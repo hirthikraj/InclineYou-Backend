@@ -1,0 +1,137 @@
+<style>
+#erd { padding: 1rem 0; overflow-x: auto; }
+#erd svg.erDiagram .divider path { stroke-opacity: 0.5; }
+#erd svg.erDiagram .row-rect-odd path,
+#erd svg.erDiagram .row-rect-odd rect,
+#erd svg.erDiagram .row-rect-even path,
+#erd svg.erDiagram .row-rect-even rect { stroke: none !important; }
+</style>
+<h2 class="sr-only">Entity-relationship diagram of the core data model: Trainer owns Clients, Templates and custom Exercises; each Client has Programs, Workout Sessions, Packages, Scheduled Sessions and Nudge logs; Programs and Set logs reference Exercises; Packages have Payments. Every table has a UUID id and a jsonb metadata column.</h2>
+<div id="erd"></div>
+<script type="module">
+import mermaid from 'https://esm.sh/mermaid@11/dist/mermaid.esm.min.mjs';
+const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+await document.fonts.ready;
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'base',
+  fontFamily: '"anthropic-sans", sans-serif',
+  themeVariables: {
+    darkMode: dark,
+    fontSize: '13px',
+    fontFamily: '"anthropic-sans", sans-serif',
+    lineColor: dark ? '#9c9a92' : '#73726c',
+    textColor: dark ? '#c2c0b6' : '#3d3d3a',
+  },
+});
+const { svg } = await mermaid.render('erd-svg', `erDiagram
+  TRAINER ||--o{ CLIENT : has
+  TRAINER ||--o{ TEMPLATE : owns
+  TRAINER ||--o{ EXERCISE : custom
+  CLIENT ||--o{ PROGRAM : has
+  CLIENT ||--o{ WORKOUT_SESSION : logs
+  CLIENT ||--o{ PACKAGE : buys
+  CLIENT ||--o{ SCHEDULED_SESSION : books
+  CLIENT ||--o{ NUDGE_LOG : receives
+  PROGRAM ||--o{ PROGRAM_EXERCISE : contains
+  EXERCISE ||--o{ PROGRAM_EXERCISE : usedin
+  WORKOUT_SESSION ||--o{ SET_LOG : records
+  EXERCISE ||--o{ SET_LOG : loggedas
+  PACKAGE ||--o{ PAYMENT : paidby
+  TRAINER {
+    uuid id PK
+    string phone
+    string type
+    string upi_vpa
+    jsonb metadata
+  }
+  CLIENT {
+    uuid id PK
+    uuid trainer_id FK
+    string status
+    string payment_mode
+    jsonb metadata
+  }
+  EXERCISE {
+    uuid id PK
+    string muscle_group
+    uuid owner_trainer_id FK
+    boolean is_custom
+    jsonb metadata
+  }
+  PROGRAM {
+    uuid id PK
+    uuid client_id FK
+    uuid template_id FK
+    jsonb metadata
+  }
+  PROGRAM_EXERCISE {
+    uuid id PK
+    uuid program_id FK
+    string target_reps
+    string target_load
+  }
+  WORKOUT_SESSION {
+    uuid id PK
+    uuid client_id FK
+    string logged_by
+    jsonb metadata
+  }
+  SET_LOG {
+    uuid id PK
+    uuid session_id FK
+    numeric load_kg
+    int reps_done
+  }
+  PACKAGE {
+    uuid id PK
+    uuid client_id FK
+    int sessions_remaining
+    string status
+  }
+  PAYMENT {
+    uuid id PK
+    uuid client_id FK
+    string method
+    string collected_by
+  }
+  SCHEDULED_SESSION {
+    uuid id PK
+    uuid client_id FK
+    string status
+  }
+  TEMPLATE {
+    uuid id PK
+    uuid trainer_id FK
+    jsonb structure
+  }
+  NUDGE_LOG {
+    uuid id PK
+    uuid client_id FK
+    string type
+    string channel
+  }`);
+document.getElementById('erd').innerHTML = svg;
+document.querySelectorAll('#erd svg.erDiagram .node').forEach(node => {
+  const firstPath = node.querySelector('path[d]');
+  if (!firstPath) return;
+  const d = firstPath.getAttribute('d');
+  const nums = d.match(/-?[\d.]+/g)?.map(Number);
+  if (!nums || nums.length < 8) return;
+  const xs = [nums[0], nums[2], nums[4], nums[6]];
+  const ys = [nums[1], nums[3], nums[5], nums[7]];
+  const x = Math.min(...xs), y = Math.min(...ys);
+  const w = Math.max(...xs) - x, h = Math.max(...ys) - y;
+  const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+  rect.setAttribute('x', x); rect.setAttribute('y', y);
+  rect.setAttribute('width', w); rect.setAttribute('height', h);
+  rect.setAttribute('rx', '8');
+  for (const a of ['fill', 'stroke', 'stroke-width', 'class', 'style']) {
+    if (firstPath.hasAttribute(a)) rect.setAttribute(a, firstPath.getAttribute(a));
+  }
+  firstPath.replaceWith(rect);
+});
+document.querySelectorAll('#erd svg.erDiagram .row-rect-odd path, #erd svg.erDiagram .row-rect-even path').forEach(p => {
+  p.setAttribute('stroke', 'none');
+});
+</script>
