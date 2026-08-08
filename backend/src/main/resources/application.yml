@@ -3,9 +3,9 @@ spring:
     name: trainx-backend
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/trainxdb
-    username: trainx
-    password: trainx_dev
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/trainxdb}
+    username: ${DATABASE_USERNAME:trainx}
+    password: ${DATABASE_PASSWORD:trainx_dev}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -22,7 +22,7 @@ spring:
     locations: classpath:db/migration
 
 server:
-  port: 8080
+  port: ${PORT:8080}
 
 logging:
   level:
@@ -35,3 +35,12 @@ app:
   otp:
     expiry-minutes: 10
     sms-enabled: false       # stub in dev; set true + configure provider in prod
+  seed:
+    exercises:
+      enabled: ${SEED_EXERCISES:true}
+      resource: seed/exercises.json
+      # Point at your own bucket once images are mirrored (scripts/mirror-exercise-images.sh)
+      image-base-url: ${EXERCISE_IMAGE_BASE_URL:https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises}
+  fcm:
+    # Raw service-account JSON, a file path, or classpath:… — blank disables push.
+    credentials: ${FCM_CREDENTIALS:}

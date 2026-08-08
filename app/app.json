@@ -6,8 +6,13 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
+    "plugins": [
+      "expo-notifications",
+      "expo-secure-store"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.traindesk.trainx"
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +22,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.trainx"
+      "package": "com.traindesk.trainx"
     },
     "web": {
       "favicon": "./assets/favicon.png"

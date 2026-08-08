@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { TOKEN_KEY } from '../api/client';
+import { resetLocalDatabase, syncDatabase } from '../db/sync';
+import { unregisterPushToken } from '../push/registerPushToken';
 
 interface AuthState {
   token: string | null;
@@ -37,6 +39,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    // Flush anything queued while the token is still valid, then wipe the
+    // local database so the next trainer on this phone starts clean.
+    await syncDatabase('sign-out');
+    await unregisterPushToken();
+    await resetLocalDatabase();
     await SecureStore.deleteItemAsync(TOKEN_KEY);
     await SecureStore.deleteItemAsync('trainx_trainer_id');
     setState({ token: null, trainerId: null, isLoading: false });

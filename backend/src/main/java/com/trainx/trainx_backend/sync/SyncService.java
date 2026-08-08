@@ -177,10 +177,178 @@ public class SyncService {
         return TableChanges.of(queryNormalized(aliveSql, params), queryIds(deadSql, params));
     }
 
-    // ── Push (stub — M0 trainers work online; push will be wired in a later phase) ──
+    // ── Push ──────────────────────────────────────────────────────────────────
 
+    @Transactional
     public void push(UUID trainerId, Map<String, Object> body) {
-        log.debug("sync push trainer={} (stub — changes ignored in M0)", trainerId);
+        @SuppressWarnings("unchecked")
+        var changes = (Map<String, Object>) body.get("changes");
+        if (changes == null) return;
+
+        String tid = trainerId.toString();
+        pushClients(tid, changes);
+        pushBodyMetrics(tid, changes);
+        warnOnUnhandledTables(tid, changes);
+        log.debug("sync push trainer={} tables={}", tid, changes.keySet());
+    }
+
+    // M0 only persists clients and body_metrics. WatermelonDB marks everything in a
+    // push as synced once we return 2xx, so anything we silently ignore is lost from
+    // the device's queue. Shout about it until the remaining tables are implemented.
+    private static final Set<String> HANDLED_PUSH_TABLES = Set.of("clients", "body_metrics");
+
+    @SuppressWarnings("unchecked")
+    private void warnOnUnhandledTables(String tid, Map<String, Object> changes) {
+        for (var entry : changes.entrySet()) {
+            if (HANDLED_PUSH_TABLES.contains(entry.getKey())) continue;
+            if (!(entry.getValue() instanceof Map<?, ?> table)) continue;
+
+            int count = mergeCreatedUpdated((Map<String, Object>) table).size()
+                    + deletedIds((Map<String, Object>) table).size();
+            if (count > 0) {
+                log.warn("sync push trainer={}: DROPPED {} record(s) for unimplemented table '{}'",
+                        tid, count, entry.getKey());
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void pushClients(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("clients");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            var p = new HashMap<String, Object>();
+            p.put("id",                    str(record.get("id")));
+            p.put("tid",                   tid);
+            p.put("name",                  str(record.get("name")));
+            p.put("phone",                 record.get("phone"));
+            p.put("goal",                  record.get("goal"));
+            p.put("status",                strOrDefault(record.get("status"), "active"));
+            p.put("payment_mode",          strOrDefault(record.get("payment_mode"), "trainer_collects"));
+            p.put("trainer_split_percent", record.get("trainer_split_percent"));
+            p.put("height_cm",             record.get("height_cm"));
+            p.put("activity_level",        record.get("activity_level"));
+            p.put("metadata",              toJsonString(record.get("metadata")));
+            p.put("created_at",            toTimestamp(record.get("created_at")));
+            p.put("updated_at",            toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO client (id, trainer_id, name, phone, goal, status, payment_mode,
+                        trainer_split_percent, height_cm, activity_level, metadata, created_at, updated_at)
+                    VALUES (:id::uuid, :tid::uuid, :name, :phone, :goal, :status, :payment_mode,
+                        :trainer_split_percent, :height_cm, :activity_level,
+                        CAST(:metadata AS jsonb), COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        name                  = EXCLUDED.name,
+                        phone                 = EXCLUDED.phone,
+                        goal                  = EXCLUDED.goal,
+                        status                = EXCLUDED.status,
+                        payment_mode          = EXCLUDED.payment_mode,
+                        trainer_split_percent = EXCLUDED.trainer_split_percent,
+                        height_cm             = EXCLUDED.height_cm,
+                        activity_level        = EXCLUDED.activity_level,
+                        metadata              = EXCLUDED.metadata,
+                        updated_at            = EXCLUDED.updated_at
+                    WHERE client.trainer_id = :tid::uuid
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE client SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void pushBodyMetrics(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("body_metrics");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            String clientId = str(record.get("client_id"));
+            if (clientId == null) continue;
+
+            // Validate client ownership before upsert
+            Boolean owned = jdbc.queryForObject(
+                    "SELECT EXISTS(SELECT 1 FROM client WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)",
+                    Map.of("cid", clientId, "tid", tid), Boolean.class);
+            if (!Boolean.TRUE.equals(owned)) {
+                log.warn("push body_metric: client {} not owned by trainer {}, skipping", clientId, tid);
+                continue;
+            }
+
+            var p = new HashMap<String, Object>();
+            p.put("id",          str(record.get("id")));
+            p.put("client_id",   clientId);
+            p.put("metric_type", str(record.get("metric_type")));
+            p.put("value",       record.get("value"));
+            p.put("unit",        str(record.get("unit")));
+            p.put("notes",       record.get("notes"));
+            p.put("recorded_at", toTimestamp(record.get("recorded_at")));
+            p.put("created_at",  toTimestamp(record.get("created_at")));
+            p.put("updated_at",  toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO body_metric (id, client_id, metric_type, value, unit, notes, recorded_at, created_at, updated_at)
+                    VALUES (:id::uuid, :client_id::uuid, :metric_type, :value, :unit, :notes,
+                        :recorded_at, COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        metric_type = EXCLUDED.metric_type,
+                        value       = EXCLUDED.value,
+                        unit        = EXCLUDED.unit,
+                        notes       = EXCLUDED.notes,
+                        recorded_at = EXCLUDED.recorded_at,
+                        updated_at  = EXCLUDED.updated_at
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE body_metric bm SET deleted_at = NOW(), updated_at = NOW()
+                    FROM client c
+                    WHERE bm.id = :id::uuid AND bm.client_id = c.id
+                      AND c.trainer_id = :tid::uuid AND bm.deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    // ── Push helpers ──────────────────────────────────────────────────────────
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> mergeCreatedUpdated(Map<String, Object> table) {
+        var result = new ArrayList<Map<String, Object>>();
+        var created = (List<Map<String, Object>>) table.getOrDefault("created", List.of());
+        var updated = (List<Map<String, Object>>) table.getOrDefault("updated", List.of());
+        result.addAll(created);
+        result.addAll(updated);
+        return result;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<String> deletedIds(Map<String, Object> table) {
+        return (List<String>) table.getOrDefault("deleted", List.of());
+    }
+
+    private String str(Object v) {
+        return v == null ? null : v.toString();
+    }
+
+    private String strOrDefault(Object v, String defaultVal) {
+        String s = str(v);
+        return s != null ? s : defaultVal;
+    }
+
+    private Timestamp toTimestamp(Object v) {
+        if (v instanceof Number n) return Timestamp.from(Instant.ofEpochMilli(n.longValue()));
+        return null;
+    }
+
+    // WatermelonDB serialises JSON columns as strings; null is also valid (column is nullable).
+    private String toJsonString(Object v) {
+        return v == null ? null : v.toString();
     }
 
     // ── JDBC helpers ──────────────────────────────────────────────────────────
@@ -209,9 +377,11 @@ public class SyncService {
 
     private Object normalizeValue(Object v) {
         if (v == null)                 return null;
-        if (v instanceof UUID u)       return u.toString();
-        if (v instanceof Timestamp ts) return ts.toInstant().toEpochMilli();
-        if (v instanceof Date d)       return d.toString();           // ISO "yyyy-MM-dd"
+        if (v instanceof UUID u)                      return u.toString();
+        if (v instanceof Timestamp ts)                return ts.toInstant().toEpochMilli();
+        if (v instanceof java.time.OffsetDateTime odt) return odt.toInstant().toEpochMilli();
+        if (v instanceof java.time.LocalDateTime ldt)  return ldt.toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
+        if (v instanceof Date d)                      return d.toString(); // ISO "yyyy-MM-dd"
         if (v instanceof BigDecimal bd) return bd;                    // Jackson serialises fine
         if (v instanceof Boolean || v instanceof Integer
                 || v instanceof Long || v instanceof String) return v;

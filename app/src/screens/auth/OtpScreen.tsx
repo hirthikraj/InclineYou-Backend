@@ -59,7 +59,6 @@ export default function OtpScreen({ route }: Props) {
           value={otp}
           onChangeText={setOtp}
           autoFocus
-          letterSpacing={8}
         />
 
         <TouchableOpacity

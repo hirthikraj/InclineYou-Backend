@@ -2,6 +2,7 @@ import { Database } from '@nozbe/watermelondb';
 import SQLiteAdapter from '@nozbe/watermelondb/adapters/sqlite';
 import { setGenerator } from '@nozbe/watermelondb/utils/common/randomId';
 import { schema } from './schema';
+import { migrations } from './migrations';
 import Client from './models/Client';
 import BodyMetric from './models/BodyMetric';
 import Exercise from './models/Exercise';
@@ -25,6 +26,9 @@ setGenerator(() =>
 
 const adapter = new SQLiteAdapter({
   schema,
+  // Required for the sync engine's migrationsEnabledAtVersion, and the thing that
+  // lets a future schema change migrate a trainer's phone instead of wiping it.
+  migrations,
   dbName: 'trainx',
   jsi: true,
   onSetUpError: (error) => {

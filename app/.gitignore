@@ -39,3 +39,11 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Firebase — project-specific, download from the Firebase console
+google-services.json
+GoogleService-Info.plist
+
+# Local env
+.env
+.env.local

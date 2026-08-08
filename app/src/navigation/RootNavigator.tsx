@@ -2,11 +2,17 @@ import React from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { useAuth } from '../store/AuthContext';
+import { useSyncTriggers } from '../db/useSync';
+import { usePushRegistration } from '../push/usePush';
 import AuthStack from './AuthStack';
 import MainStack from './MainStack';
 
 export default function RootNavigator() {
   const { token, isLoading } = useAuth();
+
+  // Both only make sense once we have a token; they're no-ops otherwise.
+  useSyncTriggers(!!token);
+  usePushRegistration(!!token);
 
   if (isLoading) {
     return (
