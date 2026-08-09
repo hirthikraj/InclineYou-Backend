@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { MainStackParamList } from '../../navigation/MainStack';
 import { clientsCollection, updateClient, CLIENT_STATUSES } from '../../db/clients';
+import { isDeliveryMode, type DeliveryMode } from '../../home/mode';
 import { Field, Chip, formStyles } from '../../components/Form';
 import { colors } from '../../theme';
 
@@ -34,6 +35,7 @@ export default function EditClientScreen({ route, navigation }: Props) {
   const [status, setStatus] = useState<string>('active');
   const [paymentMode, setPaymentMode] =
     useState<'trainer_collects' | 'gym_collects'>('trainer_collects');
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>('floor');
   const [splitPercent, setSplitPercent] = useState('');
   const [heightCm, setHeightCm] = useState('');
   const [activityLevel, setActivityLevel] = useState<string | null>(null);
@@ -50,6 +52,9 @@ export default function EditClientScreen({ route, navigation }: Props) {
         setGoal(str(c.goal));
         setStatus(str(c.status) || 'active');
         setPaymentMode(c.paymentMode === 'gym_collects' ? 'gym_collects' : 'trainer_collects');
+        // A client saved before this field existed reads back as floor, which
+        // is what the home screen was already assuming about them.
+        setDeliveryMode(isDeliveryMode(c.deliveryMode) ? c.deliveryMode : 'floor');
         setSplitPercent(str(c.trainerSplitPercent));
         setHeightCm(str(c.heightCm));
         setActivityLevel(c.activityLevel ?? null);
@@ -79,6 +84,7 @@ export default function EditClientScreen({ route, navigation }: Props) {
         goal: goal || undefined,
         status,
         paymentMode,
+        deliveryMode,
         trainerSplitPercent: num(splitPercent),
         heightCm: num(heightCm),
         activityLevel: activityLevel ?? undefined,
@@ -132,6 +138,20 @@ export default function EditClientScreen({ route, navigation }: Props) {
                 label="Gym collects"
                 selected={paymentMode === 'gym_collects'}
                 onPress={() => setPaymentMode('gym_collects')}
+              />
+            </View>
+
+            <Text style={formStyles.label}>How do you train them?</Text>
+            <View style={formStyles.chipRow}>
+              <Chip
+                label="On the floor"
+                selected={deliveryMode === 'floor'}
+                onPress={() => setDeliveryMode('floor')}
+              />
+              <Chip
+                label="Remote"
+                selected={deliveryMode === 'remote'}
+                onPress={() => setDeliveryMode('remote')}
               />
             </View>
 

@@ -5,7 +5,12 @@ import OtpScreen from '../screens/auth/OtpScreen';
 
 export type AuthStackParamList = {
   Phone: undefined;
-  Otp: { phone: string };
+  /**
+   * `lockedFor` opens straight into state 3c with that many seconds left, for
+   * when the number is already serving a lock and asking for a code told us so.
+   * Absent on the normal path, where a code has actually been sent.
+   */
+  Otp: { phone: string; lockedFor?: number };
 };
 
 const Stack = createNativeStackNavigator<AuthStackParamList>();

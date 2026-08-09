@@ -1,4 +1,5 @@
 import { synchronize, hasUnsyncedChanges } from '@nozbe/watermelondb/sync';
+import fetchLocalChanges from '@nozbe/watermelondb/sync/impl/fetchLocal';
 import { database } from './index';
 import { api } from '../api/client';
 
@@ -10,6 +11,12 @@ export interface SyncState {
   lastSyncedAt: number | null;
   /** true while local writes are waiting to reach the server */
   hasPending: boolean;
+  /**
+   * How many records are queued. Zero when nothing is waiting, and also zero if
+   * the count couldn't be taken — `hasPending` is the reliable signal, this is
+   * the detail on top of it.
+   */
+  pendingCount: number;
   error: string | null;
 }
 
@@ -17,6 +24,7 @@ let state: SyncState = {
   phase: 'idle',
   lastSyncedAt: null,
   hasPending: false,
+  pendingCount: 0,
   error: null,
 };
 
@@ -36,12 +44,48 @@ function setState(patch: Partial<SyncState>) {
   listeners.forEach((l) => l());
 }
 
-/** Recomputes the pending badge from WatermelonDB's own bookkeeping. */
+/**
+ * Recomputes the pending badge from WatermelonDB's own bookkeeping.
+ *
+ * The count matters as well as the boolean: "4 changes waiting" tells a trainer
+ * on a gym floor that their morning's work is safe, where "changes are waiting"
+ * only tells them something is unfinished.
+ */
 export async function refreshPending() {
   try {
-    setState({ hasPending: await hasUnsyncedChanges({ database }) });
+    const pending = await hasUnsyncedChanges({ database });
+    setState({ hasPending: pending, pendingCount: pending ? await countPending() : 0 });
   } catch {
     // A read failure here is cosmetic — leave the previous value alone.
+  }
+}
+
+/**
+ * How many records are queued.
+ *
+ * `fetchLocalChanges` is the same function `synchronize` uses to build a push,
+ * so the number is exactly what would go out — but it lives under `sync/impl`
+ * and is not part of WatermelonDB's public surface. If a future version moves
+ * it, this returns 0 and the banner falls back to saying "changes are waiting",
+ * which is why nothing here is allowed to throw.
+ */
+/** WatermelonDB types `changes` as an index signature, so the values need naming. */
+interface TableChanges {
+  created: unknown[];
+  updated: unknown[];
+  deleted: unknown[];
+}
+
+async function countPending(): Promise<number> {
+  try {
+    const local = await fetchLocalChanges(database);
+    const tables: TableChanges[] = Object.values(local.changes);
+    return tables.reduce(
+      (sum, table) => sum + table.created.length + table.updated.length + table.deleted.length,
+      0,
+    );
+  } catch {
+    return 0;
   }
 }
 
@@ -90,6 +134,6 @@ export async function resetLocalDatabase() {
   await database.write(async () => {
     await database.unsafeResetDatabase();
   });
-  state = { phase: 'idle', lastSyncedAt: null, hasPending: false, error: null };
+  state = { phase: 'idle', lastSyncedAt: null, hasPending: false, pendingCount: 0, error: null };
   listeners.forEach((l) => l());
 }

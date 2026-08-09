@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 1,
+  version: 5,
   tables: [
     tableSchema({
       name: 'clients',
@@ -15,7 +15,13 @@ export const schema = appSchema({
         { name: 'trainer_split_percent', type: 'number', isOptional: true },
         { name: 'height_cm', type: 'number', isOptional: true },
         { name: 'activity_level', type: 'string', isOptional: true },
-        { name: 'metadata', type: 'string', isOptional: true }, // JSONB stored as text
+        { name: 'metadata', type: 'string', isOptional: true },
+        // V2 — per-client scheduling config
+        { name: 'sessions_per_week', type: 'number', isOptional: true },
+        { name: 'session_duration_minutes', type: 'number', isOptional: true },
+        { name: 'weekly_schedule', type: 'string', isOptional: true }, // JSON [{day,time}]
+        // V5 — how this client is usually trained. Null means never said.
+        { name: 'delivery_mode', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],
@@ -57,6 +63,8 @@ export const schema = appSchema({
         { name: 'name', type: 'string' },
         { name: 'goal', type: 'string', isOptional: true },
         { name: 'description', type: 'string', isOptional: true },
+        // V3 — day labels JSON map {"1":"Push Day","3":"Pull Day"}
+        { name: 'day_labels', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],
@@ -102,6 +110,12 @@ export const schema = appSchema({
         { name: 'duration_minutes', type: 'number', isOptional: true },
         { name: 'status', type: 'string' },
         { name: 'notes', type: 'string', isOptional: true },
+        // V3 — denormalized day label from template (e.g. "Push Day")
+        { name: 'day_label', type: 'string', isOptional: true },
+        // V4 — template day number (1, 2, 3…) to resolve program exercises for workout log
+        { name: 'template_day', type: 'number', isOptional: true },
+        // V5 — per-session override of the client's usual mode. Null = inherit.
+        { name: 'delivery_mode', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],

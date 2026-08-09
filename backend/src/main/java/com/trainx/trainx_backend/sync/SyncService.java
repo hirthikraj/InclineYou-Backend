@@ -27,11 +27,7 @@ public class SyncService {
             List<Map<String, Object>> created,
             List<Map<String, Object>> updated,
             List<String> deleted
-    ) {
-        static TableChanges of(List<Map<String, Object>> alive, List<String> dead) {
-            return new TableChanges(alive, List.of(), dead);
-        }
-    }
+    ) {}
 
     // ── Pull ──────────────────────────────────────────────────────────────────
 
@@ -80,7 +76,7 @@ public class SyncService {
                   AND updated_at > :cursor
                 """.formatted(table, fkCol);
 
-        return TableChanges.of(queryNormalized(aliveSql, params), queryIds(deadSql, params));
+        return splitAlive(queryNormalized(aliveSql, params), cursor, queryIds(deadSql, params));
     }
 
     // body_metric → client.trainer_id
@@ -104,7 +100,7 @@ public class SyncService {
                   AND bm.updated_at > :cursor
                 """.formatted(table);
 
-        return TableChanges.of(queryNormalized(aliveSql, params), queryIds(deadSql, params));
+        return splitAlive(queryNormalized(aliveSql, params), cursor, queryIds(deadSql, params));
     }
 
     // exercises: global (is_custom=false) OR trainer's own custom
@@ -126,7 +122,7 @@ public class SyncService {
                   AND updated_at > :cursor
                 """;
 
-        return TableChanges.of(queryNormalized(aliveSql, params), queryIds(deadSql, params));
+        return splitAlive(queryNormalized(aliveSql, params), cursor, queryIds(deadSql, params));
     }
 
     // program_exercise → program.trainer_id
@@ -150,7 +146,7 @@ public class SyncService {
                   AND pe.updated_at > :cursor
                 """;
 
-        return TableChanges.of(queryNormalized(aliveSql, params), queryIds(deadSql, params));
+        return splitAlive(queryNormalized(aliveSql, params), cursor, queryIds(deadSql, params));
     }
 
     // set_log → workout_session.trainer_id
@@ -174,7 +170,26 @@ public class SyncService {
                   AND sl.updated_at > :cursor
                 """;
 
-        return TableChanges.of(queryNormalized(aliveSql, params), queryIds(deadSql, params));
+        return splitAlive(queryNormalized(aliveSql, params), cursor, queryIds(deadSql, params));
+    }
+
+    /**
+     * Split normalized alive rows into created vs updated based on whether
+     * the record's created_at is after the cursor.  WatermelonDB requires this
+     * distinction: sending an existing record in `created` triggers a warning
+     * and can cause data inconsistency on the client.
+     */
+    private static TableChanges splitAlive(
+            List<Map<String, Object>> rows, Timestamp cursor, List<String> deleted) {
+        long cursorMs = cursor.toInstant().toEpochMilli();
+        var created = new ArrayList<Map<String, Object>>();
+        var updated = new ArrayList<Map<String, Object>>();
+        for (var row : rows) {
+            Object ca = row.get("created_at");
+            long createdMs = ca instanceof Number n ? n.longValue() : 0L;
+            (createdMs > cursorMs ? created : updated).add(row);
+        }
+        return new TableChanges(created, updated, deleted);
     }
 
     // ── Push ──────────────────────────────────────────────────────────────────
@@ -188,14 +203,23 @@ public class SyncService {
         String tid = trainerId.toString();
         pushClients(tid, changes);
         pushBodyMetrics(tid, changes);
+        pushTemplates(tid, changes);
+        pushPrograms(tid, changes);
+        pushProgramExercises(tid, changes);
+        pushScheduledSessions(tid, changes);
+        pushWorkoutSessions(tid, changes);
+        pushSetLogs(tid, changes);
+        pushPackages(tid, changes);
+        pushPayments(tid, changes);
+        pushNudgeLogs(tid, changes);
         warnOnUnhandledTables(tid, changes);
         log.debug("sync push trainer={} tables={}", tid, changes.keySet());
     }
 
-    // M0 only persists clients and body_metrics. WatermelonDB marks everything in a
-    // push as synced once we return 2xx, so anything we silently ignore is lost from
-    // the device's queue. Shout about it until the remaining tables are implemented.
-    private static final Set<String> HANDLED_PUSH_TABLES = Set.of("clients", "body_metrics");
+    private static final Set<String> HANDLED_PUSH_TABLES = Set.of(
+            "clients", "body_metrics", "templates", "programs", "program_exercises",
+            "scheduled_sessions", "workout_sessions", "set_logs",
+            "packages", "payments", "nudge_logs");
 
     @SuppressWarnings("unchecked")
     private void warnOnUnhandledTables(String tid, Map<String, Object> changes) {
@@ -229,27 +253,41 @@ public class SyncService {
             p.put("trainer_split_percent", record.get("trainer_split_percent"));
             p.put("height_cm",             record.get("height_cm"));
             p.put("activity_level",        record.get("activity_level"));
-            p.put("metadata",              toJsonString(record.get("metadata")));
-            p.put("created_at",            toTimestamp(record.get("created_at")));
-            p.put("updated_at",            toTimestamp(record.get("updated_at")));
+            p.put("metadata",                 toJsonString(record.get("metadata")));
+            p.put("sessions_per_week",        record.get("sessions_per_week"));
+            p.put("session_duration_minutes", record.get("session_duration_minutes"));
+            p.put("weekly_schedule",          toJsonString(record.get("weekly_schedule")));
+            p.put("delivery_mode",            deliveryMode(record.get("delivery_mode")));
+            p.put("created_at",               toTimestamp(record.get("created_at")));
+            p.put("updated_at",               toTimestamp(record.get("updated_at")));
 
             jdbc.update("""
                     INSERT INTO client (id, trainer_id, name, phone, goal, status, payment_mode,
-                        trainer_split_percent, height_cm, activity_level, metadata, created_at, updated_at)
+                        trainer_split_percent, height_cm, activity_level, metadata,
+                        sessions_per_week, session_duration_minutes, weekly_schedule,
+                        delivery_mode, created_at, updated_at)
                     VALUES (:id::uuid, :tid::uuid, :name, :phone, :goal, :status, :payment_mode,
                         :trainer_split_percent, :height_cm, :activity_level,
-                        CAST(:metadata AS jsonb), COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                        CAST(:metadata AS jsonb),
+                        :sessions_per_week, :session_duration_minutes,
+                        CAST(:weekly_schedule AS jsonb),
+                        :delivery_mode,
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
                     ON CONFLICT (id) DO UPDATE SET
-                        name                  = EXCLUDED.name,
-                        phone                 = EXCLUDED.phone,
-                        goal                  = EXCLUDED.goal,
-                        status                = EXCLUDED.status,
-                        payment_mode          = EXCLUDED.payment_mode,
-                        trainer_split_percent = EXCLUDED.trainer_split_percent,
-                        height_cm             = EXCLUDED.height_cm,
-                        activity_level        = EXCLUDED.activity_level,
-                        metadata              = EXCLUDED.metadata,
-                        updated_at            = EXCLUDED.updated_at
+                        name                    = EXCLUDED.name,
+                        phone                   = EXCLUDED.phone,
+                        goal                    = EXCLUDED.goal,
+                        status                  = EXCLUDED.status,
+                        payment_mode            = EXCLUDED.payment_mode,
+                        trainer_split_percent   = EXCLUDED.trainer_split_percent,
+                        height_cm               = EXCLUDED.height_cm,
+                        activity_level          = EXCLUDED.activity_level,
+                        metadata                = EXCLUDED.metadata,
+                        sessions_per_week       = EXCLUDED.sessions_per_week,
+                        session_duration_minutes= EXCLUDED.session_duration_minutes,
+                        weekly_schedule         = EXCLUDED.weekly_schedule,
+                        delivery_mode           = EXCLUDED.delivery_mode,
+                        updated_at              = EXCLUDED.updated_at
                     WHERE client.trainer_id = :tid::uuid
                     """, p);
         }
@@ -315,6 +353,481 @@ public class SyncService {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private void pushTemplates(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("templates");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            var p = new HashMap<String, Object>();
+            p.put("id",          str(record.get("id")));
+            p.put("tid",         tid);
+            p.put("name",        str(record.get("name")));
+            p.put("goal",        record.get("goal"));
+            p.put("description", record.get("description"));
+            p.put("structure",   toJsonString(record.get("structure")));
+            p.put("day_labels",  toJsonString(record.get("day_labels")));
+            p.put("created_at",  toTimestamp(record.get("created_at")));
+            p.put("updated_at",  toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO template (id, trainer_id, name, goal, description, structure, day_labels, created_at, updated_at)
+                    VALUES (:id::uuid, :tid::uuid, :name, :goal, :description,
+                        CAST(:structure AS jsonb), CAST(:day_labels AS jsonb),
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        name        = EXCLUDED.name,
+                        goal        = EXCLUDED.goal,
+                        description = EXCLUDED.description,
+                        structure   = EXCLUDED.structure,
+                        day_labels  = EXCLUDED.day_labels,
+                        updated_at  = EXCLUDED.updated_at
+                    WHERE template.trainer_id = :tid::uuid
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE template SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void pushPrograms(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("programs");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            String clientId = str(record.get("client_id"));
+            if (clientId == null) continue;
+
+            Boolean owned = jdbc.queryForObject(
+                    "SELECT EXISTS(SELECT 1 FROM client WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)",
+                    Map.of("cid", clientId, "tid", tid), Boolean.class);
+            if (!Boolean.TRUE.equals(owned)) {
+                log.warn("sync push trainer={}: skipping program — client {} not owned", tid, clientId);
+                continue;
+            }
+
+            var p = new HashMap<String, Object>();
+            p.put("id",         str(record.get("id")));
+            p.put("tid",        tid);
+            p.put("cid",        clientId);
+            p.put("templateId", record.get("template_id"));
+            p.put("name",       str(record.get("name")));
+            p.put("goal",       record.get("goal"));
+            p.put("startDate",  toSqlDate(record.get("start_date")));
+            p.put("endDate",    toSqlDate(record.get("end_date")));
+            p.put("status",     strOrDefault(record.get("status"), "active"));
+            p.put("created_at", toTimestamp(record.get("created_at")));
+            p.put("updated_at", toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO program (id, trainer_id, client_id, template_id, name, goal,
+                        start_date, end_date, status, created_at, updated_at)
+                    VALUES (:id::uuid, :tid::uuid, :cid::uuid, :templateId::uuid, :name, :goal,
+                        :startDate, :endDate, :status,
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        name       = EXCLUDED.name,
+                        goal       = EXCLUDED.goal,
+                        start_date = EXCLUDED.start_date,
+                        end_date   = EXCLUDED.end_date,
+                        status     = EXCLUDED.status,
+                        updated_at = EXCLUDED.updated_at
+                    WHERE program.trainer_id = :tid::uuid
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE program SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void pushProgramExercises(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("program_exercises");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            String programId = str(record.get("program_id"));
+            if (programId == null) continue;
+
+            Boolean owned = jdbc.queryForObject(
+                    "SELECT EXISTS(SELECT 1 FROM program WHERE id = :pid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)",
+                    Map.of("pid", programId, "tid", tid), Boolean.class);
+            if (!Boolean.TRUE.equals(owned)) {
+                log.warn("sync push trainer={}: skipping program_exercise — program {} not owned", tid, programId);
+                continue;
+            }
+
+            var p = new HashMap<String, Object>();
+            p.put("id",          str(record.get("id")));
+            p.put("programId",   programId);
+            p.put("exerciseId",  str(record.get("exercise_id")));
+            p.put("sets",        record.get("sets"));
+            p.put("reps",        record.get("reps"));
+            p.put("restSeconds", record.get("rest_seconds"));
+            p.put("targetLoad",  record.get("target_load"));
+            p.put("notes",       record.get("notes"));
+            p.put("dayOfWeek",   record.get("day_of_week"));
+            p.put("orderIndex",  record.getOrDefault("order_index", 0));
+            p.put("created_at",  toTimestamp(record.get("created_at")));
+            p.put("updated_at",  toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO program_exercise (id, program_id, exercise_id, sets, reps,
+                        rest_seconds, target_load, notes, day_of_week, order_index, created_at, updated_at)
+                    VALUES (:id::uuid, :programId::uuid, :exerciseId::uuid, :sets, :reps,
+                        :restSeconds, :targetLoad, :notes, :dayOfWeek, :orderIndex,
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        sets         = EXCLUDED.sets,
+                        reps         = EXCLUDED.reps,
+                        rest_seconds = EXCLUDED.rest_seconds,
+                        target_load  = EXCLUDED.target_load,
+                        notes        = EXCLUDED.notes,
+                        day_of_week  = EXCLUDED.day_of_week,
+                        order_index  = EXCLUDED.order_index,
+                        updated_at   = EXCLUDED.updated_at
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE program_exercise pe SET deleted_at = NOW(), updated_at = NOW()
+                    FROM program p
+                    WHERE pe.id = :id::uuid AND pe.program_id = p.id
+                      AND p.trainer_id = :tid::uuid AND pe.deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void pushScheduledSessions(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("scheduled_sessions");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            String clientId = str(record.get("client_id"));
+            if (clientId == null) continue;
+
+            Boolean owned = jdbc.queryForObject(
+                    "SELECT EXISTS(SELECT 1 FROM client WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)",
+                    Map.of("cid", clientId, "tid", tid), Boolean.class);
+            if (!Boolean.TRUE.equals(owned)) {
+                log.warn("sync push trainer={}: skipping scheduled_session — client {} not owned", tid, clientId);
+                continue;
+            }
+
+            var p = new HashMap<String, Object>();
+            p.put("id",              str(record.get("id")));
+            p.put("tid",             tid);
+            p.put("cid",             clientId);
+            p.put("programId",       record.get("program_id"));
+            p.put("scheduledAt",     toTimestamp(record.get("scheduled_at")));
+            p.put("durationMinutes", record.get("duration_minutes"));
+            p.put("status",          strOrDefault(record.get("status"), "scheduled"));
+            p.put("notes",           record.get("notes"));
+            p.put("dayLabel",        record.get("day_label"));
+            p.put("templateDay",     record.get("template_day"));
+            p.put("deliveryMode",    deliveryMode(record.get("delivery_mode")));
+            p.put("created_at",      toTimestamp(record.get("created_at")));
+            p.put("updated_at",      toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO scheduled_session (id, trainer_id, client_id, program_id,
+                        scheduled_at, duration_minutes, status, notes, day_label, template_day,
+                        delivery_mode, created_at, updated_at)
+                    VALUES (:id::uuid, :tid::uuid, :cid::uuid, :programId::uuid,
+                        :scheduledAt, :durationMinutes, :status, :notes, :dayLabel, :templateDay,
+                        :deliveryMode,
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        scheduled_at     = EXCLUDED.scheduled_at,
+                        duration_minutes = EXCLUDED.duration_minutes,
+                        status           = EXCLUDED.status,
+                        notes            = EXCLUDED.notes,
+                        day_label        = EXCLUDED.day_label,
+                        template_day     = EXCLUDED.template_day,
+                        delivery_mode    = EXCLUDED.delivery_mode,
+                        updated_at       = EXCLUDED.updated_at
+                    WHERE scheduled_session.trainer_id = :tid::uuid
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE scheduled_session SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void pushWorkoutSessions(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("workout_sessions");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            String clientId = str(record.get("client_id"));
+            if (clientId == null) continue;
+
+            Boolean owned = jdbc.queryForObject(
+                    "SELECT EXISTS(SELECT 1 FROM client WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)",
+                    Map.of("cid", clientId, "tid", tid), Boolean.class);
+            if (!Boolean.TRUE.equals(owned)) {
+                log.warn("sync push trainer={}: skipping workout_session — client {} not owned", tid, clientId);
+                continue;
+            }
+
+            var p = new HashMap<String, Object>();
+            p.put("id",                 str(record.get("id")));
+            p.put("tid",                tid);
+            p.put("cid",                clientId);
+            p.put("programId",          record.get("program_id"));
+            p.put("scheduledSessionId", record.get("scheduled_session_id"));
+            p.put("loggedBy",           strOrDefault(record.get("logged_by"), "trainer"));
+            p.put("sessionDate",        toSqlDate(record.get("session_date")));
+            p.put("notes",              record.get("notes"));
+            p.put("created_at",         toTimestamp(record.get("created_at")));
+            p.put("updated_at",         toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO workout_session (id, trainer_id, client_id, program_id,
+                        scheduled_session_id, logged_by, session_date, notes, created_at, updated_at)
+                    VALUES (:id::uuid, :tid::uuid, :cid::uuid, :programId::uuid,
+                        :scheduledSessionId::uuid, :loggedBy, :sessionDate, :notes,
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        session_date = EXCLUDED.session_date,
+                        notes        = EXCLUDED.notes,
+                        updated_at   = EXCLUDED.updated_at
+                    WHERE workout_session.trainer_id = :tid::uuid
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE workout_session SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void pushSetLogs(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("set_logs");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            String workoutId = str(record.get("workout_session_id"));
+            if (workoutId == null) continue;
+
+            Boolean owned = jdbc.queryForObject(
+                    "SELECT EXISTS(SELECT 1 FROM workout_session WHERE id = :wid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)",
+                    Map.of("wid", workoutId, "tid", tid), Boolean.class);
+            if (!Boolean.TRUE.equals(owned)) {
+                log.warn("sync push trainer={}: skipping set_log — workout_session {} not owned", tid, workoutId);
+                continue;
+            }
+
+            var p = new HashMap<String, Object>();
+            p.put("id",        str(record.get("id")));
+            p.put("workoutId", workoutId);
+            p.put("exerciseId", str(record.get("exercise_id")));
+            p.put("setNumber", record.get("set_number"));
+            p.put("loadKg",    record.get("load_kg"));
+            p.put("reps",      record.get("reps"));
+            p.put("rpe",       record.get("rpe"));
+            p.put("notes",     record.get("notes"));
+            p.put("created_at", toTimestamp(record.get("created_at")));
+            p.put("updated_at", toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO set_log (id, workout_session_id, exercise_id, set_number,
+                        load_kg, reps, rpe, notes, created_at, updated_at)
+                    VALUES (:id::uuid, :workoutId::uuid, :exerciseId::uuid, :setNumber,
+                        :loadKg, :reps, :rpe, :notes,
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        load_kg    = EXCLUDED.load_kg,
+                        reps       = EXCLUDED.reps,
+                        rpe        = EXCLUDED.rpe,
+                        notes      = EXCLUDED.notes,
+                        updated_at = EXCLUDED.updated_at
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE set_log sl SET deleted_at = NOW(), updated_at = NOW()
+                    FROM workout_session ws
+                    WHERE sl.id = :id::uuid AND sl.workout_session_id = ws.id
+                      AND ws.trainer_id = :tid::uuid AND sl.deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void pushPackages(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("packages");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            String clientId = str(record.get("client_id"));
+            if (clientId == null) continue;
+
+            Boolean owned = jdbc.queryForObject(
+                    "SELECT EXISTS(SELECT 1 FROM client WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)",
+                    Map.of("cid", clientId, "tid", tid), Boolean.class);
+            if (!Boolean.TRUE.equals(owned)) {
+                log.warn("sync push trainer={}: skipping package — client {} not owned", tid, clientId);
+                continue;
+            }
+
+            var p = new HashMap<String, Object>();
+            p.put("id",                 str(record.get("id")));
+            p.put("tid",                tid);
+            p.put("cid",                clientId);
+            p.put("type",               strOrDefault(record.get("type"), "session_pack"));
+            p.put("sessionsTotal",      record.get("sessions_total"));
+            p.put("sessionsRemaining",  record.get("sessions_remaining"));
+            p.put("amount",             record.get("amount"));
+            p.put("currency",           strOrDefault(record.get("currency"), "INR"));
+            p.put("startDate",          toSqlDate(record.get("start_date")));
+            p.put("endDate",            toSqlDate(record.get("end_date")));
+            p.put("status",             strOrDefault(record.get("status"), "active"));
+            p.put("created_at",         toTimestamp(record.get("created_at")));
+            p.put("updated_at",         toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO package (id, trainer_id, client_id, type, sessions_total, sessions_remaining,
+                        amount, currency, start_date, end_date, status, created_at, updated_at)
+                    VALUES (:id::uuid, :tid::uuid, :cid::uuid, :type, :sessionsTotal, :sessionsRemaining,
+                        :amount, :currency, :startDate, :endDate, :status,
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        type                = EXCLUDED.type,
+                        sessions_total      = EXCLUDED.sessions_total,
+                        sessions_remaining  = EXCLUDED.sessions_remaining,
+                        amount              = EXCLUDED.amount,
+                        currency            = EXCLUDED.currency,
+                        start_date          = EXCLUDED.start_date,
+                        end_date            = EXCLUDED.end_date,
+                        status              = EXCLUDED.status,
+                        updated_at          = EXCLUDED.updated_at
+                    WHERE package.trainer_id = :tid::uuid
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE package SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void pushPayments(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("payments");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            String clientId = str(record.get("client_id"));
+            if (clientId == null) continue;
+
+            Boolean owned = jdbc.queryForObject(
+                    "SELECT EXISTS(SELECT 1 FROM client WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)",
+                    Map.of("cid", clientId, "tid", tid), Boolean.class);
+            if (!Boolean.TRUE.equals(owned)) {
+                log.warn("sync push trainer={}: skipping payment — client {} not owned", tid, clientId);
+                continue;
+            }
+
+            var p = new HashMap<String, Object>();
+            p.put("id",           str(record.get("id")));
+            p.put("tid",          tid);
+            p.put("cid",          clientId);
+            p.put("packageId",    record.get("package_id"));
+            p.put("amount",       record.get("amount"));
+            p.put("currency",     strOrDefault(record.get("currency"), "INR"));
+            p.put("method",       strOrDefault(record.get("method"), "upi_intent"));
+            p.put("collectedBy",  strOrDefault(record.get("collected_by"), "trainer"));
+            p.put("status",       strOrDefault(record.get("status"), "pending"));
+            p.put("upiReference", record.get("upi_reference"));
+            p.put("paidAt",       toTimestamp(record.get("paid_at")));
+            p.put("created_at",   toTimestamp(record.get("created_at")));
+            p.put("updated_at",   toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO payment (id, trainer_id, client_id, package_id, amount, currency,
+                        method, collected_by, status, upi_reference, paid_at, created_at, updated_at)
+                    VALUES (:id::uuid, :tid::uuid, :cid::uuid, :packageId::uuid, :amount, :currency,
+                        :method, :collectedBy, :status, :upiReference, :paidAt,
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        status        = EXCLUDED.status,
+                        upi_reference = EXCLUDED.upi_reference,
+                        paid_at       = EXCLUDED.paid_at,
+                        updated_at    = EXCLUDED.updated_at
+                    WHERE payment.trainer_id = :tid::uuid
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE payment SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void pushNudgeLogs(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("nudge_logs");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            String clientId = str(record.get("client_id"));
+            if (clientId == null) continue;
+
+            var p = new HashMap<String, Object>();
+            p.put("id",           str(record.get("id")));
+            p.put("tid",          tid);
+            p.put("cid",          clientId);
+            p.put("channel",      strOrDefault(record.get("channel"), "whatsapp"));
+            p.put("templateName", strOrDefault(record.get("template_name"), "unknown"));
+            p.put("status",       strOrDefault(record.get("status"), "sent"));
+            p.put("sentAt",       toTimestamp(record.get("sent_at")));
+            p.put("created_at",   toTimestamp(record.get("created_at")));
+            p.put("updated_at",   toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO nudge_log (id, trainer_id, client_id, channel, template_name, status, sent_at, created_at, updated_at)
+                    VALUES (:id::uuid, :tid::uuid, :cid::uuid, :channel, :templateName, :status,
+                        COALESCE(:sentAt, NOW()), COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        status     = EXCLUDED.status,
+                        updated_at = EXCLUDED.updated_at
+                    WHERE nudge_log.trainer_id = :tid::uuid
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE nudge_log SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
     // ── Push helpers ──────────────────────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
@@ -341,9 +854,35 @@ public class SyncService {
         return s != null ? s : defaultVal;
     }
 
+    /**
+     * 'floor' | 'remote' | null.
+     *
+     * No default, unlike the status fields above: null here means "nobody has
+     * said", which is what lets a session inherit its client's usual mode.
+     * Defaulting it to 'floor' would make every session look like a deliberate
+     * answer and the fallback would never fire.
+     *
+     * An unrecognised value degrades to null rather than failing the push — a
+     * phone on a newer build sending a mode this server hasn't heard of should
+     * lose one optional field, not the whole record.
+     */
+    private String deliveryMode(Object v) {
+        String s = str(v);
+        if (s == null) return null;
+        String value = s.trim().toLowerCase();
+        return value.equals("floor") || value.equals("remote") ? value : null;
+    }
+
     private Timestamp toTimestamp(Object v) {
         if (v instanceof Number n) return Timestamp.from(Instant.ofEpochMilli(n.longValue()));
         return null;
+    }
+
+    private java.sql.Date toSqlDate(Object v) {
+        if (v == null) return null;
+        String s = v.toString().trim();
+        if (s.isEmpty()) return null;
+        try { return java.sql.Date.valueOf(s); } catch (Exception e) { return null; }
     }
 
     // WatermelonDB serialises JSON columns as strings; null is also valid (column is nullable).

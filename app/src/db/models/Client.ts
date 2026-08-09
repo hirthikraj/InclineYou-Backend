@@ -14,6 +14,11 @@ export default class Client extends Model {
   @field('height_cm') heightCm!: number;
   @text('activity_level') activityLevel!: string;
   @json('metadata', (v: unknown) => v) metadata!: Record<string, unknown>;
+  @field('sessions_per_week') sessionsPerWeek!: number;
+  @field('session_duration_minutes') sessionDurationMinutes!: number;
+  @text('weekly_schedule') weeklySchedule!: string;
+  /** 'floor' | 'remote' | null — see `home/mode.ts`. */
+  @text('delivery_mode') deliveryMode!: string;
   @readonly @date('created_at') createdAt!: Date;
   @date('updated_at') updatedAt!: Date;
 }

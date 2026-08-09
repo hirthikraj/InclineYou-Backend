@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.stream.Collectors;
 
+
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
@@ -37,7 +38,10 @@ public class ClientService {
             BigDecimal trainerSplitPercent,
             BigDecimal heightCm,
             String activityLevel,
-            Map<String, Object> metadata
+            Map<String, Object> metadata,
+            Integer sessionsPerWeek,
+            Integer sessionDurationMinutes,
+            String deliveryMode
     ) {}
 
     public record UpdateClientRequest(
@@ -49,7 +53,11 @@ public class ClientService {
             BigDecimal trainerSplitPercent,
             BigDecimal heightCm,
             String activityLevel,
-            Map<String, Object> metadata
+            Map<String, Object> metadata,
+            Integer sessionsPerWeek,
+            Integer sessionDurationMinutes,
+            List<Map<String, Object>> weeklySchedule,
+            String deliveryMode
     ) {}
 
     public record StatusFlags(boolean paymentDue, boolean sessionPackLow, boolean planExpiring) {}
@@ -66,6 +74,10 @@ public class ClientService {
             BigDecimal heightCm,
             String activityLevel,
             Map<String, Object> metadata,
+            Integer sessionsPerWeek,
+            Integer sessionDurationMinutes,
+            List<Map<String, Object>> weeklySchedule,
+            String deliveryMode,
             StatusFlags statusFlags,
             long createdAt,
             long updatedAt
@@ -123,6 +135,9 @@ public class ClientService {
         client.setHeightCm(req.heightCm());
         client.setActivityLevel(req.activityLevel());
         client.setMetadata(req.metadata());
+        client.setSessionsPerWeek(req.sessionsPerWeek());
+        client.setSessionDurationMinutes(req.sessionDurationMinutes());
+        client.setDeliveryMode(deliveryMode(req.deliveryMode()));
         clientRepo.save(client);
         return toResponse(client, new StatusFlags(false, false, false));
     }
@@ -137,8 +152,14 @@ public class ClientService {
         if (req.paymentMode() != null)         client.setPaymentMode(req.paymentMode());
         if (req.trainerSplitPercent() != null) client.setTrainerSplitPercent(req.trainerSplitPercent());
         if (req.heightCm() != null)            client.setHeightCm(req.heightCm());
-        if (req.activityLevel() != null)       client.setActivityLevel(req.activityLevel());
-        if (req.metadata() != null)            client.setMetadata(req.metadata());
+        if (req.activityLevel() != null)            client.setActivityLevel(req.activityLevel());
+        if (req.metadata() != null)                 client.setMetadata(req.metadata());
+        if (req.sessionsPerWeek() != null)          client.setSessionsPerWeek(req.sessionsPerWeek());
+        if (req.sessionDurationMinutes() != null)   client.setSessionDurationMinutes(req.sessionDurationMinutes());
+        if (req.weeklySchedule() != null)           client.setWeeklySchedule(req.weeklySchedule());
+        // An empty string clears it back to "never said" — the same convention
+        // the trainer profile endpoint uses for its skippable fields.
+        if (req.deliveryMode() != null)             client.setDeliveryMode(deliveryMode(req.deliveryMode()));
         clientRepo.save(client);
         var flags = computeStatusFlags(trainerId, List.of(clientId.toString()))
                 .getOrDefault(clientId, new StatusFlags(false, false, false));
@@ -176,6 +197,20 @@ public class ClientService {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /**
+     * 'floor' | 'remote' | null.
+     *
+     * Anything else is stored as null rather than rejected with a 400: an older
+     * or newer client sending a mode this build doesn't know about should lose
+     * one optional field, not have its whole write fail. Tolerant reader, both
+     * directions — the same contract the rest of the sync surface keeps.
+     */
+    private static String deliveryMode(String raw) {
+        if (raw == null) return null;
+        String value = raw.trim().toLowerCase();
+        return value.equals("floor") || value.equals("remote") ? value : null;
+    }
+
     private Client findOwned(UUID trainerId, UUID clientId) {
         return clientRepo.findByIdAndTrainerIdAndDeletedAtIsNull(clientId, trainerId)
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Client not found"));
@@ -185,7 +220,10 @@ public class ClientService {
         return new ClientResponse(
                 c.getId(), c.getTrainerId(), c.getName(), c.getPhone(), c.getGoal(),
                 c.getStatus(), c.getPaymentMode(), c.getTrainerSplitPercent(), c.getHeightCm(),
-                c.getActivityLevel(), c.getMetadata(), flags,
+                c.getActivityLevel(), c.getMetadata(),
+                c.getSessionsPerWeek(), c.getSessionDurationMinutes(), c.getWeeklySchedule(),
+                c.getDeliveryMode(),
+                flags,
                 c.getCreatedAt().toEpochMilli(), c.getUpdatedAt().toEpochMilli()
         );
     }

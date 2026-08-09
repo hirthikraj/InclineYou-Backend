@@ -9,6 +9,7 @@ import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -50,9 +51,30 @@ public class Client {
     @Column(name = "activity_level", length = 20)
     private String activityLevel;
 
+    /**
+     * 'floor' | 'remote', or null for "never said".
+     *
+     * Null is meaningful: a session with no mode of its own falls back to this,
+     * and this falling back to floor happens in application code. Not validated
+     * against a fixed set here for the same reason the statuses aren't — a third
+     * mode should cost a deploy, not a migration.
+     */
+    @Column(name = "delivery_mode", length = 16)
+    private String deliveryMode;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> metadata;
+
+    @Column(name = "sessions_per_week")
+    private Integer sessionsPerWeek;
+
+    @Column(name = "session_duration_minutes")
+    private Integer sessionDurationMinutes;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "weekly_schedule", columnDefinition = "jsonb")
+    private List<Map<String, Object>> weeklySchedule;
 
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;

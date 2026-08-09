@@ -3,6 +3,7 @@ import { map } from 'rxjs';
 import { database } from './index';
 import ClientModel from './models/Client';
 import BodyMetricModel from './models/BodyMetric';
+import type { DeliveryMode } from '../home/mode';
 import { refreshPending, syncDatabase } from './sync';
 
 export interface NewClientInput {
@@ -10,23 +11,29 @@ export interface NewClientInput {
   phone?: string;
   goal?: string;
   paymentMode: 'trainer_collects' | 'gym_collects';
+  /** How they're usually trained. Home's Today chips filter on it. */
+  deliveryMode?: DeliveryMode;
   trainerSplitPercent?: number;
   heightCm?: number;
   activityLevel?: string;
-  /** Optional baseline weight — written as the first body_metric entry. */
   startingWeightKg?: number;
+  sessionsPerWeek?: number;
+  sessionDurationMinutes?: number;
 }
 
-/** Fields an existing client can be edited to. `undefined` clears the column. */
 export interface ClientPatch {
   name: string;
   phone?: string;
   goal?: string;
   status: string;
   paymentMode: 'trainer_collects' | 'gym_collects';
+  deliveryMode?: DeliveryMode;
   trainerSplitPercent?: number;
   heightCm?: number;
   activityLevel?: string;
+  sessionsPerWeek?: number;
+  sessionDurationMinutes?: number;
+  weeklySchedule?: string;
 }
 
 export const CLIENT_STATUSES = ['active', 'paused', 'inactive'] as const;
@@ -71,9 +78,12 @@ export async function createClient(trainerId: string, input: NewClientInput) {
       if (input.goal) c.goal = input.goal.trim();
       c.status = 'active';
       c.paymentMode = input.paymentMode;
+      if (input.deliveryMode) c.deliveryMode = input.deliveryMode;
       if (input.trainerSplitPercent != null) c.trainerSplitPercent = input.trainerSplitPercent;
       if (input.heightCm != null) c.heightCm = input.heightCm;
       if (input.activityLevel) c.activityLevel = input.activityLevel;
+      if (input.sessionsPerWeek != null) c.sessionsPerWeek = input.sessionsPerWeek;
+      if (input.sessionDurationMinutes != null) c.sessionDurationMinutes = input.sessionDurationMinutes;
     });
 
     if (input.startingWeightKg != null) {
@@ -98,11 +108,25 @@ export async function createClient(trainerId: string, input: NewClientInput) {
 // non-null. Clearing a field means writing null, so the cast is deliberate.
 const orNull = <T>(value: T | undefined): T => (value === undefined ? null : value) as T;
 
-/**
- * Edits are local-first exactly like creates: the write lands in SQLite, sync is
- * best-effort. `updated_at` moves on its own, which is what the pull cursor and
- * last-write-wins resolution key off.
- */
+/** Saves the weekly slot pattern and session config fields on an existing client. */
+export async function saveWeeklySchedule(
+  clientId: string,
+  sessionsPerWeek: number,
+  sessionDurationMinutes: number,
+  weeklySchedule: string,
+) {
+  const client = await clientsCollection.find(clientId);
+  await database.write(async () => {
+    await client.update((c) => {
+      c.sessionsPerWeek = sessionsPerWeek;
+      c.sessionDurationMinutes = sessionDurationMinutes;
+      c.weeklySchedule = weeklySchedule;
+    });
+  });
+  await refreshPending();
+  syncDatabase('save-weekly-schedule');
+}
+
 export async function updateClient(clientId: string, patch: ClientPatch) {
   const client = await clientsCollection.find(clientId);
 
@@ -113,12 +137,16 @@ export async function updateClient(clientId: string, patch: ClientPatch) {
       c.goal = orNull(patch.goal?.trim() || undefined);
       c.status = patch.status;
       c.paymentMode = patch.paymentMode;
+      c.deliveryMode = orNull(patch.deliveryMode);
       // A freelance client has no split to record — clear any stale value.
       c.trainerSplitPercent = orNull(
         patch.paymentMode === 'gym_collects' ? patch.trainerSplitPercent : undefined,
       );
       c.heightCm = orNull(patch.heightCm);
       c.activityLevel = orNull(patch.activityLevel);
+      if (patch.sessionsPerWeek != null) c.sessionsPerWeek = patch.sessionsPerWeek;
+      if (patch.sessionDurationMinutes != null) c.sessionDurationMinutes = patch.sessionDurationMinutes;
+      if (patch.weeklySchedule !== undefined) c.weeklySchedule = orNull(patch.weeklySchedule);
     });
   });
 

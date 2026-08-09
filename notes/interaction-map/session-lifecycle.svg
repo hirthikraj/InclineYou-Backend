@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="250" viewBox="0 0 900 250" role="img" aria-label="Session lifecycle: a scheduled session becomes done, no-show or cancelled; marking it done decrements the package and links the workout log" class="dg"><style>
+svg{color:#15162B;font-family:'DejaVu Sans Mono',Menlo,Consolas,monospace}
+text{fill:currentColor}
+.box{fill:none;stroke:currentColor;stroke-width:1.4}
+.box-fill{fill:#F0F2F8;stroke:currentColor;stroke-width:1.4}
+.ln{stroke:currentColor;stroke-width:1.4;fill:none}
+.acc{stroke:#4F46E5;color:#4F46E5}
+.acc-box{fill:#E9ECFF;stroke:#4F46E5;stroke-width:1.5}
+.acc-txt{fill:#4F46E5}
+.muted-txt{fill:#767D96}
+.lbl{font-size:11px}
+.ttl{font-size:13px;font-weight:600}
+.sm{font-size:10.5px}
+.dash{stroke-dasharray:5 4}
+</style>
+<rect width="900" height="250" fill="#FFFFFF"/>
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+          </marker>
+          <marker id="ar-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#4F46E5"/>
+          </marker>
+        </defs>
+
+        <rect class="box-fill" x="20" y="98" width="150" height="52" rx="4"/>
+        <text class="ttl" x="95" y="122" text-anchor="middle">scheduled</text>
+        <text class="sm muted-txt" x="95" y="138" text-anchor="middle">created by trainer</text>
+
+        <path class="ln" d="M60 98 C 55 55, 135 55, 130 98" marker-end="url(#ar)"/>
+        <text class="lbl" x="95" y="52" text-anchor="middle">reschedule · notifies client</text>
+
+        <line class="ln" x1="170" y1="112" x2="330" y2="52" marker-end="url(#ar)"/>
+        <line class="ln" x1="170" y1="124" x2="330" y2="124" marker-end="url(#ar)"/>
+        <line class="ln" x1="170" y1="136" x2="330" y2="196" marker-end="url(#ar)"/>
+
+        <rect class="acc-box" x="330" y="26" width="150" height="52" rx="4"/>
+        <text class="ttl acc-txt" x="405" y="50" text-anchor="middle">done</text>
+        <text class="sm acc-txt" x="405" y="66" text-anchor="middle">session delivered</text>
+
+        <rect class="box" x="330" y="98" width="150" height="52" rx="4"/>
+        <text class="ttl" x="405" y="122" text-anchor="middle">no_show</text>
+        <text class="sm muted-txt" x="405" y="138" text-anchor="middle">pack not touched</text>
+
+        <rect class="box" x="330" y="170" width="150" height="52" rx="4"/>
+        <text class="ttl" x="405" y="194" text-anchor="middle">cancelled</text>
+        <text class="sm muted-txt" x="405" y="210" text-anchor="middle">pack not touched</text>
+
+        <line class="ln acc" x1="480" y1="40" x2="620" y2="40" marker-end="url(#ar-a)"/>
+        <text class="lbl acc-txt" x="550" y="30" text-anchor="middle">decrements</text>
+        <rect class="box" x="620" y="14" width="240" height="52" rx="4"/>
+        <text class="ttl" x="740" y="38" text-anchor="middle">package.sessions_remaining</text>
+        <text class="sm muted-txt" x="740" y="54" text-anchor="middle">−1 · drives the roster chip</text>
+
+        <line class="ln acc" x1="480" y1="62" x2="620" y2="112" marker-end="url(#ar-a)"/>
+        <text class="lbl acc-txt" x="566" y="100" text-anchor="middle">links</text>
+        <rect class="box" x="620" y="98" width="240" height="52" rx="4"/>
+        <text class="ttl" x="740" y="122" text-anchor="middle">workout_session</text>
+        <text class="sm muted-txt" x="740" y="138" text-anchor="middle">the sets that were logged</text>
+      </svg>

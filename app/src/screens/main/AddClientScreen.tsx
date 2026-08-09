@@ -4,18 +4,17 @@ import {
   ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { MainStackParamList } from '../../navigation/MainStack';
 import { useAuth } from '../../store/AuthContext';
 import { createClient } from '../../db/clients';
+import type { DeliveryMode } from '../../home/mode';
 import { Field, Chip, formStyles } from '../../components/Form';
 import { colors } from '../../theme';
 
 const ACTIVITY_LEVELS = ['sedentary', 'light', 'moderate', 'active'] as const;
 
-type Props = {
-  navigation: NativeStackNavigationProp<MainStackParamList, 'AddClient'>;
-};
+type Props = NativeStackScreenProps<MainStackParamList, 'AddClient'>;
 
 export default function AddClientScreen({ navigation }: Props) {
   const { trainerId } = useAuth();
@@ -24,10 +23,15 @@ export default function AddClientScreen({ navigation }: Props) {
   const [phone, setPhone] = useState('');
   const [goal, setGoal] = useState('');
   const [paymentMode, setPaymentMode] = useState<'trainer_collects' | 'gym_collects'>('trainer_collects');
+  // Floor by default: the majority in this market, and the cheaper mistake —
+  // a remote session shown as floor costs a trip, the reverse costs nothing.
+  const [deliveryMode, setDeliveryMode] = useState<DeliveryMode>('floor');
   const [splitPercent, setSplitPercent] = useState('');
   const [heightCm, setHeightCm] = useState('');
   const [weightKg, setWeightKg] = useState('');
   const [activityLevel, setActivityLevel] = useState<string | null>(null);
+  const [sessionsPerWeek, setSessionsPerWeek] = useState('');
+  const [sessionDuration, setSessionDuration] = useState('');
   const [saving, setSaving] = useState(false);
 
   const parseNumber = (raw: string): number | undefined => {
@@ -44,20 +48,37 @@ export default function AddClientScreen({ navigation }: Props) {
       Alert.alert('Not signed in', 'Sign in again and retry.');
       return;
     }
+    const spw = parseNumber(sessionsPerWeek);
+    const dur = parseNumber(sessionDuration);
+    if (!spw || spw < 1 || spw > 7) {
+      Alert.alert('Sessions required', 'Enter how many sessions per week (1–7).');
+      return;
+    }
+    if (!dur || dur < 15) {
+      Alert.alert('Duration required', 'Enter session duration in minutes (min 15).');
+      return;
+    }
 
     setSaving(true);
     try {
-      await createClient(trainerId, {
+      const client = await createClient(trainerId, {
         name,
         phone: phone || undefined,
         goal: goal || undefined,
         paymentMode,
+        deliveryMode,
         trainerSplitPercent: paymentMode === 'gym_collects' ? parseNumber(splitPercent) : undefined,
         heightCm: parseNumber(heightCm),
         activityLevel: activityLevel ?? undefined,
         startingWeightKg: parseNumber(weightKg),
+        sessionsPerWeek: spw,
+        sessionDurationMinutes: dur,
       });
-      navigation.goBack();
+      navigation.replace('WeeklySlotPicker', {
+        clientId: client.id,
+        sessionsPerWeek: spw,
+        durationMinutes: dur,
+      });
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       Alert.alert('Could not save', message);
@@ -99,6 +120,23 @@ export default function AddClientScreen({ navigation }: Props) {
             />
           </View>
 
+          {/* Home filters the day by this. Asked here because it is a fact
+              about the client, not a decision made per session — the odd
+              exception is overridden on the session itself. */}
+          <Text style={formStyles.label}>How do you train them?</Text>
+          <View style={formStyles.chipRow}>
+            <Chip
+              label="On the floor"
+              selected={deliveryMode === 'floor'}
+              onPress={() => setDeliveryMode('floor')}
+            />
+            <Chip
+              label="Remote"
+              selected={deliveryMode === 'remote'}
+              onPress={() => setDeliveryMode('remote')}
+            />
+          </View>
+
           {paymentMode === 'gym_collects' && (
             <Field
               label="My share"
@@ -109,6 +147,24 @@ export default function AddClientScreen({ navigation }: Props) {
               suffix="%"
             />
           )}
+
+          <Text style={formStyles.sectionLabel}>Schedule</Text>
+
+          <Field
+            label="Sessions per week *"
+            value={sessionsPerWeek}
+            onChangeText={setSessionsPerWeek}
+            placeholder="3"
+            keyboardType="decimal-pad"
+          />
+          <Field
+            label="Session duration *"
+            value={sessionDuration}
+            onChangeText={setSessionDuration}
+            placeholder="60"
+            keyboardType="decimal-pad"
+            suffix="min"
+          />
 
           <Text style={formStyles.sectionLabel}>Baseline intake</Text>
 

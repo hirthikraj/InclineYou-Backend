@@ -8,6 +8,7 @@ export default class Template extends Model {
   @text('name') name!: string;
   @text('goal') goal!: string;
   @text('description') description!: string;
+  @text('day_labels') dayLabels!: string; // JSON: {"1":"Push Day","3":"Pull Day"}
   @readonly @date('created_at') createdAt!: Date;
   @date('updated_at') updatedAt!: Date;
 }

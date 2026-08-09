@@ -31,6 +31,9 @@ public class OtpRequest {
     @Column(nullable = false)
     private boolean verified;
 
+    @Column(name = "wrong_attempts", nullable = false)
+    private int wrongAttempts;
+
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;
 

@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="320" viewBox="0 0 980 320" role="img" aria-label="The trainer's cycle in four phases: onboard a client, program them, deliver and log sessions, then follow through with progress, reports, nudges and payment — after which a renewal restarts the cycle" class="dg"><style>
+svg{color:#15162B;font-family:'DejaVu Sans Mono',Menlo,Consolas,monospace}
+text{fill:currentColor}
+.box{fill:none;stroke:currentColor;stroke-width:1.4}
+.box-fill{fill:#F0F2F8;stroke:currentColor;stroke-width:1.4}
+.ln{stroke:currentColor;stroke-width:1.4;fill:none}
+.acc{stroke:#4F46E5;color:#4F46E5}
+.acc-box{fill:#E9ECFF;stroke:#4F46E5;stroke-width:1.5}
+.acc-txt{fill:#4F46E5}
+.muted-txt{fill:#767D96}
+.lbl{font-size:11px}
+.ttl{font-size:13px;font-weight:600}
+.sm{font-size:10.5px}
+.dash{stroke-dasharray:5 4}
+</style>
+<rect width="980" height="320" fill="#FFFFFF"/>
+      <defs>
+        <marker id="ar5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+        <marker id="ar5-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#4F46E5"/>
+        </marker>
+      </defs>
+
+      <!-- phase 1 -->
+      <rect class="box" x="2" y="40" width="210" height="150" rx="4"/>
+      <text class="sm acc-txt" x="18" y="64">01</text>
+      <text class="ttl" x="18" y="86">Onboard</text>
+      <text class="sm muted-txt" x="18" y="110">Add client + intake</text>
+      <text class="sm muted-txt" x="18" y="128">Payment mode &amp; split %</text>
+      <text class="sm muted-txt" x="18" y="146">Height, weight, activity</text>
+      <text class="sm muted-txt" x="18" y="164">Package: sessions, ₹</text>
+      <text class="sm acc-txt" x="18" y="182">FR-1 · FR-6.1</text>
+
+      <line class="ln" x1="212" y1="115" x2="252" y2="115" marker-end="url(#ar5)"/>
+      <text class="lbl muted-txt" x="232" y="105" text-anchor="middle">has a</text>
+      <text class="lbl muted-txt" x="232" y="134" text-anchor="middle">file</text>
+
+      <!-- phase 2 -->
+      <rect class="box" x="258" y="40" width="210" height="150" rx="4"/>
+      <text class="sm acc-txt" x="274" y="64">02</text>
+      <text class="ttl" x="274" y="86">Program</text>
+      <text class="sm muted-txt" x="274" y="110">Build a template once</text>
+      <text class="sm muted-txt" x="274" y="128">Assign → client program</text>
+      <text class="sm muted-txt" x="274" y="146">Tweak just this client</text>
+      <text class="sm muted-txt" x="274" y="164">Push announces it</text>
+      <text class="sm acc-txt" x="274" y="182">FR-3 · FR-8.3</text>
+
+      <line class="ln" x1="468" y1="115" x2="508" y2="115" marker-end="url(#ar5)"/>
+      <text class="lbl muted-txt" x="488" y="105" text-anchor="middle">has a</text>
+      <text class="lbl muted-txt" x="488" y="134" text-anchor="middle">plan</text>
+
+      <!-- phase 3 -->
+      <rect class="acc-box" x="514" y="40" width="210" height="150" rx="4"/>
+      <text class="sm acc-txt" x="530" y="64">03</text>
+      <text class="ttl acc-txt" x="530" y="86">Deliver</text>
+      <text class="sm acc-txt" x="530" y="110">Schedule the slots</text>
+      <text class="sm acc-txt" x="530" y="128">Log sets offline</text>
+      <text class="sm acc-txt" x="530" y="146">Mark done → pack −1</text>
+      <text class="sm acc-txt" x="530" y="164">Syncs on reconnect</text>
+      <text class="sm acc-txt" x="530" y="182">FR-2 · FR-4 · FR-8</text>
+
+      <line class="ln" x1="724" y1="115" x2="764" y2="115" marker-end="url(#ar5)"/>
+      <text class="lbl muted-txt" x="744" y="105" text-anchor="middle">has</text>
+      <text class="lbl muted-txt" x="744" y="134" text-anchor="middle">results</text>
+
+      <!-- phase 4 -->
+      <rect class="box" x="770" y="40" width="208" height="150" rx="4"/>
+      <text class="sm acc-txt" x="786" y="64">04</text>
+      <text class="ttl" x="786" y="86">Follow through</text>
+      <text class="sm muted-txt" x="786" y="110">PRs &amp; charts, both roles</text>
+      <text class="sm muted-txt" x="786" y="128">Weekly report auto-sends</text>
+      <text class="sm muted-txt" x="786" y="146">WhatsApp nudge</text>
+      <text class="sm muted-txt" x="786" y="164">UPI or front office</text>
+      <text class="sm acc-txt" x="786" y="182">FR-5 · FR-10 · FR-9 · FR-6</text>
+
+      <path class="ln acc dash" d="M874 190 L 874 250 L 107 250 L 107 192" marker-end="url(#ar5-a)"/>
+      <text class="lbl acc-txt" x="490" y="270" text-anchor="middle">renewal — a new package restarts the cycle</text>
+
+      <text class="sm muted-txt" x="490" y="304" text-anchor="middle">phase 03 is the only one that runs with no signal, and it is the one that runs every day</text>
+    </svg>

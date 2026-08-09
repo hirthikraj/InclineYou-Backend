@@ -1,0 +1,63 @@
+/**
+ * `.tx-toast` — a short, non-blocking explanation.
+ *
+ * Its job in this system is to make a refusal legible: whenever a control is
+ * disabled by a rule the trainer can't see (a cap, a lock), the toast says
+ * which rule and what to do instead. A tap that silently does nothing is
+ * indistinguishable from a broken button.
+ *
+ * It is a live region, so it is announced without stealing focus.
+ */
+
+import React from 'react';
+import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { colors, radius, space } from './tokens';
+import type { IconProps } from './icons';
+
+export interface ToastProps {
+  children: React.ReactNode;
+  icon?: React.ComponentType<IconProps>;
+  /** Optional trailing action — uppercase accent lettering, e.g. UNDO. */
+  action?: { label: string; onPress: () => void };
+  style?: StyleProp<ViewStyle>;
+}
+
+export default function Toast({ children, icon: Icon, action, style }: ToastProps) {
+  return (
+    <View style={[styles.toast, style]} accessibilityLiveRegion="polite" accessibilityRole="alert">
+      {Icon ? <Icon size={18} color={colors.ink} strokeWidth={2.2} /> : null}
+      <Text style={styles.text}>{children}</Text>
+      {action ? (
+        <Pressable
+          onPress={action.onPress}
+          accessibilityRole="button"
+          hitSlop={{ top: 12, bottom: 12, left: 8, right: 8 }}
+        >
+          <Text style={styles.action}>{action.label}</Text>
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  toast: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.s3,
+    paddingVertical: 13,
+    paddingHorizontal: space.s4,
+    borderRadius: radius.r2,
+    backgroundColor: colors.surface3,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  text: { flex: 1, fontSize: 14, fontWeight: '500', color: colors.ink },
+  action: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    color: colors.accentText,
+  },
+});
