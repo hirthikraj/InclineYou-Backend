@@ -22,9 +22,10 @@ public class AuthService {
 
     @Transactional
     public AuthResponse verifyOtp(String phone, String otp) {
-        if (!otpService.verify(phone, otp)) {
-            throw new InvalidOtpException();
-        }
+        // Throws OtpLockedException, OtpExpiredException or InvalidOtpException
+        // on failure — each surfaces as its own HTTP response via
+        // GlobalExceptionHandler, because each needs a different recovery.
+        otpService.verify(phone, otp);
 
         Optional<Trainer> existing = trainerRepo.findByPhoneAndDeletedAtIsNull(phone);
         boolean isNew = existing.isEmpty();
@@ -33,21 +34,33 @@ public class AuthService {
         if (isNew) {
             Trainer t = new Trainer();
             t.setPhone(phone);
-            t.setName(phone); // placeholder — trainer completes profile after first login
+            // `name` is NOT NULL and we have nothing else yet — sign-in gives us
+            // a phone number and nothing more. Trainer setup overwrites it, and
+            // `setupComplete` below is what tells the app the name is a stand-in.
+            t.setName(phone);
             trainer = trainerRepo.save(t);
         } else {
             trainer = existing.get();
         }
 
         String token = jwtService.generate(trainer.getId(), trainer.getPhone());
-        return new AuthResponse(token, trainer.getId().toString(), isNew);
+        return new AuthResponse(
+                token,
+                trainer.getId().toString(),
+                isNew,
+                trainer.getSetupCompletedAt() != null);
     }
 
-    public record AuthResponse(String token, String trainerId, boolean isNewUser) {}
-
-    public static class InvalidOtpException extends RuntimeException {
-        public InvalidOtpException() {
-            super("OTP is invalid or has expired");
-        }
-    }
+    /**
+     * `isNewUser` only ever answers "is this the first verify for this number".
+     * `setupComplete` answers the question the app actually has — whether a
+     * profile exists — and survives a reinstall, a second device, and a flow
+     * abandoned halfway. New field, so an older app simply ignores it.
+     */
+    public record AuthResponse(
+            String token,
+            String trainerId,
+            boolean isNewUser,
+            boolean setupComplete
+    ) {}
 }

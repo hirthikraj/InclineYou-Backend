@@ -3,9 +3,15 @@ package com.trainx.trainx_backend.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UuidGenerator;
+import org.hibernate.type.SqlTypes;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Entity
@@ -30,6 +36,33 @@ public class Trainer {
 
     @Column(name = "fcm_token")
     private String fcmToken;
+
+    /* ------------------------------------------------ trainer setup profile */
+
+    /** A band id, never a number of years — see V8__trainer_profile.sql. */
+    @Column(name = "experience_band", length = 20)
+    private String experienceBand;
+
+    /** Initialised empty, never null: an absent list and an empty one mean the same thing here. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private List<String> specialities = new ArrayList<>();
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private List<String> certifications = new ArrayList<>();
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private List<String> languages = new ArrayList<>();
+
+    /** NULL until the trainer comes out the far side of setup. The authority on whether it is owed. */
+    @Column(name = "setup_completed_at")
+    private Instant setupCompletedAt;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private Map<String, Object> metadata = new HashMap<>();
 
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;

@@ -35,6 +35,8 @@ app:
   otp:
     expiry-minutes: 10
     sms-enabled: false       # stub in dev; set true + configure provider in prod
+    max-attempts: 3
+    lock-minutes: 10
   seed:
     exercises:
       enabled: ${SEED_EXERCISES:true}

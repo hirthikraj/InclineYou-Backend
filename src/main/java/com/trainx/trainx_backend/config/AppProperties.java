@@ -26,6 +26,10 @@ public class AppProperties {
     public static class Otp {
         private int expiryMinutes;
         private boolean smsEnabled;
+        /** Maximum wrong attempts before the phone is locked. */
+        private int maxAttempts = 3;
+        /** How long the lock lasts, in minutes. */
+        private int lockMinutes = 10;
     }
 
     @Getter
