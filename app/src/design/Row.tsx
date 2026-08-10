@@ -50,8 +50,30 @@ export interface RowProps {
   spine?: RowSpine;
   /** A finished session sits back without disappearing. */
   dim?: boolean;
+  /**
+   * `.tx-row--wrap` — let the subtitle run to as many lines as it needs.
+   *
+   * For rows where the subtitle IS the substance: the three write-off outcomes
+   * each state what they do to the client's pack and to the year's total, and
+   * an ellipsis there removes the only reason the sheet exists.
+   */
+  wrap?: boolean;
   minHeight?: number;
+  /**
+   * Marks where a search query hit the title. `<mark>` in the design file:
+   * accent ink on an accent wash, same weight as the surrounding text.
+   */
+  highlight?: string;
   style?: StyleProp<ViewStyle>;
+}
+
+/** Splits a title around the first case-insensitive hit. */
+function marked(title: string, query: string) {
+  const q = query.trim();
+  if (!q) return null;
+  const at = title.toLowerCase().indexOf(q.toLowerCase());
+  if (at < 0) return null;
+  return [title.slice(0, at), title.slice(at, at + q.length), title.slice(at + q.length)] as const;
 }
 
 export function Row({
@@ -66,13 +88,17 @@ export function Row({
   severity,
   spine,
   dim = false,
+  wrap = false,
   minHeight,
+  highlight,
   style,
 }: RowProps) {
+  const hit = highlight ? marked(title, highlight) : null;
   const content = (pressed: boolean) => [
     styles.row,
     grouped && styles.rowGrouped,
     dim && styles.rowDim,
+    wrap && styles.rowWrap,
     minHeight !== undefined && { minHeight },
     pressed && styles.rowPressed,
     style,
@@ -90,10 +116,18 @@ export function Row({
       {spine ? <View style={[styles.spine, spineTones[spine]]} /> : null}
       <View style={styles.main}>
         <Text numberOfLines={2} style={styles.title}>
-          {title}
+          {hit ? (
+            <>
+              {hit[0]}
+              <Text style={styles.mark}>{hit[1]}</Text>
+              {hit[2]}
+            </>
+          ) : (
+            title
+          )}
         </Text>
         {subtitle ? (
-          <Text numberOfLines={1} style={styles.subtitle}>
+          <Text numberOfLines={wrap ? undefined : 1} style={[styles.subtitle, wrap && styles.subtitleWrap]}>
             {subtitle}
           </Text>
         ) : null}
@@ -155,6 +189,7 @@ const styles = StyleSheet.create({
   rowGrouped: { borderRadius: 0, borderWidth: 0 },
   rowPressed: { backgroundColor: colors.surface2 },
   rowDim: { opacity: 0.5 },
+  rowWrap: { alignItems: 'flex-start', paddingTop: 14, paddingBottom: 14 },
 
   severity: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 2 },
   severityAlert: { backgroundColor: colors.warn },
@@ -165,6 +200,8 @@ const styles = StyleSheet.create({
   main: { flex: 1, minWidth: 0 },
   title: { fontSize: 15, fontWeight: '700', letterSpacing: -0.23, color: colors.ink },
   subtitle: { fontSize: 12.5, color: colors.ink2, marginTop: 3 },
+  subtitleWrap: { lineHeight: 18 },
+  mark: { backgroundColor: colors.accentSoft, color: colors.accentText },
 
   time: { width: 52, flexShrink: 0 },
   timeValue: { fontSize: 15, fontWeight: '800', letterSpacing: -0.3, color: colors.ink, ...tnum },

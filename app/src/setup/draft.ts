@@ -25,6 +25,10 @@ export const SETUP_STEPS = [
   'specialities',
   'certifications',
   'languages',
+  // What you sell, before how you get paid — the price comes before the pipe.
+  // Packs themselves live in the synced database, not in this draft; only the
+  // count is here, so the flow knows whether the step has been answered.
+  'packs',
   'payment',
 ] as const;
 
@@ -37,11 +41,12 @@ export const STEP_LABELS: Record<SetupStep, string> = {
   specialities: 'Specialities',
   certifications: 'Certifications',
   languages: 'Languages',
+  packs: 'What you sell',
   payment: 'Getting paid',
 };
 
 /** Only `name` is mandatory — a client can't accept an invite from a blank name. */
-export const OPTIONAL_STEPS: SetupStep[] = ['certifications', 'payment'];
+export const OPTIONAL_STEPS: SetupStep[] = ['certifications', 'packs', 'payment'];
 
 export interface SetupDraft {
   name: string;
@@ -51,6 +56,15 @@ export interface SetupDraft {
   certifications: string[];
   languages: string[];
   upiId: string;
+  /**
+   * How many packs are on the price list.
+   *
+   * The packs themselves are rows in the synced `packs` table — they are real
+   * business data, not an onboarding answer, and putting them in SecureStore
+   * would mean writing them twice. This count exists only so the resume screen
+   * and `nextStep` can tell answered from unanswered.
+   */
+  packCount: number;
   /** Steps the trainer explicitly passed on. Distinct from "not reached yet". */
   skipped: SetupStep[];
 }
@@ -62,6 +76,7 @@ export const EMPTY_DRAFT: SetupDraft = {
   certifications: [],
   languages: [],
   upiId: '',
+  packCount: 0,
   skipped: [],
 };
 
@@ -78,6 +93,8 @@ export function isAnswered(step: SetupStep, draft: SetupDraft): boolean {
       return draft.certifications.length > 0;
     case 'languages':
       return draft.languages.length > 0;
+    case 'packs':
+      return draft.packCount > 0;
     case 'payment':
       return draft.upiId.trim().length > 0;
   }

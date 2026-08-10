@@ -52,7 +52,7 @@ export default function LanguagesScreen({ navigation }: Props) {
 
   const cont = () => {
     patch({ languages: chosen });
-    navigation.navigate('Payment');
+    navigation.navigate('Packs');
   };
 
   return (

@@ -53,6 +53,17 @@ public class SyncService {
         changes.put("packages",             fetchDirect("package",           "trainer_id", tid, cursor));
         changes.put("payments",             fetchDirect("payment",           "trainer_id", tid, cursor));
         changes.put("nudge_logs",           fetchDirect("nudge_log",         "trainer_id", tid, cursor));
+        // Screen 05 · diary. Both hang straight off the trainer, and both are
+        // read on every diary open, so they ride the same cursor as everything
+        // else rather than a bespoke endpoint.
+        changes.put("working_hours",        fetchDirect("working_hours",     "trainer_id", tid, cursor));
+        changes.put("time_blocks",          fetchDirect("time_block",        "trainer_id", tid, cursor));
+        // Screen 06 · money. `pack` is the price list the trainer defined at
+        // setup; `gym_settlement` is the money going the other way. Both hang
+        // straight off the trainer and both are tiny — a dozen rows each — so
+        // they ride the same cursor rather than earning an endpoint.
+        changes.put("packs",                fetchDirect("pack",              "trainer_id", tid, cursor));
+        changes.put("gym_settlements",      fetchDirect("gym_settlement",    "trainer_id", tid, cursor));
 
         return new PullResponse(Instant.now().toEpochMilli(), changes);
     }
@@ -174,22 +185,27 @@ public class SyncService {
     }
 
     /**
-     * Split normalized alive rows into created vs updated based on whether
-     * the record's created_at is after the cursor.  WatermelonDB requires this
-     * distinction: sending an existing record in `created` triggers a warning
-     * and can cause data inconsistency on the client.
+     * Every alive row goes in `updated`; `created` is always empty.
+     *
+     * This used to split the two by comparing each row's `created_at` against
+     * the cursor, which is the only signal the server has — and it is the wrong
+     * signal, because the question WatermelonDB is really asking is "does this
+     * phone already hold this record", which the server cannot know. Two cases
+     * broke it routinely: a row written before the cursor but edited after it
+     * arrived as an update for something the phone had never seen, and a row
+     * re-created server-side arrived as a create for something the phone still
+     * had. Both logged "This could be a serious bug" and then quietly did the
+     * right thing anyway.
+     *
+     * So the server stops guessing. The client pairs this with
+     * `sendCreatedAsUpdated: true`, which is WatermelonDB's documented contract
+     * for exactly this arrangement: send everything alive as an update, and it
+     * inserts what is missing and updates what is not. Deletions are unchanged
+     * — those the server does know about, from `deleted_at`.
      */
     private static TableChanges splitAlive(
             List<Map<String, Object>> rows, Timestamp cursor, List<String> deleted) {
-        long cursorMs = cursor.toInstant().toEpochMilli();
-        var created = new ArrayList<Map<String, Object>>();
-        var updated = new ArrayList<Map<String, Object>>();
-        for (var row : rows) {
-            Object ca = row.get("created_at");
-            long createdMs = ca instanceof Number n ? n.longValue() : 0L;
-            (createdMs > cursorMs ? created : updated).add(row);
-        }
-        return new TableChanges(created, updated, deleted);
+        return new TableChanges(List.of(), rows, deleted);
     }
 
     // ── Push ──────────────────────────────────────────────────────────────────
@@ -212,6 +228,10 @@ public class SyncService {
         pushPackages(tid, changes);
         pushPayments(tid, changes);
         pushNudgeLogs(tid, changes);
+        pushWorkingHours(tid, changes);
+        pushTimeBlocks(tid, changes);
+        pushPacks(tid, changes);
+        pushGymSettlements(tid, changes);
         warnOnUnhandledTables(tid, changes);
         log.debug("sync push trainer={} tables={}", tid, changes.keySet());
     }
@@ -219,7 +239,9 @@ public class SyncService {
     private static final Set<String> HANDLED_PUSH_TABLES = Set.of(
             "clients", "body_metrics", "templates", "programs", "program_exercises",
             "scheduled_sessions", "workout_sessions", "set_logs",
-            "packages", "payments", "nudge_logs");
+            "packages", "payments", "nudge_logs",
+            "working_hours", "time_blocks",
+            "packs", "gym_settlements");
 
     @SuppressWarnings("unchecked")
     private void warnOnUnhandledTables(String tid, Map<String, Object> changes) {
@@ -537,16 +559,25 @@ public class SyncService {
             p.put("dayLabel",        record.get("day_label"));
             p.put("templateDay",     record.get("template_day"));
             p.put("deliveryMode",    deliveryMode(record.get("delivery_mode")));
+            // V10 · diary. The pack trio travels with the session because it is
+            // what makes the 24-hour undo exact rather than a recomputation.
+            p.put("seriesId",        record.get("series_id"));
+            p.put("cancelledBy",     cancelledBy(record.get("cancelled_by")));
+            p.put("packDelta",       record.get("pack_delta"));
+            p.put("packPackageId",   record.get("pack_package_id"));
+            p.put("packAppliedAt",   toTimestamp(record.get("pack_applied_at")));
             p.put("created_at",      toTimestamp(record.get("created_at")));
             p.put("updated_at",      toTimestamp(record.get("updated_at")));
 
             jdbc.update("""
                     INSERT INTO scheduled_session (id, trainer_id, client_id, program_id,
                         scheduled_at, duration_minutes, status, notes, day_label, template_day,
-                        delivery_mode, created_at, updated_at)
+                        delivery_mode, series_id, cancelled_by, pack_delta, pack_package_id,
+                        pack_applied_at, created_at, updated_at)
                     VALUES (:id::uuid, :tid::uuid, :cid::uuid, :programId::uuid,
                         :scheduledAt, :durationMinutes, :status, :notes, :dayLabel, :templateDay,
-                        :deliveryMode,
+                        :deliveryMode, :seriesId::uuid, :cancelledBy, :packDelta,
+                        :packPackageId::uuid, :packAppliedAt,
                         COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
                     ON CONFLICT (id) DO UPDATE SET
                         scheduled_at     = EXCLUDED.scheduled_at,
@@ -556,6 +587,11 @@ public class SyncService {
                         day_label        = EXCLUDED.day_label,
                         template_day     = EXCLUDED.template_day,
                         delivery_mode    = EXCLUDED.delivery_mode,
+                        series_id        = EXCLUDED.series_id,
+                        cancelled_by     = EXCLUDED.cancelled_by,
+                        pack_delta       = EXCLUDED.pack_delta,
+                        pack_package_id  = EXCLUDED.pack_package_id,
+                        pack_applied_at  = EXCLUDED.pack_applied_at,
                         updated_at       = EXCLUDED.updated_at
                     WHERE scheduled_session.trainer_id = :tid::uuid
                     """, p);
@@ -703,14 +739,21 @@ public class SyncService {
             p.put("startDate",          toSqlDate(record.get("start_date")));
             p.put("endDate",            toSqlDate(record.get("end_date")));
             p.put("status",             strOrDefault(record.get("status"), "active"));
+            // Screen 06 · the debt side of the book.
+            p.put("packId",             record.get("pack_id"));
+            p.put("dueDate",            toSqlDate(record.get("due_date")));
+            p.put("writtenOffAt",       toTimestamp(record.get("written_off_at")));
+            p.put("writtenOffAmount",   record.get("written_off_amount"));
             p.put("created_at",         toTimestamp(record.get("created_at")));
             p.put("updated_at",         toTimestamp(record.get("updated_at")));
 
             jdbc.update("""
                     INSERT INTO package (id, trainer_id, client_id, type, sessions_total, sessions_remaining,
-                        amount, currency, start_date, end_date, status, created_at, updated_at)
+                        amount, currency, start_date, end_date, status, pack_id, due_date,
+                        written_off_at, written_off_amount, created_at, updated_at)
                     VALUES (:id::uuid, :tid::uuid, :cid::uuid, :type, :sessionsTotal, :sessionsRemaining,
-                        :amount, :currency, :startDate, :endDate, :status,
+                        :amount, :currency, :startDate, :endDate, :status, :packId::uuid, :dueDate,
+                        :writtenOffAt, :writtenOffAmount,
                         COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
                     ON CONFLICT (id) DO UPDATE SET
                         type                = EXCLUDED.type,
@@ -721,6 +764,10 @@ public class SyncService {
                         start_date          = EXCLUDED.start_date,
                         end_date            = EXCLUDED.end_date,
                         status              = EXCLUDED.status,
+                        pack_id             = EXCLUDED.pack_id,
+                        due_date            = EXCLUDED.due_date,
+                        written_off_at      = EXCLUDED.written_off_at,
+                        written_off_amount  = EXCLUDED.written_off_amount,
                         updated_at          = EXCLUDED.updated_at
                     WHERE package.trainer_id = :tid::uuid
                     """, p);
@@ -763,20 +810,36 @@ public class SyncService {
             p.put("status",       strOrDefault(record.get("status"), "pending"));
             p.put("upiReference", record.get("upi_reference"));
             p.put("paidAt",       toTimestamp(record.get("paid_at")));
+            // Screen 06. The cut was worked out on the device at record time and
+            // travels with the row — never recomputed here, or a contract change
+            // in October would silently rewrite September.
+            p.put("gymShare",     record.get("gym_share_amount"));
+            p.put("sharePercent", record.get("share_percent"));
+            p.put("receiptNo",    record.get("receipt_no"));
+            p.put("note",         record.get("note"));
             p.put("created_at",   toTimestamp(record.get("created_at")));
             p.put("updated_at",   toTimestamp(record.get("updated_at")));
 
             jdbc.update("""
                     INSERT INTO payment (id, trainer_id, client_id, package_id, amount, currency,
-                        method, collected_by, status, upi_reference, paid_at, created_at, updated_at)
+                        method, collected_by, status, upi_reference, paid_at,
+                        gym_share_amount, share_percent, receipt_no, note, created_at, updated_at)
                     VALUES (:id::uuid, :tid::uuid, :cid::uuid, :packageId::uuid, :amount, :currency,
                         :method, :collectedBy, :status, :upiReference, :paidAt,
+                        :gymShare, :sharePercent, :receiptNo, :note,
                         COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
                     ON CONFLICT (id) DO UPDATE SET
-                        status        = EXCLUDED.status,
-                        upi_reference = EXCLUDED.upi_reference,
-                        paid_at       = EXCLUDED.paid_at,
-                        updated_at    = EXCLUDED.updated_at
+                        amount           = EXCLUDED.amount,
+                        method           = EXCLUDED.method,
+                        collected_by     = EXCLUDED.collected_by,
+                        status           = EXCLUDED.status,
+                        upi_reference    = EXCLUDED.upi_reference,
+                        paid_at          = EXCLUDED.paid_at,
+                        gym_share_amount = EXCLUDED.gym_share_amount,
+                        share_percent    = EXCLUDED.share_percent,
+                        receipt_no       = EXCLUDED.receipt_no,
+                        note             = EXCLUDED.note,
+                        updated_at       = EXCLUDED.updated_at
                     WHERE payment.trainer_id = :tid::uuid
                     """, p);
         }
@@ -830,6 +893,223 @@ public class SyncService {
 
     // ── Push helpers ──────────────────────────────────────────────────────────
 
+    /**
+     * Working hours (V10).
+     *
+     * No ownership hop to make — the trainer is on the row — so this is the
+     * simplest handler in the file. Windows are replaced wholesale by the app
+     * rather than edited in place: a day's hours are one idea, and diffing two
+     * lists of intervals on a phone to save one delete is not worth the bug.
+     */
+    @SuppressWarnings("unchecked")
+    private void pushWorkingHours(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("working_hours");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            var p = new HashMap<String, Object>();
+            p.put("id",         str(record.get("id")));
+            p.put("tid",        tid);
+            p.put("weekday",    clampWeekday(record.get("weekday")));
+            p.put("startMin",   clampMinute(record.get("start_minute")));
+            p.put("endMin",     clampMinute(record.get("end_minute")));
+            p.put("created_at", toTimestamp(record.get("created_at")));
+            p.put("updated_at", toTimestamp(record.get("updated_at")));
+
+            // A window that starts after it ends is a client bug, not data.
+            if (p.get("weekday") == null || p.get("startMin") == null || p.get("endMin") == null
+                    || (int) p.get("startMin") >= (int) p.get("endMin")) {
+                log.warn("sync push trainer={}: skipping working_hours {} — invalid window", tid, p.get("id"));
+                continue;
+            }
+
+            jdbc.update("""
+                    INSERT INTO working_hours (id, trainer_id, weekday, start_minute, end_minute,
+                        created_at, updated_at)
+                    VALUES (:id::uuid, :tid::uuid, :weekday, :startMin, :endMin,
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        weekday      = EXCLUDED.weekday,
+                        start_minute = EXCLUDED.start_minute,
+                        end_minute   = EXCLUDED.end_minute,
+                        updated_at   = EXCLUDED.updated_at
+                    WHERE working_hours.trainer_id = :tid::uuid
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE working_hours SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    /**
+     * Time blocks (V10).
+     *
+     * Nothing here touches the sessions inside the block. What happens to them
+     * is the trainer's choice in the sheet (5b) and arrives as ordinary session
+     * pushes; a block that cancelled bookings as a side effect of syncing would
+     * be a diary that empties itself.
+     */
+    @SuppressWarnings("unchecked")
+    private void pushTimeBlocks(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("time_blocks");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            var starts = toTimestamp(record.get("starts_at"));
+            var ends   = toTimestamp(record.get("ends_at"));
+            if (starts == null || ends == null || !ends.after(starts)) {
+                log.warn("sync push trainer={}: skipping time_block {} — invalid range",
+                        tid, str(record.get("id")));
+                continue;
+            }
+
+            var p = new HashMap<String, Object>();
+            p.put("id",         str(record.get("id")));
+            p.put("tid",        tid);
+            p.put("startsAt",   starts);
+            p.put("endsAt",     ends);
+            p.put("allDay",     bool(record.get("all_day")));
+            p.put("reason",     record.get("reason"));
+            p.put("created_at", toTimestamp(record.get("created_at")));
+            p.put("updated_at", toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO time_block (id, trainer_id, starts_at, ends_at, all_day, reason,
+                        created_at, updated_at)
+                    VALUES (:id::uuid, :tid::uuid, :startsAt, :endsAt, :allDay, :reason,
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        starts_at  = EXCLUDED.starts_at,
+                        ends_at    = EXCLUDED.ends_at,
+                        all_day    = EXCLUDED.all_day,
+                        reason     = EXCLUDED.reason,
+                        updated_at = EXCLUDED.updated_at
+                    WHERE time_block.trainer_id = :tid::uuid
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE time_block SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    /**
+     * The price list. Trainer-scoped and tiny — a handful of rows that change
+     * once in a while and are read on every Money open.
+     */
+    @SuppressWarnings("unchecked")
+    private void pushPacks(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("packs");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            var p = new HashMap<String, Object>();
+            p.put("id",           str(record.get("id")));
+            p.put("tid",          tid);
+            p.put("name",         strOrDefault(record.get("name"), "Pack"));
+            p.put("type",         strOrDefault(record.get("type"), "session_pack"));
+            p.put("sessions",     record.get("sessions"));
+            p.put("amount",       record.get("amount"));
+            p.put("currency",     strOrDefault(record.get("currency"), "INR"));
+            p.put("validityDays", record.get("validity_days"));
+            p.put("status",       strOrDefault(record.get("status"), "active"));
+            p.put("orderIndex",   record.get("order_index") == null ? 0 : record.get("order_index"));
+            p.put("created_at",   toTimestamp(record.get("created_at")));
+            p.put("updated_at",   toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO pack (id, trainer_id, name, type, sessions, amount, currency,
+                        validity_days, status, order_index, created_at, updated_at)
+                    VALUES (:id::uuid, :tid::uuid, :name, :type, :sessions, :amount, :currency,
+                        :validityDays, :status, :orderIndex,
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        name          = EXCLUDED.name,
+                        type          = EXCLUDED.type,
+                        sessions      = EXCLUDED.sessions,
+                        amount        = EXCLUDED.amount,
+                        currency      = EXCLUDED.currency,
+                        validity_days = EXCLUDED.validity_days,
+                        status        = EXCLUDED.status,
+                        order_index   = EXCLUDED.order_index,
+                        updated_at    = EXCLUDED.updated_at
+                    WHERE pack.trainer_id = :tid::uuid
+                    """, p);
+        }
+
+        // A pack a package points at is never really deleted — the FK would
+        // refuse, and rightly: retiring a price must not rewrite what was sold.
+        // The app retires by status; this path only fires for one never used.
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE pack SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                      AND NOT EXISTS (SELECT 1 FROM package WHERE pack_id = pack.id AND deleted_at IS NULL)
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
+    /** Money going out to the gym. One row per month, and it settles or it doesn't. */
+    @SuppressWarnings("unchecked")
+    private void pushGymSettlements(String tid, Map<String, Object> changes) {
+        var table = (Map<String, Object>) changes.get("gym_settlements");
+        if (table == null) return;
+
+        for (var record : mergeCreatedUpdated(table)) {
+            String period = str(record.get("period"));
+            if (period == null || !period.matches("\\d{4}-\\d{2}")) {
+                log.warn("sync push trainer={}: skipping gym_settlement {} — bad period '{}'",
+                        tid, str(record.get("id")), period);
+                continue;
+            }
+
+            var p = new HashMap<String, Object>();
+            p.put("id",              str(record.get("id")));
+            p.put("tid",             tid);
+            p.put("period",          period);
+            p.put("amount",          record.get("amount"));
+            p.put("sessionsCounted", record.get("sessions_counted"));
+            p.put("gymName",         record.get("gym_name"));
+            p.put("status",          strOrDefault(record.get("status"), "due"));
+            p.put("dueAt",           toTimestamp(record.get("due_at")));
+            p.put("settledAt",       toTimestamp(record.get("settled_at")));
+            p.put("created_at",      toTimestamp(record.get("created_at")));
+            p.put("updated_at",      toTimestamp(record.get("updated_at")));
+
+            jdbc.update("""
+                    INSERT INTO gym_settlement (id, trainer_id, period, amount, sessions_counted,
+                        gym_name, status, due_at, settled_at, created_at, updated_at)
+                    VALUES (:id::uuid, :tid::uuid, :period, :amount, :sessionsCounted,
+                        :gymName, :status, :dueAt, :settledAt,
+                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
+                    ON CONFLICT (id) DO UPDATE SET
+                        period           = EXCLUDED.period,
+                        amount           = EXCLUDED.amount,
+                        sessions_counted = EXCLUDED.sessions_counted,
+                        gym_name         = EXCLUDED.gym_name,
+                        status           = EXCLUDED.status,
+                        due_at           = EXCLUDED.due_at,
+                        settled_at       = EXCLUDED.settled_at,
+                        updated_at       = EXCLUDED.updated_at
+                    WHERE gym_settlement.trainer_id = :tid::uuid
+                    """, p);
+        }
+
+        for (String id : deletedIds(table)) {
+            jdbc.update("""
+                    UPDATE gym_settlement SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                    """, Map.of("id", id, "tid", tid));
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> mergeCreatedUpdated(Map<String, Object> table) {
         var result = new ArrayList<Map<String, Object>>();
@@ -871,6 +1151,34 @@ public class SyncService {
         if (s == null) return null;
         String value = s.trim().toLowerCase();
         return value.equals("floor") || value.equals("remote") ? value : null;
+    }
+
+    /** 'client' or 'trainer'. Anything else is dropped rather than stored. */
+    private String cancelledBy(Object v) {
+        String s = str(v);
+        if (s == null) return null;
+        String value = s.trim().toLowerCase();
+        return value.equals("client") || value.equals("trainer") ? value : null;
+    }
+
+    /** ISO weekday, 0 = Monday. Out of range is not a Monday, it is a bug. */
+    private Integer clampWeekday(Object v) {
+        if (!(v instanceof Number n)) return null;
+        int day = n.intValue();
+        return day >= 0 && day <= 6 ? day : null;
+    }
+
+    /** Minutes from midnight. 1440 is allowed so a window can end at midnight. */
+    private Integer clampMinute(Object v) {
+        if (!(v instanceof Number n)) return null;
+        int minute = n.intValue();
+        return minute >= 0 && minute <= 1440 ? minute : null;
+    }
+
+    private boolean bool(Object v) {
+        if (v instanceof Boolean b) return b;
+        if (v instanceof Number n) return n.intValue() != 0;
+        return false;
     }
 
     private Timestamp toTimestamp(Object v) {
@@ -922,8 +1230,13 @@ public class SyncService {
         if (v instanceof java.time.LocalDateTime ldt)  return ldt.toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
         if (v instanceof Date d)                      return d.toString(); // ISO "yyyy-MM-dd"
         if (v instanceof BigDecimal bd) return bd;                    // Jackson serialises fine
-        if (v instanceof Boolean || v instanceof Integer
-                || v instanceof Long || v instanceof String) return v;
+        if (v instanceof Boolean || v instanceof String) return v;
+        // Every remaining numeric type, by interface rather than by listing the
+        // boxes. V10's SMALLINT columns are the reason: depending on the driver
+        // an int2 arrives as a Short, which the fallback below would turn into
+        // the *string* "360" — and a weekday that is a string silently stops
+        // matching anything on the phone.
+        if (v instanceof Number n) return n;
         return v.toString(); // PGobject (JSONB) and any other driver type
     }
 }

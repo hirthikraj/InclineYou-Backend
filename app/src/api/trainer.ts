@@ -21,6 +21,14 @@ export interface TrainerProfile {
   /** The server's answer to "is trainer setup still owed". */
   setupComplete: boolean;
   setupCompletedAt: string | null;
+  /**
+   * Screen 06 · money. A null gym name means no gym — an independent trainer
+   * keeps all of it, and the "your share" line is hidden rather than shown as
+   * a full bar that says nothing.
+   */
+  gymName?: string | null;
+  /** What the GYM keeps, on floor sessions. Remote is always 0%. */
+  gymSharePercent?: number | null;
 }
 
 /**
@@ -37,6 +45,9 @@ export interface TrainerUpdate {
   languages?: string[];
   /** Stamps setup as finished. The server never un-stamps it. */
   completeSetup?: boolean;
+  /** An empty string means "left the gym" — it clears the percentage too. */
+  gymName?: string;
+  gymSharePercent?: number;
 }
 
 export function getTrainer() {

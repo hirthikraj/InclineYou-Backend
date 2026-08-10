@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { InteractionManager } from 'react-native';
 import { Q } from '@nozbe/watermelondb';
 import { combineLatest, map } from 'rxjs';
 import { database } from '../db';
@@ -79,11 +80,16 @@ export function useDeck(active: boolean = true): Deck {
 
   useEffect(() => {
     if (!active) return;
-    // Immediately, not in 30 seconds: coming back to a countdown that is half a
-    // minute stale is worse than one that was never running.
-    setNow(Date.now());
+    // Straight away, not in 30 seconds: coming back to a countdown that is half
+    // a minute stale is worse than one that was never running. But after the
+    // tab transition rather than on it — re-deriving the deck costs frames the
+    // cross-fade needs, and that shows up as a soft-feeling tab switch.
+    const task = InteractionManager.runAfterInteractions(() => setNow(Date.now()));
     const t = setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => clearInterval(t);
+    return () => {
+      task.cancel();
+      clearInterval(t);
+    };
   }, [active]);
 
   // Only the day matters to the query window, so the subscriptions survive

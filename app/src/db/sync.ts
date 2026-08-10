@@ -109,6 +109,20 @@ export function syncDatabase(reason: string = 'manual'): Promise<void> {
       await api.post('/v1/sync/push', { changes, lastPulledAt });
     },
     migrationsEnabledAtVersion: 1,
+    /**
+     * The server splits a pull into created and updated by comparing each row's
+     * `created_at` against the client's cursor — which is all it can do, since
+     * it has no record of what any one phone already holds. So a row written
+     * before the cursor but touched after it arrives as an *update* for
+     * something this phone has never seen: a client added on another device, a
+     * backdated import, a row an admin edited.
+     *
+     * Without this flag WatermelonDB logs that as a "Diagnostic error … could
+     * be a serious bug" for every such row, then creates it anyway. The flag is
+     * the documented way to say the arrangement is deliberate; the outcome is
+     * identical, minus a screenful of false alarms.
+     */
+    sendCreatedAsUpdated: true,
   })
     .then(async () => {
       setState({ phase: 'idle', lastSyncedAt: Date.now(), error: null });

@@ -30,6 +30,7 @@ import {
   labelList,
 } from '../../setup/options';
 import {
+  OPTIONAL_STEPS,
   SETUP_STEPS,
   STEP_LABELS,
   hasProgress,
@@ -220,7 +221,7 @@ function ResumeBody({ draft }: { draft: SetupDraft }) {
  */
 function stepMeta(step: SetupStep, draft: SetupDraft, isNext: boolean): string | undefined {
   if (isNext) {
-    const optional = step === 'certifications' || step === 'payment';
+    const optional = OPTIONAL_STEPS.includes(step);
     return optional ? 'Up next · optional' : 'Up next';
   }
   if (!isSettled(step, draft)) return undefined;
@@ -237,6 +238,8 @@ function stepMeta(step: SetupStep, draft: SetupDraft, isNext: boolean): string |
       return labelList(draft.certifications, CERTIFICATIONS, 2);
     case 'languages':
       return labelList(draft.languages, LANGUAGES);
+    case 'packs':
+      return `${draft.packCount} pack${draft.packCount === 1 ? '' : 's'}`;
     case 'payment':
       return draft.upiId;
   }

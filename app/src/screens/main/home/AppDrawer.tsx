@@ -42,6 +42,7 @@ import {
   IconMessage,
   IconRefresh,
   IconRupee,
+  IconClock,
   IconSettings,
   IconShield,
   IconWallet,
@@ -77,6 +78,7 @@ export type DrawerKey =
   | 'exercises'
   | 'nudges'
   | 'adherence'
+  | 'hours'
   | 'settings'
   | 'help';
 
@@ -189,6 +191,7 @@ export default function AppDrawer({ visible, onClose, onNavigate, onSignOut }: A
       <DrawerItem icon={IconBadge} label="Adherence" onPress={go('adherence')} />
 
       <DrawerLabel>App</DrawerLabel>
+      <DrawerItem icon={IconClock} label="When you work" onPress={go('hours')} />
       <DrawerItem icon={IconSettings} label="Settings" onPress={go('settings')} />
       <DrawerItem icon={IconShield} label="Help" onPress={go('help')} />
     </Drawer>

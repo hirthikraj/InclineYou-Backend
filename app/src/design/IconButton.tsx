@@ -15,6 +15,8 @@ import type { IconProps } from './icons';
 export interface IconButtonProps {
   icon: React.ComponentType<IconProps>;
   onPress?: () => void;
+  /** A second, deliberate action. The diary's view switcher uses it (§ 04). */
+  onLongPress?: () => void;
   /** Screen-reader name. Required — an icon alone says nothing out loud. */
   label: string;
   /** `.tx-iconbtn--bare` — no fill, no hairline. The app-bar default. */
@@ -31,6 +33,7 @@ export interface IconButtonProps {
 export default function IconButton({
   icon: Icon,
   onPress,
+  onLongPress,
   label,
   bare = false,
   size = 21,
@@ -44,6 +47,7 @@ export default function IconButton({
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       accessibilityRole="button"
       accessibilityLabel={showCount ? `${label}, ${count} unread` : dot ? `${label}, unread` : label}
       style={({ pressed }) => [

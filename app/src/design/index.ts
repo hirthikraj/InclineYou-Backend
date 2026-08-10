@@ -6,6 +6,7 @@
  */
 
 export * from './tokens';
+export { navTheme } from './navTheme';
 export * from './icons';
 export { default as useKeyboardVisible } from './useKeyboardVisible';
 export { default as useReduceMotion } from './useReduceMotion';
@@ -82,5 +83,54 @@ export type { NotifProps } from './Notif';
 export { default as Activity } from './Activity';
 export type { ActivityProps } from './Activity';
 export { SyncBand, SyncStamp, SyncSpinner } from './SyncBand';
+
+/* --------------------------------------------------------- the roster · § 04 */
+
+export { default as GroupHead } from './GroupHead';
+export type { GroupHeadProps } from './GroupHead';
+export { default as Pack, PACK_LOW } from './Pack';
+export type { PackProps } from './Pack';
+export { default as Tally } from './Tally';
+export type { TallyItem } from './Tally';
+export { Check, Radio, ChoiceSlot, ChoiceGrid, ChoiceCard } from './Choice';
+export { default as Menu } from './Menu';
+export type { MenuAction } from './Menu';
+export { default as SelectBar } from './SelectBar';
+export type { SelectBarAction } from './SelectBar';
+export { default as SwipeRow } from './SwipeRow';
+export type { SwipeRowProps, SwipeTone } from './SwipeRow';
+export { default as IndexRail } from './IndexRail';
+export type { IndexRailProps } from './IndexRail';
+export { default as AvatarStack } from './AvatarStack';
+
+/* ---------------------------------------------------------- the diary · § 05 */
+
+export { default as DayStrip } from './DayStrip';
+export type { StripDayProps } from './DayStrip';
+export { default as Segmented } from './Segmented';
+export type { SegmentedOption } from './Segmented';
+export { Agenda, AgendaItem, NowLine, GapBar, FreeSlot, BlockBar } from './Agenda';
+export { default as WeekGrid, Legend as WeekLegend } from './WeekGrid';
+export type { WeekColumnProps, WeekPipProps, PipKind } from './WeekGrid';
+export { default as MonthGrid } from './MonthGrid';
+export type { MonthCellProps } from './MonthGrid';
+export { default as AvailRow } from './AvailRow';
+
+/* ---------------------------------------------------------- the book · § 06 */
+
+export { default as Months } from './Months';
+export type { MonthChip } from './Months';
+export { default as Figures } from './Figures';
+export type { FiguresProps } from './Figures';
+export { default as ShareRow } from './ShareRow';
+export { Ledger, LedgerRow, BalanceMark } from './Ledger';
+export type { LedgerRowProps } from './Ledger';
+export { default as Gst } from './Gst';
+export { default as YearBars } from './YearBars';
+export type { YearBarProps } from './YearBars';
+export { Receipt, ReceiptRow } from './Receipt';
+export { default as Keypad, Amount, applyKey } from './Keypad';
+export type { Key as KeypadKey } from './Keypad';
+
 export { default as RestTimer, formatClock } from './RestTimer';
 export type { RestTimerProps } from './RestTimer';

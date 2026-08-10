@@ -329,6 +329,292 @@ export function IconLogout(props: IconProps) {
   );
 }
 
+/* ------------------------------------------------------------------ roster
+ * The glyphs screen 04 adds. Same sprite, same family — sort and filter head
+ * the roster's app bar, the rest live on the row menu and the selection bar.
+ * -------------------------------------------------------------------------- */
+
+/** i-sort */
+export function IconSort(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M4 6h16M6.5 12h11M10 18h4" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-filter */
+export function IconFilter(props: IconProps) {
+  const { frame, stroke } = useIcon({ strokeWidth: 2, ...props });
+  return (
+    <Svg {...frame}>
+      <Path d="M3 5h18l-7 8v6l-4 2v-8z" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-useradd */
+export function IconUserAdd(props: IconProps) {
+  const { frame, stroke } = useIcon({ strokeWidth: 1.9, ...props });
+  return (
+    <Svg {...frame}>
+      <Path d="M15 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" {...stroke} />
+      <Circle cx={8.5} cy={7} r={4} {...stroke} />
+      <Path d="M19 8v6M22 11h-6" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-pause */
+export function IconPause(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M9.5 4.5v15M14.5 4.5v15" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-repeat — resuming a paused client. */
+export function IconRepeat(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="m17 2 4 4-4 4" {...stroke} />
+      <Path d="M3 11V9a4 4 0 0 1 4-4h14" {...stroke} />
+      <Path d="m7 22-4-4 4-4" {...stroke} />
+      <Path d="M21 13v2a4 4 0 0 1-4 4H3" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-trash */
+export function IconTrash(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M3.5 6h17M8.5 6V4.2A1.2 1.2 0 0 1 9.7 3h4.6a1.2 1.2 0 0 1 1.2 1.2V6" {...stroke} />
+      <Path d="M18.5 6v13.3a1.7 1.7 0 0 1-1.7 1.7H7.2a1.7 1.7 0 0 1-1.7-1.7V6" {...stroke} />
+      <Path d="M10 11v5.5M14 11v5.5" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-x */
+export function IconX(props: IconProps) {
+  const { frame, stroke } = useIcon({ strokeWidth: 2.1, ...props });
+  return (
+    <Svg {...frame}>
+      <Path d="M18 6 6 18M6 6l12 12" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-dots */
+export function IconDots(props: IconProps) {
+  const { size = 22, color = colors.ink2 } = props;
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Circle cx={12} cy={5} r={1.4} fill={color} />
+      <Circle cx={12} cy={12} r={1.4} fill={color} />
+      <Circle cx={12} cy={19} r={1.4} fill={color} />
+    </Svg>
+  );
+}
+
+/** i-send */
+export function IconSend(props: IconProps) {
+  const { frame, stroke } = useIcon({ strokeWidth: 2, ...props });
+  return (
+    <Svg {...frame}>
+      <Path d="M21.5 2.5 11 13" {...stroke} />
+      <Path d="M21.5 2.5 15 21l-4-8-8-4z" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-inbox — the archive. */
+export function IconInbox(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M21 12h-5l-1.6 2.6H9.6L8 12H3" {...stroke} />
+      <Path d="M5.5 5.2 3 12v6a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-6l-2.5-6.8A2 2 0 0 0 16.6 4H7.4a2 2 0 0 0-1.9 1.2z" {...stroke} />
+    </Svg>
+  );
+}
+
+/* ------------------------------------------------------------------- diary
+ * Screen 05 adds three: jump-to-today, the view switcher, and move.
+ * -------------------------------------------------------------------------- */
+
+/** i-clock2 — jump to today. */
+export function IconClock(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Circle cx={12} cy={12} r={9} {...stroke} />
+      <Path d="M12 7.2V12l3.2 2" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-grid — cycles day / week / month. */
+export function IconGrid(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Rect x={3} y={3} width={7.5} height={7.5} rx={1.6} {...stroke} />
+      <Rect x={13.5} y={3} width={7.5} height={7.5} rx={1.6} {...stroke} />
+      <Rect x={3} y={13.5} width={7.5} height={7.5} rx={1.6} {...stroke} />
+      <Rect x={13.5} y={13.5} width={7.5} height={7.5} rx={1.6} {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-move — reschedule. */
+export function IconMove(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path
+        d="M5 9 2 12l3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"
+        {...stroke}
+      />
+    </Svg>
+  );
+}
+
+/* -------------------------------------------------------------- money · § 06 */
+
+/** i-arrdown — money IN. Down and green, the जमा side of a bahi khata. */
+export function IconArrowDown(props: IconProps) {
+  const { frame, stroke } = useIcon({ strokeWidth: 2.4, ...props });
+  return (
+    <Svg {...frame}>
+      <Path d="M12 5v14M19 12l-7 7-7-7" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-arrup — money OUT. Up and red, the उधार side. */
+export function IconArrowUp(props: IconProps) {
+  const { frame, stroke } = useIcon({ strokeWidth: 2.4, ...props });
+  return (
+    <Svg {...frame}>
+      <Path d="M12 19V5M5 12l7-7 7 7" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-download */
+export function IconDownload(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" {...stroke} />
+      <Path d="m7 10 5 5 5-5M12 15V3" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-share */
+export function IconShare(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" {...stroke} />
+      <Path d="M16 6l-4-4-4 4M12 2v12" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-building — the gym. */
+export function IconBuilding(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M3 21h18M5 21V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v16" {...stroke} />
+      <Path d="M15 9h3a2 2 0 0 1 2 2v10" {...stroke} />
+      <Path d="M9 7h2M9 11h2M9 15h2" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-percent — the cut. */
+export function IconPercent(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M19 5 5 19" {...stroke} />
+      <Circle cx={6.5} cy={6.5} r={2.5} {...stroke} />
+      <Circle cx={17.5} cy={17.5} r={2.5} {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-cash — money in your hand. */
+export function IconCash(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Rect x={2} y={6} width={20} height={12} rx={2.4} {...stroke} />
+      <Circle cx={12} cy={12} r={2.6} {...stroke} />
+      <Path d="M6 10v4M18 10v4" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-qr */
+export function IconQr(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Rect x={3} y={3} width={7} height={7} rx={1.4} {...stroke} />
+      <Rect x={14} y={3} width={7} height={7} rx={1.4} {...stroke} />
+      <Rect x={3} y={14} width={7} height={7} rx={1.4} {...stroke} />
+      <Path d="M14 14h3v3h-3zM20 14h1M14 20h1M20 20h1M17.5 20.5h.01" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-backspace — the keypad's only non-digit. */
+export function IconBackspace(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M21 5H9.4a2 2 0 0 0-1.5.7L3 12l4.9 6.3a2 2 0 0 0 1.5.7H21a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1z" {...stroke} />
+      <Path d="m17 9-5 6M12 9l5 6" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-edit */
+export function IconEdit(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5" {...stroke} />
+      <Path d="M18.4 2.6a2 2 0 0 1 2.9 2.9L12 14.8l-4 1 1-4z" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-copy */
+export function IconCopy(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Rect x={8.5} y={8.5} width={12.5} height={12.5} rx={2} {...stroke} />
+      <Path
+        d="M15.5 5.5V4.6A1.6 1.6 0 0 0 13.9 3H4.6A1.6 1.6 0 0 0 3 4.6v9.3a1.6 1.6 0 0 0 1.6 1.6h.9"
+        {...stroke}
+      />
+    </Svg>
+  );
+}
+
 /* -------------------------------------------------------------------- flags
  * Not part of the outline family above — a flag is a picture, not an icon.
  * It only ever appears inside a country-code segment.

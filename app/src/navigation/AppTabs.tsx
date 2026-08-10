@@ -6,10 +6,9 @@
  * because the word tells nobody anything. The hamburger IS the More, and
  * shipping both would be two doors to the same room.
  *
- * Home is designed. Clients, Diary and Money are stubs on purpose: each is its
- * own screen in the design programme and building them against the old UI now
- * would mean rebuilding them twice. The existing pre-design screens stay
- * reachable from the stub so nothing that worked yesterday stops working.
+ * All four are designed screens now — home, the roster, the diary and the book.
+ * Everything older than the design programme stays reachable from the drawer,
+ * so nothing that worked yesterday stopped working.
  */
 
 import React from 'react';
@@ -18,7 +17,9 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import HomeScreen from '../screens/main/HomeScreen';
-import SoonScreen from '../screens/main/SoonScreen';
+import ClientsScreen from '../screens/main/clients/ClientsScreen';
+import DiaryScreen from '../screens/main/diary/DiaryScreen';
+import MoneyScreen from '../screens/main/money/MoneyScreen';
 import AddSheet, { type AddAction } from '../screens/main/home/AddSheet';
 import AppDrawer, { type DrawerKey } from '../screens/main/home/AppDrawer';
 import { useAuth } from '../store/AuthContext';
@@ -29,6 +30,7 @@ import {
   IconHome,
   IconUsers,
   IconWallet,
+  colors,
   motion,
   type NavTab,
 } from '../design';
@@ -37,10 +39,10 @@ import type { MainStackParamList } from './MainStack';
 
 export type AppTabsParamList = {
   HomeTab: undefined;
-  /** The three stubs share one screen; the param picks which promise it makes. */
-  ClientsTab: { tab: 'clients' };
-  DiaryTab: { tab: 'diary' };
-  MoneyTab: { tab: 'money' };
+  ClientsTab: undefined;
+  DiaryTab: undefined;
+  /** `record` opens the Money screen with the record sheet already up. */
+  MoneyTab: { record?: boolean } | undefined;
 };
 
 const Tab = createBottomTabNavigator<AppTabsParamList>();
@@ -79,9 +81,10 @@ function Tabs() {
         navigation.navigate('AddClient');
         return;
       case 'payment':
-        // Payments hang off a package, which hangs off a client, so the roster
-        // is the honest first step until the Money screen exists.
-        navigation.navigate('Clients');
+        // §06's tap map: "Record a payment is the fourth item, and lands here."
+        // It lands with the sheet already open — the + was pressed with the
+        // intention already formed, and a screen to look at is not the ask.
+        navigation.navigate('Home', { screen: 'MoneyTab', params: { record: true } } as never);
     }
   };
 
@@ -93,12 +96,19 @@ function Tabs() {
       case 'programs':
         navigation.navigate('TemplateList');
         return;
+      case 'hours':
+        navigation.navigate('WorkingHours');
+        return;
       case 'packages':
+        navigation.navigate('MoneyPacks');
+        return;
       case 'payments':
+        navigation.navigate('Home', { screen: 'MoneyTab' } as never);
+        return;
       case 'nudges':
       case 'adherence':
-        // All four are roster-wide views that don't exist yet; every one of
-        // them is per-client today, so the roster is where they start.
+        // Both are roster-wide views that don't exist yet, and both are
+        // per-client today, so the roster is where they start.
         navigation.navigate('Clients');
         return;
       default:
@@ -138,13 +148,18 @@ function Tabs() {
           // enough that nobody waits for it.
           animation: 'fade',
           transitionSpec: { animation: 'timing', config: { duration: motion.fast } },
+          // Both scenes are semi-transparent in the middle of a cross-fade, so
+          // whatever is behind them is briefly visible. It has to be canvas.
+          sceneStyle: { backgroundColor: colors.canvas },
           // Stops a tab that isn't on screen from re-rendering. Home holds a
           // ticking clock and eight database subscriptions; without this it
           // keeps doing that work behind whichever tab you switched to, on the
           // same frames that tab needs.
           freezeOnBlur: true,
         }}
-        tabBar={({ state, navigation: tabNav }) => (
+        tabBar={({ state, navigation: tabNav }) =>
+          // The roster's selection mode puts its own actions here (§ 03).
+          shell.chromeHidden ? null : (
           <NavBar
             tabs={TABS}
             activeKey={state.routes[state.index].name}
@@ -164,12 +179,13 @@ function Tabs() {
             }}
             onAdd={shell.openAdd}
           />
-        )}
+          )
+        }
       >
         <Tab.Screen name="HomeTab" component={HomeScreen} />
-        <Tab.Screen name="ClientsTab" component={SoonScreen} initialParams={{ tab: 'clients' }} />
-        <Tab.Screen name="DiaryTab" component={SoonScreen} initialParams={{ tab: 'diary' }} />
-        <Tab.Screen name="MoneyTab" component={SoonScreen} initialParams={{ tab: 'money' }} />
+        <Tab.Screen name="ClientsTab" component={ClientsScreen} />
+        <Tab.Screen name="DiaryTab" component={DiaryScreen} />
+        <Tab.Screen name="MoneyTab" component={MoneyScreen} />
       </Tab.Navigator>
 
       <AppDrawer

@@ -149,7 +149,15 @@ export async function endSession(sessionId: string, notes?: string): Promise<str
 
     if (notes && !existing) await workout.update((w) => { w.notes = notes; });
 
-    await session.update((s) => { s.status = 'done'; });
+    await session.update((s) => {
+      s.status = 'done';
+      // V10 · §07 — stamp what this took and from where, so the diary's 24-hour
+      // undo can put it back exactly. A session closed here and one closed from
+      // the diary have to be equally reversible.
+      s.packDelta = pack ? -1 : 0;
+      s.packPackageId = pack ? pack.id : (null as unknown as string);
+      s.packAppliedAt = new Date();
+    });
     if (pack) await pack.update((p) => { p.sessionsRemaining = Math.max(0, p.sessionsRemaining - 1); });
 
     return workout.id;

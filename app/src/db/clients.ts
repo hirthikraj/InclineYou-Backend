@@ -127,6 +127,42 @@ export async function saveWeeklySchedule(
   syncDatabase('save-weekly-schedule');
 }
 
+/**
+ * The lifecycle statuses the roster writes, as opposed to the three the edit
+ * form offers. Adding a value here is a code change, not a migration — statuses
+ * are strings by contract precisely so this stays cheap.
+ */
+export type LifecycleStatus = 'active' | 'paused' | 'archived' | 'invited';
+
+/**
+ * Pause, resume, archive.
+ *
+ * The moment of the change is stamped into `metadata` rather than read back off
+ * `updated_at`, because any later edit would move `updated_at` and the roster
+ * would start claiming a client was paused on a day they weren't. Paused is not
+ * archived and the difference is money: paused keeps the pack, archived closes
+ * it, so both need a date a trainer can check.
+ */
+export async function setClientStatus(clientId: string, status: LifecycleStatus) {
+  const client = await clientsCollection.find(clientId);
+  const stamp = new Date().toISOString();
+
+  await database.write(async () => {
+    await client.update((c) => {
+      c.status = status;
+      const current = c.metadata && typeof c.metadata === 'object' ? c.metadata : {};
+      if (status === 'paused') c.metadata = { ...current, pausedAt: stamp };
+      else if (status === 'archived') c.metadata = { ...current, archivedAt: stamp };
+      else if (status === 'invited') c.metadata = { ...current, invitedAt: stamp };
+      else c.metadata = { ...current, resumedAt: stamp };
+    });
+  });
+
+  await refreshPending();
+  syncDatabase('client-status');
+  return client;
+}
+
 export async function updateClient(clientId: string, patch: ClientPatch) {
   const client = await clientsCollection.find(clientId);
 

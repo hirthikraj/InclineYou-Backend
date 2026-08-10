@@ -17,6 +17,16 @@ export interface Shell {
   openAdd: () => void;
   closeAdd: () => void;
   addOpen: boolean;
+  /**
+   * Hides the nav bar so a screen can put a contextual bar in its place.
+   *
+   * Only the roster's selection mode uses this: § 03 turns the bottom bar into
+   * the selection's actions, and sliding a second bar above the tabs instead
+   * would move every row up by 64px at the exact moment the trainer is aiming
+   * at one. The screen owns turning it back off, including on unmount.
+   */
+  chromeHidden: boolean;
+  setChromeHidden: (hidden: boolean) => void;
 }
 
 const ShellContext = createContext<Shell | null>(null);
@@ -24,6 +34,7 @@ const ShellContext = createContext<Shell | null>(null);
 export function ShellProvider({ children }: { children: React.ReactNode }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [chromeHidden, setChromeHidden] = useState(false);
 
   const value = useMemo<Shell>(
     () => ({
@@ -33,8 +44,10 @@ export function ShellProvider({ children }: { children: React.ReactNode }) {
       addOpen,
       openAdd: () => setAddOpen(true),
       closeAdd: () => setAddOpen(false),
+      chromeHidden,
+      setChromeHidden,
     }),
-    [drawerOpen, addOpen],
+    [drawerOpen, addOpen, chromeHidden],
   );
 
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>;

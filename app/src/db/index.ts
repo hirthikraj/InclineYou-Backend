@@ -15,6 +15,10 @@ import SetLog from './models/SetLog';
 import Package from './models/Package';
 import Payment from './models/Payment';
 import NudgeLog from './models/NudgeLog';
+import WorkingHours from './models/WorkingHours';
+import TimeBlock from './models/TimeBlock';
+import Pack from './models/Pack';
+import GymSettlement from './models/GymSettlement';
 
 // Use UUID v4 strings for IDs so they match PostgreSQL UUIDs
 setGenerator(() =>
@@ -51,5 +55,9 @@ export const database = new Database({
     Package,
     Payment,
     NudgeLog,
+    WorkingHours,
+    TimeBlock,
+    Pack,
+    GymSettlement,
   ],
 });

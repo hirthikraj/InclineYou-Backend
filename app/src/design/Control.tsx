@@ -26,7 +26,12 @@ import { colors, radius } from './tokens';
 type FocusEventArg = Parameters<NonNullable<TextInputProps['onFocus']>>[0];
 type BlurEventArg = Parameters<NonNullable<TextInputProps['onBlur']>>[0];
 
-export type ControlSize = 'sm' | 'md' | 'lg';
+/**
+ * `area` is `.tx-control--area`: height auto with a 112px floor, contents
+ * top-aligned. A multi-line message in a fixed-height box either clips or
+ * leaves a hole under itself, and the reminder sheet needs neither.
+ */
+export type ControlSize = 'sm' | 'md' | 'lg' | 'area';
 
 export interface ControlProps extends Omit<TextInputProps, 'style' | 'editable'> {
   size?: ControlSize;
@@ -104,7 +109,7 @@ export default function Control({
           placeholderTextColor={colors.ink3}
           onFocus={handleFocus}
           onBlur={handleBlur}
-          style={styles.input}
+          style={[styles.input, size === 'area' && styles.inputArea]}
           {...input}
         />
       </View>
@@ -153,6 +158,11 @@ const styles = StyleSheet.create({
     fontSize: 16, // 16 is the floor — below it, iOS zooms the page on focus
     fontWeight: '400',
   },
+  /**
+   * Only for `area`. Applying these to every control would top-align the text
+   * in a 52px single-line box on Android, where the default is centred.
+   */
+  inputArea: { alignSelf: 'stretch', lineHeight: 22, textAlignVertical: 'top' },
   seg: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -168,6 +178,7 @@ const sizes = StyleSheet.create({
   sm: { height: 44, paddingHorizontal: 12 },
   md: { height: 52, paddingHorizontal: 14 },
   lg: { height: 60, paddingHorizontal: 16 },
+  area: { minHeight: 112, alignItems: 'flex-start', paddingVertical: 13, paddingHorizontal: 14 },
 });
 
 /** The segment cancels the box's own padding so it can own the left edge. */
@@ -175,4 +186,5 @@ const segMetrics = StyleSheet.create({
   sm: { marginLeft: -12, marginRight: 12, paddingHorizontal: 10 },
   md: { marginLeft: -14, marginRight: 12, paddingHorizontal: 12 },
   lg: { marginLeft: -16, marginRight: 12, paddingHorizontal: 14 },
+  area: { marginLeft: -14, marginRight: 12, paddingHorizontal: 12 },
 });

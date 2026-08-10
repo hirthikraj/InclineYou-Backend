@@ -14,6 +14,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { colors, maxFontScale, radius, space, tnum } from './tokens';
+import type { IconProps } from './icons';
 
 export function Seg({ children, style }: { children: React.ReactNode; style?: StyleProp<ViewStyle> }) {
   return <View style={[styles.seg, style]}>{children}</View>;
@@ -25,10 +26,26 @@ export interface ChipProps {
   count?: number;
   selected?: boolean;
   onPress?: () => void;
+  /** Leads the label — the funnel on the Filter chip. */
+  icon?: React.ComponentType<IconProps>;
+  /**
+   * An accent pip carrying how many filters are applied. Distinct from `count`,
+   * which says how many rows a filter would leave: this one says how much
+   * filtering is switched on, and zero means the chip is at rest.
+   */
+  badge?: number;
   style?: StyleProp<ViewStyle>;
 }
 
-export default function Chip({ label, count, selected = false, onPress, style }: ChipProps) {
+export default function Chip({
+  label,
+  count,
+  selected = false,
+  onPress,
+  icon: Icon,
+  badge,
+  style,
+}: ChipProps) {
   const fg = selected ? colors.accentText : colors.ink2;
 
   return (
@@ -47,6 +64,7 @@ export default function Chip({ label, count, selected = false, onPress, style }:
         style,
       ]}
     >
+      {Icon ? <Icon size={15} color={fg} strokeWidth={2} /> : null}
       <Text style={[styles.label, { color: fg }]} maxFontSizeMultiplier={maxFontScale.control}>
         {label}
       </Text>
@@ -58,6 +76,13 @@ export default function Chip({ label, count, selected = false, onPress, style }:
           {count}
         </Text>
       )}
+      {badge ? (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText} maxFontSizeMultiplier={maxFontScale.micro}>
+            {badge}
+          </Text>
+        </View>
+      ) : null}
     </Pressable>
   );
 }
@@ -89,4 +114,15 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   count: { fontSize: 11, fontWeight: '700', ...tnum },
+
+  badge: {
+    minWidth: 17,
+    height: 17,
+    paddingHorizontal: 5,
+    borderRadius: 9,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeText: { fontSize: 10, fontWeight: '800', color: colors.accentInk, ...tnum },
 });

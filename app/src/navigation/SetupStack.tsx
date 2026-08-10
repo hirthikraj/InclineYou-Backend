@@ -19,6 +19,7 @@ import ExperienceScreen from '../screens/setup/ExperienceScreen';
 import SpecialitiesScreen from '../screens/setup/SpecialitiesScreen';
 import CertificationsScreen from '../screens/setup/CertificationsScreen';
 import LanguagesScreen from '../screens/setup/LanguagesScreen';
+import SetupPacksScreen from '../screens/setup/PacksScreen';
 import PaymentScreen from '../screens/setup/PaymentScreen';
 import DoneScreen from '../screens/setup/DoneScreen';
 
@@ -29,6 +30,7 @@ export type SetupStackParamList = {
   Specialities: undefined;
   Certifications: undefined;
   Languages: undefined;
+  Packs: undefined;
   Payment: undefined;
   Done: undefined;
 };
@@ -40,6 +42,7 @@ export const STEP_ROUTES: Record<SetupStep, keyof SetupStackParamList> = {
   specialities: 'Specialities',
   certifications: 'Certifications',
   languages: 'Languages',
+  packs: 'Packs',
   payment: 'Payment',
 };
 
@@ -55,6 +58,7 @@ export default function SetupStack() {
         <Stack.Screen name="Specialities" component={SpecialitiesScreen} />
         <Stack.Screen name="Certifications" component={CertificationsScreen} />
         <Stack.Screen name="Languages" component={LanguagesScreen} />
+        <Stack.Screen name="Packs" component={SetupPacksScreen} />
         <Stack.Screen name="Payment" component={PaymentScreen} />
         {/* No swiping back out of the success screen into the form. */}
         <Stack.Screen name="Done" component={DoneScreen} options={{ gestureEnabled: false }} />

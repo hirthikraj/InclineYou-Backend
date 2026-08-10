@@ -5,7 +5,7 @@ import { useAuth } from '../store/AuthContext';
 import { useSyncTriggers } from '../db/useSync';
 import { usePushRegistration } from '../push/usePush';
 import { useProfilePush } from '../setup/useProfilePush';
-import { colors } from '../design';
+import { colors, navTheme } from '../design';
 import AuthStack from './AuthStack';
 import SetupStack from './SetupStack';
 import MainStack from './MainStack';
@@ -50,7 +50,7 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer ref={navRef}>
+    <NavigationContainer ref={navRef} theme={navTheme}>
       {!token ? <AuthStack /> : needsSetup ? <SetupStack /> : <MainStack />}
     </NavigationContainer>
   );
