@@ -7,6 +7,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UuidGenerator;
 import org.hibernate.type.SqlTypes;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -59,6 +60,16 @@ public class Trainer {
     /** NULL until the trainer comes out the far side of setup. The authority on whether it is owed. */
     @Column(name = "setup_completed_at")
     private Instant setupCompletedAt;
+
+    /* ------------------------------------------------ the gym arrangement */
+
+    /** NULL means no gym: an independent trainer keeps all of it. See V11__money.sql. */
+    @Column(name = "gym_name", length = 120)
+    private String gymName;
+
+    /** What the GYM keeps, as a percentage of floor sessions. Remote is always 0%. */
+    @Column(name = "gym_share_percent")
+    private BigDecimal gymSharePercent;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")

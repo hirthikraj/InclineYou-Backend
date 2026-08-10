@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -53,7 +54,12 @@ public class TrainerService {
             List<String> certifications,
             List<String> languages,
             boolean setupComplete,
-            Instant setupCompletedAt
+            Instant setupCompletedAt,
+            /* Screen 06 · money. Null gym name means no gym, which is not the
+               same as a 0% cut — one hides the "your share" line entirely, the
+               other claims an arrangement that keeps all of it. */
+            String gymName,
+            BigDecimal gymSharePercent
     ) {}
 
     /**
@@ -69,7 +75,9 @@ public class TrainerService {
             List<String> specialities,
             List<String> certifications,
             List<String> languages,
-            Boolean completeSetup
+            Boolean completeSetup,
+            String gymName,
+            BigDecimal gymSharePercent
     ) {}
 
     public TrainerResponse get(UUID trainerId) {
@@ -92,6 +100,26 @@ public class TrainerService {
         if (req.specialities() != null) t.setSpecialities(clean(req.specialities(), "specialities"));
         if (req.certifications() != null) t.setCertifications(clean(req.certifications(), "certifications"));
         if (req.languages() != null) t.setLanguages(clean(req.languages(), "languages"));
+
+        // An empty gym name is a real instruction — the trainer left the gym —
+        // and it clears the percentage with it, so the app can never show a
+        // share of nothing.
+        if (req.gymName() != null) {
+            if (req.gymName().isBlank()) {
+                t.setGymName(null);
+                t.setGymSharePercent(null);
+            } else {
+                t.setGymName(trim(req.gymName(), 120));
+            }
+        }
+        if (req.gymSharePercent() != null) {
+            var pct = req.gymSharePercent();
+            if (pct.signum() < 0 || pct.compareTo(BigDecimal.valueOf(100)) > 0) {
+                throw new ResponseStatusException(
+                        HttpStatus.BAD_REQUEST, "gymSharePercent: must be between 0 and 100");
+            }
+            t.setGymSharePercent(pct);
+        }
 
         if (Boolean.TRUE.equals(req.completeSetup()) && t.getSetupCompletedAt() == null) {
             t.setSetupCompletedAt(Instant.now());
@@ -137,7 +165,9 @@ public class TrainerService {
                 orEmpty(t.getCertifications()),
                 orEmpty(t.getLanguages()),
                 t.getSetupCompletedAt() != null,
-                t.getSetupCompletedAt()
+                t.getSetupCompletedAt(),
+                t.getGymName(),
+                t.getGymSharePercent()
         );
     }
 
