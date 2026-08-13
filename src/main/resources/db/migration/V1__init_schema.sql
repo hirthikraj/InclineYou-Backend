@@ -1,4 +1,4 @@
--- TrainX initial schema
+-- XRep initial schema
 -- Rules: additive-only going forward; never rename/drop/retype columns.
 -- All PKs are client-generated UUIDs. updated_at drives the sync cursor.
 -- Soft deletes via deleted_at (NULL = alive).

@@ -1,11 +1,11 @@
 spring:
   application:
-    name: trainx-backend
+    name: xrep-backend
 
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/trainxdb}
-    username: ${DATABASE_USERNAME:trainx}
-    password: ${DATABASE_PASSWORD:trainx_dev}
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/xrepdb}
+    username: ${DATABASE_USERNAME:xrep}
+    password: ${DATABASE_PASSWORD:xrep_dev}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -26,7 +26,7 @@ server:
 
 logging:
   level:
-    com.trainx: DEBUG
+    com.xrep: DEBUG
 
 app:
   jwt:

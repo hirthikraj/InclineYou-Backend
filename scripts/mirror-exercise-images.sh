@@ -13,7 +13,7 @@
 #   export AWS_SECRET_ACCESS_KEY=...
 #   # R2 only — omit for AWS S3:
 #   export S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com
-#   ./scripts/mirror-exercise-images.sh trainx-exercise-images
+#   ./scripts/mirror-exercise-images.sh xrep-exercise-images
 #
 # Then point the backend at the bucket's public base URL:
 #   EXERCISE_IMAGE_BASE_URL=https://images.yourdomain.com/exercises

@@ -9,11 +9,11 @@
 		<relativePath/>
 	</parent>
 
-	<groupId>com.trainx</groupId>
-	<artifactId>trainx-backend</artifactId>
+	<groupId>com.xrep</groupId>
+	<artifactId>xrep-backend</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>trainx-backend</name>
-	<description>TrainX Backend API</description>
+	<name>xrep-backend</name>
+	<description>XRep Backend API</description>
 
 	<properties>
 		<java.version>21</java.version>
