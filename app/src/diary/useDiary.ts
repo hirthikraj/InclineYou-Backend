@@ -19,6 +19,7 @@ import { Q } from '@nozbe/watermelondb';
 import { combineLatest, map } from 'rxjs';
 import { database } from '../db';
 import type ClientModel from '../db/models/Client';
+import type BatchModel from '../db/models/Batch';
 import type ScheduledSessionModel from '../db/models/ScheduledSession';
 import type ProgramModel from '../db/models/Program';
 import type WorkoutSessionModel from '../db/models/WorkoutSession';
@@ -26,6 +27,7 @@ import type SetLogModel from '../db/models/SetLog';
 import type PackageModel from '../db/models/Package';
 import type WorkingHoursModel from '../db/models/WorkingHours';
 import type TimeBlockModel from '../db/models/TimeBlock';
+import { liveCache } from '../db/live';
 import { DAY_MS, startOfDay } from '../home/time';
 import type { DiaryInput } from './diary';
 
@@ -43,9 +45,11 @@ const setLogs = database.get<SetLogModel>('set_logs');
 const packages = database.get<PackageModel>('packages');
 const hours = database.get<WorkingHoursModel>('working_hours');
 const blocks = database.get<TimeBlockModel>('time_blocks');
+const batches = database.get<BatchModel>('batches');
 
 const EMPTY: DiaryInput = {
   clients: [],
+  batches: [],
   sessions: [],
   programs: [],
   workouts: [],
@@ -55,9 +59,21 @@ const EMPTY: DiaryInput = {
   packages: [],
 };
 
+/**
+ * The last emission, kept across mounts.
+ *
+ * The session query is windowed on the anchor month, so a swipe into a new
+ * month does tear the subscription down and build another. The cache is what
+ * stops that showing as an empty day for a frame: the previous window's rows
+ * stay on screen until the new ones land, and they overlap almost entirely.
+ */
+const cache = liveCache<DiaryInput>(EMPTY);
+
 export interface Diary {
   input: DiaryInput;
   now: number;
+  /** False only until the first emission of the app's life. */
+  ready: boolean;
 }
 
 /**
@@ -67,7 +83,8 @@ export interface Diary {
  */
 export function useDiary(anchor: number, active: boolean = true): Diary {
   const [now, setNow] = useState(() => Date.now());
-  const [input, setInput] = useState<DiaryInput>(EMPTY);
+  const [input, setInput] = useState<DiaryInput>(cache.value);
+  const [ready, setReady] = useState(cache.ready);
 
   useEffect(() => {
     if (!active) return;
@@ -116,6 +133,7 @@ export function useDiary(anchor: number, active: boolean = true): Diary {
           'cancelled_by',
           'pack_delta',
           'pack_applied_at',
+          'batch_id',
         ]),
       programs.query().observeWithColumns(['name', 'start_date', 'end_date', 'status']),
       workouts.query().observe(),
@@ -123,11 +141,13 @@ export function useDiary(anchor: number, active: boolean = true): Diary {
       packages.query().observeWithColumns(['sessions_remaining', 'sessions_total', 'status']),
       hours.query().observeWithColumns(['weekday', 'start_minute', 'end_minute']),
       blocks.query().observeWithColumns(['starts_at', 'ends_at', 'all_day', 'reason']),
+      batches.query().observeWithColumns(['name', 'capacity', 'min_size']),
     ])
       .pipe(
         map(
-          ([c, s, pr, w, l, pk, h, b]): DiaryInput => ({
+          ([c, s, pr, w, l, pk, h, b, ba]): DiaryInput => ({
             clients: c,
+            batches: ba,
             sessions: s,
             programs: pr,
             workouts: w,
@@ -138,10 +158,14 @@ export function useDiary(anchor: number, active: boolean = true): Diary {
           }),
         ),
       )
-      .subscribe(setInput);
+      .subscribe((next) => {
+        cache.set(next);
+        setInput(next);
+        setReady(true);
+      });
 
     return () => sub.unsubscribe();
   }, [bucket]);
 
-  return useMemo(() => ({ input, now }), [input, now]);
+  return useMemo(() => ({ input, now, ready }), [input, now, ready]);
 }

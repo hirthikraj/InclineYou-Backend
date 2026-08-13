@@ -3,7 +3,7 @@
  *
  * Outline, 22px on a 24px optical box, 1.8px stroke, round caps and joins —
  * one family across both platforms. The path data is lifted straight from the
- * <defs> sprite in `agent/design system/screens/trainxloginotp.html`, so these
+ * <defs> sprite in `agent/design system/screens/xreploginotp.html`, so these
  * are the same glyphs the design file draws.
  */
 
@@ -615,6 +615,105 @@ export function IconCopy(props: IconProps) {
   );
 }
 
+/* ------------------------------------------------------ behind the drawer */
+
+/** i-globe — languages */
+export function IconGlobe(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Circle cx={12} cy={12} r={9} {...stroke} />
+      <Path d="M3 12h18M12 3c2.6 2.6 2.6 15.4 0 18M12 3c-2.6 2.6-2.6 15.4 0 18" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-eye — what a client sees */
+export function IconEye(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z" {...stroke} />
+      <Circle cx={12} cy={12} r={3} {...stroke} />
+    </Svg>
+  );
+}
+
+/**
+ * i-star — a favourite.
+ *
+ * `filled` closes the outline in: the star is a toggle, and a toggle whose only
+ * state cue is a colour change on a 20px glyph is a toggle nobody can read.
+ */
+export function IconStar({ filled = false, ...props }: IconProps & { filled?: boolean }) {
+  const { frame, stroke } = useIcon(props);
+  const d = 'm12 3.2 2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.7l6.1-.9z';
+  return (
+    <Svg {...frame}>
+      <Path d={d} {...stroke} fill={filled ? stroke.stroke : 'none'} />
+    </Svg>
+  );
+}
+
+/** i-ban — a no-show */
+export function IconBan(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Circle cx={12} cy={12} r={9} {...stroke} />
+      <Path d="m5.6 5.6 12.8 12.8" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-flag — report a problem */
+export function IconFlag(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M4 21V4h9l.7 2H20v9h-6.3l-.7-2H4" {...stroke} />
+    </Svg>
+  );
+}
+
+/* -------------------------------------------------- workout log · screen 17 */
+
+/** i-minus — the stepper's other end. */
+export function IconMinus(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M5 12h14" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-swap — two arrows passing. Swap, don't skip. */
+export function IconSwap(props: IconProps) {
+  const { frame, stroke } = useIcon(props);
+  return (
+    <Svg {...frame}>
+      <Path d="M3 8h14M13.5 4.5 17 8l-3.5 3.5" {...stroke} />
+      <Path d="M21 16H7M10.5 12.5 7 16l3.5 3.5" {...stroke} />
+    </Svg>
+  );
+}
+
+/** i-grip — six dots. Only ever on a card that can be dragged. */
+export function IconGrip(props: IconProps) {
+  const { size = 22, color = colors.ink3 } = props;
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      {[6, 12, 18].map((y) => (
+        <React.Fragment key={y}>
+          <Circle cx={9} cy={y} r={1.35} fill={color} />
+          <Circle cx={15} cy={y} r={1.35} fill={color} />
+        </React.Fragment>
+      ))}
+    </Svg>
+  );
+}
+
 /* -------------------------------------------------------------------- flags
  * Not part of the outline family above — a flag is a picture, not an icon.
  * It only ever appears inside a country-code segment.
@@ -629,6 +728,26 @@ export function FlagIN({ width = 18 }: { width?: number }) {
       <Rect y={4.33} width={18} height={4.33} fill="#FFFFFF" />
       <Rect y={8.66} width={18} height={4.34} fill="#138808" />
       <Circle cx={9} cy={6.5} r={1.5} fill="none" stroke="#000080" strokeWidth={0.7} />
+    </Svg>
+  );
+}
+
+/**
+ * i-phone — the one icon the client role adds.
+ *
+ * It marks the single action in the client app that leaves the phone without
+ * drafting anything first: dialling their trainer. Everything else that reaches
+ * him opens a WhatsApp draft and sends nothing silently, which is why this glyph
+ * is never used for messaging.
+ */
+export function IconPhone(props: IconProps) {
+  const { frame, stroke } = useIcon({ strokeWidth: 1.7, ...props });
+  return (
+    <Svg {...frame}>
+      <Path
+        d="M6.2 3.5h3l1.4 3.6-2 1.4a11.4 11.4 0 0 0 5.4 5.4l1.4-2 3.6 1.4v3a2 2 0 0 1-2.2 2A15.6 15.6 0 0 1 4.2 5.7a2 2 0 0 1 2-2.2z"
+        {...stroke}
+      />
     </Svg>
   );
 }

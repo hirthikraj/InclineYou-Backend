@@ -63,7 +63,7 @@ export default function BookScreen() {
   const route = useRoute<RouteProp<MainStackParamList, 'MoneyBook'>>();
   const focused = useIsFocused();
   const { trainerId } = useAuth();
-  const { input, now } = useMoney(focused);
+  const { input, now, ready } = useMoney(focused);
 
   const clientId = route.params.clientId;
 
@@ -82,6 +82,10 @@ export default function BookScreen() {
   const year = useMemo(() => buildYear(input, now, now), [input, now]);
 
   if (!book) {
+    // Two different situations that look identical: the tables have not been
+    // read yet, or this client really is gone. Only the second one gets a
+    // sentence — telling a trainer their client has vanished, for one frame,
+    // every time they open the screen, is a lie the screen tells itself.
     return (
       <SafeAreaView edges={['top']} style={styles.safe}>
         <View style={styles.pad}>
@@ -90,7 +94,9 @@ export default function BookScreen() {
             leading={<IconButton icon={IconBack} label="Back" bare onPress={() => navigation.goBack()} />}
           />
         </View>
-        <Empty icon={IconWallet} title="That client isn't here any more" style={styles.empty} />
+        {ready ? (
+          <Empty icon={IconWallet} title="That client isn't here any more" style={styles.empty} />
+        ) : null}
       </SafeAreaView>
     );
   }

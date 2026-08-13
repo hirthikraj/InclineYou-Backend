@@ -1,7 +1,7 @@
 /**
  * Screen 02 · Trainer setup · Step 6 of 6 · Getting paid.
  *
- * `agent/design system/screens/trainxtrainersetup.html` § 05 — 5a empty,
+ * `agent/design system/screens/xreptrainersetup.html` § 05 — 5a empty,
  * 5b format valid, 5c bad format.
  *
  * We check that a UPI ID LOOKS like a UPI ID. We do not call a payment

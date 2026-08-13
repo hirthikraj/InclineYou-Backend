@@ -150,7 +150,7 @@ export default function SessionListScreen({ route, navigation }: Props) {
 
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => navigation.navigate('ScheduleSession', { clientId })}
+        onPress={() => navigation.navigate('Home', { screen: 'DiaryTab', params: { book: true, clientId } } as never)}
       >
         <Text style={styles.fabIcon}>＋</Text>
       </TouchableOpacity>

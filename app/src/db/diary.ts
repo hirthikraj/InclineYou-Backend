@@ -20,6 +20,7 @@
 import { Q } from '@nozbe/watermelondb';
 import { database } from './index';
 import ScheduledSessionModel from './models/ScheduledSession';
+import BatchModel from './models/Batch';
 import PackageModel from './models/Package';
 import WorkingHoursModel from './models/WorkingHours';
 import TimeBlockModel from './models/TimeBlock';
@@ -48,6 +49,119 @@ export function observeWorkingHours() {
 
 export function observeTimeBlocks() {
   return timeBlocksCollection.query(Q.sortBy('starts_at', Q.asc)).observe();
+}
+
+export const batchesCollection = database.get<BatchModel>('batches');
+
+/* ------------------------------------------------------------------ batches */
+
+/** What a floor holds, and the number below which it isn't worth running. */
+export const BATCH_CAPACITY = 10;
+export const BATCH_MIN = 4;
+
+export function observeBatches() {
+  return batchesCollection.query(Q.sortBy('created_at', Q.desc)).observe();
+}
+
+/**
+ * Turns a slot into a batch.
+ *
+ * The batch record is created first and every attendee's existing session is
+ * stamped with it — nothing is re-booked, nothing loses its pack history, and a
+ * session that was already marked done stays done. A batch is a grouping, not a
+ * new kind of booking.
+ */
+export async function createBatch(
+  trainerId: string,
+  name: string,
+  sessionIds: string[],
+  capacity: number = BATCH_CAPACITY,
+  minSize: number = BATCH_MIN,
+): Promise<string> {
+  const sessions = await Promise.all(sessionIds.map((id) => scheduledSessionsCollection.find(id)));
+
+  const batch = await database.write(async () => {
+    const created = await batchesCollection.create((b) => {
+      b.trainerId = trainerId;
+      b.name = name.trim() || 'Batch';
+      b.capacity = capacity;
+      b.minSize = minSize;
+    });
+    await database.batch(
+      ...sessions.map((session) =>
+        session.prepareUpdate((s) => {
+          s.batchId = created.id;
+        }),
+      ),
+    );
+    return created;
+  });
+
+  await refreshPending();
+  syncDatabase('create-batch');
+  return batch.id;
+}
+
+/** Books somebody into an existing batch, at the batch's own slot. */
+export async function addToBatch(
+  batchId: string,
+  base: Omit<BookInput, 'seriesId'>,
+): Promise<ScheduledSessionModel> {
+  const created = await database.write(async () =>
+    scheduledSessionsCollection.create((s) => {
+      s.trainerId = base.trainerId;
+      s.clientId = base.clientId;
+      s.scheduledAt = new Date(base.at);
+      s.durationMinutes = base.durationMinutes;
+      s.status = 'scheduled';
+      if (base.programId) s.programId = base.programId;
+      if (base.mode) s.deliveryMode = base.mode;
+      s.batchId = batchId;
+    }),
+  );
+
+  await refreshPending();
+  syncDatabase('add-to-batch');
+  return created;
+}
+
+/**
+ * Marks every attendee of a batch done.
+ *
+ * One tap, and one pack deduction **per person** — stamped individually, so each
+ * stays undoable on its own for 24 hours. A batch is eight sessions that share a
+ * room, and the moment this pretends otherwise the undo stops being exact.
+ *
+ * Attendees already closed off are skipped rather than charged twice, which is
+ * what makes this safe to tap again after adding somebody late.
+ */
+export async function markBatchDone(sessionIds: string[]): Promise<number> {
+  const sessions = (
+    await Promise.all(sessionIds.map((id) => scheduledSessionsCollection.find(id).catch(() => null)))
+  ).filter((s): s is ScheduledSessionModel => s !== null && s.status === 'scheduled');
+
+  let charged = 0;
+  for (const session of sessions) {
+    const pack = await chargeablePack(session.clientId);
+    await database.write(async () => {
+      if (pack) {
+        await pack.update((p) => {
+          p.sessionsRemaining = Math.max(0, (p.sessionsRemaining ?? 0) - 1);
+        });
+      }
+      await session.update((s) => {
+        s.status = 'done';
+        s.packDelta = pack ? -1 : 0;
+        s.packPackageId = pack ? pack.id : (null as unknown as string);
+        s.packAppliedAt = new Date();
+      });
+    });
+    if (pack) charged += 1;
+  }
+
+  await refreshPending();
+  syncDatabase('batch-done');
+  return charged;
 }
 
 /* ------------------------------------------------------------------ booking */
@@ -135,8 +249,18 @@ export async function bookSeries(
 /** Moving never touches the pack. The client gets the message; the count doesn't move. */
 export async function moveSession(sessionId: string, at: number): Promise<void> {
   const session = await scheduledSessionsCollection.find(sessionId);
+  const was = session.scheduledAt;
   await database.write(async () => {
     await session.update((s) => {
+      // What it WAS, kept for the client's side of this (FR-11 · 4b): their
+      // notice shows the old time struck through, because a client shown only
+      // the new time cannot tell what changed and will ask — which is the
+      // WhatsApp exchange the notice exists to replace. The FIRST move is the
+      // one that gets remembered; moving twice before they confirm still shows
+      // them the time they had in their head.
+      if (!s.movedFromAt && was) s.movedFromAt = was;
+      // And the answer they gave is about the old time, so it goes.
+      s.clientConfirmedAt = null;
       s.scheduledAt = new Date(at);
       // A moved session is live again, whatever it was before.
       if (s.status === 'cancelled') s.status = 'scheduled';

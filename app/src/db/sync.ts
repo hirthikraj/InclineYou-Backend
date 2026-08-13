@@ -2,6 +2,7 @@ import { synchronize, hasUnsyncedChanges } from '@nozbe/watermelondb/sync';
 import fetchLocalChanges from '@nozbe/watermelondb/sync/impl/fetchLocal';
 import { database } from './index';
 import { api } from '../api/client';
+import { resetLiveCaches } from './live';
 
 export type SyncPhase = 'idle' | 'syncing' | 'error';
 
@@ -89,9 +90,52 @@ async function countPending(): Promise<number> {
   }
 }
 
+/* ------------------------------------------------------- FR-11 · which half */
+
+/**
+ * Whose slice of the database this phone is syncing.
+ *
+ * Null is the trainer's whole workspace — `/v1/sync`. A client id is one
+ * client's slice of the same tables — `/v1/client/sync`, which is a different
+ * endpoint because it answers to a different token and refuses to hand over
+ * anybody else's rows.
+ *
+ * Set by `AuthContext` before the first trigger fires, and re-set on a lens
+ * switch. It is module state rather than a parameter because the sync triggers
+ * — foreground, reconnect, a write — all fire from places that have no business
+ * knowing which lens is open.
+ */
+export interface SyncScope {
+  clientId: string | null;
+}
+
+let scope: SyncScope | null = null;
+
+export function setSyncScope(next: SyncScope | null) {
+  scope = next;
+}
+
 // One sync at a time. Foreground + reconnect can fire together, and two
 // concurrent synchronize() calls on the same database throw.
 let inFlight: Promise<void> | null = null;
+
+const clientScope = () => (scope?.clientId ? scope.clientId : null);
+
+function pullPath(): string {
+  const cid = clientScope();
+  return cid ? `/v1/client/sync/pull?clientId=${cid}` : '/v1/sync/pull';
+}
+
+function pushPath(): string {
+  const cid = clientScope();
+  return cid ? `/v1/client/sync/push?clientId=${cid}` : '/v1/sync/push';
+}
+
+/** `?` or `&` depending on whether the path already carries a client id. */
+function cursor(lastPulledAt: number | null | undefined): string {
+  if (!lastPulledAt) return '';
+  return `${clientScope() ? '&' : '?'}lastPulledAt=${lastPulledAt}`;
+}
 
 export function syncDatabase(reason: string = 'manual'): Promise<void> {
   if (inFlight) return inFlight;
@@ -101,12 +145,11 @@ export function syncDatabase(reason: string = 'manual'): Promise<void> {
   inFlight = synchronize({
     database,
     pullChanges: async ({ lastPulledAt }) => {
-      const params = lastPulledAt ? `?lastPulledAt=${lastPulledAt}` : '';
-      const { data } = await api.get(`/v1/sync/pull${params}`);
+      const { data } = await api.get(`${pullPath()}${cursor(lastPulledAt)}`);
       return { changes: data.changes, timestamp: data.timestamp };
     },
     pushChanges: async ({ changes, lastPulledAt }) => {
-      await api.post('/v1/sync/push', { changes, lastPulledAt });
+      await api.post(pushPath(), { changes, lastPulledAt });
     },
     migrationsEnabledAtVersion: 1,
     /**
@@ -148,6 +191,10 @@ export async function resetLocalDatabase() {
   await database.write(async () => {
     await database.unsafeResetDatabase();
   });
+  // The screens hold the last emission outside React for a warm start. Wiping
+  // the tables is not enough — those caches would hand the next trainer the
+  // previous one's roster for a frame.
+  resetLiveCaches();
   state = { phase: 'idle', lastSyncedAt: null, hasPending: false, pendingCount: 0, error: null };
   listeners.forEach((l) => l());
 }

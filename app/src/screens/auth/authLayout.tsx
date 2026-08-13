@@ -2,7 +2,7 @@
  * Sign-in screen composition — layout only.
  *
  * These are the `.auth*`, `.trust`, `.wa` and `.legal` rules from
- * `agent/design system/screens/trainxloginotp.html`. They say where things sit;
+ * `agent/design system/screens/xreploginotp.html`. They say where things sit;
  * how they look still comes from the design system. Phone entry, OTP verify and
  * role resolution all share this shell, so all three stay in register.
  */

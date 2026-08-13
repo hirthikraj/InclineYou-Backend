@@ -11,11 +11,16 @@
  */
 
 import * as SecureStore from 'expo-secure-store';
-import { getTrainer, updateTrainer, type TrainerUpdate } from '../api/trainer';
+import {
+  getTrainer,
+  updateTrainer,
+  type TrainerProfile,
+  type TrainerUpdate,
+} from '../api/trainer';
 import { EMPTY_DRAFT, loadDraft, saveDraft, type SetupDraft } from './draft';
 
 /** Set when a push failed and the server is still behind the phone. */
-const PENDING_KEY = 'trainx_profile_pending';
+const PENDING_KEY = 'xrep_profile_pending';
 
 /**
  * The whole profile in one PATCH.
@@ -71,23 +76,69 @@ export async function clearPendingProfile(): Promise<void> {
 }
 
 /**
+ * Folds the server's copy of the profile back into the local draft.
+ *
+ * The completion meter on the deck reads the draft. But **certifications are
+ * edited on 2a and the UPI ID on 5b**, and both of those PATCH
+ * `/v1/trainers/me` without touching SecureStore — so adding the two things the
+ * meter asks for used to leave the meter exactly where it was. A checklist that
+ * doesn't tick when you do the thing reads as the app ignoring the answer.
+ *
+ * Named fields rather than a spread, because the draft carries two things the
+ * server has no opinion about — `packCount` and `skipped` — and they have to
+ * survive this.
+ *
+ * Returns the merged draft when something actually changed, so a caller can
+ * update its own state without a second read, and null when it didn't.
+ */
+export async function mergeProfileIntoDraft(
+  profile: TrainerProfile,
+): Promise<SetupDraft | null> {
+  // The phone is ahead of the server in this state, and writing the server's
+  // stale copy over the draft would delete answers that haven't gone up yet.
+  if (await hasPendingProfile()) return null;
+
+  const local = await loadDraft();
+  const next: SetupDraft = {
+    ...local,
+    // Same guard as `hydrateProfile`: the server's placeholder name is the
+    // phone number, and a 10-digit "name" must not end up on invites.
+    name: profile.name === profile.phone ? local.name : profile.name,
+    experience: profile.experienceBand ?? null,
+    specialities: profile.specialities ?? [],
+    certifications: profile.certifications ?? [],
+    languages: profile.languages ?? [],
+    upiId: profile.upiVpa ?? '',
+  };
+
+  // Both of these screens re-read on focus, so without this the draft would be
+  // rewritten to SecureStore every time the trainer looks at their profile.
+  if (JSON.stringify(local) === JSON.stringify(next)) return null;
+
+  await saveDraft(next);
+  return next;
+}
+
+/**
  * Seeds the local draft from the server for a phone that has no copy — a
  * reinstall, or a second device. Without this, a trainer who finished setup
  * last month lands on a deck that doesn't know their name and a completion
  * meter reading 0%.
  *
- * Pull only, and only into a genuinely empty draft: anything already on this
- * phone is either newer than the server or waiting to be pushed to it, and
- * overwriting that would throw away the answers the trainer just gave.
+ * Pull only, and never over a draft with a push owed: that draft is newer than
+ * the server, and overwriting it would throw away the answers the trainer just
+ * gave. Where a draft already exists this reconciles it instead of replacing it,
+ * so a profile edited on another phone — or on a screen that writes straight to
+ * `/v1/trainers/me` — reaches the completion meter without being asked twice.
  */
 export async function hydrateProfile(): Promise<boolean> {
   if (await hasPendingProfile()) return false;
 
   const local = await loadDraft();
-  if (local.name.trim().length > 0) return false;
 
   try {
     const { data } = await getTrainer();
+    if (local.name.trim().length > 0) return (await mergeProfileIntoDraft(data)) !== null;
     if (!data.setupComplete) return false;
     await saveDraft({
       ...EMPTY_DRAFT,

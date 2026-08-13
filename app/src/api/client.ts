@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-export const TOKEN_KEY = 'trainx_jwt';
+export const TOKEN_KEY = 'xrep_jwt';
 
 // Set per environment via .env / EAS build profile. Falls back to the Android
 // emulator's alias for the host machine so a fresh clone works with no config.
@@ -16,8 +16,10 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use(async (config) => {
+  // An explicit header wins. Sign-in's 7a path carries a pending token that is
+  // deliberately not in the keychain yet, and the stored one must not shadow it.
   const token = await SecureStore.getItemAsync(TOKEN_KEY);
-  if (token) {
+  if (token && !config.headers.Authorization) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;

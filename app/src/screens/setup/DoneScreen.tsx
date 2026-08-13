@@ -1,7 +1,7 @@
 /**
  * Screen 02 · Trainer setup · After setup.
  *
- * `agent/design system/screens/trainxtrainersetup.html` § 06 · 6a.
+ * `agent/design system/screens/xreptrainersetup.html` § 06 · 6a.
  *
  * No confetti. Finishing a form is not an achievement — the celebration is
  * saved for the first booking and the first payout, where the trainer has

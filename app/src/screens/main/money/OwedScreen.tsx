@@ -51,7 +51,7 @@ export default function OwedScreen() {
   const navigation = useNavigation<Nav>();
   const focused = useIsFocused();
   const { trainerId } = useAuth();
-  const { input, now } = useMoney(focused);
+  const { input, now, ready } = useMoney(focused);
 
   const [remind, setRemind] = useState<ChaseRow | null>(null);
   const [upi, setUpi] = useState<ChaseRow | null>(null);
@@ -106,7 +106,7 @@ export default function OwedScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>
-        {rows.length === 0 ? (
+        {rows.length === 0 && ready ? (
           <Empty
             icon={IconWallet}
             title="Hisaab clear"

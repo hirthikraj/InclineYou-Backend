@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "TrainX",
-    "slug": "trainx",
+    "name": "XRep",
+    "slug": "xrep",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -12,7 +12,7 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.traindesk.trainx"
+      "bundleIdentifier": "com.xrep.app"
     },
     "android": {
       "adaptiveIcon": {
@@ -22,7 +22,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.traindesk.trainx"
+      "package": "com.xrep.app"
     },
     "web": {
       "favicon": "./assets/favicon.png"

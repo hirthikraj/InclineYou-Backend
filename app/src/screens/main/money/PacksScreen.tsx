@@ -51,7 +51,7 @@ export default function PacksScreen() {
   const navigation = useNavigation<Nav>();
   const focused = useIsFocused();
   const { trainerId } = useAuth();
-  const { input, now } = useMoney(focused);
+  const { input, now, ready } = useMoney(focused);
 
   const [editing, setEditing] = useState<PackDraft | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -131,7 +131,7 @@ export default function PacksScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>
-        {view.selling.length === 0 ? (
+        {view.selling.length === 0 && ready ? (
           <Empty
             icon={IconWallet}
             title="No price list yet"

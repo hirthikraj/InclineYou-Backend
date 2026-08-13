@@ -1,7 +1,7 @@
 /**
  * Screen 06 · Money · FR-6.
  *
- * `agent/design system/screens/trainxmoney.html`.
+ * `agent/design system/screens/xrepmoney.html`.
  *
  * Nine platforms were torn down and every coaching one builds this screen as a
  * payment processor — a Stripe balance, payouts, failed charges. Train X can't
@@ -65,6 +65,7 @@ import {
   LedgerRow,
   List,
   Months,
+  Reveal,
   Row,
   Segmented,
   ShareRow,
@@ -75,6 +76,7 @@ import {
   colors,
   space,
 } from '../../../design';
+import MoneySkeleton from './MoneySkeleton';
 import RecordSheet, { type RecordResult } from './RecordSheet';
 import ReceiptSheet, { type ReceiptDetails } from './ReceiptSheet';
 import RemindSheet from './RemindSheet';
@@ -98,7 +100,7 @@ export default function MoneyScreen() {
   const { trainerId } = useAuth();
   const network = useNetworkState();
   const { pendingCount } = useSyncState();
-  const { input, now } = useMoney(focused);
+  const { input, now, ready } = useMoney(focused);
 
   const [anchor, setAnchor] = useState(() => startOfMonthAt(Date.now()));
   const [view, setView] = useState<View2>('month');
@@ -134,7 +136,9 @@ export default function MoneyScreen() {
   const year = useMemo(() => buildYear(input, anchor, now), [input, anchor, now]);
 
   const thisMonth = startOfMonthAt(now);
-  const nothingEver = months.every((m) => m.billed === 0);
+  // "No money in the book yet" replaces the whole screen, so it is the most
+  // expensive thing here to get wrong for a frame.
+  const nothingEver = ready && months.every((m) => m.billed === 0);
 
   /* ------------------------------------------------------------- tab press */
 
@@ -482,8 +486,13 @@ export default function MoneyScreen() {
       </View>
 
       <ScrollView ref={scroller} contentContainerStyle={styles.body}>
-        {header}
-        <View style={styles.viewBody}>{view === 'year' ? yearBody() : monthBody()}</View>
+        {/* The month strip and the switcher are built from the same unread
+            tables, so on a cold read the skeleton replaces the whole body
+            rather than sitting under a strip of empty chips. */}
+        <Reveal ready={ready} skeleton={<MoneySkeleton share={input.gym.name !== null} />}>
+          {header}
+          <View style={styles.viewBody}>{view === 'year' ? yearBody() : monthBody()}</View>
+        </Reveal>
       </ScrollView>
 
       <RecordSheet

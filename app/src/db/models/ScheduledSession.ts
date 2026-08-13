@@ -22,6 +22,12 @@ export default class ScheduledSession extends Model {
   @field('pack_delta') packDelta!: number;
   @text('pack_package_id') packPackageId!: string;
   @date('pack_applied_at') packAppliedAt!: Date;
+  /** V14 — what the time was before the trainer moved it. Null if never moved. */
+  @date('moved_from_at') movedFromAt!: Date | null;
+  /** V14 — the client's one-tap confirm on a move. Not a fifth status. */
+  @date('client_confirmed_at') clientConfirmedAt!: Date | null;
+  /** V15 — the batch this attendee belongs to. Null for a one-to-one session. */
+  @text('batch_id') batchId!: string;
   @readonly @date('created_at') createdAt!: Date;
   @date('updated_at') updatedAt!: Date;
 }

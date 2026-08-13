@@ -25,6 +25,7 @@ import type PackModel from '../db/models/Pack';
 import type GymSettlementModel from '../db/models/GymSettlement';
 import type ScheduledSessionModel from '../db/models/ScheduledSession';
 import type NudgeLogModel from '../db/models/NudgeLog';
+import { liveCache } from '../db/live';
 import { getTrainer } from '../api/trainer';
 import { EMPTY_GYM, type GymProfile, type MoneyInput } from './money';
 
@@ -49,9 +50,22 @@ const EMPTY: Omit<MoneyInput, 'gym'> = {
   nudges: [],
 };
 
+/** The last emission, so a re-mount paints a real book on its first frame. */
+const cache = liveCache<Omit<MoneyInput, 'gym'>>(EMPTY);
+/** The gym profile too — it comes off the network, so it is the slowest of all. */
+const gymCache = liveCache<GymProfile>(EMPTY_GYM);
+
 export interface Money {
   input: MoneyInput;
   now: number;
+  /**
+   * False only until the first emission of the app's life.
+   *
+   * The book's empty states are strong claims — "no money in the book yet",
+   * "hisaab clear", "that client isn't here any more" — and none of them may
+   * be shown before the tables have actually been read.
+   */
+  ready: boolean;
   /** Null until the profile has been read once. Distinct from "no gym". */
   profileLoaded: boolean;
   reloadProfile: () => void;
@@ -62,9 +76,10 @@ export interface Money {
  */
 export function useMoney(active: boolean = true): Money {
   const [now, setNow] = useState(() => Date.now());
-  const [rows, setRows] = useState(EMPTY);
-  const [gym, setGym] = useState<GymProfile>(EMPTY_GYM);
-  const [profileLoaded, setProfileLoaded] = useState(false);
+  const [rows, setRows] = useState(cache.value);
+  const [ready, setReady] = useState(cache.ready);
+  const [gym, setGym] = useState<GymProfile>(gymCache.value);
+  const [profileLoaded, setProfileLoaded] = useState(gymCache.ready);
   const [profileNonce, setProfileNonce] = useState(0);
 
   useEffect(() => {
@@ -141,7 +156,11 @@ export function useMoney(active: boolean = true): Money {
           nudges: nu,
         })),
       )
-      .subscribe(setRows);
+      .subscribe((next) => {
+        cache.set(next);
+        setRows(next);
+        setReady(true);
+      });
 
     return () => sub.unsubscribe();
   }, []);
@@ -152,12 +171,14 @@ export function useMoney(active: boolean = true): Money {
     getTrainer()
       .then(({ data }) => {
         if (!alive) return;
-        setGym({
+        const next: GymProfile = {
           name: data.gymName ?? null,
           percent: data.gymSharePercent ?? null,
           upiVpa: data.upiVpa ?? null,
           trainerName: data.name ?? '',
-        });
+        };
+        gymCache.set(next);
+        setGym(next);
         setProfileLoaded(true);
       })
       .catch(() => {
@@ -175,7 +196,7 @@ export function useMoney(active: boolean = true): Money {
 
   const input = useMemo<MoneyInput>(() => ({ ...rows, gym }), [rows, gym]);
   return useMemo(
-    () => ({ input, now, profileLoaded, reloadProfile }),
-    [input, now, profileLoaded, reloadProfile],
+    () => ({ input, now, ready, profileLoaded, reloadProfile }),
+    [input, now, ready, profileLoaded, reloadProfile],
   );
 }

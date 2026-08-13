@@ -10,7 +10,7 @@
 <marker id="a-sy-s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B26A00"/></marker>
 </defs>
 <rect width="1900" height="1600" fill="#FFFFFF"/>
-<text x="40" y="52" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#15162B" text-anchor="start">TrainDesk MVP — trainer &amp; client flow</text>
+<text x="40" y="52" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="25" font-weight="700" fill="#15162B" text-anchor="start">XRep MVP — trainer &amp; client flow</text>
 <text x="40" y="76" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#767D96" text-anchor="start">Every screen in the MVP, both roles, and the paths that connect them. FR tags map to the Final Requirements &amp; Delivery Plan v2.0.</text>
 <rect x="60" y="110" width="140" height="54" rx="5" fill="#FFFFFF" stroke="#C3CADB" stroke-width="1.3"/>
 <text x="74" y="134" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#15162B" text-anchor="start">Launch</text>
@@ -277,5 +277,5 @@
 <rect x="1560" y="1465" width="22" height="22" rx="4" fill="#DFF1F2" stroke="#0E6E78" stroke-width="1.3"/>
 <text x="1592" y="1480" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#434860" text-anchor="start">client role</text>
 <text x="40" y="1522" font-family="'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#767D96" text-anchor="start">16 of 31 screens exist in code today; the rest are greenfield. See the screen inventory for which is which.</text>
-<text x="1860" y="1522" font-family="'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#767D96" text-anchor="end">TrainDesk · MVP interaction map · 9 Aug 2026</text>
+<text x="1860" y="1522" font-family="'DejaVu Sans Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#767D96" text-anchor="end">XRep · MVP interaction map · 9 Aug 2026</text>
 </svg>

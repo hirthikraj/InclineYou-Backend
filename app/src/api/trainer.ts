@@ -29,6 +29,14 @@ export interface TrainerProfile {
   gymName?: string | null;
   /** What the GYM keeps, on floor sessions. Remote is always 0%. */
   gymSharePercent?: number | null;
+  /**
+   * Screens 07–16 · settings. Flat keys under `trainer.metadata.prefs`.
+   *
+   * Untyped here on purpose: the phone is the source of truth for these and
+   * `settings/prefs.ts` owns the shape. This is the server's copy, read once on
+   * a fresh install, and it may contain keys a newer build wrote.
+   */
+  preferences?: Record<string, unknown>;
 }
 
 /**
@@ -48,6 +56,11 @@ export interface TrainerUpdate {
   /** An empty string means "left the gym" — it clears the percentage too. */
   gymName?: string;
   gymSharePercent?: number;
+  /**
+   * Merged key by key, not replaced — one switch at a time must not blank the
+   * other eight. A key set to null is a deletion.
+   */
+  preferences?: Record<string, unknown>;
 }
 
 export function getTrainer() {

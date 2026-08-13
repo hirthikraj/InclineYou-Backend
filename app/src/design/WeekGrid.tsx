@@ -13,7 +13,7 @@ import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { colors, maxFontScale, radius, tnum } from './tokens';
 
-export type PipKind = 'floor' | 'remote';
+export type PipKind = 'floor' | 'remote' | 'batch';
 
 export interface WeekPipProps {
   id: string;
@@ -80,7 +80,7 @@ export default function WeekGrid({
                   accessibilityLabel={`${pip.time} ${pip.name}`}
                   style={[
                     styles.pip,
-                    { borderLeftColor: pip.kind === 'remote' ? colors.remote : colors.accent },
+                    { borderLeftColor: PIP_INK[pip.kind] ?? colors.accent },
                     pip.done && styles.pipDone,
                   ]}
                 >
@@ -117,6 +117,13 @@ export function Legend({ items }: { items: { color: string; label: string }[] })
     </View>
   );
 }
+
+/** A batch is a third thing on the week, not a floor session with more people. */
+const PIP_INK: Record<PipKind, string> = {
+  floor: colors.accent,
+  remote: colors.remote,
+  batch: colors.warn,
+};
 
 const styles = StyleSheet.create({
   grid: { paddingBottom: 4 },

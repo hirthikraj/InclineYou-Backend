@@ -17,9 +17,32 @@ import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } fro
 import { Bar, Legend } from './Bar';
 import { colors, radius, space, tnum } from './tokens';
 
+/**
+ * Which of the three tones a figure carries. `plain` is the default for
+ * anything that is neither money in nor money out — a session count, a date.
+ */
+export type FigureTone = 'ok' | 'warn' | 'plain';
+
 export interface FiguresProps {
   collected: string;
   owed: string;
+  /**
+   * The captions, when this pair is not the month's money.
+   *
+   * § 09 requires the client file's owed pair to be the same component with the
+   * same numbers as the top of his book, so the pair is reused rather than
+   * redrawn — and a reused pair needs to be able to say "He owes" and "Sessions
+   * left" instead of "Collected" and "Still owed".
+   */
+  labels?: [string, string];
+  /** Per-figure colour. Defaults to the money reading: in is ok, out is amber. */
+  tones?: [FigureTone, FigureTone];
+  /** A trailing run in quiet ink on the right-hand figure — "/16". */
+  owedSuffix?: string;
+  /** Replaces the "% in / % out" legend under the bar. */
+  legend?: [string, string];
+  /** Omits the bar entirely, for a pair whose two halves aren't one whole. */
+  bar?: boolean;
   /** 0–1. The remainder of the track stays empty rather than being filled. */
   collectedPart: number;
   owedPart: number;
@@ -33,6 +56,11 @@ export interface FiguresProps {
 export default function Figures({
   collected,
   owed,
+  labels = ['Collected', 'Still owed'],
+  tones,
+  owedSuffix,
+  legend,
+  bar = true,
   collectedPart,
   owedPart,
   writtenOffPart = 0,
@@ -41,6 +69,9 @@ export default function Figures({
   style,
 }: FiguresProps) {
   const clear = owedPart <= 0;
+  // Zero owed is not a warning. Amber on ₹0 would be an alarm about nothing,
+  // which is how a screen teaches people to ignore amber.
+  const [leftTone, rightTone] = tones ?? ['ok', clear ? 'plain' : 'warn'];
 
   const segments = [
     { key: 'in', fraction: collectedPart, color: colors.ok },
@@ -57,39 +88,48 @@ export default function Figures({
           onPress={onCollected}
           disabled={!onCollected}
           accessibilityRole={onCollected ? 'button' : undefined}
-          accessibilityLabel={`Collected ${collected}`}
+          accessibilityLabel={`${labels[0]} ${collected}`}
           style={({ pressed }) => [styles.fig, pressed && styles.pressed]}
         >
-          <Text style={styles.label}>Collected</Text>
-          <Text style={[styles.value, styles.valueOk]}>{collected}</Text>
+          <Text style={styles.label}>{labels[0]}</Text>
+          <Text style={[styles.value, toneStyle(leftTone)]}>{collected}</Text>
         </Pressable>
 
         <Pressable
           onPress={onOwed}
           disabled={!onOwed}
           accessibilityRole={onOwed ? 'button' : undefined}
-          accessibilityLabel={`Still owed ${owed}`}
+          accessibilityLabel={`${labels[1]} ${owed}`}
           style={({ pressed }) => [styles.fig, styles.figRight, pressed && styles.pressed]}
         >
-          <Text style={[styles.label, styles.labelRight]}>Still owed</Text>
-          {/* Zero owed is not a warning. Amber on ₹0 would be an alarm about
-              nothing, which is how a screen teaches people to ignore amber. */}
-          <Text style={[styles.value, styles.valueSmall, !clear && styles.valueWarn]}>{owed}</Text>
+          <Text style={[styles.label, styles.labelRight]}>{labels[1]}</Text>
+          <Text style={[styles.value, styles.valueSmall, toneStyle(rightTone)]}>
+            {owed}
+            {owedSuffix ? <Text style={styles.suffix}>{owedSuffix}</Text> : null}
+          </Text>
         </Pressable>
       </View>
 
-      <Bar segments={segments} style={styles.bar} />
-      <Legend
-        entries={[
-          { key: 'in', label: `${pct(collectedPart)}% in`, color: colors.ok },
-          { key: 'out', label: `${pct(owedPart)}% out`, color: colors.warn },
-          ...(writtenOffPart > 0
-            ? [{ key: 'off', label: `${pct(writtenOffPart)}% written off`, color: colors.lineStrong }]
-            : []),
-        ]}
-      />
+      {bar ? <Bar segments={segments} style={styles.bar} /> : null}
+      {bar ? (
+        <Legend
+          entries={[
+            { key: 'in', label: legend ? legend[0] : `${pct(collectedPart)}% in`, color: colors.ok },
+            { key: 'out', label: legend ? legend[1] : `${pct(owedPart)}% out`, color: colors.warn },
+            ...(writtenOffPart > 0
+              ? [{ key: 'off', label: `${pct(writtenOffPart)}% written off`, color: colors.lineStrong }]
+              : []),
+          ]}
+        />
+      ) : null}
     </View>
   );
+}
+
+function toneStyle(tone: FigureTone) {
+  if (tone === 'ok') return styles.valueOk;
+  if (tone === 'warn') return styles.valueWarn;
+  return null;
 }
 
 /** Rounded for display only — the bar itself uses the exact fraction. */
@@ -122,5 +162,6 @@ const styles = StyleSheet.create({
   valueSmall: { fontSize: 23, letterSpacing: -0.8 },
   valueOk: { color: colors.ok },
   valueWarn: { color: colors.warn },
+  suffix: { fontSize: 15, fontWeight: '700', color: colors.ink3, letterSpacing: 0 },
   bar: { marginTop: space.s4 },
 });

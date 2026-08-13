@@ -16,7 +16,24 @@ import { IconCheck } from './icons';
 const SIZE = 88;
 const POP_MS = 420;
 
-export default function DoneMark({ style }: { style?: StyleProp<ViewStyle> }) {
+/**
+ * `accent` is the app's own success; `pr` is a personal record and nothing else.
+ *
+ * Gold displaces the accent for the length of a record moment — rule 7 of the
+ * system reserves `--tx-pr` for exactly one meaning, so a gold mark anywhere
+ * else would spend it.
+ */
+export type DoneTone = 'accent' | 'pr';
+
+export default function DoneMark({
+  tone = 'accent',
+  label = 'Setup complete',
+  style,
+}: {
+  tone?: DoneTone;
+  label?: string;
+  style?: StyleProp<ViewStyle>;
+}) {
   const scale = useRef(new Animated.Value(0.8)).current;
   const opacity = useRef(new Animated.Value(0)).current;
 
@@ -42,10 +59,21 @@ export default function DoneMark({ style }: { style?: StyleProp<ViewStyle> }) {
   return (
     <Animated.View
       accessibilityRole="image"
-      accessibilityLabel="Setup complete"
-      style={[styles.mark, { opacity, transform: [{ scale }] }, style]}
+      accessibilityLabel={label}
+      style={[
+        styles.mark,
+        tone === 'pr' && styles.markPr,
+        { opacity, transform: [{ scale }] },
+        style,
+      ]}
     >
-      <IconCheck size={42} color={colors.accentInk} strokeWidth={2.6} />
+      {/* Dark ink on the lime, light ink on the gold — the two fills invert
+          between themes and the check has to follow each one. */}
+      <IconCheck
+        size={42}
+        color={tone === 'pr' ? colors.inkInverse : colors.accentInk}
+        strokeWidth={2.6}
+      />
     </Animated.View>
   );
 }
@@ -63,4 +91,5 @@ const styles = StyleSheet.create({
     shadowRadius: 46,
     shadowOffset: { width: 0, height: 0 },
   },
+  markPr: { backgroundColor: colors.pr, shadowColor: colors.pr },
 });

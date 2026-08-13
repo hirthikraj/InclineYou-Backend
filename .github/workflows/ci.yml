@@ -18,13 +18,13 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: trainxdb
-          POSTGRES_USER: trainx
-          POSTGRES_PASSWORD: trainx_dev
+          POSTGRES_DB: xrepdb
+          POSTGRES_USER: xrep
+          POSTGRES_PASSWORD: xrep_dev
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U trainx -d trainxdb"
+          --health-cmd "pg_isready -U xrep -d xrepdb"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -43,9 +43,9 @@ jobs:
         working-directory: backend
         run: ./mvnw -B verify
         env:
-          DATABASE_URL: jdbc:postgresql://localhost:5432/trainxdb
-          DATABASE_USERNAME: trainx
-          DATABASE_PASSWORD: trainx_dev
+          DATABASE_URL: jdbc:postgresql://localhost:5432/xrepdb
+          DATABASE_USERNAME: xrep
+          DATABASE_PASSWORD: xrep_dev
           JWT_SECRET: ci-only-secret-not-used-anywhere-real-32chars
 
   app:

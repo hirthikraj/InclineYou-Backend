@@ -17,7 +17,8 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { colors, radius, space, tnum } from './tokens';
-import { IconCheck } from './icons';
+import { IconCheck, IconX } from './icons';
+import IconButton from './IconButton';
 
 export interface MeterItem {
   /** Stable id, so a caller can route off it. */
@@ -36,6 +37,14 @@ export interface MeterProps {
   title?: string;
   items: MeterItem[];
   why?: string;
+  /**
+   * Puts a close in the header.
+   *
+   * A trainer who has decided not to add a UPI ID is being asked the same
+   * question every time they open the app, and "no" is a real answer. Omit it
+   * where the meter is the point of the screen rather than a banner on it.
+   */
+  onClose?: () => void;
   style?: StyleProp<ViewStyle>;
 }
 
@@ -47,7 +56,13 @@ export function meterPercent(items: MeterItem[]): number {
   return Math.floor((done / total) * 100);
 }
 
-export default function Meter({ title = 'Your profile', items, why, style }: MeterProps) {
+export default function Meter({
+  title = 'Your profile',
+  items,
+  why,
+  onClose,
+  style,
+}: MeterProps) {
   const percent = meterPercent(items);
 
   return (
@@ -55,6 +70,19 @@ export default function Meter({ title = 'Your profile', items, why, style }: Met
       <View style={styles.head}>
         <Text style={styles.headTitle}>{title}</Text>
         <Text style={styles.headValue}>{percent}%</Text>
+        {onClose ? (
+          /* Negative margins: a full 44px target that costs the header row no
+             height, so the baseline the design draws stays where it is. */
+          <IconButton
+            icon={IconX}
+            label={`Hide ${title.toLowerCase()}`}
+            bare
+            size={15}
+            color={colors.ink3}
+            onPress={onClose}
+            style={styles.close}
+          />
+        ) : null}
       </View>
 
       <View
@@ -121,11 +149,14 @@ const styles = StyleSheet.create({
   head: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    justifyContent: 'space-between',
     marginBottom: 11,
+    gap: 10,
   },
-  headTitle: { fontSize: 15, fontWeight: '700', letterSpacing: -0.23, color: colors.ink },
+  // flex:1 rather than `justifyContent: space-between`, so the close button
+  // sits against the percentage instead of being pushed away from it.
+  headTitle: { flex: 1, fontSize: 15, fontWeight: '700', letterSpacing: -0.23, color: colors.ink },
   headValue: { fontSize: 19, fontWeight: '800', color: colors.accentText, ...tnum },
+  close: { alignSelf: 'center', width: 44, marginTop: -14, marginBottom: -14, marginRight: -13 },
 
   bar: { height: 6, borderRadius: 3, backgroundColor: colors.surface3, overflow: 'hidden' },
   barFill: { height: '100%', borderRadius: 3, backgroundColor: colors.accent },

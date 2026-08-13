@@ -6,9 +6,10 @@
  * once is a normal Tuesday in an Indian gym, and an app that forbids it is an
  * app that gets worked around.
  *
- * The batch option the design shows is deliberately absent — batches are out of
- * scope in this pass, and an option that cannot be honoured is worse than one
- * that was never offered.
+ * The batch option the design draws is built but **off for the MVP launch**
+ * (`BATCHES_ENABLED`). It is hidden rather than shown-and-refused, for the
+ * reason it was absent in the first place: an option that cannot be honoured is
+ * worse than one that was never offered.
  */
 
 import React from 'react';
@@ -25,10 +26,10 @@ import {
   space,
 } from '../../../design';
 import { clockParts } from '../../../home/time';
-import type { DiaryItem } from '../../../diary/diary';
+import { BATCHES_ENABLED, type DiaryItem } from '../../../diary/diary';
 
 export interface ClashChoice {
-  kind: 'later' | 'move-theirs' | 'anyway';
+  kind: 'later' | 'move-theirs' | 'anyway' | 'batch';
   at: number;
 }
 
@@ -72,6 +73,15 @@ export default function ClashSheet({
             title={`Book at ${free.time} ${free.meridiem} instead`}
             subtitle="Next free slot"
             onPress={() => onChoose({ kind: 'later', at: nextFree })}
+          />
+        ) : null}
+        {BATCHES_ENABLED ? (
+          <Row
+            grouped
+            minHeight={56}
+            title="Make it a batch of 2"
+            subtitle={`${firstName} and them, together`}
+            onPress={() => onChoose({ kind: 'batch', at: clash.at })}
           />
         ) : null}
         {free && nextFree !== null ? (

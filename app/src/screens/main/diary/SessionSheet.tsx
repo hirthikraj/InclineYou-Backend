@@ -107,7 +107,7 @@ export default function SessionSheet({
         <Text style={styles.sub}>
           From {start.time} {start.meridiem}
         </Text>
-        <Text style={styles.label}>Free slots she usually takes</Text>
+        <Text style={styles.label}>Free slots they usually take</Text>
         <List style={styles.list}>
           {suggestions.length === 0 ? (
             <Row grouped minHeight={56} title="Nothing free nearby" subtitle="Pick a date instead" />
@@ -152,12 +152,12 @@ export default function SessionSheet({
     return (
       <Sheet visible={visible} onClose={onClose} title={`${firstName} didn't train`}>
         <Text style={styles.sub}>
-          {start.time} {start.meridiem} · this decides {remaining === null ? 'nothing on a pack' : 'her pack'}
+          {start.time} {start.meridiem} · this decides {remaining === null ? 'nothing on a pack' : 'their pack'}
         </Text>
 
         <View style={styles.stack}>
           <Row
-            title="Cancelled — she told me"
+            title="Cancelled — they told me"
             subtitle={
               remaining === null
                 ? 'No pack to touch. Slot opens for someone else.'
@@ -168,11 +168,11 @@ export default function SessionSheet({
             onPress={() => setOutcome('cancelled_client')}
           />
           <Row
-            title="No-show — she didn't turn up"
+            title="No-show — they didn't turn up"
             subtitle={
               remaining === null
                 ? 'No pack to deduct from.'
-                : `Pack drops to ${next}. She sees it in her app.`
+                : `Pack drops to ${next}. They see it in their app.`
             }
             minHeight={72}
             severity="critical"
@@ -181,7 +181,7 @@ export default function SessionSheet({
           />
           <Row
             title="I cancelled it"
-            subtitle="Pack stays. She gets an apology message."
+            subtitle="Pack stays. They get an apology message."
             minHeight={72}
             leading={<Radio checked={outcome === 'cancelled_trainer'} />}
             onPress={() => setOutcome('cancelled_trainer')}
@@ -236,7 +236,11 @@ export default function SessionSheet({
         <Row
           grouped
           minHeight={54}
-          title={remaining === null ? 'No pack' : `${remaining} sessions left`}
+          title={
+            remaining === null
+              ? 'No pack'
+              : `${remaining} session${remaining === 1 ? '' : 's'} left`
+          }
           subtitle={remaining === null ? 'Nothing to deduct from' : 'Open the pack'}
           leading={<IconWallet size={19} color={colors.ink3} />}
           trailing={<IconChevron size={18} color={colors.ink3} />}
@@ -279,7 +283,7 @@ export default function SessionSheet({
         </View>
         {item.state === 'scheduled' ? (
           <Button
-            label="She didn't train"
+            label="Didn't train"
             variant="ghost"
             block
             onPress={() => setPane('outcome')}

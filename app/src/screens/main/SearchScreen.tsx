@@ -149,7 +149,7 @@ export default function SearchScreen() {
                         undefined
                       }
                       leading={<IconDumbbell size={20} color={colors.ink2} />}
-                      onPress={() => navigation.navigate('ExercisePicker')}
+                      onPress={() => navigation.navigate('Exercise', { exerciseId: exercise.id })}
                     />
                   ))}
                 </List>

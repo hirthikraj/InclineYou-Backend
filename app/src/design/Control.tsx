@@ -13,6 +13,7 @@ import React, { useState } from 'react';
 import {
   Pressable,
   StyleSheet,
+  Text,
   TextInput,
   View,
   type StyleProp,
@@ -40,6 +41,15 @@ export interface ControlProps extends Omit<TextInputProps, 'style' | 'editable'>
   /** Fused left segment — country code, unit, anything that owns an edge. */
   seg?: React.ReactNode;
   onSegPress?: () => void;
+  /**
+   * `.tx-control__affix` — a trailing unit inside the box: "kg", "%", "min".
+   *
+   * Part of the field rather than a word after it, because a unit outside the
+   * control is a label the eye has to associate; inside it, the field reads as
+   * one thing. Not pressable and not focusable — tapping it focuses the input,
+   * which is what somebody aiming at the right-hand end of a field meant.
+   */
+  affix?: string;
   /** Styles the box, not the text. */
   style?: StyleProp<ViewStyle>;
   inputRef?: React.RefObject<TextInput | null>;
@@ -53,6 +63,7 @@ export default function Control({
   disabled = false,
   seg,
   onSegPress,
+  affix,
   style,
   inputRef,
   onFocus,
@@ -99,7 +110,7 @@ export default function Control({
               pressed && onSegPress ? styles.segPressed : null,
             ]}
           >
-            {seg}
+            {typeof seg === 'string' ? <Text style={styles.segText}>{seg}</Text> : seg}
           </Pressable>
         ) : null}
 
@@ -112,6 +123,8 @@ export default function Control({
           style={[styles.input, size === 'area' && styles.inputArea]}
           {...input}
         />
+
+        {affix ? <Text style={styles.affix}>{affix}</Text> : null}
       </View>
 
       {/* The focus ring sits ON the hairline, as an overlay, so focusing a field
@@ -124,6 +137,7 @@ export default function Control({
 }
 
 const styles = StyleSheet.create({
+  affix: { fontSize: 14, fontWeight: '600', color: colors.ink3, flexShrink: 0 },
   wrap: { width: '100%' },
   disabled: { opacity: 0.45 },
   halo: {
@@ -163,6 +177,10 @@ const styles = StyleSheet.create({
    * in a 52px single-line box on Android, where the default is centred.
    */
   inputArea: { alignSelf: 'stretch', lineHeight: 22, textAlignVertical: 'top' },
+  // A string seg is wrapped here rather than at every call site: React Native
+  // throws on a bare string child, and a component that accepts a ReactNode
+  // should not make its callers remember which kinds of node are legal.
+  segText: { fontSize: 15, fontWeight: '600', color: colors.ink2 },
   seg: {
     flexDirection: 'row',
     alignItems: 'center',

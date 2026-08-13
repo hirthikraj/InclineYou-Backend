@@ -191,7 +191,7 @@ export default function CalendarScreen({ route, navigation }: Props) {
           <Text style={styles.emptyText}>No sessions on this day.</Text>
           <TouchableOpacity
             style={styles.addBtn}
-            onPress={() => navigation.navigate('ScheduleSession', {})}
+            onPress={() => navigation.navigate('Home', { screen: 'DiaryTab', params: { book: true } } as never)}
           >
             <Text style={styles.addBtnText}>+ Schedule a session</Text>
           </TouchableOpacity>
@@ -226,7 +226,7 @@ export default function CalendarScreen({ route, navigation }: Props) {
           })}
           <TouchableOpacity
             style={styles.scheduleBtn}
-            onPress={() => navigation.navigate('ScheduleSession', {})}
+            onPress={() => navigation.navigate('Home', { screen: 'DiaryTab', params: { book: true } } as never)}
           >
             <Text style={styles.scheduleBtnText}>+ Add session</Text>
           </TouchableOpacity>

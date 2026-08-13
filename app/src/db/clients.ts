@@ -163,6 +163,109 @@ export async function setClientStatus(clientId: string, status: LifecycleStatus)
   return client;
 }
 
+/**
+ * Appends a body-metric reading. The only way one is ever written.
+ *
+ * § 11: **append-only, no edit and no delete.** There is deliberately no
+ * `updateBodyMetric` anywhere in the app — the absence is the feature, because a
+ * history that can be reshaped after the fact is worth nothing as evidence, and
+ * this is the screen a trainer turns their phone around to show.
+ *
+ * `at` is the moment the sheet was opened rather than the moment the write
+ * lands, so a slow tap doesn't move a reading the trainer took a minute ago. It
+ * is never a date the trainer picked: back-dating would make the history a thing
+ * somebody arranged.
+ */
+export async function logBodyMetric(
+  clientId: string,
+  metricType: string,
+  value: number,
+  unit: string,
+  at: number = Date.now(),
+): Promise<string> {
+  const row = await database.write(() =>
+    bodyMetricsCollection.create((m) => {
+      m.clientId = clientId;
+      m.metricType = metricType;
+      m.value = value;
+      m.unit = unit;
+      m.recordedAt = new Date(at);
+    }),
+  );
+  await refreshPending();
+  syncDatabase('log-body-metric');
+  return row.id;
+}
+
+/**
+ * What removing this client would actually destroy.
+ *
+ * § 10: the dialog counts what will be lost instead of asking "are you sure?".
+ * "72 sessions, 9 measurements and 6 payments" is information; the other thing
+ * is a speed bump people learn to tap through.
+ */
+export async function countForRemoval(clientId: string) {
+  const [sessions, metrics, payments] = await Promise.all([
+    database.get('scheduled_sessions').query(Q.where('client_id', clientId)).fetchCount(),
+    bodyMetricsCollection.query(Q.where('client_id', clientId)).fetchCount(),
+    database.get('payments').query(Q.where('client_id', clientId)).fetchCount(),
+  ]);
+  return { sessions, metrics, payments };
+}
+
+/**
+ * Removes a client and everything that belonged to them.
+ *
+ * The one real delete in the product, and § 10 is explicit that it **takes
+ * effect at once** — there is no grace period on a client the way there is on
+ * the trainer's own account, which is exactly why archive sits above it.
+ *
+ * The cascade is done here rather than left to the server because the app is
+ * offline-first: a client removed on a gym floor has to be gone from the roster,
+ * the diary and the book before the phone next sees a network. Every table below
+ * accepts a delete in `SyncService.push`, so the tombstones reach Postgres
+ * intact and nothing resurrects on the next pull.
+ *
+ * Money already collected is deleted with them. A settled month keeps its total
+ * regardless — `gym_settlement` stores its own amount — so closed reports don't
+ * move, which is the promise the dialog makes.
+ */
+export async function removeClient(clientId: string) {
+  const workouts = await database
+    .get('workout_sessions')
+    .query(Q.where('client_id', clientId))
+    .fetch();
+  const workoutIds = workouts.map((w) => w.id);
+
+  const owned = await Promise.all([
+    clientsCollection.query(Q.where('id', clientId)).fetch(),
+    database.get('scheduled_sessions').query(Q.where('client_id', clientId)).fetch(),
+    database.get('programs').query(Q.where('client_id', clientId)).fetch(),
+    database.get('packages').query(Q.where('client_id', clientId)).fetch(),
+    database.get('payments').query(Q.where('client_id', clientId)).fetch(),
+    database.get('nudge_logs').query(Q.where('client_id', clientId)).fetch(),
+    bodyMetricsCollection.query(Q.where('client_id', clientId)).fetch(),
+  ]);
+
+  // The log's own rows hang off the workout, not the client, so they are found
+  // through it — a set left behind would sync back as an orphan nothing renders.
+  const logRows = workoutIds.length
+    ? await Promise.all([
+        database.get('workout_exercises').query(Q.where('workout_session_id', Q.oneOf(workoutIds))).fetch(),
+        database.get('set_logs').query(Q.where('workout_session_id', Q.oneOf(workoutIds))).fetch(),
+      ])
+    : [[], []];
+
+  await database.write(async () => {
+    for (const row of [...logRows.flat(), ...workouts, ...owned.flat()]) {
+      await row.markAsDeleted();
+    }
+  });
+
+  await refreshPending();
+  syncDatabase('remove-client');
+}
+
 export async function updateClient(clientId: string, patch: ClientPatch) {
   const client = await clientsCollection.find(clientId);
 

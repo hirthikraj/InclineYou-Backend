@@ -58,6 +58,7 @@ export interface DiarySession {
   cancelledBy?: string | null;
   packDelta?: number | null;
   packAppliedAt?: Date | number | null;
+  batchId?: string | null;
 }
 export interface DiaryProgram {
   id: string;
@@ -97,8 +98,16 @@ export interface DiaryPackage {
   status: string;
 }
 
+export interface DiaryBatchRecord {
+  id: string;
+  name: string;
+  capacity: number;
+  minSize: number;
+}
+
 export interface DiaryInput {
   clients: DiaryClient[];
+  batches: DiaryBatchRecord[];
   sessions: DiarySession[];
   programs: DiaryProgram[];
   workouts: DiaryWorkout[];
@@ -107,6 +116,22 @@ export interface DiaryInput {
   blocks: DiaryBlock[];
   packages: DiaryPackage[];
 }
+
+/**
+ * Batches are built, tested and **off for the MVP launch** — a roadmap item, not
+ * a dropped one.
+ *
+ * Flipping this to true is the whole switch: the agenda folds attendees into a
+ * batch row again, the week collapses them to one pip, and the clash sheet
+ * offers "make it a batch". With it false, a session that carries a `batch_id`
+ * simply draws as the ordinary one-to-one it already is — which is also exactly
+ * what the app does when a batch is deleted, so this is a supported state rather
+ * than a hidden one.
+ *
+ * The table and the column stay: migrations that have run are immutable, and the
+ * schema contract here is additive-only. An empty table costs nothing.
+ */
+export const BATCHES_ENABLED = false;
 
 /* ------------------------------------------------------------------ output */
 
@@ -136,6 +161,46 @@ export interface DiaryItem {
   /** Its outcome can still be reversed. */
   undoable: boolean;
   seriesId?: string | null;
+  /** Set when this attendee is part of a batch. The agenda draws the batch, not them. */
+  batchId?: string | null;
+}
+
+/**
+ * 3d · a batch, as one row.
+ *
+ * Not a session — a *view* of every attendee's session at one slot. The
+ * individual rows still exist underneath and still own their own pack, outcome
+ * and undo; this is what the agenda draws instead of four rows that say the
+ * same time.
+ */
+export interface DiaryBatch {
+  /** Batch id and slot: the same batch can legitimately run twice in a day. */
+  id: string;
+  batchId: string;
+  name: string;
+  at: number;
+  endsAt: number;
+  time: string;
+  meridiem: string;
+  /** "Full Body A · 60 min", or "2 booked · 3 days out" when it is under-filled. */
+  detail: string;
+  /** Each attendee, with their own session — that is where their outcome lives. */
+  people: { id: string; name: string; sessionId: string; state: SessionState }[];
+  booked: number;
+  capacity: number;
+  minSize: number;
+  /**
+   * How far below the minimum, when there is still time to fill it.
+   *
+   * Null once the batch is full enough, and null once it has started — telling
+   * a trainer a running batch is two short is a complaint, not information.
+   */
+  shortBy: number | null;
+  /** Every attendee's session id, for marking the whole batch done. */
+  sessionIds: string[];
+  running: boolean;
+  /** Every attendee is closed off. */
+  settled: boolean;
 }
 
 export interface DiaryGap {
@@ -162,6 +227,8 @@ export interface DiaryDay {
   at: number;
   weekday: number;
   items: DiaryItem[];
+  /** One row per batch-slot. Their attendees are in `items` too, flagged. */
+  batches: DiaryBatch[];
   gaps: DiaryGap[];
   blocks: DiaryBlock[];
   /** Sessions that have started but were never closed off. */
@@ -193,6 +260,8 @@ export interface WeekPip {
   name: string;
   mode: DeliveryMode;
   state: SessionState;
+  /** Part of a batch — the week shows the group, not each attendee. */
+  batchId?: string | null;
 }
 
 export interface WeekColumn {
@@ -520,6 +589,10 @@ export function buildDay(input: DiaryInput, dayStart: number, now: number): Diar
       undoable:
         state !== 'scheduled' && (applied === null || now - applied <= 24 * 60 * 60 * 1000),
       seriesId: session.seriesId,
+      // Gated here, not just at the grouping: the agenda skips any item that
+      // belongs to a batch, so leaving this set while grouping is off would
+      // make four real sessions disappear instead of drawing individually.
+      batchId: BATCHES_ENABLED ? (session.batchId ?? null) : null,
     };
   });
 
@@ -528,6 +601,10 @@ export function buildDay(input: DiaryInput, dayStart: number, now: number): Diar
   const live = items.filter((i) => i.state !== 'cancelled');
   for (let i = 0; i < live.length; i += 1) {
     for (let j = i + 1; j < live.length; j += 1) {
+      // Two people in the same batch are not a clash — they are the batch. The
+      // warning exists for a floor double-booked by accident, and firing it on
+      // every attendee of a group would make the one signal worthless.
+      if (live[i].batchId && live[i].batchId === live[j].batchId) continue;
       if (live[i].endsAt - CLASH_GRACE_MIN * 60_000 > live[j].at) {
         live[i].clash = true;
         live[j].clash = true;
@@ -539,6 +616,8 @@ export function buildDay(input: DiaryInput, dayStart: number, now: number): Diar
   const dayBlocks = blocksOn(input.blocks, dayStart);
   const gaps = findGaps(windows, dayBlocks, live, dayStart, now, input, weekday);
 
+  const batches = groupBatches(items, input, now);
+
   const bookedCount = live.filter((i) => i.state !== 'cancelled').length;
   const freeMinutes = gaps.reduce((sum, g) => sum + g.minutes, 0);
   const openCount = items.filter((i) => i.open).length;
@@ -547,6 +626,7 @@ export function buildDay(input: DiaryInput, dayStart: number, now: number): Diar
     at: dayStart,
     weekday,
     items,
+    batches,
     gaps,
     blocks: dayBlocks,
     openCount,
@@ -554,6 +634,92 @@ export function buildDay(input: DiaryInput, dayStart: number, now: number): Diar
     closed: windows.length === 0,
     subtitle: daySubtitle(dayStart, bookedCount, openCount, freeMinutes),
   };
+}
+
+
+/**
+ * Folds every attendee of a batch into one agenda row.
+ *
+ * Keyed on batch **and slot**, because the same batch legitimately runs twice in
+ * a day — the six o'clock barbell group and the evening one are the same batch
+ * with the same capacity, and merging them would draw a row that claims sixteen
+ * people were in the room at once.
+ *
+ * A cancelled attendee is not in the count. They gave the slot back, and a batch
+ * that says 8/10 with two cancellations in it is lying about what the floor
+ * holds tonight.
+ */
+function groupBatches(items: DiaryItem[], input: DiaryInput, now: number): DiaryBatch[] {
+  if (!BATCHES_ENABLED) return [];
+
+  const byBatch = new Map<string, DiaryItem[]>();
+  for (const item of items) {
+    if (!item.batchId) continue;
+    const key = `${item.batchId}@${item.at}`;
+    const list = byBatch.get(key);
+    if (list) list.push(item);
+    else byBatch.set(key, [item]);
+  }
+
+  const records = new Map(input.batches.map((b) => [b.id, b]));
+  const rows: DiaryBatch[] = [];
+
+  for (const [key, group] of byBatch) {
+    const first = group[0];
+    const record = first.batchId ? records.get(first.batchId) : undefined;
+    // A batch row whose own record hasn't synced yet still draws — the sessions
+    // are what the trainer booked, and waiting on the name would blank the slot.
+    const capacity = record?.capacity ?? Math.max(group.length, 10);
+    const minSize = record?.minSize ?? 0;
+
+    const attending = group.filter((i) => i.state !== 'cancelled');
+    const booked = attending.length;
+    const started = now >= first.at;
+    const shortBy = !started && minSize > 0 && booked < minSize ? minSize - booked : null;
+
+    rows.push({
+      id: key,
+      batchId: first.batchId as string,
+      name: record?.name?.trim() || 'Batch',
+      at: first.at,
+      endsAt: first.endsAt,
+      time: first.time,
+      meridiem: first.meridiem,
+      detail:
+        shortBy !== null
+          ? `${booked} booked · ${daysOut(first.at, now)}`
+          : `${batchPlan(group)} · ${first.durationMinutes} min`,
+      people: attending.map((i) => ({
+        id: i.clientId,
+        name: i.clientName,
+        sessionId: i.id,
+        state: i.state,
+      })),
+      booked,
+      capacity,
+      minSize,
+      shortBy,
+      sessionIds: group.map((i) => i.id),
+      running: attending.some((i) => i.running),
+      settled: attending.length > 0 && attending.every((i) => i.state !== 'scheduled'),
+    });
+  }
+
+  return rows.sort((a, b) => a.at - b.at);
+}
+
+/** The plan they are all on, when they share one. Otherwise the batch's own name carries it. */
+function batchPlan(group: DiaryItem[]): string {
+  const labels = new Set(group.map((i) => i.detail.split(' · ')[0]).filter(Boolean));
+  return labels.size === 1 ? [...labels][0] : `${group.length} on the floor`;
+}
+
+/** "3 days out", "tomorrow", "today" — how long is left to fill it. */
+function daysOut(at: number, now: number): string {
+  const days = Math.round((startOfDay(at) - startOfDay(now)) / DAY_MS);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'tomorrow';
+  return `${days} days out`;
 }
 
 function programLabel(session: DiarySession, programs: Map<string, DiaryProgram>): string {
@@ -727,12 +893,25 @@ export function buildWeek(input: DiaryInput, anchor: number, now: number): Diary
     const at = from + i * DAY_MS;
     const weekday = isoWeekday(at);
 
-    const pips = input.sessions
+    const onDay = input.sessions
       .filter((s) => {
         const t = ms(s.scheduledAt);
         return t >= at && t < at + DAY_MS && readState(s.status) !== 'cancelled';
       })
-      .sort((a, b) => ms(a.scheduledAt) - ms(b.scheduledAt))
+      .sort((a, b) => ms(a.scheduledAt) - ms(b.scheduledAt));
+
+    // A batch is one pip, named by its size. Eight attendees drawn as eight pips
+    // would make a Saturday morning batch look like the busiest day of the week,
+    // which is the opposite of what a week view is for — shape and load.
+    const seenBatch = new Set<string>();
+    const pips = onDay
+      .filter((s) => {
+        const key = BATCHES_ENABLED && s.batchId ? `${s.batchId}@${ms(s.scheduledAt)}` : null;
+        if (!key) return true;
+        if (seenBatch.has(key)) return false;
+        seenBatch.add(key);
+        return true;
+      })
       .map((s) => {
         const client = byClient.get(s.clientId);
         const t = ms(s.scheduledAt);
@@ -743,13 +922,17 @@ export function buildWeek(input: DiaryInput, anchor: number, now: number): Diary
           // 24-hour on the pip: it is 50px wide and "06:00" fits where
           // "6:00 AM" does not.
           time: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
-          name: (client?.name?.trim() || 'Client').split(/\s+/)[0],
+          name:
+            BATCHES_ENABLED && s.batchId
+              ? `Batch ${onDay.filter((o) => o.batchId === s.batchId && ms(o.scheduledAt) === t).length}`
+              : (client?.name?.trim() || 'Client').split(/\s+/)[0],
           mode: readMode({
             session: s.deliveryMode,
             client: client?.deliveryMode,
             metadata: client?.metadata,
           }),
           state: readState(s.status),
+          batchId: BATCHES_ENABLED ? (s.batchId ?? null) : null,
         };
       });
 
@@ -877,7 +1060,7 @@ export function suggestMoves(
     out.push({ at, time, meridiem, dayLabel: dayName(at, today), why });
   };
 
-  // 1 — the rest of today, in her own free slots.
+  // 1 — the rest of today, in their own free slots.
   const todayGaps = buildDay(input, today, now).gaps;
   for (const gap of todayGaps) {
     for (const slot of gap.slots) {
@@ -888,13 +1071,13 @@ export function suggestMoves(
     }
   }
 
-  // 2 — her usual slots over the next week.
+  // 2 — their usual slots over the next week.
   for (let i = 1; i <= 7 && out.length < limit; i += 1) {
     const day = today + i * DAY_MS;
     const weekday = isoWeekday(day);
     for (const slot of usualSlots(client)) {
       if (slot.day !== weekday) continue;
-      add(atMinute(day, slot.minute), `Her usual ${DAY_SHORT[weekday]} slot`);
+      add(atMinute(day, slot.minute), `Their usual ${DAY_SHORT[weekday]} slot`);
     }
   }
 

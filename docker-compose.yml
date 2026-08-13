@@ -1,17 +1,17 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: trainx-postgres
+    container_name: xrep-postgres
     environment:
-      POSTGRES_DB: trainxdb
-      POSTGRES_USER: trainx
-      POSTGRES_PASSWORD: trainx_dev
+      POSTGRES_DB: xrepdb
+      POSTGRES_USER: xrep
+      POSTGRES_PASSWORD: xrep_dev
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U trainx -d trainxdb"]
+      test: ["CMD-SHELL", "pg_isready -U xrep -d xrepdb"]
       interval: 10s
       timeout: 5s
       retries: 5

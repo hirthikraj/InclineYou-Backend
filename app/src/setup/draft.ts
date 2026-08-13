@@ -16,7 +16,7 @@
 
 import * as SecureStore from 'expo-secure-store';
 
-const DRAFT_KEY = 'trainx_setup_draft';
+const DRAFT_KEY = 'xrep_setup_draft';
 
 /** Flow order. The step bar, the timeline and `nextStep` all read this one array. */
 export const SETUP_STEPS = [
@@ -146,6 +146,28 @@ export async function saveDraft(draft: SetupDraft): Promise<void> {
   } catch {
     // Losing the draft costs a minute of retyping; crashing costs the account.
   }
+  // Announced even if the write failed: the draft is what the app now believes,
+  // and a meter that disagrees with the screen the trainer just used is worse
+  // than one that outlives a failed write.
+  listeners.forEach((listener) => listener(draft));
+}
+
+type DraftListener = (draft: SetupDraft) => void;
+const listeners = new Set<DraftListener>();
+
+/**
+ * Fires on every write, and returns its own unsubscribe.
+ *
+ * The deck's completion meter listens. Without this it re-read the draft on
+ * focus only, so a profile reconciled against the server in the background —
+ * which is where a certification added on another phone arrives — left the meter
+ * a navigation event behind the truth.
+ */
+export function onDraftChange(listener: DraftListener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 export async function clearDraft(): Promise<void> {

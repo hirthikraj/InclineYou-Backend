@@ -1,7 +1,7 @@
 /**
  * Profile completion, as the deck shows it.
  *
- * `agent/design system/screens/trainxtrainersetup.html` § 06 · 6b.
+ * `agent/design system/screens/xreptrainersetup.html` § 06 · 6b.
  *
  * Two rules the weights encode:
  *

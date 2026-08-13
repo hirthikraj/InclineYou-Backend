@@ -79,6 +79,8 @@ export interface DeckWorkout {
   scheduledSessionId?: string;
   sessionDate: string;
   createdAt: Date | number;
+  /** V13 — set when the trainer closed the log. Absent means still open. */
+  endedAt?: Date | number | null;
 }
 export interface DeckSetLog {
   id: string;
@@ -427,10 +429,16 @@ function buildRunning(
   today: DeckScheduled[],
   clientsById: Map<string, DeckClient>,
 ): RunningSession | null {
-  // A session is running when the trainer has opened a workout log against it
-  // and has not yet marked the scheduled session done. There is no explicit
-  // "in progress" status in the schema, and inventing one would mean a session
-  // could be left running forever by a phone that died mid-set.
+  // A session is running when the trainer has opened a workout log against it,
+  // has not closed that log, and has not yet marked the scheduled session done.
+  // There is no explicit "in progress" status in the schema, and inventing one
+  // would mean a session could be left running forever by a phone that died
+  // mid-set.
+  //
+  // The `ended_at` test is what makes screen 17's *Later* honest: finishing the
+  // log and closing the money are two different facts, and a trainer who
+  // finished the log but left the money for tomorrow should not still be told
+  // they are mid-session.
   //
   // Not "the first unfinished session that happens to have a log" — an early
   // session left unmarked would then mask a later one that is genuinely under
@@ -440,7 +448,7 @@ function buildRunning(
   for (const session of today) {
     const status = lower(session.status);
     if (DONE_SESSION.has(status) || DEAD_SESSION.has(status)) continue;
-    const found = input.workouts.find((w) => w.scheduledSessionId === session.id);
+    const found = input.workouts.find((w) => w.scheduledSessionId === session.id && !w.endedAt);
     if (found) {
       live = session;
       workout = found;

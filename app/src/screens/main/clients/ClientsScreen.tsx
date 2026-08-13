@@ -1,7 +1,7 @@
 /**
  * Screen 04 · Clients.
  *
- * `agent/design system/screens/trainxclients.html`.
+ * `agent/design system/screens/xrepclients.html`.
  *
  * The teardown of nine coaching platforms produced one agreement and one blind
  * spot. They all compute who needs attention rather than asking the trainer to
@@ -77,6 +77,7 @@ import {
   IconX,
   IndexRail,
   Pack,
+  Reveal,
   Row,
   Search,
   SelectBar,
@@ -89,6 +90,7 @@ import {
 } from '../../../design';
 import SortSheet from './SortSheet';
 import FilterSheet from './FilterSheet';
+import RosterSkeleton from './RosterSkeleton';
 import RowMenu, { type RowMenuKey } from './RowMenu';
 import BulkMessageSheet from './BulkMessageSheet';
 
@@ -244,7 +246,10 @@ export default function ClientsScreen() {
         navigation.navigate('PackageList', { clientId: row.id, clientName: row.name });
         return;
       case 'session':
-        navigation.navigate('ScheduleSession', { clientId: row.id });
+        navigation.navigate('Home', {
+          screen: 'DiaryTab',
+          params: { book: true, clientId: row.id },
+        } as never);
         return;
       case 'program':
         navigation.navigate('ProgramList', { clientId: row.id });
@@ -320,7 +325,12 @@ export default function ClientsScreen() {
 
   /* ---------------------------------------------------------------- header */
 
-  const subtitle = roster.firstRun
+  // Every branch below counts something, and a count of zero before the tables
+  // have been read is a statement, not a placeholder. No subtitle at all until
+  // there is one worth printing.
+  const subtitle = !roster.ready
+    ? undefined
+    : roster.firstRun
     ? 'No clients yet'
     : offline
       ? `${roster.counts.active} active · showing local copy`
@@ -367,7 +377,9 @@ export default function ClientsScreen() {
         style={styles.chipRow}
       >
         <SectionChips
-          counts={roster.counts}
+          // Same rule as the subtitle: "ALL 0 · ACTIVE 0" across a roster of
+          // eight is the exact wrong first impression.
+          counts={roster.ready ? roster.counts : undefined}
           value={segment}
           onPick={(next) => {
             setSegment(next);
@@ -378,7 +390,7 @@ export default function ClientsScreen() {
         />
       </ScrollView>
 
-      {segment === 'attention' && visible.length > 0 ? (
+      {segment === 'attention' && visible.length > 0 && roster.ready ? (
         <Tally
           style={styles.tally}
           items={[
@@ -512,7 +524,11 @@ export default function ClientsScreen() {
 
   /* ---------------------------------------------------------------- render */
 
-  if (roster.firstRun) {
+  // `ready` guards every empty state on this screen. Before the first
+  // emission the roster is empty because nothing has been read yet, not
+  // because there is nobody — and "Your roster is empty" is the wrong thing to
+  // say to a trainer with eight clients, even for one frame.
+  if (roster.firstRun && roster.ready) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.pad}>
@@ -584,6 +600,13 @@ export default function ClientsScreen() {
       </View>
 
       <View style={styles.listWrap}>
+        {/* The search pill and the chips live in the list's header, so the whole
+            body — header included — crosses over together, and the skeleton's
+            own pill and chips sit at exactly those positions underneath. */}
+        {/* `fill`, so the list below is given a bounded height. Without it the
+            animated wrapper sizes to its content and the SectionList renders
+            every row instead of a window. */}
+        <Reveal ready={roster.ready} skeleton={<RosterSkeleton />} fill style={styles.reveal}>
         <SectionList
           ref={list}
           sections={sections}
@@ -592,6 +615,7 @@ export default function ClientsScreen() {
           ListHeaderComponent={header}
           ListFooterComponent={footer}
           ListEmptyComponent={
+            !roster.ready ? null : (
             <Empty
               icon={IconUsers}
               title="Nobody here"
@@ -606,6 +630,7 @@ export default function ClientsScreen() {
                 ) : undefined
               }
             />
+            )
           }
           renderSectionHeader={({ section }) =>
             section.label ? (
@@ -638,6 +663,7 @@ export default function ClientsScreen() {
           contentContainerStyle={styles.body}
           keyboardShouldPersistTaps="handled"
         />
+        </Reveal>
 
         {letters.length > 0 ? (
           <IndexRail
@@ -726,7 +752,8 @@ function SectionChips({
   filters,
   onFilter,
 }: {
-  counts: Record<Segment, number>;
+  /** Absent until the roster has been read — a chip with no number, not a zero. */
+  counts?: Record<Segment, number>;
   value: Segment;
   onPick: (next: Segment) => void;
   filters: number;
@@ -738,7 +765,7 @@ function SectionChips({
         <Chip
           key={s.key}
           label={s.label}
-          count={counts[s.key]}
+          count={counts?.[s.key]}
           selected={value === s.key}
           onPress={() => onPick(s.key)}
         />
@@ -772,6 +799,8 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.canvas },
   pad: { paddingHorizontal: space.inset },
   listWrap: { flex: 1 },
+  // The reveal wrapper has to fill the same space the list did.
+  reveal: { flex: 1 },
   body: { paddingBottom: space.s9 },
 
   header: { paddingHorizontal: space.inset, paddingBottom: space.s1 },

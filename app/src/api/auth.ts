@@ -1,15 +1,56 @@
 import axios from 'axios';
 import { api } from './client';
 
-export interface AuthResponse {
-  token: string;
+/**
+ * FR-11 · which half of the product this number belongs to.
+ *
+ * - `trainer` — a trainer account exists. The default lens even for somebody who
+ *   is also a client, because coaching is what they signed up to do.
+ * - `client`  — on somebody's roster and nobody's trainer.
+ * - `pending` — verified, and on nobody's roster (7a). The token is good for one
+ *   thing: claiming a trainer account.
+ * - `paused`  — every membership paused, no token (7b).
+ */
+export type Role = 'trainer' | 'client' | 'pending' | 'paused';
+
+/** One roster this number is on. A person can legitimately be on two. */
+export interface Membership {
+  clientId: string;
   trainerId: string;
+  clientName: string;
+  trainerName: string;
+  gymName: string | null;
+  trainerPhone: string | null;
+}
+
+export interface AuthResponse {
+  /** Null on `paused` — there is nothing to sign into until the trainer resumes. */
+  token: string | null;
+  /** Null unless a trainer account exists. */
+  trainerId: string | null;
   isNewUser: boolean;
   /**
    * Whether a profile already exists on the server. Optional because a backend
    * older than V8 doesn't send it — see `needsSetup` for the fallback.
    */
   setupComplete?: boolean;
+  /** Optional: a backend older than V14 doesn't send it, and every such sign-in was a trainer. */
+  role?: Role;
+  /** The signed-in trainer's own name, for "Welcome back, Ravi". Null before setup. */
+  trainerName?: string | null;
+  /** Every roster this number is on and not paused on. Absent on an older backend. */
+  clientOf?: Membership[];
+  paused?: { trainerName: string; trainerPhone: string | null; pausedOn: string | null } | null;
+}
+
+/**
+ * The lens to open, from a response an older backend may have written.
+ *
+ * Absent `role` means a backend before V14, and every sign-in it ever answered
+ * was a trainer's — so absence reads as trainer rather than as an error.
+ */
+export function roleOf(res: AuthResponse): Role {
+  return res.role ?? 'trainer';
 }
 
 /**
@@ -27,7 +68,7 @@ export function needsSetup(res: AuthResponse): boolean {
 
 /* ------------------------------------------------------------------ policy
  * The numbers the sign-in screens quote to the user. They mirror
- * `agent/design system/screens/trainxloginotp.html` § 06 · Behaviour spec.
+ * `agent/design system/screens/xreploginotp.html` § 06 · Behaviour spec.
  * All of them are ENFORCED on the server — these copies exist only so the UI
  * can say the same thing the backend does.
  * -------------------------------------------------------------------------- */
@@ -79,6 +120,26 @@ export function requestOtpOnWhatsApp(phone: string) {
 
 export function verifyOtp(phone: string, otp: string) {
   return api.post<AuthResponse>('/v1/auth/otp/verify', { phone, otp });
+}
+
+/**
+ * Screen 7a · "I'm a trainer" — open a coaching account for the number that was
+ * just verified.
+ *
+ * No body: the number comes from the pending token, because a phone in a request
+ * body is a phone anybody can type. Signing in no longer creates this account by
+ * itself — the likeliest first launch in this product is a CLIENT typing their
+ * number before their trainer has added them, and handing them a coaching
+ * workspace is a wrong turn they cannot undo.
+ */
+export function claimTrainerAccount(pendingToken: string) {
+  // Passed explicitly rather than left to the interceptor: at this point the
+  // pending token is deliberately NOT in the keychain, because a stored token is
+  // what the app reads as "signed in" — and nobody is signed in until they have
+  // chosen which of the two things on 7a they are.
+  return api.post<AuthResponse>('/v1/auth/trainer', null, {
+    headers: { Authorization: `Bearer ${pendingToken}` },
+  });
 }
 
 /* ---------------------------------------------------------------- failures

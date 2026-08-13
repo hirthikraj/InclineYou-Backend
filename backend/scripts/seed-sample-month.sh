@@ -29,9 +29,9 @@ SQL="$HERE/seed-sample-month.sql"
 
 # By default, talk to the compose database the getting-started guide sets up.
 # Override PSQL to point anywhere else.
-CONTAINER="${POSTGRES_CONTAINER:-trainx-postgres}"
-DB_USER="${POSTGRES_USER:-trainx}"
-DB_NAME="${POSTGRES_DB:-trainxdb}"
+CONTAINER="${POSTGRES_CONTAINER:-xrep-postgres}"
+DB_USER="${POSTGRES_USER:-xrep}"
+DB_NAME="${POSTGRES_DB:-xrepdb}"
 
 if [[ -n "${PSQL:-}" ]]; then
   # shellcheck disable=SC2086

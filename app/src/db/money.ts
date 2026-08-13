@@ -53,8 +53,8 @@ export const UNDO_WINDOW_MS = 24 * 60 * 60 * 1000;
  * cannot, and a trainer running more than ten phones is not a real scenario.
  * -------------------------------------------------------------------------- */
 
-const BLOCK_KEY = 'trainx_receipt_block';
-const SEQ_KEY = 'trainx_receipt_seq';
+const BLOCK_KEY = 'xrep_receipt_block';
+const SEQ_KEY = 'xrep_receipt_seq';
 
 let cachedBlock: number | null = null;
 
@@ -476,13 +476,23 @@ export async function settleGymShare(settlementId: string): Promise<void> {
  * know whether it was read, and "reminded twice" only claims that the trainer
  * asked twice, which is exactly what it means on the chase row.
  */
-export async function logReminder(trainerId: string, clientId: string): Promise<void> {
+/**
+ * @param template What was sent. Defaults to a payment chase, which is what the
+ *                 Money screens use. Screen 4d passes `nudge_<kind>` so the Sent
+ *                 tab can say which rule a message came from, and so the
+ *                 per-rule "sent 11 this month" count has something to read.
+ */
+export async function logReminder(
+  trainerId: string,
+  clientId: string,
+  template: string = 'payment_due',
+): Promise<void> {
   await database.write(async () =>
     nudgesCollection.create((n) => {
       n.trainerId = trainerId;
       n.clientId = clientId;
       n.channel = 'whatsapp';
-      n.templateName = 'payment_due';
+      n.templateName = template;
       n.status = 'sent';
       n.sentAt = new Date();
     }),

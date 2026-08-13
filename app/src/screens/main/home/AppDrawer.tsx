@@ -1,21 +1,27 @@
 /**
- * 3a · the navigation drawer.
+ * 1a · the navigation drawer, corrected.
  *
- * Grouped by frequency, most-used first, with Business at the top — the money
- * group is the thing every competitor buries on a desktop browser, and it is
- * the wedge. Nothing daily lives in here: the four tabs cover the daily
- * surfaces, and NN/g's finding is that hidden navigation is used 57% of the
- * time against 86% for a visible/hidden combination, so the rule is not "no
- * hamburger", it is "nothing daily behind one".
+ * ── Two destinations removed, and why ─────────────────────────────────────
  *
- * Badges appear only where a number drives an action — money owed, unread
- * nudges — and the exercise count is the quiet variant because 873 is
- * information, not a job. Settings is never badged; a permanently badged
- * drawer teaches people to ignore badges.
+ * When this drawer was first built, **Payments** and **Packages** had nowhere
+ * else to live. The Money tab now contains both — the ledger, the chase list and
+ * the packs you sell. The Clients screen set the rule out loud: **the drawer must
+ * not be a second route to something a tab already owns**, which is why Weekly
+ * slots moved into the Diary. The same rule applies here, so both are gone.
  *
- * Queries are gated on `visible`: the drawer is mounted for the life of the
- * app, and four standing subscriptions for a panel nobody has opened is rent
- * with no tenant.
+ * The remaining seven regroup into **Training · Growth · App**. Groups of one are
+ * gone with them: Reports and Adherence now sit with Nudges under Growth, which
+ * is what all three are for.
+ *
+ * ── Badges ────────────────────────────────────────────────────────────────
+ *
+ * Only where a number drives an action. Nudges carries how many drafts are
+ * waiting, which is a job. Exercises carries the library size as the quiet
+ * variant, because 873 is information. Settings is never badged — a permanently
+ * badged drawer teaches people to ignore badges.
+ *
+ * Queries are gated on `visible`: the drawer is mounted for the life of the app,
+ * and standing subscriptions for a panel nobody has opened is rent with no tenant.
  */
 
 import React, { useEffect, useState } from 'react';
@@ -24,9 +30,15 @@ import Constants from 'expo-constants';
 import { combineLatest, map } from 'rxjs';
 import { database } from '../../../db';
 import type ClientModel from '../../../db/models/Client';
-import type PaymentModel from '../../../db/models/Payment';
 import type ExerciseModel from '../../../db/models/Exercise';
+import type NudgeRuleModel from '../../../db/models/NudgeRule';
+import type ScheduledSessionModel from '../../../db/models/ScheduledSession';
+import type PackageModel from '../../../db/models/Package';
+import type PaymentModel from '../../../db/models/Payment';
+import type NudgeLogModel from '../../../db/models/NudgeLog';
+import { buildWaiting, type NudgeInput } from '../../../nudges/rules';
 import { loadDraft } from '../../../setup/draft';
+import { usePrefs } from '../../../settings/usePrefs';
 import {
   Avatar,
   Drawer,
@@ -41,60 +53,65 @@ import {
   IconLogout,
   IconMessage,
   IconRefresh,
-  IconRupee,
-  IconClock,
   IconSettings,
   IconShield,
-  IconWallet,
   colors,
   radius,
 } from '../../../design';
 
-const DUE = new Set(['pending', 'due', 'unpaid', 'overdue']);
-
 export interface DrawerCounts {
   clients: number;
-  overdue: number;
   exercises: number;
+  /** How many nudge drafts are waiting. A job, so it gets the loud badge. */
+  waiting: number;
 }
 
-const NO_COUNTS: DrawerCounts = { clients: 0, overdue: 0, exercises: 0 };
+const NO_COUNTS: DrawerCounts = { clients: 0, exercises: 0, waiting: 0 };
 
 export interface AppDrawerProps {
   visible: boolean;
   onClose: () => void;
-  /** Every destination the drawer can actually reach today. */
+  /** Every destination the drawer reaches. All seven are built. */
   onNavigate: (key: DrawerKey) => void;
+  onSwitchMode: () => void;
   onSignOut: () => void;
 }
 
+/**
+ * The nine interactions: the profile block, the mode switch, seven destinations
+ * and sign out. Payments and Packages are deliberately absent — see the note at
+ * the top.
+ */
 export type DrawerKey =
   | 'profile'
-  | 'switch'
-  | 'payments'
-  | 'packages'
-  | 'reports'
   | 'programs'
   | 'exercises'
-  | 'nudges'
+  | 'reports'
   | 'adherence'
-  | 'hours'
+  | 'nudges'
   | 'settings'
   | 'help';
 
-export default function AppDrawer({ visible, onClose, onNavigate, onSignOut }: AppDrawerProps) {
+export default function AppDrawer({
+  visible,
+  onClose,
+  onNavigate,
+  onSwitchMode,
+  onSignOut,
+}: AppDrawerProps) {
   const [name, setName] = useState('');
   const [counts, setCounts] = useState<DrawerCounts>(NO_COUNTS);
+  const { prefs } = usePrefs();
 
   /**
    * Both effects wait for the opening animation to finish.
    *
-   * They are what makes the drawer's content appear, and every one of them
-   * lands a `setState` — a full re-render of the panel, its avatar and its
-   * twelve rows. Run that while the panel is sliding and React is doing layout
-   * work on the same frames the animation needs, which is felt as a stutter
-   * halfway through the open. `runAfterInteractions` costs the name and the
-   * badges a few hundred milliseconds; nobody is reading them mid-slide.
+   * They are what makes the drawer's content appear, and every one of them lands
+   * a `setState` — a full re-render of the panel, its avatar and its rows. Run
+   * that while the panel is sliding and React is doing layout work on the same
+   * frames the animation needs, which is felt as a stutter halfway through the
+   * open. `runAfterInteractions` costs the name and the badges a few hundred
+   * milliseconds; nobody is reading them mid-slide.
    */
   useEffect(() => {
     if (!visible) return;
@@ -127,14 +144,16 @@ export default function AppDrawer({ visible, onClose, onNavigate, onSignOut }: A
     onNavigate(key);
   };
 
+  const self = prefs.mode === 'self';
+
   return (
     <Drawer
       visible={visible}
       onClose={onClose}
       header={
         <>
-          {/* M3's documented drawer profile block — tapping it opens profile
-              and business settings, which is where the gym and the split live. */}
+          {/* M3's documented drawer profile block. The chevron is a cue, not a
+              second control — it goes to the same place the block does. */}
           <Pressable
             onPress={go('profile')}
             accessibilityRole="button"
@@ -153,12 +172,17 @@ export default function AppDrawer({ visible, onClose, onNavigate, onSignOut }: A
           </Pressable>
 
           <Pressable
-            onPress={go('switch')}
+            onPress={() => {
+              onClose();
+              onSwitchMode();
+            }}
             accessibilityRole="button"
             style={({ pressed }) => [styles.switch, pressed && styles.pressed]}
           >
             <IconRefresh size={17} color={colors.ink2} />
-            <Text style={styles.switchLabel}>Switch to my own training</Text>
+            <Text style={styles.switchLabel}>
+              {self ? 'Switch back to coaching' : 'Switch to my own training'}
+            </Text>
           </Pressable>
         </>
       }
@@ -169,11 +193,6 @@ export default function AppDrawer({ visible, onClose, onNavigate, onSignOut }: A
         </>
       }
     >
-      <DrawerLabel>Business</DrawerLabel>
-      <DrawerItem icon={IconRupee} label="Payments" badge={counts.overdue} onPress={go('payments')} />
-      <DrawerItem icon={IconWallet} label="Packages" onPress={go('packages')} />
-      <DrawerItem icon={IconChart} label="Reports" onPress={go('reports')} />
-
       <DrawerLabel>Training</DrawerLabel>
       <DrawerItem icon={IconLayers} label="Programs" onPress={go('programs')} />
       <DrawerItem
@@ -184,38 +203,56 @@ export default function AppDrawer({ visible, onClose, onNavigate, onSignOut }: A
         onPress={go('exercises')}
       />
 
-      <DrawerLabel>Clients</DrawerLabel>
-      {/* No badge on Nudges: there is no read state for one yet, and a count
-          that can't be cleared is nagging rather than informing. */}
-      <DrawerItem icon={IconMessage} label="Nudges" onPress={go('nudges')} />
+      <DrawerLabel>Growth</DrawerLabel>
+      <DrawerItem icon={IconChart} label="Reports" onPress={go('reports')} />
       <DrawerItem icon={IconBadge} label="Adherence" onPress={go('adherence')} />
+      <DrawerItem icon={IconMessage} label="Nudges" badge={counts.waiting} onPress={go('nudges')} />
 
       <DrawerLabel>App</DrawerLabel>
-      <DrawerItem icon={IconClock} label="When you work" onPress={go('hours')} />
       <DrawerItem icon={IconSettings} label="Settings" onPress={go('settings')} />
       <DrawerItem icon={IconShield} label="Help" onPress={go('help')} />
     </Drawer>
   );
 }
 
-/** The three counts the drawer badges, in one subscription. */
+/**
+ * The counts the drawer shows, in one subscription.
+ *
+ * The waiting count is the expensive one — it derives every draft from six tables
+ * — which is exactly why this is gated on `visible` and deferred past the slide.
+ * It is also the only honest way to badge Nudges: a stored queue would let the
+ * badge claim work that was already done.
+ */
 function subscribeCounts(onChange: (counts: DrawerCounts) => void) {
   return combineLatest([
-    database.get<ClientModel>('clients').query().observe(),
-    database.get<PaymentModel>('payments').query().observe(),
+    database.get<ClientModel>('clients').query().observeWithColumns(['name', 'phone', 'status']),
     database.get<ExerciseModel>('exercises').query().observe(),
+    database.get<NudgeRuleModel>('nudge_rules').query().observeWithColumns(['enabled', 'threshold', 'action', 'message', 'kind']),
+    database
+      .get<ScheduledSessionModel>('scheduled_sessions')
+      .query()
+      .observeWithColumns(['scheduled_at', 'status']),
+    database
+      .get<PackageModel>('packages')
+      .query()
+      .observeWithColumns(['sessions_remaining', 'amount', 'status', 'due_date', 'written_off_at']),
+    database.get<PaymentModel>('payments').query().observeWithColumns(['amount', 'status', 'paid_at']),
+    database.get<NudgeLogModel>('nudge_logs').query().observeWithColumns(['sent_at', 'status']),
   ])
     .pipe(
-      map(([clients, payments, exercises]) => ({
-        clients: clients.length,
-        overdue: payments.filter((p) => DUE.has((p.status || '').toLowerCase())).length,
-        exercises: exercises.length,
-      })),
+      map(([clients, exercises, rules, sessions, packages, payments, logs]) => {
+        const input: NudgeInput = { rules, clients, sessions, packages, payments, logs };
+        return {
+          clients: clients.length,
+          exercises: exercises.length,
+          waiting: buildWaiting(input, Date.now()).length,
+        };
+      }),
     )
     .subscribe(onChange);
 }
 
-/** Support asks for this every time, which is why the line is tappable to copy. */
+/** Support asks for this every time. Tapping it shares it. */
 function versionLine(): string {
   const config = Constants.expoConfig;
   const version = config?.version ?? '1.0.0';

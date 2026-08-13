@@ -1,7 +1,7 @@
 /**
  * Train X — "Command Deck" design tokens.
  *
- * Ported verbatim from `agent/design system/trainxdesignsystem.html` (v1.0 · 9 Aug 2026),
+ * Ported verbatim from `agent/design system/xrepdesignsystem.html` (v1.0 · 9 Aug 2026),
  * which is the single source of truth. Every value below is a token; no component
  * may hard-code a colour, size or radius. Swap the palette and the app reskins.
  *
@@ -226,6 +226,15 @@ export const motion = {
   fast: 180, // chip, toggle, tooltip
   base: 240, // sheet, nav, expand
   slow: 320, // page transition
+  /**
+   * Content arriving in place of a skeleton.
+   *
+   * Longer than a page transition on purpose. A transition is a move the user
+   * asked for and is waiting on; this one they did not ask for, and its whole
+   * job is to be unhurried enough that a screenful of data appearing does not
+   * read as a jolt.
+   */
+  reveal: 420,
 };
 
 /**
@@ -244,8 +253,22 @@ export const curve = {
   standard: [0.2, 0.8, 0.2, 1],
   emphasizedDecelerate: [0.05, 0.7, 0.1, 1],
   emphasizedAccelerate: [0.3, 0, 0.8, 0.15],
+  /**
+   * For a fade, not a journey.
+   *
+   * The emphasized curves above are savagely front-loaded — `emphasizedDecelerate`
+   * puts the output at 0.7 by a twentieth of the duration. On a surface crossing
+   * 300px that still reads as travel, because the remaining distance is large.
+   * On an opacity it reads as a snap followed by a long invisible tail: measured
+   * on device, a 320ms fade reached 94% in four milliseconds.
+   *
+   * This is ease-out-quad — a fifth of the way through, a fifth of the way
+   * there. Slow enough to be seen the whole way, and still settling rather than
+   * stopping.
+   */
+  reveal: [0.25, 0.46, 0.45, 0.94],
 } satisfies Record<string, Curve> as Record<
-  'standard' | 'emphasizedDecelerate' | 'emphasizedAccelerate',
+  'standard' | 'emphasizedDecelerate' | 'emphasizedAccelerate' | 'reveal',
   // Widened deliberately: picking one of two curves with a ternary yields a
   // union of literal tuples, and a union cannot be spread into `Easing.bezier`.
   Curve

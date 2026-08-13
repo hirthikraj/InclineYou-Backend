@@ -173,5 +173,187 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    {
+      // Backend V12. Behind the drawer: the if/then rules, the star on an
+      // exercise, how a custom exercise is logged, and how long a program runs.
+      //
+      // Nothing here for reports or adherence — both are computed on the phone
+      // from sessions and workouts that already sync, which is the point: a
+      // weekly server-side score hides a client who stopped on Tuesday.
+      toVersion: 8,
+      steps: [
+        createTable({
+          name: 'nudge_rules',
+          columns: [
+            { name: 'trainer_id', type: 'string', isIndexed: true },
+            { name: 'kind', type: 'string', isIndexed: true },
+            { name: 'threshold', type: 'number', isOptional: true },
+            { name: 'action', type: 'string' },
+            { name: 'message', type: 'string', isOptional: true },
+            { name: 'enabled', type: 'boolean' },
+            { name: 'order_index', type: 'number' },
+            { name: 'created_at', type: 'number' },
+            { name: 'updated_at', type: 'number' },
+          ],
+        }),
+        createTable({
+          name: 'exercise_favourites',
+          columns: [
+            { name: 'trainer_id', type: 'string', isIndexed: true },
+            { name: 'exercise_id', type: 'string', isIndexed: true },
+            { name: 'created_at', type: 'number' },
+            { name: 'updated_at', type: 'number' },
+          ],
+        }),
+        addColumns({
+          table: 'exercises',
+          columns: [{ name: 'log_type', type: 'string', isOptional: true }],
+        }),
+        addColumns({
+          table: 'templates',
+          columns: [{ name: 'weeks', type: 'number', isOptional: true }],
+        }),
+      ],
+    },
+    {
+      /**
+       * `templates.structure` — the blueprint, so the Programs screen can draw a
+       * template's shape and list its days with no signal.
+       *
+       * It belongs with `weeks` in version 8 and is deliberately NOT there. By
+       * the time it was needed, a device had already run version 8 as written —
+       * and a migration that has run anywhere is immutable, because WatermelonDB
+       * records only the version it reached, not which steps it took. Editing
+       * step 8 would leave that device stamped `user_version = 8` with no
+       * `structure` column and no migration that will ever add one; every insert
+       * into `templates` then fails with "no such column", which is exactly how
+       * this was found.
+       *
+       * So it gets its own version. That works from all three starting states: a
+       * phone at 7 runs 8 then 9, the phone that ran the partial 8 runs 9, and a
+       * fresh install takes the schema whole and runs neither.
+       */
+      toVersion: 9,
+      steps: [
+        addColumns({
+          table: 'templates',
+          columns: [{ name: 'structure', type: 'string', isOptional: true }],
+        }),
+      ],
+    },
+    {
+      /**
+       * Screen 17 · the workout log.
+       *
+       * One table and one column, and nothing for the personal record — §09 of
+       * the design makes that a rule rather than an optimisation. A record is
+       * computed every time the screen is read, so correcting a set from
+       * November fixes every record that depended on it in the same frame.
+       */
+      toVersion: 10,
+      steps: [
+        createTable({
+          name: 'workout_exercises',
+          columns: [
+            { name: 'workout_session_id', type: 'string', isIndexed: true },
+            { name: 'exercise_id', type: 'string', isIndexed: true },
+            { name: 'order_index', type: 'number' },
+            { name: 'source', type: 'string' },
+            { name: 'swapped_from_exercise_id', type: 'string', isOptional: true },
+            { name: 'target_sets', type: 'number', isOptional: true },
+            { name: 'target_reps', type: 'number', isOptional: true },
+            { name: 'rest_seconds', type: 'number', isOptional: true },
+            { name: 'removed_at', type: 'number', isOptional: true },
+            { name: 'created_at', type: 'number' },
+            { name: 'updated_at', type: 'number' },
+          ],
+        }),
+        addColumns({
+          table: 'workout_sessions',
+          columns: [{ name: 'ended_at', type: 'number', isOptional: true }],
+        }),
+      ],
+    },
+    {
+      /**
+       * Screens 18–24 · the client role.
+       *
+       * Two tables and two columns, which is the whole storage cost of the other
+       * half of the product — because the role is a lens, not an account. A
+       * client's plan, sets, sessions, packs and receipts are the records their
+       * trainer already has; this adds only what nobody was storing: who their
+       * trainer is (`coaches`), the report that was sent rather than derived
+       * (`weekly_reports`), and the two facts a moved session needs.
+       */
+      toVersion: 11,
+      steps: [
+        createTable({
+          name: 'coaches',
+          columns: [
+            { name: 'name', type: 'string' },
+            { name: 'gym_name', type: 'string', isOptional: true },
+            { name: 'phone', type: 'string', isOptional: true },
+            { name: 'upi_vpa', type: 'string', isOptional: true },
+            { name: 'created_at', type: 'number' },
+            { name: 'updated_at', type: 'number' },
+          ],
+        }),
+        createTable({
+          name: 'weekly_reports',
+          columns: [
+            { name: 'trainer_id', type: 'string', isIndexed: true },
+            { name: 'client_id', type: 'string', isIndexed: true },
+            { name: 'week_start', type: 'string' },
+            { name: 'week_end', type: 'string' },
+            { name: 'sessions_kept', type: 'number' },
+            { name: 'sessions_planned', type: 'number' },
+            { name: 'trained_days', type: 'string', isOptional: true },
+            { name: 'volume_kg', type: 'number' },
+            { name: 'sets_done', type: 'number' },
+            { name: 'new_bests', type: 'number' },
+            { name: 'best_line', type: 'string', isOptional: true },
+            { name: 'best_previous', type: 'string', isOptional: true },
+            { name: 'sent_at', type: 'number', isOptional: true },
+            { name: 'created_at', type: 'number' },
+            { name: 'updated_at', type: 'number' },
+          ],
+        }),
+        addColumns({
+          table: 'scheduled_sessions',
+          columns: [
+            { name: 'moved_from_at', type: 'number', isOptional: true },
+            { name: 'client_confirmed_at', type: 'number', isOptional: true },
+          ],
+        }),
+      ],
+    },
+    {
+      /**
+       * Diary 3d · batches.
+       *
+       * One table and one nullable column. A batch is not a session with many
+       * clients — every attendee keeps their own `scheduled_sessions` row and
+       * they share a `batch_id`, so a pack still moves per person, one attendee
+       * can no-show while the rest train, and the 24-hour undo stays exact.
+       */
+      toVersion: 12,
+      steps: [
+        createTable({
+          name: 'batches',
+          columns: [
+            { name: 'trainer_id', type: 'string', isIndexed: true },
+            { name: 'name', type: 'string' },
+            { name: 'capacity', type: 'number' },
+            { name: 'min_size', type: 'number' },
+            { name: 'created_at', type: 'number' },
+            { name: 'updated_at', type: 'number' },
+          ],
+        }),
+        addColumns({
+          table: 'scheduled_sessions',
+          columns: [{ name: 'batch_id', type: 'string', isOptional: true }],
+        }),
+      ],
+    },
   ],
 });

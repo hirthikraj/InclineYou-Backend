@@ -57,6 +57,7 @@ export default function BookSheet({
   visible,
   input,
   at,
+  seedClientId = null,
   onBook,
   onClose,
 }: {
@@ -64,10 +65,17 @@ export default function BookSheet({
   input: DiaryInput;
   /** The slot that was tapped. */
   at: number;
+  /**
+   * Who to open with, when the sheet was reached from somewhere that already
+   * knows — a client's file, the roster's row menu, the screen after adding
+   * them. Booking from a free slot knows the time and not the person, so it
+   * stays null and the client list leads, which is 90% of that decision.
+   */
+  seedClientId?: string | null;
   onBook: (result: BookResult) => void;
   onClose: () => void;
 }) {
-  const [clientId, setClientId] = useState<string | null>(null);
+  const [clientId, setClientId] = useState<string | null>(seedClientId);
   const [minutes, setMinutes] = useState(DEFAULT_SESSION_MIN);
   const [mode, setMode] = useState<DeliveryMode>('floor');
   const [query, setQuery] = useState('');
@@ -80,7 +88,7 @@ export default function BookSheet({
   if (visible !== seed) {
     setSeed(visible);
     if (visible) {
-      setClientId(null);
+      setClientId(seedClientId);
       setMinutes(DEFAULT_SESSION_MIN);
       setMode('floor');
       setQuery('');
@@ -152,7 +160,7 @@ export default function BookSheet({
           <Callout style={styles.note}>
             {occurrences.length === 0
               ? 'Pick a day to see how many sessions this books.'
-              : `Ends after ${occurrences.length} more, on ${stamp(last)} — the day her pack runs out. `}
+              : `Ends after ${occurrences.length} more, on ${stamp(last)} — the day their pack runs out. `}
             {occurrences.length > 0 ? (
               <CalloutStrong>Nobody gets booked into sessions they haven't paid for.</CalloutStrong>
             ) : null}

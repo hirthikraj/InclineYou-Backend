@@ -1,7 +1,7 @@
 /**
  * Screen 01 · Sign in · OTP verify.
  *
- * Built to `agent/design system/screens/trainxloginotp.html` §§ 02, 03 and 06.
+ * Built to `agent/design system/screens/xreploginotp.html` §§ 02, 03 and 06.
  * Six states live in here, because auth is judged on what happens when it goes
  * wrong and lumping every failure into "Invalid OTP" strands people who did
  * nothing wrong:
@@ -34,6 +34,7 @@ import {
   readOtpFailure,
   readOtpLock,
   requestOtp,
+  roleOf,
   requestOtpOnWhatsApp,
   verifyOtp,
   type AuthResponse,
@@ -129,16 +130,72 @@ export default function OtpScreen({ navigation, route }: Props) {
   const expired = failure?.kind === 'expired';
   const busy = phase === 'verifying';
 
-  /* --- 2c → hand over to the app. The token lands in the Keychain/Keystore. --- */
+  /* --- 2c → hand over. Four ways out, and three of them are not the app. ---
+   *
+   * A verified number is one of four things, and the design gives each its own
+   * screen: a trainer (or a client) goes straight through; somebody who is both
+   * gets the role picker; a number on nobody's roster gets 7a; and a number
+   * whose every membership is paused gets 7b. Only the first stores a token,
+   * which is what makes the other three reachable at all — RootNavigator swaps
+   * stacks the moment one exists.
+   */
   useEffect(() => {
     if (phase !== 'verified' || !session) return;
     const t = setTimeout(() => {
-      // RootNavigator swaps stacks on its own once the token is set —
-      // to trainer setup for a first sign-in, straight to the app otherwise.
-      void signIn(session.token, session.trainerId, needsSetup(session));
+      const role = roleOf(session);
+      const memberships = session.clientOf ?? [];
+
+      if (role === 'paused' && session.paused) {
+        navigation.replace('Paused', {
+          trainerName: session.paused.trainerName,
+          trainerPhone: session.paused.trainerPhone,
+          pausedOn: session.paused.pausedOn,
+        });
+        return;
+      }
+
+      if (role === 'pending' && session.token) {
+        navigation.replace('Unknown', { phone, token: session.token });
+        return;
+      }
+
+      if (!session.token) {
+        // Nothing to sign in with and no screen that fits — treat it as a
+        // failure rather than a blank app.
+        setPhase('entry');
+        setNotice('Something is wrong with this sign-in. Try again in a moment.');
+        return;
+      }
+
+      // § 05: skip the picker whenever it can be skipped. It earns its place
+      // only for the genuinely dual user — a trainer who is also somebody's
+      // client — or for a client on two rosters.
+      const bothRoles = role === 'trainer' && memberships.length > 0;
+      const manyTrainers = role === 'client' && memberships.length > 1;
+      if (bothRoles || manyTrainers) {
+        navigation.replace('Role', {
+          session: {
+            token: session.token,
+            trainerId: session.trainerId,
+            owesSetup: needsSetup(session),
+            memberships,
+            name: session.trainerName ?? undefined,
+          },
+        });
+        return;
+      }
+
+      void signIn({
+        token: session.token,
+        trainerId: session.trainerId,
+        owesSetup: needsSetup(session),
+        lens: role === 'client' ? 'client' : 'trainer',
+        clientId: role === 'client' ? (memberships[0]?.clientId ?? null) : null,
+        memberships,
+      });
     }, VERIFIED_HOLD_MS);
     return () => clearTimeout(t);
-  }, [phase, session, signIn]);
+  }, [phase, session, signIn, navigation, phone]);
 
   /* --- 3c → the lock lifts on its own; the trainer never has to guess when. --- */
   useEffect(() => {

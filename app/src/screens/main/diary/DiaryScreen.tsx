@@ -1,7 +1,7 @@
 /**
  * Screen 05 · Diary · FR-2.
  *
- * `agent/design system/screens/trainxdiary.html`.
+ * `agent/design system/screens/xrepdiary.html`.
  *
  * Eight platforms were torn down and every one of them ships a time grid. A
  * time grid is the wrong shape for this job: a personal trainer works a split
@@ -15,13 +15,20 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
+import {
+  useFocusEffect,
+  useIsFocused,
+  useNavigation,
+  useRoute,
+  type RouteProp,
+} from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useNetworkState } from 'expo-network';
 
 import type { MainStackParamList } from '../../../navigation/MainStack';
+import type { AppTabsParamList } from '../../../navigation/AppTabs';
 import { useShell } from '../../../navigation/AppShell';
 import { useDiary } from '../../../diary/useDiary';
 import {
@@ -33,12 +40,18 @@ import {
   daysWorkedRecently,
   findClash,
   hhmm,
+  BATCHES_ENABLED,
+  type DiaryBatch,
+  type DiaryInput,
   type DiaryItem,
 } from '../../../diary/diary';
 import {
+  addToBatch,
   bookSeries,
   bookSession,
   cancelSessions,
+  createBatch,
+  markBatchDone,
   createTimeBlock,
   markNotTrained,
   moveSession,
@@ -52,6 +65,7 @@ import {
   AgendaItem,
   AppBar,
   Avatar,
+  AvatarStack,
   Banner,
   BlockBar,
   Button,
@@ -74,6 +88,8 @@ import {
   List,
   MonthGrid,
   NowLine,
+  Pack,
+  Reveal,
   Row,
   Segmented,
   Tag,
@@ -84,7 +100,9 @@ import {
   colors,
   space,
 } from '../../../design';
+import { AgendaSkeleton } from './DiarySkeleton';
 import BookSheet, { type BookResult } from './BookSheet';
+import BatchSheet from './BatchSheet';
 import SessionSheet, { type Outcome } from './SessionSheet';
 import ClashSheet, { type ClashChoice } from './ClashSheet';
 import TimeOffSheet, { type BlockChoice } from './TimeOffSheet';
@@ -115,9 +133,15 @@ export default function DiaryScreen() {
   const [clash, setClash] = useState<{ item: DiaryItem; wanted: number; next: number | null } | null>(null);
   const [pending, setPending] = useState<BookResult | null>(null);
   const [blockRange, setBlockRange] = useState<{ from: number; to: number } | null>(null);
+  const [batchSheet, setBatchSheet] = useState<DiaryBatch | null>(null);
+  /** The batch a booking is being made into, so the sheet books them in rather than beside it. */
+  const [addTo, setAddTo] = useState<DiaryBatch | null>(null);
+  /** Pre-selected client, when the booking came from somewhere that knows who. */
+  const [bookFor, setBookFor] = useState<string | null>(null);
 
+  const route = useRoute<RouteProp<AppTabsParamList, 'DiaryTab'>>();
   const scroller = useRef<ScrollView>(null);
-  const { input, now } = useDiary(selected, focused);
+  const { input, now, ready } = useDiary(selected, focused);
   const offline = network.isConnected === false || network.isInternetReachable === false;
 
   const day = useMemo(() => buildDay(input, selected, now), [input, selected, now]);
@@ -151,6 +175,27 @@ export default function DiaryScreen() {
 
   /* ---------------------------------------------------------------- booking */
 
+  /**
+   * "Book a session", arriving from anywhere else in the app.
+   *
+   * Booking is a sheet on the diary, not a screen — 3a draws the diary behind it
+   * — so every entry point lands here rather than on a form of its own. An
+   * effect rather than initial state, because this tab is usually already
+   * mounted and a navigate to a live screen only changes its params. The params
+   * are cleared once consumed, or returning to the tab later would reopen it.
+   */
+  const wantsBook = route.params?.book === true;
+  useEffect(() => {
+    if (!wantsBook) return;
+    const askedFor = route.params?.at ?? null;
+    const slot = askedFor ?? nextBookableSlot(input, now);
+    setSelected(startOfDay(slot));
+    setView('day');
+    setBookFor(route.params?.clientId ?? null);
+    setBookAt(slot);
+    navigation.setParams({ book: undefined, clientId: undefined, at: undefined } as never);
+  }, [wantsBook, route.params?.at, route.params?.clientId, input, now, navigation]);
+
   const openBooking = (at: number) => {
     setOpenGap(null);
     setBookAt(at);
@@ -178,6 +223,21 @@ export default function DiaryScreen() {
   const write = async (result: BookResult) => {
     if (!trainerId) return;
     try {
+      // Booking *into* a batch, from its capacity strip. Not a series and never
+      // a repeat: you join the group at its slot, and the group owns the slot.
+      if (addTo) {
+        const batch = addTo;
+        setAddTo(null);
+        await addToBatch(batch.batchId, {
+          trainerId,
+          clientId: result.clientId,
+          at: batch.at,
+          durationMinutes: result.minutes,
+          mode: result.mode,
+        });
+        setNotice(`Added to ${batch.name}.`);
+        return;
+      }
       if (result.occurrences.length > 0) {
         await bookSeries(
           {
@@ -211,6 +271,21 @@ export default function DiaryScreen() {
     setPending(null);
     if (!result) return;
 
+    if (choice.kind === 'batch' && conflicting && trainerId) {
+      // The two of them become a batch at the slot they were both going to
+      // occupy anyway. The existing session keeps its pack history; the new one
+      // is booked into the same group.
+      const booked = await bookSession({
+        trainerId,
+        clientId: result.clientId,
+        at: conflicting.at,
+        durationMinutes: result.minutes,
+        mode: result.mode,
+      });
+      await createBatch(trainerId, batchNameFor(conflicting.at), [conflicting.id, booked.id]);
+      setNotice(`${conflicting.clientName} and one more, together.`);
+      return;
+    }
     if (choice.kind === 'move-theirs' && conflicting) {
       await moveSession(conflicting.id, choice.at);
       await write(result);
@@ -301,7 +376,9 @@ export default function DiaryScreen() {
   /* ------------------------------------------------------------------ views */
 
   const dayBody = () => {
-    if (day.items.length === 0 && day.gaps.length === 0) {
+    // Only once the day has actually been read. An empty agenda and an unread
+    // one look identical and mean opposite things.
+    if (day.items.length === 0 && day.gaps.length === 0 && ready) {
       const worked = daysWorkedRecently(input, now);
       return (
         <>
@@ -349,7 +426,12 @@ export default function DiaryScreen() {
     const stream: { key: string; at: number; node: React.ReactNode }[] = [];
 
     for (const item of day.items) {
+      // An attendee of a batch is drawn as part of the batch, not beside it.
+      if (item.batchId) continue;
       stream.push({ key: item.id, at: item.at, node: sessionRow(item) });
+    }
+    for (const batch of day.batches) {
+      stream.push({ key: batch.id, at: batch.at, node: batchRow(batch) });
     }
     for (const gap of day.gaps) {
       const open = openGap === gap.id;
@@ -451,6 +533,42 @@ export default function DiaryScreen() {
     </AgendaItem>
   );
 
+  /**
+   * 3d · a batch, as one row.
+   *
+   * Capacity is a strip plus the number, and an under-filled batch says how far
+   * off the minimum it is **while there is still time to fill it** — three days
+   * out is actionable, ten minutes before is a complaint.
+   */
+  const batchRow = (batch: DiaryBatch) => (
+    <AgendaItem time={batch.time} meridiem={batch.meridiem}>
+      <Row
+        wrap
+        title={batch.name}
+        subtitle={
+          batch.shortBy !== null
+            ? `${batch.detail}\nBelow the ${batch.minSize} you need to run it`
+            : batch.detail
+        }
+        severity={batch.shortBy !== null ? 'alert' : undefined}
+        spine={batch.running ? 'now' : batch.settled ? 'done' : undefined}
+        trailing={
+          <View style={styles.batchEnd}>
+            <AvatarStack names={batch.people.map((p) => p.name)} />
+            <Pressable
+              onPress={() => setAddTo(batch)}
+              accessibilityRole="button"
+              accessibilityLabel={`${batch.booked} of ${batch.capacity} places taken. Add a client`}
+            >
+              <Pack remaining={batch.booked} total={batch.capacity} cap min={batch.minSize} />
+            </Pressable>
+          </View>
+        }
+        onPress={() => setBatchSheet(batch)}
+      />
+    </AgendaItem>
+  );
+
   const trailingFor = (item: DiaryItem) => {
     if (item.open) return <Button label="Close" size="sm" variant="ghost" onPress={() => void closeOff(item)} />;
     if (item.undoable && item.state !== 'done') {
@@ -459,6 +577,19 @@ export default function DiaryScreen() {
     if (item.state === 'done') return <Tag label="Done" tone="ok" />;
     if (item.state === 'cancelled') return <Tag label="Cancelled" />;
     return <Tag label={item.mode === 'remote' ? 'Remote' : 'Floor'} tone={item.mode === 'remote' ? 'remote' : 'floor'} />;
+  };
+
+  const closeBatch = async (batch: DiaryBatch) => {
+    try {
+      const charged = await markBatchDone(batch.sessionIds);
+      setNotice(
+        charged === batch.booked
+          ? `${batch.booked} marked done, one off each pack.`
+          : `${batch.booked} marked done. ${batch.booked - charged} had no pack to charge.`,
+      );
+    } catch {
+      setNotice('Could not close that batch off.');
+    }
   };
 
   const closeOff = async (item: DiaryItem) => {
@@ -497,7 +628,11 @@ export default function DiaryScreen() {
             id: p.sessionId,
             time: p.time,
             name: p.name,
-            kind: p.mode === 'remote' ? ('remote' as const) : ('floor' as const),
+            kind: p.batchId
+              ? ('batch' as const)
+              : p.mode === 'remote'
+                ? ('remote' as const)
+                : ('floor' as const),
             done: p.state === 'done',
           })),
         }))}
@@ -514,6 +649,7 @@ export default function DiaryScreen() {
         items={[
           { color: colors.accent, label: 'Floor' },
           { color: colors.remote, label: 'Remote' },
+          ...(BATCHES_ENABLED ? [{ color: colors.warn, label: 'Batch' }] : []),
         ]}
       />
     </>
@@ -599,17 +735,24 @@ export default function DiaryScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {header}
-        <View style={styles.viewBody}>
+        {/* The strip and the switcher sit in the header above and stay real —
+            you can already swipe to Thursday before the day has been read. Only
+            the body below them is unknown, so only it crosses over. */}
+        <Reveal ready={ready} skeleton={<AgendaSkeleton />} style={styles.viewBody}>
           {view === 'day' ? dayBody() : view === 'week' ? weekBody() : monthBody()}
-        </View>
+        </Reveal>
       </ScrollView>
 
       <BookSheet
         visible={bookAt !== null}
         input={input}
         at={bookAt ?? now}
+        seedClientId={bookFor}
         onBook={(result) => void commitBooking(result)}
-        onClose={() => setBookAt(null)}
+        onClose={() => {
+          setBookAt(null);
+          setBookFor(null);
+        }}
       />
       <SessionSheet
         visible={sheetItem !== null}
@@ -658,6 +801,26 @@ export default function DiaryScreen() {
           setPending(null);
         }}
       />
+      <BatchSheet
+        batch={batchSheet}
+        regulars={[]}
+        onAdd={() => {
+          const batch = batchSheet;
+          setBatchSheet(null);
+          setAddTo(batch);
+          setBookAt(batch?.at ?? null);
+        }}
+        onDoneAll={(batch) => {
+          setBatchSheet(null);
+          void closeBatch(batch);
+        }}
+        onOpenAttendee={(sessionId) => {
+          setBatchSheet(null);
+          const attendee = day.items.find((i) => i.id === sessionId);
+          if (attendee) setSheetItem(attendee);
+        }}
+        onClose={() => setBatchSheet(null)}
+      />
       <TimeOffSheet
         visible={blockRange !== null}
         input={input}
@@ -704,7 +867,33 @@ function idleNames(idle: { name: string }[]): string {
   return `${first} and ${idle.length - 1} other${idle.length === 2 ? '' : 's'}`;
 }
 
+/**
+ * The slot a booking should open on when the caller didn't name one.
+ *
+ * The first genuinely free slot in today's working hours, because that is the
+ * one a trainer means by "book a session" — and if today is full or over, the
+ * next hour on the clock, which is at least a real time rather than midnight.
+ */
+function nextBookableSlot(input: DiaryInput, now: number): number {
+  const today = buildDay(input, startOfDay(now), now);
+  const slot = today.gaps.flatMap((g) => g.slots).find((s) => s.at >= now);
+  if (slot) return slot.at;
+  const next = new Date(now);
+  next.setMinutes(0, 0, 0);
+  next.setHours(next.getHours() + 1);
+  return next.getTime();
+}
+
+/** "Morning batch", "Evening batch" — the hour is what a trainer calls it by. */
+function batchNameFor(at: number): string {
+  const hour = new Date(at).getHours();
+  if (hour < 12) return 'Morning batch';
+  if (hour < 17) return 'Afternoon batch';
+  return 'Evening batch';
+}
+
 const styles = StyleSheet.create({
+  batchEnd: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
   safe: { flex: 1, backgroundColor: colors.canvas },
   pad: { paddingHorizontal: space.inset },
   body: { paddingHorizontal: space.inset, paddingBottom: space.s10 },

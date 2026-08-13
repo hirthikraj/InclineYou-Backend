@@ -48,7 +48,7 @@ export { default as Search } from './Search';
 export type { SearchProps } from './Search';
 export { default as Sheet } from './Sheet';
 export type { SheetProps } from './Sheet';
-export { List, Row, RowTime } from './Row';
+export { List, Row, RowTime, RowValue } from './Row';
 export type { RowProps, RowSeverity, RowSpine } from './Row';
 
 /* ---------------------------------------------- home and navigation · § 07 */
@@ -72,6 +72,10 @@ export { Bar, Legend } from './Bar';
 export type { BarSegment, LegendEntry } from './Bar';
 export { default as WeekBars } from './WeekBars';
 export type { WeekDay } from './WeekBars';
+export { default as Skeleton, SkeletonRow, SkeletonCard, SkeletonHead } from './Skeleton';
+export type { SkeletonProps } from './Skeleton';
+export { default as Reveal } from './Reveal';
+export type { RevealProps } from './Reveal';
 export { default as Empty } from './Empty';
 export type { EmptyProps } from './Empty';
 export { default as NavBar } from './NavBar';
@@ -121,7 +125,7 @@ export { default as AvailRow } from './AvailRow';
 export { default as Months } from './Months';
 export type { MonthChip } from './Months';
 export { default as Figures } from './Figures';
-export type { FiguresProps } from './Figures';
+export type { FiguresProps, FigureTone } from './Figures';
 export { default as ShareRow } from './ShareRow';
 export { Ledger, LedgerRow, BalanceMark } from './Ledger';
 export type { LedgerRowProps } from './Ledger';
@@ -134,3 +138,65 @@ export type { Key as KeypadKey } from './Keypad';
 
 export { default as RestTimer, formatClock } from './RestTimer';
 export type { RestTimerProps } from './RestTimer';
+
+/* -------------------------------------------- behind the drawer · § 07–16 */
+
+export { default as Setting, SettingList } from './Setting';
+export type { SettingProps } from './Setting';
+export { default as Switch } from './Switch';
+export type { SwitchProps } from './Switch';
+export { default as WeekShape, toneColor } from './WeekShape';
+export type { WeekShapeProps, ShapeLegendEntry } from './WeekShape';
+export { default as Metric } from './Metric';
+export type { MetricProps, Delta } from './Metric';
+export { default as Streak } from './Streak';
+export type { StreakProps, StreakDay } from './Streak';
+export { default as Rule } from './Rule';
+export type { RuleProps } from './Rule';
+export { default as Faq } from './Faq';
+export type { FaqProps, FaqEntry } from './Faq';
+export { default as Thumb } from './Thumb';
+export type { ThumbProps } from './Thumb';
+export { default as Danger } from './Danger';
+export type { DangerProps } from './Danger';
+
+/* ------------------------------------------------ the workout log · § 17 */
+
+export { Sets, SetsHead, SetRow, SetRowStatic, SetNote } from './Sets';
+export type { SetRowProps } from './Sets';
+export { default as Stepper } from './Stepper';
+export type { StepperProps } from './Stepper';
+export { default as Rpe } from './Rpe';
+export type { RpeProps } from './Rpe';
+export { default as PrCard } from './PrCard';
+export type { PrCardProps } from './PrCard';
+export { default as Summary } from './Summary';
+export type { SummaryFigure } from './Summary';
+export { default as Dock } from './Dock';
+export type { DockProps } from './Dock';
+
+/* ------------------------------------------------- the client role · § 18–24 */
+
+/* Two components and one icon, which is the whole visual cost of the other half
+   of the product — there is no second design system. */
+export { default as Coach } from './Coach';
+export type { CoachProps } from './Coach';
+export { default as Notice } from './Notice';
+export type { NoticeProps } from './Notice';
+
+/* ------------------------------------------------- the client file · § 22–24 */
+
+/* The design file's own count: four additions, and everything else on the file
+   is a component the system already had. `Dialog` is the fifth only because the
+   CSS had `.tx-dialog` from the start and React Native never needed it until
+   something in the product became irreversible. */
+export { default as ClientHead } from './ClientHead';
+export type { ClientHeadProps } from './ClientHead';
+export { default as Tabs } from './Tabs';
+export type { TabsProps, TabItem } from './Tabs';
+export { Kv, KvRow } from './Kv';
+export type { KvRowProps } from './Kv';
+export { Measures, Measure } from './Measures';
+export type { MeasureProps } from './Measures';
+export { default as Dialog, DialogStrong } from './Dialog';
+export type { DialogProps } from './Dialog';

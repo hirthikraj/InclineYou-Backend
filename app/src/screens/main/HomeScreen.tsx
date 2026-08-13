@@ -1,7 +1,7 @@
 /**
  * Screen 03 · Home.
  *
- * `agent/design system/screens/trainxhome.html`.
+ * `agent/design system/screens/xrephome.html`.
  *
  * Seven modules, in the order a trainer needs them: what's next, where the day
  * stands, who needs chasing, the schedule, the money, and what's happened. The
@@ -38,7 +38,7 @@ import { database } from '../../db';
 import type ExerciseModel from '../../db/models/Exercise';
 import type ProgramExerciseModel from '../../db/models/ProgramExercise';
 import { endSession, startSession } from '../../db/sessions';
-import { loadDraft, EMPTY_DRAFT, type SetupDraft } from '../../setup/draft';
+import { loadDraft, onDraftChange, EMPTY_DRAFT, type SetupDraft } from '../../setup/draft';
 import { METER_WHY, profileMeterItems } from '../../setup/meter';
 import {
   Activity,
@@ -59,6 +59,7 @@ import {
   Legend,
   Meter,
   RestTimer,
+  Reveal,
   Row,
   RowTime,
   SectionHead,
@@ -74,9 +75,20 @@ import {
   space,
 } from '../../design';
 import { NextHero, RunningHero, TomorrowHero, ClearHero, FirstRunHero } from './home/Hero';
+import DeckSkeleton from './home/DeckSkeleton';
 
 /** § 04: the Floor / Remote / Done choice persists across launches. */
-const FILTER_KEY = 'trainx_today_filters';
+const FILTER_KEY = 'xrep_today_filters';
+
+/**
+ * § 06: the profile meter, dismissed.
+ *
+ * A trainer with no UPI ID and no certification to declare would otherwise be
+ * asked for both on every launch, forever. Persisted rather than held in state,
+ * because a card that comes back tomorrow hasn't been dismissed — it's been
+ * postponed, and nobody asked for that.
+ */
+const METER_KEY = 'xrep_meter_hidden';
 
 type Filters = { floor: boolean; remote: boolean; done: boolean };
 const DEFAULT_FILTERS: Filters = { floor: true, remote: true, done: false };
@@ -94,9 +106,12 @@ export default function HomeScreen() {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [showAllAttention, setShowAllAttention] = useState(false);
   const [draft, setDraft] = useState<SetupDraft>(EMPTY_DRAFT);
+  const [meterHidden, setMeterHidden] = useState(false);
   const [readAt, setReadAt] = useState(0);
   const [starting, setStarting] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  /** Set when the notice reports something reversible. Cleared with the notice. */
+  const [undo, setUndo] = useState<(() => void) | null>(null);
   const scroller = useRef<ScrollView>(null);
 
   /* ------------------------------------------------------------ persistence */
@@ -110,6 +125,7 @@ export default function HomeScreen() {
         // A corrupt preference is not worth a crash — the defaults are fine.
       }
     });
+    void SecureStore.getItemAsync(METER_KEY).then((raw) => setMeterHidden(raw === '1'));
   }, []);
 
   const toggle = (key: keyof Filters) => {
@@ -119,6 +135,11 @@ export default function HomeScreen() {
       return next;
     });
   };
+
+  // Profile edits land on the drawer's own screens, which write to the server —
+  // and the draft the meter reads catches up asynchronously. Subscribing beats
+  // re-reading on focus, which loses the race against a background reconcile.
+  useEffect(() => onDraftChange(setDraft), []);
 
   // The profile and the read mark both change on other screens, so they're
   // re-read on focus rather than once on mount.
@@ -138,12 +159,32 @@ export default function HomeScreen() {
   const meterItems = useMemo(
     () =>
       profileMeterItems(draft, {
-        onAddCertification: () => navigation.navigate('Soon', { title: 'Your profile' }),
-        onAddUpi: () => navigation.navigate('Soon', { title: 'Your profile' }),
+        // Both of these pointed at the "not built yet" placeholder until §07–16
+        // built the screens they were always meant to open. A meter row that
+        // tells you what is missing and then refuses to take you there is worse
+        // than no meter.
+        onAddCertification: () => navigation.navigate('Profile'),
+        onAddUpi: () => navigation.navigate('GettingPaid'),
       }),
     [draft, navigation],
   );
   const profileComplete = meterPercent(meterItems) >= 100;
+
+  /**
+   * Hiding it has to say where it went, or the rest of the profile becomes
+   * unfindable — the meter was the only signpost to it on this screen. And it
+   * has to be reversible: the card never comes back on its own, so a mis-tap
+   * without an undo is permanent.
+   */
+  const hideMeter = () => {
+    setMeterHidden(true);
+    void SecureStore.setItemAsync(METER_KEY, '1');
+    setNotice('Hidden. The rest of it is in Menu › You and your business.');
+    setUndo(() => () => {
+      setMeterHidden(false);
+      void SecureStore.deleteItemAsync(METER_KEY);
+    });
+  };
 
   const unread = useMemo(
     () => buildNotifications(deck, readAt).unread,
@@ -253,15 +294,19 @@ export default function HomeScreen() {
 
   /* ------------------------------------------------------------------ render */
 
+  // The date is always true; everything after it counts something, so it waits
+  // for the read. "day done" before the tables are open would be a lie.
   const subtitle = [
     dayStamp(Date.now()),
-    deck.running
-      ? 'in session'
-      : dayOver
-        ? 'day done'
-        : deck.today.length > 0
-          ? `${deck.today.length} session${deck.today.length === 1 ? '' : 's'}`
-          : null,
+    !deck.ready
+      ? null
+      : deck.running
+        ? 'in session'
+        : dayOver
+          ? 'day done'
+          : deck.today.length > 0
+            ? `${deck.today.length} session${deck.today.length === 1 ? '' : 's'}`
+            : null,
   ]
     .filter(Boolean)
     .join(' · ');
@@ -324,17 +369,36 @@ export default function HomeScreen() {
         ) : null}
 
         {notice ? (
-          <Toast style={styles.banner} action={{ label: 'Dismiss', onPress: () => setNotice(null) }}>
+          <Toast
+            style={styles.banner}
+            action={
+              undo
+                ? {
+                    label: 'Undo',
+                    onPress: () => {
+                      undo();
+                      setUndo(null);
+                      setNotice(null);
+                    },
+                  }
+                : { label: 'Dismiss', onPress: () => setNotice(null) }
+            }
+          >
             {notice}
           </Toast>
         ) : null}
 
         {/* § 06: the meter is a conditional banner, not chrome — it exists only
-            while there is something left to fill in. */}
-        {!profileComplete ? (
-          <Meter items={meterItems} why={METER_WHY} style={styles.meter} />
+            while there is something left to fill in, and only until the trainer
+            says they're done being asked. */}
+        {!profileComplete && !meterHidden ? (
+          <Meter items={meterItems} why={METER_WHY} onClose={hideMeter} style={styles.meter} />
         ) : null}
 
+        {/* Everything from here down is derived from the tables. The chrome
+            above — bar, offline banner, sync band, profile meter — is real
+            before the first read and stays put. */}
+        <Reveal ready={deck.ready} skeleton={<DeckSkeleton />}>
         <Hero
           deck={deck}
           starting={starting}
@@ -342,7 +406,9 @@ export default function HomeScreen() {
           onStart={start}
           onEnd={end}
           onAddClient={() => navigation.navigate('AddClient')}
-          onBook={() => navigation.navigate('ScheduleSession', {})}
+          onBook={() =>
+            navigation.navigate('Home', { screen: 'DiaryTab', params: { book: true } } as never)
+          }
           onTomorrow={() => navigation.navigate('Calendar', {})}
         />
 
@@ -382,7 +448,9 @@ export default function HomeScreen() {
                   : undefined
               }
             />
-            {deck.attention.length === 0 ? (
+            {/* Not before the tables have been read — "nobody needs you" is a
+                claim, and it is the opposite of the truth while loading. */}
+            {deck.attention.length === 0 && deck.ready ? (
               <Card>
                 <Empty
                   compact
@@ -590,6 +658,7 @@ export default function HomeScreen() {
             Not ready? Add yourself as a client — log sessions against it and delete it later.
           </Banner>
         ) : null}
+        </Reveal>
       </ScrollView>
     </SafeAreaView>
   );

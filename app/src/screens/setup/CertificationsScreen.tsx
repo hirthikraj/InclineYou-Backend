@@ -1,7 +1,7 @@
 /**
  * Screen 02 · Trainer setup · Step 4 of 6 · Certifications.
  *
- * `agent/design system/screens/trainxtrainersetup.html` § 04 — 4a chips,
+ * `agent/design system/screens/xreptrainersetup.html` § 04 — 4a chips,
  * 4b the full searchable list.
  *
  * This is where the category is quietly dishonest. Four of the eight platforms

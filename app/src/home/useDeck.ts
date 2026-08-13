@@ -24,6 +24,7 @@ import type ProgramModel from '../db/models/Program';
 import type PackageModel from '../db/models/Package';
 import type PaymentModel from '../db/models/Payment';
 import type BodyMetricModel from '../db/models/BodyMetric';
+import { liveCache } from '../db/live';
 import { ACTIVITY_DAYS, buildDeck, type Deck, type DeckInput } from './deck';
 import { DAY_MS, startOfDay, startOfWeek } from './time';
 
@@ -52,6 +53,14 @@ const EMPTY: Raw = {
   metrics: [],
 };
 
+/** The last emission, so a re-mount paints a real deck on its first frame. */
+const cache = liveCache<Raw>(EMPTY);
+
+export interface LiveDeck extends Deck {
+  /** False only until the first emission of the app's life. */
+  ready: boolean;
+}
+
 /**
  * The window everything is fetched against.
  *
@@ -73,9 +82,10 @@ function windowFor(now: number) {
  *   the screen, and doing that behind a pushed screen or another tab spends
  *   frames the visible screen needs. It catches up the moment focus returns.
  */
-export function useDeck(active: boolean = true): Deck {
+export function useDeck(active: boolean = true): LiveDeck {
   const [now, setNow] = useState(() => Date.now());
-  const [raw, setRaw] = useState<Raw>(EMPTY);
+  const [raw, setRaw] = useState<Raw>(cache.value);
+  const [ready, setReady] = useState(cache.ready);
   const [prSessionIds, setPrSessionIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
@@ -128,7 +138,11 @@ export function useDeck(active: boolean = true): Deck {
           }),
         ),
       )
-      .subscribe(setRaw);
+      .subscribe((next) => {
+        cache.set(next);
+        setRaw(next);
+        setReady(true);
+      });
 
     return () => sub.unsubscribe();
   }, [day]);
@@ -159,7 +173,10 @@ export function useDeck(active: boolean = true): Deck {
     };
   }, [recentWorkoutIds]);
 
-  return useMemo(() => buildDeck({ ...raw, prSessionIds }, now), [raw, prSessionIds, now]);
+  return useMemo(
+    () => ({ ...buildDeck({ ...raw, prSessionIds }, now), ready }),
+    [raw, prSessionIds, now, ready],
+  );
 }
 
 /**

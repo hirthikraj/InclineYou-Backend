@@ -7,7 +7,7 @@
  * shell comes straight from `../auth/authLayout` rather than being restated,
  * and only the differences live here.
  *
- * `agent/design system/screens/trainxtrainersetup.html` — `.setup__bar`,
+ * `agent/design system/screens/xreptrainersetup.html` — `.setup__bar`,
  * `.auth__body`, `.auth__foot`.
  */
 

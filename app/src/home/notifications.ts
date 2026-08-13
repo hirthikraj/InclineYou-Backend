@@ -21,7 +21,7 @@ import * as SecureStore from 'expo-secure-store';
 import type { Deck } from './deck';
 import { relativePast } from './time';
 
-const READ_KEY = 'trainx_notifications_read_at';
+const READ_KEY = 'xrep_notifications_read_at';
 
 export type NotifCategory = 'payments' | 'training';
 

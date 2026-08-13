@@ -35,11 +35,19 @@ export interface TimelineItemProps {
   /** The answer already given, or what's coming — never both. */
   meta?: string;
   state: TimelineState;
+  /**
+   * Replaces whatever the dot would otherwise draw.
+   *
+   * The client file's program history needs an em dash for the stretch with no
+   * program: that period is a real part of somebody's training, and a tick
+   * there would congratulate them for it while a "0" would read as a count.
+   */
+  mark?: string;
   /** The rail stops at the last item; nothing connects to below it. */
   last?: boolean;
 }
 
-export function TimelineItem({ index, label, meta, state, last = false }: TimelineItemProps) {
+export function TimelineItem({ index, label, meta, state, mark, last = false }: TimelineItemProps) {
   const done = state === 'done';
   const now = state === 'now';
 
@@ -53,8 +61,12 @@ export function TimelineItem({ index, label, meta, state, last = false }: Timeli
       {/* The canvas ring is a real view: an RN border would eat into the dot,
           and a shadow can't be a hard 4px ring on both platforms. */}
       <View style={styles.ring}>
-        <View style={[styles.dot, done && styles.dotDone, now && styles.dotNow]}>
-          {done ? (
+        <View
+          style={[styles.dot, done && !mark && styles.dotDone, now && styles.dotNow]}
+        >
+          {mark ? (
+            <Text style={[styles.dotText, now && styles.dotTextNow]}>{mark}</Text>
+          ) : done ? (
             <IconCheck size={12} color="#FFFFFF" strokeWidth={3.4} />
           ) : (
             <Text style={[styles.dotText, now && styles.dotTextNow]}>{index}</Text>

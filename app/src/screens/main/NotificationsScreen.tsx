@@ -124,7 +124,7 @@ export default function NotificationsScreen() {
                 <Button
                   label="Notification settings"
                   variant="ghost"
-                  onPress={() => navigation.navigate('Soon', { title: 'Notification settings' })}
+                  onPress={() => navigation.navigate('NotifySettings')}
                 />
               ) : undefined
             }

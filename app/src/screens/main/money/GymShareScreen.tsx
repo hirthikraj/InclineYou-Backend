@@ -58,7 +58,7 @@ export default function GymShareScreen() {
   const navigation = useNavigation<Nav>();
   const focused = useIsFocused();
   const { trainerId } = useAuth();
-  const { input, now, reloadProfile } = useMoney(focused);
+  const { input, now, ready, profileLoaded, reloadProfile } = useMoney(focused);
 
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState('');
@@ -130,7 +130,11 @@ export default function GymShareScreen() {
         </View>
 
         <ScrollView contentContainerStyle={styles.body}>
+          {/* The gym comes off the network, so this one waits on the profile
+              too — "no gym on the book" must never appear to a trainer who has
+              one, just because the request is still in flight. */}
           {!editing ? (
+            !ready || !profileLoaded ? null : (
             <Empty
               icon={IconBuilding}
               title="No gym on the book"
@@ -138,6 +142,7 @@ export default function GymShareScreen() {
               style={styles.empty}
               action={<Button label="Add the gym" size="lg" icon={IconBuilding} onPress={openEditor} />}
             />
+            )
           ) : (
             <>
               <View style={styles.field}>

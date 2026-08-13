@@ -21,19 +21,51 @@ export const PACK_LOW = 2;
 export interface PackProps {
   remaining: number;
   total?: number;
+  /**
+   * `.tx-pack--cap` — the same strip counting the other way.
+   *
+   * A pack is running out, so a low number is bad. A batch is filling up, so a
+   * low number is *early*, not a warning — and the strip fills as people join
+   * rather than draining as they leave. Same component because it is the same
+   * object on screen; the inversion is the whole difference.
+   */
+  cap?: boolean;
+  /** Below this the strip warns. The batch's minimum, ignored on a pack. */
+  min?: number;
   style?: StyleProp<ViewStyle>;
 }
 
-export default function Pack({ remaining, total, style }: PackProps) {
-  const tone = remaining <= 0 ? colors.danger : remaining <= PACK_LOW ? colors.warn : colors.ok;
-  const ink = remaining <= 0 ? colors.danger : remaining <= PACK_LOW ? colors.warn : colors.ink;
+export default function Pack({ remaining, total, cap = false, min, style }: PackProps) {
+  const short = cap && min != null && remaining < min;
+  const tone = cap
+    ? short
+      ? colors.warn
+      : colors.accent
+    : remaining <= 0
+      ? colors.danger
+      : remaining <= PACK_LOW
+        ? colors.warn
+        : colors.ok;
+  const ink = cap
+    ? short
+      ? colors.warn
+      : colors.ink
+    : remaining <= 0
+      ? colors.danger
+      : remaining <= PACK_LOW
+        ? colors.warn
+        : colors.ink;
   const filled = total && total > 0 ? Math.max(0, Math.min(1, remaining / total)) : 0;
 
   return (
     <View
       style={[styles.pack, style]}
       accessibilityLabel={
-        total ? `${remaining} of ${total} sessions left` : `${remaining} sessions left`
+        cap
+          ? `${remaining} of ${total} places taken`
+          : total
+            ? `${remaining} of ${total} sessions left`
+            : `${remaining} sessions left`
       }
     >
       <Text style={[styles.value, { color: ink }]} maxFontSizeMultiplier={maxFontScale.micro}>

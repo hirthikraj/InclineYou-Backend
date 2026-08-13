@@ -9,17 +9,21 @@ import { colors, navTheme } from '../design';
 import AuthStack from './AuthStack';
 import SetupStack from './SetupStack';
 import MainStack from './MainStack';
+import ClientStack from './ClientStack';
 import type { MainStackParamList } from './MainStack';
 
 export default function RootNavigator() {
-  const { token, isLoading, needsSetup, landing, clearLanding } = useAuth();
+  const { token, isLoading, needsSetup, landing, clearLanding, lens } = useAuth();
   const navRef = useNavigationContainerRef<MainStackParamList>();
 
   // All three only make sense once we have a token; they're no-ops otherwise.
   useSyncTriggers(!!token);
   usePushRegistration(!!token);
 
-  const inApp = !!token && !needsSetup;
+  const client = lens === 'client';
+  // Trainer setup is a trainer's flow. A client has nothing to set up — their
+  // trainer maintains their record — so the client lens is never held behind it.
+  const inApp = !!token && (client || !needsSetup);
 
   // Only once setup is behind us: mid-flow there is nothing complete to send,
   // and the flow's own `finish()` owns the first attempt.
@@ -51,7 +55,15 @@ export default function RootNavigator() {
 
   return (
     <NavigationContainer ref={navRef} theme={navTheme}>
-      {!token ? <AuthStack /> : needsSetup ? <SetupStack /> : <MainStack />}
+      {!token ? (
+        <AuthStack />
+      ) : client ? (
+        <ClientStack />
+      ) : needsSetup ? (
+        <SetupStack />
+      ) : (
+        <MainStack />
+      )}
     </NavigationContainer>
   );
 }

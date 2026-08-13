@@ -11,6 +11,7 @@ import Program from './models/Program';
 import ProgramExercise from './models/ProgramExercise';
 import ScheduledSession from './models/ScheduledSession';
 import WorkoutSession from './models/WorkoutSession';
+import WorkoutExercise from './models/WorkoutExercise';
 import SetLog from './models/SetLog';
 import Package from './models/Package';
 import Payment from './models/Payment';
@@ -19,6 +20,11 @@ import WorkingHours from './models/WorkingHours';
 import TimeBlock from './models/TimeBlock';
 import Pack from './models/Pack';
 import GymSettlement from './models/GymSettlement';
+import NudgeRule from './models/NudgeRule';
+import ExerciseFavourite from './models/ExerciseFavourite';
+import Coach from './models/Coach';
+import WeeklyReport from './models/WeeklyReport';
+import Batch from './models/Batch';
 
 // Use UUID v4 strings for IDs so they match PostgreSQL UUIDs
 setGenerator(() =>
@@ -33,7 +39,7 @@ const adapter = new SQLiteAdapter({
   // Required for the sync engine's migrationsEnabledAtVersion, and the thing that
   // lets a future schema change migrate a trainer's phone instead of wiping it.
   migrations,
-  dbName: 'trainx',
+  dbName: 'xrep',
   jsi: true,
   onSetUpError: (error) => {
     console.error('WatermelonDB setup error', error);
@@ -51,6 +57,7 @@ export const database = new Database({
     ProgramExercise,
     ScheduledSession,
     WorkoutSession,
+    WorkoutExercise,
     SetLog,
     Package,
     Payment,
@@ -59,5 +66,10 @@ export const database = new Database({
     TimeBlock,
     Pack,
     GymSettlement,
+    NudgeRule,
+    ExerciseFavourite,
+    Coach,
+    WeeklyReport,
+    Batch,
   ],
 });

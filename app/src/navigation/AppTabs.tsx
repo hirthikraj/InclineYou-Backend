@@ -11,8 +11,7 @@
  * so nothing that worked yesterday stopped working.
  */
 
-import React from 'react';
-import { Alert } from 'react-native';
+import React, { useEffect, useState } from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -22,8 +21,10 @@ import DiaryScreen from '../screens/main/diary/DiaryScreen';
 import MoneyScreen from '../screens/main/money/MoneyScreen';
 import AddSheet, { type AddAction } from '../screens/main/home/AddSheet';
 import AppDrawer, { type DrawerKey } from '../screens/main/home/AppDrawer';
+import ModeSheet from '../screens/main/drawer/ModeSheet';
+import { database } from '../db';
 import { useAuth } from '../store/AuthContext';
-import { useSyncState } from '../db/useSync';
+import type ClientModel from '../db/models/Client';
 import {
   NavBar,
   IconCalendar,
@@ -40,7 +41,13 @@ import type { MainStackParamList } from './MainStack';
 export type AppTabsParamList = {
   HomeTab: undefined;
   ClientsTab: undefined;
-  DiaryTab: undefined;
+  /**
+   * `book` opens the diary with the booking sheet already up — the designed way
+   * to book (3a), which is a sheet on the diary rather than a screen of its own.
+   * `clientId` pre-selects who, and `at` the slot; both optional, because "book
+   * a session" from the + button knows neither.
+   */
+  DiaryTab: { book?: boolean; clientId?: string; at?: number } | undefined;
   /** `record` opens the Money screen with the record sheet already up. */
   MoneyTab: { record?: boolean } | undefined;
 };
@@ -65,17 +72,21 @@ export default function AppTabs() {
 function Tabs() {
   const navigation = useNavigation<NativeStackNavigationProp<MainStackParamList>>();
   const shell = useShell();
-  const { signOut } = useAuth();
-  const { hasPending } = useSyncState();
+  const { memberships, switchLens } = useAuth();
+  const [modeOpen, setModeOpen] = useState(false);
+  const clientCount = useClientCount(modeOpen);
 
   const openAdd = (action: AddAction) => {
     shell.closeAdd();
     switch (action) {
       case 'workout':
-        navigation.navigate('SessionList', {});
+        // One question — who — and then straight into the log. Not the session
+        // list: the + was pressed to start logging, and a list of appointments
+        // is an answer to a different question.
+        navigation.navigate('LogPick');
         return;
       case 'session':
-        navigation.navigate('ScheduleSession', {});
+        navigation.navigate('Home', { screen: 'DiaryTab', params: { book: true } } as never);
         return;
       case 'client':
         navigation.navigate('AddClient');
@@ -88,54 +99,52 @@ function Tabs() {
     }
   };
 
+  /**
+   * Every drawer destination, and all seven are real screens now.
+   *
+   * Nudges opens on **Waiting** when the badge is non-zero — the tap map's rule,
+   * and the right one: a number on a drawer item is a job, and the job is on the
+   * second tab.
+   */
   const openDrawerItem = (key: DrawerKey) => {
     switch (key) {
-      case 'exercises':
-        navigation.navigate('ExercisePicker');
+      case 'profile':
+        navigation.navigate('Profile');
         return;
       case 'programs':
-        navigation.navigate('TemplateList');
+        navigation.navigate('Programs');
         return;
-      case 'hours':
-        navigation.navigate('WorkingHours');
+      case 'exercises':
+        navigation.navigate('Exercises');
         return;
-      case 'packages':
-        navigation.navigate('MoneyPacks');
+      case 'reports':
+        navigation.navigate('Reports');
         return;
-      case 'payments':
-        navigation.navigate('Home', { screen: 'MoneyTab' } as never);
+      case 'adherence':
+        navigation.navigate('Adherence');
         return;
       case 'nudges':
-      case 'adherence':
-        // Both are roster-wide views that don't exist yet, and both are
-        // per-client today, so the roster is where they start.
-        navigation.navigate('Clients');
+        navigation.navigate('NudgeRules', {});
         return;
-      default:
-        // profile · switch · reports · settings · help — none built yet.
-        navigation.navigate('Soon', { title: TITLES[key] ?? 'Coming soon' });
+      case 'settings':
+        navigation.navigate('Settings');
+        return;
+      case 'help':
+        navigation.navigate('Help');
     }
   };
 
   /**
-   * Signing out wipes local storage, so anything still queued dies with it.
-   * The warning is the whole point — a trainer who logged four sessions on a
-   * gym floor with no signal must not lose them to a mistap in a drawer.
+   * Sign-out is a screen, not an alert.
+   *
+   * An alert cannot say WHAT is unsynced, and "some records haven't reached the
+   * server" is not enough to decide with — a queued nudge log is worth losing and
+   * a recorded payment is not. §5e lists what is waiting and offers the safe path
+   * first. This just gets there.
    */
   const confirmSignOut = () => {
     shell.closeDrawer();
-    if (!hasPending) {
-      void signOut();
-      return;
-    }
-    Alert.alert(
-      'Unsynced changes',
-      "Some records haven't reached the server yet. Signing out now will lose them.",
-      [
-        { text: 'Stay', style: 'cancel' },
-        { text: 'Sign out anyway', style: 'destructive', onPress: () => void signOut() },
-      ],
-    );
+    navigation.navigate('SignOut');
   };
 
   return (
@@ -192,17 +201,55 @@ function Tabs() {
         visible={shell.drawerOpen}
         onClose={shell.closeDrawer}
         onNavigate={openDrawerItem}
+        onSwitchMode={() => setModeOpen(true)}
         onSignOut={confirmSignOut}
       />
       <AddSheet visible={shell.addOpen} onClose={shell.closeAdd} onPick={openAdd} />
+
+      {/* 2b. Mounted in the shell rather than in the drawer, because the drawer
+          closes to open it and a sheet inside a closing panel closes with it. */}
+      <ModeSheet
+        visible={modeOpen}
+        clients={clientCount}
+        onClose={() => setModeOpen(false)}
+        onSwitched={(mode) => {
+          setModeOpen(false);
+          if (mode !== 'self') return;
+          // FR-11 · the other half of the lens. A trainer who is also somebody's
+          // client has a real book to switch into — their own plan, their own
+          // sets, read from the client side of the same records. A trainer who
+          // trains nobody's client still lands on the screen that says the
+          // self-training contents are not built, because inventing a second
+          // data model for them would be guessing.
+          const mine = memberships[0];
+          if (mine) void switchLens('client', mine.clientId);
+          else navigation.navigate('SelfTraining');
+        }}
+      />
     </>
   );
 }
 
-const TITLES: Partial<Record<DrawerKey, string>> = {
-  profile: 'Your profile',
-  switch: 'My own training',
-  reports: 'Reports',
-  settings: 'Settings',
-  help: 'Help',
-};
+
+/**
+ * How many clients are on the roster, for the mode sheet's subtitle.
+ *
+ * Its own tiny hook, and gated on the sheet being open, because the shell is
+ * mounted for the life of the app and a standing count for one line of copy in a
+ * sheet nobody has opened is a subscription with no reader.
+ */
+function useClientCount(active: boolean): number {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    if (!active) return;
+    const sub = database
+      .get<ClientModel>('clients')
+      .query()
+      .observeCount()
+      .subscribe(setCount);
+    return () => sub.unsubscribe();
+  }, [active]);
+
+  return count;
+}

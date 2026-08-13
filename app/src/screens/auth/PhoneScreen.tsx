@@ -1,7 +1,7 @@
 /**
  * Screen 01 · Sign in · Phone entry — the front door.
  *
- * Built to `agent/design system/screens/trainxloginotp.html` § 01:
+ * Built to `agent/design system/screens/xreploginotp.html` § 01:
  *
  *   1a  default — CTA visible but disabled until 10 digits
  *   1b  filled, keyboard up — the CTA docks above the keyboard
@@ -51,11 +51,11 @@ type Props = {
 const PHONE_LENGTH = 10;
 
 /**
- * The domain the OTP SMS is bound to (`@trainx.app #481234`), so these are the
+ * The domain the OTP SMS is bound to (`@xrep.app #481234`), so these are the
  * same origin. Point them elsewhere the day legal copy moves.
  */
-const TERMS_URL = 'https://trainx.app/terms';
-const PRIVACY_URL = 'https://trainx.app/privacy';
+const TERMS_URL = 'https://xrep.app/terms';
+const PRIVACY_URL = 'https://xrep.app/privacy';
 
 export default function PhoneScreen({ navigation }: Props) {
   const [digits, setDigits] = useState('');

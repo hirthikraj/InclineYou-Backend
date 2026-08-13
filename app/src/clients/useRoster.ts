@@ -21,6 +21,7 @@ import type PackageModel from '../db/models/Package';
 import type PaymentModel from '../db/models/Payment';
 import type WorkoutSessionModel from '../db/models/WorkoutSession';
 import type ScheduledSessionModel from '../db/models/ScheduledSession';
+import { liveCache } from '../db/live';
 import { buildRoster, type Roster, type RosterInput } from './roster';
 
 /** The "N days" figures move once a day; a slower tick than the deck's is fine. */
@@ -42,14 +43,23 @@ const EMPTY: RosterInput = {
   sessions: [],
 };
 
+/** The last emission, so a re-mount paints real rows on its first frame. */
+const cache = liveCache<RosterInput>(EMPTY);
+
+export interface LiveRoster extends Roster {
+  /** False only until the first emission of the app's life. */
+  ready: boolean;
+}
+
 /**
  * @param active The screen's focus state. Behind another tab the clock stops —
  *   every tick rebuilds the whole roster, and doing that unseen spends frames
  *   the visible tab needs.
  */
-export function useRoster(active: boolean = true): Roster {
+export function useRoster(active: boolean = true): LiveRoster {
   const [now, setNow] = useState(() => Date.now());
-  const [raw, setRaw] = useState<RosterInput>(EMPTY);
+  const [raw, setRaw] = useState<RosterInput>(cache.value);
+  const [ready, setReady] = useState(cache.ready);
 
   useEffect(() => {
     if (!active) return;
@@ -91,10 +101,14 @@ export function useRoster(active: boolean = true): Roster {
           }),
         ),
       )
-      .subscribe(setRaw);
+      .subscribe((next) => {
+        cache.set(next);
+        setRaw(next);
+        setReady(true);
+      });
 
     return () => sub.unsubscribe();
   }, []);
 
-  return useMemo(() => buildRoster(raw, now), [raw, now]);
+  return useMemo(() => ({ ...buildRoster(raw, now), ready }), [raw, now, ready]);
 }

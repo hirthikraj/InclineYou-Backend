@@ -152,6 +152,32 @@ export function Row({
   );
 }
 
+/**
+ * `.tx-row__value` — a figure and its unit, right-aligned at the end of a row.
+ *
+ * A tag says what something IS; this says how much of it there is. "4 / SETS",
+ * "57.5 / KG × 5", "−0.5 / KG" — the number is what the eye lands on and the
+ * unit is there so it means something.
+ */
+export function RowValue({
+  value,
+  unit,
+  tone,
+  minWidth,
+}: {
+  value: string;
+  unit?: string;
+  tone?: string;
+  minWidth?: number;
+}) {
+  return (
+    <View style={[styles.value, minWidth !== undefined && { minWidth }]}>
+      <Text style={[styles.valueTop, tone ? { color: tone } : null]}>{value}</Text>
+      {unit ? <Text style={styles.valueUnit}>{unit}</Text> : null}
+    </View>
+  );
+}
+
 /** `.tx-row__time` — the 52px clock column on a schedule row. */
 export function RowTime({ time, meridiem }: { time: string; meridiem?: string }) {
   return (
@@ -163,6 +189,17 @@ export function RowTime({ time, meridiem }: { time: string; meridiem?: string })
 }
 
 const styles = StyleSheet.create({
+  value: { alignItems: 'flex-end', flexShrink: 0, marginLeft: space.s2 },
+  valueTop: { fontSize: 17, fontWeight: '700', letterSpacing: -0.26, color: colors.ink, ...tnum },
+  valueUnit: {
+    fontSize: 9.5,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    color: colors.ink3,
+    marginTop: 2,
+  },
+
   list: {
     backgroundColor: colors.surface,
     borderRadius: radius.r2,

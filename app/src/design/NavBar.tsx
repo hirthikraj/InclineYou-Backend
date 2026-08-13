@@ -27,8 +27,16 @@ export interface NavBarProps {
   tabs: NavTab[];
   activeKey: string;
   onSelect: (key: string) => void;
-  /** The centre +. Sits between tabs 2 and 3. */
-  onAdd: () => void;
+  /**
+   * The centre +. Sits between tabs 2 and 3.
+   *
+   * Omitted in the client role, and that is the only difference between the two
+   * bars in this app. A trainer creates four different kinds of thing between
+   * sessions; a client creates one kind, in one place, and the rest of their app
+   * is read-only — so their create actions are contextual and live on the screen
+   * that owns them. A global + would open a sheet with one item in it.
+   */
+  onAdd?: () => void;
   /** § 04: long-pressing + jumps straight to the last action used. */
   onAddLongPress?: () => void;
 }
@@ -44,19 +52,21 @@ export default function NavBar({ tabs, activeKey, onSelect, onAdd, onAddLongPres
           <NavItem key={t.key} tab={t} active={t.key === activeKey} onPress={() => onSelect(t.key)} />
         ))}
 
-        <Pressable
-          onPress={onAdd}
-          onLongPress={onAddLongPress}
-          accessibilityRole="button"
-          accessibilityLabel="Add"
-          style={styles.addSlot}
-        >
-          {({ pressed }) => (
-            <View style={[styles.fab, pressed && styles.fabPressed]}>
-              <IconPlus size={22} color={colors.accentInk} strokeWidth={2.4} />
-            </View>
-          )}
-        </Pressable>
+        {onAdd ? (
+          <Pressable
+            onPress={onAdd}
+            onLongPress={onAddLongPress}
+            accessibilityRole="button"
+            accessibilityLabel="Add"
+            style={styles.addSlot}
+          >
+            {({ pressed }) => (
+              <View style={[styles.fab, pressed && styles.fabPressed]}>
+                <IconPlus size={22} color={colors.accentInk} strokeWidth={2.4} />
+              </View>
+            )}
+          </Pressable>
+        ) : null}
 
         {tabs.slice(split).map((t) => (
           <NavItem key={t.key} tab={t} active={t.key === activeKey} onPress={() => onSelect(t.key)} />
