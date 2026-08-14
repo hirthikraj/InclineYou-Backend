@@ -1,6 +1,7 @@
 package com.xrep.xrep_backend.config;
 
 import com.xrep.xrep_backend.auth.JwtAuthFilter;
+import com.xrep.xrep_backend.ratelimit.RateLimitFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,6 +23,7 @@ import org.springframework.security.web.context.SecurityContextRepository;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final RateLimitFilter rateLimitFilter;
 
     @Bean
     public BCryptPasswordEncoder passwordEncoder() {
@@ -69,6 +71,12 @@ public class SecurityConfig {
                         .authenticationEntryPoint((req, res, e) -> res.sendError(401, "Unauthorized"))
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                // After the JWT filter, on purpose: a caller with a token is
+                // counted as themselves rather than as their network, and traffic
+                // that will end in 401 is still counted, because authorisation
+                // has not run yet. Both halves matter and only this position has
+                // them.
+                .addFilterAfter(rateLimitFilter, JwtAuthFilter.class)
                 .build();
     }
 }

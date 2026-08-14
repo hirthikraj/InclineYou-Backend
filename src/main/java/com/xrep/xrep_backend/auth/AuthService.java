@@ -34,13 +34,28 @@ public class AuthService {
      * the product is this person?
      *
      * A number can be a trainer, somebody's client, both, or neither, and the
-     * four cases have four different next screens — the Deck, the client's
-     * Today, the role picker (5a), and "we don't know this number yet" (7a). The
-     * one thing this method will not do is guess: a phone that is on nobody's
-     * roster no longer silently becomes a trainer account, because the most
-     * likely first launch in this product is a CLIENT typing their number
-     * before their trainer has added them, and minting a coaching workspace for
-     * them is a wrong turn they cannot undo.
+     * cases have different next screens — the Deck, the client's Today, the role
+     * picker (5a), and "we don't know this number yet" (7a). The one thing this
+     * method will not do is guess: a phone that is on nobody's roster no longer
+     * silently becomes a trainer account, because the most likely first launch in
+     * this product is a CLIENT typing their number before their trainer has added
+     * them, and minting a coaching workspace for them is a wrong turn they cannot
+     * undo.
+     *
+     * ── Pause is not a wall ───────────────────────────────────────────────────
+     *
+     * A paused membership used to return no token at all, which meant a lapsed
+     * package took the app off somebody's phone. It also disagreed with
+     * ClientSyncService, which has always served a paused client their history —
+     * so the real behaviour was "works for up to seven days, then stops", which
+     * nobody designed.
+     *
+     * Pause now signs in like any other membership. What it changes is what the
+     * lens contains, not whether it opens: the history is there, self-logging is
+     * there, and the coaching layer is not. Every roster comes back on
+     * {@code clientOf} carrying its own status, and {@code paused} is filled in
+     * when there is nothing BUT paused rosters — which is the banner the client
+     * sees, naming who paused it and when.
      */
     @Transactional
     public AuthResponse verifyOtp(String phone, String otp) {
@@ -52,10 +67,11 @@ public class AuthService {
         Optional<Trainer> existing = trainerRepo.findByPhoneAndDeletedAtIsNull(phone);
         var memberships = clientRepo.findMembershipsByPhone(phone);
 
-        List<Membership> active = memberships.stream()
-                .filter(m -> !"paused".equalsIgnoreCase(m.getStatus()))
-                .map(AuthService::toMembership)
-                .toList();
+        // Every roster, paused ones included. A paused membership is still a
+        // membership — it carries its own `status` and the app decides what to
+        // dim. Dropping them here is what used to turn a lapsed package into a
+        // locked app.
+        List<Membership> rosters = memberships.stream().map(AuthService::toMembership).toList();
 
         if (existing.isPresent()) {
             Trainer trainer = existing.get();
@@ -70,11 +86,11 @@ public class AuthService {
                     trainer.getSetupCompletedAt() != null,
                     JwtService.ROLE_TRAINER,
                     named(trainer),
-                    active,
-                    null);
+                    rosters,
+                    allPaused(memberships));
         }
 
-        if (!active.isEmpty()) {
+        if (!rosters.isEmpty()) {
             // Somebody's client and nobody's trainer. No trainer row is created:
             // this person has not asked to coach anyone, and an empty roster
             // sitting in the trainer table is a workspace waiting to confuse the
@@ -86,29 +102,8 @@ public class AuthService {
                     true,
                     JwtService.ROLE_CLIENT,
                     null,
-                    active,
-                    null);
-        }
-
-        // On a roster, but every one of them paused — 7b. Paused is not deleted,
-        // and the screen says so; naming the trainer and the date is what turns
-        // a wall into information, and the fix is a WhatsApp to them, not us.
-        Optional<ClientRepository.Membership> paused = memberships.stream()
-                .max(Comparator.comparing(
-                        m -> m.getPausedAt() == null ? java.time.Instant.EPOCH : m.getPausedAt()));
-        if (paused.isPresent()) {
-            var m = paused.get();
-            return new AuthResponse(
-                    null, null, false, true,
-                    "paused",
-                    null,
-                    List.of(),
-                    new PausedInfo(
-                            m.getTrainerName(),
-                            m.getTrainerPhone(),
-                            m.getPausedAt() == null
-                                    ? null
-                                    : LocalDate.ofInstant(m.getPausedAt(), IST).toString()));
+                    rosters,
+                    allPaused(memberships));
         }
 
         // 7a. Neither, so ask — one screen, two exits, and no dead end. The
@@ -156,10 +151,8 @@ public class AuthService {
                     return trainerRepo.save(t);
                 });
 
-        var active = clientRepo.findMembershipsByPhone(phone).stream()
-                .filter(m -> !"paused".equalsIgnoreCase(m.getStatus()))
-                .map(AuthService::toMembership)
-                .toList();
+        var memberships = clientRepo.findMembershipsByPhone(phone);
+        var rosters = memberships.stream().map(AuthService::toMembership).toList();
 
         return new AuthResponse(
                 jwtService.generate(trainer.getId(), trainer.getPhone()),
@@ -168,13 +161,47 @@ public class AuthService {
                 trainer.getSetupCompletedAt() != null,
                 JwtService.ROLE_TRAINER,
                 named(trainer),
-                active,
-                null);
+                rosters,
+                allPaused(memberships));
     }
 
     /** The placeholder name trainer setup has not replaced yet is not a name. */
     private static String named(Trainer t) {
         return t.getName() == null || t.getName().equals(t.getPhone()) ? null : t.getName();
+    }
+
+    /** `status` is a string on purpose (§2 of the data model); compare it like one. */
+    private static boolean isPaused(ClientRepository.Membership m) {
+        return "paused".equalsIgnoreCase(m.getStatus());
+    }
+
+    /**
+     * Who paused it and when — but only when there is nothing else to open.
+     *
+     * A client with one paused roster and one active one is not "paused"; they
+     * are training with somebody, and telling them otherwise at sign-in would be
+     * a lie the second roster contradicts. So this is null unless every
+     * membership is paused, and the per-roster case is carried by each
+     * {@link Membership}'s own {@code status} instead.
+     *
+     * When it is set, it names the most recently paused of them: that is the one
+     * the person is most likely asking about, and the fix is a WhatsApp to that
+     * trainer rather than to us.
+     */
+    private static PausedInfo allPaused(List<ClientRepository.Membership> memberships) {
+        if (memberships.isEmpty() || !memberships.stream().allMatch(AuthService::isPaused)) {
+            return null;
+        }
+        return memberships.stream()
+                .max(Comparator.comparing(
+                        m -> m.getPausedAt() == null ? java.time.Instant.EPOCH : m.getPausedAt()))
+                .map(m -> new PausedInfo(m.getTrainerName(), m.getTrainerPhone(), pausedOn(m)))
+                .orElse(null);
+    }
+
+    /** A pause is a date in the trainer's day, not an instant. Null if never paused. */
+    private static String pausedOn(ClientRepository.Membership m) {
+        return m.getPausedAt() == null ? null : LocalDate.ofInstant(m.getPausedAt(), IST).toString();
     }
 
     private static Membership toMembership(ClientRepository.Membership m) {
@@ -184,7 +211,9 @@ public class AuthService {
                 m.getClientName(),
                 m.getTrainerName(),
                 m.getGymName(),
-                m.getTrainerPhone());
+                m.getTrainerPhone(),
+                m.getStatus(),
+                isPaused(m) ? pausedOn(m) : null);
     }
 
     /**
@@ -202,7 +231,15 @@ public class AuthService {
             String trainerId,
             boolean isNewUser,
             boolean setupComplete,
-            /** "trainer" | "client" | "pending" | "paused" — which lens to open. */
+            /**
+             * "trainer" | "client" | "pending" — which lens to open.
+             *
+             * "paused" was a fourth value and is no longer sent: a paused client
+             * opens the client lens like anybody else, and the pause is described
+             * by {@code paused} and by each roster's own status. An app built
+             * against the old contract still handles this correctly — it reads
+             * "client", signs in, and simply doesn't draw the banner.
+             */
             String role,
             /**
              * The signed-in trainer's own name, for "Welcome back, Ravi" on the
@@ -211,9 +248,12 @@ public class AuthService {
              * not greeting them.
              */
             String trainerName,
-            /** Every roster this number is on and not paused on. Often empty. */
+            /**
+             * Every roster this number is on, paused ones included — each says so
+             * itself via {@link Membership#status}. Often empty.
+             */
             List<Membership> clientOf,
-            /** Only on "paused" — who paused it and when. */
+            /** Set only when every roster is paused — who paused it and when. */
             PausedInfo paused
     ) {}
 
@@ -231,7 +271,15 @@ public class AuthService {
             String clientName,
             String trainerName,
             String gymName,
-            String trainerPhone
+            String trainerPhone,
+            /**
+             * `active` | `paused`. Added when pause stopped being a wall: the app
+             * needs to know WHICH roster is paused to dim the right one, and a
+             * single flag on the response can't say that for somebody on two.
+             */
+            String status,
+            /** "2026-07-22", or null when this roster isn't paused. */
+            String pausedOn
     ) {}
 
     public record PausedInfo(String trainerName, String trainerPhone, String pausedOn) {}

@@ -34,6 +34,19 @@ public class OtpRequest {
     @Column(name = "wrong_attempts", nullable = false)
     private int wrongAttempts;
 
+    /**
+     * When the wait this row's wrong attempts bought is over. Null on all but a
+     * handful of rows: it is set once, on the attempt that hits the cap.
+     *
+     * The lock is a property of the NUMBER, not of one code, so it is read as
+     * "the furthest-future lock on this phone" — see
+     * {@code OtpRequestRepository#lockedUntilFor}. It lives on the row because
+     * {@code wrongAttempts} does, and because a lock in memory is a lock a deploy
+     * cancels.
+     */
+    @Column(name = "locked_until")
+    private Instant lockedUntil;
+
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;
 
