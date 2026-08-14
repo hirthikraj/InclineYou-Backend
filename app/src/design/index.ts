@@ -1,5 +1,5 @@
 /**
- * Train X design system — the only surface screens should import from.
+ * XRep design system — the only surface screens should import from.
  *
  * If a screen needs a colour, a size or a component that isn't exported here,
  * the answer is to add it to the system, not to hard-code it in the screen.
@@ -10,6 +10,20 @@ export { navTheme } from './navTheme';
 export * from './icons';
 export { default as useKeyboardVisible } from './useKeyboardVisible';
 export { default as useReduceMotion } from './useReduceMotion';
+
+/* ------------------------------------------------------------- brand · § 35 */
+
+export {
+  default as Splash,
+  LogoMark,
+  LogoTile,
+  LogoLockup,
+  LIFT_MS,
+  SPLASH_HOLD_MS,
+  TILE,
+  MARK_MIN,
+} from './Logo';
+export type { LogoMarkProps, LogoLockupProps, SplashProps } from './Logo';
 
 export { default as Button } from './Button';
 export type { ButtonProps, ButtonVariant, ButtonSize } from './Button';

@@ -190,7 +190,7 @@ export default function ProgramScreen() {
                     <Callout icon={IconCopy} style={styles.note}>
                       <CalloutStrong>Week {week} runs the same shape.</CalloutStrong> This program is
                       one week&apos;s plan repeated for {view.weeks} weeks — per-week progression is
-                      authored at a desk, and Train X won&apos;t invent numbers it doesn&apos;t have.
+                      authored at a desk, and XRep won&apos;t invent numbers it doesn&apos;t have.
                     </Callout>
                   ) : null}
 

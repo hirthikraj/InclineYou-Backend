@@ -22,6 +22,7 @@ import MoneyScreen from '../screens/main/money/MoneyScreen';
 import AddSheet, { type AddAction } from '../screens/main/home/AddSheet';
 import AppDrawer, { type DrawerKey } from '../screens/main/home/AppDrawer';
 import ModeSheet from '../screens/main/drawer/ModeSheet';
+import { isPaused } from '../api/auth';
 import { database } from '../db';
 import { useAuth } from '../store/AuthContext';
 import type ClientModel from '../db/models/Client';
@@ -221,7 +222,13 @@ function Tabs() {
           // trains nobody's client still lands on the screen that says the
           // self-training contents are not built, because inventing a second
           // data model for them would be guessing.
-          const mine = memberships[0];
+          //
+          // A live roster first. Since pause stopped being a wall, `memberships`
+          // carries paused ones too — and dropping a trainer who trains with
+          // somebody into the paused book they also have would be the wrong one
+          // of the two. A paused roster is still worth opening when it is all
+          // they have: the history is in it.
+          const mine = memberships.find((m) => !isPaused(m)) ?? memberships[0];
           if (mine) void switchLens('client', mine.clientId);
           else navigation.navigate('SelfTraining');
         }}

@@ -12,7 +12,7 @@
  * screen is cheap; the enforcement is in `db/training.ts` and on the server.
  *
  * What is refused here, and stated in the teardown: **building a twelve-week
- * program from scratch on a phone.** Train X shows, assigns and edits on mobile.
+ * program from scratch on a phone.** XRep shows, assigns and edits on mobile.
  * Authoring is a desk job, and pretending otherwise produces a bad program — so
  * the + offers to duplicate what exists rather than opening a blank builder.
  */

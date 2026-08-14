@@ -1,7 +1,7 @@
 /**
  * 5b · Getting paid.
  *
- * The screen where Train X says the hardest thing about itself: **we check the
+ * The screen where XRep says the hardest thing about itself: **we check the
  * format only.** `name@bank` is all a phone can validate. We cannot confirm the ID
  * belongs to this trainer, and we cannot see whether a payment arrived — so the
  * screen says both, and asks them to read it back to themselves before saving.
@@ -149,7 +149,7 @@ export default function GettingPaidScreen() {
             </SettingList>
 
             <Callout icon={IconAlert} style={styles.note}>
-              We check the <CalloutStrong>format only</CalloutStrong> — name@bank. Train X can&apos;t
+              We check the <CalloutStrong>format only</CalloutStrong> — name@bank. XRep can&apos;t
               confirm the ID belongs to you, and can&apos;t see whether a payment arrived.{' '}
               <CalloutStrong>Read it back to yourself before you save.</CalloutStrong>
             </Callout>
@@ -257,7 +257,7 @@ export default function GettingPaidScreen() {
             </SettingList>
 
             <Text style={styles.fine}>
-              Train X never holds, moves or confirms money. It keeps the book, and the money goes
+              XRep never holds, moves or confirms money. It keeps the book, and the money goes
               straight from the client to you.
             </Text>
           </>

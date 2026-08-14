@@ -257,7 +257,7 @@ function versionLine(): string {
   const config = Constants.expoConfig;
   const version = config?.version ?? '1.0.0';
   const build = config?.android?.versionCode ?? config?.ios?.buildNumber;
-  return build ? `Train X ${version} (${build})` : `Train X ${version}`;
+  return build ? `XRep ${version} (${build})` : `XRep ${version}`;
 }
 
 const styles = StyleSheet.create({

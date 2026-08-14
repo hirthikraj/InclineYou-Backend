@@ -98,7 +98,7 @@ export default function SignOutScreen() {
     <SafeAreaView edges={['top']} style={styles.safe}>
       <View style={styles.pad}>
         <AppBar
-          title="Sign out of Train X?"
+          title="Sign out of XRep?"
           subtitle={hasPending ? 'Something is still waiting' : 'Nothing is waiting'}
           leading={<IconButton icon={IconBack} label="Back" bare onPress={() => navigation.goBack()} />}
         />

@@ -34,10 +34,13 @@ import type { ClientTabsParamList } from '../../navigation/ClientTabs';
 import { useShell } from '../../navigation/AppShell';
 import { useAuth } from '../../store/AuthContext';
 import { useClient } from '../../client/useClient';
+import { isPaused } from '../../api/auth';
 import {
   buildSessions,
   buildToday,
   coachFirstName,
+  pausedDraft,
+  pausedLine,
   rupeesShort,
   type TodayView,
 } from '../../client/client';
@@ -61,6 +64,7 @@ import {
   IconCloudOff,
   IconDumbbell,
   IconLayers,
+  IconLock,
   IconMenu,
   IconMessage,
   IconPlay,
@@ -91,10 +95,20 @@ export default function TodayScreen({
 }) {
   const navigation = useNavigation<Nav>();
   const shell = useShell();
-  const { clientId } = useAuth();
+  const { clientId, memberships } = useAuth();
   const { input } = useClient(clientId);
   const sync = useSyncState();
   const network = useNetworkState();
+
+  // Whether the roster this lens is open on is on hold. Read from the sign-in
+  // answer rather than from sync, because it has to be true on the very first
+  // frame of a fresh install — the pull that would carry the client row has not
+  // landed, and a paused person opening a lens that says nothing is the old bug
+  // wearing a different face.
+  const paused = useMemo(
+    () => memberships.find((m) => m.clientId === clientId && isPaused(m)) ?? null,
+    [memberships, clientId],
+  );
 
   const [at, setAt] = useState(() => Date.now());
   const [starting, setStarting] = useState(false);
@@ -141,11 +155,16 @@ export default function TodayScreen({
   const first = coachFirstName(coach);
 
   /** Every message action in the client app is a draft. Nothing sends silently. */
+  const whatsapp = (phone: string, text: string) => {
+    void Linking.openURL(
+      `https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`,
+    );
+  };
+
+  /** The same, addressed to the synced coach record — null before the first pull. */
   const message = (text: string) => {
     if (!coach?.phone) return;
-    void Linking.openURL(
-      `https://wa.me/${coach.phone.replace(/\D/g, '')}?text=${encodeURIComponent(text)}`,
-    );
+    whatsapp(coach.phone, text);
   };
 
   const openLog = async () => {
@@ -193,6 +212,28 @@ export default function TodayScreen({
           />
         }
       >
+        {/* 7b, as a line rather than a wall. Above the offline banner because a
+            pause outlasts a tunnel: this is the state of the relationship, that
+            one is the state of the radio. */}
+        {paused ? (
+          <Banner
+            tone="neutral"
+            icon={IconLock}
+            style={styles.banner}
+            // Everything here comes off the membership, not off `coach` — the
+            // coach record arrives with the first sync, and the person most
+            // likely to see this banner is on a phone that has never synced.
+            onPress={
+              paused.trainerPhone
+                ? () => whatsapp(paused.trainerPhone!, pausedDraft(paused.trainerName))
+                : undefined
+            }
+          >
+            {pausedLine(paused.trainerName, paused.pausedOn ?? null)}
+            {paused.trainerPhone ? ' Tap to message them.' : ''}
+          </Banner>
+        ) : null}
+
         {/* 6b. The banner names what still works, because the honest thing to
             say offline is that nothing is waiting on the client. */}
         {offline ? (

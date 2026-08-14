@@ -2,7 +2,7 @@
  * 3c · Exercises.
  *
  * Hevy ships "400+ high-quality exercises" with filters for equipment and muscle
- * plus search. Train X shows 873 with the same two filters and one extra chip
+ * plus search. XRep shows 873 with the same two filters and one extra chip
  * Hevy buries: **Yours**. A custom exercise you built for one client's shoulder is
  * the one you will look for hardest, and burying it in the same alphabetical list
  * as the other 872 is the one thing that library gets wrong.

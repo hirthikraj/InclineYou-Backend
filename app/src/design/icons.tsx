@@ -1,5 +1,5 @@
 /**
- * Train X iconography.
+ * XRep iconography.
  *
  * Outline, 22px on a 24px optical box, 1.8px stroke, round caps and joins —
  * one family across both platforms. The path data is lifted straight from the

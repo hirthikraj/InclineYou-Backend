@@ -128,7 +128,7 @@ export default function ClientAddedScreen() {
             onPress={() => {
               const uri = whatsappUri(
                 head.phone,
-                `Hi ${first}, I've added you to Train X. You'll get your sessions and what you owe on your own phone — install it if you like, and nothing changes if you don't.`,
+                `Hi ${first}, I've added you to XRep. You'll get your sessions and what you owe on your own phone — install it if you like, and nothing changes if you don't.`,
               );
               if (uri) void Linking.openURL(uri);
             }}

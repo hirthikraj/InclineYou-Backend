@@ -74,7 +74,7 @@ export default function ClientDrawer({
       footer={
         <>
           <DrawerItem icon={IconLogout} label="Sign out" onPress={() => go('signOut')} />
-          <DrawerVersion>{`Train X ${Constants.expoConfig?.version ?? ''}`}</DrawerVersion>
+          <DrawerVersion>{`XRep ${Constants.expoConfig?.version ?? ''}`}</DrawerVersion>
         </>
       }
     >

@@ -81,7 +81,7 @@ export default function SettingsScreen() {
   const deleteAccount = () => {
     Alert.alert(
       'Delete your account?',
-      'Everything goes: clients, sessions, the book. There is a 30-day grace period before it is permanent, and you can stop it by signing back in.\n\nTrain X cannot process this from the app yet — message support and it is done within a day.',
+      'Everything goes: clients, sessions, the book. There is a 30-day grace period before it is permanent, and you can stop it by signing back in.\n\nXRep cannot process this from the app yet — message support and it is done within a day.',
       [
         { text: 'Keep my account', style: 'cancel' },
         {
@@ -197,7 +197,7 @@ export default function SettingsScreen() {
                 // Said plainly rather than left to be discovered: the app is
                 // dark-first and the light palette is defined but not wired to a
                 // runtime switch, so choosing light would change nothing.
-                meta: 'Train X is dark for now. The light theme is built but not switched on yet — this remembers your choice for when it is.',
+                meta: 'XRep is dark for now. The light theme is built but not switched on yet — this remembers your choice for when it is.',
                 options: APPEARANCES.map((a) => ({ key: a.key, label: a.label })),
                 value: prefs.appearance,
                 onPick: (key) => void setPrefs({ appearance: key as typeof prefs.appearance }),
@@ -245,7 +245,7 @@ export default function SettingsScreen() {
           />
           <Setting
             icon={IconStar}
-            label="Rate Train X"
+            label="Rate XRep"
             meta="On the Play Store"
             onPress={() => setNotice('Not on the store yet — this build is a dev client.')}
           />
@@ -291,7 +291,7 @@ function versionLine(): string {
   const config = Constants.expoConfig;
   const version = config?.version ?? '1.0.0';
   const build = config?.android?.versionCode ?? config?.ios?.buildNumber;
-  return build ? `Train X ${version} (${build})` : `Train X ${version}`;
+  return build ? `XRep ${version} (${build})` : `XRep ${version}`;
 }
 
 const styles = StyleSheet.create({

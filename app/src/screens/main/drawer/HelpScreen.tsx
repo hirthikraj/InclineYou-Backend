@@ -59,11 +59,11 @@ const SUPPORT_PHONE = '918000000000';
 const QUESTIONS = [
   {
     q: 'Where do I withdraw my money?',
-    a: "You don't — and there's nothing to withdraw. **Train X never holds your money.** Clients pay you by cash, by UPI into your own bank, or at the gym counter, and Train X keeps the book so you know who has paid and who hasn't.",
+    a: "You don't — and there's nothing to withdraw. **XRep never holds your money.** Clients pay you by cash, by UPI into your own bank, or at the gym counter, and XRep keeps the book so you know who has paid and who hasn't.",
   },
   {
     q: "A client paid but the app doesn't know",
-    a: "Record it. Train X cannot see your bank account or read your UPI notifications, so a payment only exists in the book once you write it down. Open the client, tap **Record payment**, and the pack and the month's figures update immediately — offline too.",
+    a: "Record it. XRep cannot see your bank account or read your UPI notifications, so a payment only exists in the book once you write it down. Open the client, tap **Record payment**, and the pack and the month's figures update immediately — offline too.",
   },
   {
     q: 'Do my clients have to install anything?',
@@ -79,7 +79,7 @@ const QUESTIONS = [
   },
   {
     q: 'Do I need to register for GST?',
-    a: `Services cross into GST at **₹${(GST_LINE / 100000).toFixed(0)} lakh a year** (₹10 lakh in a few north-eastern states). The Money screen shows a meter against that line and warns you before you reach it, not after — late registration costs a penalty. Train X is not your accountant, and this is the one number it will point at.`,
+    a: `Services cross into GST at **₹${(GST_LINE / 100000).toFixed(0)} lakh a year** (₹10 lakh in a few north-eastern states). The Money screen shows a meter against that line and warns you before you reach it, not after — late registration costs a penalty. XRep is not your accountant, and this is the one number it will point at.`,
   },
 ];
 
@@ -89,14 +89,14 @@ export default function HelpScreen() {
 
   const diagnostics = () =>
     [
-      `Train X ${Constants.expoConfig?.version ?? '1.0.0'}`,
+      `XRep ${Constants.expoConfig?.version ?? '1.0.0'}`,
       `Build: ${Constants.expoConfig?.android?.versionCode ?? Constants.expoConfig?.ios?.buildNumber ?? 'dev'}`,
       `Platform: ${Platform.OS} ${Platform.Version}`,
       `Device: ${Constants.deviceName ?? 'unknown'}`,
     ].join('\n');
 
   const openWhatsApp = async () => {
-    const text = `Hi Train X support — I need help.\n\n${diagnostics()}`;
+    const text = `Hi XRep support — I need help.\n\n${diagnostics()}`;
     try {
       await Linking.openURL(`https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent(text)}`);
     } catch {
@@ -107,7 +107,7 @@ export default function HelpScreen() {
   const report = async () => {
     try {
       await Share.share({
-        message: `Train X problem report\n\n${diagnostics()}\n\nWhat happened:\n`,
+        message: `XRep problem report\n\n${diagnostics()}\n\nWhat happened:\n`,
       });
     } catch {
       setNotice('Could not open the share sheet.');

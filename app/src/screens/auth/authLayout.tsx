@@ -28,6 +28,7 @@ import {
   useKeyboardVisible,
   IconBack,
   IconMessage,
+  LogoTile,
   type IconProps,
 } from '../../design';
 
@@ -114,13 +115,16 @@ export function AuthFoot({
   return <View style={[styles.foot, { paddingBottom }]}>{children}</View>;
 }
 
-/** The lime `X`. Stands in for a back button on the first screen of the flow. */
+/**
+ * `.brandmark` — the 46px lime tile with the XRep mark knocked out of it.
+ * Stands in for a back button on the first screen of the flow.
+ *
+ * The mark goes alone here, never the lockup: § 35.5 puts the wordmark on the
+ * splash and nowhere else. Kept as a named wrapper rather than `LogoTile` at
+ * each call site so the auth and setup headers can only ever carry one thing.
+ */
 export function Brandmark() {
-  return (
-    <View style={styles.brandmark} accessibilityRole="image" accessibilityLabel="Train X">
-      <Text style={styles.brandmarkText}>X</Text>
-    </View>
-  );
+  return <LogoTile />;
 }
 
 /* ----------------------------------------------------------------- pieces */
@@ -277,21 +281,6 @@ const styles = StyleSheet.create({
   },
   body: { flex: 1, paddingTop: 26 },
   foot: { paddingTop: space.s4 },
-
-  brandmark: {
-    width: 46,
-    height: 46,
-    borderRadius: radius.r3,
-    backgroundColor: colors.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  brandmarkText: {
-    color: colors.accentInk,
-    fontSize: 23,
-    fontWeight: '900',
-    letterSpacing: -1.15,
-  },
 
   back: {
     width: 40,

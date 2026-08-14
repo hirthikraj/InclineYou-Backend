@@ -14,7 +14,7 @@
  *
  * ── What the plan learns ──────────────────────────────────────────────────
  *
- * Nothing, silently. Three identical swaps and Train X asks once whether the
+ * Nothing, silently. Three identical swaps and XRep asks once whether the
  * program should change. Asking is the design: an app that quietly rewrites a
  * trainer's programming has taken their job.
  */
@@ -225,7 +225,7 @@ export default function SwapSheet({
           index={2}
           state="todo"
           label="Third swap in a row"
-          meta="Train X asks once whether the program should change. Never silently."
+          meta="XRep asks once whether the program should change. Never silently."
           last
         />
       </Timeline>

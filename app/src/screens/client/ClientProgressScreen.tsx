@@ -9,7 +9,7 @@
  * a shape, not a reading.
  *
  * Bodyweight is deliberately directionless — no green arrow, no red one. The
- * metric component paints "down" in danger red, and Train X does not have an
+ * metric component paints "down" in danger red, and XRep does not have an
  * opinion about which way a client's weight should move. Green for up and red for
  * down on somebody's body is the app taking a position.
  *

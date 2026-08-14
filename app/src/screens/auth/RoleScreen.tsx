@@ -24,6 +24,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
 
 import type { AuthStackParamList } from '../../navigation/AuthStack';
+import { isPaused } from '../../api/auth';
 import { useAuth, type Lens } from '../../store/AuthContext';
 import { database } from '../../db';
 import type ClientModel from '../../db/models/Client';
@@ -60,12 +61,15 @@ export default function RoleScreen({ route }: Props) {
   const clients = useClientCount(!!session.trainerId);
 
   const canCoach = !!session.trainerId;
+  // A paused roster is still selectable — the history is in it — but it is never
+  // what the screen should land on preselected.
+  const live = session.memberships.filter((m) => !isPaused(m));
   const [pick, setPick] = useState<Pick>(
     // Coaching first when it exists — it is what they signed up to do, and the
     // design's own copy leads with it.
     canCoach
       ? { lens: 'trainer', clientId: null }
-      : { lens: 'client', clientId: session.memberships[0]?.clientId ?? null },
+      : { lens: 'client', clientId: (live[0] ?? session.memberships[0])?.clientId ?? null },
   );
 
   const [busy, setBusy] = useState(false);
@@ -116,10 +120,15 @@ export default function RoleScreen({ route }: Props) {
               key={m.clientId}
               icon={IconDumbbell}
               title={canCoach && session.memberships.length === 1 ? 'My own training' : m.trainerName}
+              // A paused card says so instead of naming the gym: which roster is
+              // on hold is the only thing that distinguishes two cards here, and
+              // finding out after you tap is finding out too late.
               proof={
-                canCoach && session.memberships.length === 1
-                  ? `With ${m.trainerName}${m.gymName ? ` · ${m.gymName}` : ''}`
-                  : m.gymName ?? 'Your trainer'
+                isPaused(m)
+                  ? `Paused — your history is still here`
+                  : canCoach && session.memberships.length === 1
+                    ? `With ${m.trainerName}${m.gymName ? ` · ${m.gymName}` : ''}`
+                    : m.gymName ?? 'Your trainer'
               }
               avatar={m.trainerName}
               selected={pick.lens === 'client' && pick.clientId === m.clientId}

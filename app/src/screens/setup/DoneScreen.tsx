@@ -35,7 +35,7 @@ export default function DoneScreen() {
         <DoneMark />
         <Text style={styles.title}>{firstName ? `You're set up, ${firstName}` : "You're set up"}</Text>
         <Text style={styles.body}>
-          Everything else can wait. Add your first client and Train X starts tracking from day one.
+          Everything else can wait. Add your first client and XRep starts tracking from day one.
         </Text>
       </View>
 

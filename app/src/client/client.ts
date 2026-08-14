@@ -190,6 +190,40 @@ export function coachFirstName(coach: ClientCoach | null): string {
   return coach.name.trim().split(/\s+/)[0] || coach.name;
 }
 
+/** The same first-name rule, for a name that arrived from sign-in rather than sync. */
+function firstNameOf(name: string): string {
+  return name.trim().split(/\s+/)[0] || name;
+}
+
+/**
+ * § 07b, moved inside the lens.
+ *
+ * This used to be a wall at sign-in: a paused membership got no token, and a
+ * lapsed package took the app off somebody's phone. It is a line now, because
+ * everything behind it is still theirs — every session, every set — and they can
+ * keep logging on their own while the coaching is off.
+ *
+ * What survives from 7b is the part that made it information rather than a
+ * shrug: the trainer is named, the date is named, and the recovery is a message
+ * to them. The person who can undo this is the one who did it.
+ */
+export function pausedLine(trainerName: string, pausedOn: string | null): string {
+  const who = firstNameOf(trainerName);
+  const when = pausedOn ? ` on ${longDateIso(pausedOn)}` : '';
+  return `${who} paused your plan${when}. Your history is safe and you can still log.`;
+}
+
+/** The WhatsApp draft behind that line. Never sent silently — it opens a compose. */
+export function pausedDraft(trainerName: string): string {
+  return `Hi ${firstNameOf(trainerName)}, my XRep access is paused. Could you turn it back on?`;
+}
+
+/** "2026-07-22" → "22 July". Falls back to the raw string on anything unparseable. */
+function longDateIso(iso: string): string {
+  const at = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(at.getTime()) ? iso : longDate(at.getTime());
+}
+
 function livePlan(input: ClientInput, clientId: string) {
   return input.programs.find(
     (p) => p.clientId === clientId && !DEAD_PROGRAM.has(p.status.toLowerCase()),

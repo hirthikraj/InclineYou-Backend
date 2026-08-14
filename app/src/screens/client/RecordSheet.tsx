@@ -65,7 +65,7 @@ export default function RecordSheet({
       : null;
 
   const share = () => {
-    // A system share sheet with a plain line and the number. Train X posts
+    // A system share sheet with a plain line and the number. XRep posts
     // nothing anywhere, and this is the only place it hands anything to the OS.
     void Share.share({
       message: `New best: ${record.name} — ${record.value} ${record.unit}${record.was ? ` (${record.was})` : ''}`,
@@ -96,7 +96,7 @@ export default function RecordSheet({
 
       <Callout style={styles.note}>
         {coach} sees this on their phone. They may say something about it — that is the only
-        automatic message Train X sends on a record.
+        automatic message XRep sends on a record.
       </Callout>
 
       <Button label="Back to the set" size="lg" block style={styles.primary} onPress={onClose} />

@@ -219,7 +219,7 @@ export default function ClientsScreen() {
         navigation.navigate('PackageList', { clientId: row.id, clientName: row.name });
         return;
       case 'invite':
-        void whatsapp(row, `Hi ${first}, here's your Train X invite again.`);
+        void whatsapp(row, `Hi ${first}, here's your XRep invite again.`);
         return;
       default:
         if (row.status === 'paused') void resume(row);

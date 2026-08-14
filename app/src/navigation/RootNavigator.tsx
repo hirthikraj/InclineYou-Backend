@@ -1,11 +1,10 @@
-import React, { useEffect } from 'react';
-import { View, ActivityIndicator } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
 import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { useAuth } from '../store/AuthContext';
 import { useSyncTriggers } from '../db/useSync';
 import { usePushRegistration } from '../push/usePush';
 import { useProfilePush } from '../setup/useProfilePush';
-import { colors, navTheme } from '../design';
+import { navTheme, Splash } from '../design';
 import AuthStack from './AuthStack';
 import SetupStack from './SetupStack';
 import MainStack from './MainStack';
@@ -45,12 +44,28 @@ export default function RootNavigator() {
     return () => clearTimeout(t);
   }, [inApp, landing, clearLanding, navRef]);
 
-  if (isLoading) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.canvas }}>
-        <ActivityIndicator size="large" color={colors.accent} />
-      </View>
-    );
+  /**
+   * Launch — frames 0a–0c of the login file, and the only place the full lockup
+   * appears. It replaces a spinner: restoring a session and opening the local
+   * database is the one wait every cold start has, and the design system spends
+   * it on the mark rather than on a rotating circle.
+   *
+   * Held for the lift as well as for `isLoading`, because the two do not take
+   * the same time. Auth usually resolves in well under the 2.5s launch runs
+   * (`SPLASH_HOLD_MS` — the 1.4s lift plus the hold on the seated lockup), and a
+   * logo cut off mid-lift reads as a crash; the reverse — a slow restore on a
+   * cold device — just holds the seated frame until it is done. None of it gates
+   * anything: local data resolves behind the whole splash, which is the whole of
+   * FR-8. Under reduced motion `onDone` fires on the first frame, so nobody who
+   * has asked for stillness waits on either.
+   */
+  const [liftDone, setLiftDone] = useState(false);
+  /* Captured once: the note describes what the splash is waiting for, and a
+     line that appears and vanishes mid-lift is worse than no line at all. */
+  const note = useRef(isLoading ? 'Opening your book…' : undefined).current;
+
+  if (isLoading || !liftDone) {
+    return <Splash note={note} onDone={() => setLiftDone(true)} />;
   }
 
   return (

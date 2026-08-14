@@ -54,6 +54,7 @@
   /* filled danger surface — white label needs 4.5:1, so it is NOT --tx-danger */
   --tx-danger-fill:#D93036; --tx-danger-fill-ink:#FFFFFF;
   --tx-ok-fill:#3DDC84;     --tx-ok-fill-ink:#052912;
+  --tx-info-fill:#2E6FC7;   --tx-info-fill-ink:#FFFFFF;   /* white on this = 4.9:1 */
 
   /* -- domain -- */
   --tx-floor:#9FD3FF;     --tx-floor-soft:rgba(159,211,255,.12);
@@ -108,6 +109,7 @@
   --tx-info:#1B5FA8;      --tx-info-soft:#E5EFF9;
   --tx-danger-fill:#C0281E; --tx-danger-fill-ink:#FFFFFF;
   --tx-ok-fill:#0E7034;     --tx-ok-fill-ink:#FFFFFF;
+  --tx-info-fill:#1B5FA8;   --tx-info-fill-ink:#FFFFFF;   /* white on this = 6.4:1 */
 
   --tx-floor:#1B5FA8;     --tx-floor-soft:#E5EFF9;
   --tx-remote:#6B3FC4;    --tx-remote-soft:#EFE9FB;
@@ -159,6 +161,7 @@
   /* -- avatar palette ·white initials, every one clears 5.9:1 ----------------- */
   --tx-av-1:#4A5568; --tx-av-2:#4B44C4; --tx-av-3:#0E6E62; --tx-av-4:#2F6B33;
   --tx-av-5:#8A5A12; --tx-av-6:#96421F; --tx-av-7:#7A3A73; --tx-av-8:#1F5A9E;
+  --tx-av-9:#8E2F45; --tx-av-10:#5C6B18; --tx-av-11:#10627E; --tx-av-12:#5B3FA8;
 
   /* -- touch --------------------------------------------------------------- */
   --tx-tap-min:48px;     /* absolute floor, everywhere */
@@ -205,7 +208,7 @@
   transition:background var(--tx-t-instant) var(--tx-ease),
              border-color var(--tx-t-instant) var(--tx-ease),
              opacity var(--tx-t-instant) var(--tx-ease);
-  white-space:nowrap;
+  white-space:nowrap;flex:0 0 auto;
 }
 .tx-btn--primary{background:var(--tx-accent);color:var(--tx-accent-ink)}
 .tx-btn--primary:active{background:var(--tx-accent-press)}
@@ -216,7 +219,8 @@
 .tx-btn--danger{background:var(--tx-danger-soft);color:var(--tx-danger);box-shadow:inset 0 0 0 1px currentColor}
 .tx-btn--text{background:none;color:var(--tx-accent-text);height:44px;padding:0 var(--tx-s2);letter-spacing:.04em}
 .tx-btn--lg{height:56px;font-size:15px}
-.tx-btn--sm{height:38px;padding:0 var(--tx-s3);font-size:11.5px;letter-spacing:.08em}
+.tx-btn--sm{height:38px;padding:0 var(--tx-s3);font-size:11.5px;letter-spacing:.08em;position:relative}
+.tx-btn--sm::before{content:"";position:absolute;inset:-3px -4px}   /* 44px hit area */
 .tx-btn--block{display:flex;width:100%}
 .tx-btn[disabled],.tx-btn[aria-disabled="true"]{opacity:.45;pointer-events:none}
 /* a faded accent fill reads as a bug, not as "off" — disabled primary goes tonal */
@@ -235,6 +239,7 @@
 @keyframes tx-spin{to{transform:rotate(360deg)}}
 
 .tx-iconbtn{
+  flex:0 0 auto;
   width:44px;height:44px;border-radius:var(--tx-r2);
   display:inline-grid;place-items:center;color:var(--tx-ink-2);
   background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line);
@@ -307,10 +312,13 @@
 .tx-avatar--now{box-shadow:0 0 0 2px var(--tx-canvas),0 0 0 4px var(--tx-accent)}
 .tx-avatar__tick{
   position:absolute;right:-2px;bottom:-2px;width:18px;height:18px;border-radius:50%;
-  background:var(--tx-ok);border:2px solid var(--tx-canvas);display:grid;place-items:center;color:#fff;
+  background:var(--tx-ok-fill);border:2px solid var(--tx-canvas);display:grid;place-items:center;color:var(--tx-ok-fill-ink);
 }
 .tx-avatars{display:flex}
+/* the overlap has to stay smaller than the padding around the initials, or the
+   avatar on top clips the letter underneath it */
 .tx-avatars .tx-avatar{border:2px solid var(--tx-surface);margin-left:-8px}
+.tx-avatars .tx-avatar--xs{margin-left:-5px}
 .tx-avatars .tx-avatar:first-child{margin-left:0}
 
 /* ------------------------------------------------------ 7. INPUTS AND FORMS
@@ -360,6 +368,7 @@
   color:var(--tx-ink);font-family:inherit;
   font-size:16px;              /* 16 is the floor — below it, iOS zooms the page on focus */
   font-weight:400;line-height:1.4;
+  align-self:stretch;          /* fill the control, or only the text line is tappable */
 }
 .tx-control textarea{resize:none;height:100%;min-height:86px;line-height:1.5}
 .tx-control input::placeholder,
@@ -407,9 +416,14 @@
   transition:box-shadow var(--tx-t-fast) var(--tx-ease);
 }
 .tx-search:focus-within{outline:2px solid var(--tx-focus);outline-offset:-1px;box-shadow:0 0 0 3px var(--tx-focus-halo)}
-.tx-search input{flex:1;min-width:0;border:0;background:none;outline:none;color:var(--tx-ink);
+.tx-search input{flex:1;min-width:0;align-self:stretch;border:0;background:none;outline:none;color:var(--tx-ink);
   font-family:inherit;font-size:16px}
 .tx-search input::placeholder{color:var(--tx-ink-3)}
+.tx-search__clear{
+  width:26px;height:26px;border-radius:50%;flex:0 0 26px;display:grid;place-items:center;
+  background:var(--tx-surface-3);color:var(--tx-ink-2);position:relative;
+}
+.tx-search__clear::before{content:"";position:absolute;inset:-9px}   /* 44px hit area */
 
 /* ---- OTP: presentational slots over ONE real input ---- */
 .tx-otp{display:flex;align-items:center;gap:10px}
@@ -535,8 +549,8 @@
   display:flex;flex-direction:column;justify-content:space-between;gap:6px;
   transition:background var(--tx-t-fast) var(--tx-ease),box-shadow var(--tx-t-fast) var(--tx-ease);
 }
-.tx-choice button b{font-size:14.5px;font-weight:600;letter-spacing:-.01em;color:var(--tx-ink)}
-.tx-choice button span{font-size:12.5px;color:var(--tx-ink-3);line-height:1.35}
+:where(.tx-choice) button b{font-size:14.5px;font-weight:600;letter-spacing:-.01em;color:var(--tx-ink)}
+:where(.tx-choice) button span{font-size:12.5px;color:var(--tx-ink-3);line-height:1.35}
 .tx-choice button[aria-pressed="true"]{
   background:var(--tx-accent-soft);box-shadow:inset 0 0 0 2px var(--tx-accent-line);
 }
@@ -585,14 +599,21 @@
 .tx-row__time span{display:block;font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--tx-ink-3);margin-top:2px}
 .tx-row__spine{display:block;width:2px;align-self:stretch;border-radius:2px;background:var(--tx-line-strong)}
 .tx-row__main{flex:1;min-width:0}
-.tx-row__main b{display:block;font-size:15px;font-weight:700;letter-spacing:-.015em;color:var(--tx-ink)}
-.tx-row__main span{display:block;font-size:12.5px;color:var(--tx-ink-2);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* DIRECT children only. A descendant selector here catches a <b> used for
+   emphasis inside the sub-line and turns it into a block, which breaks the
+   sentence onto three lines. Same failure mode as the :where() sweep. */
+:where(.tx-row__main) > b{display:block;font-size:15px;font-weight:700;letter-spacing:-.015em;color:var(--tx-ink)}
+:where(.tx-row__main) > span{display:block;font-size:12.5px;color:var(--tx-ink-2);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tx-row__value{text-align:right;font-variant-numeric:tabular-nums}
-.tx-row__value b{display:block;font-size:15px;font-weight:800;letter-spacing:-.02em}
-.tx-row__value span{display:block;font-size:11px;color:var(--tx-ink-3);margin-top:3px}
+:where(.tx-row__value) > b{display:block;font-size:15px;font-weight:800;letter-spacing:-.02em}
+:where(.tx-row__value) > span{display:block;font-size:11px;color:var(--tx-ink-3);margin-top:3px}
 .tx-row--now .tx-row__spine{background:var(--tx-accent);box-shadow:0 0 8px var(--tx-accent-line)}
 .tx-row--done{opacity:.5}
 .tx-row--done .tx-row__spine{background:var(--tx-ok)}
+/* the sub-line is a sentence, not a label — it wraps instead of truncating */
+.tx-row--wrap{align-items:flex-start;padding-top:14px;padding-bottom:14px}
+.tx-row--wrap :where(.tx-row__main) > span{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.45}
+.tx-row--wrap .tx-radio,.tx-row--wrap .tx-check{margin-top:1px}
 .tx-row--alert{box-shadow:inset 0 0 0 1px var(--tx-line),inset 2px 0 0 var(--tx-warn),var(--tx-e1)}
 .tx-row--critical{box-shadow:inset 0 0 0 1px var(--tx-line),inset 2px 0 0 var(--tx-danger),var(--tx-e1)}
 
@@ -612,11 +633,19 @@
 }
 .tx-setting:last-child{border-bottom:0}
 .tx-setting__main{flex:1;min-width:0}
-.tx-setting__main b{display:block;font-size:15px;font-weight:500}
-.tx-setting__main span{display:block;font-size:12.5px;color:var(--tx-ink-3);margin-top:2px}
+:where(.tx-setting__main) > b{display:block;font-size:15px;font-weight:500}
+:where(.tx-setting__main) > span{display:block;font-size:12.5px;color:var(--tx-ink-3);margin-top:2px}
+/* a destructive setting has to look destructive before it is tapped */
+.tx-setting[data-destructive] svg:first-child{color:var(--tx-danger)}
+.tx-setting[data-destructive] :where(.tx-setting__main) > b{color:var(--tx-danger)}
 .tx-setting__value{color:var(--tx-ink-3);font-size:14px;font-variant-numeric:tabular-nums}
 
-/* swipe action revealed behind a row */
+/* Swipe action revealed behind a row.
+   EXACTLY ONE action, and it is contextual to the row's state. NN/g: "burying
+   key actions behind a contextual swipe prevents users from discovering them",
+   and a second 84px action hides the avatar and most of the name on a 390pt
+   screen. Everything else lives in the long-press menu, which is also where
+   this action is duplicated — swipe is never the only path. */
 .tx-swipe{position:relative;border-radius:var(--tx-r2);overflow:hidden}
 .tx-swipe__actions{position:absolute;inset:0;display:flex;justify-content:flex-end}
 .tx-swipe__action{
@@ -624,8 +653,17 @@
   font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#fff;
 }
 .tx-swipe__action--pay{background:var(--tx-ok-fill);color:var(--tx-ok-fill-ink)}
+.tx-swipe__action--nudge{background:var(--tx-info-fill);color:var(--tx-info-fill-ink)}
 .tx-swipe__action--del{background:var(--tx-danger-fill);color:var(--tx-danger-fill-ink)}
-.tx-swipe .tx-row{position:relative;transform:translateX(-84px)}
+.tx-swipe__action{width:76px}
+.tx-swipe .tx-row{position:relative;transform:translateX(-76px)}
+/* Mid-swipe the row's leading content slides under the edge — that is how the
+   gesture works on both platforms. So the severity spine is pinned to the
+   container, not the row: whatever else scrolls away, you can still see which
+   row you have hold of. */
+.tx-swipe[data-severity="critical"]{box-shadow:inset 2px 0 0 var(--tx-danger)}
+.tx-swipe[data-severity="alert"]{box-shadow:inset 2px 0 0 var(--tx-warn)}
+.tx-swipe[data-severity] .tx-row{box-shadow:none}
 
 /* ---------------------------------------------- 10. SET TABLE (workout log) */
 
@@ -654,7 +692,7 @@
 .tx-set__in:focus{box-shadow:inset 0 0 0 2px var(--tx-accent-line)}
 .tx-set__done{width:40px;height:40px;border-radius:var(--tx-r1);display:grid;place-items:center;margin:0 auto;
   background:var(--tx-surface-2);color:var(--tx-ink-off);transition:all var(--tx-t-instant) var(--tx-ease)}
-.tx-set[data-done="true"] .tx-set__done{background:var(--tx-ok);color:#fff}
+.tx-set[data-done="true"] .tx-set__done{background:var(--tx-ok-fill);color:var(--tx-ok-fill-ink)}
 .tx-set[data-done="true"]{background:var(--tx-ok-soft)}
 .tx-set[data-pr="true"] .tx-set__n{background:var(--tx-pr-soft);color:var(--tx-pr)}
 
@@ -678,7 +716,13 @@
 
 .tx-sectionhead{display:flex;align-items:center;justify-content:space-between;margin:var(--tx-section-gap) 0 var(--tx-s3)}
 .tx-sectionhead__label{font-size:10.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--tx-ink-3)}
-.tx-sectionhead__action{font-size:10.5px;font-weight:800;letter-spacing:.11em;text-transform:uppercase;color:var(--tx-accent-text)}
+.tx-sectionhead__action{font-size:10.5px;font-weight:800;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--tx-accent-text);position:relative}
+.tx-sectionhead__action::before{content:"";position:absolute;inset:-16px -10px}  /* 44px hit area */
+/* A bare count is NOT an action. Rendering "4" as __action makes a 27px-wide
+   button that fails the touch floor and lies about being tappable. */
+.tx-sectionhead__count{font-size:11px;font-weight:800;letter-spacing:.06em;
+  color:var(--tx-ink-3);font-variant-numeric:tabular-nums}
 
 .tx-navbar{
   background:var(--tx-surface);border-top:1px solid var(--tx-line);
@@ -712,9 +756,17 @@
 
 .tx-sheet{
   background:var(--tx-surface);border-radius:var(--tx-r4) var(--tx-r4) 0 0;
-  box-shadow:var(--tx-e4);padding:var(--tx-s3) var(--tx-inset) var(--tx-s5);
-  border-top:1px solid var(--tx-line);
+  box-shadow:var(--tx-e4);border-top:1px solid var(--tx-line);
+  /* bottom pad carries the gesture-bar inset — a sheet is the one surface that
+     always reaches the bottom edge, so it always owes the safe area. */
+  padding:var(--tx-s3) var(--tx-inset) calc(var(--tx-s5) + var(--tx-safe-b, 0px));
 }
+/* A sheet IS --tx-surface, so a card placed on one must step up a rung or it
+   vanishes into its own container. Same rule as a card inside a card. */
+:where(.tx-sheet) .tx-row,
+:where(.tx-sheet) .tx-list{background:var(--tx-surface-2)}
+:where(.tx-sheet) .tx-list .tx-row{background:none}
+:where(.tx-sheet) .tx-callout{background:var(--tx-surface-2)}
 .tx-sheet__grab{width:38px;height:4px;border-radius:2px;background:var(--tx-line-strong);margin:0 auto var(--tx-s4)}
 .tx-sheet__title{font-size:19px;font-weight:700;letter-spacing:-.02em;margin-bottom:var(--tx-s2)}
 
@@ -766,6 +818,8 @@
 .tx-legend{display:flex;gap:var(--tx-s5);margin-top:10px;font-size:11px;font-weight:600;color:var(--tx-ink-2)}
 .tx-legend span{display:flex;align-items:center;gap:6px}
 .tx-legend s{display:block;width:7px;height:7px;border-radius:2px;text-decoration:none;flex:0 0 7px}
+/* a soft-fill swatch is invisible at 7px unless it carries its own ring */
+.tx-legend s[data-ring]{box-shadow:inset 0 0 0 1px var(--tx-danger)}
 
 .tx-week{display:flex;align-items:flex-end;gap:6px;height:72px}
 .tx-week div{flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;height:100%;justify-content:flex-end}
@@ -827,9 +881,764 @@
 .tx-scroll-x{display:flex;gap:var(--tx-s2);overflow-x:auto;scrollbar-width:none}
 .tx-scroll-x::-webkit-scrollbar{display:none}
 .tx-divider{height:1px;background:var(--tx-line);border:0;margin:var(--tx-s4) 0}
+/* one small-caps label, used by filter groups, sheet sections and form groups.
+   Three components had re-declared the same rule before this existed. */
+.tx-label{font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--tx-ink-3)}
+/* Inline code inside the app, on app tokens. Needed because the showcase page
+   styles a bare `code` element, and an unscoped page-chrome rule reaching into
+   a component is exactly the leak this system is supposed to prevent.
+   .tx code is (0,1,1) so it beats a bare `code` at (0,0,1). */
+.tx code{font-family:var(--tx-mono);font-size:.92em;color:var(--tx-ink-2);
+  background:var(--tx-surface-2);padding:1px 5px;border-radius:var(--tx-r1);
+  box-shadow:inset 0 0 0 1px var(--tx-line)}
+/* search-term highlight — a tint, never a yellow browser default */
+:where(.tx) mark{background:var(--tx-accent-soft);color:var(--tx-accent-text);
+  border-radius:3px;padding:0 1px;font-weight:inherit}
 .tx-ink-2{color:var(--tx-ink-2)}
 .tx-ink-3{color:var(--tx-ink-3)}
 .tx-accent{color:var(--tx-accent-text)}
+
+/* ------------------------------------------------------- 18. ONBOARDING
+   Everything a multi-step profile flow needs. All tokens-first; the only
+   genuinely new primitives in the system since v1.0.
+   -------------------------------------------------------------------------- */
+
+/* ---- step progress · segmented bar, the 2026 mobile default ---- */
+.tx-steps{display:flex;gap:5px;align-items:center;width:100%}
+.tx-steps i{flex:1;height:4px;border-radius:2px;background:var(--tx-surface-3);display:block;
+  transition:background var(--tx-t-base) var(--tx-ease)}
+.tx-steps i[data-state="done"]{background:var(--tx-accent)}
+.tx-steps i[data-state="now"]{background:linear-gradient(90deg,var(--tx-accent) 55%,var(--tx-surface-3) 55%)}
+.tx-steps__label{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--tx-ink-3);white-space:nowrap;font-variant-numeric:tabular-nums}
+
+/* ---- skip · top-right in the app bar, never next to the primary CTA ---- */
+.tx-skip{min-height:44px;padding:0 6px;color:var(--tx-ink-3);font-size:14px;font-weight:500;white-space:nowrap;flex:0 0 auto}
+
+/* ---- photo picker · initials render from the first keystroke ---- */
+.tx-photo{position:relative;width:112px;height:112px;margin:0 auto;flex:0 0 auto}
+.tx-photo__img{width:112px;height:112px;border-radius:var(--tx-rfull);display:grid;place-items:center;
+  font-size:38px;font-weight:700;letter-spacing:-.02em;color:#fff;background:var(--tx-av-1);overflow:hidden}
+.tx-photo__img[data-empty="true"]{background:var(--tx-surface-2);color:var(--tx-ink-3);
+  box-shadow:inset 0 0 0 1.5px var(--tx-field-line)}
+.tx-photo__badge{position:absolute;right:0;bottom:0;width:38px;height:38px;border-radius:50%;
+  background:var(--tx-accent);color:var(--tx-accent-ink);display:grid;place-items:center;
+  box-shadow:0 0 0 4px var(--tx-canvas)}
+.tx-photo__ring{position:absolute;inset:-5px;border-radius:50%;border:3px solid var(--tx-accent);
+  border-right-color:transparent;animation:tx-spin .9s linear infinite}
+
+/* ---- selection chips · the workhorse of an onboarding flow ---- */
+.tx-pick{display:flex;flex-wrap:wrap;gap:8px}
+:where(.tx-pick) button{
+  display:inline-flex;align-items:center;gap:7px;min-height:44px;padding:0 15px;border-radius:var(--tx-r2);
+  background:var(--tx-field);box-shadow:inset 0 0 0 1px var(--tx-field-line);
+  color:var(--tx-ink-2);font-size:14.5px;font-weight:500;letter-spacing:-.01em;text-align:left;
+  transition:background var(--tx-t-fast) var(--tx-ease),box-shadow var(--tx-t-fast) var(--tx-ease),
+             color var(--tx-t-fast) var(--tx-ease);
+}
+:where(.tx-pick) button svg{flex:0 0 auto}
+.tx-pick > button[aria-pressed="true"]{
+  background:var(--tx-accent-soft);box-shadow:inset 0 0 0 1.5px var(--tx-accent-line);
+  color:var(--tx-accent-text);font-weight:600;
+}
+.tx-pick > button[aria-disabled="true"]{opacity:.38;pointer-events:none}
+.tx-pick > button[data-add]{
+  background:none;box-shadow:none;border:1px dashed var(--tx-field-line-hover);color:var(--tx-accent-text);
+}
+.tx-pick__count{font-size:12.5px;font-weight:600;color:var(--tx-ink-3);font-variant-numeric:tabular-nums}
+.tx-pick__count[data-max="true"]{color:var(--tx-warn)}
+
+/* ---- callout · a fact or a reassurance, never an error ---- */
+.tx-callout{display:flex;gap:10px;align-items:flex-start;padding:13px 14px;border-radius:var(--tx-r2);
+  background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line)}
+.tx-callout svg{flex:0 0 auto;margin-top:1px;color:var(--tx-ink-3)}
+.tx-callout p{margin:0;font-size:12.5px;line-height:1.5;color:var(--tx-ink-3)}
+.tx-callout b{color:var(--tx-ink-2);font-weight:600}
+.tx-callout--accent{background:var(--tx-accent-soft);box-shadow:inset 0 0 0 1px var(--tx-accent-line)}
+.tx-callout--accent svg{color:var(--tx-accent-text)}
+.tx-callout--accent p{color:var(--tx-ink-2)}
+.tx-callout--accent b{color:var(--tx-accent-text)}
+
+/* ---- inline verification · UPI, and anything else with a name lookup ---- */
+.tx-verified{margin-top:8px;padding:13px 14px;border-radius:var(--tx-r2);
+  background:var(--tx-ok-soft);box-shadow:inset 0 0 0 1px rgba(61,220,132,.28)}
+.tx-verified__row{display:flex;align-items:center;gap:10px}
+.tx-verified__row b{flex:1;font-size:15px;font-weight:700;letter-spacing:.01em;color:var(--tx-ink)}
+.tx-verified p{margin:4px 0 0 28px;font-size:12.5px;color:var(--tx-ink-2)}
+.tx-verified__acts{display:flex;gap:8px;margin:12px 0 0 28px}
+
+/* ---- completion meter · pre-seeded, never opens at zero ---- */
+.tx-meter{background:var(--tx-surface);border-radius:var(--tx-r2);padding:var(--tx-card-pad);
+  box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1)}
+.tx-meter__head{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:11px}
+.tx-meter__head b{font-size:15px;font-weight:700;letter-spacing:-.015em}
+.tx-meter__head span{font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--tx-accent-text)}
+.tx-meter__bar{height:6px;border-radius:3px;background:var(--tx-surface-3);overflow:hidden}
+.tx-meter__bar i{display:block;height:100%;background:var(--tx-accent);border-radius:3px;
+  transition:width var(--tx-t-slow) var(--tx-ease)}
+.tx-meter__why{margin:9px 0 0;font-size:12.5px;color:var(--tx-ink-3)}
+.tx-meter__list{margin-top:12px;border-top:1px solid var(--tx-line)}
+.tx-meter__row{display:flex;align-items:center;gap:11px;width:100%;min-height:48px;text-align:left;
+  border-bottom:1px solid var(--tx-line)}
+.tx-meter__row:last-child{border-bottom:0}
+:where(.tx-meter__row) span{flex:1;font-size:14.5px;color:var(--tx-ink)}
+.tx-meter__row[data-done="true"] span{color:var(--tx-ink-3)}
+.tx-meter__row em{font-style:normal;font-size:12px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--tx-accent-text)}
+.tx-meter__tick{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;flex:0 0 20px;
+  background:var(--tx-surface-3);color:transparent}
+.tx-meter__row[data-done="true"] .tx-meter__tick{background:var(--tx-ok-fill);color:var(--tx-ok-fill-ink)}
+
+/* ---- the restrained success moment · no confetti ---- */
+.tx-done{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+  flex:1;text-align:center}
+.tx-done__mark{width:88px;height:88px;border-radius:50%;display:grid;place-items:center;
+  background:var(--tx-accent);color:var(--tx-accent-ink);
+  box-shadow:0 0 46px rgba(198,242,78,.28);animation:tx-pop 420ms var(--tx-ease) both}
+@keyframes tx-pop{0%{transform:scale(.8);opacity:0}60%{transform:scale(1.03)}100%{transform:scale(1);opacity:1}}
+.tx-done h3{margin:0;font-size:25px;font-weight:800;letter-spacing:-.03em;color:var(--tx-ink)}
+.tx-done p{margin:0;font-size:14.5px;line-height:1.55;color:var(--tx-ink-2);max-width:30ch}
+@media (prefers-reduced-motion:reduce){
+  .tx-done__mark{animation:none}
+}
+
+/* ---- vertical timeline · resumable multi-step state ---- */
+.tx-timeline{position:relative;padding-left:34px}
+.tx-timeline__item{position:relative;padding-bottom:18px;min-height:40px}
+.tx-timeline__item:last-child{padding-bottom:0}
+.tx-timeline__item::before{content:"";position:absolute;left:-24px;top:26px;bottom:-2px;width:2px;
+  border-radius:1px;background:var(--tx-line-strong)}
+.tx-timeline__item:last-child::before{display:none}
+.tx-timeline__item[data-state="done"]::before{background:var(--tx-ok-fill)}
+.tx-timeline__dot{position:absolute;left:-34px;top:0;width:22px;height:22px;border-radius:50%;
+  display:grid;place-items:center;flex:0 0 22px;
+  background:var(--tx-surface-2);color:var(--tx-ink-3);
+  font-size:11px;font-weight:800;font-variant-numeric:tabular-nums;
+  box-shadow:0 0 0 4px var(--tx-canvas)}
+/* --tx-ok is a TEXT colour. Filling with it and writing #fff on top is 1.78:1
+   in dark — the fill/fill-ink pair exists precisely for this. */
+.tx-timeline__item[data-state="done"] .tx-timeline__dot{
+  background:var(--tx-ok-fill);color:var(--tx-ok-fill-ink)}
+.tx-timeline__item[data-state="now"] .tx-timeline__dot{background:var(--tx-accent);color:var(--tx-accent-ink);
+  box-shadow:0 0 0 4px var(--tx-canvas),0 0 14px var(--tx-accent-line)}
+:where(.tx-timeline__item) b{display:block;font-size:15.5px;font-weight:600;letter-spacing:-.015em;color:var(--tx-ink);line-height:22px}
+:where(.tx-timeline__item) span.m{display:block;font-size:12.5px;line-height:1.4;color:var(--tx-ink-3);margin-top:2px}
+.tx-timeline__item[data-state="todo"] b{color:var(--tx-ink-3);font-weight:500}
+.tx-timeline__item[data-state="now"] b{color:var(--tx-accent-text)}
+
+/* ----------------------------------------------------- 19. HOME & NAVIGATION
+   Drawer, notification centre, activity feed, sync affordances.
+   -------------------------------------------------------------------------- */
+
+/* ---- navigation drawer · Android container for everything weekly-or-rarer ---- */
+.tx-drawer{
+  width:312px;height:100%;display:flex;flex-direction:column;
+  background:var(--tx-surface);border-radius:0 var(--tx-r4) var(--tx-r4) 0;
+  box-shadow:var(--tx-e3);
+}
+.tx-drawer__head{padding:calc(var(--tx-statusbar,56px) + 10px) 18px 12px;border-bottom:1px solid var(--tx-line);flex:0 0 auto}
+.tx-drawer__id{display:flex;align-items:center;gap:12px;width:100%;text-align:left;min-height:48px}
+:where(.tx-drawer__id) .m{flex:1;min-width:0}
+:where(.tx-drawer__id) .m b{display:block;font-size:16px;font-weight:700;letter-spacing:-.02em;color:var(--tx-ink)}
+:where(.tx-drawer__id) .m span{display:block;font-size:12.5px;color:var(--tx-ink-3);margin-top:2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tx-drawer__switch{
+  display:flex;align-items:center;gap:10px;width:100%;min-height:44px;margin-top:10px;padding:0 12px;
+  border-radius:var(--tx-r2);background:var(--tx-surface-2);color:var(--tx-ink-2);
+  font-size:13.5px;font-weight:600;text-align:left;
+}
+/* No fade mask here on purpose. A gradient mask dims whatever sits under it,
+   which on a nav list means a live destination reads as disabled. The pinned
+   footer's top border is the hard edge, and the half-row above it is the
+   scroll affordance — same as M3's ModalDrawerSheet. */
+.tx-drawer__body{flex:1;min-height:0;overflow-y:auto;padding:6px 10px 4px;scrollbar-width:none;
+  overscroll-behavior:contain}
+.tx-drawer__body::-webkit-scrollbar{display:none}
+.tx-drawer__label{
+  padding:10px 14px 4px;line-height:1.4;
+  font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--tx-ink-3);
+}
+.tx-drawer__item{
+  display:flex;align-items:center;gap:13px;width:100%;min-height:48px;padding:0 13px;
+  border-radius:var(--tx-rfull);color:var(--tx-ink-2);font-size:15px;font-weight:500;
+  letter-spacing:-.01em;text-align:left;
+  transition:background var(--tx-t-fast) var(--tx-ease),color var(--tx-t-fast) var(--tx-ease);
+}
+.tx-drawer__item svg{flex:0 0 auto;color:var(--tx-ink-3)}
+:where(.tx-drawer__item) span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tx-drawer__item[aria-current="page"]{background:var(--tx-accent-soft);color:var(--tx-accent-text);font-weight:600}
+.tx-drawer__item[aria-current="page"] svg{color:var(--tx-accent-text)}
+.tx-drawer__badge{
+  min-width:22px;height:22px;padding:0 7px;border-radius:11px;flex:0 0 auto;
+  background:var(--tx-danger-fill);color:var(--tx-danger-fill-ink);
+  font-size:11px;font-weight:800;display:grid;place-items:center;font-variant-numeric:tabular-nums;
+}
+.tx-drawer__badge--quiet{background:var(--tx-surface-3);color:var(--tx-ink-2)}
+.tx-drawer__foot{flex:0 0 auto;padding:8px 10px;border-top:1px solid var(--tx-line)}
+.tx-drawer__ver{
+  display:block;text-align:center;padding:8px 0 2px;font-size:11px;color:var(--tx-ink-3);
+  font-family:var(--tx-mono);letter-spacing:.03em;
+}
+
+/* ---- notification centre ---- */
+.tx-notif{
+  display:flex;gap:12px;align-items:flex-start;width:100%;text-align:left;
+  padding:14px var(--tx-inset);border-bottom:1px solid var(--tx-line);
+}
+.tx-notif__dot{width:8px;height:8px;border-radius:50%;background:var(--tx-accent);margin-top:14px;flex:0 0 8px}
+.tx-notif[data-read="true"] .tx-notif__dot{background:transparent}
+.tx-notif[data-read="true"]{opacity:.62}
+:where(.tx-notif) .m{flex:1;min-width:0}
+:where(.tx-notif) .m p{margin:0;font-size:14.5px;line-height:1.4;color:var(--tx-ink)}
+:where(.tx-notif) .m p b{font-weight:700}
+:where(.tx-notif) .m time{display:block;font-size:12px;color:var(--tx-ink-3);margin-top:5px}
+
+/* ---- activity feed ---- */
+.tx-activity{display:flex;gap:12px;align-items:flex-start;width:100%;text-align:left;padding:12px 0;
+  border-bottom:1px solid var(--tx-line)}
+.tx-activity:last-child{border-bottom:0}
+:where(.tx-activity) .m{flex:1;min-width:0}
+:where(.tx-activity) .m p{margin:0;font-size:14px;line-height:1.4;color:var(--tx-ink-2)}
+:where(.tx-activity) .m p b{color:var(--tx-ink);font-weight:600}
+:where(.tx-activity) .m span{display:block;font-size:11.5px;color:var(--tx-ink-3);margin-top:4px;
+  font-variant-numeric:tabular-nums}
+
+/* ---- sync affordances · a local-first app must say when it last talked home ---- */
+.tx-synced{font-size:11px;color:var(--tx-ink-3);font-variant-numeric:tabular-nums;
+  display:flex;align-items:center;gap:6px}
+.tx-ptr{display:flex;align-items:center;justify-content:center;gap:9px;height:50px;
+  color:var(--tx-ink-3);font-size:13px;font-weight:500}
+.tx-ptr__spin{width:19px;height:19px;border-radius:50%;flex:0 0 19px;
+  border:2px solid var(--tx-line-strong);border-top-color:var(--tx-accent);animation:tx-spin .8s linear infinite}
+
+/* ---- app bar with a leading menu control ---- */
+.tx-appbar--nav{display:flex;align-items:center;gap:6px;min-height:56px;padding:2px 0}
+:where(.tx-appbar--nav) .t{flex:1;min-width:0}
+:where(.tx-appbar--nav) .t b{display:block;font-size:19px;font-weight:800;letter-spacing:-.02em;color:var(--tx-ink)}
+:where(.tx-appbar--nav) .t span{display:block;font-size:12px;color:var(--tx-ink-3);margin-top:2px}
+
+/* ============================================================================
+   20. ROSTER · CLIENTS LIST, SELECTION, SCRUBBING
+   Every rule below is token-only. Nothing here hard-codes a colour or a size
+   that isn't already in the scale.
+   -------------------------------------------------------------------------- */
+
+/* ---- sticky group header inside a scrolling roster ---- */
+.tx-stick{
+  position:sticky;top:0;z-index:3;
+  display:flex;align-items:center;justify-content:space-between;gap:var(--tx-s3);
+  /* bleeds into the screen gutter with its own margin/padding rather than a
+     pseudo-element — an absolutely-positioned bleed resolves against the
+     nearest positioned ancestor, which is the screen, not the header. */
+  margin:0 calc(var(--tx-inset) * -1);
+  padding:9px calc(var(--tx-inset) + 2px) 7px;
+  background:var(--tx-canvas);
+  font-size:10.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--tx-ink-3);
+}
+/* a count is information, not decoration — it owes the 4.5:1 floor */
+.tx-stick em{font-style:normal;font-variant-numeric:tabular-nums;color:var(--tx-ink-3)}
+.tx-stick--alert{color:var(--tx-warn)}
+
+/* ---- sessions left in a paid pack ---- */
+.tx-pack{
+  display:inline-flex;flex-direction:column;align-items:flex-end;gap:5px;flex:0 0 auto;min-width:42px;
+}
+.tx-pack b{font-size:14px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--tx-ink)}
+.tx-pack b i{font-style:normal;font-size:10.5px;font-weight:700;color:var(--tx-ink-3)}
+.tx-pack__bar{display:block;width:42px;height:3px;border-radius:2px;background:var(--tx-surface-3);overflow:hidden}
+.tx-pack__bar s{display:block;height:100%;border-radius:2px;background:var(--tx-ok);text-decoration:none}
+.tx-pack[data-low="true"] b{color:var(--tx-warn)}
+.tx-pack[data-low="true"] .tx-pack__bar s{background:var(--tx-warn)}
+.tx-pack[data-low="out"] b{color:var(--tx-danger)}
+.tx-pack[data-low="out"] .tx-pack__bar s{background:var(--tx-danger)}
+
+/* ---- A–Z scrub rail · only earns its place past ~40 rows ---- */
+.tx-index{
+  position:absolute;right:2px;top:0;bottom:0;z-index:4;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+  width:22px;padding:var(--tx-s2) 0;
+}
+.tx-index b{
+  font-size:9px;font-weight:800;line-height:1;color:var(--tx-ink-3);
+  font-variant-numeric:tabular-nums;
+}
+.tx-index b[data-on="true"]{color:var(--tx-accent-text)}
+/* the bubble is a child of the letter under the finger, so it can never
+   drift onto the app bar the way a top-anchored bubble does */
+.tx-index b{position:relative}
+.tx-index__bubble{
+  position:absolute;right:26px;top:50%;transform:translateY(-50%);pointer-events:none;
+  width:54px;height:54px;border-radius:var(--tx-r3);
+  background:var(--tx-accent);color:var(--tx-accent-ink);
+  display:grid;place-items:center;font-size:24px;font-weight:800;
+  box-shadow:var(--tx-e3);
+}
+
+/* ---- contextual bar · replaces the app bar while rows are selected ---- */
+.tx-selectbar{
+  display:flex;align-items:center;gap:var(--tx-s2);min-height:56px;padding:2px 0;
+}
+:where(.tx-selectbar) .n{flex:1;min-width:0;font-size:17px;font-weight:800;letter-spacing:-.02em;
+  color:var(--tx-ink);font-variant-numeric:tabular-nums}
+.tx-selectbar__act{
+  display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 var(--tx-s3);
+  border-radius:var(--tx-rfull);background:var(--tx-surface-2);color:var(--tx-ink);
+  font-size:12px;font-weight:700;letter-spacing:.04em;position:relative;
+}
+.tx-selectbar__act::before{content:"";position:absolute;inset:-6px -2px}
+.tx-selectbar__act[data-destructive]{color:var(--tx-danger)}
+
+/* selection mode. The control sits in a slot exactly as wide as the avatar it
+   replaces, so no text moves horizontally when the mode flips — the eye keeps
+   its place in the list. */
+.tx-row__lead{flex:0 0 34px;display:grid;place-items:center}
+.tx-row[data-selected]{background:var(--tx-accent-soft)}
+
+/* ---- filter button carrying a count of what's applied ---- */
+.tx-chip--filter[data-n]:not([data-n="0"])::after{
+  content:attr(data-n);
+  min-width:17px;height:17px;padding:0 5px;border-radius:9px;
+  background:var(--tx-accent);color:var(--tx-accent-ink);
+  font-size:10px;font-weight:800;display:grid;place-items:center;
+  font-variant-numeric:tabular-nums;letter-spacing:0;
+}
+
+/* ---- roster summary strip · one line, never a chart ---- */
+.tx-tally{
+  display:flex;align-items:center;justify-content:space-between;gap:var(--tx-s3);
+  padding:11px var(--tx-s3);border-radius:var(--tx-r2);
+  background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line);
+}
+:where(.tx-tally) span{display:flex;align-items:baseline;gap:6px;font-size:11px;font-weight:700;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--tx-ink-3);white-space:nowrap}
+:where(.tx-tally) span b{font-size:15px;font-weight:800;letter-spacing:-.02em;color:var(--tx-ink);
+  font-variant-numeric:tabular-nums}
+:where(.tx-tally) span[data-tone="warn"] b{color:var(--tx-warn)}
+:where(.tx-tally) span[data-tone="ok"] b{color:var(--tx-ok)}
+.tx-tally hr{width:1px;height:20px;background:var(--tx-line);border:0;margin:0}
+
+/* ============================================================================
+   21. DIARY · AGENDA, WEEK, MONTH, SLOTS
+   A trainer's day is a split shift — early morning, a dead middle, evening.
+   Every component here exists because a 24-hour time grid spends most of its
+   pixels on hours in which nothing happens.
+   -------------------------------------------------------------------------- */
+
+/* ---- day strip · load density instead of a single dot ---- */
+.tx-day__load{display:flex;gap:3px;align-items:center;height:5px}
+.tx-day__load s{width:4px;height:4px;border-radius:50%;background:var(--tx-accent);
+  text-decoration:none;display:block}
+.tx-day__load s[data-off="true"]{background:var(--tx-line-strong)}
+.tx-day[aria-selected="true"] .tx-day__load s{background:var(--tx-accent-ink)}
+.tx-day[aria-selected="true"] .tx-day__load s[data-off="true"]{background:rgba(0,0,0,.24)}
+.tx-day[data-today="true"] b{color:var(--tx-accent-text)}
+.tx-day[aria-selected="true"][data-today="true"] b{color:var(--tx-accent-ink)}
+.tx-day[data-past="true"]{opacity:.5}
+/* selection always beats de-emphasis — a picked past day is still picked */
+.tx-day[aria-selected="true"]{opacity:1}
+
+/* ---- agenda · a time gutter and a rail, not a grid ---- */
+.tx-agenda{position:relative;padding-left:52px}
+/* the gutter is outside the item, so it offsets by the agenda's own padding —
+   left:0 would put the time on top of the row */
+.tx-agenda__t{
+  position:absolute;left:-52px;width:44px;text-align:right;
+  font-size:11px;font-weight:700;color:var(--tx-ink-3);
+  font-variant-numeric:tabular-nums;line-height:1.2;padding-top:3px;
+}
+/* AM/PM is read, so it owes 4.5:1 — --tx-ink-off is for rules, not for text */
+.tx-agenda__t s{display:block;font-size:9px;font-weight:700;letter-spacing:.06em;
+  color:var(--tx-ink-3);text-decoration:none;margin-top:1px}
+.tx-agenda__item{position:relative;margin-bottom:8px}
+.tx-agenda__item:last-child{margin-bottom:0}
+
+/* ---- collapsed free time ---- */
+.tx-gap{
+  display:flex;align-items:center;gap:9px;width:100%;min-height:46px;
+  padding:0 var(--tx-s3);border-radius:var(--tx-r2);text-align:left;
+  background:repeating-linear-gradient(135deg,var(--tx-surface) 0 7px,transparent 7px 14px);
+  box-shadow:inset 0 0 0 1px var(--tx-line);
+  color:var(--tx-ink-3);font-size:12.5px;
+}
+.tx-gap b{font-weight:700;color:var(--tx-ink-2);font-variant-numeric:tabular-nums}
+.tx-gap em{font-style:normal;margin-left:auto;font-size:10.5px;font-weight:800;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--tx-accent-text)}
+
+/* ---- a bookable slot ---- */
+.tx-slot{
+  display:flex;align-items:center;gap:10px;width:100%;min-height:52px;
+  padding:0 var(--tx-s3);border-radius:var(--tx-r2);text-align:left;
+  background:transparent;box-shadow:inset 0 0 0 1px dashed var(--tx-line);
+  border:1px dashed var(--tx-line-strong);
+  color:var(--tx-ink-2);font-size:14px;font-weight:600;
+}
+.tx-slot svg{color:var(--tx-ink-3);flex:0 0 auto}
+.tx-slot span{font-variant-numeric:tabular-nums}
+.tx-slot em{font-style:normal;margin-left:auto;font-size:11px;font-weight:700;color:var(--tx-ink-3)}
+.tx-slot:active{background:var(--tx-surface)}
+
+/* ---- now line ---- */
+.tx-now{display:flex;align-items:center;gap:8px;margin:2px 0 10px;position:relative;left:-52px;
+  width:calc(100% + 52px)}
+.tx-now b{font-size:10px;font-weight:800;letter-spacing:.06em;color:var(--tx-accent-ink);
+  background:var(--tx-accent);border-radius:var(--tx-r1);padding:2px 6px;
+  font-variant-numeric:tabular-nums;flex:0 0 auto}
+.tx-now s{flex:1;height:1px;background:var(--tx-accent);text-decoration:none;display:block;
+  box-shadow:0 0 8px var(--tx-accent-line)}
+
+/* ---- session status, four of them, never nine ---- */
+.tx-row[data-status="done"]{opacity:.55}
+.tx-row[data-status="cancelled"] .tx-row__main b{text-decoration:line-through;color:var(--tx-ink-3)}
+.tx-row[data-status="cancelled"]{opacity:.7}
+.tx-row[data-status="noshow"]{box-shadow:inset 2px 0 0 var(--tx-danger)}
+
+/* ---- overlap ---- */
+.tx-clash{
+  display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:var(--tx-r2);
+  background:var(--tx-danger-soft);color:var(--tx-danger);
+  font-size:12px;font-weight:600;line-height:1.4;
+}
+.tx-clash svg{flex:0 0 auto}
+
+/* ---- batch capacity ----
+   Deliberately NOT its own component. "8 of 10 spots" is the same shape as
+   "12 of 16 sessions", so it reuses .tx-pack. A bar per person was 110px wide
+   and truncated every line of text next to it. */
+.tx-pack--cap b i{color:var(--tx-ink-3)}
+
+/* ---- week view · seven columns of pips, not a time grid ---- */
+.tx-wk{display:grid;grid-template-columns:repeat(7,1fr);gap:5px}
+.tx-wk__col{display:flex;flex-direction:column;gap:4px;min-width:0}
+.tx-wk__h{
+  text-align:center;padding:7px 0 8px;border-radius:var(--tx-r2) var(--tx-r2) 0 0;
+  background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line);
+}
+.tx-wk__h span{display:block;font-size:8.5px;font-weight:800;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--tx-ink-3)}
+.tx-wk__h b{display:block;font-size:14px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px}
+.tx-wk__col[data-today="true"] .tx-wk__h{background:var(--tx-accent-soft);
+  box-shadow:inset 0 0 0 1px var(--tx-accent-line)}
+.tx-wk__col[data-today="true"] .tx-wk__h b{color:var(--tx-accent-text)}
+.tx-wk__pip{
+  /* 44 not 34 — a week pip is a real target that opens the day */
+  border-radius:var(--tx-r1);padding:5px 4px;min-height:44px;
+  background:var(--tx-surface-2);box-shadow:inset 2px 0 0 var(--tx-accent);
+  font-size:9px;font-weight:700;line-height:1.25;color:var(--tx-ink-2);
+  overflow:hidden;text-align:left;
+}
+.tx-wk__pip b{display:block;font-size:9.5px;font-weight:800;font-variant-numeric:tabular-nums;color:var(--tx-ink)}
+.tx-wk__pip span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+.tx-wk__pip[data-kind="remote"]{box-shadow:inset 2px 0 0 var(--tx-remote)}
+.tx-wk__pip[data-kind="batch"]{box-shadow:inset 2px 0 0 var(--tx-info)}
+.tx-wk__pip[data-kind="off"]{box-shadow:none;background:transparent;color:var(--tx-ink-3);
+  border:1px dashed var(--tx-line);min-height:44px;display:grid;place-items:center;font-size:9px}
+.tx-wk__more{font-size:9px;font-weight:800;color:var(--tx-ink-3);text-align:center;padding:2px 0}
+
+/* ---- month · density, not content ---- */
+.tx-mo{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.tx-mo__h{text-align:center;font-size:9px;font-weight:800;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--tx-ink-3);padding-bottom:5px}
+.tx-mo__d{
+  aspect-ratio:1;border-radius:var(--tx-r2);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:4px;
+  font-size:13px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--tx-ink-2);
+}
+.tx-mo__d[data-out="true"]{color:var(--tx-ink-off)}
+.tx-mo__d[data-today="true"]{box-shadow:inset 0 0 0 1px var(--tx-accent-line);color:var(--tx-accent-text);font-weight:800}
+.tx-mo__d[aria-selected="true"]{background:var(--tx-accent);color:var(--tx-accent-ink);font-weight:800}
+.tx-mo__dots{display:flex;gap:2px;height:4px}
+.tx-mo__dots s{width:4px;height:4px;border-radius:50%;background:var(--tx-accent);
+  text-decoration:none;display:block}
+.tx-mo__d[aria-selected="true"] .tx-mo__dots s{background:var(--tx-accent-ink)}
+.tx-mo__d[data-full="true"] .tx-mo__dots s{background:var(--tx-warn)}
+
+/* ---- weekly availability grid ---- */
+.tx-avail{display:flex;flex-direction:column;gap:6px}
+.tx-avail__row{display:flex;align-items:center;gap:10px;min-height:48px;width:100%;text-align:left}
+.tx-avail__d{flex:0 0 38px;font-size:11px;font-weight:800;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--tx-ink-3)}
+.tx-avail__bars{flex:1;min-width:0;display:flex;gap:5px;flex-wrap:wrap}
+.tx-avail__bar{
+  padding:6px 10px;border-radius:var(--tx-rfull);
+  background:var(--tx-accent-soft);color:var(--tx-accent-text);
+  font-size:11.5px;font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.tx-avail__bar[data-off="true"]{background:var(--tx-surface-2);color:var(--tx-ink-3)}
+
+/* ============================================================================
+   22. MONEY · LEDGER, SHARE, TURNOVER
+   Train X does not process payments. Money moved by cash, by UPI into the
+   trainer's own VPA, or through the gym's counter — so this is a BOOK, not a
+   dashboard. The model is a digital bahi khata, not a payment processor.
+   -------------------------------------------------------------------------- */
+
+/* ---- the month's money · two figures, one bar ---- */
+.tx-money{
+  background:var(--tx-surface);border-radius:var(--tx-r3);padding:var(--tx-card-pad);
+  box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+/* align the LABELS, not the bottoms of the blocks. The two figures are
+   deliberately different sizes, so flex-end drops the smaller label 12px and
+   the pair reads as misaligned. */
+.tx-money__row{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--tx-s4)}
+.tx-money__fig{min-width:0}
+.tx-money__fig s{display:block;text-decoration:none;font-size:10px;font-weight:800;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--tx-ink-3);margin-bottom:7px}
+.tx-money__fig b{display:block;font-size:29px;font-weight:800;letter-spacing:-.035em;
+  font-variant-numeric:tabular-nums;color:var(--tx-ink);line-height:1}
+.tx-money__fig[data-tone="ok"] b{color:var(--tx-ok)}
+.tx-money__fig[data-tone="warn"] b{color:var(--tx-warn)}
+.tx-money__fig--r{text-align:right}
+.tx-money__fig--r b{font-size:23px}
+
+/* ---- gym cut · the line every western app is missing ---- */
+.tx-share{
+  display:flex;align-items:center;gap:var(--tx-s3);width:100%;text-align:left;
+  padding:12px var(--tx-s3);border-radius:var(--tx-r2);
+  background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line);
+}
+.tx-share__bar{flex:1;min-width:0;height:8px;border-radius:var(--tx-r1);
+  background:var(--tx-surface-3);overflow:hidden;display:flex}
+.tx-share__bar i{display:block;height:100%}
+:where(.tx-share) .m{flex:0 0 auto;font-size:11px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--tx-ink-3)}
+:where(.tx-share) .m b{display:block;font-size:16px;font-weight:800;letter-spacing:-.025em;
+  color:var(--tx-ink);font-variant-numeric:tabular-nums;margin-top:3px;text-transform:none;letter-spacing:-.025em}
+
+/* ---- ledger · chronological, in and out, running balance ---- */
+.tx-ledger{
+  background:var(--tx-surface);border-radius:var(--tx-r2);overflow:hidden;
+  box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+.tx-led{
+  display:flex;align-items:center;gap:var(--tx-s3);width:100%;text-align:left;
+  min-height:62px;padding:11px var(--tx-s3);border-bottom:1px solid var(--tx-line);
+}
+.tx-ledger .tx-led:last-child{border-bottom:0}
+.tx-led__dir{
+  width:30px;height:30px;border-radius:50%;flex:0 0 30px;display:grid;place-items:center;
+  background:var(--tx-ok-soft);color:var(--tx-ok);
+}
+.tx-led[data-dir="out"] .tx-led__dir{background:var(--tx-danger-soft);color:var(--tx-danger)}
+:where(.tx-led) .m{flex:1;min-width:0}
+:where(.tx-led) .m > b{display:block;font-size:14.5px;font-weight:600;letter-spacing:-.01em;
+  color:var(--tx-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:where(.tx-led) .m > span{display:block;font-size:11.5px;color:var(--tx-ink-3);margin-top:3px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tx-led__amt{flex:0 0 auto;text-align:right}
+:where(.tx-led__amt) b{display:block;font-size:15px;font-weight:800;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;color:var(--tx-ok)}
+.tx-led[data-dir="out"] :where(.tx-led__amt) b{color:var(--tx-danger)}
+/* money that has already left is history, not an alarm */
+.tx-led[data-settled="true"]{opacity:.62}
+:where(.tx-led__amt) span{display:block;font-size:10.5px;color:var(--tx-ink-3);margin-top:3px;
+  font-variant-numeric:tabular-nums}
+
+/* running balance divider inside a client's book */
+.tx-led__bal{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px var(--tx-s3);background:var(--tx-surface-2);
+  font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--tx-ink-3);
+}
+.tx-led__bal b{font-size:14px;font-weight:800;letter-spacing:-.02em;text-transform:none;
+  font-variant-numeric:tabular-nums;color:var(--tx-ink)}
+.tx-led__bal[data-clear="true"]{color:var(--tx-ok)}
+.tx-led__bal[data-clear="true"] b{color:var(--tx-ok)}
+
+/* ---- turnover against the GST line ---- */
+.tx-gst{
+  padding:var(--tx-card-pad);border-radius:var(--tx-r2);
+  background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line);
+}
+.tx-gst__head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--tx-s3)}
+.tx-gst__head b{font-size:15px;font-weight:700;letter-spacing:-.015em}
+.tx-gst__head span{font-size:11px;font-weight:700;color:var(--tx-ink-3);font-variant-numeric:tabular-nums}
+.tx-gst__track{position:relative;height:10px;border-radius:5px;background:var(--tx-surface-3);
+  margin:12px 0 0;overflow:hidden}
+.tx-gst__track i{display:block;height:100%;border-radius:5px;background:var(--tx-accent)}
+.tx-gst[data-near="true"] .tx-gst__track i{background:var(--tx-warn)}
+.tx-gst__mark{display:flex;justify-content:space-between;margin-top:8px;font-size:10.5px;
+  color:var(--tx-ink-3);font-variant-numeric:tabular-nums}
+
+/* ---- UPI QR block ---- */
+.tx-qr{
+  display:flex;flex-direction:column;align-items:center;gap:12px;
+  padding:var(--tx-s5);border-radius:var(--tx-r3);background:#FFFFFF;
+}
+/* Stand-in for a real UPI QR. The three finder squares matter: without them a
+   checkerboard reads as a placeholder pattern rather than something scannable,
+   and reviewers stop trusting the screen. */
+.tx-qr__code{
+  position:relative;width:135px;height:135px;
+  background:repeating-conic-gradient(#0A0B0D 0% 25%, #FFFFFF 0% 50%) 0 0/15px 15px;
+}
+.tx-qr__code s{position:absolute;width:45px;height:45px;background:#FFFFFF;text-decoration:none;
+  box-shadow:inset 0 0 0 6px #0A0B0D, inset 0 0 0 12px #FFFFFF, inset 0 0 0 21px #0A0B0D}
+.tx-qr__code s:nth-child(1){top:0;left:0}
+.tx-qr__code s:nth-child(2){top:0;right:0}
+.tx-qr__code s:nth-child(3){bottom:0;left:0}
+.tx-qr__vpa{font-family:var(--tx-mono);font-size:12px;color:#3A3F47;letter-spacing:.02em}
+
+/* ---- amount keypad ---- */
+.tx-pad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tx-pad button{
+  min-height:56px;border-radius:var(--tx-r2);background:var(--tx-surface-2);color:var(--tx-ink);
+  font-size:23px;font-weight:700;font-variant-numeric:tabular-nums;
+  box-shadow:inset 0 0 0 1px var(--tx-line);
+}
+.tx-pad button:active{background:var(--tx-surface-3)}
+.tx-pad button[data-quiet="true"]{background:transparent;box-shadow:none;color:var(--tx-ink-2);font-size:17px}
+
+/* ---- receipt ---- */
+.tx-receipt{
+  border-radius:var(--tx-r2);background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line);
+  padding:var(--tx-card-pad);
+}
+.tx-receipt__row{display:flex;align-items:baseline;justify-content:space-between;gap:var(--tx-s3);
+  padding:7px 0;font-size:13px;color:var(--tx-ink-3)}
+.tx-receipt__row b{color:var(--tx-ink);font-weight:600;font-variant-numeric:tabular-nums;text-align:right}
+.tx-receipt__row--total{border-top:1px dashed var(--tx-line-strong);margin-top:7px;padding-top:12px;
+  font-size:14px;color:var(--tx-ink-2)}
+.tx-receipt__row--total b{font-size:19px;font-weight:800;letter-spacing:-.02em}
+
+/* ---- month scroller ---- */
+.tx-months{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
+.tx-months::-webkit-scrollbar{display:none}
+.tx-month{
+  flex:0 0 auto;min-height:48px;padding:0 14px;border-radius:var(--tx-r2);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line);
+}
+.tx-month span{font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--tx-ink-3)}
+.tx-month b{font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.tx-month[aria-selected="true"]{background:var(--tx-accent);box-shadow:none}
+.tx-month[aria-selected="true"] span,.tx-month[aria-selected="true"] b{color:var(--tx-accent-ink)}
+
+/* ---- year bars ---- */
+.tx-year{display:flex;align-items:flex-end;gap:5px;height:120px}
+.tx-year__c{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;height:100%;
+  justify-content:flex-end;min-width:0}
+/* No opacity dimming. The legend says lime = collected and amber = owed, so
+   every bar has to be those colours — a dimmed bar reads as a third category
+   that the legend never explains. The current month is marked on its LABEL. */
+.tx-year__c i{display:block;width:100%;border-radius:var(--tx-r1) var(--tx-r1) 0 0;
+  background:var(--tx-accent)}
+.tx-year__c s{display:block;width:100%;border-radius:0 0 var(--tx-r1) var(--tx-r1);
+  background:var(--tx-warn);text-decoration:none}
+.tx-year__c span{font-size:9px;font-weight:700;color:var(--tx-ink-3);text-transform:uppercase}
+.tx-year__c[data-on="true"] span{color:var(--tx-accent-text);font-weight:800}
+/* a month with nothing in it still gets a baseline, so the axis stays readable */
+.tx-year__c[data-empty="true"] i{height:2px;background:var(--tx-line-strong);border-radius:1px}
+
+/* ============================================================================
+   23. DRAWER DESTINATIONS · LIBRARY, BUILDER, REPORTS, RULES, SETTINGS
+   Everything reached from the navigation drawer. These are weekly-or-rarer
+   surfaces, so they favour density and completeness over speed.
+   -------------------------------------------------------------------------- */
+
+/* ---- exercise thumbnail · stands in for a demo loop ---- */
+.tx-thumb{
+  width:52px;height:52px;border-radius:var(--tx-r2);flex:0 0 52px;
+  display:grid;place-items:center;position:relative;overflow:hidden;
+  background:linear-gradient(150deg,var(--tx-surface-3),var(--tx-surface-2));
+  box-shadow:inset 0 0 0 1px var(--tx-line);color:var(--tx-ink-3);
+}
+.tx-thumb--sm{width:40px;height:40px;flex:0 0 40px}
+.tx-thumb__play{
+  position:absolute;right:3px;bottom:3px;width:16px;height:16px;border-radius:50%;
+  background:var(--tx-accent);color:var(--tx-accent-ink);display:grid;place-items:center;
+}
+.tx-thumb[data-custom="true"]{box-shadow:inset 0 0 0 1px var(--tx-accent-line)}
+
+/* ---- program matrix · weeks down, days across ---- */
+.tx-grid7{display:grid;grid-template-columns:26px repeat(7,1fr);gap:4px;align-items:center}
+.tx-grid7__h{font-size:8.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--tx-ink-3);text-align:center}
+.tx-grid7__w{font-size:9.5px;font-weight:800;color:var(--tx-ink-3);font-variant-numeric:tabular-nums}
+.tx-grid7__c{
+  aspect-ratio:1;border-radius:var(--tx-r1);background:var(--tx-surface-2);
+  box-shadow:inset 0 0 0 1px var(--tx-line);
+  display:grid;place-items:center;font-size:8.5px;font-weight:800;color:var(--tx-ink-3);
+}
+.tx-grid7__c[data-k="push"]{background:var(--tx-accent-soft);box-shadow:inset 0 0 0 1px var(--tx-accent-line);color:var(--tx-accent-text)}
+.tx-grid7__c[data-k="pull"]{background:var(--tx-info-soft);box-shadow:inset 0 0 0 1px var(--tx-info-soft);color:var(--tx-info)}
+.tx-grid7__c[data-k="legs"]{background:var(--tx-pr-soft);box-shadow:inset 0 0 0 1px var(--tx-pr-soft);color:var(--tx-pr)}
+/* A rest cell is empty and DASHED. A "·" glyph inside it would be text at
+   2.31:1, and dashed already means "nothing scheduled" everywhere else in this
+   system — .tx-slot and .tx-wk__pip[data-kind=off] use it too. */
+.tx-grid7__c[data-k="rest"]{background:transparent;box-shadow:none;
+  border:1px dashed var(--tx-line-strong)}
+
+/* ---- a metric with a sparkline ---- */
+.tx-metric{
+  padding:var(--tx-card-pad);border-radius:var(--tx-r2);text-align:left;width:100%;
+  background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+.tx-metric__l{display:block;font-size:10px;font-weight:800;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--tx-ink-3)}
+.tx-metric__v{display:flex;align-items:baseline;gap:8px;margin-top:9px}
+.tx-metric__v b{font-size:26px;font-weight:800;letter-spacing:-.035em;font-variant-numeric:tabular-nums}
+.tx-metric__d{font-size:11px;font-weight:800;letter-spacing:.02em;color:var(--tx-ok)}
+.tx-metric__d[data-dir="down"]{color:var(--tx-danger)}
+.tx-metric__d[data-dir="flat"]{color:var(--tx-ink-3)}
+/* A sparkline has no legend, so it gets ONE colour — the rightmost bar is the
+   current period by convention and needs no extra emphasis. Same lesson as the
+   year chart: a second colour nothing explains reads as a second category. */
+.tx-spark{display:flex;align-items:flex-end;gap:2px;height:40px;margin-top:14px}
+.tx-spark i{flex:1;border-radius:2px 2px 0 0;background:var(--tx-accent);display:block;min-height:3px}
+
+/* ---- seven-day adherence strip ---- */
+.tx-streak{display:flex;gap:3px;flex:0 0 auto}
+.tx-streak s{
+  /* 11px not 13: seven cells plus a percentage must still leave a name room */
+  width:11px;height:20px;border-radius:2px;display:block;text-decoration:none;
+  background:var(--tx-surface-3);
+}
+.tx-streak s[data-s="done"]{background:var(--tx-ok)}
+.tx-streak s[data-s="miss"]{background:var(--tx-danger-soft);box-shadow:inset 0 0 0 1px var(--tx-danger)}
+.tx-streak s[data-s="rest"]{background:transparent;box-shadow:inset 0 0 0 1px var(--tx-line)}
+
+/* ---- if / then rule ---- */
+.tx-rule2{
+  width:100%;text-align:left;padding:var(--tx-s3);border-radius:var(--tx-r2);
+  background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line);
+}
+.tx-rule2__top{display:flex;align-items:center;gap:var(--tx-s3);margin-bottom:10px}
+.tx-rule2__top b{flex:1;min-width:0;font-size:14.5px;font-weight:700;letter-spacing:-.015em;color:var(--tx-ink)}
+.tx-rule2__cond{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px;color:var(--tx-ink-3)}
+.tx-rule2__cond s{
+  text-decoration:none;padding:4px 9px;border-radius:var(--tx-rfull);
+  background:var(--tx-surface-2);color:var(--tx-ink-2);font-weight:600;
+  box-shadow:inset 0 0 0 1px var(--tx-line);
+}
+.tx-rule2__cond s[data-k="then"]{background:var(--tx-accent-soft);color:var(--tx-accent-text);
+  box-shadow:inset 0 0 0 1px var(--tx-accent-line)}
+.tx-rule2[data-off="true"]{opacity:.55}
+
+/* ---- FAQ accordion ---- */
+.tx-faq{background:var(--tx-surface);border-radius:var(--tx-r2);overflow:hidden;
+  box-shadow:inset 0 0 0 1px var(--tx-line)}
+.tx-faq__q{
+  display:flex;align-items:center;gap:var(--tx-s3);width:100%;text-align:left;min-height:54px;
+  padding:12px var(--tx-s3);border-bottom:1px solid var(--tx-line);
+  font-size:14.5px;font-weight:600;letter-spacing:-.01em;color:var(--tx-ink);
+}
+.tx-faq__q svg{flex:0 0 auto;color:var(--tx-ink-3);transition:transform var(--tx-t-fast) var(--tx-ease)}
+.tx-faq__q[aria-expanded="true"] svg{transform:rotate(180deg);color:var(--tx-accent-text)}
+.tx-faq__a{padding:0 var(--tx-s3) 16px;border-bottom:1px solid var(--tx-line);
+  font-size:13px;line-height:1.6;color:var(--tx-ink-2)}
+.tx-faq__a b{color:var(--tx-ink)}
+.tx-faq > :last-child{border-bottom:0}
+
+/* ---- destructive confirm block ---- */
+.tx-danger{
+  padding:var(--tx-card-pad);border-radius:var(--tx-r2);
+  background:var(--tx-danger-soft);box-shadow:inset 0 0 0 1px var(--tx-danger-soft);
+}
+.tx-danger b{display:block;font-size:14.5px;font-weight:700;color:var(--tx-danger);margin-bottom:7px}
+.tx-danger p{margin:0;font-size:12.5px;line-height:1.55;color:var(--tx-ink-2)}
 
 /* ===================== PAGE CHROME (not part of the app) ================= */
 body{
@@ -877,13 +1686,18 @@ p.sec b{color:#E4E7EB;font-weight:600}
   background:linear-gradient(155deg,#33373E,#101216 26%,#0C0E11 62%,#2B2F36);
   box-shadow:0 46px 88px -26px rgba(0,0,0,.86),0 0 0 1px rgba(255,255,255,.055),inset 0 1px 0 rgba(255,255,255,.09)}
 .screen{position:relative;width:390px;height:844px;border-radius:45px;overflow:hidden;
-  display:flex;flex-direction:column;isolation:isolate}
+  display:flex;flex-direction:column;isolation:isolate;
+  /* stands in for env(safe-area-inset-bottom) — 5px bar + 6/8 margins */
+  --tx-safe-b:19px}
 .island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:112px;height:32px;
   border-radius:20px;background:#000;z-index:40}
 .statusbar{height:56px;flex:0 0 56px;display:flex;align-items:center;justify-content:space-between;
   padding:0 30px 0 32px;position:relative;z-index:30;color:var(--tx-ink)}
 .sb-time{font-size:15.5px;font-weight:600;letter-spacing:-.01em;font-variant-numeric:tabular-nums}
 .sb-icons{display:flex;align-items:center;gap:6px}
+.scroll{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none;
+  padding:0 var(--tx-inset) var(--tx-s4)}
+.scroll::-webkit-scrollbar{display:none}
 
 .notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(292px,1fr));gap:14px;margin-top:26px}
 .note{border:1px solid #1C1F25;border-radius:14px;padding:19px;background:#0E1013}
@@ -910,7 +1724,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 /* ============ SCREEN COMPOSITION · layout only, components come from the system ==== */
 .auth{display:flex;flex-direction:column;flex:1;min-height:0;padding:0 var(--tx-inset)}
 .auth__top{display:flex;align-items:center;justify-content:space-between;min-height:48px;flex:0 0 auto}
-.auth__body{flex:1;min-height:0;padding-top:26px;display:flex;flex-direction:column}
+.auth__body{flex:1;min-height:0;padding-top:26px;display:flex;flex-direction:column;
+  overflow-y:auto;scrollbar-width:none}
+.auth__body::-webkit-scrollbar{display:none}
 .auth__foot{flex:0 0 auto;padding:16px 0 22px}
 .brandmark{width:46px;height:46px;border-radius:var(--tx-r3);background:var(--tx-accent);color:var(--tx-accent-ink);
   display:grid;place-items:center;font-weight:900;font-size:23px;letter-spacing:-.05em}
@@ -919,11 +1735,13 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 .auth .sub a{color:var(--tx-accent-text);font-weight:600;text-decoration:none}
 .legal{font-size:11.5px;line-height:1.55;color:var(--tx-ink-3);text-align:center;margin-top:14px}
 .legal a{color:var(--tx-ink-2);text-decoration:underline;text-underline-offset:2px}
-.backbtn{width:40px;height:40px;margin-left:-8px;border-radius:var(--tx-r2);display:grid;place-items:center;color:var(--tx-ink-2)}
+.backbtn{width:44px;height:44px;margin-left:-10px;border-radius:var(--tx-r2);display:grid;place-items:center;color:var(--tx-ink-2)}
 
 .resend{display:flex;align-items:center;justify-content:space-between;margin-top:18px;font-size:13.5px;flex:0 0 auto}
 .resend span{color:var(--tx-ink-3);font-variant-numeric:tabular-nums}
-.resend button{color:var(--tx-ink-3);font-weight:600;font-size:13.5px}
+.resend button{color:var(--tx-ink-3);font-weight:600;font-size:13.5px;position:relative}
+/* 13.5px of text is a 15px box — hit-slop takes it to 45x119 without moving anything */
+.resend button::before{content:"";position:absolute;inset:-15px -12px}
 .resend button[data-live="true"]{color:var(--tx-accent-text)}
 
 .wa{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;min-height:48px;margin-top:10px;
@@ -1006,7 +1824,951 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 .blockwrap h3{margin:0;font-size:21px;font-weight:800;letter-spacing:-.025em;color:var(--tx-ink)}
 .blockwrap p{margin:0;font-size:14px;color:var(--tx-ink-2);max-width:33ch;line-height:1.55}
 
+/* ---- doc theme switch (mockup pages) ---- */
+.themeswitch{position:fixed;top:18px;right:22px;z-index:80;display:flex;gap:4px;padding:4px;
+  border-radius:10px;background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line),0 6px 22px rgba(0,0,0,.35)}
+.themeswitch button{padding:7px 14px;border-radius:7px;font-size:12px;font-weight:700;color:var(--tx-ink-3);
+  border:0;background:none;cursor:pointer;font-family:inherit}
+.themeswitch button[aria-pressed="true"]{background:var(--tx-accent);color:var(--tx-accent-ink)}
+
+/* ---- qwerty stand-in · only to show how much list survives the keyboard ---- */
+.kbd--qwerty{padding:8px 4px 6px}
+.kbd__row{display:flex;gap:5px;justify-content:center;margin-bottom:6px}
+.kbd__row s{flex:1;height:40px;border-radius:6px;background:var(--tx-surface);color:var(--tx-ink-2);
+  display:grid;place-items:center;font-size:14px;font-weight:500;text-decoration:none;
+  box-shadow:0 1px 0 rgba(0,0,0,.35)}
+.kbd__row s[data-wide]{flex:2.6;font-size:12px;letter-spacing:.04em}
+
+/* a pushed screen has no bottom bar, so its scroller owes the gesture inset itself */
+.scroll--push{padding-bottom:calc(var(--tx-s4) + var(--tx-safe-b,0px))}
+
+
+/* ===== from workout-components.css ===== */
+/* ============================================================================
+   TRAIN X — WORKOUT LOG · new components
+   Screen 17 · FR-4 · FR-5 · 9 Aug 2026
+
+   Everything the floor screen needs that the design system does not already
+   ship. Tokens only: no literal colours, no new spacing or radius values, and
+   nothing here re-implements or restyles a component tx.css already provides.
+   Load after tx.css.
+   ========================================================================== */
+
+
+/* ------------------------------------------------------------------ 1. DOCK */
+/* The one persistent action in the product. Every other screen puts its
+   primary at the end of the scroll; a session is 60 minutes long and the
+   trainer must be able to end it from wherever their thumb happens to be, so
+   here the button is docked. Positioning is borrowed from .sheetlayer — this
+   is the bar, not a new layer class. Canvas ground plus a hairline, because
+   the set list scrolls underneath and needs an edge to disappear behind. */
+.tx-dock{
+  display:flex;align-items:center;gap:var(--tx-s2);
+  /* 56px content + the gesture inset: this bar always reaches the bottom edge,
+     so it always owes the safe area. */
+  padding:var(--tx-s3) var(--tx-inset) calc(var(--tx-s3) + var(--tx-safe-b,0px));
+  background:var(--tx-canvas);
+  box-shadow:inset 0 1px 0 var(--tx-line);
+}
+.tx-dock .tx-btn{flex:1}
+/* A second, quieter way out sits beside the primary and never above 48. */
+.tx-dock__alt{
+  flex:0 0 auto;min-height:56px;padding:0 var(--tx-s4);border-radius:var(--tx-r2);
+  background:var(--tx-surface-2);box-shadow:inset 0 0 0 1px var(--tx-line);
+  color:var(--tx-ink-2);font-size:12px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;
+}
+
+
+/* ------------------------------------------------- 2. SET TABLE · additions */
+/* .tx-sets already carries the whole table. These are the three states the
+   floor screen needs that the system had not met yet. */
+
+/* The row the trainer is about to type into. Accent tint and a 2px edge — and
+   deliberately NOT the .tx-card--live glow, because one thing glows per screen
+   and on this screen that is the exercise card. */
+.tx-set--next{background:var(--tx-accent-soft);box-shadow:inset 2px 0 0 var(--tx-accent)}
+.tx-set--next .tx-set__n{background:var(--tx-accent);color:var(--tx-accent-ink)}
+
+/* A set that is on this phone and not yet on the server. The tick stays green:
+   done is a fact about the gym, not about the network. The amber ring is the
+   only thing sync gets to say, and it says it without moving a pixel of
+   layout — a set row must not resize when the signal comes back. */
+.tx-set[data-queued="true"] .tx-set__done{box-shadow:inset 0 0 0 2px var(--tx-warn)}
+
+/* A note belongs in the table and not behind a tap, because it is read next
+   week while typing the same set. Two lines, then it trails off; the full text
+   is one tap away in the set sheet. */
+.tx-sets__note{
+  display:block;width:100%;text-align:left;
+  padding:0 var(--tx-s3) 11px;margin-top:-3px;
+  border-bottom:1px solid var(--tx-line);
+}
+.tx-sets__note p{
+  margin:0;font-size:12.5px;line-height:1.45;color:var(--tx-ink-3);
+  /* two lines is the contract — a five-line note would push the next set off
+     the thumb zone, and the next set matters more than the prose. */
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.tx-sets__note p b{color:var(--tx-ink-2);font-weight:600}
+.tx-sets .tx-sets__note:last-child{border-bottom:0}
+
+
+/* ------------------------------------------------------------------- 3. RPE */
+/* 6 to 10 in half steps is nine values. Nine targets across 360dp is 33px
+   each, which is a lie about the size of a thumb. So: five whole steps at
+   ~51dp, plus one half-step toggle. Same nine values, twice the target, and
+   the eye lands on 7-8-9-10 the way a coach thinks.
+   56px tall — it is used mid-session. */
+.tx-rpe{display:flex;gap:var(--tx-s2);align-items:stretch}
+.tx-rpe__scale{
+  flex:1;min-width:0;display:flex;gap:3px;height:56px;padding:3px;
+  border-radius:calc(var(--tx-r2) + 3px);
+  background:var(--tx-field);
+  box-shadow:inset 0 0 0 1px var(--tx-field-line),var(--tx-field-inset);
+}
+.tx-rpe__scale button{
+  flex:1;min-width:0;border-radius:var(--tx-r2);
+  font-size:16px;font-weight:700;letter-spacing:-.01em;font-variant-numeric:tabular-nums;
+  color:var(--tx-ink-2);
+  transition:background var(--tx-t-fast) var(--tx-ease),color var(--tx-t-fast) var(--tx-ease);
+}
+.tx-rpe__scale button[aria-pressed="true"]{background:var(--tx-accent);color:var(--tx-accent-ink);font-weight:800}
+.tx-rpe__half{
+  flex:0 0 56px;width:56px;border-radius:var(--tx-r2);
+  background:var(--tx-field);
+  box-shadow:inset 0 0 0 1px var(--tx-field-line),var(--tx-field-inset);
+  color:var(--tx-ink-3);font-size:15px;font-weight:700;
+}
+.tx-rpe__half[aria-pressed="true"]{
+  background:var(--tx-accent-soft);
+  box-shadow:inset 0 0 0 1px var(--tx-accent-line);
+  color:var(--tx-accent-text);
+}
+/* RPE is a judgement, not a measurement, so the control says out loud what the
+   number it just took actually means. Also the only place the value appears as
+   a decimal — the scale itself never draws "8.5". */
+.tx-rpe__why{margin:8px 0 0;font-size:12.5px;line-height:1.45;color:var(--tx-ink-3)}
+.tx-rpe__why b{color:var(--tx-ink-2);font-weight:600;font-variant-numeric:tabular-nums}
+
+
+/* --------------------------------------------------------------- 4. PR CARD */
+/* Gold is only ever this. The card states the number it beat, because "PR"
+   without the old number is a sticker rather than information. */
+.tx-pr{
+  position:relative;overflow:hidden;
+  padding:var(--tx-card-pad);border-radius:var(--tx-r2);
+  background:linear-gradient(180deg,var(--tx-pr-soft),transparent 58%),var(--tx-surface);
+  /* the halo is the gold soft token used as a shadow colour — no new value */
+  box-shadow:inset 0 0 0 1px var(--tx-pr-soft),0 0 26px var(--tx-pr-soft);
+}
+.tx-pr__head{
+  display:flex;align-items:center;gap:7px;color:var(--tx-pr);
+  font-size:10.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;
+}
+.tx-pr__head em{font-style:normal;margin-left:auto;letter-spacing:.06em;color:var(--tx-ink-3)}
+.tx-pr__fig{display:flex;align-items:baseline;gap:10px;margin-top:11px}
+.tx-pr__fig b{
+  font-size:30px;font-weight:800;letter-spacing:-.035em;
+  font-variant-numeric:tabular-nums;color:var(--tx-ink);
+}
+.tx-pr__fig b i{font-style:normal;font-size:14px;font-weight:700;color:var(--tx-ink-3);margin-left:3px}
+/* struck through: the old number is the entire meaning of the new one */
+.tx-pr__fig s{font-size:14px;color:var(--tx-ink-3);font-variant-numeric:tabular-nums}
+.tx-pr__fig em{
+  font-style:normal;margin-left:auto;font-size:15px;font-weight:800;
+  color:var(--tx-pr);font-variant-numeric:tabular-nums;
+}
+.tx-pr__why{margin:9px 0 0;font-size:12.5px;line-height:1.5;color:var(--tx-ink-3)}
+.tx-pr__why b{color:var(--tx-ink-2);font-weight:600}
+
+/* ONE GLOW PER SCREEN — enforced, not remembered. If a live exercise card is
+   anywhere on this screen, the record keeps the gold and loses the halo.
+   .tx-pr--quiet is the same treatment asked for by hand, for a record that is
+   real but below the shout threshold (a first-week accessory lift). */
+.tx:has(.tx-card--live) .tx-pr,
+.tx-pr--quiet{box-shadow:inset 0 0 0 1px var(--tx-pr-soft)}
+.tx-pr--quiet{background:var(--tx-surface)}
+.tx-pr--quiet .tx-pr__fig b{font-size:23px}
+
+
+/* ----------------------------------------------------------- 5. END SUMMARY */
+/* Four figures that close a session, hairline-divided, two by two — the shape
+   of a receipt, on purpose. .tx-rail is three tappable stats; this is one
+   read-only block, so it does not borrow that component's affordance. */
+.tx-summary{
+  display:grid;grid-template-columns:1fr 1fr;overflow:hidden;
+  border-radius:var(--tx-r2);background:var(--tx-surface);
+  box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+.tx-summary__fig{padding:13px var(--tx-card-pad)}
+.tx-summary__fig:nth-child(odd){border-right:1px solid var(--tx-line)}
+.tx-summary__fig:nth-child(-n+2){border-bottom:1px solid var(--tx-line)}
+.tx-summary__fig span{
+  display:block;font-size:9.5px;font-weight:700;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--tx-ink-3);
+}
+.tx-summary__fig b{
+  display:block;margin-top:7px;font-size:23px;font-weight:800;letter-spacing:-.03em;
+  font-variant-numeric:tabular-nums;color:var(--tx-ink);
+}
+.tx-summary__fig b i{font-style:normal;font-size:12px;font-weight:700;color:var(--tx-ink-3);margin-left:3px}
+/* the only figure allowed to be gold, and only when it is not zero */
+.tx-summary__fig--pr b{color:var(--tx-pr)}
+
+/* ===== from clientfile-components.css ===== */
+/* ============================================================================
+   TRAIN X — CLIENT FILE  ·  additions to the design system
+   v1.1 · for trainx-clients.html frames 5a–8b
+   Four additions only. Everything else on the client file is an existing
+   component: .tx-tabs, .tx-row, .tx-list, .tx-pack, .tx-bar, .tx-metric,
+   .tx-spark, .tx-timeline, .tx-field, .tx-choice, .tx-segmented, .tx-stepper,
+   .tx-sheet, .tx-dialog, .tx-callout, .tx-streak, .tx-money, .tx-ledger.
+   Token-only, like the rest of the system: no hex, no value off the scale.
+   ========================================================================== */
+
+/* -------------------------------------------------- 22. CLIENT FILE HEADER
+   The identity block at the top of a client's file. It exists because the app
+   bar cannot carry this: a 19px title slot holds a name, but not a name plus
+   floor/remote plus status plus the phone number plus the two verbs a trainer
+   opens the file to use. So the bar keeps only the back arrow and the parent
+   context, and the name is drawn once, here, at h2 weight.
+   On scroll this block collapses and the name moves into the bar's title slot
+   — Material's large-top-app-bar behaviour. That is why the bar looks empty.
+   -------------------------------------------------------------------------- */
+
+.tx-clienthead{padding:var(--tx-s1) 0 var(--tx-s4)}
+.tx-clienthead__id{display:flex;align-items:center;gap:var(--tx-s3)}
+.tx-clienthead__m{flex:1;min-width:0}
+/* DIRECT child, for the same reason .tx-row__main uses one: a <b> inside the
+   meta line is emphasis, not a title, and must not become a block. */
+.tx-clienthead__m > b{
+  display:block;font-size:21px;font-weight:800;letter-spacing:-.025em;line-height:1.15;
+  color:var(--tx-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.tx-clienthead__meta{display:flex;align-items:center;gap:7px;margin-top:7px}
+/* <s> is the system's slot element for a non-semantic run of text (see
+   .tx-money__fig s). Using it here keeps the .tx-tag children in this row from
+   inheriting a font-size that a bare `span` rule would force on them. */
+.tx-clienthead__meta s{
+  text-decoration:none;font-size:12.5px;color:var(--tx-ink-3);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+}
+/* Two verbs, never three. At 360dp a third button pushes the first one below
+   its label's own width and the row starts truncating uppercase text. */
+.tx-clienthead__acts{display:flex;gap:var(--tx-s2);margin-top:var(--tx-s3)}
+/* A paused client's file is still fully readable — dimming it would hide the
+   history that is the whole reason paused exists. Only the name steps down a
+   rung, so the state is visible without the screen going grey. */
+.tx-clienthead[data-state="paused"] .tx-clienthead__m > b{color:var(--tx-ink-2)}
+
+
+/* ------------------------------------------------- 23. KEY / VALUE READOUT
+   A list of facts about one record, where the FIGURE is the content and the
+   label is the caption — the inverse of .tx-setting, which is a 15px title
+   with a quiet value beside it. Used for the overview's five figures, the
+   pack's terms, and the locked fields in Edit.
+   Every row is a <button> and goes somewhere; a row that goes nowhere is a
+   <div> and says why in its own value slot. A number on a client's file that
+   cannot be tapped is a dead end the trainer has to leave the file to chase.
+   -------------------------------------------------------------------------- */
+
+.tx-kv{
+  background:var(--tx-surface);border-radius:var(--tx-r2);overflow:hidden;
+  box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+.tx-kv__row{
+  display:flex;align-items:center;gap:var(--tx-s3);width:100%;min-height:56px;
+  padding:11px var(--tx-s4);border-bottom:1px solid var(--tx-line);text-align:left;
+  transition:background var(--tx-t-instant) var(--tx-ease);
+}
+.tx-kv__row:last-child{border-bottom:0}
+button.tx-kv__row:active{background:var(--tx-surface-2)}
+.tx-kv__k{
+  flex:1;min-width:0;display:flex;align-items:center;gap:6px;
+  font-size:10.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--tx-ink-3);
+}
+.tx-kv__k svg{flex:0 0 auto;color:var(--tx-ink-3)}
+.tx-kv__v{
+  flex:0 0 auto;max-width:60%;text-align:right;
+  font-size:16px;font-weight:800;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;color:var(--tx-ink);
+}
+.tx-kv__v i{font-style:normal;font-size:11.5px;font-weight:700;color:var(--tx-ink-3)}
+/* the second line is a sentence, so it drops the caps, the tracking and the
+   tabular figures the value above it needs */
+.tx-kv__v > span{
+  display:block;margin-top:4px;
+  font-size:11.5px;font-weight:500;letter-spacing:0;text-transform:none;
+  color:var(--tx-ink-3);font-variant-numeric:normal;line-height:1.4;white-space:normal;
+}
+.tx-kv__row[data-tone="warn"] .tx-kv__v{color:var(--tx-warn)}
+.tx-kv__row[data-tone="ok"] .tx-kv__v{color:var(--tx-ok)}
+/* Locked is not disabled. --tx-ink-off would drop the value below the reading
+   floor, and the value is exactly what the trainer came to read — they just
+   can't change it. So the figure keeps ink-2 and the row carries a lock. */
+.tx-kv__row[data-locked="true"] .tx-kv__v{color:var(--tx-ink-2)}
+.tx-kv__row > svg:last-child{flex:0 0 auto;color:var(--tx-ink-3)}
+
+
+/* ------------------------------------- 24. APPEND-ONLY MEASUREMENT HISTORY
+   Weight and waist, newest first, with the change since the reading below it.
+   The delta is deliberately NOT --tx-ok / --tx-danger. −3.8 kg is progress for
+   a fat-loss client and a failure for somebody adding size; the app does not
+   know which, so it does not get a colour opinion. Direction is carried by the
+   sign, which is unambiguous in every language this ships in.
+   Rows are not buttons. A measurement cannot be edited — a wrong reading is
+   corrected by appending a new one, and the row it corrects says so.
+   -------------------------------------------------------------------------- */
+
+.tx-measures{
+  background:var(--tx-surface);border-radius:var(--tx-r2);overflow:hidden;
+  box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+.tx-measure{
+  display:flex;align-items:center;gap:var(--tx-s3);width:100%;min-height:58px;
+  padding:11px var(--tx-s4);border-bottom:1px solid var(--tx-line);text-align:left;
+}
+.tx-measure:last-child{border-bottom:0}
+.tx-measure__when{flex:1;min-width:0}
+.tx-measure__when b{
+  display:block;font-size:14px;font-weight:600;letter-spacing:-.01em;
+  color:var(--tx-ink);font-variant-numeric:tabular-nums;
+}
+/* wraps rather than truncates: a correction note is a sentence, and half of
+   "corrects the 96.5 kg entered the same day" is worse than none of it */
+.tx-measure__when span{
+  display:block;margin-top:3px;font-size:11.5px;line-height:1.4;color:var(--tx-ink-3);
+}
+.tx-measure__v{
+  flex:0 0 auto;font-size:17px;font-weight:800;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;color:var(--tx-ink);
+}
+.tx-measure__v i{font-style:normal;font-size:11px;font-weight:700;color:var(--tx-ink-3);margin-left:3px}
+/* fixed width so a column of deltas lines up under itself — same reason every
+   money column in the system is tabular and right-aligned */
+.tx-measure__d{
+  flex:0 0 58px;width:58px;text-align:right;
+  font-size:12.5px;font-weight:700;color:var(--tx-ink-2);
+  font-variant-numeric:tabular-nums;
+}
+/* the oldest reading, and a superseded one, have nothing to compare against —
+   an em dash, never 0.0 */
+.tx-measure__d[data-empty="true"]{color:var(--tx-ink-3)}
+/* A superseded reading stays in the history and stays readable — it is evidence,
+   not noise. Struck through and stepped down to ink-3, which is exactly what
+   .tx-row[data-status="cancelled"] does to a cancelled session: same meaning,
+   same treatment, learned once. */
+.tx-measure[data-superseded="true"] .tx-measure__v{color:var(--tx-ink-3);text-decoration:line-through}
+.tx-measure[data-superseded="true"] .tx-measure__v i{color:var(--tx-ink-3)}
+
+
+/* ---------------------------------------- 25. TWO SMALL METRIC EXTENSIONS
+   .tx-metric__d ships with three directions: up (ok), down (danger), flat
+   (neutral). A body metric needs a fourth — a real, signed change that the app
+   refuses to grade. "none" means the number moved and we are not saying whether
+   that was good. Same reasoning as .tx-measure__d above.
+   -------------------------------------------------------------------------- */
+
+.tx-metric__d[data-dir="none"]{color:var(--tx-ink-2)}
+
+/* .tx-metric has a delta slot and no unit slot; .tx-stat has a unit slot and no
+   delta. A body metric needs both — 84.2 means nothing without "kg". Borrowed
+   value-for-value from .tx-stat__value i so the two read as one system. */
+.tx-metric__v b i{font-style:normal;font-size:12px;font-weight:700;color:var(--tx-ink-3);margin-left:3px}
+
+/* ===== from drawer-components.css ===== */
+/* ============================================================================
+   24. AUTHORING, REPORTS AND THE SYNC QUEUE
+   The four surfaces section 23 showed but never let anybody change: the week
+   you author, the week the server writes, the message that leaves, and the
+   queue everything sits in until the signal comes back.
+
+   All four are list-shaped on purpose. A phone is good at rows and bad at
+   canvases, which is the same reason this system refuses program authoring
+   from scratch on mobile — the builder below edits a week, it does not draw
+   one. Every state here also has to be legible with no network, so nothing
+   in this section depends on a value the server has to confirm first.
+   -------------------------------------------------------------------------- */
+
+/* ---- builder · a week you can edit with one thumb ---- */
+.tx-builder{
+  background:var(--tx-surface);border-radius:var(--tx-r2);overflow:hidden;
+  box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+.tx-builder__day{
+  display:flex;align-items:center;gap:10px;width:100%;min-height:52px;
+  padding:8px var(--tx-s3);text-align:left;border-bottom:1px solid var(--tx-line);
+  background:var(--tx-surface-2);
+}
+.tx-builder > :last-child{border-bottom:0}
+:where(.tx-builder__day) .m{flex:1;min-width:0}
+:where(.tx-builder__day) .m b{display:block;font-size:14.5px;font-weight:700;letter-spacing:-.015em;
+  color:var(--tx-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:where(.tx-builder__day) .m span{display:block;font-size:11.5px;color:var(--tx-ink-3);margin-top:3px;
+  font-variant-numeric:tabular-nums}
+/* The open day keeps an accent spine. Once its exercises have pushed the day
+   header off the top of the screen you still need to know which day you are
+   editing, and the spine survives the scroll where the header does not. */
+.tx-builder__day[data-open="true"]{box-shadow:inset 2px 0 0 var(--tx-accent)}
+/* A rest day drops the raised fill and mutes, the same way every other "nothing
+   scheduled" surface in this system recedes. It keeps its chevron: a rest day
+   is still a day, and turning it into a training day is the point. A dashed
+   border would have been consistent with .tx-slot but boxes a row mid-list. */
+.tx-builder__day[data-rest="true"]{background:transparent}
+.tx-builder__day[data-rest="true"] .m b{color:var(--tx-ink-3);font-weight:500}
+.tx-builder__day[data-rest="true"] .tx-builder__grip{color:var(--tx-line-strong)}
+/* The grip reads 20px and answers at 48. A reorder handle you have to aim at
+   is a reorder handle that gets used once and then abandoned for the menu. */
+.tx-builder__grip{position:relative;flex:0 0 20px;display:grid;place-items:center;color:var(--tx-ink-3)}
+.tx-builder__grip::before{content:"";position:absolute;inset:-14px}
+/* An exercise inside the open day. Indented past the grip column so the
+   hierarchy survives without a second border or a nested container. */
+.tx-builder__ex{
+  display:flex;align-items:center;gap:10px;width:100%;min-height:48px;
+  padding:7px var(--tx-s3) 7px 30px;text-align:left;border-bottom:1px solid var(--tx-line);
+}
+:where(.tx-builder__ex) .m{flex:1;min-width:0}
+:where(.tx-builder__ex) .m b{display:block;font-size:14px;font-weight:600;letter-spacing:-.01em;
+  color:var(--tx-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The prescription is the reason this row exists, so it clears the 4.5:1 floor
+   at --tx-ink-2 instead of sitting at the --tx-ink-3 used for day counts. */
+:where(.tx-builder__ex) .m span{display:block;font-size:11.5px;color:var(--tx-ink-2);margin-top:3px;
+  font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* ---- pending write · what is waiting, how old it is, and why ---- */
+.tx-queue{
+  background:var(--tx-surface);border-radius:var(--tx-r2);overflow:hidden;
+  box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+.tx-queue__item{
+  display:flex;align-items:center;gap:var(--tx-s3);width:100%;min-height:58px;
+  padding:9px var(--tx-s3);text-align:left;border-bottom:1px solid var(--tx-line);
+}
+.tx-queue > :last-child{border-bottom:0}
+.tx-queue__kind{
+  width:28px;height:28px;border-radius:var(--tx-r1);flex:0 0 28px;display:grid;place-items:center;
+  background:var(--tx-surface-2);color:var(--tx-ink-3);
+}
+:where(.tx-queue__item) .m{flex:1;min-width:0}
+:where(.tx-queue__item) .m b{display:block;font-size:14px;font-weight:600;letter-spacing:-.01em;
+  color:var(--tx-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The REASON carries this whole component. A queue that only says "waiting"
+   is a spinner with extra steps, so the reason is real text at --tx-ink-2 and
+   never an icon on its own. */
+:where(.tx-queue__item) .m span{display:block;font-size:11.5px;color:var(--tx-ink-2);margin-top:3px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Age, not a progress bar. Nothing here knows how long the network will take,
+   and a bar that cannot finish is a lie with an animation on it. */
+.tx-queue__age{flex:0 0 auto;font-size:11px;font-weight:700;letter-spacing:.02em;
+  color:var(--tx-ink-3);font-variant-numeric:tabular-nums}
+.tx-queue__item[data-state="sending"] .tx-queue__kind{background:var(--tx-info-soft);color:var(--tx-info)}
+/* Blocked is the only state that is a problem, so it is the only one that
+   takes a severity spine — the same 2px inset .tx-row--critical uses. */
+.tx-queue__item[data-state="blocked"]{box-shadow:inset 2px 0 0 var(--tx-danger)}
+.tx-queue__item[data-state="blocked"] .tx-queue__kind{background:var(--tx-danger-soft);color:var(--tx-danger)}
+.tx-queue__item[data-state="blocked"] .m span,
+.tx-queue__item[data-state="blocked"] .tx-queue__age{color:var(--tx-danger)}
+
+/* ---- delivery state · queued, sent, failed, and nothing invented in between ----
+   Four states and no fifth. Train X hands a message to WhatsApp and WhatsApp
+   stops talking to it, so there is no "delivered" and no "read" to draw. The
+   __why line is mandatory: a state without a reason is a shrug. */
+.tx-delivery{display:flex;flex-direction:column;gap:var(--tx-card-gap)}
+.tx-delivery__item{
+  padding:11px var(--tx-s3);border-radius:var(--tx-r2);background:var(--tx-surface);
+  box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+.tx-delivery__top{display:flex;align-items:center;gap:10px}
+.tx-delivery__mark{
+  width:26px;height:26px;border-radius:50%;flex:0 0 26px;display:grid;place-items:center;
+  background:var(--tx-surface-2);color:var(--tx-ink-3);
+}
+:where(.tx-delivery__top) .m{flex:1;min-width:0}
+:where(.tx-delivery__top) .m b{display:block;font-size:14.5px;font-weight:700;letter-spacing:-.015em;
+  color:var(--tx-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+:where(.tx-delivery__top) .m span{display:block;font-size:11.5px;color:var(--tx-ink-3);margin-top:2px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tx-delivery__t{flex:0 0 auto;font-size:11.5px;font-weight:600;color:var(--tx-ink-3);
+  font-variant-numeric:tabular-nums}
+/* Indented to the mark's column so the reason reads as belonging to the state
+   and not as a second message. */
+.tx-delivery__why{margin:8px 0 0 36px;font-size:12px;line-height:1.45;color:var(--tx-ink-2)}
+.tx-delivery__acts{display:flex;gap:8px;margin:10px 0 0 36px}
+.tx-delivery__item[data-state="sent"] .tx-delivery__mark{background:var(--tx-ok-fill);color:var(--tx-ok-fill-ink)}
+.tx-delivery__item[data-state="queued"] .tx-delivery__mark{background:var(--tx-info-soft);color:var(--tx-info)}
+.tx-delivery__item[data-state="held"] .tx-delivery__mark{background:var(--tx-warn-soft);color:var(--tx-warn)}
+/* Failed keeps the hairline AND takes the spine — dropping the ring to make
+   room for the severity bar leaves the card floating on the canvas. */
+.tx-delivery__item[data-state="failed"]{
+  box-shadow:inset 2px 0 0 var(--tx-danger),inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+.tx-delivery__item[data-state="failed"] .tx-delivery__mark{background:var(--tx-danger-fill);color:var(--tx-danger-fill-ink)}
+.tx-delivery__item[data-state="failed"] .tx-delivery__why{color:var(--tx-danger)}
+/* A held message is a rule doing its job, not a fault. It stays legible. */
+.tx-delivery__item[data-state="held"] .tx-delivery__top .m b{color:var(--tx-ink-2)}
+
+/* ---- the generated week · an artefact, not a dashboard ----
+   This is the one component a CLIENT sees, so it is built like a document:
+   a head that names who and when, figures in label/value pairs, and a footnote
+   that says what it is not. Same shape as .tx-receipt, same reason. */
+.tx-report{
+  background:var(--tx-surface);border-radius:var(--tx-r2);overflow:hidden;
+  box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+/* A 2px accent rule instead of a filled band. A full band is branding on
+   somebody else's WhatsApp, and it prints as a black bar. */
+.tx-report__head{
+  padding:var(--tx-s4) var(--tx-s4) var(--tx-s3);border-bottom:1px solid var(--tx-line);
+  box-shadow:inset 0 2px 0 var(--tx-accent);
+}
+.tx-report__head s{display:block;text-decoration:none;font-size:9.5px;font-weight:800;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--tx-ink-3)}
+.tx-report__head b{display:block;font-size:19px;font-weight:800;letter-spacing:-.025em;
+  color:var(--tx-ink);margin-top:7px}
+.tx-report__head span{display:block;font-size:12px;color:var(--tx-ink-3);margin-top:4px;
+  font-variant-numeric:tabular-nums}
+.tx-report__body{padding:var(--tx-s4)}
+/* width:100% so the same class works as a <div> in a preview and as a <button>
+   on the live report — every figure opens the sessions it was counted from. */
+.tx-report__line{
+  display:flex;align-items:baseline;justify-content:space-between;gap:var(--tx-s3);
+  width:100%;padding:9px 0;text-align:left;font-size:13px;color:var(--tx-ink-2);
+}
+.tx-report__line + .tx-report__line{border-top:1px solid var(--tx-line)}
+.tx-report__line b{flex:0 0 auto;font-weight:700;color:var(--tx-ink);text-align:right;
+  font-variant-numeric:tabular-nums}
+.tx-report__foot{
+  padding:11px var(--tx-s4);border-top:1px solid var(--tx-line);background:var(--tx-surface-2);
+  font-size:11px;line-height:1.45;color:var(--tx-ink-3);
+}
+/* A report is --tx-surface, so a stat placed on one has to step up a rung or
+   it disappears into its own container. Same rule as a card inside a card and
+   a card inside a sheet. */
+:where(.tx-report) .tx-stat{background:var(--tx-surface-2);box-shadow:inset 0 0 0 1px var(--tx-line)}
+/* Preview variant · same document, quoted rather than presented. */
+.tx-report--sm .tx-report__head{padding:var(--tx-s3) var(--tx-s3) 11px}
+.tx-report--sm .tx-report__head b{font-size:16px;margin-top:5px}
+.tx-report--sm .tx-report__body{padding:6px var(--tx-s3) var(--tx-s2)}
+.tx-report--sm .tx-report__foot{padding:9px var(--tx-s3)}
+
+/* ---- completions to two existing components ---- */
+/* .tx-tally shipped with ok and warn. A delivery tally needs the third tone,
+   and borrowing warn for a failure would make amber mean two things. */
+:where(.tx-tally) span[data-tone="danger"] b{color:var(--tx-danger)}
+/* .tx-empty's action slot assumed one button. The sync queue's empty state
+   offers a check-anyway, and it should sit on the same baseline as the rest. */
+.tx-empty__acts{display:flex;gap:8px;justify-content:center}
+/* An add-affordance inside the day, borrowed from .tx-pick > button[data-add]:
+   accent text, no fill, and it sits in the list rather than under it — a dashed
+   slot here would have cost 70px and boxed a row mid-list. */
+.tx-builder__ex[data-add="true"] .tx-builder__grip{color:var(--tx-accent-text)}
+.tx-builder__ex[data-add="true"] .m b{color:var(--tx-accent-text)}
+
+/* ===== from moneydiary-components.css ===== */
+/* ============================================================================
+   TRAIN X — MONEY + DIARY ADDITIONS  ·  "Command Deck"
+   v1.1 · 11 Aug 2026 · loads after tx.css
+
+   Three components the pack editor (Money 07) and the marked-done moment
+   (Diary 07) need and the system does not have. Same rules as tx.css: tokens
+   only, nothing hard-codes a colour or a size that isn't already in the scale,
+   4pt spacing, every figure tabular, and --tx-ink-3 as the floor for any text
+   a trainer has to read.
+
+   Everything else on those screens is stock: .tx-field, .tx-control,
+   .tx-stepper, .tx-segmented, .tx-choice, .tx-row, .tx-list, .tx-callout,
+   .tx-toast, .tx-card--live, .tx-receipt, .tx-sheet, .tx-switch.
+   ========================================================================== */
+
+
+/* -------------------------------------------------- 1. DERIVED READOUT
+   A figure the app works out from two fields the trainer is typing into —
+   price ÷ sessions — parked under them and recomputed on every keystroke.
+
+   Not .tx-metric: a metric is a dashboard tile for a stored number and its
+   period-on-period delta. This is a form affordance. It is never stored, never
+   tappable, and it has to carry its own arithmetic in words — a bare "₹450"
+   sitting under two inputs is a number with no visible reason to be believed.
+
+   Not .tx-callout either: a callout is a sentence with an icon, and the number
+   is the point here, so the number is the biggest thing in the block.
+   -------------------------------------------------------------------------- */
+.tx-derived{
+  display:block;padding:13px var(--tx-s4);border-radius:var(--tx-r2);
+  background:var(--tx-surface-2);box-shadow:inset 0 0 0 1px var(--tx-line);
+}
+.tx-derived__n{
+  display:flex;align-items:baseline;gap:7px;
+  font-size:26px;font-weight:800;letter-spacing:-.035em;
+  font-variant-numeric:tabular-nums;color:var(--tx-ink);
+}
+/* the unit is read, so it owes 4.5:1 — and it is a word, not a label, so it
+   stays sentence case. "₹450 EACH" shouts an answer nobody asked for. */
+.tx-derived__n s{
+  text-decoration:none;font-size:13px;font-weight:600;letter-spacing:0;color:var(--tx-ink-3);
+}
+/* the sum, spelled out. This is the line that makes the big number checkable
+   against a calculator, which is what a trainer will actually do once. */
+.tx-derived__x{
+  display:block;margin-top:5px;font-size:12px;font-weight:500;
+  font-variant-numeric:tabular-nums;color:var(--tx-ink-3);
+}
+/* the comparison, in a sentence, because "₹75" on its own does not say which
+   way round is right */
+.tx-derived__vs{
+  margin:9px 0 0;padding-top:9px;border-top:1px solid var(--tx-line);
+  font-size:12.5px;line-height:1.5;color:var(--tx-ink-3);
+}
+.tx-derived__vs b{color:var(--tx-ink-2);font-weight:600}
+
+/* There is deliberately NO ok tone. Arithmetic that comes out the right way
+   round is the default and gets no colour: green in this system means done,
+   and a price is never done. Amber is the only tone, and it means the same
+   thing it means everywhere else — look at this before you move on. */
+.tx-derived[data-tone="warn"] .tx-derived__vs,
+.tx-derived[data-tone="warn"] .tx-derived__vs b{color:var(--tx-warn)}
+
+
+/* ------------------------------------------------------- 2. IMPACT BLOCK
+   Two groups: what an edit changes, and what it can never change. The count in
+   each header is the load-bearing part — "6 live packs" is the fact that makes
+   a price change safe to press, and no product in the category shows it.
+
+   Built for the pack editor's save (Money 7c) and general enough for any pair
+   of promises of the shape "this moves / this cannot move" — a gym-percentage
+   change and a client merge are the next two screens that need it.
+
+   Stacked, never two columns. At 390 minus 40 of inset a column is 155px, and
+   "The 6 packs already sold stay at ₹3,200" cannot live in 155px without
+   becoming four ragged lines — which is how a guarantee stops being read.
+   -------------------------------------------------------------------------- */
+.tx-impact{display:flex;flex-direction:column;gap:var(--tx-card-gap)}
+.tx-impact__group{
+  border-radius:var(--tx-r2);padding:11px var(--tx-s4) 12px;
+  background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+/* the group that changes carries the accent hairline — it is the consequence
+   being accepted. The group that holds carries a neutral one on purpose: a
+   guarantee drawn in a warning colour reads as a warning. */
+.tx-impact__group[data-kind="changes"]{
+  box-shadow:inset 0 0 0 1px var(--tx-line),inset 2px 0 0 var(--tx-accent),var(--tx-e1);
+}
+.tx-impact__group[data-kind="keeps"]{
+  box-shadow:inset 0 0 0 1px var(--tx-line),inset 2px 0 0 var(--tx-line-strong),var(--tx-e1);
+}
+.tx-impact__head{
+  display:flex;align-items:baseline;justify-content:space-between;gap:var(--tx-s3);
+  margin-bottom:8px;
+}
+.tx-impact__head b{
+  font-size:10.5px;font-weight:800;letter-spacing:.13em;text-transform:uppercase;color:var(--tx-ink-3);
+}
+/* the count is information, not decoration, so it clears the 4.5:1 floor and
+   it is tabular — two of these blocks sit above one another and the numbers
+   have to line up */
+.tx-impact__head em{
+  font-style:normal;font-size:12px;font-weight:800;letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums;color:var(--tx-ink-2);white-space:nowrap;
+}
+.tx-impact__item{
+  display:flex;gap:9px;align-items:flex-start;padding:4px 0;
+  font-size:13px;line-height:1.45;color:var(--tx-ink-2);
+}
+.tx-impact__item b{color:var(--tx-ink);font-weight:600}
+/* a 4px marker, not an icon: four repeated check marks down a list is
+   decoration, and the group header already says which kind of list it is */
+.tx-impact__item::before{
+  content:"";flex:0 0 4px;width:4px;height:4px;border-radius:1px;margin-top:7px;
+  background:var(--tx-line-strong);
+}
+.tx-impact__group[data-kind="changes"] .tx-impact__item::before{background:var(--tx-accent)}
+
+
+/* ------------------------------------------------------- 3. BEFORE → AFTER
+   One count, two values and an arrow: 12 → 11. The instant a session is marked
+   done this is what the trainer needs to see, and it is the same shape whether
+   the thing that moved is sessions left or a pack price.
+
+   Markup is <s>from</s><i>arrow</i><b>to</b>. The arrow is markup, not
+   generated content: this ships in Tamil and Hindi next, and a direction glyph
+   that only exists in CSS cannot be flipped by a later dir rule and cannot be
+   read out by a screen reader.
+   -------------------------------------------------------------------------- */
+.tx-delta{
+  display:inline-flex;align-items:baseline;gap:5px;flex:0 0 auto;
+  font-variant-numeric:tabular-nums;letter-spacing:-.02em;
+}
+.tx-delta s{text-decoration:none;font-size:13px;font-weight:600;color:var(--tx-ink-3)}
+.tx-delta i{font-style:normal;font-size:12px;font-weight:700;color:var(--tx-ink-3)}
+.tx-delta b{font-size:16px;font-weight:800;color:var(--tx-ink)}
+/* the trailing unit, when the pair needs one: 12 → 11 of 16 */
+.tx-delta em{
+  font-style:normal;font-size:10.5px;font-weight:700;color:var(--tx-ink-3);margin-left:1px;
+}
+
+/* No colour on a correct decrement. 12 → 11 is exactly what a done session is
+   supposed to do, and painting it red would make the app look like it
+   disagreed with the trainer who just tapped it. Colour appears only where
+   .tx-pack already puts it — nearly out, or out — so the two components tell
+   the same story about the same pack. */
+.tx-delta[data-low="true"] b{color:var(--tx-warn)}
+.tx-delta[data-low="out"] b{color:var(--tx-danger)}
+/* sessions arriving is the one case that earns green — a pack being sold, or an
+   undo putting one back. Same convention as the ledger: in is green. */
+.tx-delta[data-tone="ok"] b{color:var(--tx-ok)}
+
+/* Not for use inside .tx-toast. `.tx-toast b` is the action slot — it is
+   uppercase, accent and margin-left:auto — so a <b> in there belongs to Undo
+   and nothing else. In a toast the pair is written as plain text. */
+
+/* ===== from clientrole-components.css ===== */
+/* ============================================================================
+   TRAIN X — CLIENT ROLE  ·  FR-11  ·  additions to the design system
+   Two components. The governing constraint for this role is that it reuses the
+   existing system — "same system, same tokens, only the tab bar and the home
+   composition change" — so everything else on the seven client screens is
+   already in tx.css: .tx-card, .tx-rail, .tx-row, .tx-sets, .tx-timer,
+   .tx-pack, .tx-upi, .tx-verified, .tx-receipt, .tx-metric, .tx-spark,
+   .tx-week, .tx-streak, .tx-banner, .tx-callout, .tx-empty, .tx-sheet.
+
+   The client tab bar needs NO new CSS: it is .tx-navbar with four .tx-navitem
+   children and no .tx-fab. A component that is an existing component minus a
+   child is not a new component.
+
+   Both rules below exist because the client role introduces two objects the
+   trainer app never had to draw: the trainer as a person you can reach, and a
+   change to your week that somebody else made.
+   ========================================================================== */
+
+/* ---------------------------------------------- 25. YOUR TRAINER (FR-11.1)
+   A trainer's app contains 27 people, so a person is a list row. A client's
+   app contains exactly one person, so that person is not a row — on the
+   no-plan first run they are the primary object on the screen, and they carry
+   two actions beside a 52px avatar, which .tx-row cannot hold at 360dp
+   without the name truncating. Used on the no-plan first run, on Sessions and
+   on Payments: three screens, so it earns a class instead of three inline
+   overrides.
+   Actions are laid out by the frame (style="flex:1"), the house pattern —
+   the component owns the box, not the ratio.
+   -------------------------------------------------------------------------- */
+
+.tx-coach{
+  display:flex;flex-direction:column;gap:var(--tx-s3);
+  padding:var(--tx-card-pad);border-radius:var(--tx-r2);
+  background:var(--tx-surface);box-shadow:inset 0 0 0 1px var(--tx-line),var(--tx-e1);
+}
+.tx-coach__id{display:flex;align-items:center;gap:var(--tx-s3);width:100%;text-align:left}
+:where(.tx-coach__id) .m{flex:1;min-width:0}
+/* the eyebrow is a <s> for the same reason .tx-money__fig uses one: it is a
+   label above a name, and a <span> is already spoken for by the sub-line */
+:where(.tx-coach__id) .m s{
+  display:block;text-decoration:none;margin-bottom:5px;
+  font-size:9.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--tx-ink-3);
+}
+:where(.tx-coach__id) .m b{display:block;font-size:17px;font-weight:700;letter-spacing:-.02em;color:var(--tx-ink)}
+:where(.tx-coach__id) .m span{
+  display:block;margin-top:3px;font-size:12.5px;color:var(--tx-ink-3);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.tx-coach__acts{display:flex;gap:var(--tx-s2)}
+
+/* ------------------------------------------ 26. RESCHEDULE NOTICE (FR-2.3)
+   The one card in the product that reports a decision the reader did not make.
+   The trainer app has no equivalent — a trainer MAKES the move, a client
+   RECEIVES it — and it needs three things no existing component carries
+   together: the old time still on screen beside the new one, the sentence that
+   says nothing was deducted, and a 56px confirm.
+
+   Info spine, not amber. --tx-warn means "pending on you" everywhere else in
+   this system (money due, unclosed session); the client has done nothing and
+   owes nothing here. Info is the same tone .tx-banner--sync and .tx-tag--info
+   already carry: this is news that needs one tap.
+   -------------------------------------------------------------------------- */
+
+.tx-notice{
+  padding:var(--tx-card-pad);border-radius:var(--tx-r2);
+  background:linear-gradient(180deg,var(--tx-info-soft),transparent 52%),var(--tx-surface);
+  box-shadow:inset 0 0 0 1px var(--tx-line),inset 2px 0 0 var(--tx-info),var(--tx-e1);
+}
+.tx-notice__head{display:flex;align-items:center;gap:10px;margin-bottom:var(--tx-s3)}
+.tx-notice__head svg{flex:0 0 auto;color:var(--tx-info)}
+.tx-notice__head b{
+  font-size:10.5px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--tx-info);
+}
+.tx-notice__head time{
+  margin-left:auto;flex:0 0 auto;
+  font-size:11.5px;color:var(--tx-ink-3);font-variant-numeric:tabular-nums;
+}
+/* From → to, both visible. A client who only sees the new time cannot tell
+   what changed, and asks — which is a WhatsApp message the notice existed to
+   prevent. The old time is struck through at ink-3: readable, clearly past. */
+.tx-notice__when{display:flex;align-items:baseline;gap:var(--tx-s3);margin-bottom:10px}
+.tx-notice__when s{
+  flex:0 0 auto;font-size:17px;font-weight:700;letter-spacing:-.02em;
+  color:var(--tx-ink-3);font-variant-numeric:tabular-nums;text-decoration-thickness:1.5px;
+}
+.tx-notice__when i{flex:0 0 auto;font-style:normal;color:var(--tx-ink-3);align-self:center}
+.tx-notice__when b{
+  font-size:23px;font-weight:800;letter-spacing:-.03em;color:var(--tx-ink);font-variant-numeric:tabular-nums;
+}
+.tx-notice p{margin:0;font-size:13px;line-height:1.5;color:var(--tx-ink-2)}
+.tx-notice p b{color:var(--tx-ink);font-weight:600}
+/* 56px, because confirming a session time is a decision made standing up with
+   one hand — the same reason Start and Log set are 56px */
+.tx-notice__acts{display:flex;gap:var(--tx-s2);margin-top:var(--tx-s4)}
+
+
+/* ------------------------------------------------ 25. SETUP CHROME (recovered)
+   .preflight, .setup__bar and .tight are used by trainx-setup.html but were
+   never defined in any stylesheet, so the pre-flight list rendered as run-on
+   text and the step bar stacked into three rows. Written to the anatomy the
+   markup already implies. */
+.preflight{display:flex;align-items:flex-start;gap:var(--tx-s3);padding:8px 0}
+.preflight > i{flex:0 0 20px;height:20px;display:grid;place-items:center;
+  color:var(--tx-ink-3);margin-top:1px}
+.preflight > div{min-width:0}
+.preflight b{display:block;font-size:14px;font-weight:600;letter-spacing:-.01em;color:var(--tx-ink)}
+/* the description is a second line, not a continuation of the title */
+.preflight span{display:block;font-size:12.5px;line-height:1.45;color:var(--tx-ink-3);margin-top:2px}
+
+/* one row: back, then the progress bar taking the slack, then N / 6 */
+.setup__bar{display:flex;align-items:center;gap:var(--tx-s3);min-height:56px;flex:0 0 auto}
+.setup__bar .tx-steps{flex:1;min-width:0}
+
+/* a title that follows the step bar has already had its air above it */
+.auth h2.tight{margin-top:4px}
+
+
+/* ---------------------------------------------- FRAME ANCHORS (deep linking)
+   The information architecture links straight to a frame — trainx-clients.html#f-6b.
+   Without a landing state the jump is disorienting: the page simply appears
+   somewhere new. The ring says "this is the one you asked for" and fades, so it
+   never becomes permanent chrome. */
+.unit{scroll-margin-top:28px}
+.unit:target .unit__label{color:var(--tx-accent-text)}
+.unit:target .unit__label b{color:var(--tx-accent-text)}
+.unit:target .device{outline:3px solid var(--tx-accent-line);outline-offset:7px;border-radius:57px}
+@media (prefers-reduced-motion:no-preference){
+  .unit:target .device{animation:tx-landed 2.4s var(--tx-ease) 1 both}
+}
+@keyframes tx-landed{
+  0%,45%{outline-color:var(--tx-accent)}
+  100%{outline-color:transparent}
+}
+
+
+/* ══════════════════════════════════════════════════════ X REP LOGO · v1.0
+   One module, used by the brand chapter and by every auth and onboarding
+   screen. Two tokens carry the whole colourway:
+
+     --xr-fig     the figure
+     --xr-acc     the barbell
+     --xr-on-acc  the mark when it sits ON a lime field
+
+   THE RULE THAT DECIDES EVERYTHING: #C6F24E on white measures 1.17:1 against
+   --tx-surface-2 and 1.3:1 against pure white. A lime mark on a light ground is
+   not low-contrast, it is ABSENT, and a logo has no alt text on a printed
+   receipt. So the lime is a FILL colour: on light the bar steps down to
+   --tx-accent-text (5.54:1), and lime survives at full strength only as a
+   field with an ink mark knocked out of it. */
+/* The two tokens are declared on the THEME selectors, not on .xr-scope. That
+   distinction is the whole bug this replaced: variables resolve where they are
+   declared, so defining them on a .xr-scope wrapper meant a child carrying
+   data-theme="light" could not change them — and the mark rendered a white
+   figure on a white card at 1.06:1. Declared here, they re-resolve at every
+   themed element, ancestor or descendant. */
+:root,[data-theme="dark"]{--xr-fig:var(--tx-ink);--xr-acc:var(--tx-accent);
+  --xr-on-acc:var(--tx-accent-ink)}
+[data-theme="light"]{--xr-fig:var(--tx-ink);--xr-acc:var(--tx-accent-text);
+  --xr-on-acc:var(--tx-accent-ink)}
+.xr-scope{--xr-fig:var(--tx-ink);--xr-acc:var(--tx-accent);--xr-on-acc:var(--tx-accent-ink)}
+[data-theme="light"] .xr-scope,.xr-scope[data-theme="light"],
+[data-theme="light"]{--xr-acc:var(--tx-accent-text)}
+.xr-mark{display:block;overflow:visible}
+
+/* the lime field. Ink on lime is 15.2:1 and needs no theme override at all. */
+.xr-tile{display:grid;place-items:center;background:var(--tx-accent);flex:0 0 auto}
+.xr-tile .xr-mark{--xr-fig:var(--tx-accent-ink);--xr-acc:var(--tx-accent-ink)}
+
+.xr-lockup{display:flex;align-items:center;gap:5px}
+.xr-lockup--v{flex-direction:column;gap:9px}
+/* Archivo is the brand face and Inter is the interface face. The split is
+   deliberate: a wordmark wants more character than the UI it sits above. */
+.xr-word{font-family:'Archivo',var(--tx-font);font-weight:800;letter-spacing:-.035em;
+  line-height:.8;color:var(--tx-ink)}
+.xr-tagline{display:block;font-family:'Archivo',var(--tx-font);font-size:11px;font-weight:600;
+  letter-spacing:.42em;color:var(--tx-ink-2);text-align:center;margin-top:14px}
+
+/* ── motion ───────────────────────────────────────────────────────────────
+   Cold start, once. Never on a tab change, never as a spinner, never looping.
+
+   Four transforms on a silhouette that is never redrawn, staggered in the order
+   a lift actually happens: legs drive, hips follow, bar travels, arms lock out
+   last. The plates then keep moving for 180ms after the bar has stopped, which
+   is the detail that makes a loaded bar read as heavy rather than weightless. */
+.xr-anim{--xr-dur:1.4s;
+  --xr-drive:cubic-bezier(.16,.84,.24,1);    /* fast out of the hole, long settle */
+  --xr-spring:cubic-bezier(.34,1.56,.64,1);  /* the plate settle only */
+  --xr-soft:cubic-bezier(.22,1,.36,1)}
+.xr-anim .xr-legs{transform-box:fill-box;transform-origin:50% 100%;
+  animation:xr-drive var(--xr-dur) var(--xr-drive) both}
+.xr-anim .xr-upper{animation:xr-rise var(--xr-dur) var(--xr-drive) .04s both}
+.xr-anim .xr-bar{animation:xr-lift var(--xr-dur) var(--xr-drive) .06s both}
+.xr-anim .xr-arms{transform-box:fill-box;transform-origin:50% 100%;
+  animation:xr-extend var(--xr-dur) var(--xr-drive) .09s both}
+.xr-anim .xr-plates{animation:xr-settle var(--xr-dur) var(--xr-spring) both}
+.xr-anim .xr-bloom{opacity:0;filter:blur(3px);animation:xr-bloom var(--xr-dur) linear both}
+.xr-anim .xr-name{animation:xr-name var(--xr-dur) var(--xr-soft) both}
+.xr-anim .xr-tag{animation:xr-tag var(--xr-dur) var(--xr-soft) both}
+
+/* the 90ms dip before the drive. Anticipation is the cheapest thing in
+   animation and the first thing missing from most of it. */
+@keyframes xr-drive{0%{transform:scaleY(.80)}8%{transform:scaleY(.755)}
+  62%{transform:scaleY(1.035)}80%{transform:scaleY(.995)}100%{transform:scaleY(1)}}
+@keyframes xr-rise{0%,6%{transform:translateY(26px)}66%{transform:translateY(-3.5px)}
+  84%{transform:translateY(.7px)}100%{transform:translateY(0)}}
+@keyframes xr-lift{0%,8%{transform:translateY(56px)}68%{transform:translateY(-4px)}
+  85%{transform:translateY(.9px)}100%{transform:translateY(0)}}
+/* the largest delay, because lockout is the last thing to happen. Held at .62
+   and not the original .22: scaleY on a stroked path distorts stroke weight,
+   and at .22 the arc became a flat shelf drawn in two different weights. */
+@keyframes xr-extend{0%,10%{transform:scaleY(.62)}70%{transform:scaleY(1.045)}
+  87%{transform:scaleY(.99)}100%{transform:scaleY(1)}}
+@keyframes xr-settle{0%,62%{transform:translateY(0)}74%{transform:translateY(2.4px)}
+  88%{transform:translateY(-.5px)}100%{transform:translateY(0)}}
+@keyframes xr-bloom{0%,60%{opacity:0}70%{opacity:1}88%,100%{opacity:0}}
+/* starts at 58%, while the bar is still travelling. Sequential beats read as a
+   slideshow; overlapping ones read as one movement. */
+@keyframes xr-name{0%,58%{opacity:0;transform:translateY(7px) scale(.965)}
+  76%,100%{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes xr-tag{0%,78%{opacity:0;transform:translateY(4px)}
+  97%,100%{opacity:1;transform:translateY(0)}}
+
+/* Frozen at the REST frame, never mid-transition — a logo caught halfway reads
+   as a failed render rather than as a still. */
+@media (prefers-reduced-motion:reduce){
+  .xr-anim .xr-legs,.xr-anim .xr-upper,.xr-anim .xr-bar,.xr-anim .xr-arms,
+  .xr-anim .xr-plates,.xr-anim .xr-name,.xr-anim .xr-tag{animation:none!important}
+  .xr-anim .xr-bloom{display:none}
+}
+
+/* ── the splash surface ─────────────────────────────────────────────────── */
+.xr-splash{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:0;padding:0 var(--tx-inset)}
+.xr-splash__foot{position:absolute;left:0;right:0;bottom:0;padding:0 var(--tx-inset) 30px;
+  text-align:center}
+.xr-splash__ver{font-family:var(--tx-mono,'JetBrains Mono',monospace);font-size:10.5px;
+  letter-spacing:.11em;color:var(--tx-ink-3)}
+
+/* the auth header lockup: the tile, because at 46px a stroked mark on canvas
+   loses the plates and the tile does not */
+.xr-head{display:flex;align-items:center;gap:11px}
+.xr-head__w{font-family:'Archivo',var(--tx-font);font-size:20px;font-weight:800;
+  letter-spacing:-.03em;color:var(--tx-ink)}
 </style>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800;900&display=swap" rel="stylesheet">
 </head>
 <body>
 
@@ -1027,6 +2789,15 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 <g id="i-home"><path d="M3 10.2 12 3l9 7.2V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></g>
 <g id="i-phone"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8.1 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.8 2z"/></g>
 <g id="i-play"><path d="M6.5 4.7 19 12 6.5 19.3z"/></g>
+
+<g id="i-minus"><path d="M5 12h14"/></g>
+<g id="i-swap"><path d="M3 8h14M13.5 4.5 17 8l-3.5 3.5"/><path d="M21 16H7M10.5 12.5 7 16l3.5 3.5"/></g>
+<g id="i-grip"><circle cx="9" cy="6" r="1.35"/><circle cx="15" cy="6" r="1.35"/><circle cx="9" cy="12" r="1.35"/><circle cx="15" cy="12" r="1.35"/><circle cx="9" cy="18" r="1.35"/><circle cx="15" cy="18" r="1.35"/></g>
+<g id="i-cloud-check"><path d="M7 17h10a4 4 0 0 0 .4-8A6 6 0 0 0 6 7.8 4.6 4.6 0 0 0 7 17z"/><path d="m9.6 12.6 2 2 3.6-3.8"/></g>
+<g id="i-archive"><rect x="3" y="4" width="18" height="4.6" rx="1.5"/><path d="M5 8.6v10A1.9 1.9 0 0 0 6.9 20.5h10.2a1.9 1.9 0 0 0 1.9-1.9v-10"/><path d="M10 12.4h4"/></g>
+<g id="i-phone"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8.1 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.8 2z"/></g>
+
+<g id="i-search"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></g>
 </defs></svg>
 
 <div class="wrap">
@@ -1050,22 +2821,77 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 </div>
 
 <!-- ============================================================ 01 ===== -->
+<h2 class="sec">00 · Launch</h2>
+<h3 class="sec">The one screen the animation belongs on</h3>
+<p class="sec">The flow map has always listed <b>Launch</b> as a node and it has never had a frame — it was
+covered by a line of prose. That is the gap the logo animation falls into, so it is drawn here. The lift
+runs <b>once, on cold start, in 1.4s</b>, and it never gates first paint: local data is already resolving
+behind it, which is the whole point of FR-8. A returning trainer sees 0b and lands on Home without
+touching a keyboard.</p>
+<div class="stage">
+
+  <div class="unit" id="f-0a">
+    <div class="unit__label"><b>0a</b> · Cold start</div>
+    <div class="device"><div class="screen tx xr-scope xr-anim" data-theme="dark">
+      <div class="island"></div>
+      <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
+        <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x=".6" y=".6" width="21" height="11.8" rx="3.4" stroke="currentColor" opacity=".45"/><rect x="2.4" y="2.4" width="14" height="8.2" rx="2" fill="currentColor"/><path d="M23.4 4.4v4.2c1.2-.4 1.8-1.1 1.8-2.1s-.6-1.7-1.8-2.1z" fill="currentColor" opacity=".45"/></svg>
+      </span></div>
+      <div class="xr-splash"><div class="xr-lockup"><svg class="xr-mark " width="64" height="64" viewBox="0 0 100 100" fill="none" role="img" aria-label="X REP"><rect class="xr-bloom" x="0" y="13" width="100" height="14" rx="7" fill="var(--xr-acc)"/><g class="xr-bar"><rect x="4" y="16" width="92" height="8" rx="3" fill="var(--xr-acc)"/><g class="xr-plates"><rect x="4"  y="13" width="7"  height="14" fill="var(--xr-fig)"/><rect x="89" y="13" width="7"  height="14" fill="var(--xr-fig)"/><rect x="16" y="7"  width="10" height="26" fill="var(--xr-fig)"/><rect x="74" y="7"  width="10" height="26" fill="var(--xr-fig)"/></g></g><path class="xr-legs" d="M28 93 C28 60 72 60 72 93" stroke="var(--xr-fig)" stroke-width="11" fill="none"/><g class="xr-upper"><circle cx="50" cy="35" r="9" fill="var(--xr-fig)"/><g stroke="var(--xr-fig)" stroke-width="11" fill="none"><path d="M50 43 L50 64"/><path class="xr-arms" d="M33 22 C34 56 66 56 67 22"/></g></g></svg><span class="xr-word xr-name" style="font-size:52px">REP</span></div><span class="xr-tagline xr-tag">TRAIN · TRACK · GROW</span></div>
+      
+      <div class="xr-splash__foot"><span class="xr-splash__ver">X REP 1.0.0 (812)</span></div>
+    </div></div>
+    <p class="unit__note">The full lockup — mark, word and tagline — is used <b>here and nowhere else in the app</b>. Every other surface gets the mark alone, because by then the user knows what they opened. Click the frame to replay.</p>
+  </div>
+
+  <div class="unit" id="f-0b">
+    <div class="unit__label"><b>0b</b> · Returning user</div>
+    <div class="device"><div class="screen tx xr-scope xr-anim" data-theme="dark">
+      <div class="island"></div>
+      <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
+        <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x=".6" y=".6" width="21" height="11.8" rx="3.4" stroke="currentColor" opacity=".45"/><rect x="2.4" y="2.4" width="14" height="8.2" rx="2" fill="currentColor"/><path d="M23.4 4.4v4.2c1.2-.4 1.8-1.1 1.8-2.1s-.6-1.7-1.8-2.1z" fill="currentColor" opacity=".45"/></svg>
+      </span></div>
+      <div class="xr-splash"><div class="xr-lockup"><svg class="xr-mark " width="64" height="64" viewBox="0 0 100 100" fill="none" role="img" aria-label="X REP"><rect class="xr-bloom" x="0" y="13" width="100" height="14" rx="7" fill="var(--xr-acc)"/><g class="xr-bar"><rect x="4" y="16" width="92" height="8" rx="3" fill="var(--xr-acc)"/><g class="xr-plates"><rect x="4"  y="13" width="7"  height="14" fill="var(--xr-fig)"/><rect x="89" y="13" width="7"  height="14" fill="var(--xr-fig)"/><rect x="16" y="7"  width="10" height="26" fill="var(--xr-fig)"/><rect x="74" y="7"  width="10" height="26" fill="var(--xr-fig)"/></g></g><path class="xr-legs" d="M28 93 C28 60 72 60 72 93" stroke="var(--xr-fig)" stroke-width="11" fill="none"/><g class="xr-upper"><circle cx="50" cy="35" r="9" fill="var(--xr-fig)"/><g stroke="var(--xr-fig)" stroke-width="11" fill="none"><path d="M50 43 L50 64"/><path class="xr-arms" d="M33 22 C34 56 66 56 67 22"/></g></g></svg><span class="xr-word xr-name" style="font-size:52px">REP</span></div><span class="xr-tagline xr-tag">TRAIN · TRACK · GROW</span><div class="xr-splash-note"><span class="tx-caption tx-ink-3">Opening your book…</span></div></div>
+      
+      <div class="xr-splash__foot"><span class="xr-splash__ver">X REP 1.0.0 (812)</span></div>
+    </div></div>
+    <p class="unit__note">A trainer with a session on this device never sees phone entry. The splash is the whole of sign-in for them, and the line under the mark says what is happening rather than spinning at them.</p>
+  </div>
+
+  <div class="unit" id="f-0c">
+    <div class="unit__label"><b>0c</b> · Reduced motion</div>
+    <div class="device"><div class="screen tx xr-scope " data-theme="dark">
+      <div class="island"></div>
+      <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
+        <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
+        <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x=".6" y=".6" width="21" height="11.8" rx="3.4" stroke="currentColor" opacity=".45"/><rect x="2.4" y="2.4" width="14" height="8.2" rx="2" fill="currentColor"/><path d="M23.4 4.4v4.2c1.2-.4 1.8-1.1 1.8-2.1s-.6-1.7-1.8-2.1z" fill="currentColor" opacity=".45"/></svg>
+      </span></div>
+      <div class="xr-splash"><div class="xr-lockup"><svg class="xr-mark " width="64" height="64" viewBox="0 0 100 100" fill="none" role="img" aria-label="X REP"><g class="xr-bar"><rect x="4" y="16" width="92" height="8" rx="3" fill="var(--xr-acc)"/><rect x="4"  y="13" width="7"  height="14" fill="var(--xr-fig)"/><rect x="89" y="13" width="7"  height="14" fill="var(--xr-fig)"/><rect x="16" y="7"  width="10" height="26" fill="var(--xr-fig)"/><rect x="74" y="7"  width="10" height="26" fill="var(--xr-fig)"/></g><path class="xr-legs" d="M28 93 C28 60 72 60 72 93" stroke="var(--xr-fig)" stroke-width="11" fill="none"/><g class="xr-upper"><circle cx="50" cy="35" r="9" fill="var(--xr-fig)"/><g stroke="var(--xr-fig)" stroke-width="11" fill="none"><path d="M50 43 L50 64"/><path class="xr-arms" d="M33 22 C34 56 66 56 67 22"/></g></g></svg><span class="xr-word" style="font-size:52px">REP</span></div><span class="xr-tagline">TRAIN · TRACK · GROW</span></div>
+      
+      <div class="xr-splash__foot"><span class="xr-splash__ver">X REP 1.0.0 (812)</span></div>
+    </div></div>
+    <p class="unit__note">Under <code>prefers-reduced-motion</code> the mark is frozen at the <b>rest</b> frame, never mid-lift. A logo caught halfway reads as a failed render, not as a still.</p>
+  </div>
+</div>
+
 <h2 class="sec">01 · Phone entry</h2>
 <h3 class="sec">The front door</h3>
 <p class="sec">One field, one button. The headline <em>is</em> the label — wired with <code>aria-labelledby</code> rather than repeating itself above the field. The country code is a fused segment, so <code>:focus-within</code> rings the whole group.</p>
 
 <div class="stage">
 
-  <div class="unit">
+  <div class="unit" id="f-1a">
     <div class="unit__label"><b>1a</b> · Default</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
         <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x=".6" y=".6" width="21" height="11.8" rx="3.4" stroke="currentColor" opacity=".45"/><rect x="2.4" y="2.4" width="14" height="8.2" rx="2" fill="currentColor"/><path d="M23.4 4.4v4.2c1.2-.4 1.8-1.1 1.8-2.1s-.6-1.7-1.8-2.1z" fill="currentColor" opacity=".45"/></svg>
       </span></div>
       <div class="auth">
-        <div class="auth__top"><div class="brandmark">X</div></div>
+        <div class="auth__top"><div class="brandmark"><svg class="xr-mark " width="33" height="33" viewBox="0 0 100 100" fill="none" role="img" aria-label="X REP"><g class="xr-bar"><rect x="4" y="16" width="92" height="8" rx="3" fill="var(--xr-on-acc)"/><rect x="4"  y="13" width="7"  height="14" fill="var(--xr-on-acc)"/><rect x="89" y="13" width="7"  height="14" fill="var(--xr-on-acc)"/><rect x="16" y="7"  width="10" height="26" fill="var(--xr-on-acc)"/><rect x="74" y="7"  width="10" height="26" fill="var(--xr-on-acc)"/></g><path class="xr-legs" d="M28 93 C28 60 72 60 72 93" stroke="var(--xr-on-acc)" stroke-width="11" fill="none"/><g class="xr-upper"><circle cx="50" cy="35" r="9" fill="var(--xr-on-acc)"/><g stroke="var(--xr-on-acc)" stroke-width="11" fill="none"><path d="M50 43 L50 64"/><path class="xr-arms" d="M33 22 C34 56 66 56 67 22"/></g></g></svg></div></div>
         <div class="auth__body">
           <h2 id="ph1">Enter your mobile number</h2>
           <p class="sub">We'll text you a 6-digit code to sign you in.</p>
@@ -1092,16 +2918,16 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note">CTA is disabled until 10 digits are entered — visible, not hidden, so the next step is never a surprise.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-1b">
     <div class="unit__label"><b>1b</b> · Filled · keyboard up</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
         <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x=".6" y=".6" width="21" height="11.8" rx="3.4" stroke="currentColor" opacity=".45"/><rect x="2.4" y="2.4" width="14" height="8.2" rx="2" fill="currentColor"/><path d="M23.4 4.4v4.2c1.2-.4 1.8-1.1 1.8-2.1s-.6-1.7-1.8-2.1z" fill="currentColor" opacity=".45"/></svg>
       </span></div>
       <div class="auth">
-        <div class="auth__top"><div class="brandmark">X</div></div>
+        <div class="auth__top"><div class="brandmark"><svg class="xr-mark " width="33" height="33" viewBox="0 0 100 100" fill="none" role="img" aria-label="X REP"><g class="xr-bar"><rect x="4" y="16" width="92" height="8" rx="3" fill="var(--xr-on-acc)"/><rect x="4"  y="13" width="7"  height="14" fill="var(--xr-on-acc)"/><rect x="89" y="13" width="7"  height="14" fill="var(--xr-on-acc)"/><rect x="16" y="7"  width="10" height="26" fill="var(--xr-on-acc)"/><rect x="74" y="7"  width="10" height="26" fill="var(--xr-on-acc)"/></g><path class="xr-legs" d="M28 93 C28 60 72 60 72 93" stroke="var(--xr-on-acc)" stroke-width="11" fill="none"/><g class="xr-upper"><circle cx="50" cy="35" r="9" fill="var(--xr-on-acc)"/><g stroke="var(--xr-on-acc)" stroke-width="11" fill="none"><path d="M50 43 L50 64"/><path class="xr-arms" d="M33 22 C34 56 66 56 67 22"/></g></g></svg></div></div>
         <div class="auth__body">
           <h2>Enter your mobile number</h2>
           <p class="sub">We'll text you a 6-digit code to sign you in.</p>
@@ -1133,16 +2959,16 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note">The keyboard eats 46% of a 390pt screen and more of a 360dp one. <b>The CTA docks above it</b> — never below the fold, never requiring a dismiss-then-tap.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-1c">
     <div class="unit__label bad"><b>1c</b> · Invalid number</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
         <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x=".6" y=".6" width="21" height="11.8" rx="3.4" stroke="currentColor" opacity=".45"/><rect x="2.4" y="2.4" width="14" height="8.2" rx="2" fill="currentColor"/><path d="M23.4 4.4v4.2c1.2-.4 1.8-1.1 1.8-2.1s-.6-1.7-1.8-2.1z" fill="currentColor" opacity=".45"/></svg>
       </span></div>
       <div class="auth">
-        <div class="auth__top"><div class="brandmark">X</div></div>
+        <div class="auth__top"><div class="brandmark"><svg class="xr-mark " width="33" height="33" viewBox="0 0 100 100" fill="none" role="img" aria-label="X REP"><g class="xr-bar"><rect x="4" y="16" width="92" height="8" rx="3" fill="var(--xr-on-acc)"/><rect x="4"  y="13" width="7"  height="14" fill="var(--xr-on-acc)"/><rect x="89" y="13" width="7"  height="14" fill="var(--xr-on-acc)"/><rect x="16" y="7"  width="10" height="26" fill="var(--xr-on-acc)"/><rect x="74" y="7"  width="10" height="26" fill="var(--xr-on-acc)"/></g><path class="xr-legs" d="M28 93 C28 60 72 60 72 93" stroke="var(--xr-on-acc)" stroke-width="11" fill="none"/><g class="xr-upper"><circle cx="50" cy="35" r="9" fill="var(--xr-on-acc)"/><g stroke="var(--xr-on-acc)" stroke-width="11" fill="none"><path d="M50 43 L50 64"/><path class="xr-arms" d="M33 22 C34 56 66 56 67 22"/></g></g></svg></div></div>
         <div class="auth__body">
           <h2>Enter your mobile number</h2>
           <p class="sub">We'll text you a 6-digit code to sign you in.</p>
@@ -1181,9 +3007,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 
 <div class="stage">
 
-  <div class="unit">
+  <div class="unit" id="f-2a">
     <div class="unit__label"><b>2a</b> · Waiting for the code</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1216,9 +3042,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note">Grouped 3 + 3 so a six-digit string is scannable. Resend is visible but dead for 30s — a greyed control with a countdown answers "is it broken?" before the question forms.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-2b">
     <div class="unit__label"><b>2b</b> · Auto-filled from SMS</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1258,9 +3084,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note">The suggestion strip is the OS reading a correctly formatted SMS. <b>Auto-submit on the sixth digit</b> — the Verify button is a fallback for screen readers and for a paste that doesn't trigger input events.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-2c">
     <div class="unit__label"><b>2c</b> · Verified</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1290,9 +3116,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 
 <div class="stage">
 
-  <div class="unit">
+  <div class="unit" id="f-3a">
     <div class="unit__label bad"><b>3a</b> · Wrong code</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:25</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1329,9 +3155,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note"><b>The digits stay.</b> Clearing the field on a wrong code is hostile — one digit was probably mistyped. Shake 420ms, error haptic, caret to the end, resend goes live immediately.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-3b">
     <div class="unit__label bad"><b>3b</b> · Code expired</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:36</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1368,9 +3194,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note">Expiry is <b>amber, not red</b> — nobody did anything wrong. WhatsApp appears as a fallback from the second attempt on; in India it lands when SMS routes are congested.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-3c">
     <div class="unit__label bad"><b>3c</b> · Too many attempts</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:27</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1383,7 +3209,7 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-lock"/></svg>
           </div>
           <h3>Sign-in paused</h3>
-          <p>Five wrong codes on this number. We've paused it for a few minutes.</p>
+          <p>Five wrong codes on this number. We've paused it for a few minutes to keep your clients' data safe.</p>
           <div class="count">4:58</div>
         </div>
         <div class="auth__foot">
@@ -1407,16 +3233,16 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 
 <div class="stage">
 
-  <div class="unit">
+  <div class="unit" id="f-4a">
     <div class="unit__label bad"><b>4a</b> · Offline at sign-in</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
         <svg width="16" height="12" viewBox="0 0 18 12" fill="currentColor" opacity=".4"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/></svg>
         <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x=".6" y=".6" width="21" height="11.8" rx="3.4" stroke="currentColor" opacity=".45"/><rect x="2.4" y="2.4" width="9" height="8.2" rx="2" fill="currentColor"/></svg>
       </span></div>
       <div class="auth">
-        <div class="auth__top"><div class="brandmark">X</div></div>
+        <div class="auth__top"><div class="brandmark"><svg class="xr-mark " width="33" height="33" viewBox="0 0 100 100" fill="none" role="img" aria-label="X REP"><g class="xr-bar"><rect x="4" y="16" width="92" height="8" rx="3" fill="var(--xr-on-acc)"/><rect x="4"  y="13" width="7"  height="14" fill="var(--xr-on-acc)"/><rect x="89" y="13" width="7"  height="14" fill="var(--xr-on-acc)"/><rect x="16" y="7"  width="10" height="26" fill="var(--xr-on-acc)"/><rect x="74" y="7"  width="10" height="26" fill="var(--xr-on-acc)"/></g><path class="xr-legs" d="M28 93 C28 60 72 60 72 93" stroke="var(--xr-on-acc)" stroke-width="11" fill="none"/><g class="xr-upper"><circle cx="50" cy="35" r="9" fill="var(--xr-on-acc)"/><g stroke="var(--xr-on-acc)" stroke-width="11" fill="none"><path d="M50 43 L50 64"/><path class="xr-arms" d="M33 22 C34 56 66 56 67 22"/></g></g></svg></div></div>
         <div class="auth__body">
           <h2>Enter your mobile number</h2>
           <p class="sub">We'll text you a 6-digit code to sign you in.</p>
@@ -1445,9 +3271,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note">The number is preserved and the screen retries by itself on reconnect. "Just this once" is doing real work — it sets the expectation the rest of the app then keeps.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-4b">
     <div class="unit__label"><b>4b</b> · Returning user, offline</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">6:02</span><span class="sb-icons">
         <svg width="16" height="12" viewBox="0 0 18 12" fill="currentColor" opacity=".4"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/></svg>
@@ -1504,9 +3330,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 <p class="sec">Your map says a person can be a trainer and a client. That's a real case — most independent coaches also train. For everyone else this screen never appears; the app resolves the single role silently and goes straight to the Deck.</p>
 
 <div class="stage">
-  <div class="unit">
+  <div class="unit" id="f-5a">
     <div class="unit__label"><b>5a</b> · Both roles</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:25</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1605,9 +3431,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 
 <div class="stage">
 
-  <div class="unit">
+  <div class="unit" id="f-7a">
     <div class="unit__label bad"><b>7a</b> · Number not recognised</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1639,9 +3465,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note">One screen, two exits, and neither is a dead end. Note it appears <b>after</b> OTP verification, not before — revealing which numbers exist before you prove you own one leaks your customer list.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-7b">
     <div class="unit__label bad"><b>7b</b> · Client removed or paused</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1668,16 +3494,16 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note">FR-1 has pause and soft delete, so both need an answer here. Naming the trainer and the date turns a wall into information, and the WhatsApp button is the actual fix — the trainer, not support.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-7c">
     <div class="unit__label"><b>7c</b> · Country picker</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
         <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x=".6" y=".6" width="21" height="11.8" rx="3.4" stroke="currentColor" opacity=".45"/><rect x="2.4" y="2.4" width="14" height="8.2" rx="2" fill="currentColor"/></svg>
       </span></div>
       <div class="auth" style="opacity:.5">
-        <div class="auth__top"><div class="brandmark">X</div></div>
+        <div class="auth__top"><div class="brandmark"><svg class="xr-mark " width="33" height="33" viewBox="0 0 100 100" fill="none" role="img" aria-label="X REP"><g class="xr-bar"><rect x="4" y="16" width="92" height="8" rx="3" fill="var(--xr-on-acc)"/><rect x="4"  y="13" width="7"  height="14" fill="var(--xr-on-acc)"/><rect x="89" y="13" width="7"  height="14" fill="var(--xr-on-acc)"/><rect x="16" y="7"  width="10" height="26" fill="var(--xr-on-acc)"/><rect x="74" y="7"  width="10" height="26" fill="var(--xr-on-acc)"/></g><path class="xr-legs" d="M28 93 C28 60 72 60 72 93" stroke="var(--xr-on-acc)" stroke-width="11" fill="none"/><g class="xr-upper"><circle cx="50" cy="35" r="9" fill="var(--xr-on-acc)"/><g stroke="var(--xr-on-acc)" stroke-width="11" fill="none"><path d="M50 43 L50 64"/><path class="xr-arms" d="M33 22 C34 56 66 56 67 22"/></g></g></svg></div></div>
         <div class="auth__body">
           <h2>Enter your mobile number</h2>
           <p class="sub">We'll text you a 6-digit code to sign you in.</p>
@@ -1725,9 +3551,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 
 <div class="stage">
 
-  <div class="unit">
+  <div class="unit" id="f-8a">
     <div class="unit__label"><b>8a</b> · Resent</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:25</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1760,9 +3586,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note">Without an explicit confirmation people tap resend three more times, burn the rate limit and land in the lockout screen for no reason. The cooldown escalates 30s → 60s → 120s.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-8b">
     <div class="unit__label bad"><b>8b</b> · Still nothing</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:27</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1803,9 +3629,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note">Offered after the second resend. <b>Voice OTP is the one most apps skip</b> and it recovers a real slice of otherwise-lost signups — dual-SIM confusion, DND filters and MNP-in-progress numbers all kill SMS but not a call.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-8c">
     <div class="unit__label bad"><b>8c</b> · Server error</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:26</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1869,9 +3695,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 
 <div class="stage">
 
-  <div class="unit">
+  <div class="unit" id="f-9a">
     <div class="unit__label"><b>9a</b> · Old device gets told</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">21:14</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1905,9 +3731,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note">Out-of-band, on the device that already trusts you. Device, city and time — enough to recognise yourself, or not.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-9b">
     <div class="unit__label"><b>9b</b> · Settings → Devices</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">21:15</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1945,9 +3771,9 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
     <p class="unit__note">Per-device revoke plus a nuclear option. The stale device carries a warning bar — six days idle on a shared phone is the case worth flagging.</p>
   </div>
 
-  <div class="unit">
+  <div class="unit" id="f-9c">
     <div class="unit__label bad"><b>9c</b> · Sign out with unsynced work</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">21:16</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
@@ -1979,16 +3805,16 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 <!-- ============================================================ 10 ==== -->
 <h2 class="sec">10 · Force update</h2>
 <div class="stage">
-  <div class="unit">
+  <div class="unit" id="f-10a">
     <div class="unit__label bad"><b>10a</b> · Minimum version</div>
-    <div class="device"><div class="screen tx" data-theme="dark">
+    <div class="device"><div class="screen tx xr-scope" data-theme="dark">
       <div class="island"></div>
       <div class="statusbar"><span class="sb-time">9:24</span><span class="sb-icons">
         <svg width="18" height="12" viewBox="0 0 18 12" fill="currentColor"><rect y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" width="3" height="12" rx="1"/></svg>
         <svg width="26" height="13" viewBox="0 0 26 13" fill="none"><rect x=".6" y=".6" width="21" height="11.8" rx="3.4" stroke="currentColor" opacity=".45"/><rect x="2.4" y="2.4" width="14" height="8.2" rx="2" fill="currentColor"/></svg>
       </span></div>
       <div class="auth">
-        <div class="auth__top"><div class="brandmark">X</div></div>
+        <div class="auth__top"><div class="brandmark"><svg class="xr-mark " width="33" height="33" viewBox="0 0 100 100" fill="none" role="img" aria-label="X REP"><g class="xr-bar"><rect x="4" y="16" width="92" height="8" rx="3" fill="var(--xr-on-acc)"/><rect x="4"  y="13" width="7"  height="14" fill="var(--xr-on-acc)"/><rect x="89" y="13" width="7"  height="14" fill="var(--xr-on-acc)"/><rect x="16" y="7"  width="10" height="26" fill="var(--xr-on-acc)"/><rect x="74" y="7"  width="10" height="26" fill="var(--xr-on-acc)"/></g><path class="xr-legs" d="M28 93 C28 60 72 60 72 93" stroke="var(--xr-on-acc)" stroke-width="11" fill="none"/><g class="xr-upper"><circle cx="50" cy="35" r="9" fill="var(--xr-on-acc)"/><g stroke="var(--xr-on-acc)" stroke-width="11" fill="none"><path d="M50 43 L50 64"/><path class="xr-arms" d="M33 22 C34 56 66 56 67 22"/></g></g></svg></div></div>
         <div class="blockwrap">
           <div class="blockwrap__ring" style="background:var(--tx-info-soft);color:var(--tx-info)">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><use href="#i-refresh"/></svg>
@@ -2034,7 +3860,7 @@ footer{margin-top:80px;padding-top:24px;border-top:1px solid #1C1F25;display:fle
 <div class="notes" style="margin-bottom:26px">
   <div class="note note--bad">
     <h4>1 · The SMS format</h4>
-    <p>I specified <code>@xrep.app #481234</code> as the last line. <b>That does nothing on native iOS or Android.</b> It's the WICG origin-bound-code spec, used by <em>WebOTP in browsers</em> — not by native apps. Android's SMS Retriever needs an <b>11-character app hash</b> and a ≤140-byte message; iOS just needs <code>textContentType = .oneTimeCode</code> and parses heuristically. Worse, on Indian DLT that line is an unclassified CTA-shaped string that may trip URL/CTA whitelisting scrubbers — a delivery risk that buys nothing.</p>
+    <p>I specified <code>@trainx.app #481234</code> as the last line. <b>That does nothing on native iOS or Android.</b> It's the WICG origin-bound-code spec, used by <em>WebOTP in browsers</em> — not by native apps. Android's SMS Retriever needs an <b>11-character app hash</b> and a ≤140-byte message; iOS just needs <code>textContentType = .oneTimeCode</code> and parses heuristically. Worse, on Indian DLT that line is an unclassified CTA-shaped string that may trip URL/CTA whitelisting scrubbers — a delivery risk that buys nothing.</p>
   </div>
   <div class="note note--bad">
     <h4>2 · The consent line</h4>

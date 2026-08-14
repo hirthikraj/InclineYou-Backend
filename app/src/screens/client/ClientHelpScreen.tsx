@@ -52,7 +52,7 @@ export default function ClientHelpScreen() {
     },
     {
       q: 'Where does my payment go?',
-      a: `Straight to ${first}'s bank, through your own UPI app. **Train X never holds your money** and cannot confirm a payment — they mark it received when it lands, and your receipt comes from them.`,
+      a: `Straight to ${first}'s bank, through your own UPI app. **XRep never holds your money** and cannot confirm a payment — they mark it received when it lands, and your receipt comes from them.`,
     },
     {
       q: 'I logged the wrong weight. Can I delete it?',

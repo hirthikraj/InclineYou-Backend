@@ -1,5 +1,5 @@
 /**
- * Train X — "Command Deck" design tokens.
+ * XRep — "Command Deck" design tokens.
  *
  * Ported verbatim from `agent/design system/xrepdesignsystem.html` (v1.0 · 9 Aug 2026),
  * which is the single source of truth. Every value below is a token; no component

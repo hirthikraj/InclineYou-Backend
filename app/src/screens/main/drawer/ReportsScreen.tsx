@@ -81,7 +81,7 @@ export default function ReportsScreen() {
    */
   const share = async () => {
     const lines = [
-      `Train X reports,${view.subtitle}`,
+      `XRep reports,${view.subtitle}`,
       '',
       'Metric,Value,Change',
       ...view.metrics.map((m) => `${m.label},${m.value},${m.delta?.text ?? ''}`),

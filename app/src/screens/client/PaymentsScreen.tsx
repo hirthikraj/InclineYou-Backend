@@ -15,7 +15,7 @@
  * own VPA is never printed: the deep link carries it and the client's UPI app
  * confirms his name before they authorise.
  *
- * Train X never holds, moves or confirms this money, and every screen that could
+ * XRep never holds, moves or confirms this money, and every screen that could
  * imply otherwise says so instead. "I paid cash" tells the trainer over WhatsApp;
  * the balance does not move until he marks it received, because we cannot read
  * anybody's bank and a wrong guess destroys the book.
@@ -172,7 +172,7 @@ export default function PaymentsScreen() {
 
             <Callout style={styles.note}>
               {first} collects this themselves.{' '}
-              <CalloutStrong>Train X never holds your money</CalloutStrong> — it keeps the book,
+              <CalloutStrong>XRep never holds your money</CalloutStrong> — it keeps the book,
               which is why they mark each payment received.
             </Callout>
           </>

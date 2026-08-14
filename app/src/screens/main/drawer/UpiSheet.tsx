@@ -94,7 +94,7 @@ export default function UpiSheet({ visible, current, onSave, onClose }: UpiSheet
       ) : null}
 
       <Callout icon={IconAlert} style={styles.note}>
-        We check the <CalloutStrong>format only</CalloutStrong>. Train X can&apos;t confirm this ID is
+        We check the <CalloutStrong>format only</CalloutStrong>. XRep can&apos;t confirm this ID is
         yours and can&apos;t see whether a payment arrived — a single wrong letter still looks
         perfectly valid to us.
       </Callout>

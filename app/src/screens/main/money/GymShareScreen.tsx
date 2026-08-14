@@ -6,7 +6,7 @@
  * in an average.
  *
  * The honest caveat is the point of the screen: **these are your figures, not
- * the gym's.** Train X does not talk to any gym's system, so if their number
+ * the gym's.** XRep does not talk to any gym's system, so if their number
  * differs, this is the one the trainer can show them.
  *
  * When no gym is set up, the screen becomes the place to set one up — because
@@ -329,7 +329,7 @@ export default function GymShareScreen() {
         ) : null}
 
         <Callout icon={IconShield} style={styles.note}>
-          These are your own figures, not the gym's. Train X doesn't talk to your gym's system — if
+          These are your own figures, not the gym's. XRep doesn't talk to your gym's system — if
           their number differs, this is the one you can show them.
         </Callout>
       </ScrollView>

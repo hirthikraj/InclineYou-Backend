@@ -3,7 +3,7 @@
  *
  * Every rule this file enforces comes from §08 of the design:
  *
- *   · Train X never holds, moves or confirms money. Nothing here calls a
+ *   · XRep never holds, moves or confirms money. Nothing here calls a
  *     payment provider, because there isn't one. A payment is RECORDED by the
  *     trainer, never auto-detected — we cannot read their bank, and marking a
  *     payment from a parsed SMS would be wrong often enough to destroy trust in

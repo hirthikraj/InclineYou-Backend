@@ -78,7 +78,7 @@ export default function ClientViewSheet({ visible, profile, onClose }: ClientVie
                 ))}
                 {/* Said here as well as on the profile, because this is the copy
                     a client reads and it should not overstate what it means. */}
-                <Text style={styles.fine}>Self-declared, not verified by Train X.</Text>
+                <Text style={styles.fine}>Self-declared, not verified by XRep.</Text>
               </>
             ) : null}
 

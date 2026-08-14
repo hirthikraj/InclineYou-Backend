@@ -189,7 +189,7 @@ export default function SessionSheet({
         </View>
 
         <Callout icon={IconShield} style={styles.note}>
-          Whatever you pick is <CalloutStrong>undoable for 24 hours</CalloutStrong>. Train X never
+          Whatever you pick is <CalloutStrong>undoable for 24 hours</CalloutStrong>. XRep never
           decides this for you.
         </Callout>
 

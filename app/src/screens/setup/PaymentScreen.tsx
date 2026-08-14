@@ -163,7 +163,7 @@ export default function PaymentScreen({ navigation }: Props) {
 
       <SetupBody>
         <SetupTitle tight>How should clients pay you?</SetupTitle>
-        <SetupSub>Your UPI ID. Money goes straight to you — Train X never holds it.</SetupSub>
+        <SetupSub>Your UPI ID. Money goes straight to you — XRep never holds it.</SetupSub>
 
         <FieldLabel>UPI ID</FieldLabel>
         <Control

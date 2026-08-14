@@ -87,7 +87,7 @@ export default function UnknownScreen({ navigation, route }: Props) {
 
       <AuthBody>
         <AuthTitle>We don&apos;t know this number yet</AuthTitle>
-        <AuthSub>+91 {format(phone)} isn&apos;t on Train X. Which are you?</AuthSub>
+        <AuthSub>+91 {format(phone)} isn&apos;t on XRep. Which are you?</AuthSub>
 
         <View style={styles.options}>
           <Option
@@ -108,10 +108,6 @@ export default function UnknownScreen({ navigation, route }: Props) {
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <TrustNote icon={IconAlert}>
-          <TrustStrong>Typed it wrong?</TrustStrong> One digit is the usual cause — go back and
-          check the number.
-        </TrustNote>
       </AuthBody>
 
       <AuthFoot>
@@ -130,7 +126,7 @@ export default function UnknownScreen({ navigation, route }: Props) {
           nothing here can. */}
       <Sheet visible={howOpen} onClose={() => setHowOpen(false)} title="Your trainer adds you">
         <Text style={styles.sheetBody}>
-          Train X works from your trainer&apos;s roster, so they add you with the number you just
+          XRep works from your trainer&apos;s roster, so they add you with the number you just
           typed — there is nothing for you to set up.
         </Text>
         <Text style={styles.sheetBody}>

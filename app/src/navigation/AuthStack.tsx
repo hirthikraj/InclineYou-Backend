@@ -33,7 +33,15 @@ export type AuthStackParamList = {
   Role: { session: RoleSession };
   /** § 07a · the number is on nobody's roster. The token claims a trainer account. */
   Unknown: { phone: string; token: string };
-  /** § 07b · every membership paused. There is no token and nothing to open. */
+  /**
+   * § 07b · LEGACY. Every membership paused, no token, nothing to open.
+   *
+   * Pause is not a wall any more: a paused client signs in, gets their history
+   * and their logging, and reads the pause as a banner on Today. This route
+   * survives for one case only — a new app talking to a backend from before that
+   * change, which still answers `role: "paused"` with no token. Delete it once
+   * no such server is running.
+   */
   Paused: { trainerName: string; trainerPhone: string | null; pausedOn: string | null };
 };
 

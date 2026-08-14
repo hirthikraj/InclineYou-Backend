@@ -7,7 +7,7 @@
  * relationship is personal and the debt is small.
  *
  * The message is shown in full and editable, with three tones. And the sheet
- * says the hard thing out loud: **Train X can't confirm the payment.** The
+ * says the hard thing out loud: **XRep can't confirm the payment.** The
  * money goes straight to the trainer's bank, so they will still have to mark
  * it received. Pretending otherwise would be the one lie that breaks the book.
  */
@@ -143,7 +143,7 @@ export default function RemindSheet({
       )}
 
       <Callout icon={IconAlert} style={styles.warn}>
-        Train X can't confirm the payment — the money goes straight to your bank. You'll still need
+        XRep can't confirm the payment — the money goes straight to your bank. You'll still need
         to mark it received when it lands.
       </Callout>
 
