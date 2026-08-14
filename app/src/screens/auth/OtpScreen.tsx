@@ -30,12 +30,15 @@ import {
   RESEND_LADDER,
   SUPPORT_WHATSAPP_NUMBER,
   WhatsAppUnavailableError,
+  isPaused,
   needsSetup,
   readOtpFailure,
   readOtpLock,
+  readSendThrottle,
   requestOtp,
   roleOf,
   requestOtpOnWhatsApp,
+  throttleMessage,
   verifyOtp,
   type AuthResponse,
   type OtpFailure,
@@ -130,21 +133,30 @@ export default function OtpScreen({ navigation, route }: Props) {
   const expired = failure?.kind === 'expired';
   const busy = phase === 'verifying';
 
-  /* --- 2c → hand over. Four ways out, and three of them are not the app. ---
+  /* --- 2c → hand over. Three ways out, and one of them is not the app. ---
    *
-   * A verified number is one of four things, and the design gives each its own
-   * screen: a trainer (or a client) goes straight through; somebody who is both
-   * gets the role picker; a number on nobody's roster gets 7a; and a number
-   * whose every membership is paused gets 7b. Only the first stores a token,
-   * which is what makes the other three reachable at all — RootNavigator swaps
-   * stacks the moment one exists.
+   * A verified number goes straight through as a trainer or a client; somebody
+   * who is genuinely both gets the role picker; a number on nobody's roster gets
+   * 7a. Only the first stores a token, which is what makes the others reachable
+   * at all — RootNavigator swaps stacks the moment one exists.
+   *
+   * A paused membership is NOT one of the ways out. It used to be — 7b, no
+   * token, a wall — and that took the app off the phone of anybody whose package
+   * lapsed. Pause now signs in like anything else and says so with a banner
+   * inside the lens, because the history is still theirs and so is the logging.
    */
   useEffect(() => {
     if (phase !== 'verified' || !session) return;
     const t = setTimeout(() => {
       const role = roleOf(session);
       const memberships = session.clientOf ?? [];
+      // A paused roster still opens, but it is not what sign-in should choose
+      // for somebody who also has a live one, and it is not worth interrupting
+      // a trainer with a picker over.
+      const live = memberships.filter((m) => !isPaused(m));
 
+      // Legacy: a backend from before the pause fix answers with no token and
+      // nothing else to open. Only reachable during a rolling deploy.
       if (role === 'paused' && session.paused) {
         navigation.replace('Paused', {
           trainerName: session.paused.trainerName,
@@ -169,9 +181,11 @@ export default function OtpScreen({ navigation, route }: Props) {
 
       // § 05: skip the picker whenever it can be skipped. It earns its place
       // only for the genuinely dual user — a trainer who is also somebody's
-      // client — or for a client on two rosters.
-      const bothRoles = role === 'trainer' && memberships.length > 0;
-      const manyTrainers = role === 'client' && memberships.length > 1;
+      // live client — or for a client training with two people right now. A
+      // paused roster is reachable from the lens switcher and never worth a
+      // screen at sign-in.
+      const bothRoles = role === 'trainer' && live.length > 0;
+      const manyTrainers = role === 'client' && live.length > 1;
       if (bothRoles || manyTrainers) {
         navigation.replace('Role', {
           session: {
@@ -190,7 +204,10 @@ export default function OtpScreen({ navigation, route }: Props) {
         trainerId: session.trainerId,
         owesSetup: needsSetup(session),
         lens: role === 'client' ? 'client' : 'trainer',
-        clientId: role === 'client' ? (memberships[0]?.clientId ?? null) : null,
+        // Prefer a live roster; fall back to the paused one, which for an
+        // all-paused client is the only thing there is — and is exactly the
+        // lens we now want to open instead of the old wall.
+        clientId: role === 'client' ? (live[0] ?? memberships[0])?.clientId ?? null : null,
         memberships,
       });
     }, VERIFIED_HOLD_MS);
@@ -273,6 +290,16 @@ export default function OtpScreen({ navigation, route }: Props) {
         setPhase('locked');
         return;
       }
+      // Refused on the send rate, not on a wrong code and not on the network.
+      // Our cooldown is client-side and the server's is the real one, so when
+      // they disagree — after a restart, or at the day's ceiling — take the
+      // server's number and put the button back on cooldown for exactly that.
+      const throttledFor = readSendThrottle(err);
+      if (throttledFor !== null) {
+        setResendLeft(throttledFor);
+        setNotice(throttleMessage(throttledFor));
+        return;
+      }
       setNotice(
         err instanceof WhatsAppUnavailableError
           ? "WhatsApp codes aren't switched on yet — the code comes by SMS."
@@ -324,7 +351,7 @@ export default function OtpScreen({ navigation, route }: Props) {
             label="Message support on WhatsApp"
             disabled={!SUPPORT_WHATSAPP_NUMBER}
             onPress={() => {
-              void openWhatsApp(SUPPORT_WHATSAPP_NUMBER, `Locked out of Train X · +91 ${phone}`);
+              void openWhatsApp(SUPPORT_WHATSAPP_NUMBER, `Locked out of XRep · +91 ${phone}`);
             }}
           />
           <Legal>
@@ -425,8 +452,8 @@ export default function OtpScreen({ navigation, route }: Props) {
             {/* Steps aside while the keyboard is up — state 2b. */}
             {keyboardUp ? null : (
               <TrustNote icon={IconShield}>
-                Train X will never ask for this code on a call or over WhatsApp.{' '}
-                <TrustStrong>Nobody from Train X will ever ask you to share it.</TrustStrong>
+                XRep will never ask for this code on a call or over WhatsApp.{' '}
+                <TrustStrong>Nobody from XRep will ever ask you to share it.</TrustStrong>
               </TrustNote>
             )}
           </>

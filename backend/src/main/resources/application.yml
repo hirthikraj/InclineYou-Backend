@@ -23,6 +23,11 @@ spring:
 
 server:
   port: ${PORT:8080}
+  # Set to `framework` behind a proxy (Railway) so getRemoteAddr() is the caller's
+  # IP rather than the proxy's. The rate limiter keys authenticated requests by the
+  # token's subject, so this only affects /v1/auth/** — where a shared proxy
+  # address would otherwise put every trainer in one bucket.
+  forward-headers-strategy: ${FORWARD_HEADERS:none}
 
 logging:
   level:
@@ -37,6 +42,22 @@ app:
     sms-enabled: false       # stub in dev; set true + configure provider in prod
     max-attempts: 3
     lock-minutes: 10
+    # Send rate per number. Counted from otp_request rows, so it survives a restart
+    # and holds across instances — as does the wrong-attempt lock above, since V17.
+    # The ladder mirrors RESEND_LADDER in the app.
+    resend-ladder-seconds: [30, 60, 120]
+    send-window-minutes: 60
+    max-sends-per-day: 10
+  # Requests per identity per window, per class of endpoint. Keyed by the token's
+  # subject where there is one, by remote address on /v1/auth/**. In-memory and
+  # per-instance by design — see AppProperties.RateLimit.
+  rate-limit:
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    standard:  { limit: 120, window-seconds: 60 }
+    auth:      { limit: 300, window-seconds: 60 }   # loose: may be keyed by a shared proxy IP
+    sync:      { limit: 60,  window-seconds: 60 }
+    messaging: { limit: 10,  window-seconds: 60 }   # each call spends a WhatsApp message
+
   seed:
     exercises:
       enabled: ${SEED_EXERCISES:true}

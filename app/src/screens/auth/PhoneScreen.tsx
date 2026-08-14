@@ -16,7 +16,15 @@ import { StyleSheet, Text, TextInput, View } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useFocusEffect } from '@react-navigation/native';
 import type { AuthStackParamList } from '../../navigation/AuthStack';
-import { isOfflineError, isRateLimited, readOtpLock, requestOtp } from '../../api/auth';
+import {
+  isOfflineError,
+  isRateLimited,
+  readOtpLock,
+  readSendThrottle,
+  readValidationDetail,
+  requestOtp,
+  throttleMessage,
+} from '../../api/auth';
 import {
   Button,
   Control,
@@ -51,6 +59,21 @@ type Props = {
 const PHONE_LENGTH = 10;
 
 /**
+ * The whole rule, not just the length — a mirror of the `^[6-9]\d{9}$` on
+ * `AuthController.OtpRequestBody`.
+ *
+ * Counting digits alone let a 5-leading number reach the network, where the
+ * server's 400 arrived as "couldn't send the code. Try again." — which names
+ * nothing, and points at the connection rather than the one character that is
+ * wrong. TRAI allocates only the 6, 7, 8 and 9 series to mobile, so a number
+ * outside them can never receive an SMS and there is nothing to retry.
+ */
+const PHONE_RE = /^[6-9]\d{9}$/;
+
+/** 1c, for the one way a ten-digit number can still not be a mobile number. */
+const LEAD_MSG = 'Indian mobile numbers start with 6, 7, 8 or 9.';
+
+/**
  * The domain the OTP SMS is bound to (`@xrep.app #481234`), so these are the
  * same origin. Point them elsewhere the day legal copy moves.
  */
@@ -80,22 +103,37 @@ export default function PhoneScreen({ navigation }: Props) {
   const handleChange = (raw: string) => {
     const next = raw.replace(/\D/g, '').slice(0, PHONE_LENGTH);
     setDigits(next);
-    // The error clears the moment the tenth digit lands — not before, or it
-    // flickers away while the number is still half-typed.
-    if (message && next.length === PHONE_LENGTH) setMessage(null);
+    // The error clears the moment the number becomes valid — not before, or it
+    // flickers away while the number is still half-typed. A tenth digit that
+    // still doesn't make a mobile number keeps the message: clearing it there
+    // would hand the button back and invite the same rejection again.
+    if (message && PHONE_RE.test(next)) setMessage(null);
   };
 
   /** Validation happens on blur, never on the first keystroke. */
   const handleBlur = () => {
-    if (digits.length === 0 || complete) return;
-    setMessage({
-      text: `That's ${digits.length} ${digits.length === 1 ? 'digit' : 'digits'} — Indian mobile numbers have ${PHONE_LENGTH}`,
-      tone: 'error',
-    });
+    if (digits.length === 0) return;
+    if (!complete) {
+      setMessage({
+        text: `That's ${digits.length} ${digits.length === 1 ? 'digit' : 'digits'} — Indian mobile numbers have ${PHONE_LENGTH}`,
+        tone: 'error',
+      });
+      return;
+    }
+    // Ten digits and still not a mobile number: say which rule it missed,
+    // rather than letting the server say it in worse words a round trip later.
+    if (!PHONE_RE.test(digits)) setMessage({ text: LEAD_MSG, tone: 'error' });
   };
 
   const handleSend = async () => {
     if (!complete || loading) return;
+    // Caught here rather than by disabling the CTA: state 1a earns the button at
+    // ten digits, and a dead button that explains nothing is worse than a live
+    // one that names the problem the moment it is pressed.
+    if (!PHONE_RE.test(digits)) {
+      setMessage({ text: LEAD_MSG, tone: 'error' });
+      return;
+    }
     setLoading(true);
     setMessage(null);
     try {
@@ -110,18 +148,34 @@ export default function PhoneScreen({ navigation }: Props) {
         navigation.navigate('Otp', { phone: digits, lockedFor });
         return;
       }
+      // The send rate, which is not a lock and not a connection: the server says
+      // how long is left, so quote that rather than guessing at "a minute".
+      const throttledFor = readSendThrottle(err);
+      if (throttledFor !== null) {
+        setMessage({ text: throttleMessage(throttledFor), tone: 'warn' });
+        return;
+      }
       if (isOfflineError(err)) {
         setMessage({
           text: 'No internet. Signing in needs it, just this once.',
           tone: 'warn',
         });
       } else if (isRateLimited(err)) {
+        // A 429 we can't read — an older server, or a proxy that ate the body.
         setMessage({
           text: "That's a lot of codes. Give it a minute before trying again.",
           tone: 'warn',
         });
       } else {
-        setMessage({ text: "Couldn't send the code. Try again.", tone: 'error' });
+        // A refused field: the server has already written the sentence that
+        // says what's wrong, so quote it rather than blaming the connection.
+        // The local checks above should catch every case we know of — this is
+        // the backstop for a rule the backend gains and the app hasn't learned.
+        const detail = readValidationDetail(err);
+        setMessage({
+          text: detail ?? "Couldn't send the code. Try again.",
+          tone: 'error',
+        });
       }
     } finally {
       setLoading(false);
@@ -170,7 +224,7 @@ export default function PhoneScreen({ navigation }: Props) {
         {keyboardUp ? null : (
           <TrustNote icon={IconCloudOff}>
             <TrustStrong>This is the only screen that needs internet.</TrustStrong> After you're
-            in, Train X works fully offline and syncs when it can.
+            in, XRep works fully offline and syncs when it can.
           </TrustNote>
         )}
       </AuthBody>

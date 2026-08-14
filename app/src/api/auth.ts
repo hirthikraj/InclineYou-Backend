@@ -6,10 +6,13 @@ import { api } from './client';
  *
  * - `trainer` — a trainer account exists. The default lens even for somebody who
  *   is also a client, because coaching is what they signed up to do.
- * - `client`  — on somebody's roster and nobody's trainer.
+ * - `client`  — on somebody's roster and nobody's trainer. Paused rosters count:
+ *   pause changes what the lens contains, not whether it opens.
  * - `pending` — verified, and on nobody's roster (7a). The token is good for one
  *   thing: claiming a trainer account.
- * - `paused`  — every membership paused, no token (7b).
+ * - `paused`  — LEGACY. A backend before the pause fix sent this with no token,
+ *   and 7b was a wall. Kept only so a new app against an old server during a
+ *   rolling deploy still has a screen. Nothing current sends it.
  */
 export type Role = 'trainer' | 'client' | 'pending' | 'paused';
 
@@ -21,10 +24,23 @@ export interface Membership {
   trainerName: string;
   gymName: string | null;
   trainerPhone: string | null;
+  /**
+   * `active` | `paused`. Optional: a backend before the pause fix never sent
+   * paused rosters at all, so absence reads as active — which is exactly what
+   * every roster such a backend returned was.
+   */
+  status?: string;
+  /** "2026-07-22", or absent/null when this roster isn't paused. */
+  pausedOn?: string | null;
+}
+
+/** Is this roster on hold? Absence of `status` means an older backend, so: no. */
+export function isPaused(m: Membership): boolean {
+  return m.status?.toLowerCase() === 'paused';
 }
 
 export interface AuthResponse {
-  /** Null on `paused` — there is nothing to sign into until the trainer resumes. */
+  /** Null only on the legacy `paused` role. Every live path returns a token. */
   token: string | null;
   /** Null unless a trainer account exists. */
   trainerId: string | null;
@@ -38,8 +54,9 @@ export interface AuthResponse {
   role?: Role;
   /** The signed-in trainer's own name, for "Welcome back, Ravi". Null before setup. */
   trainerName?: string | null;
-  /** Every roster this number is on and not paused on. Absent on an older backend. */
+  /** Every roster this number is on, paused included — each says so via `status`. */
   clientOf?: Membership[];
+  /** Set only when EVERY roster is paused. Drives the banner, no longer a wall. */
   paused?: { trainerName: string; trainerPhone: string | null; pausedOn: string | null } | null;
 }
 
@@ -165,6 +182,29 @@ export function isRateLimited(err: unknown): boolean {
   return axios.isAxiosError(err) && err.response?.status === 429;
 }
 
+/**
+ * The server's own sentence for a field it refused, or null if that isn't what
+ * this error is.
+ *
+ * `GlobalExceptionHandler` answers a failed `@Valid` with 400 and a
+ * ProblemDetail whose `detail` reads `phone: must be a valid 10-digit Indian
+ * mobile number` — the one line that says what is actually wrong. Letting that
+ * fall through to "couldn't send the code" blames the connection for a typo and
+ * invites the same number again, so the screens read it and quote it.
+ *
+ * The field name is ours, not the trainer's, so it is stripped. A detail long
+ * enough to wrap a field message is treated as not-for-humans and dropped —
+ * better the generic line than a paragraph under the input.
+ */
+export function readValidationDetail(err: unknown): string | null {
+  if (!axios.isAxiosError(err) || err.response?.status !== 400) return null;
+  const data = err.response.data as { detail?: unknown } | undefined;
+  const raw = typeof data?.detail === 'string' ? data.detail.trim() : '';
+  const detail = raw.replace(/^[A-Za-z_][\w.]*:\s*/, '');
+  if (!detail || detail.length > 120) return null;
+  return detail.charAt(0).toUpperCase() + detail.slice(1);
+}
+
 export type OtpFailure =
   | { kind: 'wrong'; attemptsLeft: number | null }
   | { kind: 'expired' }
@@ -183,10 +223,10 @@ interface OtpErrorBody {
  * seconds-only here — the backend sends `Retry-After: 600`, never an HTTP-date,
  * so a NaN means it wasn't usable and we fall through.
  */
-function lockSeconds(body: OtpErrorBody, headers: unknown): number {
+function lockSeconds(body: OtpErrorBody, headers: unknown, fallback = LOCK_SECONDS): number {
   const header = Number((headers as Record<string, unknown> | undefined)?.['retry-after']);
   const seconds =
-    body.retryAfterSeconds ?? (Number.isFinite(header) && header > 0 ? header : LOCK_SECONDS);
+    body.retryAfterSeconds ?? (Number.isFinite(header) && header > 0 ? header : fallback);
   return Math.round(seconds);
 }
 
@@ -206,6 +246,45 @@ export function readOtpLock(err: unknown): number | null {
   const body: OtpErrorBody = typeof data === 'object' && data !== null ? data : {};
   if (body.code?.toUpperCase() !== 'OTP_LOCKED') return null;
   return lockSeconds(body, headers);
+}
+
+/**
+ * Seconds until this number may ask for another code, or null if that isn't what
+ * this error is.
+ *
+ * The sibling of {@link readOtpLock}, and the reason that one insists on an
+ * explicit `OTP_LOCKED`: `/v1/auth/otp/request` answers 429 for two unrelated
+ * things. A lock is three wrong codes and owes the trainer a countdown screen; a
+ * throttle is the send rate — 30 seconds between the first codes of a minute, or
+ * the day's ceiling — and belongs inline on the screen they are already on.
+ * Neither spends anything, and neither is a connection problem.
+ */
+export function readSendThrottle(err: unknown): number | null {
+  if (!axios.isAxiosError(err) || !err.response) return null;
+  const { data, headers } = err.response;
+  const body: OtpErrorBody = typeof data === 'object' && data !== null ? data : {};
+  if (body.code?.toUpperCase() !== 'OTP_THROTTLED') return null;
+  return lockSeconds(body, headers, RESEND_LADDER[0]);
+}
+
+/**
+ * The wait, in the unit a person actually reads.
+ *
+ * The number matters: the ladder refuses for half a minute and the day's ceiling
+ * refuses for hours, and "give it a minute" is a lie in the second case that the
+ * next attempt exposes. Both sign-in screens quote this so they cannot drift.
+ */
+export function throttleMessage(seconds: number): string {
+  const wait = Math.max(1, Math.round(seconds));
+  if (wait <= 90) return `That's a lot of codes. Try again in ${plural(wait, 'second')}.`;
+  const minutes = Math.ceil(wait / 60);
+  if (minutes < 90) return `That's a lot of codes. Try again in ${plural(minutes, 'minute')}.`;
+  const hours = Math.max(1, Math.round(wait / 3600));
+  return `That's too many codes for this number today. Try again in about ${plural(hours, 'hour')}.`;
+}
+
+function plural(n: number, unit: string): string {
+  return `${n} ${unit}${n === 1 ? '' : 's'}`;
 }
 
 export function readOtpFailure(err: unknown): OtpFailure {

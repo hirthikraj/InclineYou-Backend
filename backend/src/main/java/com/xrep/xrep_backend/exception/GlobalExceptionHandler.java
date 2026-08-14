@@ -3,6 +3,7 @@ package com.xrep.xrep_backend.exception;
 import com.xrep.xrep_backend.auth.InvalidOtpException;
 import com.xrep.xrep_backend.auth.OtpExpiredException;
 import com.xrep.xrep_backend.auth.OtpLockedException;
+import com.xrep.xrep_backend.auth.OtpThrottledException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -38,6 +39,26 @@ public class GlobalExceptionHandler {
     ResponseEntity<ProblemDetail> handleOtpLocked(OtpLockedException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
         pd.setProperty("code", "OTP_LOCKED");
+        pd.setProperty("retryAfterSeconds", ex.getRetryAfterSeconds());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
+                .body(pd);
+    }
+
+    /**
+     * Also 429, and deliberately a different `code` from the lock above.
+     *
+     * The two are opposite recoveries wearing the same status: a lock means this
+     * number typed three wrong codes and the app owes it a countdown screen; a
+     * throttle means the codes are going out faster than anyone reads them, and
+     * the answer is to wait on the screen you are already on. `retryAfterSeconds`
+     * carries the real wait — 30 seconds on the second code of a minute, hours
+     * once the day's ceiling is hit — so the app can say which it is.
+     */
+    @ExceptionHandler(OtpThrottledException.class)
+    ResponseEntity<ProblemDetail> handleOtpThrottled(OtpThrottledException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
+        pd.setProperty("code", "OTP_THROTTLED");
         pd.setProperty("retryAfterSeconds", ex.getRetryAfterSeconds());
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
