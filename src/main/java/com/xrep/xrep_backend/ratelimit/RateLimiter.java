@@ -17,17 +17,19 @@ import java.util.concurrent.atomic.AtomicLong;
  * window lets twice the limit through across its boundary — the first request of
  * a new window is free however hard the last one was hammered.
  *
- * Hand-rolled rather than Bucket4j: sixty lines against a dependency, for a
- * capacity guard whose state is deliberately allowed to be lost.
+ * ── This is now the FALLBACK ──────────────────────────────────────────────────
  *
- * ── What this does not do ─────────────────────────────────────────────────────
+ * Live counting happens in Redis via {@link Bucket4jLimiter}. This class is what
+ * runs when Redis is unreachable, and it is kept rather than deleted because the
+ * alternative during a cache outage is refusing every request or allowing every
+ * request, and both are worse than a ceiling that is temporarily per-instance.
  *
- * Counters are per process. A restart clears them and a second instance keeps its
- * own, so the effective ceiling is the configured one times the instance count.
- * That is the accepted trade for not writing to Postgres on every request; a
- * shared store is the fix when there is more than one instance. The OTP lock made
- * the opposite trade for the opposite reason — it is a security decision that has
- * to hold for its full ten minutes, and it lives in a column.
+ * Which is also its known limitation, unchanged: counters are per process, so a
+ * restart clears them and a second instance keeps its own, making the effective
+ * ceiling the configured one times the instance count. Acceptable for a capacity
+ * guard for the length of an outage; never acceptable for the OTP send ceiling,
+ * which is why that one is a Bucket4j bucket with a Postgres-backed history
+ * underneath rather than this.
  */
 @Component
 @Slf4j

@@ -17,6 +17,20 @@ public class AppProperties {
     private Seed seed = new Seed();
     private Fcm fcm = new Fcm();
     private RateLimit rateLimit = new RateLimit();
+    private Redis redis = new Redis();
+
+    /**
+     * Whether Redis is used at all.
+     *
+     * A kill switch rather than a hard dependency: every Redis-backed thing in
+     * this application has a working fallback, because a cache being down must
+     * not be the reason nobody can sign in.
+     */
+    @Getter
+    @Setter
+    public static class Redis {
+        private boolean enabled = true;
+    }
 
     @Getter
     @Setter
@@ -32,11 +46,7 @@ public class AppProperties {
         private boolean smsEnabled;
         /** Maximum wrong attempts before the phone is locked. */
         private int maxAttempts = 3;
-        /**
-         * How long the lock lasts, in minutes. Stamped onto
-         * {@code otp_request.locked_until} when the cap is hit, so changing this
-         * moves future locks and leaves a wait already being served alone.
-         */
+
         private int lockMinutes = 10;
 
         /* ── send rate, per number ──────────────────────────────────────────

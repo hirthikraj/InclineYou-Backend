@@ -19,6 +19,12 @@ import java.nio.charset.StandardCharsets;
 /**
  * A ceiling on every endpoint, applied per caller.
  *
+ * The counting moved to Redis (Bucket4j) so that the ceiling is the ceiling
+ * rather than the ceiling per process — the limitation the known-gaps list
+ * carried, where a restart cleared every counter and each instance kept its own.
+ * {@link Bucket4jLimiter} falls back to the in-process {@link RateLimiter} when
+ * Redis is unreachable, which is a weaker limit and not an absent one.
+ *
  * Sits immediately after {@code JwtAuthFilter} in the security chain, which is the
  * one position that gets both halves right: the token has been parsed, so an
  * authenticated caller is counted as themselves rather than as their network; and
@@ -48,7 +54,7 @@ import java.nio.charset.StandardCharsets;
 @Slf4j
 public class RateLimitFilter extends OncePerRequestFilter {
 
-    private final RateLimiter limiter;
+    private final Bucket4jLimiter limiter;
     private final AppProperties props;
 
     @Override
@@ -75,7 +81,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
         };
 
         String caller = caller(request);
-        var decision = limiter.take(tier.name() + '|' + caller, limits);
+        // The tier is part of the key, so a trainer hammering /sync does not
+        // spend the budget that their next ordinary request needs.
+        var decision = limiter.tryConsume(
+                "rl:" + tier.name() + ':' + caller,
+                limits.getLimit(),
+                java.time.Duration.ofSeconds(Math.max(1, limits.getWindowSeconds())));
         if (decision.allowed()) {
             chain.doFilter(request, response);
             return;

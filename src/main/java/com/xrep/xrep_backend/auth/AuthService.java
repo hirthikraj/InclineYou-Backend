@@ -1,22 +1,58 @@
 package com.xrep.xrep_backend.auth;
 
+import com.xrep.xrep_backend.entity.AppUser;
+import com.xrep.xrep_backend.entity.Client;
 import com.xrep.xrep_backend.entity.Trainer;
+import com.xrep.xrep_backend.repository.AppUserRepository;
+import com.xrep.xrep_backend.repository.AppUserRepository.Identity;
 import com.xrep.xrep_backend.repository.ClientRepository;
 import com.xrep.xrep_backend.repository.TrainerRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
+/**
+ * Sign-in, and the one question it exists to answer: which half of the product
+ * is this person, and is there anything they have to answer before they get in.
+ *
+ * ── One number, one role ──────────────────────────────────────────────────────
+ *
+ * Role used to be inferred from where a row happened to exist — a phone in
+ * `trainer` meant a trainer, a phone in `client` meant somebody's client, a
+ * phone in both meant the app had to ask. It is now stated, in `app_user`, and
+ * it is exclusive: the roster-add path refuses a number that already owns a
+ * trainer account, so this method never has to resolve a person who is both.
+ *
+ * ── One round trip ────────────────────────────────────────────────────────────
+ *
+ * {@link AppUserRepository#findIdentityByPhone} returns the role, the trainer's
+ * setup state, and every roster with its own consent status, in a single query.
+ * That matters less for speed than it looks — the bcrypt comparison in
+ * {@link OtpService#verify} costs two orders of magnitude more than the lookups
+ * — and more for correctness: role alone cannot pick a screen, because an
+ * invited client and an accepted one are the same role and different
+ * destinations, and a two-step lookup is a place for the two answers to
+ * disagree.
+ *
+ * Nothing here reads a profile. Specialities, certifications, languages, UPI,
+ * goals — none of it decides a route, and all of it is fetched by whichever
+ * dashboard opens.
+ */
 @Service
 @RequiredArgsConstructor
 public class AuthService {
 
+    private final AppUserRepository appUserRepo;
     private final TrainerRepository trainerRepo;
     private final ClientRepository clientRepo;
     private final OtpService otpService;
@@ -25,195 +61,404 @@ public class AuthService {
     /** Weeks and dates in this product are Indian, wherever the server is. */
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
+    /* ---------------------------------------------------- membership states */
+
+    public static final String INVITED = "invited";
+    public static final String ACCEPTED = "accepted";
+    public static final String DECLINED = "declined";
+    public static final String MEMBERSHIP_PAUSED = "paused";
+    public static final String REMOVED = "removed";
+
+    /* -------------------------------------------------------- response roles
+     * Wider than the JWT's four, because a token says what you may DO and this
+     * says which screen you are owed. `invited`, `removed` and `unattached` all
+     * ride the same invited token and land in three different places.
+     * -------------------------------------------------------------------------- */
+
+    public static final String VIEW_TRAINER = "trainer";
+    public static final String VIEW_CLIENT = "client";
+    public static final String VIEW_PENDING = "pending";
+    public static final String VIEW_INVITED = "invited";
+    public static final String VIEW_REMOVED = "removed";
+    /** A client whose every membership is answered and gone. Not a new account. */
+    public static final String VIEW_UNATTACHED = "unattached";
+    /** Reserved. Nothing mints one yet — see {@link AppUser#ROLE_GYM_ADMIN}. */
+    public static final String VIEW_GYM_ADMIN = "gym_admin";
+
     public void requestOtp(String phone) {
         otpService.send(phone);
     }
 
     /**
-     * Verify a code, and answer the question the app actually has: which half of
-     * the product is this person?
+     * Verify a code, then route.
      *
-     * A number can be a trainer, somebody's client, both, or neither, and the
-     * cases have different next screens — the Deck, the client's Today, the role
-     * picker (5a), and "we don't know this number yet" (7a). The one thing this
-     * method will not do is guess: a phone that is on nobody's roster no longer
-     * silently becomes a trainer account, because the most likely first launch in
-     * this product is a CLIENT typing their number before their trainer has added
-     * them, and minting a coaching workspace for them is a wrong turn they cannot
-     * undo.
+     * The order of the client branches below is the product decision, not an
+     * implementation detail:
      *
-     * ── Pause is not a wall ───────────────────────────────────────────────────
-     *
-     * A paused membership used to return no token at all, which meant a lapsed
-     * package took the app off somebody's phone. It also disagreed with
-     * ClientSyncService, which has always served a paused client their history —
-     * so the real behaviour was "works for up to seven days, then stops", which
-     * nobody designed.
-     *
-     * Pause now signs in like any other membership. What it changes is what the
-     * lens contains, not whether it opens: the history is there, self-logging is
-     * there, and the coaching layer is not. Every roster comes back on
-     * {@code clientOf} carrying its own status, and {@code paused} is filled in
-     * when there is nothing BUT paused rosters — which is the banner the client
-     * sees, naming who paused it and when.
+     *   1. A LIVE roster wins over everything. Somebody who is training is
+     *      training, and stopping them at a consent screen because a second
+     *      trainer also invited them would block the thing they opened the app
+     *      to do. The outstanding invite travels in {@code clientOf} and the app
+     *      surfaces it inside.
+     *   2. Otherwise an unanswered INVITE — the accept/decline screen.
+     *   3. Otherwise an unacknowledged REMOVAL — shown once, then acknowledged.
+     *   4. Otherwise nothing is left to open: every membership was declined, or
+     *      removed and acknowledged. That is `unattached`, and it is NOT 7a —
+     *      offering a coaching account to somebody whose role is client would be
+     *      the wrong turn 7a itself was written to avoid.
      */
     @Transactional
     public AuthResponse verifyOtp(String phone, String otp) {
-        // Throws OtpLockedException, OtpExpiredException or InvalidOtpException
-        // on failure — each surfaces as its own HTTP response via
+        // Throws OtpLockedException, OtpExpiredException or InvalidOtpException on
+        // failure — each surfaces as its own HTTP response via
         // GlobalExceptionHandler, because each needs a different recovery.
         otpService.verify(phone, otp);
 
-        Optional<Trainer> existing = trainerRepo.findByPhoneAndDeletedAtIsNull(phone);
-        var memberships = clientRepo.findMembershipsByPhone(phone);
+        List<Identity> rows = appUserRepo.findIdentityByPhone(phone);
 
-        // Every roster, paused ones included. A paused membership is still a
-        // membership — it carries its own `status` and the app decides what to
-        // dim. Dropping them here is what used to turn a lapsed package into a
-        // locked app.
-        List<Membership> rosters = memberships.stream().map(AuthService::toMembership).toList();
-
-        if (existing.isPresent()) {
-            Trainer trainer = existing.get();
-            // A trainer who is also somebody's client gets the coaching lens by
-            // default and the memberships alongside it — the app decides whether
-            // to show 5a, and it stores that answer locally. The role is a lens,
-            // never a second identity, so there is one token either way.
-            return new AuthResponse(
-                    jwtService.generate(trainer.getId(), trainer.getPhone()),
-                    trainer.getId().toString(),
-                    false,
-                    trainer.getSetupCompletedAt() != null,
-                    JwtService.ROLE_TRAINER,
-                    named(trainer),
-                    rosters,
-                    allPaused(memberships));
+        // No identity at all. The number is real — they just proved it — and it
+        // is on nobody's roster: screen 7a, two exits, no dead end. Deliberately
+        // NOT a trainer account minted on the spot, because the likeliest first
+        // launch in this product is a CLIENT typing their number before their
+        // trainer has added them.
+        if (rows.isEmpty()) {
+            return pending(phone);
         }
 
-        if (!rosters.isEmpty()) {
-            // Somebody's client and nobody's trainer. No trainer row is created:
-            // this person has not asked to coach anyone, and an empty roster
-            // sitting in the trainer table is a workspace waiting to confuse the
-            // next screen that counts them.
-            return new AuthResponse(
-                    jwtService.generateClient(phone),
-                    null,
-                    false,
-                    true,
-                    JwtService.ROLE_CLIENT,
-                    null,
-                    rosters,
-                    allPaused(memberships));
+        Identity head = rows.get(0);
+        String role = head.getRole();
+
+        if (AppUser.ROLE_TRAINER.equals(role)) {
+            return trainerView(head);
         }
 
-        // 7a. Neither, so ask — one screen, two exits, and no dead end. The
-        // token is good for exactly one thing: claiming a trainer account for
-        // the number that was just proved.
+        if (AppUser.ROLE_GYM_ADMIN.equals(role)) {
+            // Reserved and not built. An honest "not yet" beats routing them into a trainer's Deck, which is not their data.
+            return new AuthResponse(null, null, false, false,
+                    VIEW_GYM_ADMIN, null, List.of(), null, null);
+        }
+
+        return clientView(phone, rows);
+    }
+
+    /* ------------------------------------------------------------- trainer */
+
+    private AuthResponse trainerView(Identity head) {
+        // A `role = 'trainer'` user whose trainer row is soft-deleted. Not a
+        // crash and not a trainer: send them to 7a, where claiming restores it.
+        if (head.getTrainerId() == null) {
+            return pending(phoneOf(head));
+        }
+
         return new AuthResponse(
-                jwtService.generatePending(phone),
-                null,
-                true,
+                jwtService.generate(head.getTrainerId(), phoneOf(head)),
+                head.getTrainerId().toString(),
                 false,
-                JwtService.ROLE_PENDING,
-                null,
+                head.getSetupCompletedAt() != null,
+                VIEW_TRAINER,
+                displayName(head.getTrainerOwnName(), phoneOf(head)),
                 List.of(),
+                null,
                 null);
     }
+
+    /* -------------------------------------------------------------- client */
+
+    private AuthResponse clientView(String phone, List<Identity> rows) {
+        List<Identity> memberships = rows.stream()
+                .filter(r -> r.getClientId() != null)
+                .toList();
+
+        List<Membership> live = memberships.stream()
+                .filter(AuthService::isLive)
+                .map(AuthService::toMembership)
+                .toList();
+
+        // 1 · Training with somebody. Every roster travels, including invites still outstanding, so the app can surface them without another call.
+        if (!live.isEmpty()) {
+            List<Membership> all = memberships.stream()
+                    .filter(m -> !REMOVED.equalsIgnoreCase(m.getMembershipStatus()))
+                    .filter(m -> !DECLINED.equalsIgnoreCase(m.getMembershipStatus()))
+                    .map(AuthService::toMembership)
+                    .toList();
+            return new AuthResponse(
+                    jwtService.generateClient(phone),
+                    null, false, true,
+                    VIEW_CLIENT, null,
+                    all,
+                    allPaused(memberships),
+                    null);
+        }
+
+        // 2 · Named by a trainer, and has never agreed to anything. The token opens no sync scope — only accept and decline.
+        List<Membership> invites = memberships.stream()
+                .filter(m -> INVITED.equalsIgnoreCase(m.getMembershipStatus()))
+                .map(AuthService::toMembership)
+                .toList();
+        if (!invites.isEmpty()) {
+            return new AuthResponse(
+                    jwtService.generateInvited(phone),
+                    null, false, false,
+                    VIEW_INVITED, null,
+                    invites,
+                    null,
+                    null);
+        }
+
+        // 3 · Removed, and not yet told. Shown once; the acknowledgement is what
+        // stops it reappearing, because the row itself is kept forever — the
+        // trainer's payments and session history all point at it.
+        List<Identity> removals = memberships.stream()
+                .filter(m -> REMOVED.equalsIgnoreCase(m.getMembershipStatus()))
+                .filter(m -> m.getRemovedAckAt() == null)
+                .toList();
+        if (!removals.isEmpty()) {
+            Identity latest = removals.stream()
+                    .max(Comparator.comparing(m -> m.getRemovedAt() == null
+                            ? Instant.EPOCH : m.getRemovedAt()))
+                    .orElseThrow();
+            return new AuthResponse(
+                    jwtService.generateInvited(phone),
+                    null, false, false,
+                    VIEW_REMOVED, null,
+                    removals.stream().map(AuthService::toMembership).toList(),
+                    null,
+                    new RemovedInfo(
+                            latest.getClientId().toString(),
+                            latest.getCoachName(),
+                            latest.getCoachPhone(),
+                            onDate(latest.getRemovedAt())));
+        }
+
+        // 4 · Everything answered and gone. Not 7a — this number's role is
+        // client, and offering it a coaching workspace is the wrong turn.
+        return new AuthResponse(
+                jwtService.generateInvited(phone),
+                null, false, false,
+                VIEW_UNATTACHED, null,
+                List.of(), null, null);
+    }
+
+    private AuthResponse pending(String phone) {
+        return new AuthResponse(
+                jwtService.generatePending(phone),
+                null, true, false,
+                VIEW_PENDING, null, List.of(), null, null);
+    }
+
+    /* --------------------------------------------------------- claim (7a) */
 
     /**
      * "I'm a trainer" on 7a.
      *
-     * Creating the trainer row is a deliberate act now rather than a side effect
-     * of signing in, which is the only difference from how this used to work.
-     * Idempotent: a second tap, or a retry after a dropped response, returns the
-     * account that already exists.
+     * Creating the trainer row is a deliberate act rather than a side effect of
+     * signing in. Idempotent: a second tap, or a retry after a dropped response,
+     * returns the account that already exists.
+     *
+     * Now also writes the identity. The `app_user` row is what makes the role
+     * exclusive from here on — once it says trainer, no trainer can add this
+     * number to a roster.
      */
     @Transactional
     public AuthResponse claimTrainer(String phone) {
-        // The token's subject. A pending or client token carries the phone; a
-        // trainer token carries a trainer id, and one of those arriving here
-        // means somebody already has an account — not a number to open one for.
-        if (phone == null || !phone.matches("^[6-9]\\d{9}$")) {
-            throw new org.springframework.web.server.ResponseStatusException(
-                    org.springframework.http.HttpStatus.BAD_REQUEST,
+        // The token's subject. A pending token carries the phone; a trainer
+        // token carries a trainer id, and one of those arriving here means
+        // somebody already has an account — not a number to open one for.
+        if (phone == null || !phone.matches(AuthController.PHONE_PATTERN)) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "This sign-in already has a trainer account.");
+        }
+
+        // A number already known as somebody's client cannot become a trainer
+        // without a decision about their memberships that nobody has made. The
+        // roster-add path guards the mirror image of this.
+        Optional<AppUser> existing = appUserRepo.findByPhoneAndDeletedAtIsNull(phone);
+        if (existing.isPresent() && !AppUser.ROLE_TRAINER.equals(existing.get().getRole())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                    "This number is already on a trainer's roster as a client.");
         }
 
         Trainer trainer = trainerRepo.findByPhoneAndDeletedAtIsNull(phone)
                 .orElseGet(() -> {
                     Trainer t = new Trainer();
                     t.setPhone(phone);
-                    // `name` is NOT NULL and we have nothing else yet — sign-in
-                    // gives us a phone number and nothing more. Trainer setup
-                    // overwrites it, and `setupComplete` below is what tells the
-                    // app the name is a stand-in.
+                    // `name` is NOT NULL and sign-in has given us a phone number
+                    // and nothing else, so the number stands in until trainer
+                    // setup writes a real one. Not cosmetic: without it the
+                    // insert fails its not-null constraint and NOBODY can open a
+                    // trainer account. `displayName` below is what stops the
+                    // placeholder ever being greeted as if it were a name.
                     t.setName(phone);
                     return trainerRepo.save(t);
                 });
 
-        var memberships = clientRepo.findMembershipsByPhone(phone);
-        var rosters = memberships.stream().map(AuthService::toMembership).toList();
+        if (existing.isEmpty()) {
+            AppUser user = new AppUser();
+            user.setPhone(phone);
+            user.setRole(AppUser.ROLE_TRAINER);
+            user.setPrivacyAcceptedAt(Instant.now());
+            appUserRepo.save(user);
+        }
 
         return new AuthResponse(
                 jwtService.generate(trainer.getId(), trainer.getPhone()),
                 trainer.getId().toString(),
                 true,
                 trainer.getSetupCompletedAt() != null,
-                JwtService.ROLE_TRAINER,
-                named(trainer),
-                rosters,
-                allPaused(memberships));
+                VIEW_TRAINER,
+                displayName(trainer.getName(), trainer.getPhone()),
+                List.of(),
+                null,
+                null);
     }
 
-    /** The placeholder name trainer setup has not replaced yet is not a name. */
-    private static String named(Trainer t) {
-        return t.getName() == null || t.getName().equals(t.getPhone()) ? null : t.getName();
+    /**
+     * Accept — the moment a client accepts trainers request.
+     */
+    @Transactional
+    public AuthResponse acceptInvite(String phone, UUID clientId) {
+        Client membership = ownedMembership(phone, clientId);
+
+        if (INVITED.equalsIgnoreCase(membership.getMembershipStatus())) {
+            membership.setMembershipStatus(ACCEPTED);
+            membership.setAcceptedAt(Instant.now());
+            clientRepo.save(membership);
+        }
+
+        // The policy was on the screen they just tapped through. Stamped once — a second acceptance does not move the date of the first.
+        appUserRepo.findByPhoneAndDeletedAtIsNull(phone).ifPresent(user -> {
+            if (user.getPrivacyAcceptedAt() == null) {
+                user.setPrivacyAcceptedAt(Instant.now());
+                appUserRepo.save(user);
+            }
+        });
+
+        // Re-resolve rather than hand-building the response: they may be on two rosters, and the client lens opens on all of them.
+        return clientView(phone, appUserRepo.findIdentityByPhone(phone));
+    }
+
+    /**
+     * Decline.
+     *
+     * The row is kept, not deleted. A trainer who added somebody by mistake, or
+     * whose client changed their mind, still has a roster entry that says what
+     * happened — and the client keeps a record that they were asked and said no,
+     * which is what stops the same invite being drawn again at the next sign-in.
+     */
+    @Transactional
+    public AuthResponse declineInvite(String phone, UUID clientId) {
+        Client membership = ownedMembership(phone, clientId);
+
+        if (INVITED.equalsIgnoreCase(membership.getMembershipStatus())) {
+            membership.setMembershipStatus(DECLINED);
+            membership.setDeclinedAt(Instant.now());
+            clientRepo.save(membership);
+        }
+
+        return clientView(phone, appUserRepo.findIdentityByPhone(phone));
+    }
+
+    /**
+     * "OK" on the removal notice.
+     *
+     * Stamping this is the whole reason the column exists: the membership row
+     * outlives the membership, so `removed` is permanently true, and without an
+     * acknowledgement sign-in would redraw the notice every single time. The
+     * local wipe happens on the phone; nothing here deletes anything, because
+     * the trainer's books point at this row.
+     */
+    @Transactional
+    public AuthResponse acknowledgeRemoval(String phone, UUID clientId) {
+        Client membership = ownedMembership(phone, clientId);
+
+        if (REMOVED.equalsIgnoreCase(membership.getMembershipStatus())
+                && membership.getRemovedAckAt() == null) {
+            membership.setRemovedAckAt(Instant.now());
+            clientRepo.save(membership);
+        }
+
+        return clientView(phone, appUserRepo.findIdentityByPhone(phone));
+    }
+
+    /**
+     * Turn "this token owns this number" into "this token owns this membership".
+     *
+     * The same answer whether the row does not exist or belongs to somebody
+     * else — telling them apart would let a signed-in caller probe for other
+     * people's client ids.
+     */
+    private Client ownedMembership(String phone, UUID clientId) {
+        return clientRepo.findById(clientId)
+                .filter(c -> c.getDeletedAt() == null)
+                .filter(c -> phone.equals(c.getPhone()))
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.FORBIDDEN, "Not your record."));
+    }
+
+    /* --------------------------------------------------------------- shape */
+
+    /** Live = the lens opens. Paused is live: pause changes what it contains. */
+    private static boolean isLive(Identity m) {
+        String s = m.getMembershipStatus();
+        return ACCEPTED.equalsIgnoreCase(s) || MEMBERSHIP_PAUSED.equalsIgnoreCase(s);
     }
 
     /** `status` is a string on purpose (§2 of the data model); compare it like one. */
-    private static boolean isPaused(ClientRepository.Membership m) {
-        return "paused".equalsIgnoreCase(m.getStatus());
+    private static boolean isPaused(Identity m) {
+        return "paused".equalsIgnoreCase(m.getStatus())
+                || MEMBERSHIP_PAUSED.equalsIgnoreCase(m.getMembershipStatus());
+    }
+
+    /** The placeholder name trainer setup has not replaced yet is not a name. */
+    private static String displayName(String name, String phone) {
+        return name == null || name.equals(phone) ? null : name;
+    }
+
+    /**
+     * The signed-in number. Emphatically not {@code getCoachPhone()}, which is
+     * the trainer on a membership row and is null on a trainer's own lookup.
+     */
+    private static String phoneOf(Identity head) {
+        return head.getPhone();
     }
 
     /**
      * Who paused it and when — but only when there is nothing else to open.
      *
      * A client with one paused roster and one active one is not "paused"; they
-     * are training with somebody, and telling them otherwise at sign-in would be
-     * a lie the second roster contradicts. So this is null unless every
-     * membership is paused, and the per-roster case is carried by each
-     * {@link Membership}'s own {@code status} instead.
-     *
-     * When it is set, it names the most recently paused of them: that is the one
-     * the person is most likely asking about, and the fix is a WhatsApp to that
-     * trainer rather than to us.
+     * are training with somebody, and saying otherwise at sign-in is a lie the
+     * second roster contradicts. When it is set, it names the most recently
+     * paused: that is the one they are most likely asking about, and the fix is
+     * a WhatsApp to that trainer rather than to us.
      */
-    private static PausedInfo allPaused(List<ClientRepository.Membership> memberships) {
-        if (memberships.isEmpty() || !memberships.stream().allMatch(AuthService::isPaused)) {
+    private static PausedInfo allPaused(List<Identity> memberships) {
+        List<Identity> live = memberships.stream().filter(AuthService::isLive).toList();
+        if (live.isEmpty() || !live.stream().allMatch(AuthService::isPaused)) {
             return null;
         }
-        return memberships.stream()
+        return live.stream()
                 .max(Comparator.comparing(
-                        m -> m.getPausedAt() == null ? java.time.Instant.EPOCH : m.getPausedAt()))
-                .map(m -> new PausedInfo(m.getTrainerName(), m.getTrainerPhone(), pausedOn(m)))
+                        m -> m.getPausedAt() == null ? Instant.EPOCH : m.getPausedAt()))
+                .map(m -> new PausedInfo(m.getCoachName(), m.getCoachPhone(), onDate(m.getPausedAt())))
                 .orElse(null);
     }
 
-    /** A pause is a date in the trainer's day, not an instant. Null if never paused. */
-    private static String pausedOn(ClientRepository.Membership m) {
-        return m.getPausedAt() == null ? null : LocalDate.ofInstant(m.getPausedAt(), IST).toString();
+    /** A pause or a removal is a date in the trainer's day, not an instant. */
+    private static String onDate(Instant at) {
+        return at == null ? null : LocalDate.ofInstant(at, IST).toString();
     }
 
-    private static Membership toMembership(ClientRepository.Membership m) {
+    private static Membership toMembership(Identity m) {
         return new Membership(
                 m.getClientId().toString(),
-                m.getTrainerId().toString(),
+                m.getClientTrainerId() == null ? null : m.getClientTrainerId().toString(),
                 m.getClientName(),
-                m.getTrainerName(),
-                m.getGymName(),
-                m.getTrainerPhone(),
+                m.getCoachName(),
+                m.getCoachGymName(),
+                m.getCoachPhone(),
                 m.getStatus(),
-                isPaused(m) ? pausedOn(m) : null);
+                m.getMembershipStatus(),
+                isPaused(m) ? onDate(m.getPausedAt()) : null);
     }
 
     /**
@@ -222,9 +467,11 @@ public class AuthService {
      * profile exists — and survives a reinstall, a second device, and a flow
      * abandoned halfway.
      *
-     * Everything from `role` down is new in V14 and additive: an older app reads
-     * the first four fields and behaves exactly as it did, because a returning
-     * trainer still gets a trainer token and `role: "trainer"`.
+     * Additive across versions: an app built before V18 reads the first seven
+     * fields and behaves as it did. It will not recognise the `invited`,
+     * `removed` or `unattached` roles, which is why none of them carries a
+     * client token — an old build that falls through to its default branch gets
+     * a token that cannot open a sync scope rather than one that can.
      */
     public record AuthResponse(
             String token,
@@ -232,29 +479,18 @@ public class AuthService {
             boolean isNewUser,
             boolean setupComplete,
             /**
-             * "trainer" | "client" | "pending" — which lens to open.
-             *
-             * "paused" was a fourth value and is no longer sent: a paused client
-             * opens the client lens like anybody else, and the pause is described
-             * by {@code paused} and by each roster's own status. An app built
-             * against the old contract still handles this correctly — it reads
-             * "client", signs in, and simply doesn't draw the banner.
+             * "trainer" | "client" | "pending" | "invited" | "removed" |
+             * "unattached" | "gym_admin" — which screen this sign-in is owed.
              */
             String role,
-            /**
-             * The signed-in trainer's own name, for "Welcome back, Ravi" on the
-             * role picker. Null when it is still the phone-number placeholder,
-             * because greeting somebody by their own phone number is worse than
-             * not greeting them.
-             */
+            /** The trainer's own name, for "Welcome back, Ravi". Null before setup. */
             String trainerName,
-            /**
-             * Every roster this number is on, paused ones included — each says so
-             * itself via {@link Membership#status}. Often empty.
-             */
+            /** Every roster this number is on that is still worth drawing. */
             List<Membership> clientOf,
-            /** Set only when every roster is paused — who paused it and when. */
-            PausedInfo paused
+            /** Set only when every LIVE roster is paused — who paused it and when. */
+            PausedInfo paused,
+            /** Set only on the `removed` role — who removed them and when. */
+            RemovedInfo removed
     ) {}
 
     /**
@@ -272,15 +508,25 @@ public class AuthService {
             String trainerName,
             String gymName,
             String trainerPhone,
-            /**
-             * `active` | `paused`. Added when pause stopped being a wall: the app
-             * needs to know WHICH roster is paused to dim the right one, and a
-             * single flag on the response can't say that for somebody on two.
-             */
+            /** The TRAINER's view: `active` | `paused` | `archived` | `inactive`. */
             String status,
+            /**
+             * The CLIENT's own answer: `invited` | `accepted` | `declined` |
+             * `paused` | `removed`. Kept apart from `status` because the two
+             * answer to different people and can legitimately disagree.
+             */
+            String membershipStatus,
             /** "2026-07-22", or null when this roster isn't paused. */
             String pausedOn
     ) {}
 
     public record PausedInfo(String trainerName, String trainerPhone, String pausedOn) {}
+
+    /** Who ended it and when, so the notice can name them rather than just close. */
+    public record RemovedInfo(
+            String clientId,
+            String trainerName,
+            String trainerPhone,
+            String removedOn
+    ) {}
 }

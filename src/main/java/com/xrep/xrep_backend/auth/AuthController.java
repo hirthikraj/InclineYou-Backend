@@ -8,6 +8,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.UUID;
+
 @RestController
 @RequestMapping("/v1/auth")
 @RequiredArgsConstructor
@@ -15,28 +17,50 @@ public class AuthController {
 
     private final AuthService authService;
 
+    //Requesting an OTP
     @PostMapping("/otp/request")
     public ResponseEntity<Void> requestOtp(@Valid @RequestBody OtpRequestBody body) {
         authService.requestOtp(body.phone());
         return ResponseEntity.ok().build();
     }
 
+    //Verifying an OTP
     @PostMapping("/otp/verify")
     public ResponseEntity<AuthService.AuthResponse> verifyOtp(@Valid @RequestBody OtpVerifyBody body) {
         return ResponseEntity.ok(authService.verifyOtp(body.phone(), body.otp()));
     }
 
-    /**
-     * Screen 7a · "I'm a trainer".
-     *
-     * The only authenticated endpoint under /v1/auth. It takes no body: the
-     * number comes from the token that was just minted by a successful verify,
-     * because a phone in a request body is a phone anybody can type.
-     */
+    //Claiming an app user as "Trainer"
     @PostMapping("/trainer")
     public ResponseEntity<AuthService.AuthResponse> claimTrainer() {
         var claims = SecurityContextHolder.getContext().getAuthentication();
         return ResponseEntity.ok(authService.claimTrainer(claims.getName()));
+    }
+
+    /** Accept an invite. Also stamps the privacy acceptance the screen carried. */
+    @PostMapping("/membership/{clientId}/accept")
+    public ResponseEntity<AuthService.AuthResponse> accept(@PathVariable UUID clientId) {
+        return ResponseEntity.ok(authService.acceptInvite(caller(), clientId));
+    }
+
+    /** Decline. The row is kept — the trainer's roster should say what happened. */
+    @PostMapping("/membership/{clientId}/decline")
+    public ResponseEntity<AuthService.AuthResponse> decline(@PathVariable UUID clientId) {
+        return ResponseEntity.ok(authService.declineInvite(caller(), clientId));
+    }
+
+    /**
+     * "OK" on the removal notice. The local wipe happens on the phone; this is
+     * only what stops the notice being redrawn at every future sign-in.
+     */
+    @PostMapping("/membership/{clientId}/ack-removal")
+    public ResponseEntity<AuthService.AuthResponse> ackRemoval(@PathVariable UUID clientId) {
+        return ResponseEntity.ok(authService.acknowledgeRemoval(caller(), clientId));
+    }
+
+    /** The token's subject — for every role but trainer, that is the phone. */
+    private static String caller() {
+        return SecurityContextHolder.getContext().getAuthentication().getName();
     }
 
     /**

@@ -188,6 +188,27 @@ public class ScheduledSessionService {
 
     // ── Mark done ─────────────────────────────────────────────────────────────
 
+    /**
+     * Closes a session: marks it done, opens its workout log, and takes one off
+     * the pack — each of those at most once, however many times this is called.
+     *
+     * Every step here used to be unconditional. Calling this twice on the same
+     * session set `done` twice (harmless), inserted a SECOND workout_session for
+     * it (not harmless), and subtracted from the pack again (somebody's money).
+     * A twelve-session pack with one session delivered could read nine.
+     *
+     * It is not enough that the current app no longer calls this — the route is
+     * live, an older build on somebody's phone still posts to it, and the app
+     * writes the same outcome locally and syncs it up. Two paths to one outcome
+     * is exactly the shape that double-charges, so this now mirrors the client's
+     * `settlePack`: what the session ALREADY took decides what it takes now.
+     *
+     * `pack_delta` / `pack_package_id` / `pack_applied_at` (V10) are stamped, so
+     * the diary's 24-hour undo can reverse a session closed here as exactly as
+     * one closed on the device. Not stamping them was the subtler half of the
+     * bug: an unstamped session looks untouched, so the device charges for it
+     * again on the next sync.
+     */
     @Transactional
     public Map<String, Object> markDone(UUID sessionId, UUID trainerId, MarkDoneRequest req) {
         var session = findOwned(sessionId, trainerId);
@@ -195,14 +216,77 @@ public class ScheduledSessionService {
         Object programIdRaw = session.get("program_id");
         String programId = programIdRaw != null ? programIdRaw.toString() : null;
         String tid = trainerId.toString();
+        var idParams = Map.<String, Object>of("id", sessionId.toString(), "tid", tid);
 
-        // Update status to done
-        jdbc.update("""
-                UPDATE scheduled_session SET status = 'done', updated_at = NOW()
+        // ── What this session has already taken ──────────────────────────────
+        var stamped = jdbc.queryForList("""
+                SELECT pack_delta, pack_package_id::text AS pack_package_id
+                FROM scheduled_session
                 WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
-                """, Map.of("id", sessionId.toString(), "tid", tid));
+                FOR UPDATE
+                """, idParams);
+        Object priorDelta = stamped.isEmpty() ? null : stamped.get(0).get("pack_delta");
+        String priorPackId = stamped.isEmpty() ? null : str(stamped.get(0).get("pack_package_id"));
+        boolean alreadyCharged =
+                priorPackId != null && priorDelta != null && ((Number) priorDelta).intValue() != 0;
 
-        // Create workout_session
+        // ── The pack ─────────────────────────────────────────────────────────
+        // Skipped entirely when this session has already paid. `RETURNING` is
+        // what makes the charge attributable: without knowing WHICH pack was
+        // decremented there is nothing to stamp, and nothing to undo against.
+        String chargedPackId = priorPackId;
+        int delta = alreadyCharged ? ((Number) priorDelta).intValue() : 0;
+
+        if (!alreadyCharged) {
+            var charged = jdbc.queryForList("""
+                    UPDATE package SET
+                        sessions_remaining = GREATEST(0, sessions_remaining - 1),
+                        updated_at = NOW()
+                    WHERE id = (
+                        SELECT id FROM package
+                        WHERE client_id = :cid::uuid AND trainer_id = :tid::uuid
+                          AND type = 'session_pack' AND status = 'active'
+                          AND sessions_remaining > 0 AND deleted_at IS NULL
+                        ORDER BY created_at ASC
+                        LIMIT 1
+                    )
+                    RETURNING id::text AS id
+                    """, Map.of("cid", clientId, "tid", tid));
+            chargedPackId = charged.isEmpty() ? null : str(charged.get(0).get("id"));
+            delta = chargedPackId != null ? -1 : 0;
+        }
+
+        // ── The session ──────────────────────────────────────────────────────
+        var ps = new HashMap<String, Object>();
+        ps.put("id",     sessionId.toString());
+        ps.put("tid",    tid);
+        ps.put("delta",  delta);
+        ps.put("packId", chargedPackId);
+        jdbc.update("""
+                UPDATE scheduled_session SET
+                    status          = 'done',
+                    pack_delta      = :delta,
+                    pack_package_id = :packId::uuid,
+                    pack_applied_at = NOW(),
+                    updated_at      = NOW()
+                WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                """, ps);
+
+        // ── The workout log ──────────────────────────────────────────────────
+        // Reused if one is already open against this session, matching the
+        // client's `startSession`. A second log would split one session's sets
+        // across two records and count the session twice in every report.
+        var existing = jdbc.queryForList("""
+                SELECT id::text AS id FROM workout_session
+                WHERE scheduled_session_id = :id::uuid AND trainer_id = :tid::uuid
+                  AND deleted_at IS NULL
+                ORDER BY created_at ASC
+                LIMIT 1
+                """, idParams);
+        if (!existing.isEmpty()) {
+            return Map.of("workoutSessionId", str(existing.get(0).get("id")));
+        }
+
         UUID workoutId = UUID.randomUUID();
         Instant now = Instant.now();
         String sessionDate = (req != null && req.sessionDate() != null && !req.sessionDate().isBlank())
@@ -226,21 +310,6 @@ public class ScheduledSessionService {
                 VALUES (:id::uuid, :tid::uuid, :cid::uuid, :programId::uuid, :scheduledSessionId::uuid,
                     'trainer', :sessionDate, :notes, :now, :now)
                 """, pw);
-
-        // Decrement sessions_remaining on the oldest active session_pack for this client
-        jdbc.update("""
-                UPDATE package SET
-                    sessions_remaining = GREATEST(0, sessions_remaining - 1),
-                    updated_at = NOW()
-                WHERE id = (
-                    SELECT id FROM package
-                    WHERE client_id = :cid::uuid AND trainer_id = :tid::uuid
-                      AND type = 'session_pack' AND status = 'active'
-                      AND sessions_remaining > 0 AND deleted_at IS NULL
-                    ORDER BY created_at ASC
-                    LIMIT 1
-                )
-                """, Map.of("cid", clientId, "tid", tid));
 
         return Map.of("workoutSessionId", workoutId.toString());
     }

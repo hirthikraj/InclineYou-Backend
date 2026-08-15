@@ -1,52 +1,53 @@
 package com.xrep.xrep_backend.auth;
 
 import com.xrep.xrep_backend.config.AppProperties;
-import com.xrep.xrep_backend.entity.OtpRequest;
-import com.xrep.xrep_backend.repository.OtpRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
-import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * The send-rate throttle — how many codes a number may ask for.
+ * The life of one code: issued, checked, spent — or guessed at until the number
+ * is locked.
  *
- * `maxAttempts` caps guesses at a code and has always been enforced. The other
- * direction was open: /v1/auth/otp/request would mint a code every time it was
- * asked, so fifty calls meant fifty codes. Free while SMS is stubbed, and
- * somebody else's phone buzzing all night on our bill the day it isn't.
+ * The send limits moved to {@link OtpSendLimiter} and the storage behind
+ * {@link OtpStore}, so what is pinned here is the sequence and the two rules
+ * that are easy to break by accident: an expired code must not spend an attempt,
+ * and a lock must be read before anything else happens.
  *
- * The arithmetic is the part worth pinning down. Which rung of the ladder a
- * request lands on, and what wait it is told, are both easy to get one off.
+ * The store is mocked, which is the point of the interface — these rules must
+ * hold identically whether the state is in Redis or in Postgres.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class OtpServiceTest {
 
     private static final String PHONE = "9876543210";
+    private static final String HASH = "$2a$10$stub";
 
-    @Mock OtpRequestRepository otpRepo;
+    @Mock OtpStore store;
+    @Mock OtpSendLimiter limiter;
+    @Mock OtpSender sender;
     @Mock BCryptPasswordEncoder bcrypt;
 
     AppProperties props;
@@ -58,145 +59,126 @@ class OtpServiceTest {
         props.getOtp().setExpiryMinutes(10);
         props.getOtp().setMaxAttempts(3);
         props.getOtp().setLockMinutes(10);
-        props.getOtp().setResendLadderSeconds(List.of(30, 60, 120));
-        props.getOtp().setSendWindowMinutes(60);
-        props.getOtp().setMaxSendsPerDay(10);
 
-        when(bcrypt.encode(anyString())).thenReturn("$2a$10$stub");
-        otp = new OtpService(otpRepo, props, bcrypt);
+        when(bcrypt.encode(anyString())).thenReturn(HASH);
+        otp = new OtpService(store, limiter, sender, props, bcrypt);
     }
 
-    /* --------------------------------------------------------- the ladder */
+    /* ---------------------------------------------------------------- send */
 
     @Nested
-    @DisplayName("the resend ladder")
-    class Ladder {
+    @DisplayName("issuing a code")
+    class Send {
 
         @Test
-        @DisplayName("the first code in a window goes out with no wait")
-        void firstIsFree() {
-            sentInWindow(0);
+        @DisplayName("the code is stored hashed and never in the clear")
+        void storedHashed() {
+            otp.send(PHONE);
+
+            var code = ArgumentCaptor.forClass(String.class);
+            verify(store).saveCode(eq(PHONE), code.capture(), any(Instant.class));
+            assertThat(code.getValue()).isEqualTo(HASH);
+        }
+
+        @Test
+        @DisplayName("the send is recorded, or the ladder has nothing to count")
+        void sendIsRecorded() {
+            otp.send(PHONE);
+            verify(store).recordSend(eq(PHONE), any(Instant.class));
+        }
+
+        @Test
+        @DisplayName("a throttled send costs nothing — no code, no dispatch")
+        void throttledSendsNothing() {
+            org.mockito.Mockito.doThrow(new OtpThrottledException(30))
+                    .when(limiter).check(anyString(), any(Instant.class));
+
+            assertThatThrownBy(() -> otp.send(PHONE)).isInstanceOf(OtpThrottledException.class);
+
+            verify(store, never()).saveCode(anyString(), anyString(), any(Instant.class));
+            verify(sender, never()).send(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("a locked number is told it is locked, not throttled")
+        void lockWinsOverThrottle() {
+            // Both would refuse. Only one has a countdown screen, so the lock has
+            // to be the one that answers — and it is checked first.
+            when(store.lockedUntil(PHONE)).thenReturn(Instant.now().plusSeconds(300));
+
+            assertThatThrownBy(() -> otp.send(PHONE)).isInstanceOf(OtpLockedException.class);
+            verify(store, never()).saveCode(anyString(), anyString(), any(Instant.class));
+            verify(limiter, never()).check(anyString(), any(Instant.class));
+        }
+
+        @Test
+        @DisplayName("a lock whose time has passed needs no clearing")
+        void expiredLockIsSimplyOver() {
+            when(store.lockedUntil(PHONE)).thenReturn(Instant.now().minusSeconds(1));
 
             assertThatCode(() -> otp.send(PHONE)).doesNotThrowAnyException();
-            verify(otpRepo).save(any(OtpRequest.class));
-        }
-
-        @Test
-        @DisplayName("a second code 10s after the first is refused for 20 more")
-        void secondTooSoon() {
-            sentInWindow(1, Instant.now().minusSeconds(10));
-
-            assertThatThrownBy(() -> otp.send(PHONE))
-                    .isInstanceOf(OtpThrottledException.class)
-                    .extracting(e -> ((OtpThrottledException) e).getRetryAfterSeconds())
-                    // 30s rung minus the 10 already served. Rounded up, so 20 or 21.
-                    .satisfies(s -> assertThat((int) s).isBetween(20, 21));
-            verify(otpRepo, never()).save(any(OtpRequest.class));
-        }
-
-        @Test
-        @DisplayName("a second code once the 30s rung is served goes out")
-        void secondAfterCooldown() {
-            sentInWindow(1, Instant.now().minusSeconds(31));
-
-            assertThatCode(() -> otp.send(PHONE)).doesNotThrowAnyException();
-            verify(otpRepo).save(any(OtpRequest.class));
-        }
-
-        @Test
-        @DisplayName("the third code climbs to the 60s rung")
-        void thirdClimbs() {
-            sentInWindow(2, Instant.now().minusSeconds(31));
-
-            assertThatThrownBy(() -> otp.send(PHONE))
-                    .isInstanceOf(OtpThrottledException.class)
-                    .extracting(e -> ((OtpThrottledException) e).getRetryAfterSeconds())
-                    .satisfies(s -> assertThat((int) s).isBetween(29, 30));
-        }
-
-        @Test
-        @DisplayName("the ladder clamps at its last rung rather than running off the end")
-        void clampsAtLastRung() {
-            // Nine sends deep, three rungs defined — the index must not walk past 2.
-            sentInWindow(9, Instant.now().minusSeconds(1));
-
-            assertThatThrownBy(() -> otp.send(PHONE))
-                    .isInstanceOf(OtpThrottledException.class)
-                    .extracting(e -> ((OtpThrottledException) e).getRetryAfterSeconds())
-                    .satisfies(s -> assertThat((int) s).isBetween(118, 120));
-        }
-
-        @Test
-        @DisplayName("an empty ladder switches the spacing off, leaving the day's ceiling")
-        void emptyLadderIsNoSpacing() {
-            props.getOtp().setResendLadderSeconds(List.of());
-            sentInWindow(5, Instant.now().minusSeconds(1));
-
-            assertThatCode(() -> otp.send(PHONE)).doesNotThrowAnyException();
-        }
-
-        @Test
-        @DisplayName("a send older than the window doesn't count toward the ladder")
-        void windowExpires() {
-            // Two sends today, none in the last hour: the ladder starts over.
-            when(otpRepo.countSentSince(eq(PHONE), any(Instant.class))).thenReturn(2L, 0L);
-            when(otpRepo.lastSentAt(PHONE)).thenReturn(Instant.now().minus(Duration.ofHours(3)));
-
-            assertThatCode(() -> otp.send(PHONE)).doesNotThrowAnyException();
+            verify(store).saveCode(eq(PHONE), anyString(), any(Instant.class));
         }
     }
 
-    /* ------------------------------------------------------ the day's cap */
+    /* -------------------------------------------------------------- verify */
 
     @Nested
-    @DisplayName("the daily ceiling")
-    class DailyCap {
+    @DisplayName("checking a code")
+    class Verify {
 
         @Test
-        @DisplayName("the eleventh code in a day is refused until the first ages out")
-        void capRefuses() {
-            Instant oldest = Instant.now().minus(Duration.ofHours(20));
-            when(otpRepo.countSentSince(eq(PHONE), any(Instant.class))).thenReturn(10L);
-            when(otpRepo.oldestSentSince(eq(PHONE), any(Instant.class))).thenReturn(oldest);
+        @DisplayName("the right code is consumed so it cannot be replayed")
+        void rightCodeIsConsumed() {
+            liveCode(0);
+            when(bcrypt.matches(anyString(), anyString())).thenReturn(true);
 
-            assertThatThrownBy(() -> otp.send(PHONE))
-                    .isInstanceOf(OtpThrottledException.class)
-                    .extracting(e -> ((OtpThrottledException) e).getRetryAfterSeconds())
-                    // Four hours left of the oldest send's rolling day.
-                    .satisfies(s -> assertThat((int) s).isBetween(4 * 3600 - 2, 4 * 3600));
-            verify(otpRepo, never()).save(any(OtpRequest.class));
+            assertThatCode(() -> otp.verify(PHONE, "123456")).doesNotThrowAnyException();
+            verify(store).consume(PHONE);
         }
 
         @Test
-        @DisplayName("the ceiling is quoted ahead of the ladder — it is the longer wait")
-        void capBeatsLadder() {
-            // At the ceiling AND one second past a send: the answer must be hours,
-            // not the 120s rung, or the next request contradicts this one.
-            when(otpRepo.countSentSince(eq(PHONE), any(Instant.class))).thenReturn(10L);
-            when(otpRepo.oldestSentSince(eq(PHONE), any(Instant.class)))
-                    .thenReturn(Instant.now().minus(Duration.ofHours(1)));
-            when(otpRepo.lastSentAt(PHONE)).thenReturn(Instant.now().minusSeconds(1));
+        @DisplayName("no live code reads as expired, and spends nothing")
+        void noCodeIsExpired() {
+            when(store.activeCode(PHONE)).thenReturn(Optional.empty());
 
-            assertThatThrownBy(() -> otp.send(PHONE))
-                    .isInstanceOf(OtpThrottledException.class)
-                    .extracting(e -> ((OtpThrottledException) e).getRetryAfterSeconds())
-                    .satisfies(s -> assertThat((int) s).isGreaterThan(3600));
+            assertThatThrownBy(() -> otp.verify(PHONE, "123456"))
+                    .isInstanceOf(OtpExpiredException.class);
+            verify(store, never()).recordWrongAttempt(anyString());
         }
-    }
-
-    /* ---------------------------------------------------- lock vs throttle */
-
-    @Nested
-    @DisplayName("the wrong-attempt lock")
-    class Lock {
 
         @Test
-        @DisplayName("the attempt that hits the cap stamps locked_until on the row")
+        @DisplayName("an expired code must NOT burn an attempt")
+        void expiredDoesNotSpendAnAttempt() {
+            when(store.activeCode(PHONE)).thenReturn(Optional.of(
+                    new OtpStore.Code(HASH, Instant.now().minusSeconds(1), 0)));
+
+            assertThatThrownBy(() -> otp.verify(PHONE, "123456"))
+                    .isInstanceOf(OtpExpiredException.class);
+            // The recovery is "send a new one", not "retype" — charging an
+            // attempt for our own expiry is the bug this pins.
+            verify(store, never()).recordWrongAttempt(anyString());
+        }
+
+        @Test
+        @DisplayName("a wrong code below the cap leaves the number unlocked")
+        void noLockBelowTheCap() {
+            liveCode(0);
+            when(store.recordWrongAttempt(PHONE)).thenReturn(1);
+            when(bcrypt.matches(anyString(), anyString())).thenReturn(false);
+
+            assertThatThrownBy(() -> otp.verify(PHONE, "000000"))
+                    .isInstanceOf(InvalidOtpException.class)
+                    .extracting(e -> ((InvalidOtpException) e).getAttemptsLeft())
+                    .isEqualTo(2);
+            verify(store, never()).lock(anyString(), any(Instant.class));
+        }
+
+        @Test
+        @DisplayName("the attempt that hits the cap locks the number for the full wait")
         void lockIsPersisted() {
-            props.getOtp().setMaxAttempts(3);
-            props.getOtp().setLockMinutes(10);
-            OtpRequest live = liveRequest(2); // two already spent
-            when(otpRepo.findLatestUnverified(PHONE)).thenReturn(Optional.of(live));
+            liveCode(2);                                  // two already spent
+            when(store.recordWrongAttempt(PHONE)).thenReturn(3);
             when(bcrypt.matches(anyString(), anyString())).thenReturn(false);
 
             assertThatThrownBy(() -> otp.verify(PHONE, "000000"))
@@ -204,90 +186,45 @@ class OtpServiceTest {
                     .extracting(e -> ((OtpLockedException) e).getRetryAfterSeconds())
                     .isEqualTo(600);
 
-            // The wait and the count that caused it are one row and one save —
-            // in memory this was a map entry the next deploy threw away.
-            assertThat(live.getWrongAttempts()).isEqualTo(3);
-            assertThat(live.getLockedUntil()).isNotNull();
-            assertThat(live.getLockedUntil()).isAfter(Instant.now().plusSeconds(590));
-            verify(otpRepo).save(live);
+            var until = ArgumentCaptor.forClass(Instant.class);
+            verify(store).lock(eq(PHONE), until.capture());
+            assertThat(until.getValue()).isAfter(Instant.now().plusSeconds(590));
         }
 
         @Test
-        @DisplayName("a wrong code below the cap leaves the row unlocked")
-        void noLockBelowTheCap() {
-            props.getOtp().setMaxAttempts(3);
-            OtpRequest live = liveRequest(0);
-            when(otpRepo.findLatestUnverified(PHONE)).thenReturn(Optional.of(live));
+        @DisplayName("the count comes from the store, not from the code we read")
+        void countIsAuthoritative() {
+            // SEC-OTP-06: the increment is atomic and its RETURN value decides the
+            // lock. Trusting the count read a moment earlier is exactly how two
+            // parallel verifies both think they were the second attempt.
+            liveCode(0);
+            when(store.recordWrongAttempt(PHONE)).thenReturn(3);
             when(bcrypt.matches(anyString(), anyString())).thenReturn(false);
 
             assertThatThrownBy(() -> otp.verify(PHONE, "000000"))
-                    .isInstanceOf(InvalidOtpException.class)
-                    .extracting(e -> ((InvalidOtpException) e).getAttemptsLeft())
-                    .isEqualTo(2);
-            assertThat(live.getLockedUntil()).isNull();
+                    .isInstanceOf(OtpLockedException.class);
+            verify(store).lock(eq(PHONE), any(Instant.class));
         }
 
         @Test
-        @DisplayName("a lock read from the row refuses a verify — a fresh process included")
+        @DisplayName("a stored lock refuses a verify — a fresh process included")
         void storedLockRefusesVerify() {
-            // Nothing in this service instance ever locked this number: the wait
-            // is a column, which is the whole point of moving it there.
-            when(otpRepo.lockedUntilFor(PHONE)).thenReturn(Instant.now().plusSeconds(420));
+            // Nothing in this instance ever locked this number: the wait is in
+            // shared state, which is the whole point of moving it out of memory.
+            when(store.lockedUntil(PHONE)).thenReturn(Instant.now().plusSeconds(420));
 
             assertThatThrownBy(() -> otp.verify(PHONE, "123456"))
                     .isInstanceOf(OtpLockedException.class)
                     .extracting(e -> ((OtpLockedException) e).getRetryAfterSeconds())
                     .satisfies(s -> assertThat((int) s).isBetween(419, 420));
-            verify(otpRepo, never()).findLatestUnverified(anyString());
-        }
-
-        @Test
-        @DisplayName("a locked number is told it is locked, not throttled")
-        void lockWinsOverThrottle() {
-            // Both would refuse the send. Only one has a countdown screen, so the
-            // lock has to be the one that answers.
-            when(otpRepo.lockedUntilFor(PHONE)).thenReturn(Instant.now().plusSeconds(300));
-            sentInWindow(5, Instant.now().minusSeconds(1));
-
-            assertThatThrownBy(() -> otp.send(PHONE)).isInstanceOf(OtpLockedException.class);
-            verify(otpRepo, never()).save(any(OtpRequest.class));
-        }
-
-        @Test
-        @DisplayName("a lock whose time has passed needs no clearing")
-        void expiredLockIsSimplyOver() {
-            when(otpRepo.lockedUntilFor(PHONE)).thenReturn(Instant.now().minusSeconds(1));
-            sentInWindow(0);
-
-            assertThatCode(() -> otp.send(PHONE)).doesNotThrowAnyException();
-            verify(otpRepo).save(any(OtpRequest.class));
-        }
-
-        private OtpRequest liveRequest(int spent) {
-            OtpRequest r = new OtpRequest();
-            r.setPhone(PHONE);
-            r.setOtpHash("$2a$10$stub");
-            r.setExpiresAt(Instant.now().plusSeconds(600));
-            r.setWrongAttempts(spent);
-            return r;
+            verify(store, never()).activeCode(anyString());
         }
     }
 
     /* -------------------------------------------------------------- helpers */
 
-    /** No sends at all — every count answers 0. */
-    private void sentInWindow(long count) {
-        sentInWindow(count, Instant.now().minusSeconds(1));
-    }
-
-    /**
-     * `count` sends inside both the window and the day, the most recent at
-     * `lastSent`. Both counts answer the same number, which is true for anything
-     * short of a day-long spread and keeps the daily ceiling out of the way while
-     * the ladder is under test.
-     */
-    private void sentInWindow(long count, Instant lastSent) {
-        when(otpRepo.countSentSince(eq(PHONE), any(Instant.class))).thenReturn(count);
-        when(otpRepo.lastSentAt(PHONE)).thenReturn(count == 0 ? null : lastSent);
+    private void liveCode(int spent) {
+        when(store.activeCode(PHONE)).thenReturn(Optional.of(
+                new OtpStore.Code(HASH, Instant.now().plusSeconds(600), spent)));
     }
 }
