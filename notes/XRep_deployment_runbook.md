@@ -1,6 +1,6 @@
 # XRep — End-to-End Deployment Runbook (iOS + Android)
 
-**Stack:** React Native (Expo + EAS) app · Java + Spring Boot backend on **Railway (managed)** · PostgreSQL (managed) · object storage (R2/S3) · WhatsApp BSP · FCM · UPI deep link · phone OTP.
+**Stack:** React Native (Expo + EAS) app · Java + Spring Boot backend on **Railway (managed)** · Redis (managed, AOF on) · PostgreSQL (managed) · object storage (R2/S3) · WhatsApp BSP · FCM · UPI deep link · phone OTP.
 **Release strategy:** iOS + Android **at the same time**, using **organization** developer accounts.
 
 ---
@@ -36,6 +36,40 @@
 7. **Backups** — Railway's managed Postgres backs up; still export periodically and **test a restore once**.
 
 > **Not Vercel for the backend.** Vercel is built for frontend/serverless (Next.js/Node), not a long-running Java service. Keep Vercel in mind later for a **web landing page or the trainer web dashboard** — not for this backend.
+
+---
+
+## 2b. Redis (OTP state + rate limiting) — managed on Railway
+
+Added when the one-time codes and the API rate limiter moved off Postgres. Small,
+but it carries two abuse controls, so the configuration is not free-form.
+
+1. **Provision** — add a Redis service to the same Railway project (private
+   networking, so it is never exposed publicly).
+2. **`appendonly yes` is mandatory.** ⚠ This is the one setting that must not be
+   skipped. The OTP lock and the daily send ceiling are abuse controls; V17 moved
+   the lock out of memory precisely so a restart could not clear it, and a Redis
+   without AOF puts that straight back — the brute-force ceiling silently becomes
+   "three attempts per Redis restart". Verify after provisioning:
+   ```
+   redis-cli config get appendonly     # must be: yes
+   ```
+3. **Env vars** — `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD`. Absent or
+   unreachable is survivable (see below) but is not the intended running state.
+4. **`REDIS_ENABLED=false`** is the kill switch if Redis ever misbehaves in
+   production. The app keeps working: OTP state falls back to the `otp_request`
+   table and rate limiting to in-process buckets.
+
+**What happens when Redis is down.** Nothing user-visible. Sign-in works, the
+limits still hold — the OTP ones from Postgres exactly as before, the API ones
+per-instance rather than globally. This is verified behaviour, not a hope: the
+backend boots and passes its full suite with no Redis reachable at all. The one
+thing to know is that a lock imposed while Redis was up is still honoured after a
+failover, because it is mirrored to Postgres and sign-in takes the later of the
+two.
+
+**Memory** is negligible — three short-lived keys per number mid-sign-in plus one
+bucket per active caller, all TTL'd. A 256 MB instance is generous.
 
 ---
 
@@ -86,7 +120,7 @@ Because it's React Native, **one codebase builds both**: `eas build --platform a
 ## 6. Environments
 - **Production** — Railway.
 - **Staging** — a second Railway environment + database to test before prod.
-- **Dev** — local, Postgres in Docker.
+- **Dev** — local, Postgres **and Redis** in Docker (`docker compose up -d`).
 - App build profiles map each to the right API URL, for both platforms.
 
 ---
@@ -121,6 +155,7 @@ Because it's React Native, **one codebase builds both**: `eas build --platform a
 3. [ ] Privacy policy published; **Play Data Safety** + **Apple App Privacy** completed.
 4. [ ] WhatsApp templates approved; DLT done (or WhatsApp OTP chosen).
 5. [ ] Backend on **Railway**; managed Postgres; HTTPS live; `/health` green; **backups + restore-tested**.
+5b. [ ] **Redis provisioned with `appendonly yes` verified** — an OTP lock that a restart clears is not a lock.
 6. [ ] Object storage bucket live; exercise images uploaded.
 7. [ ] FCM, BSP, OTP wired with prod keys.
 8. [ ] Prod smoke test passed (OTP → create client → sync → survives restart).

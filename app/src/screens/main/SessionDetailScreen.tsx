@@ -1,372 +1,364 @@
-import React, { useEffect, useState } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  Alert, ActivityIndicator, Modal, TextInput,
-} from 'react-native';
+/**
+ * One appointment.
+ *
+ * The diary owns the *quick* version of this — tap a session in the day and a
+ * sheet gives you Start, Move and the three didn't-train outcomes without
+ * losing your place in the schedule. This screen is what the other doors open
+ * onto: home's hero, the client file's session list. Those arrive from outside
+ * the diary, with no day behind them to keep, so a screen is right and a sheet
+ * would be a sheet over nothing.
+ *
+ * Start is the primary and it is the only large button, because on the day of,
+ * at the time of, it is the only thing anybody wants. Move is one row deeper.
+ * The two outcomes that end a session without training sit last and are
+ * confirmed, since both of them touch the client's pack.
+ *
+ * Marking done is a **local** write — `endSession`, the same call the home
+ * screen's End uses. One implementation of "session delivered", and it works on
+ * a gym floor with no signal.
+ */
+
+import React, { useEffect, useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+
 import type { MainStackParamList } from '../../navigation/MainStack';
 import { scheduledSessionsCollection, findClientsByIds, endSession } from '../../db/sessions';
 import { updateSession } from '../../api/sessions';
 import { syncDatabase } from '../../db/sync';
 import type ScheduledSession from '../../db/models/ScheduledSession';
 import type Client from '../../db/models/Client';
-import { colors } from '../../theme';
+import {
+  AppBar,
+  Avatar,
+  Button,
+  Control,
+  Dialog,
+  Empty,
+  FieldLabel,
+  IconBack,
+  IconButton,
+  IconCalendar,
+  IconMove,
+  IconPlay,
+  Kv,
+  KvRow,
+  Reveal,
+  Sheet,
+  Skeleton,
+  SkeletonCard,
+  Tag,
+  Toast,
+  colors,
+  space,
+  type TagTone,
+} from '../../design';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'SessionDetail'>;
 
-const STATUS_COLOR: Record<string, string> = {
-  scheduled: colors.indigo,
-  done:       '#2E7D32',
-  no_show:    '#B26A00',
-  cancelled:  '#9E9E9E',
+const STATUS: Record<string, { label: string; tone: TagTone }> = {
+  scheduled: { label: 'Booked', tone: 'accent' },
+  done: { label: 'Delivered', tone: 'ok' },
+  no_show: { label: 'No-show', tone: 'warn' },
+  cancelled: { label: 'Cancelled', tone: 'neutral' },
 };
 
-function formatDateTime(ms: number): string {
-  return new Date(ms).toLocaleString('en-IN', {
+/** The model stores a Date on some paths and epoch millis on others. */
+function millis(at: Date | number): number {
+  return at instanceof Date ? at.getTime() : Number(at);
+}
+
+function longDate(ms: number): string {
+  return new Date(ms).toLocaleDateString('en-IN', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
+}
+
+function clock(ms: number): string {
+  return new Date(ms).toLocaleTimeString('en-IN', {
     hour: '2-digit', minute: '2-digit', hour12: true,
   });
 }
 
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{value}</Text>
-    </View>
-  );
-}
-
 export default function SessionDetailScreen({ route, navigation }: Props) {
   const { sessionId } = route.params;
+
   const [session, setSession] = useState<ScheduledSession | null>(null);
   const [client, setClient] = useState<Client | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [acting, setActing] = useState(false);
-  const [showReschedule, setShowReschedule] = useState(false);
-  const [rescheduleDate, setRescheduleDate] = useState('');
-  const [rescheduleTime, setRescheduleTime] = useState('');
+  const [ready, setReady] = useState(false);
+
+  const [moving, setMoving] = useState(false);
+  const [date, setDate] = useState('');
+  const [time, setTime] = useState('');
+  const [ending, setEnding] = useState<'no_show' | 'cancelled' | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    scheduledSessionsCollection.find(sessionId)
-      .then((s) => { setSession(s); setLoading(false); })
-      .catch(() => setLoading(false));
+    let live = true;
+    try {
+      const sub = scheduledSessionsCollection.findAndObserve(sessionId).subscribe({
+        next: (next) => { if (live) { setSession(next); setReady(true); } },
+        // The row was deleted on another device while this was open.
+        error: () => { if (live) { setSession(null); setReady(true); } },
+      });
+      return () => { live = false; sub.unsubscribe(); };
+    } catch {
+      setReady(true);
+      return () => { live = false; };
+    }
   }, [sessionId]);
 
   useEffect(() => {
-    if (!session?.clientId) return;
-    findClientsByIds([session.clientId]).then((map) => {
-      setClient(map[session.clientId] ?? null);
-    });
+    const id = session?.clientId;
+    if (!id) return;
+    void findClientsByIds([id]).then((map) => setClient(map[id] ?? null));
   }, [session?.clientId]);
 
-  // Re-observe the session for live status updates
-  useEffect(() => {
-    try {
-      const sub = scheduledSessionsCollection
-        .findAndObserve(sessionId)
-        .subscribe(setSession);
-      return () => sub.unsubscribe();
-    } catch { /* record deleted */ }
-  }, [sessionId]);
+  const at = useMemo(() => (session ? millis(session.scheduledAt) : null), [session]);
 
-  const handleMarkDone = () => {
-    Alert.alert('Mark session done?', 'This will create a workout log and decrement the client\'s session pack.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Mark done', onPress: async () => {
-          setActing(true);
-          try {
-            // Local-first, same path the home screen's End uses — one
-            // implementation of "session delivered", and it works offline.
-            const workoutSessionId = await endSession(sessionId);
-            navigation.replace('WorkoutLog', {
-              workoutId: workoutSessionId,
-              programId:   session?.programId   ?? undefined,
-              templateDay: session?.templateDay  ?? undefined,
-            });
-          } catch (e: any) {
-            Alert.alert('Error', e?.message ?? 'Could not mark session done.');
-          } finally {
-            setActing(false);
-          }
-        },
-      },
-    ]);
+  /** Seeds the move sheet from where the session is now, in local time. */
+  const openMove = () => {
+    if (at === null) return;
+    const d = new Date(at);
+    setDate(d.toLocaleDateString('en-CA')); // YYYY-MM-DD, without the UTC shift
+    setTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
+    setMoving(true);
   };
 
-  const openReschedule = () => {
-    if (!session) return;
-    const ms = session.scheduledAt instanceof Date ? session.scheduledAt.getTime() : Number(session.scheduledAt);
-    const d = new Date(ms);
-    setRescheduleDate(d.toLocaleDateString('en-CA')); // YYYY-MM-DD
-    setRescheduleTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`);
-    setShowReschedule(true);
-  };
-
-  const handleReschedule = async () => {
-    if (!rescheduleDate.match(/^\d{4}-\d{2}-\d{2}$/) || !rescheduleTime.match(/^\d{2}:\d{2}$/)) {
-      Alert.alert('Invalid input', 'Enter date as YYYY-MM-DD and time as HH:MM (24h).');
+  const move = async () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) {
+      setNotice('Use YYYY-MM-DD and HH:MM.');
       return;
     }
-    const newMs = new Date(`${rescheduleDate}T${rescheduleTime}:00`).getTime();
-    if (isNaN(newMs)) {
-      Alert.alert('Invalid date/time', 'Could not parse the date and time you entered.');
+    const to = new Date(`${date}T${time}:00`).getTime();
+    if (Number.isNaN(to)) {
+      setNotice('That is not a real date and time.');
       return;
     }
-    setActing(true);
+    setBusy(true);
     try {
-      await updateSession(sessionId, { scheduledAt: newMs });
+      await updateSession(sessionId, { scheduledAt: to });
       await syncDatabase('reschedule-session');
-      setShowReschedule(false);
-      Alert.alert('Rescheduled', 'Session moved to the new time.');
-    } catch (e: any) {
-      Alert.alert('Error', e?.message ?? 'Could not reschedule session.');
+      setMoving(false);
+      setNotice(`Moved to ${clock(to)} on ${longDate(to)}.`);
+    } catch {
+      setNotice('Could not move it. It stays where it was.');
     } finally {
-      setActing(false);
+      setBusy(false);
     }
   };
 
-  const handleMarkStatus = (status: 'no_show' | 'cancelled') => {
-    const label = status === 'no_show' ? 'No-show' : 'Cancel';
-    Alert.alert(`${label} session?`, `Mark this session as "${status.replace('_', '-')}"?`, [
-      { text: 'Back', style: 'cancel' },
-      {
-        text: label, style: 'destructive', onPress: async () => {
-          setActing(true);
-          try {
-            await updateSession(sessionId, { status });
-            await syncDatabase('update-session-status');
-            navigation.goBack();
-          } catch (e: any) {
-            Alert.alert('Error', e?.message ?? 'Could not update session.');
-          } finally {
-            setActing(false);
-          }
-        },
-      },
-    ]);
+  /**
+   * Done opens the log rather than closing the screen.
+   *
+   * `replace`, not `navigate`: nobody backs out of a workout into the
+   * appointment they just started.
+   */
+  const start = async () => {
+    setBusy(true);
+    try {
+      const workoutId = await endSession(sessionId);
+      navigation.replace('WorkoutLog', {
+        workoutId,
+        programId: session?.programId || undefined,
+        templateDay: session?.templateDay ?? undefined,
+      });
+    } catch {
+      setNotice('Could not start the log.');
+    } finally {
+      setBusy(false);
+    }
   };
 
-  if (loading) {
+  const close = async (status: 'no_show' | 'cancelled') => {
+    setBusy(true);
+    try {
+      await updateSession(sessionId, { status });
+      await syncDatabase('update-session-status');
+      navigation.goBack();
+    } catch {
+      setNotice('Could not update it.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const status = session ? (STATUS[session.status] ?? { label: session.status, tone: 'neutral' as TagTone }) : null;
+  const booked = session?.status === 'scheduled';
+  const name = client?.name ?? 'This client';
+
+  if (ready && !session) {
     return (
-      <SafeAreaView style={styles.safe}>
-        <ActivityIndicator style={{ marginTop: 40 }} color={colors.indigo} />
+      <SafeAreaView edges={['top']} style={styles.safe}>
+        <View style={styles.pad}>
+          <AppBar
+            title="Session"
+            leading={<IconButton icon={IconBack} label="Back" bare onPress={() => navigation.goBack()} />}
+          />
+        </View>
+        <Empty
+          icon={IconCalendar}
+          title="That session is gone"
+          body="It was deleted, probably from another device. Anything already logged against it is still in the client's history."
+          style={styles.empty}
+        />
       </SafeAreaView>
     );
   }
-
-  if (!session) {
-    return (
-      <SafeAreaView style={styles.safe}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Text style={styles.backText}>‹</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Session</Text>
-          <View style={styles.backBtn} />
-        </View>
-        <View style={styles.emptyBox}>
-          <Text style={styles.emptyText}>Session not found.</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  const ms = session.scheduledAt instanceof Date
-    ? session.scheduledAt.getTime()
-    : Number(session.scheduledAt);
-  const isScheduled = session.status === 'scheduled';
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>‹</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>Session</Text>
-        <View style={styles.backBtn} />
+    <SafeAreaView edges={['top']} style={styles.safe}>
+      <View style={styles.pad}>
+        <AppBar
+          title={client?.name ?? 'Session'}
+          subtitle={at !== null ? `${clock(at)} · ${longDate(at)}` : undefined}
+          leading={<IconButton icon={IconBack} label="Back" bare onPress={() => navigation.goBack()} />}
+          actions={status ? <Tag label={status.label} tone={status.tone} /> : undefined}
+        />
       </View>
 
-      <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+      <Reveal ready={ready} skeleton={<SessionSkeleton />} style={styles.reveal}>
+        <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
+          {session && at !== null ? (
+            <>
+              <Kv style={styles.kv}>
+                <KvRow
+                  label="Client"
+                  value={name}
+                  leading={client ? <Avatar name={client.name} size="sm" /> : undefined}
+                />
+                <KvRow label="Starts" value={clock(at)} detail={longDate(at)} />
+                <KvRow
+                  label="Runs for"
+                  value={session.durationMinutes ? String(session.durationMinutes) : '—'}
+                  suffix={session.durationMinutes ? 'min' : undefined}
+                />
+                {session.dayLabel ? <KvRow label="Plan day" value={session.dayLabel} /> : null}
+                {session.notes ? <KvRow label="Note" value={session.notes} /> : null}
+              </Kv>
 
-        {/* Status pill */}
-        <View style={styles.statusRow}>
-          <View style={[styles.statusPill, { backgroundColor: STATUS_COLOR[session.status] + '22' }]}>
-            <Text style={[styles.statusText, { color: STATUS_COLOR[session.status] ?? colors.muted }]}>
-              {session.status.replace('_', '-').toUpperCase()}
-            </Text>
+              {booked ? (
+                <>
+                  <Button
+                    label="Start the session"
+                    icon={IconPlay}
+                    variant="primary"
+                    size="lg"
+                    block
+                    loading={busy && !moving && ending === null}
+                    onPress={() => void start()}
+                  />
+                  <Button
+                    label="Move it"
+                    icon={IconMove}
+                    variant="secondary"
+                    block
+                    onPress={openMove}
+                    style={styles.second}
+                  />
+
+                  <Text style={styles.fine}>She didn&apos;t train?</Text>
+                  <View style={styles.outcomes}>
+                    <Button
+                      label="No-show"
+                      variant="ghost"
+                      onPress={() => setEnding('no_show')}
+                      style={styles.grow}
+                    />
+                    <Button
+                      label="Cancelled"
+                      variant="ghost"
+                      onPress={() => setEnding('cancelled')}
+                      style={styles.grow}
+                    />
+                  </View>
+                </>
+              ) : (
+                <Text style={styles.fine}>
+                  {session.status === 'done'
+                    ? 'Delivered. The sets are on the client file, under their history.'
+                    : 'This one is closed. Book another from the diary.'}
+                </Text>
+              )}
+            </>
+          ) : null}
+        </ScrollView>
+      </Reveal>
+
+      <Sheet visible={moving} onClose={() => setMoving(false)} title="Move this session">
+        <Text style={styles.meta}>
+          {at !== null ? `Currently ${clock(at)} on ${longDate(at)}.` : ''} The client is not told —
+          send them a message afterwards if the change matters to them.
+        </Text>
+
+        <View style={styles.fields}>
+          <View style={styles.grow}>
+            <FieldLabel>Date</FieldLabel>
+            <Control value={date} onChangeText={setDate} placeholder="2026-08-20" keyboardType="numbers-and-punctuation" />
+          </View>
+          <View style={styles.grow}>
+            <FieldLabel>Time · 24h</FieldLabel>
+            <Control value={time} onChangeText={setTime} placeholder="07:00" keyboardType="numbers-and-punctuation" />
           </View>
         </View>
 
-        {/* Details card */}
-        <View style={styles.card}>
-          <Row label="Client"   value={client?.name ?? '…'} />
-          <Row label="When"     value={formatDateTime(ms)} />
-          <Row label="Duration" value={session.durationMinutes ? `${session.durationMinutes} min` : '—'} />
-          {session.notes ? <Row label="Notes" value={session.notes} /> : null}
-        </View>
+        <Button label="Move it" variant="primary" size="lg" block loading={busy} onPress={() => void move()} />
+      </Sheet>
 
-        {/* Action buttons */}
-        {isScheduled && (
-          <View style={styles.actions}>
-            <TouchableOpacity
-              style={[styles.btn, styles.btnPrimary, acting && { opacity: 0.6 }]}
-              onPress={handleMarkDone}
-              disabled={acting}
-            >
-              {acting
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={styles.btnPrimaryText}>Mark done + Log workout</Text>}
-            </TouchableOpacity>
+      <Dialog
+        visible={ending !== null}
+        title={ending === 'no_show' ? `Mark ${name} a no-show?` : 'Cancel this session?'}
+        confirmLabel={ending === 'no_show' ? 'No-show' : 'Cancel it'}
+        cancelLabel="Back"
+        onCancel={() => setEnding(null)}
+        onConfirm={() => {
+          const outcome = ending;
+          setEnding(null);
+          if (outcome) void close(outcome);
+        }}
+      >
+        {ending === 'no_show'
+          ? 'The slot is spent — it comes off their pack, the same as a session they turned up for.'
+          : 'The slot goes back. Nothing comes off their pack.'}
+      </Dialog>
 
-            <TouchableOpacity
-              style={[styles.btn, styles.btnReschedule, acting && { opacity: 0.6 }]}
-              onPress={openReschedule}
-              disabled={acting}
-            >
-              <Text style={styles.btnRescheduleText}>Reschedule</Text>
-            </TouchableOpacity>
-
-            <View style={styles.secondaryRow}>
-              <TouchableOpacity
-                style={[styles.btn, styles.btnSecondary, { flex: 1 }, acting && { opacity: 0.6 }]}
-                onPress={() => handleMarkStatus('no_show')}
-                disabled={acting}
-              >
-                <Text style={styles.btnSecondaryText}>No-show</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.btn, styles.btnSecondary, { flex: 1 }, acting && { opacity: 0.6 }]}
-                onPress={() => handleMarkStatus('cancelled')}
-                disabled={acting}
-              >
-                <Text style={styles.btnSecondaryText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-
-        {session.status === 'done' && (
-          <Text style={styles.hint}>
-            Session logged. Open the client's workout history to review sets.
-          </Text>
-        )}
-      </ScrollView>
-
-      {/* Reschedule modal */}
-      <Modal visible={showReschedule} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalSheet}>
-            <Text style={styles.modalTitle}>Reschedule session</Text>
-            <Text style={styles.modalLabel}>New date (YYYY-MM-DD)</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={rescheduleDate}
-              onChangeText={setRescheduleDate}
-              placeholder="2026-08-15"
-              keyboardType="numeric"
-              autoCapitalize="none"
-            />
-            <Text style={styles.modalLabel}>New time (HH:MM, 24h)</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={rescheduleTime}
-              onChangeText={setRescheduleTime}
-              placeholder="09:00"
-              keyboardType="numeric"
-              autoCapitalize="none"
-            />
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.btn, styles.btnSecondary, { flex: 1 }]}
-                onPress={() => setShowReschedule(false)}
-                disabled={acting}
-              >
-                <Text style={styles.btnSecondaryText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.btn, styles.btnPrimary, { flex: 1 }]}
-                onPress={handleReschedule}
-                disabled={acting}
-              >
-                {acting
-                  ? <ActivityIndicator color="#fff" size="small" />
-                  : <Text style={styles.btnPrimaryText}>Save</Text>}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      {notice ? (
+        <Toast style={styles.toast} action={{ label: 'Dismiss', onPress: () => setNotice(null) }}>
+          {notice}
+        </Toast>
+      ) : null}
     </SafeAreaView>
   );
 }
 
+function SessionSkeleton() {
+  return (
+    <View style={styles.body} accessibilityLabel="Loading this session">
+      <SkeletonCard height={196} style={styles.skelCard} />
+      <Skeleton height={52} style={styles.skelButton} />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1, backgroundColor: colors.canvas },
+  pad: { paddingHorizontal: space.inset },
+  reveal: { flex: 1 },
+  body: { paddingHorizontal: space.inset, paddingBottom: space.s10 },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 12, paddingVertical: 14, backgroundColor: colors.indigo,
-  },
-  headerTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: '#fff' },
-  backBtn: { width: 56, alignItems: 'center' },
-  backText: { fontSize: 30, color: '#fff', lineHeight: 32 },
+  kv: { marginTop: space.s4, marginBottom: space.s5 },
+  second: { marginTop: space.s2 },
+  outcomes: { flexDirection: 'row', gap: space.s2, marginTop: space.s2 },
+  grow: { flex: 1 },
+  fine: { fontSize: 11.5, lineHeight: 17, color: colors.ink3, marginTop: space.s5 },
+  empty: { marginTop: space.s7 },
 
-  body: { padding: 20, paddingBottom: 60 },
+  meta: { fontSize: 13, lineHeight: 20, color: colors.ink3, marginBottom: space.s4 },
+  fields: { flexDirection: 'row', gap: space.s2, marginBottom: space.s5 },
 
-  statusRow: { alignItems: 'center', marginBottom: 20 },
-  statusPill: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20 },
-  statusText: { fontSize: 13, fontWeight: '800', letterSpacing: 1 },
-
-  card: {
-    backgroundColor: colors.card, borderRadius: 14,
-    paddingHorizontal: 16, marginBottom: 24,
-    shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
-  },
-  row: {
-    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between',
-    paddingVertical: 13, borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.hairline, gap: 12,
-  },
-  rowLabel: { fontSize: 13, color: colors.muted, flexShrink: 0 },
-  rowValue: { fontSize: 14, color: colors.ink, fontWeight: '600', textAlign: 'right', flex: 1 },
-
-  actions: { gap: 12 },
-  btn: { height: 50, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  btnPrimary: { backgroundColor: colors.indigo },
-  btnPrimaryText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  btnSecondary: {
-    borderWidth: 1.5, borderColor: colors.border,
-    backgroundColor: colors.card,
-  },
-  btnSecondaryText: { color: colors.body, fontSize: 14, fontWeight: '600' },
-  secondaryRow: { flexDirection: 'row', gap: 12 },
-
-  emptyBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  emptyText: { fontSize: 15, color: colors.muted },
-
-  hint: { textAlign: 'center', fontSize: 13, color: colors.muted, marginTop: 12 },
-
-  btnReschedule: {
-    borderWidth: 1.5, borderColor: colors.indigo, backgroundColor: colors.card,
-  },
-  btnRescheduleText: { color: colors.indigo, fontSize: 14, fontWeight: '600' },
-
-  modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)',
-    alignItems: 'center', justifyContent: 'center', padding: 24,
-  },
-  modalSheet: {
-    backgroundColor: colors.card, borderRadius: 16, padding: 24, width: '100%',
-  },
-  modalTitle: { fontSize: 17, fontWeight: '700', color: colors.ink, marginBottom: 16 },
-  modalLabel: { fontSize: 13, color: colors.muted, marginBottom: 6 },
-  modalInput: {
-    borderWidth: 1.5, borderColor: colors.border, borderRadius: 10,
-    height: 44, paddingHorizontal: 12, fontSize: 15, color: colors.ink,
-    backgroundColor: colors.bg, marginBottom: 14,
-  },
-  modalActions: { flexDirection: 'row', gap: 12, marginTop: 4 },
+  skelCard: { marginTop: space.s4 },
+  skelButton: { marginTop: space.s5, borderRadius: 8 },
+  toast: { marginHorizontal: space.inset, marginBottom: space.s3 },
 });

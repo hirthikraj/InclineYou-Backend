@@ -37,6 +37,14 @@ export interface BlueprintEntry {
   exerciseId: string;
   /** 1 = Monday. Null on an entry that was never given a day. */
   day: number | null;
+  /**
+   * Which week of the program, 1-based.
+   *
+   * Reads as 1 on every entry written before programs had weeks, which is what
+   * those entries meant: one week's shape, repeated for however long the
+   * program ran.
+   */
+  week: number;
   sets: number | null;
   reps: number | null;
   restSeconds: number | null;
@@ -82,6 +90,8 @@ export interface LibTemplate {
   weeks?: number | null;
   structure?: string | null;
   dayLabels?: string | null;
+  /** "1,3,5". Null on a template authored before the layout step existed. */
+  trainingDays?: string | null;
 }
 
 export interface LibProgram {
@@ -170,7 +180,12 @@ export function buildPrograms(input: TrainingInput, filter: string = 'all'): Pro
     const blueprint = parseBlueprint(template.structure);
     const clients = perTemplate.get(template.id)?.size ?? 0;
     const weeks = Math.max(1, template.weeks ?? 1);
-    const shape = weekShape(blueprint, parseDayLabels(template.dayLabels), musclesById);
+    const shape = weekShape(
+      blueprint,
+      parseTrainingDays(template.trainingDays, blueprint),
+      parseDayLabels(template.dayLabels),
+      musclesById,
+    );
     const daysPerWeek = shape.week.filter((d) => d !== null).length;
 
     return {
@@ -251,13 +266,18 @@ function cardMeta(clients: number, daysPerWeek: number): string {
  */
 function weekShape(
   blueprint: BlueprintEntry[],
+  trainingDays: number[],
   labels: Record<number, string>,
   musclesById: Map<string, string[]>,
 ): { week: (number | null)[]; legend: ShapeLegendEntry[] } {
   const week: (number | null)[] = [null, null, null, null, null, null, null];
 
+  // The card draws ONE week's shape, so it draws the first — mixing weeks would
+  // colour Wednesday from whichever week happened to sort last.
   const byDay = new Map<number, BlueprintEntry[]>();
+  trainingDays.forEach((day) => byDay.set(day, []));
   blueprint.forEach((entry) => {
+    if (entry.week !== 1) return;
     if (entry.day == null || entry.day < 1 || entry.day > 7) return;
     const list = byDay.get(entry.day) ?? [];
     list.push(entry);
@@ -306,6 +326,8 @@ export interface ProgramDay {
   day: number;
   /** "Monday · Push A". */
   title: string;
+  /** The trainer's own name for the day, where they gave it one. */
+  label: string | null;
   exercises: {
     id: string;
     exerciseId: string;
@@ -321,12 +343,48 @@ export interface ProgramView {
   name: string;
   subtitle: string;
   weeks: number;
+  /** The week these days were drawn from — what the chip row has selected. */
+  week: number;
+  /** Every weekday the program trains on, whether or not it has been filled. */
+  trainingDays: number[];
   days: ProgramDay[];
   clients: number;
+  /**
+   * This week has nothing of its own and is showing week 1's shape.
+   *
+   * The distinction matters at the point of editing: adding an exercise to a
+   * repeating week has to copy the week first, or the trainer would be editing
+   * week 1 while looking at a header that says week 3.
+   */
+  repeats: boolean;
+  /** Weeks that have been authored in their own right, in order. */
+  authoredWeeks: number[];
+  /** Nothing laid out and nothing on the blueprint. */
   empty: boolean;
 }
 
-export function buildProgram(input: TrainingInput, templateId: string): ProgramView | null {
+/**
+ * One week of one program.
+ *
+ * ── Two rules, both about being honest ────────────────────────────────────
+ *
+ * **A day exists because the trainer laid it out, not because something is on
+ * it.** Building the day list from the blueprint alone was the old behaviour and
+ * it had a trap in it: the first exercise went on Monday, Monday became the only
+ * day, and there was no longer anywhere to put Tuesday's first exercise. So the
+ * days come from `training_days` and the blueprint's own days are merged in —
+ * an exercise sitting on a day nobody laid out still gets drawn.
+ *
+ * **A week with nothing of its own repeats week 1.** That was already the app's
+ * story for a multi-week program and it stays true; what changes is that a week
+ * can now be authored separately, and `repeats` says which of the two you are
+ * looking at so the screen never implies numbers nobody wrote.
+ */
+export function buildProgram(
+  input: TrainingInput,
+  templateId: string,
+  week: number = 1,
+): ProgramView | null {
   const template = input.templates.find((t) => t.id === templateId);
   if (!template) return null;
 
@@ -334,6 +392,8 @@ export function buildProgram(input: TrainingInput, templateId: string): ProgramV
   const labels = parseDayLabels(template.dayLabels);
   const byId = new Map(input.exercises.map((e) => [e.id, e] as const));
   const weeks = Math.max(1, template.weeks ?? 1);
+  const wanted = Math.min(Math.max(1, Math.round(week)), weeks);
+  const trainingDays = parseTrainingDays(template.trainingDays, blueprint);
 
   const clients = new Set(
     input.programs
@@ -341,8 +401,15 @@ export function buildProgram(input: TrainingInput, templateId: string): ProgramV
       .map((p) => p.clientId),
   ).size;
 
+  const authoredWeeks = [...new Set(blueprint.map((entry) => entry.week))].sort((a, b) => a - b);
+
+  const own = blueprint.filter((entry) => entry.week === wanted);
+  const repeats = own.length === 0 && wanted !== 1 && authoredWeeks.includes(1);
+  const showing = repeats ? blueprint.filter((entry) => entry.week === 1) : own;
+
   const byDay = new Map<number, BlueprintEntry[]>();
-  blueprint.forEach((entry) => {
+  trainingDays.forEach((day) => byDay.set(day, []));
+  showing.forEach((entry) => {
     if (entry.day == null) return;
     const list = byDay.get(entry.day) ?? [];
     list.push(entry);
@@ -358,10 +425,11 @@ export function buildProgram(input: TrainingInput, templateId: string): ProgramV
       return {
         day,
         title: [WEEKDAY_NAMES[day - 1] ?? `Day ${day}`, label].filter(Boolean).join(' · '),
+        label,
         exercises: sorted.map((entry) => {
           const exercise = byId.get(entry.exerciseId);
           return {
-            id: `${day}-${entry.exerciseId}-${entry.orderIndex}`,
+            id: `${wanted}-${day}-${entry.exerciseId}-${entry.orderIndex}`,
             exerciseId: entry.exerciseId,
             // An exercise the library hasn't pulled yet is named honestly rather
             // than shown as a blank row.
@@ -378,8 +446,12 @@ export function buildProgram(input: TrainingInput, templateId: string): ProgramV
     name: template.name,
     subtitle: `${weeks} week${weeks === 1 ? '' : 's'} · ${clients} client${clients === 1 ? '' : 's'}`,
     weeks,
+    week: wanted,
+    trainingDays,
     days,
     clients,
+    repeats,
+    authoredWeeks,
     empty: days.length === 0,
   };
 }
@@ -884,6 +956,8 @@ export function parseBlueprint(structure: string | null | undefined): BlueprintE
     out.push({
       exerciseId: entry.exercise_id,
       day: num(entry.day_of_week),
+      // A missing week is week 1 — see the note on the field.
+      week: Math.max(1, num(entry.week) ?? 1),
       sets: num(entry.sets),
       reps: num(entry.reps),
       restSeconds: num(entry.rest_seconds),
@@ -891,7 +965,69 @@ export function parseBlueprint(structure: string | null | undefined): BlueprintE
       orderIndex: num(entry.order_index) ?? index,
     });
   });
-  return out.sort((a, b) => (a.day ?? 99) - (b.day ?? 99) || a.orderIndex - b.orderIndex);
+  return out.sort(
+    (a, b) => a.week - b.week || (a.day ?? 99) - (b.day ?? 99) || a.orderIndex - b.orderIndex,
+  );
+}
+
+/**
+ * The weekdays a program trains on.
+ *
+ * `training_days` is the trainer's own layout and wins when it is there. When it
+ * is not — every template authored before the layout step existed — the days are
+ * whatever the blueprint already sits on, which is the same answer for a filled
+ * template and an honest empty one for a template nobody has touched.
+ *
+ * Read across ALL weeks, not just the one on screen: a day belongs to the
+ * program, and a week that happens to be empty does not remove Wednesday from it.
+ */
+export function parseTrainingDays(
+  trainingDays: string | null | undefined,
+  blueprint: BlueprintEntry[] = [],
+): number[] {
+  if (trainingDays != null && trainingDays.trim() !== '') {
+    const days = trainingDays
+      .split(',')
+      .map((part) => Number(part.trim()))
+      .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7);
+    return [...new Set(days)].sort((a, b) => a - b);
+  }
+  const used = blueprint
+    .map((entry) => entry.day)
+    .filter((day): day is number => day != null && day >= 1 && day <= 7);
+  return [...new Set(used)].sort((a, b) => a - b);
+}
+
+/**
+ * Which week of a program a date falls in, 1-based.
+ *
+ * Counted off the program's own start date rather than off the calendar's weeks,
+ * because a program that started on a Wednesday is in its first week until the
+ * following Wednesday — a Monday-based count would put its third day in week 2
+ * and hand the client the wrong session on day three.
+ *
+ * Week 1 when the program never said when it started, and week 1 for a date
+ * before it started. Both are the only answers that cannot be wrong about a plan
+ * with no timeline on it.
+ */
+export function programWeek(
+  startDate: string | null | undefined,
+  on: Date = new Date(),
+): number {
+  if (!startDate) return 1;
+  const start = new Date(`${startDate}T00:00:00`);
+  if (Number.isNaN(start.getTime())) return 1;
+  const today = new Date(on.getFullYear(), on.getMonth(), on.getDate());
+  const days = Math.floor((today.getTime() - start.getTime()) / 86_400_000);
+  return days < 0 ? 1 : Math.floor(days / 7) + 1;
+}
+
+/** Back to the stored form. Empty when nothing is laid out, never `"0"`. */
+export function formatTrainingDays(days: number[]): string {
+  return [...new Set(days)]
+    .filter((day) => Number.isInteger(day) && day >= 1 && day <= 7)
+    .sort((a, b) => a - b)
+    .join(',');
 }
 
 export function parseDayLabels(json: string | null | undefined): Record<number, string> {

@@ -103,6 +103,20 @@ export function observePacks() {
   return packsCollection.query(Q.sortBy('order_index', Q.asc)).observe();
 }
 
+/** 'trainer' | 'gym' — a price list belongs to one of two people. */
+export type PackOwner = 'trainer' | 'gym';
+
+/**
+ * Whose price this is.
+ *
+ * Every row written before V14 has no owner, and every one of those was the
+ * trainer's own — so null reads as 'trainer' here rather than being back-filled
+ * in the database, where it would claim a row said something it never said.
+ */
+export function packOwner(pack: { owner?: string | null }): PackOwner {
+  return pack.owner === 'gym' ? 'gym' : 'trainer';
+}
+
 /* ------------------------------------------------------- recording payments */
 
 export type PaymentMethod = 'upi_intent' | 'cash' | 'gym_front_office';
@@ -297,6 +311,8 @@ export interface PackInput {
   sessions?: number | null;
   amount: number;
   validityDays?: number | null;
+  /** Whose price list this belongs on. Defaults to the trainer's own. */
+  owner?: PackOwner;
   orderIndex?: number;
 }
 
@@ -311,6 +327,7 @@ export async function createPack(input: PackInput): Promise<PackModel> {
       p.currency = 'INR';
       p.validityDays = input.validityDays ?? null;
       p.status = 'active';
+      p.owner = input.owner ?? 'trainer';
       p.orderIndex = input.orderIndex ?? 0;
     }),
   );
@@ -331,6 +348,7 @@ export async function updatePack(
       if (patch.sessions !== undefined) p.sessions = patch.sessions ?? null;
       if (patch.amount != null) p.amount = patch.amount;
       if (patch.validityDays !== undefined) p.validityDays = patch.validityDays ?? null;
+      if (patch.owner != null) p.owner = patch.owner;
       if (patch.orderIndex != null) p.orderIndex = patch.orderIndex;
     });
   });
@@ -367,10 +385,18 @@ export async function sellPack(args: {
   pack: { id: string; type: string; sessions: number | null; amount: number; validityDays: number | null };
   /** Sessions still unused on the pack being replaced, if any. */
   carryOver?: number;
+  /**
+   * Knocked off the list price for this client, on this sale.
+   *
+   * The pack keeps its price — a discount is a thing given to one person, and
+   * writing it back to the price list would re-quote everybody else.
+   */
+  discount?: number;
   dueDate?: string;
 }): Promise<PackageModel> {
   const { pack } = args;
   const carry = args.carryOver ?? 0;
+  const discount = Math.max(0, Math.min(pack.amount, Math.round(args.discount ?? 0)));
   const total = pack.sessions != null ? pack.sessions + carry : null;
   const today = new Date();
 
@@ -383,7 +409,9 @@ export async function sellPack(args: {
         p.sessionsTotal = total;
         p.sessionsRemaining = total;
       }
-      p.amount = pack.amount;
+      // `amount` is what this client owes — already net of anything given away.
+      p.amount = pack.amount - discount;
+      if (discount > 0) p.discountAmount = discount;
       p.currency = 'INR';
       p.startDate = isoDay(today);
       if (pack.validityDays != null) {

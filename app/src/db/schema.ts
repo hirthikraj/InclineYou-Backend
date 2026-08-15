@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 12,
+  version: 15,
   tables: [
     tableSchema({
       name: 'clients',
@@ -22,6 +22,9 @@ export const schema = appSchema({
         { name: 'weekly_schedule', type: 'string', isOptional: true }, // JSON [{day,time}]
         // V5 — how this client is usually trained. Null means never said.
         { name: 'delivery_mode', type: 'string', isOptional: true },
+        // V13 — the CLIENT's own consent, as opposed to `status`, which is the
+        // trainer's view. Server-owned: the app reads it and never writes it.
+        { name: 'membership_status', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],
@@ -79,6 +82,12 @@ export const schema = appSchema({
         // is still the only place that turns it into a client's program, because
         // assigning COPIES it and a copy is a transaction.
         { name: 'structure', type: 'string', isOptional: true },
+        // V15 — the weekdays this program trains on, "1,3,5" for Mon/Wed/Fri.
+        // The blueprint knows the day of every exercise on it, but a program is
+        // laid out before it is filled: the day exists as soon as the trainer
+        // says it does. Null reads as "not told" and the days fall back to
+        // whichever ones the blueprint uses.
+        { name: 'training_days', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],
@@ -109,6 +118,9 @@ export const schema = appSchema({
         { name: 'target_load', type: 'number', isOptional: true },
         { name: 'notes', type: 'string', isOptional: true },
         { name: 'day_of_week', type: 'number', isOptional: true },
+        // V15 — which week of the program. Null reads as week 1, which is what
+        // every row written before multi-week programs existed meant.
+        { name: 'week', type: 'number', isOptional: true },
         { name: 'order_index', type: 'number' },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
@@ -246,6 +258,9 @@ export const schema = appSchema({
         { name: 'due_date', type: 'string', isOptional: true },
         { name: 'written_off_at', type: 'number', isOptional: true },
         { name: 'written_off_amount', type: 'number', isOptional: true },
+        // V14 — what was knocked off the list price when this was sold. `amount`
+        // stays what the client actually owes; this only says why it is lower.
+        { name: 'discount_amount', type: 'number', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],
@@ -327,6 +342,10 @@ export const schema = appSchema({
         { name: 'currency', type: 'string' },
         { name: 'validity_days', type: 'number', isOptional: true },
         { name: 'status', type: 'string' }, // active | inactive
+        // V14 — whose price this is. 'trainer' | 'gym'. Null on every row
+        // written before the gym price list existed, and null reads as the
+        // trainer's own, which is what those rows were.
+        { name: 'owner', type: 'string', isOptional: true },
         { name: 'order_index', type: 'number' },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },

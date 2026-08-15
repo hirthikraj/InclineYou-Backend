@@ -5,6 +5,7 @@ import WorkoutSession from './models/WorkoutSession';
 import Client from './models/Client';
 import Package from './models/Package';
 import { refreshPending, syncDatabase } from './sync';
+import { settlePack } from './diary';
 
 export const scheduledSessionsCollection = database.get<ScheduledSession>('scheduled_sessions');
 export const workoutSessionsCollection = database.get<WorkoutSession>('workout_sessions');
@@ -123,17 +124,11 @@ export async function endSession(sessionId: string, notes?: string): Promise<str
   const session = await scheduledSessionsCollection.find(sessionId);
   const existing = await findWorkout(sessionId);
 
-  const packs = await packagesCollection
-    .query(
-      Q.where('client_id', session.clientId),
-      Q.where('type', 'session_pack'),
-      Q.where('status', 'active'),
-      Q.sortBy('created_at', Q.asc),
-    )
-    .fetch();
-  // The oldest pack with something left on it — a pack already at zero is spent,
-  // not the one to charge.
-  const pack = packs.find((p) => (p.sessionsRemaining ?? 0) > 0);
+  // Settled against what this session already took, never from zero. Four
+  // screens can finish a session — the home hero, the session detail, the
+  // workout log and the diary — and nothing stopped two of them from running
+  // on the same session. Each used to subtract one more.
+  const settlement = await settlePack(session, true);
 
   const workoutId = await database.write(async () => {
     const workout =
@@ -154,11 +149,11 @@ export async function endSession(sessionId: string, notes?: string): Promise<str
       // V10 · §07 — stamp what this took and from where, so the diary's 24-hour
       // undo can put it back exactly. A session closed here and one closed from
       // the diary have to be equally reversible.
-      s.packDelta = pack ? -1 : 0;
-      s.packPackageId = pack ? pack.id : (null as unknown as string);
+      s.packDelta = settlement.delta;
+      s.packPackageId = settlement.packageId as unknown as string;
       s.packAppliedAt = new Date();
     });
-    if (pack) await pack.update((p) => { p.sessionsRemaining = Math.max(0, p.sessionsRemaining - 1); });
+    await settlement.apply();
 
     return workout.id;
   });

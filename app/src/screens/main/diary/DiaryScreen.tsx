@@ -15,7 +15,17 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Animated,
+  Linking,
+  PanResponder,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   useFocusEffect,
@@ -33,6 +43,7 @@ import { useShell } from '../../../navigation/AppShell';
 import { useDiary } from '../../../diary/useDiary';
 import {
   DEFAULT_SESSION_MIN,
+  atMinute,
   buildDay,
   buildMonth,
   buildStrip,
@@ -40,6 +51,9 @@ import {
   daysWorkedRecently,
   findClash,
   hhmm,
+  mergeWindows,
+  isoWeekday,
+  stepAnchor,
   BATCHES_ENABLED,
   type DiaryBatch,
   type DiaryInput,
@@ -99,6 +113,7 @@ import {
   WeekLegend,
   colors,
   space,
+  useReduceMotion,
 } from '../../../design';
 import { AgendaSkeleton } from './DiarySkeleton';
 import BookSheet, { type BookResult } from './BookSheet';
@@ -115,6 +130,17 @@ const VIEWS = [
   { key: 'week' as const, label: 'Week' },
   { key: 'month' as const, label: 'Month' },
 ];
+
+/* --------------------------------------------------------- the page turn */
+
+/** Horizontal travel before this counts as a swipe and not a scroll or a tap. */
+const SWIPE_SLOP = 18;
+/** Travel that commits the turn on its own, however slowly it was made. */
+const SWIPE_COMMIT = 56;
+/** …or a flick this fast, which commits at any distance. */
+const SWIPE_VELOCITY = 0.35;
+/** How far off-screen the arriving day starts. Short: this is a hint, not a ride. */
+const SWIPE_ENTER = 40;
 
 export default function DiaryScreen() {
   const navigation = useNavigation<Nav>();
@@ -398,7 +424,7 @@ export default function DiaryScreen() {
                   size="lg"
                   block
                   icon={IconPlus}
-                  onPress={() => openBooking(defaultSlot(selected, now))}
+                  onPress={() => openBooking(defaultSlot(input, selected, now))}
                 />
                 {day.closed ? (
                   <Button
@@ -662,7 +688,7 @@ export default function DiaryScreen() {
         cells={month.cells}
         selected={selected}
         onSelect={setSelected}
-        onLongPress={(at) => openBooking(defaultSlot(at, now))}
+        onLongPress={(at) => openBooking(defaultSlot(input, at, now))}
       />
       <WeekLegend
         items={[
@@ -695,6 +721,86 @@ export default function DiaryScreen() {
     </>
   );
 
+  /* ------------------------------------------------------------------ swipe */
+
+  /**
+   * Left for forward, right for back — the direction every calendar and photo
+   * gallery on the phone already uses. Dragging the page leftward pulls the
+   * *next* day in from the right, so the finger moves the content rather than
+   * the cursor. Whatever the view is stepping by, the gesture is the same one.
+   *
+   * `PanResponder` rather than a gesture library because this app has neither
+   * gesture-handler nor reanimated installed, and `Sheet` and `Drawer` already
+   * do their dragging this way.
+   */
+  const shift = useRef(new Animated.Value(0)).current;
+  const reduceMotion = useReduceMotion();
+
+  // Read through a ref so the responder can be built once and still see the
+  // current view. Rebuilding it every render would drop a gesture in progress.
+  const stepper = useRef<(delta: 1 | -1) => void>(() => {});
+  useEffect(() => {
+    stepper.current = (delta) => {
+      setSelected((current) => stepAnchor(view, current, delta));
+      setOpenGap(null);
+      if (reduceMotion) {
+        shift.setValue(0);
+        return;
+      }
+      // The new day enters from the side the swipe was heading towards.
+      shift.setValue(delta * SWIPE_ENTER);
+      Animated.timing(shift, {
+        toValue: 0,
+        duration: 170,
+        useNativeDriver: true,
+      }).start();
+    };
+  });
+
+  const swipe = useMemo(
+    () =>
+      PanResponder.create({
+        // Capture, not bubble: the body is inside a vertical ScrollView, and a
+        // non-capturing handler would never see a gesture the scroller had
+        // already claimed. The 2:1 ratio is what keeps a vertical scroll —
+        // which is always slightly diagonal — from being read as a page turn.
+        onMoveShouldSetPanResponderCapture: (_, g) =>
+          Math.abs(g.dx) > SWIPE_SLOP && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+        // Once this is a page turn it stays one. Handing it back mid-drag would
+        // leave the content translated with nothing to settle it.
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderMove: (_, g) => {
+          if (reduceMotion) return;
+          // Damped, so the page resists rather than tracking the finger. It is
+          // a hint that the gesture registered, not a draggable surface.
+          shift.setValue(g.dx * 0.3);
+        },
+        onPanResponderRelease: (_, g) => {
+          const far = Math.abs(g.dx) > SWIPE_COMMIT;
+          const fast = Math.abs(g.vx) > SWIPE_VELOCITY;
+          if (far || fast) {
+            // Distance decides when there is distance; otherwise the flick
+            // does. A swipe out and most of the way back leaves `dx` near
+            // zero with a decisive `vx`, and reading `dx` there would turn
+            // the page whichever way the noise fell.
+            const towards = far ? g.dx : g.vx;
+            stepper.current(towards < 0 ? 1 : -1);
+            return;
+          }
+          Animated.spring(shift, {
+            toValue: 0,
+            useNativeDriver: true,
+            bounciness: 0,
+            speed: 18,
+          }).start();
+        },
+        onPanResponderTerminate: () => {
+          shift.setValue(0);
+        },
+      }),
+    [shift, reduceMotion],
+  );
+
   /* ----------------------------------------------------------------- render */
 
   return (
@@ -706,9 +812,15 @@ export default function DiaryScreen() {
           leading={<IconButton icon={IconMenu} label="Menu" bare onPress={shell.openDrawer} />}
           actions={
             <>
+              {/* Jump to today wears the calendar, not the clock. It moves the
+                  diary to a DATE; the clock next to it is about times of day,
+                  and two clocks in one bar meaning two different things is
+                  worse than either icon being imperfect on its own. It also
+                  stays conditional, which is what keeps the bar at two actions
+                  in the state it is usually in. */}
               {isToday && view === 'day' ? null : (
                 <IconButton
-                  icon={IconClock}
+                  icon={IconCalendar}
                   label="Jump to today"
                   bare
                   onPress={() => {
@@ -717,31 +829,55 @@ export default function DiaryScreen() {
                   }}
                 />
               )}
+              {/* Working hours, visibly and permanently.
+                  This was reachable only by long-pressing the view switcher —
+                  a gesture on an unrelated control, which is not a route
+                  anybody finds. The hours decide what this whole screen draws:
+                  a closed day, an empty gap, a slot that is missing at 4pm are
+                  all answered here, and the question is always asked while
+                  looking at the diary. Settings still has the same entry for
+                  anyone who goes looking where settings live. */}
+              <IconButton
+                icon={IconClock}
+                label="Your working hours"
+                bare
+                onPress={() => navigation.navigate('WorkingHours')}
+              />
               <IconButton
                 icon={IconGrid}
                 label="Change view"
                 bare
                 onPress={() => setView(view === 'day' ? 'week' : view === 'week' ? 'month' : 'day')}
-                onLongPress={() => navigation.navigate('WorkingHours')}
               />
             </>
           }
         />
       </View>
 
-      <ScrollView
-        ref={scroller}
-        contentContainerStyle={styles.body}
-        keyboardShouldPersistTaps="handled"
-      >
-        {header}
-        {/* The strip and the switcher sit in the header above and stay real —
-            you can already swipe to Thursday before the day has been read. Only
-            the body below them is unknown, so only it crosses over. */}
-        <Reveal ready={ready} skeleton={<AgendaSkeleton />} style={styles.viewBody}>
-          {view === 'day' ? dayBody() : view === 'week' ? weekBody() : monthBody()}
-        </Reveal>
-      </ScrollView>
+      {/* The page turn is captured out here, around the scroller rather than
+          inside it, so a swipe anywhere — over the strip, the grid, a session
+          row — turns the page. Vertical scrolling passes straight through. */}
+      <View style={styles.swipe} {...swipe.panHandlers}>
+        <ScrollView
+          ref={scroller}
+          contentContainerStyle={styles.body}
+          keyboardShouldPersistTaps="handled"
+        >
+          {header}
+          {/* The strip and the switcher sit in the header above and stay real —
+              you can already swipe to Thursday before the day has been read. Only
+              the body below them is unknown, so only it crosses over.
+
+              The header stays put through a page turn too: the day strip is the
+              week, and sliding it sideways while it stays on the same week would
+              claim a movement that did not happen. */}
+          <Animated.View style={{ transform: [{ translateX: shift }] }}>
+            <Reveal ready={ready} skeleton={<AgendaSkeleton />} style={styles.viewBody}>
+              {view === 'day' ? dayBody() : view === 'week' ? weekBody() : monthBody()}
+            </Reveal>
+          </Animated.View>
+        </ScrollView>
+      </View>
 
       <BookSheet
         visible={bookAt !== null}
@@ -853,12 +989,37 @@ function longDay(at: number): string {
   return `${weekdayName(at)} ${d.getDate()} ${MONTH_SHORT[d.getMonth()]}`;
 }
 
-/** Where a booking starts when nothing was tapped: the next round hour. */
-function defaultSlot(day: number, now: number): number {
-  const base = day === startOfDay(now) ? now : day + 6 * 3_600_000;
-  const d = new Date(base);
-  d.setMinutes(0, 0, 0);
-  return d.getTime() + (day === startOfDay(now) ? 3_600_000 : 0);
+/**
+ * Where a booking starts when nothing was tapped.
+ *
+ * The moment this day opens for work, not a fixed 06:00 — a trainer whose
+ * Tuesday starts at 17:00 was being handed 06:00 and made to nudge eleven
+ * hours, and one who starts at 05:00 was being handed an hour they had already
+ * spent. The hours are already on screen behind this sheet; opening anywhere
+ * else contradicts them.
+ *
+ * On today the clock wins over the calendar: the next round hour, unless the
+ * day has not opened yet, in which case it is the opening. A day with no hours
+ * at all — or one already over — falls back to the next round hour, which is at
+ * least a real time rather than midnight. The trainer is never *held* to any of
+ * this; §07 keeps their own booking free of working hours entirely.
+ */
+function defaultSlot(input: DiaryInput, day: number, now: number): number {
+  const windows = mergeWindows(input.hours.filter((h) => h.weekday === isoWeekday(day)));
+
+  if (day !== startOfDay(now)) {
+    return windows[0] ? atMinute(day, windows[0].startMinute) : day + 6 * 3_600_000;
+  }
+
+  const next = new Date(now);
+  next.setMinutes(0, 0, 0);
+  next.setHours(next.getHours() + 1);
+  const hour = next.getTime();
+
+  // The first window that has not already closed — on a split shift at 14:00
+  // that is the evening, not the morning that ended three hours ago.
+  const live = windows.find((w) => atMinute(day, w.endMinute) > hour);
+  return live ? Math.max(atMinute(day, live.startMinute), hour) : hour;
 }
 
 function idleNames(idle: { name: string }[]): string {
@@ -896,6 +1057,7 @@ const styles = StyleSheet.create({
   batchEnd: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
   safe: { flex: 1, backgroundColor: colors.canvas },
   pad: { paddingHorizontal: space.inset },
+  swipe: { flex: 1 },
   body: { paddingHorizontal: space.inset, paddingBottom: space.s10 },
   banner: { marginBottom: space.s2 },
   strip: { marginTop: 10 },

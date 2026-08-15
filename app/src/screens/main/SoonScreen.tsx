@@ -40,23 +40,39 @@ type Stub = {
   existing?: { label: string; go: (nav: NativeStackNavigationProp<MainStackParamList>) => void };
 };
 
+/**
+ * All three of these are drawn now and all three are tabs, so the stub for each
+ * one hands you to the tab rather than to the pre-design screen it used to
+ * offer — those are deleted. The entries stay because a stale deep link into
+ * `Soon` should still land somewhere useful.
+ */
 const STUBS: Record<string, Stub> = {
   clients: {
     title: 'Clients',
-    body: 'The roster, with the status chips and the search. Being designed next.',
+    body: 'The roster, with the status chips and the search.',
     icon: IconUsers,
-    existing: { label: 'Open the current roster', go: (nav) => nav.navigate('Clients') },
+    existing: {
+      label: 'Open the roster',
+      go: (nav) => nav.navigate('Home', { screen: 'ClientsTab' } as never),
+    },
   },
   diary: {
     title: 'Diary',
-    body: 'The week, the day, and rescheduling by drag. Being designed next.',
+    body: 'The week, the day, and rescheduling by drag.',
     icon: IconCalendar,
-    existing: { label: 'Open the current calendar', go: (nav) => nav.navigate('Calendar', {}) },
+    existing: {
+      label: 'Open the diary',
+      go: (nav) => nav.navigate('Home', { screen: 'DiaryTab' } as never),
+    },
   },
   money: {
     title: 'Money',
     body: 'Packages, payments and what each client owes — the thing every other platform locks to a desktop browser.',
     icon: IconRupee,
+    existing: {
+      label: 'Open the book',
+      go: (nav) => nav.navigate('Home', { screen: 'MoneyTab' } as never),
+    },
   },
 };
 

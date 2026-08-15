@@ -323,6 +323,34 @@ export function isoWeekday(at: number): number {
   return (new Date(at).getDay() + 6) % 7;
 }
 
+/** What the three diary views step by. */
+export type DiaryView = 'day' | 'week' | 'month';
+
+/**
+ * The neighbouring day, week or month — where a horizontal swipe lands.
+ *
+ * Calendar arithmetic rather than `anchor ± n * DAY_MS`, because the two stop
+ * agreeing the moment a clock changes: adding 24 hours across a DST boundary
+ * lands at 23:00 the previous day or 01:00 the next, and the diary would skip
+ * or repeat a day once a year. India has no DST today, which makes this the
+ * kind of bug that ships and then waits.
+ *
+ * A month step clamps the date: from 31 March, one month back is 28 February,
+ * not the 3 March that overflowing would give.
+ */
+export function stepAnchor(view: DiaryView, anchor: number, delta: 1 | -1): number {
+  const d = new Date(anchor);
+  const y = d.getFullYear();
+
+  if (view === 'day') return new Date(y, d.getMonth(), d.getDate() + delta).getTime();
+  if (view === 'week') return new Date(y, d.getMonth(), d.getDate() + 7 * delta).getTime();
+
+  const month = d.getMonth() + delta;
+  // Day 0 of the following month is the last day of this one.
+  const lastDate = new Date(y, month + 1, 0).getDate();
+  return new Date(y, month, Math.min(d.getDate(), lastDate)).getTime();
+}
+
 /**
  * 24-hour, always.
  *
@@ -342,10 +370,25 @@ export function minuteOfDay(at: number): number {
   return d.getHours() * 60 + d.getMinutes();
 }
 
-function atMinute(dayStart: number, minute: number): number {
+export function atMinute(dayStart: number, minute: number): number {
   const d = new Date(dayStart);
   d.setHours(0, minute, 0, 0);
   return d.getTime();
+}
+
+/**
+ * Is a span entirely inside one of these windows?
+ *
+ * One window, not the union of several: a session running 10:30–11:30 across a
+ * 06:00–11:00 morning and an 11:00–15:00 midday window is only covered because
+ * `mergeWindows` already welded those two into one. Callers must merge first,
+ * which every caller here does.
+ *
+ * A zero-length span is covered if its instant is; nothing else treats a
+ * boundary as outside, so `endMinute` is inclusive of the window's end.
+ */
+export function coveredBy(windows: TimeWindow[], startMinute: number, endMinute: number): boolean {
+  return mergeWindows(windows).some((w) => startMinute >= w.startMinute && endMinute <= w.endMinute);
 }
 
 function readState(status: string): SessionState {
@@ -1031,67 +1074,96 @@ export interface MoveSuggestion {
   why: string;
 }
 
+/** One day's worth of somewhere-to-move-to, for the move pane's list. */
+export interface MoveDay {
+  /** Start of day, and the list key. */
+  day: number;
+  /** "Today" · "Tomorrow" · "Tue 18 Aug" */
+  label: string;
+  slots: MoveSuggestion[];
+}
+
+/** How far ahead the move pane looks. Two weeks is past any real reschedule. */
+export const MOVE_HORIZON_DAYS = 14;
+
 /**
- * Three ranked slots before the date picker.
+ * Every slot this session could move into, grouped by day.
  *
- * Ranked by *when that client usually trains*, because a picker is what you
- * show when you have nothing intelligent to say. Their own weekly slots first,
- * then the nearest free time today, then the same time tomorrow.
+ * This replaced a ranked top-three, which was the right shape for a prompt and
+ * the wrong one for a list: a morning session filled all three slots from its
+ * own morning window, so a trainer moving somebody to Thursday evening was told
+ * their only options were 9am, 10am and 11am. Ranking cannot fix that — the
+ * list has to be complete and it has to scroll. What ranking was for survives
+ * as the reason on each row.
+ *
+ * Still only genuinely free time — working hours minus blocks minus what is
+ * already booked, which is what `buildDay` computes — and only slots long
+ * enough to hold this session. A day with nothing free is omitted rather than
+ * listed empty.
  */
-export function suggestMoves(
+export function moveOptions(
   input: DiaryInput,
   session: DiarySession,
   now: number,
-  limit = 3,
-): MoveSuggestion[] {
+  days = MOVE_HORIZON_DAYS,
+): MoveDay[] {
   const client = input.clients.find((c) => c.id === session.clientId);
-  if (!client) return [];
-
+  const usual = client ? usualSlots(client) : [];
   const from = ms(session.scheduledAt);
   const minutes = session.durationMinutes || DEFAULT_SESSION_MIN;
   const today = startOfDay(now);
-  const out: MoveSuggestion[] = [];
-  const seen = new Set<number>();
 
-  const add = (at: number, why: string) => {
-    if (at <= now || seen.has(at) || out.length >= limit) return;
-    seen.add(at);
-    const { time, meridiem } = clockParts(at);
-    out.push({ at, time, meridiem, dayLabel: dayName(at, today), why });
-  };
+  const out: MoveDay[] = [];
 
-  // 1 — the rest of today, in their own free slots.
-  const todayGaps = buildDay(input, today, now).gaps;
-  for (const gap of todayGaps) {
-    for (const slot of gap.slots) {
-      if (slot.at > from && slot.minutes >= minutes) {
-        const later = Math.round((slot.at - from) / 3_600_000);
-        add(slot.at, later >= 1 ? `${later} hour${later === 1 ? '' : 's'} later · floor free` : 'Later today · floor free');
-      }
-    }
-  }
-
-  // 2 — their usual slots over the next week.
-  for (let i = 1; i <= 7 && out.length < limit; i += 1) {
+  for (let i = 0; i < days; i += 1) {
     const day = today + i * DAY_MS;
     const weekday = isoWeekday(day);
-    for (const slot of usualSlots(client)) {
-      if (slot.day !== weekday) continue;
-      add(atMinute(day, slot.minute), `Their usual ${DAY_SHORT[weekday]} slot`);
-    }
-  }
+    const slots: MoveSuggestion[] = [];
 
-  // 3 — free slots over the next few days, so there is always something.
-  for (let i = 1; i <= 7 && out.length < limit; i += 1) {
-    const day = today + i * DAY_MS;
     for (const gap of buildDay(input, day, now).gaps) {
       for (const slot of gap.slots) {
-        if (slot.minutes >= minutes) add(slot.at, 'Floor free');
+        // The session's own slot is already excluded — it is busy, so it was
+        // never a gap. What has to go is the past and anything too short.
+        if (slot.at <= now || slot.minutes < minutes) continue;
+        const { time, meridiem } = clockParts(slot.at);
+        slots.push({
+          at: slot.at,
+          time,
+          meridiem,
+          dayLabel: dayName(slot.at, today),
+          why: moveReason(slot.at, from, weekday, usual, today),
+        });
       }
     }
+
+    if (slots.length > 0) out.push({ day, label: dayName(day, today), slots });
   }
 
   return out;
+}
+
+/** Why this slot is worth reading, in the four words the row has for it. */
+function moveReason(
+  at: number,
+  from: number,
+  weekday: number,
+  usual: { day: number; minute: number }[],
+  today: number,
+): string {
+  if (usual.some((s) => s.day === weekday && s.minute === minuteOfDay(at))) {
+    return `Their usual ${DAY_SHORT[weekday]} slot`;
+  }
+
+  if (startOfDay(at) !== today) return 'Floor free';
+
+  // Same day as the session it is moving off: say the distance, which is the
+  // thing being weighed. Signed, because a 6am session can move to 9am and a
+  // 6pm one can move to 9am too, and "9 hours later" would be a lie in the
+  // second case.
+  const shift = Math.round((at - from) / 3_600_000);
+  if (shift === 0) return 'Later today · floor free';
+  const unit = Math.abs(shift) === 1 ? 'hour' : 'hours';
+  return shift > 0 ? `${shift} ${unit} later · floor free` : `${-shift} ${unit} earlier · floor free`;
 }
 
 function dayName(at: number, today: number): string {

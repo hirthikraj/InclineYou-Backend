@@ -8,7 +8,6 @@ import SoonScreen from '../screens/main/SoonScreen';
 import AddClientScreen from '../screens/main/clients/AddClientScreen';
 import AddClientPayScreen from '../screens/main/clients/AddClientPayScreen';
 import ClientAddedScreen from '../screens/main/clients/ClientAddedScreen';
-import ClientRosterScreen from '../screens/main/ClientRosterScreen';
 import ClientSearchScreen from '../screens/main/clients/ClientSearchScreen';
 import WorkingHoursScreen from '../screens/main/diary/WorkingHoursScreen';
 import ClientFileScreen from '../screens/main/clients/ClientFileScreen';
@@ -18,7 +17,6 @@ import BodyMetricsScreen from '../screens/main/clients/BodyMetricsScreen';
 import ExercisePickerScreen from '../screens/main/ExercisePickerScreen';
 import ProgramListScreen from '../screens/main/ProgramListScreen';
 import ProgramDetailScreen from '../screens/main/ProgramDetailScreen';
-import SessionListScreen from '../screens/main/SessionListScreen';
 import SessionDetailScreen from '../screens/main/SessionDetailScreen';
 // Screen 17 · the workout log
 import LogPickScreen from '../screens/main/log/LogPickScreen';
@@ -27,11 +25,8 @@ import FinishScreen from '../screens/main/log/FinishScreen';
 import TodaysBestsScreen from '../screens/main/log/TodaysBestsScreen';
 import SessionProgressScreen from '../screens/main/log/SessionProgressScreen';
 import ExerciseHistoryScreen from '../screens/main/log/ExerciseHistoryScreen';
-import ProgressScreen from '../screens/main/ProgressScreen';
 import PackageListScreen from '../screens/main/PackageListScreen';
 import PackageDetailScreen from '../screens/main/PackageDetailScreen';
-import CalendarScreen from '../screens/main/CalendarScreen';
-import NudgesScreen from '../screens/main/NudgesScreen';
 import OwedScreen from '../screens/main/money/OwedScreen';
 import BookScreen from '../screens/main/money/BookScreen';
 import MoneyPacksScreen from '../screens/main/money/PacksScreen';
@@ -46,6 +41,9 @@ import ExercisesScreen from '../screens/main/drawer/ExercisesScreen';
 import ExerciseScreen from '../screens/main/drawer/ExerciseScreen';
 import ReportsScreen from '../screens/main/drawer/ReportsScreen';
 import MetricScreen from '../screens/main/drawer/MetricScreen';
+import WeeklyScreen from '../screens/main/drawer/WeeklyScreen';
+import WeekReportScreen from '../screens/main/drawer/WeekReportScreen';
+import SyncQueueScreen from '../screens/main/drawer/SyncQueueScreen';
 import AdherenceScreen from '../screens/main/drawer/AdherenceScreen';
 import NudgeRulesScreen from '../screens/main/drawer/NudgeRulesScreen';
 import SettingsScreen from '../screens/main/drawer/SettingsScreen';
@@ -62,7 +60,6 @@ export type MainStackParamList = {
   Search: undefined;
   /** The honest placeholder for a destination that isn't designed yet. */
   Soon: { title?: string } | undefined;
-  Clients: undefined;
   /** Screen 04 · § 02 — the roster's own full-screen search. */
   ClientSearch: undefined;
   /** Screen 05 · § 5a — weekly working hours. */
@@ -80,7 +77,6 @@ export type MainStackParamList = {
   ProgramList: { clientId: string };
   ProgramDetail: { programId: string };
   // M3
-  SessionList: { clientId?: string };
   SessionDetail: { sessionId: string };
   /**
    * The + button's "Log a workout": who for.
@@ -105,15 +101,9 @@ export type MainStackParamList = {
   SessionProgress: { clientId: string };
   /** 5b — one exercise, one client, every set. */
   ExerciseHistory: { clientId: string; exerciseId: string };
-  // M4
-  Progress: { clientId: string; clientName?: string };
   // M5
   PackageList: { clientId: string; clientName?: string };
   PackageDetail: { packageId: string; clientId: string };
-  // M6
-  Calendar: { selectedDate?: string };
-  // M7
-  Nudges: { clientId: string; clientName?: string };
   /** Screen 06 · § 2a — everything outstanding, sorted by how late. */
   MoneyOwed: undefined;
   /** Screen 06 · § 4a — one client's book. `record` opens the sheet on arrival. */
@@ -127,7 +117,14 @@ export type MainStackParamList = {
 
   /** 2a — you and your business. */
   Profile: undefined;
-  /** 2b's destination. The mode sheet lives in the shell; this is what it opens. */
+  /**
+   * 2b's destination. The mode sheet lives in the shell; this is what it opens.
+   *
+   * Unreachable while `SELF_TRAINING_ENABLED` is false — every way in is gated
+   * on that constant. The route stays registered so switching the feature back
+   * on is the one-line flip it claims to be, and so nothing that navigates here
+   * has to be re-typed when it is.
+   */
   SelfTraining: undefined;
   /** 3a — the program shelf. */
   Programs: undefined;
@@ -138,9 +135,10 @@ export type MainStackParamList = {
   /** 3c — the exercise library. */
   /**
    * `pickFor` turns the library into a picker: a row adds that exercise to the
-   * program's day and pops, rather than opening it.
+   * program's day and pops, rather than opening it. `week` is which week of the
+   * program the day belongs to — omitted means week 1.
    */
-  Exercises: { pickFor?: { templateId: string; day: number } } | undefined;
+  Exercises: { pickFor?: { templateId: string; day: number; week?: number } } | undefined;
   /**
    * 3d — one exercise. `clientId` scopes the records and history to them, which
    * is what the tap map means by "per client when you arrive from a client".
@@ -150,6 +148,16 @@ export type MainStackParamList = {
   Reports: undefined;
   /** 4b — inside a metric. */
   Metric: { metric: 'delivered' | 'training'; range: '7d' | '30d' | 'year' };
+  /** 7a · 7c — every weekly report that went out, and what happened to it. */
+  Weekly: undefined;
+  /**
+   * 7a · 7b — one client's week, and sending it again.
+   *
+   * By report from the weekly list, or by client from their file, which resolves
+   * to their most recent one. Two ways in because there are two questions:
+   * "what went out on the 3rd?" and "what did Ravi last get?".
+   */
+  WeekReport: { reportId?: string; clientId?: string };
   /** 4c — adherence. */
   Adherence: undefined;
   /** 4d — the if/then rules. `tab` opens on Waiting when the badge is non-zero. */
@@ -164,6 +172,14 @@ export type MainStackParamList = {
   Help: undefined;
   /** 5e — sign out, which blocks on unsynced writes. */
   SignOut: undefined;
+  /**
+   * 8a–8c — what is waiting to reach the server, and why.
+   *
+   * Not a drawer destination. Every "Queued" tag in the app is its entry point,
+   * which is the only way in that makes sense: nobody goes looking for a sync
+   * queue, they tap the thing that told them something was queued.
+   */
+  SyncQueue: undefined;
 };
 
 const Stack = createNativeStackNavigator<MainStackParamList>();
@@ -182,7 +198,6 @@ export default function MainStack() {
       <Stack.Screen name="Notifications" component={NotificationsScreen} />
       <Stack.Screen name="Search" component={SearchScreen} />
       <Stack.Screen name="Soon" component={SoonScreen} />
-      <Stack.Screen name="Clients" component={ClientRosterScreen} />
       <Stack.Screen name="ClientSearch" component={ClientSearchScreen} />
       <Stack.Screen name="WorkingHours" component={WorkingHoursScreen} />
       <Stack.Screen name="AddClient" component={AddClientScreen} />
@@ -195,7 +210,6 @@ export default function MainStack() {
       <Stack.Screen name="ExercisePicker" component={ExercisePickerScreen} />
       <Stack.Screen name="ProgramList" component={ProgramListScreen} />
       <Stack.Screen name="ProgramDetail" component={ProgramDetailScreen} />
-      <Stack.Screen name="SessionList" component={SessionListScreen} />
       <Stack.Screen name="SessionDetail" component={SessionDetailScreen} />
       <Stack.Screen name="LogPick" component={LogPickScreen} />
       <Stack.Screen name="WorkoutLog" component={LogScreen} />
@@ -203,11 +217,8 @@ export default function MainStack() {
       <Stack.Screen name="TodaysBests" component={TodaysBestsScreen} />
       <Stack.Screen name="SessionProgress" component={SessionProgressScreen} />
       <Stack.Screen name="ExerciseHistory" component={ExerciseHistoryScreen} />
-      <Stack.Screen name="Progress" component={ProgressScreen} />
       <Stack.Screen name="PackageList" component={PackageListScreen} />
       <Stack.Screen name="PackageDetail" component={PackageDetailScreen} />
-      <Stack.Screen name="Calendar" component={CalendarScreen} />
-      <Stack.Screen name="Nudges" component={NudgesScreen} />
       <Stack.Screen name="MoneyOwed" component={OwedScreen} />
       <Stack.Screen name="MoneyBook" component={BookScreen} />
       <Stack.Screen name="MoneyPacks" component={MoneyPacksScreen} />
@@ -223,6 +234,8 @@ export default function MainStack() {
       <Stack.Screen name="Exercise" component={ExerciseScreen} />
       <Stack.Screen name="Reports" component={ReportsScreen} />
       <Stack.Screen name="Metric" component={MetricScreen} />
+      <Stack.Screen name="Weekly" component={WeeklyScreen} />
+      <Stack.Screen name="WeekReport" component={WeekReportScreen} />
       <Stack.Screen name="Adherence" component={AdherenceScreen} />
       <Stack.Screen name="NudgeRules" component={NudgeRulesScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />
@@ -230,6 +243,7 @@ export default function MainStack() {
       <Stack.Screen name="NotifySettings" component={NotifySettingsScreen} />
       <Stack.Screen name="Help" component={HelpScreen} />
       <Stack.Screen name="SignOut" component={SignOutScreen} />
+      <Stack.Screen name="SyncQueue" component={SyncQueueScreen} />
     </Stack.Navigator>
   );
 }

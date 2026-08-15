@@ -355,5 +355,94 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    {
+      /**
+       * V18 · the client's own consent, mirrored onto the device.
+       *
+       * One nullable column, and the app never writes it. `status` stays the
+       * trainer's view of the arrangement — active, paused, archived — and this
+       * carries the CLIENT's answer to being added at all: invited, accepted,
+       * declined, paused, removed, or `unavailable` when the number turns out to
+       * belong to a trainer account and no invite can ever reach it.
+       *
+       * Nullable because it arrives from the server, so a row written offline
+       * has nothing to put here until the next pull — and a null reads as "not
+       * told yet", which is the honest answer rather than a guess.
+       */
+      toVersion: 13,
+      steps: [
+        addColumns({
+          table: 'clients',
+          columns: [{ name: 'membership_status', type: 'string', isOptional: true }],
+        }),
+      ],
+    },
+    {
+      /**
+       * V14 · the gym's price list, and what came off a price at the till.
+       *
+       * A trainer employed at a gym sells two different things: their own packs,
+       * which they price, and the gym's packages, which they don't. Both are
+       * price-list entries with a name, a session count and an amount, so they
+       * are the same table with an owner rather than a second table that would
+       * have to be joined into every place a pack is read.
+       *
+       * `owner` is nullable and null means 'trainer' — every row that exists
+       * today was the trainer's own, and back-filling would rewrite history to
+       * say something it never said.
+       *
+       * `discount_amount` sits on the SOLD package, not on the pack: a discount
+       * is something given to one client on one sale, and putting it on the
+       * price list would change what everyone else is quoted.
+       */
+      toVersion: 14,
+      steps: [
+        addColumns({
+          table: 'packs',
+          columns: [{ name: 'owner', type: 'string', isOptional: true }],
+        }),
+        addColumns({
+          table: 'packages',
+          columns: [{ name: 'discount_amount', type: 'number', isOptional: true }],
+        }),
+      ],
+    },
+    {
+      /**
+       * V15 · a program has weeks, and it has days it trains on.
+       *
+       * Two nullable columns, and between them they turn a program from one
+       * week's shape into something a trainer can actually author.
+       *
+       * `training_days` is the layout: the weekdays the program runs on, "1,3,5"
+       * for Mon/Wed/Fri. It has to exist apart from the blueprint because a
+       * program is laid out *before* it is filled — until now the only record of
+       * a day was an exercise sitting on it, which meant Tuesday did not exist
+       * until something was on Tuesday, and there was no way to put the first
+       * thing there.
+       *
+       * `week` is the progression. It is on the exercise rather than on the
+       * program because that is what differs: week 3's Monday is week 1's Monday
+       * with heavier numbers, and a per-week row is the only shape that can say
+       * so. Null reads as week 1 — every row written before this migration was
+       * one week's shape repeated, and back-filling a 1 onto them would claim
+       * the trainer authored a week they never opened.
+       *
+       * The blueprint carries the same `week` inside `templates.structure`,
+       * where it needs no migration at all: it is JSON, and `parseBlueprint`
+       * already reads an entry missing a field as that field being unset.
+       */
+      toVersion: 15,
+      steps: [
+        addColumns({
+          table: 'templates',
+          columns: [{ name: 'training_days', type: 'string', isOptional: true }],
+        }),
+        addColumns({
+          table: 'program_exercises',
+          columns: [{ name: 'week', type: 'number', isOptional: true }],
+        }),
+      ],
+    },
   ],
 });

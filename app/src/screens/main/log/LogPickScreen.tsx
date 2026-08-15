@@ -34,6 +34,7 @@ import { buildLogPick } from '../../../log/log';
 import { startUnbookedLog } from '../../../db/log';
 import { startSession } from '../../../db/sessions';
 import { useAuth } from '../../../store/AuthContext';
+import { SELF_TRAINING_ENABLED } from '../../../settings/prefs';
 import {
   AppBar,
   Avatar,
@@ -222,17 +223,20 @@ export default function LogPickScreen() {
             the session count in the diary stays what it was.
           </Callout>
 
-          {/* The + sheet promises "for a client, or for yourself". The second
-              half is not built, and a row that says where it went is better
-              than a promise with nothing behind it. */}
-          <Row
-            leading={<IconUser size={18} color={colors.ink3} />}
-            title="Log your own workout"
-            subtitle="Your own training is a separate book — and not built yet"
-            trailing={<IconChevron size={18} color={colors.ink3} />}
-            onPress={() => navigation.navigate('SelfTraining')}
-            style={styles.self}
-          />
+          {/* The + sheet used to promise "for a client, or for yourself", and
+              this row said where the second half went. Both are gone while
+              self-training is off — the sheet no longer promises it, so there
+              is nothing left to explain. */}
+          {SELF_TRAINING_ENABLED ? (
+            <Row
+              leading={<IconUser size={18} color={colors.ink3} />}
+              title="Log your own workout"
+              subtitle="Your own training is a separate book — and not built yet"
+              trailing={<IconChevron size={18} color={colors.ink3} />}
+              onPress={() => navigation.navigate('SelfTraining')}
+              style={styles.self}
+            />
+          ) : null}
         </ScrollView>
       )}
 

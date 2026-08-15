@@ -35,8 +35,7 @@ public class SecurityConfig {
         return new RequestAttributeSecurityContextRepository();
     }
 
-    // Prevents Spring Boot from auto-configuring an InMemoryUserDetailsManager.
-    // All authentication goes through the JWT filter; UserDetailsService is never called.
+    // Prevents Spring Boot from Auto configuring an InMemoryUserDetailsManager. All authentication goes through the JWT filter; UserDetailsService is never called.
     @Bean
     public UserDetailsService noOpUserDetailsService() {
         return username -> { throw new UsernameNotFoundException("JWT auth only"); };
@@ -51,19 +50,9 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .securityContext(ctx -> ctx.securityContextRepository(securityContextRepository()))
                 .authorizeHttpRequests(auth -> auth
-                        // First match wins, so the one authenticated endpoint
-                        // under /v1/auth has to be named before the wildcard.
-                        // Screen 7a: the number verified and is on nobody's
-                        // roster, and claiming a trainer account off the back of
-                        // that must prove which number it was.
                         .requestMatchers("/v1/auth/trainer").authenticated()
+                        .requestMatchers("/v1/auth/membership/**").hasRole("INVITED")
                         .requestMatchers("/v1/auth/**", "/health").permitAll()
-                        // FR-11 · the client role. Two separate surfaces on one
-                        // deployment, and the gate between them is here rather
-                        // than in each controller: a client token must never
-                        // reach a roster, and a trainer token has no business on
-                        // the client endpoints either — its subject is a trainer
-                        // id, and every client route reads a phone.
                         .requestMatchers("/v1/client/**").hasRole("CLIENT")
                         .anyRequest().hasRole("TRAINER")
                 )
@@ -71,11 +60,6 @@ public class SecurityConfig {
                         .authenticationEntryPoint((req, res, e) -> res.sendError(401, "Unauthorized"))
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
-                // After the JWT filter, on purpose: a caller with a token is
-                // counted as themselves rather than as their network, and traffic
-                // that will end in 401 is still counted, because authorisation
-                // has not run yet. Both halves matter and only this position has
-                // them.
                 .addFilterAfter(rateLimitFilter, JwtAuthFilter.class)
                 .build();
     }

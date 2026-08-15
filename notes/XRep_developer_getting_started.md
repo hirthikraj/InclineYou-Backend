@@ -55,7 +55,7 @@ Do these in the first 1–3 weeks. Some run in parallel with environment setup (
 - [ ] **Expo CLI + EAS CLI** (`npm i -g eas-cli`).
 - [ ] **Android Studio** — for the SDK + an emulator.
 - [ ] **A real, low-cost Android phone** — essential. Your users are on cheap Androids in bad lighting with poor signal; the emulator won't tell you the truth.
-- [ ] **Docker** — run PostgreSQL locally via Docker Compose.
+- [ ] **Docker** — run PostgreSQL **and Redis** locally via Docker Compose (`docker compose up -d`).
 - [ ] **Git**, plus IntelliJ IDEA (backend) and VS Code (React Native).
 
 ### 2.3 Accounts to create
@@ -84,7 +84,7 @@ Goal of M0: a working skeleton and **one vertical slice through the hardest part
 
 ### 3.1 Backend skeleton
 1. Generate a Spring Boot project (Spring Initializr) with: Web, Spring Data JPA, PostgreSQL driver, Validation, Security.
-2. Bring up PostgreSQL with Docker Compose.
+2. Bring up PostgreSQL and Redis with Docker Compose. Redis holds the one-time codes (TTL'd) and the rate-limit buckets; the app runs without it, falling back to Postgres and in-process counters.
 3. Add a migration tool (Flyway or Liquibase) and create the core tables from the data model (Trainer, Client, Exercise, Program, WorkoutSession, SetLog, Package, Payment, ScheduledSession, NudgeLog).
 4. Build **phone-OTP auth**: request-OTP + verify-OTP endpoints, issue a JWT. (Stub SMS in dev; wire a real provider later.)
 5. Implement the **`/sync` endpoint** contract: accept a batch of changed records (client-generated UUIDs + `updated_at`), return server changes since the client's cursor. Use soft deletes.

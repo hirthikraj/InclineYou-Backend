@@ -109,7 +109,7 @@ export default function OwedScreen() {
         {rows.length === 0 && ready ? (
           <Empty
             icon={IconWallet}
-            title="Hisaab clear"
+            title="Everything clear"
             body="Every client is paid up. Nothing to chase."
             style={styles.empty}
           />

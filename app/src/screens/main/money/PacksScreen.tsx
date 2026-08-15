@@ -11,6 +11,11 @@
  *
  * "Ending soon" is here rather than on the roster because renewing is a money
  * decision, and this is where the prices are.
+ *
+ * A trainer employed at a gym keeps **two** price lists here, in two groups: the
+ * packs they set, and the packages the gym's counter sells. They are separated
+ * rather than mixed because only one of them is theirs to change — and because
+ * adding a client asks which of the two applies before it asks anything else.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -43,7 +48,7 @@ import {
   colors,
   space,
 } from '../../../design';
-import PackSheet, { BLANK_PACK, type PackDraft } from './PackSheet';
+import PackSheet, { BLANK_GYM_PACK, BLANK_PACK, type PackDraft } from './PackSheet';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
@@ -57,6 +62,7 @@ export default function PacksScreen() {
   const [notice, setNotice] = useState<string | null>(null);
 
   const view = useMemo(() => buildPacks(input, now), [input, now]);
+  const gym = input.gym.name;
   const mostSold = useMemo(() => {
     const top = [...view.selling].sort((a, b) => b.clients - a.clients)[0];
     return top && top.clients > 0 ? top.id : null;
@@ -83,9 +89,14 @@ export default function PacksScreen() {
           sessions: pack.sessions,
           amount: pack.amount,
           validityDays: pack.validityDays,
+          owner: pack.owner ?? 'trainer',
           orderIndex: input.packs.length,
         });
-        setNotice(`${pack.name} added to your price list.`);
+        setNotice(
+          pack.owner === 'gym'
+            ? `${pack.name} added to ${gym ?? 'the gym'}'s list.`
+            : `${pack.name} added to your price list.`,
+        );
       }
     } catch {
       setNotice('Could not save that pack.');
@@ -166,6 +177,7 @@ export default function PacksScreen() {
                       sessions: pack.sessions,
                       amount: pack.amount,
                       validityDays: null,
+                      owner: 'trainer',
                     })
                   }
                   onLongPress={() => retire(pack.id, pack.name, pack.clients)}
@@ -174,6 +186,56 @@ export default function PacksScreen() {
             </List>
           </>
         )}
+
+        {/* The gym's own counter prices. Shown only once there is a gym to
+            attribute them to — an unnamed price list belongs to nobody. */}
+        {gym ? (
+          <>
+            <GroupHead
+              label={`${gym} sells`}
+              count={view.gymSelling.length}
+              style={styles.head}
+            />
+            {view.gymSelling.length > 0 ? (
+              <List>
+                {view.gymSelling.map((pack) => (
+                  <Row
+                    key={pack.id}
+                    grouped
+                    title={`${pack.name} · ${rupees(pack.amount)}`}
+                    subtitle={pack.detail}
+                    leading={<IconWallet size={20} color={colors.ink2} />}
+                    onPress={() =>
+                      setEditing({
+                        id: pack.id,
+                        name: pack.name,
+                        type: pack.type as PackDraft['type'],
+                        sessions: pack.sessions,
+                        amount: pack.amount,
+                        validityDays: null,
+                        owner: 'gym',
+                      })
+                    }
+                    onLongPress={() => retire(pack.id, pack.name, pack.clients)}
+                  />
+                ))}
+              </List>
+            ) : (
+              <Callout icon={IconWallet} style={styles.gymBlank}>
+                Nothing from {gym} yet. Add what their counter charges and you can pick it when a
+                client pays the gym instead of you.
+              </Callout>
+            )}
+            <Button
+              label={view.gymSelling.length === 0 ? `Add a ${gym} package` : 'Add another'}
+              variant="ghost"
+              block
+              icon={IconPlus}
+              style={styles.gymAdd}
+              onPress={() => setEditing({ ...BLANK_GYM_PACK })}
+            />
+          </>
+        ) : null}
 
         {view.ending.length > 0 ? (
           <>
@@ -246,6 +308,7 @@ export default function PacksScreen() {
       <PackSheet
         visible={editing !== null}
         draft={editing}
+        gymName={gym}
         onSave={(pack) => void save(pack)}
         onClose={() => setEditing(null)}
       />
@@ -265,6 +328,8 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: space.inset, paddingBottom: space.s10 },
   head: { marginHorizontal: -space.inset },
   empty: { marginTop: space.s7 },
+  gymBlank: { marginTop: space.s2 },
+  gymAdd: { marginTop: space.s3 },
   note: { marginTop: space.s5 },
   toast: { marginHorizontal: space.inset, marginBottom: space.s3 },
 });

@@ -82,7 +82,18 @@ export function useRoster(active: boolean = true): LiveRoster {
     const sub = combineLatest([
       clients
         .query(Q.sortBy('name', Q.asc))
-        .observeWithColumns(['name', 'phone', 'status', 'delivery_mode', 'metadata']),
+        // `membership_status` is server-owned and arrives on a pull rather than
+        // from anything the trainer did, so it has to be watched explicitly —
+        // otherwise the roster would keep showing a client as invited until some
+        // unrelated edit happened to rebuild the row.
+        .observeWithColumns([
+          'name',
+          'phone',
+          'status',
+          'membership_status',
+          'delivery_mode',
+          'metadata',
+        ]),
       programs.query().observeWithColumns(['name', 'start_date', 'end_date', 'status']),
       packages.query().observeWithColumns(['sessions_remaining', 'sessions_total', 'status']),
       payments.query().observeWithColumns(['amount', 'status']),

@@ -13,6 +13,15 @@
  * gone with them: Reports and Adherence now sit with Nudges under Growth, which
  * is what all three are for.
  *
+ * ── And the mode switch, for now ──────────────────────────────────────────
+ *
+ * "Switch to my own training" sat in the header block between the profile and
+ * the destinations. It is hidden behind `SELF_TRAINING_ENABLED` — see the note
+ * on that constant. Hidden rather than shown-and-refused, the same way batches
+ * are: the header is the first thing read on every drawer open, and a row there
+ * that leads to "not built yet" is the app admitting it is unfinished before
+ * the trainer has reached anything they came for.
+ *
  * ── Badges ────────────────────────────────────────────────────────────────
  *
  * Only where a number drives an action. Nudges carries how many drafts are
@@ -38,6 +47,7 @@ import type PaymentModel from '../../../db/models/Payment';
 import type NudgeLogModel from '../../../db/models/NudgeLog';
 import { buildWaiting, type NudgeInput } from '../../../nudges/rules';
 import { loadDraft } from '../../../setup/draft';
+import { SELF_TRAINING_ENABLED } from '../../../settings/prefs';
 import { usePrefs } from '../../../settings/usePrefs';
 import {
   Avatar,
@@ -73,14 +83,15 @@ export interface AppDrawerProps {
   onClose: () => void;
   /** Every destination the drawer reaches. All seven are built. */
   onNavigate: (key: DrawerKey) => void;
-  onSwitchMode: () => void;
+  /** Optional while `SELF_TRAINING_ENABLED` is off — nothing can call it. */
+  onSwitchMode?: () => void;
   onSignOut: () => void;
 }
 
 /**
- * The nine interactions: the profile block, the mode switch, seven destinations
- * and sign out. Payments and Packages are deliberately absent — see the note at
- * the top.
+ * The eight interactions: the profile block, seven destinations and sign out —
+ * plus the mode switch when self-training is switched back on. Payments and
+ * Packages are deliberately absent; see the note at the top.
  */
 export type DrawerKey =
   | 'profile'
@@ -171,19 +182,21 @@ export default function AppDrawer({
             <IconChevron size={18} color={colors.ink3} />
           </Pressable>
 
-          <Pressable
-            onPress={() => {
-              onClose();
-              onSwitchMode();
-            }}
-            accessibilityRole="button"
-            style={({ pressed }) => [styles.switch, pressed && styles.pressed]}
-          >
-            <IconRefresh size={17} color={colors.ink2} />
-            <Text style={styles.switchLabel}>
-              {self ? 'Switch back to coaching' : 'Switch to my own training'}
-            </Text>
-          </Pressable>
+          {SELF_TRAINING_ENABLED ? (
+            <Pressable
+              onPress={() => {
+                onClose();
+                onSwitchMode?.();
+              }}
+              accessibilityRole="button"
+              style={({ pressed }) => [styles.switch, pressed && styles.pressed]}
+            >
+              <IconRefresh size={17} color={colors.ink2} />
+              <Text style={styles.switchLabel}>
+                {self ? 'Switch back to coaching' : 'Switch to my own training'}
+              </Text>
+            </Pressable>
+          ) : null}
         </>
       }
       footer={

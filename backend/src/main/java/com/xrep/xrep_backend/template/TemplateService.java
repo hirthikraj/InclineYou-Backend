@@ -224,13 +224,18 @@ public class TemplateService {
             ep.put("notes",       str(ex.get("notes")));
             ep.put("dayOfWeek",   ex.get("day_of_week"));
             ep.put("orderIndex",  ex.getOrDefault("order_index", 0));
+            // V20. A blueprint entry that predates multi-week programs has no
+            // week on it and means week 1 — copying it as NULL would be the
+            // same thing, but writing the 1 makes the client's plan explicit
+            // about a shape the trainer can now see week by week.
+            ep.put("week",        ex.getOrDefault("week", 1));
             ep.put("now",         Timestamp.from(now));
 
             jdbc.update("""
                     INSERT INTO program_exercise (id, program_id, exercise_id, sets, reps,
-                        rest_seconds, target_load, notes, day_of_week, order_index, created_at, updated_at)
+                        rest_seconds, target_load, notes, day_of_week, week, order_index, created_at, updated_at)
                     VALUES (:id::uuid, :programId::uuid, :exerciseId::uuid, :sets, :reps,
-                        :restSeconds, :targetLoad, :notes, :dayOfWeek, :orderIndex, :now, :now)
+                        :restSeconds, :targetLoad, :notes, :dayOfWeek, :week, :orderIndex, :now, :now)
                     """, ep);
         }
 

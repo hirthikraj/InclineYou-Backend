@@ -78,6 +78,21 @@ public class SyncService {
         // agenda cannot draw a batch row without it — so it rides the same
         // cursor rather than being fetched when a batch happens to be on screen.
         changes.put("batches",              fetchDirect("batch",             "trainer_id", tid, cursor));
+        /*
+         * Drawer 7a–7c · weekly reports.
+         *
+         * The client has had these since V14; the trainer, who is the person the
+         * report is FROM, could not see what went out. Same rows, pulled on the
+         * trainer's cursor — which is the whole point: the figures the trainer
+         * reads and the figures the client reads are one row, not two
+         * calculations that agree today and drift when a set is corrected.
+         *
+         * Pull only. There is no `pushWeeklyReports` and there must not be: the
+         * job writes these, and a phone that could rewrite a sent report would
+         * make every one of them arguable. `idx_weekly_report_trainer` already
+         * indexes exactly this access path.
+         */
+        changes.put("weekly_reports",       fetchDirect("weekly_report",     "trainer_id", tid, cursor));
 
         return new PullResponse(Instant.now().toEpochMilli(), changes);
     }
@@ -292,11 +307,49 @@ public class SyncService {
         if (table == null) return;
 
         for (var record : mergeCreatedUpdated(table)) {
+            String phone = str(record.get("phone"));
+
+            // V18 · one number, one role.
+            //
+            // A number that already owns a trainer account cannot also sit on
+            // somebody's roster: `app_user.role` is exclusive, and sign-in reads
+            // it as the whole answer. Checked here rather than at add-time
+            // because the roster is written offline and there is no network to
+            // ask at the moment the trainer types the number.
+            //
+            // What this does NOT do is drop the row. Only the INVITE is
+            // impossible — the trainer's record of this person is perfectly
+            // valid, and the roster already tells them that an un-invited client
+            // can be scheduled, logged and billed exactly like any other. Losing
+            // the client, their sessions and their payments to enforce a rule
+            // about app access would cost the trainer far more than the rule is
+            // worth, and they would never find out why. So the row lands and
+            // says what happened; `unavailable` is what the roster renders.
+            boolean blocked = phone != null && ownedByATrainer(phone);
+            if (blocked) {
+                log.info("push client: {} owns a trainer account — saved, invite withheld", phone);
+            }
+
+            // The identity, created the moment a trainer names the number. This
+            // is what an invite is FOR — the person does not exist to us until
+            // somebody claims they train with them, and they have not agreed to
+            // anything yet, which is exactly what `membership_status` carries.
+            //
+            // Skipped for a blocked number: an `app_user` already exists for it
+            // and it says trainer, which is the whole reason we are here.
+            if (phone != null && !blocked) {
+                jdbc.update("""
+                        INSERT INTO app_user (phone, role) VALUES (:phone, 'client')
+                        ON CONFLICT (phone) DO NOTHING
+                        """, Map.of("phone", phone));
+            }
+
             var p = new HashMap<String, Object>();
             p.put("id",                    str(record.get("id")));
             p.put("tid",                   tid);
             p.put("name",                  str(record.get("name")));
             p.put("phone",                 record.get("phone"));
+            p.put("blocked",               blocked);
             p.put("goal",                  record.get("goal"));
             p.put("status",                strOrDefault(record.get("status"), "active"));
             p.put("payment_mode",          strOrDefault(record.get("payment_mode"), "trainer_collects"));
@@ -315,13 +368,37 @@ public class SyncService {
                     INSERT INTO client (id, trainer_id, name, phone, goal, status, payment_mode,
                         trainer_split_percent, height_cm, activity_level, metadata,
                         sessions_per_week, session_duration_minutes, weekly_schedule,
-                        delivery_mode, created_at, updated_at)
+                        delivery_mode, membership_status, invited_at, accepted_at,
+                        created_at, updated_at)
                     VALUES (:id::uuid, :tid::uuid, :name, :phone, :goal, :status, :payment_mode,
                         :trainer_split_percent, :height_cm, :activity_level,
                         CAST(:metadata AS jsonb),
                         :sessions_per_week, :session_duration_minutes,
                         CAST(:weekly_schedule AS jsonb),
                         :delivery_mode,
+                        -- V18 · a trainer adding a number is a CLAIM, not a
+                        -- relationship. It becomes one when the client accepts.
+                        -- A client with no phone can never sign in to answer, so
+                        -- there is nobody to ask and nothing to hold up: their
+                        -- record is the trainer's alone and starts accepted.
+                        -- `unavailable` is the third case: the number is real but
+                        -- belongs to a trainer account, so no invite can ever be
+                        -- sent to it and the roster has to say so.
+                        -- CAST on every :phone here, and it is not decoration.
+                        -- NamedParameterJdbcTemplate expands each occurrence
+                        -- into its own `?`, so a :phone that appears only in an
+                        -- `IS NULL` test has no inferable type and Postgres
+                        -- refuses the statement with "could not determine data
+                        -- type" — but ONLY when the value really is null, which
+                        -- is exactly the client-with-no-phone case.
+                        CASE WHEN CAST(:blocked AS boolean)   THEN 'unavailable'
+                             WHEN CAST(:phone AS varchar) IS NULL THEN 'accepted'
+                             ELSE 'invited' END,
+                        CASE WHEN CAST(:blocked AS boolean)
+                                   OR CAST(:phone AS varchar) IS NULL
+                             THEN NULL ELSE NOW() END,
+                        CASE WHEN CAST(:phone AS varchar) IS NULL
+                             THEN NOW() ELSE NULL END,
                         COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
                     ON CONFLICT (id) DO UPDATE SET
                         name                    = EXCLUDED.name,
@@ -350,6 +427,71 @@ public class SyncService {
                                 THEN NOW()
                             WHEN EXCLUDED.status = 'paused'
                                 THEN client.paused_at
+                            ELSE NULL
+                        END,
+                        -- V18 · the trainer's end of the arrangement, mirrored
+                        -- onto the client's. Derived here for the same reason
+                        -- `paused_at` is: the trainer's app flips `status` and
+                        -- knows nothing about this column.
+                        --
+                        -- An UNANSWERED invite is never overwritten. A trainer
+                        -- pausing or archiving somebody who has not accepted does
+                        -- not turn the invitation into an answer, and a refusal
+                        -- is not theirs to reverse — those two states belong to
+                        -- the client and only the client's own endpoints move
+                        -- them. `archived` is the removal the notice announces;
+                        -- the hard purge deletes the row outright and has no
+                        -- membership left to describe.
+                        membership_status = CASE
+                            -- Still pointing at a trainer's number. Re-asserted
+                            -- on every push rather than latched, because the
+                            -- other side of it is the recovery below.
+                            WHEN CAST(:blocked AS boolean) THEN 'unavailable'
+                            -- The trainer corrected the number. This is the
+                            -- reason the block is a state and not a rejection:
+                            -- fixing the typo is a plain edit, and the invite
+                            -- that could not be sent before now can be.
+                            WHEN client.membership_status = 'unavailable'
+                                THEN 'invited'
+                            WHEN client.membership_status IN ('invited', 'declined')
+                                THEN client.membership_status
+                            WHEN EXCLUDED.status = 'archived' THEN 'removed'
+                            WHEN EXCLUDED.status = 'paused'   THEN 'paused'
+                            ELSE 'accepted'
+                        END,
+                        -- Stamped when a corrected number finally makes an
+                        -- invite possible, and cleared while it isn't.
+                        --
+                        -- The clock therefore restarts on recovery rather than
+                        -- running from the first attempt, and that is deliberate:
+                        -- the roster ages an invite into "Invited 30 days ago ·
+                        -- not set up", which would be a lie about an invite that
+                        -- only became sendable today. Nobody was ignoring it —
+                        -- it could not be delivered.
+                        invited_at = CASE
+                            WHEN CAST(:blocked AS boolean) THEN NULL
+                            WHEN client.membership_status = 'unavailable' THEN NOW()
+                            ELSE client.invited_at
+                        END,
+                        removed_at = CASE
+                            WHEN CAST(:blocked AS boolean) THEN NULL
+                            WHEN client.membership_status IN ('invited', 'declined', 'unavailable')
+                                THEN client.removed_at
+                            WHEN EXCLUDED.status = 'archived' AND client.status <> 'archived'
+                                THEN NOW()
+                            WHEN EXCLUDED.status = 'archived'
+                                THEN client.removed_at
+                            ELSE NULL
+                        END,
+                        -- Cleared when they are taken off archive, so that a
+                        -- client who is removed, told, and later brought back is
+                        -- told again if it happens a second time.
+                        removed_ack_at = CASE
+                            WHEN CAST(:blocked AS boolean) THEN NULL
+                            WHEN client.membership_status IN ('invited', 'declined', 'unavailable')
+                                THEN client.removed_ack_at
+                            WHEN EXCLUDED.status = 'archived'
+                                THEN client.removed_ack_at
                             ELSE NULL
                         END,
                         updated_at              = EXCLUDED.updated_at
@@ -435,22 +577,27 @@ public class SyncService {
             // V12. How long the program runs, which is what the Programs screen
             // draws its weeks × days matrix from.
             p.put("weeks",       record.get("weeks"));
+            // V20. The weekdays the program trains on, "1,3,5". Held apart from
+            // the blueprint because a day exists as soon as the trainer lays it
+            // out, which is before anything has been put on it.
+            p.put("training_days", record.get("training_days"));
             p.put("created_at",  toTimestamp(record.get("created_at")));
             p.put("updated_at",  toTimestamp(record.get("updated_at")));
 
             jdbc.update("""
-                    INSERT INTO template (id, trainer_id, name, goal, description, structure, day_labels, weeks, created_at, updated_at)
+                    INSERT INTO template (id, trainer_id, name, goal, description, structure, day_labels, weeks, training_days, created_at, updated_at)
                     VALUES (:id::uuid, :tid::uuid, :name, :goal, :description,
-                        CAST(:structure AS jsonb), CAST(:day_labels AS jsonb), :weeks,
+                        CAST(:structure AS jsonb), CAST(:day_labels AS jsonb), :weeks, :training_days,
                         COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
                     ON CONFLICT (id) DO UPDATE SET
-                        name        = EXCLUDED.name,
-                        goal        = EXCLUDED.goal,
-                        description = EXCLUDED.description,
-                        structure   = EXCLUDED.structure,
-                        day_labels  = EXCLUDED.day_labels,
-                        weeks       = EXCLUDED.weeks,
-                        updated_at  = EXCLUDED.updated_at
+                        name          = EXCLUDED.name,
+                        goal          = EXCLUDED.goal,
+                        description   = EXCLUDED.description,
+                        structure     = EXCLUDED.structure,
+                        day_labels    = EXCLUDED.day_labels,
+                        weeks         = EXCLUDED.weeks,
+                        training_days = EXCLUDED.training_days,
+                        updated_at    = EXCLUDED.updated_at
                     WHERE template.trainer_id = :tid::uuid
                     """, p);
         }
@@ -546,14 +693,17 @@ public class SyncService {
             p.put("notes",       record.get("notes"));
             p.put("dayOfWeek",   record.get("day_of_week"));
             p.put("orderIndex",  record.getOrDefault("order_index", 0));
+            // V20. NULL reads as week 1, which is what every row written before
+            // multi-week programs existed meant.
+            p.put("week",        record.get("week"));
             p.put("created_at",  toTimestamp(record.get("created_at")));
             p.put("updated_at",  toTimestamp(record.get("updated_at")));
 
             jdbc.update("""
                     INSERT INTO program_exercise (id, program_id, exercise_id, sets, reps,
-                        rest_seconds, target_load, notes, day_of_week, order_index, created_at, updated_at)
+                        rest_seconds, target_load, notes, day_of_week, week, order_index, created_at, updated_at)
                     VALUES (:id::uuid, :programId::uuid, :exerciseId::uuid, :sets, :reps,
-                        :restSeconds, :targetLoad, :notes, :dayOfWeek, :orderIndex,
+                        :restSeconds, :targetLoad, :notes, :dayOfWeek, :week, :orderIndex,
                         COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
                     ON CONFLICT (id) DO UPDATE SET
                         sets         = EXCLUDED.sets,
@@ -562,6 +712,7 @@ public class SyncService {
                         target_load  = EXCLUDED.target_load,
                         notes        = EXCLUDED.notes,
                         day_of_week  = EXCLUDED.day_of_week,
+                        week         = EXCLUDED.week,
                         order_index  = EXCLUDED.order_index,
                         updated_at   = EXCLUDED.updated_at
                     """, p);
@@ -608,10 +759,10 @@ public class SyncService {
             p.put("deliveryMode",    deliveryMode(record.get("delivery_mode")));
             // V10 · diary. The pack trio travels with the session because it is
             // what makes the 24-hour undo exact rather than a recomputation.
-            p.put("seriesId",        record.get("series_id"));
+            p.put("seriesId",        uuidOrNull(record.get("series_id"), "series_id"));
             p.put("cancelledBy",     cancelledBy(record.get("cancelled_by")));
             p.put("packDelta",       record.get("pack_delta"));
-            p.put("packPackageId",   record.get("pack_package_id"));
+            p.put("packPackageId",   uuidOrNull(record.get("pack_package_id"), "pack_package_id"));
             p.put("packAppliedAt",   toTimestamp(record.get("pack_applied_at")));
             // V14 · the move, from the client's side of it. `moved_from_at` is
             // what the client's notice strikes through, and the confirm is theirs
@@ -620,7 +771,7 @@ public class SyncService {
             p.put("movedFromAt",     toTimestamp(record.get("moved_from_at")));
             p.put("clientConfirmedAt", toTimestamp(record.get("client_confirmed_at")));
             // V15 · which batch this attendee belongs to, if any.
-            p.put("batchId",         record.get("batch_id"));
+            p.put("batchId",         uuidOrNull(record.get("batch_id"), "batch_id"));
             p.put("created_at",      toTimestamp(record.get("created_at")));
             p.put("updated_at",      toTimestamp(record.get("updated_at")));
 
@@ -760,7 +911,7 @@ public class SyncService {
             p.put("exerciseId",  str(record.get("exercise_id")));
             p.put("orderIndex",  record.getOrDefault("order_index", 0));
             p.put("source",      strOrDefault(record.get("source"), "planned"));
-            p.put("swappedFrom", record.get("swapped_from_exercise_id"));
+            p.put("swappedFrom", uuidOrNull(record.get("swapped_from_exercise_id"), "swapped_from_exercise_id"));
             p.put("targetSets",  record.get("target_sets"));
             p.put("targetReps",  record.get("target_reps"));
             p.put("restSeconds", record.get("rest_seconds"));
@@ -885,16 +1036,19 @@ public class SyncService {
             p.put("dueDate",            toSqlDate(record.get("due_date")));
             p.put("writtenOffAt",       toTimestamp(record.get("written_off_at")));
             p.put("writtenOffAmount",   record.get("written_off_amount"));
+            // V19 · what was knocked off the list price at the till. `amount` is
+            // already net of it; this only records why it is lower.
+            p.put("discountAmount",     record.get("discount_amount"));
             p.put("created_at",         toTimestamp(record.get("created_at")));
             p.put("updated_at",         toTimestamp(record.get("updated_at")));
 
             jdbc.update("""
                     INSERT INTO package (id, trainer_id, client_id, type, sessions_total, sessions_remaining,
                         amount, currency, start_date, end_date, status, pack_id, due_date,
-                        written_off_at, written_off_amount, created_at, updated_at)
+                        written_off_at, written_off_amount, discount_amount, created_at, updated_at)
                     VALUES (:id::uuid, :tid::uuid, :cid::uuid, :type, :sessionsTotal, :sessionsRemaining,
                         :amount, :currency, :startDate, :endDate, :status, :packId::uuid, :dueDate,
-                        :writtenOffAt, :writtenOffAmount,
+                        :writtenOffAt, :writtenOffAmount, :discountAmount,
                         COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
                     ON CONFLICT (id) DO UPDATE SET
                         type                = EXCLUDED.type,
@@ -909,6 +1063,9 @@ public class SyncService {
                         due_date            = EXCLUDED.due_date,
                         written_off_at      = EXCLUDED.written_off_at,
                         written_off_amount  = EXCLUDED.written_off_amount,
+                        -- Same reasoning as pack.owner: a build that doesn't know
+                        -- the column sends nothing, and nothing must not erase it.
+                        discount_amount     = COALESCE(EXCLUDED.discount_amount, package.discount_amount),
                         updated_at          = EXCLUDED.updated_at
                     WHERE package.trainer_id = :tid::uuid
                     """, p);
@@ -1161,15 +1318,25 @@ public class SyncService {
             p.put("currency",     strOrDefault(record.get("currency"), "INR"));
             p.put("validityDays", record.get("validity_days"));
             p.put("status",       strOrDefault(record.get("status"), "active"));
+            // V19 · whose price this is.
+            //
+            // Absent and 'trainer' are NOT the same thing on an update. A build
+            // that predates the gym price list still edits packs, and it sends
+            // every column it knows about — which does not include this one. Sent
+            // as null, it means "I have nothing to say about the owner", and the
+            // statement below keeps whatever is already there rather than
+            // quietly moving the gym's package onto the trainer's list.
+            p.put("owner",        record.get("owner") == null ? null
+                                : ("gym".equals(str(record.get("owner"))) ? "gym" : "trainer"));
             p.put("orderIndex",   record.get("order_index") == null ? 0 : record.get("order_index"));
             p.put("created_at",   toTimestamp(record.get("created_at")));
             p.put("updated_at",   toTimestamp(record.get("updated_at")));
 
             jdbc.update("""
                     INSERT INTO pack (id, trainer_id, name, type, sessions, amount, currency,
-                        validity_days, status, order_index, created_at, updated_at)
+                        validity_days, status, owner, order_index, created_at, updated_at)
                     VALUES (:id::uuid, :tid::uuid, :name, :type, :sessions, :amount, :currency,
-                        :validityDays, :status, :orderIndex,
+                        :validityDays, :status, COALESCE(CAST(:owner AS VARCHAR), 'trainer'), :orderIndex,
                         COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
                     ON CONFLICT (id) DO UPDATE SET
                         name          = EXCLUDED.name,
@@ -1179,6 +1346,7 @@ public class SyncService {
                         currency      = EXCLUDED.currency,
                         validity_days = EXCLUDED.validity_days,
                         status        = EXCLUDED.status,
+                        owner         = COALESCE(CAST(:owner AS VARCHAR), pack.owner),
                         order_index   = EXCLUDED.order_index,
                         updated_at    = EXCLUDED.updated_at
                     WHERE pack.trainer_id = :tid::uuid
@@ -1505,6 +1673,54 @@ public class SyncService {
 
     private String str(Object v) {
         return SyncRows.str(v);
+    }
+
+    /**
+     * A value bound to a `uuid` column, or NULL if it is not one.
+     *
+     * Postgres rejects a malformed uuid with an error, and {@link #push} is a
+     * single transaction — so ONE unparseable id from one row rolls back the
+     * entire batch: clients, metrics, templates, sessions, logs and money. The
+     * device then retries the same batch forever and stops syncing altogether,
+     * with no symptom beyond a pending count that never falls.
+     *
+     * That is exactly what happened: `bookSeries` wrote `series_<random>` into
+     * `series_id`, and every trainer who booked a recurring session silently
+     * stopped syncing anything. The app is fixed and repairs itself on launch,
+     * but an old build is forever, so the server stops trusting the input.
+     *
+     * Dropped to NULL rather than refused, because these are all OPTIONAL
+     * grouping columns — a series id, a batch id, the pack a session was drawn
+     * from. Losing one costs the grouping on that row; refusing the push costs
+     * the trainer everything they did offline. Logged, so a client generating
+     * bad ids is visible rather than silently tolerated.
+     */
+    private String uuidOrNull(Object v, String column) {
+        String raw = str(v);
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return UUID.fromString(raw).toString();
+        } catch (IllegalArgumentException e) {
+            log.warn("push: dropping malformed uuid in {} — {}", column, raw);
+            return null;
+        }
+    }
+
+    /**
+     * V18 · does this number already own a trainer account?
+     *
+     * The guard that keeps `app_user.role` exclusive from the roster side.
+     * Checked against `app_user` rather than `trainer` because that is the table
+     * sign-in believes, and a check against a different table than the one the
+     * decision is read from is a check that can disagree with it.
+     */
+    private boolean ownedByATrainer(String phone) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS(
+                    SELECT 1 FROM app_user
+                    WHERE phone = :phone AND role = 'trainer' AND deleted_at IS NULL
+                )
+                """, Map.of("phone", phone), Boolean.class));
     }
 
     private String strOrDefault(Object v, String defaultVal) {

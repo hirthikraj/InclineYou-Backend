@@ -5,7 +5,11 @@
 
 import React from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { colors, radius, space } from './tokens';
+
+/** `transparent 46%` — where the CSS gradient has finished fading out. */
+const TINT_STOP = 0.46;
 
 export interface CardProps {
   children: React.ReactNode;
@@ -14,11 +18,16 @@ export interface CardProps {
   /**
    * `.tx-card--live` — the one card on a screen that is happening now.
    *
-   * The CSS fades an accent tint from the top edge. RN has no gradient without
-   * a native module, so the tint is a real layer pinned to the top 46% of the
-   * card — the same proportion the gradient stops at — sitting over the normal
-   * surface rather than replacing it. Painting `accentSoft` as the background
-   * instead would tint against the canvas and come out muddy.
+   * The CSS fades an accent tint down from the top edge, gone by 46%. This used
+   * to be approximated with a flat `accentSoft` block clipped to the top 46%,
+   * and the approximation was visible: a solid tint has a hard bottom edge, so
+   * the card read as a lime bar ruled off by a line rather than a glow coming
+   * off the top. It is a real gradient now — `react-native-svg` is already what
+   * every icon and the skeleton sweep are drawn with, so this costs nothing new.
+   *
+   * The layer sits over the normal surface rather than replacing it. Painting
+   * the tint as the background instead would tint against the canvas and come
+   * out muddy.
    */
   live?: boolean;
   style?: StyleProp<ViewStyle>;
@@ -27,8 +36,28 @@ export interface CardProps {
 export default function Card({ children, flush = false, live = false, style }: CardProps) {
   return (
     <View style={[styles.card, live && styles.live, flush && styles.flush, style]}>
-      {live ? <View style={styles.tint} pointerEvents="none" /> : null}
+      {live ? <LiveTint /> : null}
       {children}
+    </View>
+  );
+}
+
+/**
+ * The accent fade. Fills the card and clips to its radius, so it needs no
+ * measurement — the card sizes to its content and the gradient follows.
+ */
+function LiveTint() {
+  return (
+    <View style={styles.tint} pointerEvents="none">
+      <Svg width="100%" height="100%">
+        <Defs>
+          <LinearGradient id="tx-card-live" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={colors.accentSoftHue} stopOpacity={colors.accentSoftAlpha} />
+            <Stop offset={TINT_STOP} stopColor={colors.accentSoftHue} stopOpacity={0} />
+          </LinearGradient>
+        </Defs>
+        <Rect x="0" y="0" width="100%" height="100%" fill="url(#tx-card-live)" />
+      </Svg>
     </View>
   );
 }
@@ -43,5 +72,5 @@ const styles = StyleSheet.create({
   },
   flush: { padding: 0, overflow: 'hidden' },
   live: { borderColor: colors.accentLine, overflow: 'hidden' },
-  tint: { position: 'absolute', top: 0, left: 0, right: 0, height: '46%', backgroundColor: colors.accentSoft },
+  tint: StyleSheet.absoluteFillObject,
 });

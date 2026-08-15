@@ -199,7 +199,7 @@ export default function PhoneScreen({ navigation }: Props) {
           onBlur={handleBlur}
           onSubmitEditing={() => void handleSend()}
           error={invalid}
-          placeholder="98765 43210"
+          placeholder="98*** *****"
           keyboardType="phone-pad"
           inputMode="tel"
           maxLength={PHONE_LENGTH + 1} // the grouping space

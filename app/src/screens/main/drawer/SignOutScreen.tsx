@@ -133,6 +133,11 @@ export default function SignOutScreen() {
                       subtitle={line.detail}
                       wrap
                       trailing={<Text style={styles.count}>{line.count}</Text>}
+                      // Row by row, for the trainer who wants to see the actual
+                      // payment before deciding it is losable. No fourth button
+                      // for it — the three options here are the decision, and a
+                      // fourth would compete with them.
+                      onPress={() => navigation.navigate('SyncQueue')}
                     />
                   ))}
                 </List>

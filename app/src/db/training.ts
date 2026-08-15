@@ -30,8 +30,15 @@ import { refreshPending, syncDatabase } from './sync';
 
 // The blueprint's shape and its parsers live with the module that reads them.
 // Re-exported here so a writer's call site does not need to know that.
-export { parseBlueprint as readBlueprint, parseDayLabels as readDayLabels } from '../training/training';
+export {
+  parseBlueprint as readBlueprint,
+  parseDayLabels as readDayLabels,
+  parseTrainingDays as readTrainingDays,
+  formatTrainingDays,
+} from '../training/training';
 export type { BlueprintEntry } from '../training/training';
+
+import { parseTrainingDays, formatTrainingDays } from '../training/training';
 
 export const exercisesCollection = database.get<ExerciseModel>('exercises');
 export const favouritesCollection = database.get<ExerciseFavouriteModel>('exercise_favourites');
@@ -149,6 +156,7 @@ export async function createTemplate(
   trainerId: string,
   name: string,
   weeks: number | null = null,
+  trainingDays: number[] = [],
 ): Promise<TemplateModel> {
   const created = await database.write(() =>
     templatesCollection.create((t) => {
@@ -157,10 +165,89 @@ export async function createTemplate(
       t.weeks = weeks;
       t.structure = '[]';
       t.dayLabels = '{}';
+      // Empty rather than null when the trainer skipped the layout: null means
+      // "never asked", and this one was asked and left blank.
+      t.trainingDays = formatTrainingDays(trainingDays);
     }),
   );
   after('create-template');
   return created;
+}
+
+/**
+ * The days the program trains on.
+ *
+ * Laid out before anything is put on them, which is the point — a day nobody has
+ * filled yet is still a day, and it is the only thing the trainer can add the
+ * first exercise to.
+ *
+ * Taking a day away leaves whatever was on it alone. The alternative is deleting
+ * a session's worth of prescription as a side effect of tapping a chip, and 3b
+ * draws an off-layout day that still has exercises on it rather than hiding
+ * them. Removing them is a separate, deliberate act.
+ */
+export async function setTrainingDays(templateId: string, days: number[]): Promise<void> {
+  const row = await templatesCollection.find(templateId);
+  await database.write(() =>
+    row.update((t) => {
+      t.trainingDays = formatTrainingDays(days);
+    }),
+  );
+  after('set-training-days');
+}
+
+/**
+ * Copies one week's exercises onto another week.
+ *
+ * This is how week 2 gets written: a trainer does not author twelve weeks from
+ * nothing, they take last week and change three numbers. So the copy is a real
+ * copy — every entry duplicated with the new week on it — and from that moment
+ * the two weeks have nothing to do with each other. Editing week 2 afterwards is
+ * ordinary editing, because week 2 is now ordinary rows.
+ *
+ * Refuses to write over a week that already has something on it. Overwriting is
+ * a different decision and it belongs behind its own confirmation, not inside a
+ * function called "copy".
+ */
+export async function copyWeek(
+  templateId: string,
+  from: number,
+  to: number,
+): Promise<number> {
+  if (from === to) return 0;
+  const row = await templatesCollection.find(templateId);
+  const current = parseBlueprintRows(row.structure);
+
+  const already = current.filter((e) => weekOf(e) === to);
+  if (already.length) throw new Error(`Week ${to} already has exercises on it`);
+
+  const source = current.filter((e) => weekOf(e) === from);
+  if (!source.length) return 0;
+
+  const copied = source.map((e) => ({ ...e, week: to }));
+  await database.write(() =>
+    row.update((t) => {
+      t.structure = JSON.stringify([...current, ...copied]);
+    }),
+  );
+  after('copy-week');
+  return copied.length;
+}
+
+/** Empties one week. The week itself stays — it goes back to repeating week 1. */
+export async function clearWeek(templateId: string, week: number): Promise<number> {
+  const row = await templatesCollection.find(templateId);
+  const current = parseBlueprintRows(row.structure);
+  const kept = current.filter((e) => weekOf(e) !== week);
+  if (kept.length === current.length) return 0;
+
+  await database.write(() =>
+    row.update((t) => {
+      t.structure = JSON.stringify(kept);
+    }),
+  );
+  after('clear-week');
+  return current.length - kept.length;
 }
 
 /**
@@ -177,6 +264,8 @@ export async function addToBlueprint(
   entry: {
     exerciseId: string;
     day: number;
+    /** Defaults to week 1, which is the only week a single-week program has. */
+    week?: number;
     sets?: number | null;
     reps?: number | null;
     restSeconds?: number | null;
@@ -185,11 +274,13 @@ export async function addToBlueprint(
 ): Promise<void> {
   const row = await templatesCollection.find(templateId);
   const current = parseBlueprintRows(row.structure);
-  const onDay = current.filter((e) => num(e.day_of_week) === entry.day);
+  const week = Math.max(1, Math.round(entry.week ?? 1));
+  const onDay = current.filter((e) => weekOf(e) === week && num(e.day_of_week) === entry.day);
 
   current.push({
     exercise_id: entry.exerciseId,
     day_of_week: entry.day,
+    week,
     sets: entry.sets ?? 3,
     reps: entry.reps ?? 10,
     rest_seconds: entry.restSeconds ?? 60,
@@ -197,27 +288,49 @@ export async function addToBlueprint(
     order_index: onDay.length + 1,
   });
 
+  // Putting something on a day makes it a training day, if it wasn't one. The
+  // trainer has just said so more plainly than any chip row could.
+  //
+  // The blueprint's own days are the fallback, not an empty list: a template
+  // authored before the layout existed has no `training_days`, and writing one
+  // that holds only the day just touched would claim the program dropped every
+  // other day it has always trained on.
+  const existing = current
+    .map((e) => num(e.day_of_week))
+    .filter((day): day is number => day != null);
+  const days = parseTrainingDays(row.trainingDays, []);
+  const laidOut = days.length ? days : existing;
+
   await database.write(() =>
     row.update((t) => {
       t.structure = JSON.stringify(current);
+      t.trainingDays = formatTrainingDays([...laidOut, entry.day]);
     }),
   );
   after('add-to-blueprint');
 }
 
-/** Removes one exercise from a day, and closes the gap in that day's order. */
+/**
+ * Removes one exercise from one day of one week, and closes the gap in that
+ * day's order.
+ *
+ * Scoped to the week on purpose: weeks 1 and 3 both having a bench press is the
+ * normal case, and taking it out of week 3 must not quietly take it out of the
+ * week the client is training this Monday.
+ */
 export async function removeFromBlueprint(
   templateId: string,
   exerciseId: string,
   day: number,
+  week: number = 1,
 ): Promise<void> {
   const row = await templatesCollection.find(templateId);
   const kept = parseBlueprintRows(row.structure).filter(
-    (e) => !(e.exercise_id === exerciseId && num(e.day_of_week) === day),
+    (e) => !(e.exercise_id === exerciseId && num(e.day_of_week) === day && weekOf(e) === week),
   );
   let seen = 0;
   kept.forEach((e) => {
-    if (num(e.day_of_week) === day) {
+    if (num(e.day_of_week) === day && weekOf(e) === week) {
       seen += 1;
       e.order_index = seen;
     }
@@ -279,6 +392,11 @@ function parseBlueprintRows(structure: string | null | undefined): RawEntry[] {
 
 function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+/** A raw entry's week. Missing means 1 — see `BlueprintEntry.week`. */
+function weekOf(entry: RawEntry): number {
+  return Math.max(1, num(entry.week) ?? 1);
 }
 
 export async function updateTemplate(

@@ -49,6 +49,8 @@ public class ProgramService {
             BigDecimal targetLoad,
             String notes,
             Integer dayOfWeek,
+            /** V20. Which week of the program. Null reads as week 1. */
+            Integer week,
             int orderIndex
     ) {}
 
@@ -59,6 +61,7 @@ public class ProgramService {
             BigDecimal targetLoad,
             String notes,
             Integer dayOfWeek,
+            Integer week,
             Integer orderIndex
     ) {}
 
@@ -85,6 +88,7 @@ public class ProgramService {
             BigDecimal targetLoad,
             String notes,
             Integer dayOfWeek,
+            Integer week,
             int orderIndex,
             long createdAt,
             long updatedAt
@@ -199,10 +203,10 @@ public class ProgramService {
         findOwned(programId, trainerId);
         var rows = jdbc.queryForList("""
                 SELECT id::text, program_id::text, exercise_id::text, sets, reps, rest_seconds,
-                       target_load, notes, day_of_week, order_index, created_at, updated_at
+                       target_load, notes, day_of_week, week, order_index, created_at, updated_at
                 FROM program_exercise
                 WHERE program_id = :pid::uuid AND deleted_at IS NULL
-                ORDER BY COALESCE(day_of_week, 999), order_index ASC
+                ORDER BY COALESCE(week, 1), COALESCE(day_of_week, 999), order_index ASC
                 """, Map.of("pid", programId.toString()));
 
         return rows.stream().map(this::toExerciseResponse).toList();
@@ -227,19 +231,23 @@ public class ProgramService {
         p.put("targetLoad",  req.targetLoad());
         p.put("notes",       req.notes());
         p.put("dayOfWeek",   req.dayOfWeek());
+        // An older build posts no week at all; that request means week 1, which
+        // is the only week it knows how to draw.
+        Integer week = req.week() != null ? req.week() : 1;
+        p.put("week",        week);
         p.put("orderIndex",  req.orderIndex());
         p.put("now",         Timestamp.from(now));
 
         jdbc.update("""
                 INSERT INTO program_exercise (id, program_id, exercise_id, sets, reps, rest_seconds,
-                    target_load, notes, day_of_week, order_index, created_at, updated_at)
+                    target_load, notes, day_of_week, week, order_index, created_at, updated_at)
                 VALUES (:id::uuid, :programId::uuid, :exerciseId::uuid, :sets, :reps, :restSeconds,
-                    :targetLoad, :notes, :dayOfWeek, :orderIndex, :now, :now)
+                    :targetLoad, :notes, :dayOfWeek, :week, :orderIndex, :now, :now)
                 """, p);
 
         return new ProgramExerciseResponse(id.toString(), programId.toString(), req.exerciseId(),
                 req.sets(), req.reps(), req.restSeconds(), req.targetLoad(), req.notes(),
-                req.dayOfWeek(), req.orderIndex(), now.toEpochMilli(), now.toEpochMilli());
+                req.dayOfWeek(), week, req.orderIndex(), now.toEpochMilli(), now.toEpochMilli());
     }
 
     // ── Update exercise ───────────────────────────────────────────────────────
@@ -262,6 +270,7 @@ public class ProgramService {
         if (req.targetLoad() != null)  { p.put("targetLoad",  req.targetLoad());  sets.add("target_load = :targetLoad"); }
         if (req.notes() != null)       { p.put("notes",       req.notes());       sets.add("notes = :notes"); }
         if (req.dayOfWeek() != null)   { p.put("dayOfWeek",   req.dayOfWeek());   sets.add("day_of_week = :dayOfWeek"); }
+        if (req.week() != null)        { p.put("week",        req.week());        sets.add("week = :week"); }
         if (req.orderIndex() != null)  { p.put("orderIndex",  req.orderIndex());  sets.add("order_index = :orderIndex"); }
 
         jdbc.update("UPDATE program_exercise SET " + String.join(", ", sets) +
@@ -269,7 +278,7 @@ public class ProgramService {
 
         var rows = jdbc.queryForList("""
                 SELECT id::text, program_id::text, exercise_id::text, sets, reps, rest_seconds,
-                       target_load, notes, day_of_week, order_index, created_at, updated_at
+                       target_load, notes, day_of_week, week, order_index, created_at, updated_at
                 FROM program_exercise WHERE id = :id::uuid AND deleted_at IS NULL
                 """, Map.of("id", exId.toString()));
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Program exercise not found");
@@ -330,6 +339,7 @@ public class ProgramService {
                 targetLoad,
                 str(r.get("notes")),
                 (Integer) r.get("day_of_week"),
+                (Integer) r.get("week"),
                 orderIndex,
                 toEpochMilli(r.get("created_at")),
                 toEpochMilli(r.get("updated_at")));

@@ -125,3 +125,65 @@ export async function pendingSummary(): Promise<PendingLine[]> {
 
   return lines;
 }
+
+/* ------------------------------------------------- 8a · row by row, not by table */
+
+export type PendingAction = 'created' | 'updated' | 'deleted';
+
+/**
+ * One queued write, as it would go out.
+ *
+ * `raw` is WatermelonDB's dirty row — column names, not model properties — and
+ * it is null for a delete, because a deleted row is an id and nothing else.
+ * Everything downstream has to cope with that; the sync queue screen says
+ * "removed" and stops rather than describing a row that is gone.
+ */
+export interface PendingChange {
+  table: string;
+  id: string;
+  action: PendingAction;
+  raw: Record<string, unknown> | null;
+}
+
+/**
+ * The same queue `pendingSummary` counts, one row at a time.
+ *
+ * Sign-out needs the shape of what is waiting — "a payment and one logged
+ * session" — and can decide on that. The sync queue screen needs the rows
+ * themselves, because "a payment" and "₹3,000 from Ravi Kannan" are different
+ * amounts of reassurance to somebody who just recorded it in a basement.
+ *
+ * Both read `fetchLocalChanges`, and both degrade the same way: a WatermelonDB
+ * version that moves it leaves this returning an empty list and the screen
+ * falling back to the count it already has from `sync.ts`.
+ */
+export async function pendingChanges(): Promise<PendingChange[]> {
+  let changes: Record<string, TableChanges>;
+  try {
+    const local = await fetchLocalChanges(database);
+    changes = local.changes as unknown as Record<string, TableChanges>;
+  } catch {
+    return [];
+  }
+
+  const out: PendingChange[] = [];
+
+  for (const [table, set] of Object.entries(changes)) {
+    for (const raw of set?.created ?? []) {
+      out.push({ table, id: rowId(raw), action: 'created', raw: raw as Record<string, unknown> });
+    }
+    for (const raw of set?.updated ?? []) {
+      out.push({ table, id: rowId(raw), action: 'updated', raw: raw as Record<string, unknown> });
+    }
+    for (const id of set?.deleted ?? []) {
+      out.push({ table, id: String(id), action: 'deleted', raw: null });
+    }
+  }
+
+  return out;
+}
+
+function rowId(raw: unknown): string {
+  const id = (raw as { id?: unknown } | null)?.id;
+  return typeof id === 'string' ? id : '';
+}

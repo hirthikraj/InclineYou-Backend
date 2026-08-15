@@ -10,9 +10,17 @@
  *
  * **The split is pre-filled and the field says where the number came from**,
  * because a 50% default nobody can trace is a number nobody trusts. Below it the
- * arithmetic is done out loud on the trainer's own most-sold pack, using the
- * same pair and bar the Gym share screen uses — so the two screens agree by
- * construction rather than by both being careful.
+ * arithmetic is done out loud on the pack this client is actually being put on,
+ * using the same pair and bar the Gym share screen uses — so the two screens
+ * agree by construction rather than by both being careful.
+ *
+ * **Who collects decides which price list is offered.** A client paying the
+ * trainer picks from the trainer's packs, with a discount box, because that is a
+ * price the trainer sets and can knock money off. A client paying at the gym's
+ * counter picks from the gym's packages and there is no discount box — you
+ * cannot discount a price you don't set. Either way the two figures underneath
+ * are worked out before the Add button, so nobody agrees to a number they
+ * haven't seen.
  *
  * Skip lives in the app bar, never beside the primary button.
  */
@@ -26,7 +34,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { MainStackParamList } from '../../../navigation/MainStack';
 import { useAuth } from '../../../store/AuthContext';
 import { createClient } from '../../../db/clients';
-import { observePacks } from '../../../db/money';
+import { observePacks, packOwner, sellPack, type PackOwner } from '../../../db/money';
 import { getTrainer } from '../../../api/trainer';
 import { rupees } from '../../../home/time';
 import type { DeliveryMode } from '../../../home/mode';
@@ -36,12 +44,17 @@ import {
   Callout,
   CalloutStrong,
   ChoiceCard,
+  ChoiceSlot,
   Control,
   FieldLabel,
   FieldMsg,
   Figures,
   IconBack,
   IconButton,
+  IconWallet,
+  List,
+  Radio,
+  Row,
   Segmented,
   SkipButton,
   Steps,
@@ -52,6 +65,17 @@ import {
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 type Rt = RouteProp<MainStackParamList, 'AddClientPay'>;
+
+/** One line of a price list — enough to show it, price it and sell it. */
+interface PriceRow {
+  id: string;
+  name: string;
+  type: string;
+  sessions: number | null;
+  amount: number;
+  validityDays: number | null;
+  owner: PackOwner;
+}
 
 export default function AddClientPayScreen() {
   const navigation = useNavigation<Nav>();
@@ -64,7 +88,9 @@ export default function AddClientPayScreen() {
   const [gym, setGym] = useState<{ name: string | null; percent: number | null; upi: string | null }>(
     { name: null, percent: null, upi: null },
   );
-  const [pack, setPack] = useState<{ sessions: number | null; amount: number } | null>(null);
+  const [packs, setPacks] = useState<PriceRow[]>([]);
+  const [chosenId, setChosenId] = useState<string | null>(null);
+  const [discount, setDiscount] = useState('');
   const [saving, setSaving] = useState(false);
 
   // The default and its provenance arrive together — the field's own message
@@ -89,24 +115,64 @@ export default function AddClientPayScreen() {
     };
   }, []);
 
-  // The most-sold pack is what the arithmetic below is done on, because a split
-  // shown on an abstract ₹100 is a percentage restated, not an explanation.
+  // Both price lists, kept whole. Which one is offered is decided by who
+  // collects, and that answer changes while this screen is open.
   useEffect(() => {
     const sub = observePacks().subscribe((rows) => {
-      const live = rows.filter((p) => p.status === 'active');
-      const top = live[0] ?? rows[0];
-      setPack(top ? { sessions: top.sessions ?? null, amount: top.amount } : null);
+      setPacks(
+        rows
+          .filter((p) => p.status === 'active')
+          .map((p) => ({
+            id: p.id,
+            name: p.name,
+            type: p.type,
+            sessions: p.sessions ?? null,
+            amount: p.amount,
+            validityDays: p.validityDays ?? null,
+            owner: packOwner(p),
+          })),
+      );
     });
     return () => sub.unsubscribe();
   }, []);
 
-  const gymCut = useMemo(() => {
+  /** Whose price list applies. The one question already answered above. */
+  const owner: PackOwner = collector === 'gym' ? 'gym' : 'trainer';
+  const list = useMemo(() => packs.filter((p) => p.owner === owner), [packs, owner]);
+
+  // A pack picked from one list must not stay picked when the other list is
+  // shown — the price on screen would stop being the price being agreed.
+  useEffect(() => {
+    setChosenId((current) => (current && list.some((p) => p.id === current) ? current : null));
+    if (owner === 'gym') setDiscount('');
+  }, [list, owner]);
+
+  const chosen = useMemo(() => list.find((p) => p.id === chosenId) ?? null, [list, chosenId]);
+
+  /**
+   * The split, on the money this client is actually being signed up for.
+   *
+   * Falls back to the first pack on the applicable list when nothing is picked
+   * yet, because a split shown on an abstract ₹100 is a percentage restated,
+   * not an explanation — but the moment a pack is picked the figures are about
+   * that pack, discount included.
+   */
+  const shown = chosen ?? list[0] ?? null;
+  const cut = useMemo(() => {
+    if (!shown) return null;
     const pct = mode === 'remote' ? 0 : Number(percent);
-    if (!pack || !Number.isFinite(pct)) return null;
+    if (!Number.isFinite(pct)) return null;
     const clamped = Math.max(0, Math.min(100, pct));
-    const theirs = Math.round((pack.amount * clamped) / 100);
-    return { theirs, yours: pack.amount - theirs, percent: clamped };
-  }, [pack, percent, mode]);
+    // Only a price the trainer sets can be discounted, and only the pack that
+    // was actually picked — never the fallback standing in for it.
+    const off =
+      owner === 'trainer' && chosen
+        ? Math.max(0, Math.min(shown.amount, Number(discount.replace(/\D/g, '')) || 0))
+        : 0;
+    const net = shown.amount - off;
+    const theirs = Math.round((net * clamped) / 100);
+    return { off, net, theirs, yours: net - theirs, percent: clamped };
+  }, [shown, chosen, owner, discount, percent, mode]);
 
   const save = async (withMoney: boolean) => {
     if (!trainerId || saving) return;
@@ -125,6 +191,30 @@ export default function AddClientPayScreen() {
             ? Math.max(0, Math.min(100, 100 - pct))
             : undefined,
       });
+
+      // The pack picked here is a pack sold: the client owes it from today, at
+      // the figure shown above rather than the list price. Its own try, because
+      // a pack that fails to write is one sale to redo from the client's book —
+      // losing the client over it would cost the trainer far more.
+      if (withMoney && chosen) {
+        try {
+          await sellPack({
+            trainerId,
+            clientId: client.id,
+            pack: {
+              id: chosen.id,
+              type: chosen.type,
+              sessions: chosen.sessions,
+              amount: chosen.amount,
+              validityDays: chosen.validityDays,
+            },
+            discount: cut?.off ?? 0,
+          });
+        } catch {
+          /* The client is added. The pack can be sold again from their book. */
+        }
+      }
+
       navigation.replace('ClientAdded', { clientId: client.id });
     } catch {
       setSaving(false);
@@ -179,6 +269,70 @@ export default function AddClientPayScreen() {
           />
         </View>
 
+        {/* --------------------------------------------------- the price list */}
+
+        <Text style={styles.group}>
+          {owner === 'gym' ? `What ${gym.name ?? 'the gym'} sells` : 'What they buy'}
+        </Text>
+        {list.length > 0 ? (
+          <List>
+            {list.map((row) => (
+              <Row
+                key={row.id}
+                grouped
+                selected={row.id === chosenId}
+                title={`${row.name} · ${rupees(row.amount)}`}
+                subtitle={
+                  row.sessions
+                    ? `${rupees(Math.round(row.amount / row.sessions))} a session`
+                    : row.type === 'monthly'
+                      ? 'Per month'
+                      : 'One session'
+                }
+                leading={
+                  <ChoiceSlot>
+                    <Radio checked={row.id === chosenId} />
+                  </ChoiceSlot>
+                }
+                // Tapping the chosen one again unpicks it: adding a client
+                // without selling them anything yet is a real answer.
+                onPress={() => setChosenId((current) => (current === row.id ? null : row.id))}
+              />
+            ))}
+          </List>
+        ) : (
+          <Text style={styles.blank}>
+            {owner === 'gym'
+              ? `No ${gym.name ?? 'gym'} packages on the list yet — add them in Money → Packs and they'll be pickable here.`
+              : 'No packs on your price list yet — add them in Money → Packs. You can still add ' +
+                `${first} now and sell one later.`}
+          </Text>
+        )}
+
+        {owner === 'trainer' && chosen ? (
+          <>
+            <View style={styles.label}>
+              <FieldLabel>
+                Discount <Text style={styles.optional}>optional</Text>
+              </FieldLabel>
+            </View>
+            <Control
+              value={discount}
+              onChangeText={setDiscount}
+              keyboardType="number-pad"
+              inputMode="numeric"
+              seg={<Text style={styles.rupee}>₹</Text>}
+              placeholder="0"
+              accessibilityLabel="Discount off this pack, in rupees"
+            />
+            <FieldMsg>
+              {cut && cut.off > 0
+                ? `${first} pays ${rupees(cut.net)} instead of ${rupees(chosen.amount)}. Your price list is unchanged.`
+                : 'Off this sale only — your price list stays as it is.'}
+            </FieldMsg>
+          </>
+        ) : null}
+
         {mode === 'floor' && gym.name ? (
           <>
             <View style={styles.label}>
@@ -200,40 +354,64 @@ export default function AddClientPayScreen() {
           </>
         ) : null}
 
-        {gymCut && pack ? (
-          <Figures
-            collected={rupees(gymCut.yours)}
-            owed={rupees(gymCut.theirs)}
-            labels={[
-              pack.sessions ? `Yours on a ${pack.sessions}-pack` : 'Yours',
-              "The gym's",
-            ]}
-            tones={['ok', gymCut.theirs > 0 ? 'warn' : 'plain']}
-            legend={[`${100 - gymCut.percent}% yours`, `${gymCut.percent}% theirs`]}
-            collectedPart={pack.amount ? gymCut.yours / pack.amount : 1}
-            owedPart={pack.amount ? gymCut.theirs / pack.amount : 0}
-            style={styles.money}
-          />
+        {cut && shown ? (
+          <>
+            <Figures
+              collected={rupees(cut.yours)}
+              owed={rupees(cut.theirs)}
+              labels={[
+                // Who is holding the money changes what "yours" means: on the
+                // gym's counter it is a debt to you, not cash in your hand.
+                owner === 'gym'
+                  ? 'The gym owes you'
+                  : shown.sessions
+                    ? `Yours on the ${shown.sessions}-pack`
+                    : 'Yours',
+                "The gym's",
+              ]}
+              tones={['ok', cut.theirs > 0 ? 'warn' : 'plain']}
+              legend={[`${100 - cut.percent}% yours`, `${cut.percent}% theirs`]}
+              collectedPart={cut.net ? cut.yours / cut.net : 1}
+              owedPart={cut.net ? cut.theirs / cut.net : 0}
+              style={styles.money}
+            />
+            <Text style={styles.basis}>
+              {chosen
+                ? `On ${chosen.name} at ${rupees(cut.net)}${cut.off > 0 ? ` (${rupees(cut.off)} off)` : ''}${
+                    owner === 'gym' ? ', collected at the counter' : ''
+                  }.`
+                : `On your ${shown.name}, until you pick one above.`}
+            </Text>
+          </>
         ) : null}
 
-        <Callout style={styles.note}>
-          {mode === 'floor' ? (
-            <>
-              Move {first} to <CalloutStrong>remote</CalloutStrong> and the gym&apos;s share is 0% —
-              the whole {pack ? rupees(pack.amount) : 'amount'} stays yours.{' '}
-            </>
-          ) : (
-            <>
-              Remote sessions are <CalloutStrong>always 0%</CalloutStrong>, whatever the gym takes on
-              the floor.{' '}
-            </>
-          )}
-          Change the percentage later and it applies from that day on;{' '}
-          <CalloutStrong>sessions already recorded keep the split they were recorded with.</CalloutStrong>
-        </Callout>
+        {/* Once a pack is picked the figures above ARE the explanation, and the
+            paragraph would push the button off a small screen. It stays while
+            nothing is picked, because then the numbers need the context. */}
+        {chosen ? null : (
+          <Callout style={styles.note}>
+            {mode === 'floor' ? (
+              <>
+                Move {first} to <CalloutStrong>remote</CalloutStrong> and the gym&apos;s share is 0%
+                — the whole {shown ? rupees(shown.amount) : 'amount'} stays yours.{' '}
+              </>
+            ) : (
+              <>
+                Remote sessions are <CalloutStrong>always 0%</CalloutStrong>, whatever the gym takes
+                on the floor.{' '}
+              </>
+            )}
+            Change the percentage later and it applies from that day on;{' '}
+            <CalloutStrong>
+              sessions already recorded keep the split they were recorded with.
+            </CalloutStrong>
+          </Callout>
+        )}
 
         <Button
-          label={`Add ${first}`}
+          // The agreed number rides on the button, so the last thing read
+          // before the tap is the thing being agreed to.
+          label={chosen && cut ? `Add ${first} on ${rupees(cut.net)}` : `Add ${first}`}
           size="lg"
           block
           disabled={saving}
@@ -262,7 +440,13 @@ const styles = StyleSheet.create({
   },
   choices: { flexDirection: 'row', gap: space.s2 },
   label: { marginTop: space.s5 },
+  blank: { fontSize: 13.5, color: colors.ink3, lineHeight: 20 },
+  optional: { fontSize: 13, fontWeight: '400', color: colors.ink3 },
+  rupee: { fontSize: 16, fontWeight: '500', color: colors.ink },
   money: { marginTop: space.s4 },
+  /* Names the pack the figures above were worked out on — a split with no
+     stated basis is a number the trainer has to take on faith. */
+  basis: { fontSize: 12.5, color: colors.ink3, marginTop: space.s2 },
   note: { marginTop: space.s3 },
   go: { marginTop: space.s6 },
 });

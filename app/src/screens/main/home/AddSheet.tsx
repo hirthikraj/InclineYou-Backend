@@ -37,7 +37,10 @@ const ACTIONS: {
     key: 'workout',
     icon: IconDumbbell,
     title: 'Log a workout',
-    subtitle: 'For a client, or for yourself',
+    // "or for yourself" until self-training was switched off. The + sheet is
+    // read at the moment of intent, and a promise here that the next screen
+    // cannot keep is the worst place in the app to make one.
+    subtitle: 'Booked or not — pick who',
   },
   {
     key: 'session',

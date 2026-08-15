@@ -1,6 +1,7 @@
 package com.xrep.xrep_backend.auth;
 
-import com.xrep.xrep_backend.entity.Trainer;
+import com.xrep.xrep_backend.entity.AppUser;
+import com.xrep.xrep_backend.repository.AppUserRepository;
 import com.xrep.xrep_backend.repository.ClientRepository;
 import com.xrep.xrep_backend.repository.TrainerRepository;
 import org.junit.jupiter.api.DisplayName;
@@ -16,7 +17,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -25,17 +25,23 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 /**
- * What sign-in decides, and specifically what a pause decides.
+ * What sign-in decides.
  *
- * The behaviour under test here was a bug worth a regression test rather than a
- * changelog line: a paused membership used to return no token, which took the
- * app off the phone of anyone whose package lapsed — while ClientSyncService
- * went on serving paused clients their history quite happily. The two halves
- * disagreed, and because tokens last seven days the visible symptom was an app
- * that worked for a week and then didn't.
+ * Two behaviours are pinned here, and both were bugs worth a regression test
+ * rather than a changelog line.
  *
- * So the first test below is the fix, and the rest are the cases it must not
- * have broken on the way past.
+ * The first is the pause: a paused membership used to return no token, which
+ * took the app off the phone of anyone whose package lapsed — while
+ * ClientSyncService went on serving paused clients their history quite happily.
+ * The two halves disagreed, and because tokens last seven days the visible
+ * symptom was an app that worked for a week and then didn't.
+ *
+ * The second is consent (V18): a trainer typing a number into their roster is a
+ * claim, not a relationship, and the person on the other end must be asked
+ * before anything of theirs is shared. The invite must therefore never carry a
+ * token that can open a sync scope, and the removal notice must be shown exactly
+ * once — the server row is kept forever, so without the acknowledgement it would
+ * be the app for the rest of time.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -44,6 +50,7 @@ class AuthServiceTest {
     private static final String PHONE = "9876543210";
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
+    @Mock AppUserRepository appUserRepo;
     @Mock TrainerRepository trainerRepo;
     @Mock ClientRepository clientRepo;
     @Mock OtpService otpService;
@@ -51,22 +58,20 @@ class AuthServiceTest {
 
     @InjectMocks AuthService auth;
 
-    /* ------------------------------------------------------------ the fix */
+    /* --------------------------------------------------- pause is not a wall */
 
     @Test
     @DisplayName("a client whose only roster is paused still gets a token")
     void pausedClientSignsIn() {
         stubTokens();
-        noTrainer();
         var pausedOn = Instant.parse("2026-07-22T04:00:00Z");
-        when(clientRepo.findMembershipsByPhone(PHONE))
-                .thenReturn(List.of(membership("Ravi Kannan", "paused", pausedOn)));
+        identity(client("Ravi Kannan", "paused", "paused", pausedOn));
 
         var res = auth.verifyOtp(PHONE, "123456");
 
         // The whole point: there is something to sign into.
         assertThat(res.token()).isNotNull();
-        assertThat(res.role()).isEqualTo(JwtService.ROLE_CLIENT);
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_CLIENT);
 
         // And the lens knows which roster is on hold, so it can say so.
         assertThat(res.clientOf()).hasSize(1);
@@ -84,27 +89,21 @@ class AuthServiceTest {
     @DisplayName("`paused` is not sent as a role any more — it was the wall")
     void pausedIsNeverARole() {
         stubTokens();
-        noTrainer();
-        when(clientRepo.findMembershipsByPhone(PHONE))
-                .thenReturn(List.of(membership("Ravi Kannan", "paused", Instant.now())));
+        identity(client("Ravi Kannan", "paused", "paused", Instant.now()));
 
         assertThat(auth.verifyOtp(PHONE, "123456").role()).isNotEqualTo("paused");
     }
-
-    /* ------------------------------------------------- what it must not break */
 
     @Test
     @DisplayName("one paused roster among live ones is not a paused sign-in")
     void mixedRostersAreNotPaused() {
         stubTokens();
-        noTrainer();
-        when(clientRepo.findMembershipsByPhone(PHONE)).thenReturn(List.of(
-                membership("Ravi Kannan", "active", null),
-                membership("Kumar S", "paused", Instant.parse("2026-07-22T04:00:00Z"))));
+        identity(client("Ravi Kannan", "active", "accepted", null),
+                 client("Kumar S", "paused", "paused", Instant.parse("2026-07-22T04:00:00Z")));
 
         var res = auth.verifyOtp(PHONE, "123456");
 
-        assertThat(res.role()).isEqualTo(JwtService.ROLE_CLIENT);
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_CLIENT);
         // Both come back — the paused one is reachable, it is just labelled.
         assertThat(res.clientOf()).hasSize(2);
         // But the person IS training with somebody, so the banner would be a lie.
@@ -115,75 +114,176 @@ class AuthServiceTest {
     @DisplayName("an active client is untouched by any of this")
     void activeClientUnchanged() {
         stubTokens();
-        noTrainer();
-        when(clientRepo.findMembershipsByPhone(PHONE))
-                .thenReturn(List.of(membership("Ravi Kannan", "active", null)));
+        identity(client("Ravi Kannan", "active", "accepted", null));
 
         var res = auth.verifyOtp(PHONE, "123456");
 
-        assertThat(res.role()).isEqualTo(JwtService.ROLE_CLIENT);
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_CLIENT);
         assertThat(res.token()).isNotNull();
         assertThat(res.paused()).isNull();
         assertThat(res.clientOf().get(0).pausedOn()).isNull();
     }
 
     @Test
-    @DisplayName("a trainer who is also a paused client still opens the coaching lens")
-    void trainerWithPausedMembership() {
-        stubTokens();
-        var trainer = new Trainer();
-        trainer.setId(UUID.randomUUID());
-        trainer.setPhone(PHONE);
-        trainer.setName("Ravi Kannan");
-        when(trainerRepo.findByPhoneAndDeletedAtIsNull(PHONE)).thenReturn(Optional.of(trainer));
-        when(clientRepo.findMembershipsByPhone(PHONE))
-                .thenReturn(List.of(membership("Kumar S", "paused", Instant.now())));
-
-        var res = auth.verifyOtp(PHONE, "123456");
-
-        assertThat(res.role()).isEqualTo(JwtService.ROLE_TRAINER);
-        assertThat(res.token()).isNotNull();
-        assertThat(res.clientOf()).hasSize(1);
-    }
-
-    @Test
     @DisplayName("a number on nobody's roster is still 7a, not a silent trainer account")
     void unknownNumberIsPending() {
         stubTokens();
-        noTrainer();
-        when(clientRepo.findMembershipsByPhone(PHONE)).thenReturn(List.of());
+        when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of());
 
         var res = auth.verifyOtp(PHONE, "123456");
 
-        assertThat(res.role()).isEqualTo(JwtService.ROLE_PENDING);
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_PENDING);
         assertThat(res.isNewUser()).isTrue();
         assertThat(res.paused()).isNull();
     }
 
+    @Test
+    @DisplayName("a trainer opens the coaching lens and carries no rosters")
+    void trainerSignsIn() {
+        stubTokens();
+        when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of(
+                trainerRow(UUID.randomUUID(), "Ravi Kannan", Instant.now())));
+
+        var res = auth.verifyOtp(PHONE, "123456");
+
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_TRAINER);
+        assertThat(res.token()).isNotNull();
+        assertThat(res.setupComplete()).isTrue();
+        // V18 · role is exclusive, so a trainer is never also somebody's client.
+        assertThat(res.clientOf()).isEmpty();
+    }
+
+    /* -------------------------------------------------------------- consent */
+
+    @Test
+    @DisplayName("an unanswered invite gets the invited role, never a client token")
+    void invitedClientIsNotSignedIn() {
+        stubTokens();
+        identity(client("Ravi Kannan", "active", "invited", null));
+
+        var res = auth.verifyOtp(PHONE, "123456");
+
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_INVITED);
+        // The distinction the whole consent step rests on: the token behind an
+        // invite must not be one that opens a sync scope.
+        assertThat(res.token()).isEqualTo("invited-token");
+        assertThat(res.clientOf()).hasSize(1);
+        assertThat(res.clientOf().get(0).membershipStatus()).isEqualTo("invited");
+    }
+
+    @Test
+    @DisplayName("a live roster beats an outstanding invite — training is not held up")
+    void liveRosterWinsOverInvite() {
+        stubTokens();
+        identity(client("Ravi Kannan", "active", "accepted", null),
+                 client("Kumar S", "active", "invited", null));
+
+        var res = auth.verifyOtp(PHONE, "123456");
+
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_CLIENT);
+        assertThat(res.token()).isEqualTo("client-token");
+        // The invite still travels, so the app can surface it inside the lens
+        // rather than making it wait for the next sign-in.
+        assertThat(res.clientOf()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("a removal names who and when, and is shown exactly once")
+    void removalIsAnnouncedThenRetired() {
+        stubTokens();
+        var removedAt = Instant.parse("2026-08-14T04:00:00Z");
+        identity(removedClient("Ravi Kannan", removedAt, null));
+
+        var res = auth.verifyOtp(PHONE, "123456");
+
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_REMOVED);
+        assertThat(res.removed()).isNotNull();
+        assertThat(res.removed().trainerName()).isEqualTo("Ravi Kannan");
+        assertThat(res.removed().removedOn()).isEqualTo("2026-08-14");
+
+        // Once acknowledged the row still says `removed` forever — the trainer's
+        // books point at it — so the ack stamp is the only thing standing
+        // between this person and the notice on every future sign-in.
+        identity(removedClient("Ravi Kannan", removedAt, Instant.now()));
+        var after = auth.verifyOtp(PHONE, "123456");
+
+        assertThat(after.role()).isEqualTo(AuthService.VIEW_UNATTACHED);
+        assertThat(after.removed()).isNull();
+    }
+
+    @Test
+    @DisplayName("a declined invite is unattached, NOT 7a — never offered a trainer account")
+    void declinedIsUnattachedNotPending() {
+        stubTokens();
+        identity(client("Ravi Kannan", "active", "declined", null));
+
+        var res = auth.verifyOtp(PHONE, "123456");
+
+        // The distinction matters: 7a offers "I'm a trainer", and handing that
+        // to somebody who declined one invite would quietly convert them.
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_UNATTACHED);
+        assertThat(res.role()).isNotEqualTo(AuthService.VIEW_PENDING);
+        assertThat(res.clientOf()).isEmpty();
+    }
+
     /* ------------------------------------------------------------- fixtures */
 
-    private void noTrainer() {
-        when(trainerRepo.findByPhoneAndDeletedAtIsNull(PHONE)).thenReturn(Optional.empty());
+    private void identity(AppUserRepository.Identity... rows) {
+        when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of(rows));
     }
 
     private void stubTokens() {
         when(jwtService.generate(any(), anyString())).thenReturn("trainer-token");
         when(jwtService.generateClient(anyString())).thenReturn("client-token");
         when(jwtService.generatePending(anyString())).thenReturn("pending-token");
+        when(jwtService.generateInvited(anyString())).thenReturn("invited-token");
+    }
+
+    /** A row with a trainer identity and no membership. */
+    private static AppUserRepository.Identity trainerRow(UUID id, String name, Instant setupAt) {
+        return row(AppUser.ROLE_TRAINER, id, name, setupAt, null, null, null, null, null, null);
+    }
+
+    private static AppUserRepository.Identity client(
+            String coach, String status, String membershipStatus, Instant pausedAt) {
+        return row(AppUser.ROLE_CLIENT, null, null, null,
+                coach, status, membershipStatus, pausedAt, null, null);
+    }
+
+    private static AppUserRepository.Identity removedClient(
+            String coach, Instant removedAt, Instant ackAt) {
+        return row(AppUser.ROLE_CLIENT, null, null, null,
+                coach, "archived", "removed", null, removedAt, ackAt);
     }
 
     /** The Spring Data projection, hand-rolled — there is no entity to build here. */
-    private static ClientRepository.Membership membership(
-            String trainerName, String status, Instant pausedAt) {
-        return new ClientRepository.Membership() {
-            public UUID getClientId() { return UUID.randomUUID(); }
-            public UUID getTrainerId() { return UUID.randomUUID(); }
-            public String getClientName() { return "Priya"; }
+    private static AppUserRepository.Identity row(
+            String role, UUID trainerId, String trainerOwnName, Instant setupAt,
+            String coach, String status, String membershipStatus,
+            Instant pausedAt, Instant removedAt, Instant removedAckAt) {
+        UUID clientId = coach == null ? null : UUID.randomUUID();
+        return new AppUserRepository.Identity() {
+            public UUID getUserId() { return UUID.randomUUID(); }
+            public String getPhone() { return PHONE; }
+            public String getRole() { return role; }
+            public Instant getPrivacyAcceptedAt() { return null; }
+
+            public UUID getTrainerId() { return trainerId; }
+            public Instant getSetupCompletedAt() { return setupAt; }
+            public String getTrainerOwnName() { return trainerOwnName; }
+
+            public UUID getClientId() { return clientId; }
+            public UUID getClientTrainerId() { return clientId == null ? null : UUID.randomUUID(); }
+            public String getClientName() { return clientId == null ? null : "Priya"; }
             public String getStatus() { return status; }
+            public String getMembershipStatus() { return membershipStatus; }
             public Instant getPausedAt() { return pausedAt; }
-            public String getTrainerName() { return trainerName; }
-            public String getGymName() { return "Iron Works"; }
-            public String getTrainerPhone() { return "9000000001"; }
+            public Instant getRemovedAt() { return removedAt; }
+            public Instant getRemovedAckAt() { return removedAckAt; }
+
+            public String getCoachName() { return coach; }
+            public String getCoachGymName() { return coach == null ? null : "Iron Works"; }
+            public String getCoachPhone() { return coach == null ? null : "9000000001"; }
         };
     }
 }

@@ -12,7 +12,7 @@ export {
   PACK_LOW_THRESHOLD,
   EXPIRING_WITHIN_DAYS,
 } from './clientStatusRules';
-export type { StatusChip, ClientFlags, ClientStatus } from './clientStatusRules';
+export type { ChipTone, StatusChip, ClientFlags, ClientStatus } from './clientStatusRules';
 
 export interface RosterEntry {
   client: ClientModel;

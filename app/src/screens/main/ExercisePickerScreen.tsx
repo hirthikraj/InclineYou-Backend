@@ -1,115 +1,190 @@
+/**
+ * Pick one exercise, hand it back, pop.
+ *
+ * A second, thinner copy of the library (3c) — and deliberately so. That screen
+ * is 873 rows sectioned by muscle with filters, favourites and a create form,
+ * and its pick mode writes straight into a *template's* blueprint. This one is
+ * asked for by a **client's own program**, which is a different table, so it
+ * cannot reuse that path without teaching the library a second write.
+ *
+ * What it does instead is answer one question — which exercise — and return the
+ * answer through `exercisePick`, leaving the caller to decide what to do with
+ * it. That keeps the write where it belongs and keeps this screen to a search
+ * box and a list.
+ *
+ * Cancel rather than Back on the leading edge: this screen was opened mid-task
+ * by something that is waiting on an answer, and "Cancel" is the accurate word
+ * for leaving without giving one.
+ */
+
 import React, { useEffect, useState } from 'react';
-import {
-  View, Text, TextInput, FlatList, TouchableOpacity, StyleSheet,
-} from 'react-native';
+import { FlatList, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+
 import type { MainStackParamList } from '../../navigation/MainStack';
 import { observeExerciseSearch } from '../../db/programs';
 import { deliverPick } from '../../db/exercisePick';
 import type Exercise from '../../db/models/Exercise';
-import { colors } from '../../theme';
+import {
+  AppBar,
+  Empty,
+  IconButton,
+  IconDumbbell,
+  IconX,
+  List,
+  Row,
+  Search,
+  Skeleton,
+  SkeletonRow,
+  Thumb,
+  colors,
+  radius,
+  space,
+} from '../../design';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'ExercisePicker'>;
+
+/** `Row`'s grouped height. The list is told it rather than measuring 873 rows. */
+const ROW_H = 64;
+
+const itemLayout = (_: unknown, index: number) => ({
+  length: ROW_H,
+  offset: ROW_H * index,
+  index,
+});
 
 export default function ExercisePickerScreen({ navigation }: Props) {
   const [query, setQuery] = useState('');
   const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    const sub = observeExerciseSearch(query).subscribe(setExercises);
+    const sub = observeExerciseSearch(query).subscribe((next) => {
+      setExercises(next);
+      setReady(true);
+    });
     return () => sub.unsubscribe();
   }, [query]);
 
-  const handlePick = (exercise: Exercise) => {
-    deliverPick({ id: exercise.id, name: exercise.name, muscleGroup: exercise.muscleGroup || null });
+  const pick = (exercise: Exercise) => {
+    deliverPick({
+      id: exercise.id,
+      name: exercise.name,
+      muscleGroup: exercise.muscleGroup || null,
+    });
     navigation.goBack();
   };
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.cancelBtn}>
-          <Text style={styles.cancelText}>Cancel</Text>
-        </TouchableOpacity>
-        <Text style={styles.title}>Pick exercise</Text>
-        <View style={styles.cancelBtn} />
-      </View>
+    <SafeAreaView edges={['top']} style={styles.safe}>
+      <View style={styles.pad}>
+        <AppBar
+          title="Pick an exercise"
+          subtitle={ready ? `${exercises.length} to choose from` : undefined}
+          leading={
+            <IconButton icon={IconX} label="Cancel" bare onPress={() => navigation.goBack()} />
+          }
+        />
 
-      <View style={styles.searchRow}>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search exercises..."
-          placeholderTextColor="#BBB"
+        <Search
           value={query}
           onChangeText={setQuery}
+          placeholder="Search by name or muscle"
           autoFocus
-          clearButtonMode="while-editing"
+          trailing={
+            query ? (
+              <IconButton icon={IconX} label="Clear" bare size={18} onPress={() => setQuery('')} />
+            ) : undefined
+          }
+          style={styles.search}
         />
       </View>
 
-      <FlatList
-        data={exercises}
-        keyExtractor={(e) => e.id}
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.list}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.row} onPress={() => handlePick(item)} activeOpacity={0.7}>
-            <View style={styles.rowBody}>
-              <Text style={styles.rowName} numberOfLines={1}>{item.name}</Text>
-              {item.muscleGroup ? (
-                <Text style={styles.rowMeta}>{item.muscleGroup}</Text>
-              ) : null}
+      {ready ? (
+        <FlatList
+          data={exercises}
+          keyExtractor={(e) => e.id}
+          contentContainerStyle={styles.body}
+          showsVerticalScrollIndicator={false}
+          // The keyboard is up the whole time this screen is; a tap on a result
+          // should pick it rather than spend itself dismissing the keyboard.
+          keyboardShouldPersistTaps="handled"
+          getItemLayout={itemLayout}
+          initialNumToRender={12}
+          windowSize={7}
+          removeClippedSubviews
+          renderItem={({ item, index }) => (
+            /* `List` draws one card around a group of rows and a virtualised
+               list has no group to wrap, so the border is per row and only the
+               ends are rounded. */
+            <View
+              style={[
+                styles.cell,
+                index === 0 && styles.cellFirst,
+                index === exercises.length - 1 && styles.cellLast,
+              ]}
+            >
+              <Row
+                grouped
+                leading={<Thumb size="sm" custom={item.isCustom} />}
+                title={item.name}
+                subtitle={item.muscleGroup || undefined}
+                highlight={query}
+                onPress={() => pick(item)}
+              />
             </View>
-            {item.isCustom ? <Text style={styles.customBadge}>Custom</Text> : null}
-          </TouchableOpacity>
-        )}
-        ItemSeparatorComponent={() => <View style={styles.sep} />}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyText}>
-              {query ? 'No exercises match your search.' : 'Loading exercises...'}
-            </Text>
-          </View>
-        }
-      />
+          )}
+          ListEmptyComponent={
+            <Empty
+              icon={IconDumbbell}
+              title={query ? `Nothing matches “${query}”` : 'The library is empty'}
+              body={
+                query
+                  ? 'Try a shorter word — the search reads names and muscles, so “press” finds more than “bench press” does.'
+                  : 'Exercises arrive with the first sync. Once one lands you can pick it here.'
+              }
+              style={styles.empty}
+            />
+          }
+        />
+      ) : (
+        <View style={styles.body} accessibilityLabel="Loading the exercise library">
+          <Skeleton width={104} height={10} style={styles.headGap} />
+          <List>
+            {Array.from({ length: 6 }, (_, i) => (
+              <SkeletonRow key={i} grouped avatar={false} />
+            ))}
+          </List>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1, backgroundColor: colors.canvas },
+  pad: { paddingHorizontal: space.inset },
+  body: { paddingHorizontal: space.inset, paddingBottom: space.s10 },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 12, paddingVertical: 14, backgroundColor: colors.indigo,
+  search: { marginTop: 6, marginBottom: space.s3 },
+  headGap: { marginTop: space.s5, marginBottom: space.s3 },
+
+  cell: {
+    backgroundColor: colors.surface,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: colors.line,
   },
-  title: { fontSize: 17, fontWeight: '700', color: '#fff' },
-  cancelBtn: { width: 70, alignItems: 'flex-start' },
-  cancelText: { fontSize: 15, color: '#fff', fontWeight: '500' },
-
-  searchRow: { padding: 12, backgroundColor: colors.card, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.hairline },
-  searchInput: {
-    backgroundColor: colors.bg, borderRadius: 10, height: 42, paddingHorizontal: 12,
-    fontSize: 15, color: colors.ink,
+  cellFirst: {
+    borderTopWidth: 1,
+    borderTopLeftRadius: radius.r2,
+    borderTopRightRadius: radius.r2,
   },
-
-  list: { paddingBottom: 40 },
-
-  row: {
-    flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 14,
-    backgroundColor: colors.card,
+  cellLast: {
+    borderBottomWidth: 1,
+    borderBottomLeftRadius: radius.r2,
+    borderBottomRightRadius: radius.r2,
   },
-  rowBody: { flex: 1 },
-  rowName: { fontSize: 15, fontWeight: '600', color: colors.ink },
-  rowMeta: { fontSize: 12, color: colors.muted, marginTop: 2 },
-  customBadge: {
-    fontSize: 11, fontWeight: '700', color: colors.indigo,
-    backgroundColor: colors.indigoTint, paddingHorizontal: 8, paddingVertical: 3,
-    borderRadius: 20,
-  },
-  sep: { height: StyleSheet.hairlineWidth, backgroundColor: colors.hairline, marginLeft: 16 },
-
-  empty: { paddingTop: 48, alignItems: 'center' },
-  emptyText: { fontSize: 14, color: colors.faint },
+  empty: { marginTop: space.s7 },
 });

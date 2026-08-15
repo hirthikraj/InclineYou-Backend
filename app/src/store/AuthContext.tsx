@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import { TOKEN_KEY } from '../api/client';
 import type { Membership } from '../api/auth';
 import { resetLocalDatabase, setSyncScope, syncDatabase } from '../db/sync';
+import { seedDefaultWorkingHours } from '../db/diary';
 import { hydratePrefs, resetPrefs } from '../settings/prefs';
 import { unregisterPushToken } from '../push/registerPushToken';
 import { clearDraft } from '../setup/draft';
@@ -168,7 +169,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * the background. Waiting on the network here would break the flow's own
    * promise that none of it needs internet.
    */
+  /**
+   * The end of trainer setup — and the one moment a working week can be seeded.
+   *
+   * Setup deliberately never asks for hours (`xreptrainersetup.html` § 06:
+   * "setting them before having clients is guessing"), but leaving the table
+   * empty is worse than guessing. With no rows the diary reports every day
+   * closed and offers no bookable slot anywhere, which reads as a broken app
+   * rather than as a setting nobody has touched. A default week is a visible,
+   * obviously-editable wrong answer, and a trainer corrects one of those.
+   *
+   * Best-effort on purpose: this is a convenience, and a trainer who has just
+   * finished setup must reach their deck whether or not the write lands.
+   */
   const completeSetup = async (next: Landing) => {
+    if (state.trainerId) {
+      try {
+        await seedDefaultWorkingHours(state.trainerId);
+      } catch {
+        /* The hours screen is one tap from Settings; a failed seed is not a
+           reason to hold someone at the last screen of onboarding. */
+      }
+    }
+
     await SecureStore.deleteItemAsync(SETUP_KEY);
     setLanding(next);
     setState((current) => ({ ...current, needsSetup: false }));

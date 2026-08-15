@@ -71,6 +71,8 @@ export interface ProgramExerciseInput {
   reps?: number;
   restSeconds?: number;
   dayOfWeek?: number;
+  /** Which week of the program. Omitted means week 1, which is what the server assumes. */
+  week?: number;
   orderIndex: number;
 }
 
@@ -80,6 +82,7 @@ export interface ProgramExercisePatch {
   restSeconds?: number;
   notes?: string;
   dayOfWeek?: number;
+  week?: number;
   orderIndex?: number;
 }
 

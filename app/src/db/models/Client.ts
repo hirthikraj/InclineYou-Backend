@@ -19,6 +19,15 @@ export default class Client extends Model {
   @text('weekly_schedule') weeklySchedule!: string;
   /** 'floor' | 'remote' | null — see `home/mode.ts`. */
   @text('delivery_mode') deliveryMode!: string;
+  /**
+   * The CLIENT's own answer: 'invited' | 'accepted' | 'declined' | 'paused' |
+   * 'removed' | 'unavailable'. Server-owned — read here, never written.
+   *
+   * Distinct from `status`, which is the trainer's view of the same
+   * arrangement. The two can legitimately disagree: a trainer can be actively
+   * training and billing somebody who has not opened the app.
+   */
+  @text('membership_status') membershipStatus!: string;
   @readonly @date('created_at') createdAt!: Date;
   @date('updated_at') updatedAt!: Date;
 }

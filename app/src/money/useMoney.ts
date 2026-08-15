@@ -62,7 +62,7 @@ export interface Money {
    * False only until the first emission of the app's life.
    *
    * The book's empty states are strong claims — "no money in the book yet",
-   * "hisaab clear", "that client isn't here any more" — and none of them may
+   * "everything clear", "that client isn't here any more" — and none of them may
    * be shown before the tables have actually been read.
    */
   ready: boolean;
@@ -136,7 +136,16 @@ export function useMoney(active: boolean = true): Money {
         ]),
       packs
         .query(Q.sortBy('order_index', Q.asc))
-        .observeWithColumns(['name', 'type', 'sessions', 'amount', 'validity_days', 'status', 'order_index']),
+        .observeWithColumns([
+          'name',
+          'type',
+          'sessions',
+          'amount',
+          'validity_days',
+          'status',
+          'owner',
+          'order_index',
+        ]),
       settlements
         .query(Q.sortBy('period', Q.desc))
         .observeWithColumns(['amount', 'sessions_counted', 'gym_name', 'status', 'due_at', 'settled_at']),

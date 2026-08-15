@@ -25,7 +25,6 @@ import type { MainStackParamList } from '../../../navigation/MainStack';
 import { usePrefs } from '../../../settings/usePrefs';
 import { languageLabel, notifyOnCount, setPrefs, APPEARANCES } from '../../../settings/prefs';
 import { useSyncState } from '../../../db/useSync';
-import { syncDatabase } from '../../../db/sync';
 import { useAuth } from '../../../store/AuthContext';
 import {
   AppBar,
@@ -181,10 +180,12 @@ export default function SettingsScreen() {
                 <Tag label="Clear" tone="ok" />
               )
             }
-            onPress={() => {
-              void syncDatabase('settings');
-              setNotice(hasPending ? 'Pushing what is waiting.' : 'Checking for anything new.');
-            }}
+            /* Opens the queue rather than firing a sync from here. The row has
+               just told the trainer a number, and a row that quotes a number
+               and then does something other than show it is a dead end — which
+               is what this was until the queue screen existed. Sync now lives
+               on that screen, next to the list it acts on. */
+            onPress={() => navigation.navigate('SyncQueue')}
           />
           <Setting
             icon={IconEye}

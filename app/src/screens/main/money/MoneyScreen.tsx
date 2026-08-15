@@ -378,7 +378,7 @@ export default function MoneyScreen() {
 
       {month.hisaabClear ? (
         <Callout tone="accent" icon={IconCheck} style={styles.clear}>
-          <CalloutStrong tone="accent">Hisaab clear.</CalloutStrong> Every client is paid up for{' '}
+          <CalloutStrong tone="accent">Everything clear.</CalloutStrong> Every client is paid up for{' '}
           {month.label}.
         </Callout>
       ) : null}

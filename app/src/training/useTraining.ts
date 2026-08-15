@@ -59,7 +59,7 @@ function observeTraining() {
     workouts.query().observeWithColumns(['session_date', 'client_id']),
     templates
       .query(Q.sortBy('created_at', Q.desc))
-      .observeWithColumns(['name', 'goal', 'weeks', 'structure', 'day_labels']),
+      .observeWithColumns(['name', 'goal', 'weeks', 'structure', 'day_labels', 'training_days']),
     programs.query().observeWithColumns(['status', 'template_id', 'client_id']),
     clients.query().observeWithColumns(['name']),
   ]).pipe(

@@ -20,7 +20,7 @@
  *   · The LEDGER is on the movement axis — money that actually moved, newest
  *     first. That is a diary, and it is what a shopkeeper reads.
  *
- * A month is "hisaab clear" when its account has nothing left out. That phrase
+ * A month is "Everything clear" when its account has nothing left out. That phrase
  * is OkCredit's, and it is the right words — not "all invoices settled", which
  * is what a western app would say to a trainer in Adyar.
  */
@@ -99,6 +99,8 @@ export interface MoneyPack {
   amount: number;
   validityDays?: number | null;
   status: string;
+  /** 'trainer' | 'gym'. Null on anything written before the gym price list. */
+  owner?: string | null;
   orderIndex: number;
 }
 
@@ -808,7 +810,7 @@ export function buildBook(input: MoneyInput, clientId: string, now: number): Boo
     mark: {
       id: 'today',
       label: 'Balance today',
-      value: owed > 0 ? `${rupees(owed)} due` : 'Hisaab clear',
+      value: owed > 0 ? `${rupees(owed)} due` : 'Everything clear',
       clear: owed <= 0,
     },
   });
@@ -823,7 +825,7 @@ export function buildBook(input: MoneyInput, clientId: string, now: number): Boo
         mark: {
           id: `clear-${e.id}`,
           label: `Balance on ${shortDate(clear.at)}`,
-          value: 'Hisaab clear',
+          value: 'Everything clear',
           clear: true,
         },
       });
@@ -896,6 +898,8 @@ export interface PackRow {
   amount: number;
   perSession: number | null;
   active: boolean;
+  /** Whose price list it sits on. Never null here — a missing owner is the trainer's. */
+  owner: 'trainer' | 'gym';
   /** How many clients are on this pack right now. */
   clients: number;
   detail: string;
@@ -911,7 +915,17 @@ export interface EndingRow {
 }
 
 export interface PacksView {
+  /** The trainer's own price list — the packs they set and can discount. */
   selling: PackRow[];
+  /**
+   * The gym's, when the trainer works at one.
+   *
+   * Kept apart from `selling` rather than flagged inside it, because the two
+   * lists answer different questions: one is what this trainer charges, the
+   * other is what the gym's counter charges, and the pricing note below only
+   * makes sense about prices the trainer actually controls.
+   */
+  gymSelling: PackRow[];
   retired: PackRow[];
   ending: EndingRow[];
   activePackages: number;
@@ -935,6 +949,7 @@ export function buildPacks(input: MoneyInput, now: number): PacksView {
         amount: pack.amount,
         perSession: per,
         active: pack.status === 'active',
+        owner: pack.owner === 'gym' ? 'gym' : 'trainer',
         clients: on,
         detail: [
           per ? `${rupees(per)} each` : pack.type === 'monthly' ? 'per month' : null,
@@ -960,14 +975,20 @@ export function buildPacks(input: MoneyInput, now: number): PacksView {
     }))
     .sort((a, b) => a.remaining - b.remaining);
 
-  const selling = rows.filter((r) => r.active);
+  const selling = rows.filter((r) => r.active && r.owner === 'trainer');
+  const gymSelling = rows.filter((r) => r.active && r.owner === 'gym');
   return {
     selling,
+    gymSelling,
     retired: rows.filter((r) => !r.active),
     ending,
     activePackages: live.length,
+    // Only the trainer's own prices are judged. Telling someone their gym has
+    // priced its own packs badly is advice they cannot act on.
     priceNote: pricingNote(selling),
-    subtitle: `${selling.length} you sell · ${live.length} active`,
+    subtitle: gymSelling.length
+      ? `${selling.length} yours · ${gymSelling.length} the gym's · ${live.length} active`
+      : `${selling.length} you sell · ${live.length} active`,
   };
 }
 

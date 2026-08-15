@@ -22,6 +22,9 @@ export default class Package extends Model {
   /** A write-off keeps the row and the history. It is not a delete. */
   @date('written_off_at') writtenOffAt!: Date | null;
   @field('written_off_amount') writtenOffAmount!: number | null;
+  /* --- V14 --- */
+  /** What was knocked off the list price at the till. `amount` is already net. */
+  @field('discount_amount') discountAmount!: number | null;
   @readonly @date('created_at') createdAt!: Date;
   @date('updated_at') updatedAt!: Date;
 }

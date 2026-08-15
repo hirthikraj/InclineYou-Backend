@@ -38,6 +38,13 @@ export interface RosterClient {
   name: string;
   phone?: string;
   status: string;
+  /**
+   * The CLIENT's own consent, from the server. Distinct from `status`, which is
+   * this trainer's view — the two can legitimately disagree. Absent until the
+   * first pull after the client was written, which is why nothing here treats
+   * absence as meaningful.
+   */
+  membershipStatus?: string | null;
   deliveryMode?: string | null;
   metadata?: unknown;
   createdAt: Date | number;
@@ -92,7 +99,7 @@ export interface RosterInput {
 /* ------------------------------------------------------------------- output */
 
 export type RosterStatus = 'active' | 'paused' | 'invited' | 'archived' | 'inactive';
-export type AttentionKind = 'overdue' | 'quiet' | 'pack' | 'invite';
+export type AttentionKind = 'overdue' | 'quiet' | 'pack' | 'invite' | 'unavailable';
 export type Batch = 'morning' | 'evening' | 'night' | 'none';
 
 export interface RosterRow {
@@ -367,7 +374,26 @@ function row(
   const invitedAt = metaTime(client, 'invitedAt') ?? ms(client.createdAt);
   const inviteDays = daysBetween(invitedAt, now);
 
-  if (status === 'paused') {
+  /**
+   * The number belongs to a trainer account, so no invite can ever reach it.
+   *
+   * Ranked ABOVE money, which nothing else here is, and deliberately: every
+   * other attention item is a thing that became true over time and will still be
+   * true tomorrow, whereas this one is a typo the trainer made seconds ago and
+   * can fix in seconds. Ranking it below an overdue payment would bury the one
+   * item on the roster that is actually a data-entry mistake — and the trainer
+   * would go on believing they had invited somebody they had not.
+   *
+   * The client themselves is untouched by this: they can be scheduled, logged
+   * and billed exactly like anyone else. Only app access is impossible.
+   */
+  const unavailable = lower(client.membershipStatus ?? '') === 'unavailable';
+
+  if (unavailable) {
+    attention = { kind: 'unavailable', action: 'Fix number', weight: 5000 };
+    severity = 'alert';
+    line = 'That number is a trainer account — they can’t be invited';
+  } else if (status === 'paused') {
     const pausedAt = metaTime(client, 'pausedAt') ?? ms(client.updatedAt);
     const tail = sessionsLeft === null ? 'no pack' : `${sessionsLeft} sessions left`;
     line = `Paused ${shortDate(pausedAt)} · ${tail}`;

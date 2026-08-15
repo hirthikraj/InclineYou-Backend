@@ -221,6 +221,18 @@ export default function HomeScreen() {
     navigation.navigate('SessionDetail', { sessionId: session.id });
 
   /**
+   * The schedule and the book are tabs, not screens.
+   *
+   * Home's "full schedule" and its money figures used to push the pre-design
+   * calendar and roster over the top of the shell. Both of those surfaces are
+   * designed now and they live in the tab bar, so these move sideways instead
+   * of stacking — which is also the only way back out that doesn't need a
+   * back button.
+   */
+  const openTab = (screen: 'DiaryTab' | 'MoneyTab', params?: object) =>
+    navigation.navigate('Home', { screen, params } as never);
+
+  /**
    * § 04: Start goes straight into the workout log, prefilled.
    *
    * A local write, so it works on a gym floor with no signal — and it only
@@ -353,7 +365,15 @@ export default function HomeScreen() {
         />
 
         {offline ? (
-          <Banner tone="offline" icon={IconCloudOff} style={styles.banner} onPress={refresh}>
+          /* Tapping retries when there is nothing waiting, and shows WHAT is
+             waiting when there is. The banner has just claimed a number, and
+             the number is the thing a trainer wants opened. */
+          <Banner
+            tone="offline"
+            icon={IconCloudOff}
+            style={styles.banner}
+            onPress={sync.hasPending ? () => navigation.navigate('SyncQueue') : refresh}
+          >
             {`Offline — everything still works.${queued(sync.hasPending, sync.pendingCount)}`}
           </Banner>
         ) : null}
@@ -406,10 +426,8 @@ export default function HomeScreen() {
           onStart={start}
           onEnd={end}
           onAddClient={() => navigation.navigate('AddClient')}
-          onBook={() =>
-            navigation.navigate('Home', { screen: 'DiaryTab', params: { book: true } } as never)
-          }
-          onTomorrow={() => navigation.navigate('Calendar', {})}
+          onBook={() => openTab('DiaryTab', { book: true })}
+          onTomorrow={() => openTab('DiaryTab')}
         />
 
         {deck.firstRun ? null : (
@@ -418,18 +436,18 @@ export default function HomeScreen() {
               label="Sessions"
               value={deck.todayDone}
               unit={`/${deck.today.length}`}
-              onPress={() => navigation.navigate('Calendar', {})}
+              onPress={() => openTab('DiaryTab')}
             />
             <Stat
               label="Collected"
               value={rupeesShort(deck.collectedToday)}
-              onPress={() => navigation.navigate('Clients')}
+              onPress={() => openTab('MoneyTab')}
             />
             <Stat
               label="Pending"
               value={deck.pendingTotal > 0 ? rupeesShort(deck.pendingTotal) : '—'}
               tone={deck.pendingTotal > 0 ? 'warn' : 'default'}
-              onPress={() => navigation.navigate('Clients')}
+              onPress={() => openTab('MoneyTab')}
             />
           </StatRail>
         )}
@@ -498,7 +516,7 @@ export default function HomeScreen() {
           <>
             <SectionHead
               label="Today"
-              action={{ label: 'Full schedule', onPress: () => navigation.navigate('Calendar', {}) }}
+              action={{ label: 'Full schedule', onPress: () => openTab('DiaryTab') }}
             />
             <Seg style={styles.seg}>
               {(['floor', 'remote'] as DeliveryMode[]).map((mode) => (
@@ -557,7 +575,7 @@ export default function HomeScreen() {
           <>
             <SectionHead
               label={deck.money.monthLabel}
-              action={{ label: 'Payments', onPress: () => navigation.navigate('Clients') }}
+              action={{ label: 'Payments', onPress: () => openTab('MoneyTab') }}
             />
             <Card>
               <View style={styles.moneyHead}>

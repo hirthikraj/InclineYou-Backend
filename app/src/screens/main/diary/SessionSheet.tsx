@@ -37,7 +37,7 @@ import {
 } from '../../../design';
 import { MODE_LABELS } from '../../../home/mode';
 import { clockParts } from '../../../home/time';
-import { suggestMoves, packRemaining, type DiaryInput, type DiaryItem } from '../../../diary/diary';
+import { moveOptions, packRemaining, type DiaryInput, type DiaryItem } from '../../../diary/diary';
 
 type Pane = 'session' | 'move' | 'outcome';
 export type Outcome = 'cancelled_client' | 'no_show' | 'cancelled_trainer';
@@ -87,9 +87,11 @@ export default function SessionSheet({
     [input.sessions, item],
   );
 
-  const suggestions = useMemo(
-    () => (session ? suggestMoves(input, session, now) : []),
-    [input, session, now],
+  // Only while the move pane is open: this walks a fortnight of `buildDay`, and
+  // there is no reason to pay for that every time somebody taps a session.
+  const days = useMemo(
+    () => (session && pane === 'move' ? moveOptions(input, session, now) : []),
+    [input, session, now, pane],
   );
 
   if (!item) return null;
@@ -102,34 +104,52 @@ export default function SessionSheet({
   /* ------------------------------------------------------------------ move */
 
   if (pane === 'move') {
+    const total = days.reduce((n, d) => n + d.slots.length, 0);
+
     return (
       <Sheet visible={visible} onClose={onClose} title={`Move ${item.clientName}`}>
         <Text style={styles.sub}>
           From {start.time} {start.meridiem}
         </Text>
-        <Text style={styles.label}>Free slots they usually take</Text>
-        <List style={styles.list}>
-          {suggestions.length === 0 ? (
-            <Row grouped minHeight={56} title="Nothing free nearby" subtitle="Pick a date instead" />
-          ) : (
-            suggestions.map((s) => (
+
+        {/* The list scrolls; the callout and Back button do not. A trainer
+            moving somebody to next Thursday should not have to scroll past
+            every free slot in between to find the way out of the pane. */}
+        <ScrollView
+          style={styles.moveScroll}
+          contentContainerStyle={styles.moveBody}
+          showsVerticalScrollIndicator
+        >
+          {total === 0 ? (
+            <List style={styles.list}>
               <Row
-                key={s.at}
                 grouped
                 minHeight={56}
-                title={s.dayLabel}
-                subtitle={s.why}
-                leading={
-                  <View style={styles.time}>
-                    <Text style={styles.timeValue}>{s.time}</Text>
-                    <Text style={styles.timeMeridiem}>{s.meridiem}</Text>
-                  </View>
-                }
-                onPress={() => onMove(item, s.at)}
+                title="Nothing free in the next two weeks"
+                subtitle="Open up more hours in Settings › When you work"
               />
+            </List>
+          ) : (
+            days.map((d) => (
+              <View key={d.day}>
+                <Text style={[styles.label, styles.dayLabel]}>{d.label}</Text>
+                <List style={styles.list}>
+                  {d.slots.map((s) => (
+                    <Row
+                      key={s.at}
+                      grouped
+                      minHeight={56}
+                      title={`${s.time} ${s.meridiem}`}
+                      subtitle={s.why}
+                      onPress={() => onMove(item, s.at)}
+                    />
+                  ))}
+                </List>
+              </View>
             ))
           )}
-        </List>
+        </ScrollView>
+
         <Callout icon={IconMessage} style={styles.note}>
           {firstName} gets one WhatsApp with the new time.{' '}
           <CalloutStrong>Nothing is deducted for a move.</CalloutStrong>
@@ -307,6 +327,12 @@ const styles = StyleSheet.create({
     color: colors.ink3,
   },
   list: { marginTop: 10 },
+  // `flexShrink` is what lets the list shrink into the sheet's height cap.
+  // Without it the ScrollView takes its full content height and pushes the
+  // callout and the Back button off the bottom of the screen.
+  moveScroll: { flexShrink: 1 },
+  moveBody: { paddingBottom: space.s2 },
+  dayLabel: { marginTop: space.s4 },
   stack: { gap: space.s2 },
   note: { marginTop: space.s4 },
   actions: { marginTop: space.s4, gap: space.s2 },
@@ -314,7 +340,4 @@ const styles = StyleSheet.create({
   grow: { flex: 1 },
   more: { width: 56 },
   cta: { marginTop: space.s3 },
-  time: { width: 52 },
-  timeValue: { fontSize: 15, fontWeight: '800', letterSpacing: -0.3, color: colors.ink },
-  timeMeridiem: { fontSize: 9, fontWeight: '700', letterSpacing: 0.9, color: colors.ink3, marginTop: 2 },
 });

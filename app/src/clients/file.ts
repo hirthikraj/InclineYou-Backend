@@ -39,6 +39,8 @@ export interface FileClient {
   name: string;
   phone?: string | null;
   status: string;
+  /** The client's own consent, from the server. See `Client.membershipStatus`. */
+  membershipStatus?: string | null;
   deliveryMode?: string | null;
   paymentMode?: string | null;
   trainerSplitPercent?: number | null;
@@ -136,8 +138,21 @@ export interface FileHead {
   mode: DeliveryMode;
   status: 'active' | 'paused' | 'archived' | 'invited' | 'inactive';
   statusLabel: string;
+  /**
+   * True when the phone on this record belongs to a trainer account, so no
+   * invite can ever reach it. Everything else about the client works — they can
+   * be scheduled, logged and billed — which is why this is a flag beside the
+   * status rather than a status of its own.
+   */
+  cannotInvite: boolean;
   /** The primary verb. For a client who owes you ₹6,000 it is not "Book". */
   owed: number;
+  /**
+   * The verb alone — the amount is not repeated here. This label sits in a
+   * half-width button beside "Book", and "Collect ₹12,000" is wider than that
+   * button on a 360dp screen. The figure is already on the same screen, large,
+   * in the "Owes you" pair right below.
+   */
   owedLabel: string | null;
 }
 
@@ -154,8 +169,9 @@ export function buildHead(input: FileInput, now: number): FileHead | null {
     mode: readMode({ client: c.deliveryMode, metadata: c.metadata }),
     status,
     statusLabel: STATUS_LABELS[status],
+    cannotInvite: (c.membershipStatus ?? '').toLowerCase() === 'unavailable',
     owed,
-    owedLabel: owed > 0 ? `Collect ${rupees(owed)}` : null,
+    owedLabel: owed > 0 ? 'Collect' : null,
   };
 }
 

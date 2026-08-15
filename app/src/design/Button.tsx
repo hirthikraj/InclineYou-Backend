@@ -76,6 +76,7 @@ export default function Button({
         {Icon ? <Icon size={iconSize} color={labelColor(variant, disabled)} /> : null}
         <Text
           numberOfLines={1}
+          ellipsizeMode="tail"
           maxFontSizeMultiplier={maxFontScale.control}
           style={[
             styles.label,
@@ -124,11 +125,18 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   block: { alignSelf: 'stretch', width: '100%' },
-  content: { flexDirection: 'row', alignItems: 'center', gap: space.s2 },
+  /**
+   * Shrinkable, and `minWidth: 0` with it. Without both, a label wider than a
+   * width-constrained button (`flex: 1` in a pair, say) keeps its intrinsic
+   * width and spills over the fill instead of ellipsising — `numberOfLines`
+   * alone cannot save it, because nothing above the Text is bounding it.
+   */
+  content: { flexDirection: 'row', alignItems: 'center', gap: space.s2, flexShrink: 1, minWidth: 0 },
   hidden: { opacity: 0 },
   label: {
     fontWeight: '800',
     textTransform: 'uppercase',
+    flexShrink: 1,
   },
   /** `.tx-btn--text` owns its own metrics regardless of the size prop. */
   textMetrics: { minHeight: 44, paddingVertical: 6, paddingHorizontal: space.s2 },

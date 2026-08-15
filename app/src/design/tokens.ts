@@ -40,6 +40,15 @@ export const dark = {
   accentText: '#C6F24E', // links, active tab, small icons
   accentSoft: 'rgba(198,242,78,0.12)',
   accentLine: 'rgba(198,242,78,0.34)',
+  /**
+   * `accentSoft` split into hue and alpha. An SVG gradient stop needs the two
+   * apart: `extractGradient` throws away whatever alpha is inside `stopColor`
+   * and takes it from `stopOpacity` alone, so an `rgba()` string handed to a
+   * stop renders fully opaque. Only `Card`'s live tint needs the split — every
+   * other surface uses `accentSoft` flat.
+   */
+  accentSoftHue: '#C6F24E',
+  accentSoftAlpha: 0.12,
 
   /* semantic */
   ok: '#3DDC84',
@@ -95,6 +104,10 @@ export const light: Palette = {
   accentText: '#4F6B0A', // 6.1 : 1 — lime is unreadable as text on white
   accentSoft: '#EDF6D6',
   accentLine: '#CFE39A',
+  // Light's soft tint is already opaque — accent blended onto white — so the
+  // hue is the token itself and the alpha is 1.
+  accentSoftHue: '#EDF6D6',
+  accentSoftAlpha: 1,
 
   ok: '#0E7034',
   okSoft: '#E4F4EA',

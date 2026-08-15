@@ -36,6 +36,8 @@ export interface PackDraft {
   sessions: number | null;
   amount: number;
   validityDays: number | null;
+  /** Whose price list this belongs on. Absent means the trainer's own. */
+  owner?: 'trainer' | 'gym';
 }
 
 export const BLANK_PACK: PackDraft = {
@@ -44,16 +46,23 @@ export const BLANK_PACK: PackDraft = {
   sessions: 12,
   amount: 0,
   validityDays: null,
+  owner: 'trainer',
 };
+
+/** What the gym sells at its counter, entered by the trainer who works there. */
+export const BLANK_GYM_PACK: PackDraft = { ...BLANK_PACK, owner: 'gym' };
 
 export default function PackSheet({
   visible,
   draft,
+  gymName,
   onSave,
   onClose,
 }: {
   visible: boolean;
   draft: PackDraft | null;
+  /** Names the gym in the copy when the draft is one of its packages. */
+  gymName?: string | null;
   onSave: (pack: PackDraft) => void;
   onClose: () => void;
 }) {
@@ -80,9 +89,23 @@ export default function PackSheet({
   const valid = price > 0 && (type === 'monthly' || count > 0);
 
   const label = autoName(type, count);
+  const theirs = draft?.owner === 'gym';
+  const whose = gymName ?? 'the gym';
 
   return (
-    <Sheet visible={visible} onClose={onClose} title={draft?.id ? 'Edit this pack' : 'A pack you sell'}>
+    <Sheet
+      visible={visible}
+      onClose={onClose}
+      title={
+        theirs
+          ? draft?.id
+            ? `Edit this ${whose} package`
+            : `A package ${whose} sells`
+          : draft?.id
+            ? 'Edit this pack'
+            : 'A pack you sell'
+      }
+    >
       {/* The sheet caps its own height; four fields and three choice cards go
           past that on a small phone, so the body scrolls inside the cap. */}
       <ScrollView keyboardShouldPersistTaps="handled" style={styles.body}>
@@ -126,7 +149,7 @@ export default function PackSheet({
       ) : null}
 
       <View style={styles.field}>
-        <FieldLabel>Price</FieldLabel>
+        <FieldLabel>{theirs ? `What ${whose} charges` : 'Price'}</FieldLabel>
         <Control
           value={amount}
           onChangeText={setAmount}
@@ -169,13 +192,22 @@ export default function PackSheet({
       </View>
 
       <Callout icon={IconWallet} style={styles.note}>
-        Changing a price here never changes a pack somebody already bought. What they paid is what
-        they paid.
+        {theirs ? (
+          <>
+            This is the gym&apos;s price, not yours — put down what their counter actually charges.
+            Your cut of it is your gym share, and you can&apos;t discount a price you don&apos;t set.
+          </>
+        ) : (
+          <>
+            Changing a price here never changes a pack somebody already bought. What they paid is
+            what they paid.
+          </>
+        )}
       </Callout>
       </ScrollView>
 
       <Button
-        label={draft?.id ? 'Save' : 'Add this pack'}
+        label={draft?.id ? 'Save' : theirs ? 'Add this package' : 'Add this pack'}
         size="lg"
         block
         disabled={!valid}
@@ -188,6 +220,7 @@ export default function PackSheet({
             sessions: type === 'monthly' ? null : count,
             amount: price,
             validityDays: Number(validity.replace(/\D/g, '')) || null,
+            owner: draft?.owner ?? 'trainer',
           })
         }
       />

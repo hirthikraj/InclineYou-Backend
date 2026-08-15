@@ -22,6 +22,13 @@ export default class Pack extends Model {
   @field('validity_days') validityDays!: number | null;
   /** 'active' | 'inactive' */
   @text('status') status!: string;
+  /**
+   * Whose price this is — 'trainer' or 'gym'.
+   *
+   * Null on anything written before V14, and null means the trainer's own. Read
+   * it through `packOwner()` rather than comparing this field directly.
+   */
+  @text('owner') owner!: string | null;
   @field('order_index') orderIndex!: number;
   @readonly @date('created_at') createdAt!: Date;
   @date('updated_at') updatedAt!: Date;

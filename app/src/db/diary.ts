@@ -18,13 +18,15 @@
  */
 
 import { Q } from '@nozbe/watermelondb';
-import { database } from './index';
+import { database, uuid } from './index';
 import ScheduledSessionModel from './models/ScheduledSession';
 import BatchModel from './models/Batch';
 import PackageModel from './models/Package';
 import WorkingHoursModel from './models/WorkingHours';
 import TimeBlockModel from './models/TimeBlock';
+import { clientsCollection } from './clients';
 import { refreshPending, syncDatabase } from './sync';
+import { coveredBy, mergeWindows, minuteOfDay, isoWeekday } from '../diary/diary';
 import type { DeliveryMode } from '../home/mode';
 
 export const scheduledSessionsCollection =
@@ -222,7 +224,13 @@ export async function bookSeries(
 ): Promise<string> {
   // A client-generated id, like every other id in this app — the series has to
   // be stable before it has ever reached the server.
-  const seriesId = `series_${Math.random().toString(36).slice(2)}${occurrences[0] ?? 0}`;
+  //
+  // A UUID specifically, and not a readable `series_…` string. `series_id` is a
+  // `uuid` column (V10) and the sync push casts to it, so a friendlier format
+  // was rejected by Postgres on arrival — and because the whole push is one
+  // transaction, it took every other pending change down with it and retried
+  // forever. One malformed id was silently costing the device all of its sync.
+  const seriesId = uuid();
 
   await database.write(async () => {
     await database.batch(
@@ -291,6 +299,83 @@ async function chargeablePack(clientId: string): Promise<PackageModel | undefine
   return packs.find((p) => (p.sessionsRemaining ?? 0) > 0);
 }
 
+/** What to write to a pack, and what to stamp on the session, for one outcome. */
+export interface PackSettlement {
+  /** Runs the pack writes. Call inside a `database.write`. */
+  apply: () => Promise<void>;
+  /** Stamp these on the session, so undo stays exact. */
+  delta: number;
+  packageId: string | null;
+}
+
+/**
+ * Settles a session against its pack **from whatever it already took**.
+ *
+ * This exists because closing a session is not a one-way door, and the code
+ * assumed it was. A session can be finished from the workout log, from the home
+ * hero, from its detail screen and from the diary; nothing stopped a second one
+ * of those from running, and each simply subtracted one more. Marking an
+ * already-done session as a no-show charged for it twice over. A twelve-session
+ * pack with one session delivered could read nine.
+ *
+ * `startSession` and `markBatchDone` were already written this way — they check
+ * before they act. These two paths were the ones that did not.
+ *
+ * The rule is that the pack reflects the session's *current* outcome, not the
+ * running total of every button ever pressed:
+ *
+ *   · already charged, and still should be — nothing moves, and the original
+ *     stamp is kept so the 24-hour undo still credits the pack it took from
+ *   · charged, but shouldn't be — put it back
+ *   · not charged, and should be — take one
+ *   · not charged, and shouldn't be — nothing moves
+ *
+ * Re-charging deliberately reuses the pack the session was first charged to
+ * rather than re-running `chargeablePack`: a re-decision must not migrate
+ * somebody's session onto a pack they bought later.
+ */
+export async function settlePack(
+  session: ScheduledSessionModel,
+  wantsCharge: boolean,
+): Promise<PackSettlement> {
+  const priorDelta = session.packDelta ?? 0;
+  const priorPack = session.packPackageId
+    ? await packagesCollection.find(session.packPackageId).catch(() => null)
+    : null;
+  const charged = priorPack !== null && priorDelta !== 0;
+
+  if (charged && wantsCharge) {
+    return { apply: async () => {}, delta: priorDelta, packageId: priorPack.id };
+  }
+
+  if (charged && !wantsCharge) {
+    return {
+      delta: 0,
+      packageId: null,
+      apply: async () => {
+        await priorPack.update((p) => {
+          const total = p.sessionsTotal ?? Number.POSITIVE_INFINITY;
+          p.sessionsRemaining = Math.min(total, (p.sessionsRemaining ?? 0) - priorDelta);
+        });
+      },
+    };
+  }
+
+  if (!wantsCharge) return { apply: async () => {}, delta: 0, packageId: null };
+
+  const pack = await chargeablePack(session.clientId);
+  return {
+    delta: pack ? -1 : 0,
+    packageId: pack ? pack.id : null,
+    apply: async () => {
+      if (!pack) return;
+      await pack.update((p) => {
+        p.sessionsRemaining = Math.max(0, (p.sessionsRemaining ?? 0) - 1);
+      });
+    },
+  };
+}
+
 /**
  * Marks a session as not-trained and decides the money in one write.
  *
@@ -305,22 +390,19 @@ export async function markNotTrained(
   by?: CancelledBy,
 ): Promise<void> {
   const session = await scheduledSessionsCollection.find(sessionId);
-  const charge = outcome === 'no_show';
-  const pack = charge ? await chargeablePack(session.clientId) : undefined;
+  // Settled against what this session already took, not from zero — a done
+  // session re-marked as a no-show must cost one in total, not two.
+  const settlement = await settlePack(session, outcome === 'no_show');
 
   await database.write(async () => {
-    if (pack) {
-      await pack.update((p) => {
-        p.sessionsRemaining = Math.max(0, (p.sessionsRemaining ?? 0) - 1);
-      });
-    }
+    await settlement.apply();
     await session.update((s) => {
       s.status = outcome;
       s.cancelledBy = outcome === 'cancelled' ? (by ?? 'client') : (null as unknown as string);
       // Stamped even when nothing was charged: "this outcome took nothing" is
       // a fact undo needs as much as "it took one".
-      s.packDelta = pack ? -1 : 0;
-      s.packPackageId = pack ? pack.id : (null as unknown as string);
+      s.packDelta = settlement.delta;
+      s.packPackageId = settlement.packageId as unknown as string;
       s.packAppliedAt = new Date();
     });
   });
@@ -411,6 +493,121 @@ export async function saveWorkingHours(
 
   await refreshPending();
   syncDatabase('save-working-hours');
+}
+
+/**
+ * The week a trainer starts with.
+ *
+ * A split shift six days a week, Sunday closed — the shape of an Indian gym
+ * floor, and the same one `backend/scripts/seed-sample-month.sql` uses. These
+ * are a starting point to correct, not a claim about this trainer: FR-2 owns
+ * the real answer and the trainer edits it from Settings whenever they like.
+ *
+ * Seeded rather than left empty because empty is indistinguishable from broken.
+ * With no rows `findGaps` returns nothing for every day of the week, so the
+ * diary offers no bookable time anywhere and says the day is closed — a new
+ * trainer reads that as the app not working, not as a setting they never set.
+ */
+export const DEFAULT_WORKING_HOURS: HourWindow[] = [
+  { startMinute: 6 * 60, endMinute: 11 * 60 },
+  { startMinute: 17 * 60, endMinute: 21 * 60 },
+];
+
+/** Monday–Saturday. Sunday is the one day off the default assumes. */
+const DEFAULT_WORKING_DAYS = [0, 1, 2, 3, 4, 5];
+
+/**
+ * Gives a brand-new trainer a working week, once.
+ *
+ * No-ops if *any* row exists, on any weekday. The guard is deliberately that
+ * broad: a trainer who has deliberately closed all seven days has an empty
+ * *merged* week but non-empty rows, and re-seeding them on the next launch
+ * would silently reopen a week they closed on purpose.
+ */
+export async function seedDefaultWorkingHours(trainerId: string): Promise<boolean> {
+  const existing = await workingHoursCollection.query().fetchCount();
+  if (existing > 0) return false;
+
+  await database.write(async () => {
+    await database.batch(
+      ...DEFAULT_WORKING_DAYS.flatMap((weekday) =>
+        DEFAULT_WORKING_HOURS.map((w) =>
+          workingHoursCollection.prepareCreate((row) => {
+            row.trainerId = trainerId;
+            row.weekday = weekday;
+            row.startMinute = w.startMinute;
+            row.endMinute = w.endMinute;
+          }),
+        ),
+      ),
+    );
+  });
+
+  await refreshPending();
+  syncDatabase('seed-working-hours');
+  return true;
+}
+
+/** A booking that the hours about to be saved would no longer cover. */
+export interface HoursConflict {
+  sessionId: string;
+  clientId: string;
+  clientName: string;
+  at: number;
+  minutes: number;
+}
+
+/**
+ * Which booked clients fall outside a proposed set of hours.
+ *
+ * Only *future* sessions, and only `scheduled` ones. A session that already
+ * happened cannot be affected by a rule set afterwards, and a cancelled one is
+ * not a commitment to anybody — warning about either trains the trainer to tap
+ * through the warning.
+ *
+ * This never blocks the save. §07 is explicit that hours constrain what a
+ * client can self-book and never what the trainer already agreed to, so an
+ * existing booking outside the new hours stays booked and keeps showing in the
+ * diary. The trainer is told, and decides.
+ */
+export async function conflictingSessions(
+  weekday: number,
+  windows: HourWindow[],
+  now: number = Date.now(),
+): Promise<HoursConflict[]> {
+  const merged = mergeWindows(windows);
+
+  const sessions = await scheduledSessionsCollection
+    .query(Q.where('status', 'scheduled'), Q.where('scheduled_at', Q.gt(now)))
+    .fetch();
+
+  const hits = sessions.filter((s) => {
+    const at = s.scheduledAt.getTime();
+    if (isoWeekday(at) !== weekday) return false;
+    const start = minuteOfDay(at);
+    // Clamped, not wrapped. A session that runs past midnight cannot be inside
+    // any window — windows are minutes within one day — and clamping makes it
+    // read as "ends at 24:00", which correctly fails `coveredBy`.
+    const end = Math.min(24 * 60, start + (s.durationMinutes || 0));
+    return !coveredBy(merged, start, end);
+  });
+
+  if (hits.length === 0) return [];
+
+  const clients = await clientsCollection
+    .query(Q.where('id', Q.oneOf([...new Set(hits.map((s) => s.clientId))])))
+    .fetch();
+  const nameById = new Map(clients.map((c) => [c.id, c.name.trim() || 'Client']));
+
+  return hits
+    .map((s) => ({
+      sessionId: s.id,
+      clientId: s.clientId,
+      clientName: nameById.get(s.clientId) ?? 'Client',
+      at: s.scheduledAt.getTime(),
+      minutes: s.durationMinutes || 0,
+    }))
+    .sort((a, b) => a.at - b.at);
 }
 
 /* ------------------------------------------------------------------ blocks */

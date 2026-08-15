@@ -1,26 +1,49 @@
 package com.xrep.xrep_backend.auth;
 
 import com.xrep.xrep_backend.config.AppProperties;
-import com.xrep.xrep_backend.entity.OtpRequest;
-import com.xrep.xrep_backend.repository.OtpRequestRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
-import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 
+/**
+ * Issue a code, and check one.
+ *
+ * The state lives behind {@link OtpStore} — Redis when it is up, `otp_request`
+ * when it is not — and the send limits live in {@link OtpSendLimiter}. What is
+ * left here is the sequence, which is the part worth reading in one piece:
+ * a wait is checked before anything is generated, a code is hashed before it is
+ * stored, and a wrong guess is counted whether or not the caller sees an error.
+ *
+ * ── What moving to Redis actually changed ─────────────────────────────────────
+ *
+ * Two things, and neither is speed.
+ *
+ * Expiry stopped being somebody's job. `V1__init_schema.sql` promised a
+ * scheduled cleanup for `otp_request` that was never written, so the table has
+ * grown since the first sign-in; a TTL cannot be forgotten.
+ *
+ * And the wrong-attempt counter became atomic. It used to be read-modify-write
+ * under READ COMMITTED, so two verifies landing together could both read `2` and
+ * both write `3` — SEC-OTP-06, a burst buying a fourth guess at a six-digit
+ * code. {@code HINCRBY} makes that impossible on the fast path, and the Postgres
+ * fallback now takes a row lock so it is impossible on the slow one too.
+ *
+ * No longer {@code @Transactional}: the store owns its own transactions where it
+ * needs them, and wrapping a Redis call in a database transaction would be a lie
+ * about what can be rolled back.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class OtpService {
 
-    private final OtpRequestRepository otpRepo;
+    private final OtpStore store;
+    private final OtpSendLimiter limiter;
+    private final OtpSender sender;
     private final AppProperties props;
     private final BCryptPasswordEncoder bcrypt;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -28,153 +51,69 @@ public class OtpService {
     /**
      * Is this number serving a wait, and if so throw it.
      *
-     * This used to be a {@code ConcurrentHashMap} field, which made the ceiling
-     * on brute force "three attempts per restart": every deploy cleared every
-     * live lock, and a second instance never saw the first one's. It is now
-     * {@code otp_request.locked_until} (V17), so it survives both.
-     *
-     * A lock in the past needs no cleanup — it is simply over. The map needed
-     * pruning; a timestamp does not.
+     * This was a {@code ConcurrentHashMap} once, which made the ceiling on brute
+     * force "three attempts per restart": every deploy cleared every live lock,
+     * and a second instance never saw the first one's. V17 moved it onto the row;
+     * it now lives in Redis with the row as a backstop, and
+     * {@link DelegatingOtpStore#lockedUntil} takes the later of the two so a
+     * failover never hands somebody a clean slate.
      */
     private void requireUnlocked(String phone, Instant now) {
-        Instant lockedUntil = otpRepo.lockedUntilFor(phone);
+        Instant lockedUntil = store.lockedUntil(phone);
         if (lockedUntil != null && lockedUntil.isAfter(now)) {
-            throw new OtpLockedException(secondsUntil(now, lockedUntil));
+            throw new OtpLockedException(OtpSendLimiter.secondsUntil(now, lockedUntil));
         }
     }
 
-    @Transactional
     public void send(String phone) {
         Instant now = Instant.now();
 
         requireUnlocked(phone, now);
 
-        // Before anything is generated or sent: a refused request must cost
-        // nothing, least of all an SMS.
-        throttle(phone, now);
+        // Before anything is generated or sent: a refused request must cost nothing, least of all an SMS.
+        limiter.check(phone, now);
 
         String otp = String.format("%06d", secureRandom.nextInt(1_000_000));
+        Instant expiresAt = now.plusSeconds(props.getOtp().getExpiryMinutes() * 60L);
 
-        OtpRequest req = new OtpRequest();
-        req.setPhone(phone);
-        req.setOtpHash(bcrypt.encode(otp));
-        req.setExpiresAt(Instant.now().plusSeconds(props.getOtp().getExpiryMinutes() * 60L));
-        otpRepo.save(req);
-
-        if (props.getOtp().isSmsEnabled()) {
-            // TODO: integrate SMS provider (MSG91 or Firebase Auth)
-        } else {
-            log.info("[DEV] OTP for {}: {}", phone, otp);
-        }
+        // Hashed, never stored in the clear — the store is a cache to everything that can read it, and a readable code is a readable account.
+        store.saveCode(phone, bcrypt.encode(otp), expiresAt);
+        store.recordSend(phone, now);
+        sender.send(phone, otp);
     }
 
     /**
-     * How many codes a number may ask for, and how fast.
-     *
-     * {@code maxAttempts} caps guesses at a code. This caps the codes themselves,
-     * which is the other half and the expensive one: with SMS stubbed, an
-     * unlimited request rate is a log full of codes, and the day a provider is
-     * wired it is somebody else's phone buzzing all night on our bill.
-     *
-     * Two limits, and the day's ceiling is checked first — when both apply it is
-     * the longer wait, and quoting the 30-second one would be a promise the next
-     * request breaks.
-     *
-     * Counted from {@code otp_request} rather than a field: every code ever sent
-     * is already a row there, so the limit survives a deploy and holds across
-     * instances — the same reason the lock moved onto the row in V17.
-     *
-     * Two requests landing in the same millisecond can both read the same count
-     * and both pass — READ COMMITTED, no row to lock. The window is a millisecond
-     * wide and the daily ceiling still bounds the total, so the worst case is one
-     * extra text, not an unbounded run.
+     * @throws OtpLockedException   too many wrong attempts; carries the wait
+     * @throws OtpExpiredException  aged out, or there is no live code
+     * @throws InvalidOtpException  wrong; always carries attemptsLeft
      */
-    private void throttle(String phone, Instant now) {
-        var otp = props.getOtp();
-
-        Instant dayAgo = now.minus(Duration.ofHours(24));
-        if (otpRepo.countSentSince(phone, dayAgo) >= otp.getMaxSendsPerDay()) {
-            // The count falls back under the ceiling the moment the oldest of
-            // those sends ages out of the rolling day.
-            Instant oldest = otpRepo.oldestSentSince(phone, dayAgo);
-            Instant freeAt = (oldest == null ? now : oldest).plus(Duration.ofHours(24));
-            log.warn("OTP send refused for {}: {} in 24h", phone, otp.getMaxSendsPerDay());
-            throw new OtpThrottledException(secondsUntil(now, freeAt));
-        }
-
-        List<Integer> ladder = otp.getResendLadderSeconds();
-        if (ladder == null || ladder.isEmpty()) return;
-
-        Instant windowStart = now.minus(Duration.ofMinutes(otp.getSendWindowMinutes()));
-        long sentInWindow = otpRepo.countSentSince(phone, windowStart);
-        // The first code inside a window never waits — that is somebody signing
-        // in, not somebody hammering.
-        if (sentInWindow == 0) return;
-
-        Instant lastSent = otpRepo.lastSentAt(phone);
-        if (lastSent == null) return;
-
-        int step = (int) Math.min(sentInWindow, ladder.size()) - 1;
-        Instant readyAt = lastSent.plusSeconds(ladder.get(step));
-        if (readyAt.isAfter(now)) {
-            throw new OtpThrottledException(secondsUntil(now, readyAt));
-        }
-    }
-
-    /** Rounded up, and never 0 — "retry after 0 seconds" reads as "retry now". */
-    private static int secondsUntil(Instant now, Instant when) {
-        long millis = Duration.between(now, when).toMillis();
-        return (int) Math.max(1, (millis + 999) / 1000);
-    }
-
-    /**
-     * Verifies the OTP for the given phone number.
-     *
-     * @throws OtpLockedException   if the phone is locked due to too many wrong attempts
-     * @throws OtpExpiredException  if the code has aged out, or there is no live code
-     * @throws InvalidOtpException  if the code is wrong (always carries attemptsLeft)
-     */
-    // REQUIRES_NEW: suspends the caller's transaction so this one commits on its
-    // own, even when an exception follows. Without it, the outer @Transactional on
-    // AuthService.verifyOtp() rolls back the shared transaction on RuntimeException,
-    // discarding the wrongAttempts increment before it ever reaches the DB.
-    @Transactional(propagation = Propagation.REQUIRES_NEW,
-                   noRollbackFor = {InvalidOtpException.class, OtpExpiredException.class,
-                                    OtpLockedException.class})
     public void verify(String phone, String otp) {
         Instant now = Instant.now();
 
-        // 1. Is this number serving a wait? Read from the row, not from memory.
+        // 1. Is this number serving a wait?
         requireUnlocked(phone, now);
 
-        // 2. Find the active (unexpired, unverified) OTP for this number.
-        OtpRequest req = otpRepo.findLatestUnverified(phone).orElse(null);
-        if (req == null || req.getExpiresAt().isBefore(now)) {
-            // Its own failure, not a wrong code: the recovery is "send a new one",
-            // not "retype", and it must not burn an attempt. Note this returns
-            // before the counter below ever runs.
+        // 2. The live code, if there is one.
+        OtpStore.Code code = store.activeCode(phone).orElse(null);
+        if (code == null || code.expiresAt().isBefore(now)) {
             throw new OtpExpiredException();
         }
 
-        // 3. Check the code.
-        if (!bcrypt.matches(otp, req.getOtpHash())) {
-            int newCount = req.getWrongAttempts() + 1;
-            req.setWrongAttempts(newCount);
+        // 3. Check it.
+        if (!bcrypt.matches(otp, code.hash())) {
+            int used = store.recordWrongAttempt(phone);
 
             int maxAttempts = props.getOtp().getMaxAttempts();
             int lockSeconds = props.getOtp().getLockMinutes() * 60;
-            boolean locking = newCount >= maxAttempts;
-            // Stamped on the same row and in the same save as the count that
-            // caused it, so the wait and its reason commit together or not at
-            // all. REQUIRES_NEW above is what gets them committed at all.
-            if (locking) req.setLockedUntil(now.plusSeconds(lockSeconds));
-            otpRepo.save(req);
 
-            if (locking) throw new OtpLockedException(lockSeconds);
-            throw new InvalidOtpException(maxAttempts - newCount);
+            if (used >= maxAttempts) {
+                store.lock(phone, now.plusSeconds(lockSeconds));
+                throw new OtpLockedException(lockSeconds);
+            }
+            throw new InvalidOtpException(maxAttempts - used);
         }
 
-        req.setVerified(true);
-        otpRepo.save(req);
+        // 4. Spent. A verified code must never work twice (AUTH-29).
+        store.consume(phone);
     }
 }

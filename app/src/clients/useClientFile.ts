@@ -83,7 +83,7 @@ const gymCache = liveCache<GymProfile>(EMPTY_GYM);
 function observe(clientId: string) {
   return combineLatest([
     clients.query(Q.where('id', clientId)).observeWithColumns([
-      'name', 'phone', 'status', 'delivery_mode', 'payment_mode',
+      'name', 'phone', 'status', 'membership_status', 'delivery_mode', 'payment_mode',
       'trainer_split_percent', 'metadata',
     ]),
     programs
@@ -206,6 +206,7 @@ function toClient(c: ClientModel) {
     name: c.name,
     phone: c.phone,
     status: c.status,
+    membershipStatus: c.membershipStatus,
     deliveryMode: c.deliveryMode,
     paymentMode: c.paymentMode,
     trainerSplitPercent: c.trainerSplitPercent,

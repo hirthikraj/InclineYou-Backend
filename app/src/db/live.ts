@@ -8,7 +8,7 @@
  * initialised with, and that used to be an empty input.
  *
  * The result was a screen that asserted something false for a beat: "No
- * clients yet" on a roster of eight, "Hisaab clear" on ₹15,000 outstanding,
+ * clients yet" on a roster of eight, "everything clear" on ₹15,000 outstanding,
  * "That client isn't here any more" on a client who is. Then the real data
  * arrived and it all changed. That is worse than a blank pause — a wrong
  * sentence rendered confidently is a bug the user sees.

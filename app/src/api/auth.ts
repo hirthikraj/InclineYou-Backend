@@ -14,7 +14,32 @@ import { api } from './client';
  *   and 7b was a wall. Kept only so a new app against an old server during a
  *   rolling deploy still has a screen. Nothing current sends it.
  */
-export type Role = 'trainer' | 'client' | 'pending' | 'paused';
+export type Role =
+  | 'trainer'
+  | 'client'
+  | 'pending'
+  /**
+   * V18 · named by a trainer, and has never agreed to anything. The token that
+   * comes with this is good for exactly two calls — accept and decline — and
+   * cannot open a sync scope, so an unanswered invite can read nothing.
+   */
+  | 'invited'
+  /** V18 · a trainer ended it and this person has not been told yet. Shown once. */
+  | 'removed'
+  /**
+   * V18 · every membership answered and gone — declined, or removed and
+   * acknowledged. Deliberately NOT `pending`: this number's role is client, and
+   * offering it a coaching workspace is the wrong turn 7a exists to avoid.
+   */
+  | 'unattached'
+  /** V18 · reserved. Nothing mints one yet. */
+  | 'gym_admin'
+  /**
+   * LEGACY. A backend before the pause fix sent this with no token, and 7b was
+   * a wall. Kept only so a new app against an old server during a rolling
+   * deploy still has a screen. Nothing current sends it.
+   */
+  | 'paused';
 
 /** One roster this number is on. A person can legitimately be on two. */
 export interface Membership {
@@ -30,8 +55,22 @@ export interface Membership {
    * every roster such a backend returned was.
    */
   status?: string;
+  /**
+   * V18 · the CLIENT's own answer: `invited` | `accepted` | `declined` |
+   * `paused` | `removed`. Kept apart from `status`, which is the TRAINER's view
+   * of the same arrangement — the two answer to different people and can
+   * legitimately disagree. Optional: a backend before V18 doesn't send it, and
+   * every roster such a backend returned was one the client had never been
+   * asked about, which reads as accepted because that is how it behaved.
+   */
+  membershipStatus?: string;
   /** "2026-07-22", or absent/null when this roster isn't paused. */
   pausedOn?: string | null;
+}
+
+/** Has this person been asked and not yet answered? */
+export function isInvited(m: Membership): boolean {
+  return m.membershipStatus?.toLowerCase() === 'invited';
 }
 
 /** Is this roster on hold? Absence of `status` means an older backend, so: no. */
@@ -58,6 +97,13 @@ export interface AuthResponse {
   clientOf?: Membership[];
   /** Set only when EVERY roster is paused. Drives the banner, no longer a wall. */
   paused?: { trainerName: string; trainerPhone: string | null; pausedOn: string | null } | null;
+  /** V18 · set only on the `removed` role — who ended it and when. */
+  removed?: {
+    clientId: string;
+    trainerName: string | null;
+    trainerPhone: string | null;
+    removedOn: string | null;
+  } | null;
 }
 
 /**
@@ -156,6 +202,41 @@ export function claimTrainerAccount(pendingToken: string) {
   // chosen which of the two things on 7a they are.
   return api.post<AuthResponse>('/v1/auth/trainer', null, {
     headers: { Authorization: `Bearer ${pendingToken}` },
+  });
+}
+
+/* ------------------------------------------------- answering a membership
+ * All three carry the invited token explicitly rather than leaning on the
+ * interceptor, for the same reason `claimTrainerAccount` does: the token is
+ * deliberately NOT in the keychain yet, because a stored token is what the app
+ * reads as "signed in" — and nobody is signed in until they have answered.
+ * -------------------------------------------------------------------------- */
+
+/** Accept the invite. The privacy policy was on the screen that calls this. */
+export function acceptInvite(invitedToken: string, clientId: string) {
+  return api.post<AuthResponse>(`/v1/auth/membership/${clientId}/accept`, null, {
+    headers: { Authorization: `Bearer ${invitedToken}` },
+  });
+}
+
+/** Decline. The trainer keeps a roster row that says what happened. */
+export function declineInvite(invitedToken: string, clientId: string) {
+  return api.post<AuthResponse>(`/v1/auth/membership/${clientId}/decline`, null, {
+    headers: { Authorization: `Bearer ${invitedToken}` },
+  });
+}
+
+/**
+ * "OK" on the removal notice.
+ *
+ * The membership row outlives the membership — the trainer's payments and
+ * session history point at it — so `removed` is permanently true, and this
+ * acknowledgement is the only thing that stops the notice being redrawn at
+ * every future sign-in. The local wipe happens on the phone, separately.
+ */
+export function acknowledgeRemoval(invitedToken: string, clientId: string) {
+  return api.post<AuthResponse>(`/v1/auth/membership/${clientId}/ack-removal`, null, {
+    headers: { Authorization: `Bearer ${invitedToken}` },
   });
 }
 

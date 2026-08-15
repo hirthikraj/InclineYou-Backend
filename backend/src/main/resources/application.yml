@@ -21,6 +21,24 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      # Short on purpose. Redis is the fast path for sign-in and for every
+      # request's rate-limit check, and both have a working Postgres/in-memory
+      # fallback — so a slow Redis must fail over quickly rather than hold the
+      # request thread. Waiting is the worse failure here.
+      timeout: 250ms
+      connect-timeout: 250ms
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 16
+          max-idle: 8
+          min-idle: 1
+
 server:
   port: ${PORT:8080}
   # Set to `framework` behind a proxy (Railway) so getRemoteAddr() is the caller's
@@ -34,6 +52,12 @@ logging:
     com.xrep: DEBUG
 
 app:
+  redis:
+    # The kill switch. Off — or unreachable — and everything falls back: OTP
+    # state to `otp_request` in Postgres, rate limiting to the in-process
+    # buckets. Nobody is locked out of signing in because a cache is down, and
+    # the limits still hold, just per instance again.
+    enabled: ${REDIS_ENABLED:true}
   jwt:
     secret: ${JWT_SECRET:dev-only-secret-change-before-production-32chars}
     expiry-minutes: 10080   # 7 days

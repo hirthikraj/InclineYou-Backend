@@ -38,6 +38,7 @@ import ProgramExerciseModel from './models/ProgramExercise';
 import TemplateModel from './models/Template';
 import ProgramModel from './models/Program';
 import { refreshPending, syncDatabase } from './sync';
+import { currentProgramWeek, fetchProgramExercisesForDay } from './programs';
 
 export const workoutsCollection = database.get<WorkoutSessionModel>('workout_sessions');
 export const workoutExercisesCollection =
@@ -124,6 +125,11 @@ async function planFor(
  * The prescription is **copied**, not joined. Editing the client's program next
  * week must not rewrite what was asked for this morning, for the same reason
  * assigning a program copies it.
+ *
+ * **Which week** is worked out from the program's start date rather than asked
+ * for, because the session does not know: a booking carries the day it belongs
+ * to and always has. A week the trainer never authored falls back to week 1,
+ * which is what a program with one week's shape has always meant.
  */
 export async function seedLogFromPlan(
   workoutId: string,
@@ -137,13 +143,12 @@ export async function seedLogFromPlan(
   const programId = await planFor(workoutId, hintedProgramId);
   if (!programId) return;
 
-  const planned = await programExercisesCollection
-    .query(
-      Q.where('program_id', programId),
-      Q.where('day_of_week', templateDay),
-      Q.sortBy('order_index', Q.asc),
-    )
-    .fetch();
+  const program = await programsCollection.find(programId).catch(() => null);
+  const planned = await fetchProgramExercisesForDay(
+    programId,
+    templateDay,
+    currentProgramWeek(program?.startDate),
+  );
   if (!planned.length) return;
 
   await database.write(async () => {
@@ -596,6 +601,9 @@ async function swapInProgram(
           next.targetLoad = pe.targetLoad;
           next.notes = pe.notes;
           next.dayOfWeek = pe.dayOfWeek;
+          // Carried, not defaulted: a swap that reaches the program reaches
+          // every week it appears in, each staying in the week it was on.
+          next.week = pe.week;
           next.orderIndex = pe.orderIndex;
         }),
       ]),

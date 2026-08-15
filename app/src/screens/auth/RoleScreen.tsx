@@ -1,24 +1,28 @@
 /**
- * Screen 01 · § 05 — Resolve role. Only shown to people who are both.
+ * Screen 01 · § 05 — Whose book to open.
  *
- * A person can coach clients and train with somebody, and that is not a corner
- * case: most independent coaches also train. For everyone else this screen never
- * appears — sign-in resolves the single role silently and goes straight through,
- * which is the rule the design states twice and the reason this file is short.
+ * Shown to one person only: a client who is training with more than one trainer
+ * right now. Everybody else resolves silently and goes straight through, which
+ * is the rule the design states twice and the reason this file is short.
  *
- * Each card carries live proof that it is the right one — how many clients, whose
- * plan — because a role picker with two bare labels makes people guess.
+ * ── What used to be here ──────────────────────────────────────────────────────
  *
- * ── Where the proof comes from ────────────────────────────────────────────
+ * This screen also used to resolve "you coach clients here AND you train here",
+ * for the trainer who is also somebody's client. That case no longer exists:
+ * from V18 `app_user.role` is a single exclusive value per number, the roster-add
+ * path refuses a phone that already owns a trainer account, and sign-in returns
+ * one identity. The coaching card and its roster count went with it.
  *
- * The roster count is read from the local database, not the network: this screen
- * is one tap after a verify and the first sync has not landed. On a returning
- * phone the number is there instantly; on a fresh install there is nothing to
- * count, and the card says what it is instead of showing a zero that would read
- * as "you have no clients".
+ * Multi-trainer clients are a different thing and are NOT affected — one person
+ * can still be on two rosters, which is two client rows and one human being, and
+ * choosing between them is what this screen is now entirely for.
+ *
+ * Each card still carries proof of which is which — the trainer's name, their
+ * gym, whether that roster is paused — because a picker with two bare labels
+ * makes people guess, and finding out after you tap is finding out too late.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
@@ -26,8 +30,6 @@ import type { RouteProp } from '@react-navigation/native';
 import type { AuthStackParamList } from '../../navigation/AuthStack';
 import { isPaused } from '../../api/auth';
 import { useAuth, type Lens } from '../../store/AuthContext';
-import { database } from '../../db';
-import type ClientModel from '../../db/models/Client';
 import {
   AuthBody,
   AuthFoot,
@@ -41,7 +43,6 @@ import {
   Avatar,
   Button,
   IconDumbbell,
-  IconUsers,
   colors,
   radius,
   space,
@@ -52,25 +53,20 @@ type Props = {
   route: RouteProp<AuthStackParamList, 'Role'>;
 };
 
-/** What the two cards resolve to. A membership id names which client record. */
+/** Which membership the client lens will read. */
 type Pick = { lens: Lens; clientId: string | null };
 
 export default function RoleScreen({ route }: Props) {
   const { session } = route.params;
   const { signIn } = useAuth();
-  const clients = useClientCount(!!session.trainerId);
 
-  const canCoach = !!session.trainerId;
   // A paused roster is still selectable — the history is in it — but it is never
   // what the screen should land on preselected.
   const live = session.memberships.filter((m) => !isPaused(m));
-  const [pick, setPick] = useState<Pick>(
-    // Coaching first when it exists — it is what they signed up to do, and the
-    // design's own copy leads with it.
-    canCoach
-      ? { lens: 'trainer', clientId: null }
-      : { lens: 'client', clientId: (live[0] ?? session.memberships[0])?.clientId ?? null },
-  );
+  const [pick, setPick] = useState<Pick>({
+    lens: 'client',
+    clientId: (live[0] ?? session.memberships[0])?.clientId ?? null,
+  });
 
   const [busy, setBusy] = useState(false);
 
@@ -86,8 +82,6 @@ export default function RoleScreen({ route }: Props) {
     });
   };
 
-  const first = session.memberships[0];
-
   return (
     <AuthScreen>
       <AuthTop>
@@ -98,38 +92,18 @@ export default function RoleScreen({ route }: Props) {
         <AuthTitle>
           {session.name ? `Welcome back, ${session.name}` : 'Welcome back'}
         </AuthTitle>
-        <AuthSub>
-          {canCoach
-            ? 'You coach clients here and you train here. Where do you want to start?'
-            : 'You train with more than one trainer. Whose book do you want to open?'}
-        </AuthSub>
+        <AuthSub>You train with more than one trainer. Whose book do you want to open?</AuthSub>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.list}>
-          {canCoach ? (
-            <RoleCard
-              icon={IconUsers}
-              title="Coaching"
-              proof={coachProof(clients)}
-              selected={pick.lens === 'trainer'}
-              onPress={() => setPick({ lens: 'trainer', clientId: null })}
-            />
-          ) : null}
-
           {session.memberships.map((m) => (
             <RoleCard
               key={m.clientId}
               icon={IconDumbbell}
-              title={canCoach && session.memberships.length === 1 ? 'My own training' : m.trainerName}
+              title={m.trainerName}
               // A paused card says so instead of naming the gym: which roster is
               // on hold is the only thing that distinguishes two cards here, and
               // finding out after you tap is finding out too late.
-              proof={
-                isPaused(m)
-                  ? `Paused — your history is still here`
-                  : canCoach && session.memberships.length === 1
-                    ? `With ${m.trainerName}${m.gymName ? ` · ${m.gymName}` : ''}`
-                    : m.gymName ?? 'Your trainer'
-              }
+              proof={isPaused(m) ? 'Paused — your history is still here' : m.gymName ?? 'Your trainer'}
               avatar={m.trainerName}
               selected={pick.lens === 'client' && pick.clientId === m.clientId}
               onPress={() => setPick({ lens: 'client', clientId: m.clientId })}
@@ -148,24 +122,15 @@ export default function RoleScreen({ route }: Props) {
           size="lg"
           block
           loading={busy}
-          disabled={pick.lens === 'client' && !pick.clientId}
+          disabled={!pick.clientId}
           onPress={() => void go()}
         />
-        {!canCoach && first ? (
-          <Text style={styles.foot}>
-            Nothing here is a second account — it is the same sign-in, read from the other side.
-          </Text>
-        ) : null}
+        <Text style={styles.foot}>
+          Nothing here is a second account — it is the same sign-in, read from the other side.
+        </Text>
       </AuthFoot>
     </AuthScreen>
   );
-}
-
-/** Live proof, or an honest sentence when there is nothing local to count yet. */
-function coachProof(clients: number | null): string {
-  if (clients === null) return 'Your roster, your day, your book';
-  if (clients === 0) return 'Set up your roster — nobody on it yet';
-  return `${clients} client${clients === 1 ? '' : 's'} · your day and your book`;
 }
 
 function RoleCard({
@@ -208,36 +173,6 @@ function RoleCard({
       </View>
     </Pressable>
   );
-}
-
-/**
- * How many clients are on this phone already.
- *
- * Null until the count is in, and null forever on a phone with an empty database
- * — the card has copy for that case rather than a zero.
- */
-function useClientCount(active: boolean): number | null {
-  const [count, setCount] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!active) return;
-    let alive = true;
-    void database
-      .get<ClientModel>('clients')
-      .query()
-      .fetchCount()
-      .then((n) => {
-        if (alive) setCount(n);
-      })
-      .catch(() => {
-        // A read failure is not worth a screen. The card falls back to copy.
-      });
-    return () => {
-      alive = false;
-    };
-  }, [active]);
-
-  return count;
 }
 
 const styles = StyleSheet.create({

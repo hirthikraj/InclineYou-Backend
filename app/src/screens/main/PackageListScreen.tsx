@@ -1,41 +1,79 @@
-import React, { useEffect, useState } from 'react';
-import {
-  View, Text, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, ActivityIndicator,
-  Modal, TextInput, KeyboardAvoidingView, Platform,
-} from 'react-native';
+/**
+ * What one client has bought.
+ *
+ * Not the price list — that is § 06 · 4b, the trainer's own packs, and it lives
+ * on the Money tab. This is the other side of it: the packs *this person* is
+ * actually holding, which is what the roster's "pack running low" and the
+ * diary's "open pack" are both asking to see.
+ *
+ * The live pack is the whole screen. A trainer opening this is answering one
+ * of two questions — how many sessions are left, or what is still owed — and
+ * both of those are about the pack that is running now. Everything expired is a
+ * receipt, so it goes below a rule and reads dimmer.
+ *
+ * Selling a new one is a sheet rather than a screen: four fields, opened from
+ * a decision already made, and pushing a screen for it would put a back button
+ * between the trainer and the till.
+ */
+
+import React, { useEffect, useMemo, useState } from 'react';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+
 import type { MainStackParamList } from '../../navigation/MainStack';
 import { observePackages, createPackage } from '../../db/packages';
+import { observeClient } from '../../db/clients';
 import { useAuth } from '../../store/AuthContext';
+import { rupees } from '../../home/time';
 import type PackageModel from '../../db/models/Package';
-import { colors } from '../../theme';
+import {
+  AppBar,
+  Button,
+  Control,
+  Empty,
+  FieldLabel,
+  GroupHead,
+  IconBack,
+  IconButton,
+  IconPlus,
+  IconWallet,
+  List,
+  Reveal,
+  Row,
+  RowValue,
+  Segmented,
+  Sheet,
+  Skeleton,
+  SkeletonRow,
+  Tag,
+  Toast,
+  colors,
+  space,
+  type TagTone,
+} from '../../design';
 
 type Props = NativeStackScreenProps<MainStackParamList, 'PackageList'>;
 
-const TYPE_LABELS: Record<string, string> = {
+type PackType = 'session_pack' | 'monthly';
+
+const TYPE_LABEL: Record<string, string> = {
   session_pack: 'Session pack',
   monthly: 'Monthly',
 };
 
-const STATUS_COLORS: Record<string, string> = {
-  active: '#2E7D32',
-  expired: '#9E9E9E',
-  cancelled: '#B26A00',
-  overdue: '#C62828',
+const STATUS: Record<string, { label: string; tone: TagTone }> = {
+  active: { label: 'Running', tone: 'accent' },
+  overdue: { label: 'Overdue', tone: 'danger' },
+  expired: { label: 'Expired', tone: 'neutral' },
+  cancelled: { label: 'Cancelled', tone: 'neutral' },
 };
 
-function formatDate(s: string | null | undefined): string {
-  return s ? new Date(s).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
-}
-
-interface AddState {
-  type: 'session_pack' | 'monthly';
-  sessions: string;
-  amount: string;
-  startDate: string;
-  endDate: string;
+function day(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
 export default function PackageListScreen({ route, navigation }: Props) {
@@ -43,251 +81,260 @@ export default function PackageListScreen({ route, navigation }: Props) {
   const { trainerId } = useAuth();
 
   const [packages, setPackages] = useState<PackageModel[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showAdd, setShowAdd] = useState(false);
-  const [add, setAdd] = useState<AddState>({
-    type: 'session_pack', sessions: '', amount: '', startDate: '', endDate: '',
-  });
+  const [ready, setReady] = useState(false);
+  const [name, setName] = useState<string | null>(clientName ?? null);
+
+  const [selling, setSelling] = useState(false);
+  const [type, setType] = useState<PackType>('session_pack');
+  const [sessions, setSessions] = useState('');
+  const [amount, setAmount] = useState('');
+  const [from, setFrom] = useState('');
+  const [until, setUntil] = useState('');
   const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    const sub = observePackages(clientId).subscribe((pkgs) => {
-      setPackages(pkgs);
-      setLoading(false);
+    const sub = observePackages(clientId).subscribe((next) => {
+      setPackages(next);
+      setReady(true);
     });
     return () => sub.unsubscribe();
   }, [clientId]);
 
-  const handleSave = async () => {
-    const amount = parseFloat(add.amount);
-    if (!amount || isNaN(amount)) {
-      Alert.alert('Amount required', 'Enter the package amount in ₹.');
+  useEffect(() => {
+    const sub = observeClient(clientId).subscribe((client) => {
+      if (client?.name) setName(client.name);
+    });
+    return () => sub.unsubscribe();
+  }, [clientId]);
+
+  const { live, done } = useMemo(() => {
+    const l: PackageModel[] = [];
+    const d: PackageModel[] = [];
+    for (const pkg of packages) (pkg.status === 'active' || pkg.status === 'overdue' ? l : d).push(pkg);
+    return { live: l, done: d };
+  }, [packages]);
+
+  const reset = () => {
+    setType('session_pack');
+    setSessions('');
+    setAmount('');
+    setFrom('');
+    setUntil('');
+  };
+
+  const sell = async () => {
+    const value = parseFloat(amount);
+    if (!value || Number.isNaN(value)) {
+      setNotice('A pack needs a price.');
       return;
     }
-    if (!trainerId) return;
-
+    if (!trainerId) {
+      setNotice('Not signed in yet — try again in a moment.');
+      return;
+    }
     setSaving(true);
     try {
       await createPackage({
         trainerId,
         clientId,
-        type: add.type,
-        sessionsTotal: add.type === 'session_pack' && add.sessions ? parseInt(add.sessions, 10) : undefined,
-        amount,
-        startDate: add.startDate || undefined,
-        endDate: add.endDate || undefined,
+        type,
+        sessionsTotal: type === 'session_pack' && sessions ? parseInt(sessions, 10) : undefined,
+        amount: value,
+        startDate: from || undefined,
+        endDate: until || undefined,
       });
-      setShowAdd(false);
-      setAdd({ type: 'session_pack', sessions: '', amount: '', startDate: '', endDate: '' });
+      setSelling(false);
+      reset();
+      setNotice(`${TYPE_LABEL[type]} sold. Record the payment when it lands.`);
     } catch {
-      Alert.alert('Error', 'Could not save package. Try again.');
+      setNotice('Could not save that pack.');
     } finally {
       setSaving(false);
     }
   };
 
+  /** "8 of 12 left · ₹3,000" for a pack, dates for a month. */
+  const detail = (pkg: PackageModel): string => {
+    if (pkg.type === 'session_pack') {
+      const left = pkg.sessionsRemaining ?? 0;
+      const total = pkg.sessionsTotal ?? null;
+      return `${left} of ${total ?? '?'} left · ${rupees(pkg.amount)}`;
+    }
+    const span = [day(pkg.startDate), day(pkg.endDate)].filter(Boolean).join(' → ');
+    return span ? `${rupees(pkg.amount)} · ${span}` : rupees(pkg.amount);
+  };
+
+  const row = (pkg: PackageModel, dim = false) => {
+    const status = STATUS[pkg.status] ?? { label: pkg.status, tone: 'neutral' as TagTone };
+    const pack = pkg.type === 'session_pack';
+    return (
+      <Row
+        key={pkg.id}
+        grouped
+        dim={dim}
+        title={TYPE_LABEL[pkg.type] ?? pkg.type}
+        subtitle={detail(pkg)}
+        severity={pkg.status === 'overdue' ? 'critical' : undefined}
+        trailing={
+          pack ? (
+            <RowValue value={String(pkg.sessionsRemaining ?? 0)} unit="left" minWidth={44} />
+          ) : (
+            <Tag label={status.label} tone={status.tone} />
+          )
+        }
+        onPress={() => navigation.navigate('PackageDetail', { packageId: pkg.id, clientId })}
+      />
+    );
+  };
+
   return (
-    <SafeAreaView style={styles.safe}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>‹</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle} numberOfLines={1}>
-          {clientName ? `${clientName} · Packages` : 'Packages'}
-        </Text>
-        <TouchableOpacity onPress={() => setShowAdd(true)} style={styles.addBtn}>
-          <Text style={styles.addText}>+ Add</Text>
-        </TouchableOpacity>
+    <SafeAreaView edges={['top']} style={styles.safe}>
+      <View style={styles.pad}>
+        <AppBar
+          title="Packs"
+          subtitle={name ?? undefined}
+          leading={<IconButton icon={IconBack} label="Back" bare onPress={() => navigation.goBack()} />}
+          actions={<IconButton icon={IconPlus} label="Sell a pack" bare onPress={() => setSelling(true)} />}
+        />
       </View>
 
-      {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={colors.indigo} />
-      ) : (
+      <Reveal ready={ready} skeleton={<PackListSkeleton />} style={styles.reveal}>
         <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
           {packages.length === 0 ? (
-            <View style={styles.emptyBox}>
-              <Text style={styles.emptyText}>No packages yet.</Text>
-              <TouchableOpacity onPress={() => setShowAdd(true)}>
-                <Text style={styles.linkText}>Add a package</Text>
-              </TouchableOpacity>
-            </View>
+            <Empty
+              icon={IconWallet}
+              title="Nothing sold to them yet"
+              body="Sell a pack and the session count starts coming off it as you deliver. Until then there is nothing to run down."
+              action={<Button label="Sell a pack" icon={IconPlus} onPress={() => setSelling(true)} />}
+              style={styles.empty}
+            />
           ) : (
-            <View style={styles.card}>
-              {packages.map((pkg, i) => (
-                <TouchableOpacity
-                  key={pkg.id}
-                  style={[styles.row, i === packages.length - 1 && { borderBottomWidth: 0 }]}
-                  onPress={() => navigation.navigate('PackageDetail', { packageId: pkg.id, clientId })}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.pkgType}>{TYPE_LABELS[pkg.type] ?? pkg.type}</Text>
-                    <Text style={styles.pkgMeta}>
-                      {pkg.type === 'session_pack'
-                        ? `${pkg.sessionsRemaining ?? 0} / ${pkg.sessionsTotal ?? '?'} sessions · ₹${pkg.amount}`
-                        : `₹${pkg.amount} · ${formatDate(pkg.startDate)} – ${formatDate(pkg.endDate)}`}
-                    </Text>
-                  </View>
-                  <Text style={[styles.status, { color: STATUS_COLORS[pkg.status] ?? colors.muted }]}>
-                    {pkg.status}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+            <>
+              {live.length ? (
+                <>
+                  <GroupHead label="Running" count={live.length} />
+                  <List style={styles.group}>{live.map((pkg) => row(pkg))}</List>
+                </>
+              ) : null}
+
+              {done.length ? (
+                <>
+                  <GroupHead label="Finished" count={done.length} />
+                  <List style={styles.group}>{done.map((pkg) => row(pkg, true))}</List>
+                </>
+              ) : null}
+
+              <Button
+                label="Sell another pack"
+                icon={IconPlus}
+                variant="secondary"
+                block
+                onPress={() => setSelling(true)}
+                style={styles.sell}
+              />
+            </>
           )}
         </ScrollView>
-      )}
+      </Reveal>
 
-      {/* Add package modal */}
-      <Modal visible={showAdd} animationType="slide" transparent>
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <View style={styles.sheet}>
-            <Text style={styles.sheetTitle}>New package</Text>
+      <Sheet visible={selling} onClose={() => setSelling(false)} title="Sell a pack">
+        <Segmented
+          options={[
+            { key: 'session_pack', label: 'Session pack' },
+            { key: 'monthly', label: 'Monthly' },
+          ]}
+          value={type}
+          onChange={setType}
+          style={styles.seg}
+        />
 
-            <Text style={styles.fieldLabel}>Type</Text>
-            <View style={styles.chipRow}>
-              {(['session_pack', 'monthly'] as const).map((t) => (
-                <TouchableOpacity
-                  key={t}
-                  style={[styles.chip, add.type === t && styles.chipActive]}
-                  onPress={() => setAdd((s) => ({ ...s, type: t }))}
-                >
-                  <Text style={[styles.chipText, add.type === t && styles.chipTextActive]}>
-                    {TYPE_LABELS[t]}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {add.type === 'session_pack' && (
-              <>
-                <Text style={styles.fieldLabel}>Number of sessions</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="number-pad"
-                  value={add.sessions}
-                  onChangeText={(v) => setAdd((s) => ({ ...s, sessions: v }))}
-                  placeholder="e.g. 12"
-                />
-              </>
-            )}
-
-            <Text style={styles.fieldLabel}>Amount (₹)</Text>
-            <TextInput
-              style={styles.input}
-              keyboardType="decimal-pad"
-              value={add.amount}
-              onChangeText={(v) => setAdd((s) => ({ ...s, amount: v }))}
-              placeholder="e.g. 3000"
+        {type === 'session_pack' ? (
+          <View style={styles.field}>
+            <FieldLabel>How many sessions</FieldLabel>
+            <Control
+              value={sessions}
+              onChangeText={setSessions}
+              keyboardType="number-pad"
+              placeholder="12"
             />
-
-            <Text style={styles.fieldLabel}>Start date (YYYY-MM-DD, optional)</Text>
-            <TextInput
-              style={styles.input}
-              value={add.startDate}
-              onChangeText={(v) => setAdd((s) => ({ ...s, startDate: v }))}
-              placeholder="2026-08-01"
-            />
-
-            <Text style={styles.fieldLabel}>End date (YYYY-MM-DD, optional)</Text>
-            <TextInput
-              style={styles.input}
-              value={add.endDate}
-              onChangeText={(v) => setAdd((s) => ({ ...s, endDate: v }))}
-              placeholder="2026-08-31"
-            />
-
-            <View style={styles.sheetActions}>
-              <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={() => setShowAdd(false)}
-                disabled={saving}
-              >
-                <Text style={styles.cancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={saving}>
-                {saving ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.saveBtnText}>Save</Text>
-                )}
-              </TouchableOpacity>
-            </View>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        ) : null}
+
+        <View style={styles.field}>
+          <FieldLabel>Price</FieldLabel>
+          <Control
+            value={amount}
+            onChangeText={setAmount}
+            keyboardType="decimal-pad"
+            placeholder="3000"
+            affix="₹"
+          />
+        </View>
+
+        <View style={styles.dates}>
+          <View style={styles.grow}>
+            <FieldLabel>Starts</FieldLabel>
+            <Control value={from} onChangeText={setFrom} placeholder="2026-08-01" keyboardType="numbers-and-punctuation" />
+          </View>
+          <View style={styles.grow}>
+            <FieldLabel>Ends</FieldLabel>
+            <Control value={until} onChangeText={setUntil} placeholder="2026-08-31" keyboardType="numbers-and-punctuation" />
+          </View>
+        </View>
+
+        <Text style={styles.fine}>
+          Dates are optional. A session pack runs until the sessions are gone; a month needs both
+          ends to know when it lapsed.
+        </Text>
+
+        <Button
+          label="Sell it"
+          variant="primary"
+          size="lg"
+          block
+          loading={saving}
+          onPress={() => void sell()}
+        />
+      </Sheet>
+
+      {notice ? (
+        <Toast style={styles.toast} action={{ label: 'Dismiss', onPress: () => setNotice(null) }}>
+          {notice}
+        </Toast>
+      ) : null}
     </SafeAreaView>
   );
 }
 
+function PackListSkeleton() {
+  return (
+    <View style={styles.body} accessibilityLabel="Loading this client's packs">
+      <Skeleton width={82} height={10} style={styles.headGap} />
+      <List>
+        <SkeletonRow grouped avatar={false} trailing />
+        <SkeletonRow grouped avatar={false} trailing />
+      </List>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
+  safe: { flex: 1, backgroundColor: colors.canvas },
+  pad: { paddingHorizontal: space.inset },
+  reveal: { flex: 1 },
+  body: { paddingHorizontal: space.inset, paddingBottom: space.s10 },
 
-  header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 12, paddingVertical: 14, backgroundColor: colors.indigo,
-  },
-  headerTitle: { flex: 1, textAlign: 'center', fontSize: 17, fontWeight: '700', color: '#fff' },
-  backBtn: { width: 56, alignItems: 'center' },
-  backText: { fontSize: 30, color: '#fff', lineHeight: 32 },
-  addBtn: { width: 56, alignItems: 'center' },
-  addText: { fontSize: 14, fontWeight: '700', color: '#fff' },
+  headGap: { marginTop: space.s5, marginBottom: space.s3 },
+  group: { marginBottom: space.s2 },
+  sell: { marginTop: space.s5 },
+  empty: { marginTop: space.s7 },
 
-  body: { padding: 20, paddingBottom: 60 },
+  seg: { marginBottom: space.s4 },
+  field: { marginBottom: space.s4 },
+  dates: { flexDirection: 'row', gap: space.s2, marginBottom: space.s3 },
+  grow: { flex: 1 },
+  fine: { fontSize: 11.5, lineHeight: 17, color: colors.ink3, marginBottom: space.s5 },
 
-  card: {
-    backgroundColor: colors.card, borderRadius: 12,
-    paddingHorizontal: 14, marginBottom: 24,
-    shadowColor: '#000', shadowOpacity: 0.04, shadowRadius: 6, elevation: 1,
-  },
-  row: {
-    flexDirection: 'row', alignItems: 'center',
-    paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.hairline,
-  },
-  pkgType: { fontSize: 15, fontWeight: '600', color: colors.ink },
-  pkgMeta: { fontSize: 12, color: colors.muted, marginTop: 3 },
-  status: { fontSize: 12, fontWeight: '600', textTransform: 'capitalize' },
-
-  emptyBox: {
-    backgroundColor: colors.card, borderRadius: 12,
-    paddingVertical: 40, alignItems: 'center',
-  },
-  emptyText: { fontSize: 14, color: colors.faint },
-  linkText: { fontSize: 13, color: colors.indigo, fontWeight: '600', marginTop: 10 },
-
-  // Modal sheet
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    padding: 24, paddingBottom: 36,
-  },
-  sheetTitle: { fontSize: 18, fontWeight: '700', color: colors.ink, marginBottom: 20 },
-  fieldLabel: { fontSize: 13, color: colors.muted, marginBottom: 6, marginTop: 14 },
-  input: {
-    borderWidth: 1.5, borderColor: colors.border, borderRadius: 10,
-    height: 44, paddingHorizontal: 12, fontSize: 15, color: colors.ink,
-    backgroundColor: colors.bg,
-  },
-  chipRow: { flexDirection: 'row', gap: 10 },
-  chip: {
-    flex: 1, height: 40, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderColor: colors.border, backgroundColor: colors.bg,
-  },
-  chipActive: { borderColor: colors.indigo, backgroundColor: colors.indigoSoft },
-  chipText: { fontSize: 13, color: colors.muted, fontWeight: '600' },
-  chipTextActive: { color: colors.indigo },
-  sheetActions: { flexDirection: 'row', gap: 12, marginTop: 24 },
-  cancelBtn: {
-    flex: 1, height: 46, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1.5, borderColor: colors.border,
-  },
-  cancelText: { fontSize: 15, color: colors.ink, fontWeight: '600' },
-  saveBtn: {
-    flex: 1, height: 46, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.indigo,
-  },
-  saveBtnText: { fontSize: 15, color: '#fff', fontWeight: '700' },
+  toast: { marginHorizontal: space.inset, marginBottom: space.s3 },
 });

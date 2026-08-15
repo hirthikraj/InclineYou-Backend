@@ -171,6 +171,38 @@ export default function OtpScreen({ navigation, route }: Props) {
         return;
       }
 
+      // V18 · a trainer has named this number and it has never answered. The
+      // token opens no sync scope, so nothing is signed in until they do.
+      if (role === 'invited' && session.token) {
+        const invite = memberships.find((m) => m.membershipStatus === 'invited');
+        if (invite) {
+          navigation.replace('Invite', { token: session.token, membership: invite });
+          return;
+        }
+      }
+
+      // V18 · a trainer ended it. Shown once — the acknowledgement is what
+      // retires it, because the server row is kept forever.
+      if (role === 'removed' && session.token && session.removed) {
+        navigation.replace('Removed', { token: session.token, removed: session.removed });
+        return;
+      }
+
+      // V18 · a client with nothing live. Deliberately not 7a: this number's
+      // role is client, and offering it a coaching account is the wrong turn.
+      if (role === 'unattached') {
+        navigation.replace('Unattached', { trainerName: memberships[0]?.trainerName ?? null });
+        return;
+      }
+
+      // Reserved and not built. Better an honest stop than a trainer's Deck
+      // rendered over somebody else's data.
+      if (role === 'gym_admin') {
+        setPhase('entry');
+        setNotice('Gym accounts aren’t available yet. Talk to your trainer for now.');
+        return;
+      }
+
       if (!session.token) {
         // Nothing to sign in with and no screen that fits — treat it as a
         // failure rather than a blank app.
@@ -179,14 +211,13 @@ export default function OtpScreen({ navigation, route }: Props) {
         return;
       }
 
-      // § 05: skip the picker whenever it can be skipped. It earns its place
-      // only for the genuinely dual user — a trainer who is also somebody's
-      // live client — or for a client training with two people right now. A
-      // paused roster is reachable from the lens switcher and never worth a
-      // screen at sign-in.
-      const bothRoles = role === 'trainer' && live.length > 0;
+      // § 05: skip the picker whenever it can be skipped. Since V18 it earns
+      // its place for exactly one case — a client training with two people
+      // right now — because `app_user.role` is exclusive and nobody is both a
+      // trainer and somebody's client any more. A paused roster is reachable
+      // from the lens switcher and never worth a screen at sign-in.
       const manyTrainers = role === 'client' && live.length > 1;
-      if (bothRoles || manyTrainers) {
+      if (manyTrainers) {
         navigation.replace('Role', {
           session: {
             token: session.token,

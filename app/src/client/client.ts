@@ -32,6 +32,7 @@ import {
   type LogInput,
   type LogSet,
 } from '../log/log';
+import { programWeek } from '../training/training';
 import {
   daysLate,
   ms,
@@ -71,6 +72,8 @@ export interface ClientPlanRow {
   reps: number | null;
   targetLoad: number | null;
   dayOfWeek: number | null;
+  /** Which week of the program. Null reads as week 1. */
+  week?: number | null;
   orderIndex: number;
 }
 
@@ -458,14 +461,29 @@ function plannedCount(
   return countProgramDay(input, programId ?? session.programId ?? null, session.templateDay ?? null);
 }
 
-/** The plan's rows for one day of one program. */
+/**
+ * The plan's rows for one day of one program.
+ *
+ * Narrowed to the week the program is actually in, worked out from its start
+ * date — the same arithmetic the trainer's app uses when it seeds a log, so the
+ * client's preview and the session they walk into agree. A week the trainer
+ * never authored has no rows of its own and falls back to week 1, which is what
+ * a one-week shape repeated has always meant.
+ */
 function programDay(
   input: ClientInput,
   programId: string | null,
   day: number | null,
 ): ClientPlanRow[] {
   if (!programId) return [];
-  const rows = input.programExercises.filter((r) => r.programId === programId);
+  const all = input.programExercises.filter((r) => r.programId === programId);
+
+  const week = programWeek(input.programs.find((p) => p.id === programId)?.startDate);
+  const thisWeek = all.filter((r) => Math.max(1, r.week ?? 1) === week);
+  const rows = thisWeek.length || week === 1
+    ? thisWeek
+    : all.filter((r) => Math.max(1, r.week ?? 1) === 1);
+
   const forDay = day == null ? rows : rows.filter((r) => r.dayOfWeek === day);
   // A program whose rows carry no day at all is one day repeated — that is how
   // the builder stores a single-day template, and dropping to every row is

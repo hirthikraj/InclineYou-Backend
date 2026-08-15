@@ -35,8 +35,10 @@ import {
   IconBan,
   IconButton,
   IconChart,
+  IconChevron,
   IconClock,
   IconDownload,
+  IconMessage,
   IconPercent,
   IconWallet,
   List,
@@ -171,6 +173,21 @@ export default function ReportsScreen() {
               </Callout>
             </>
           )}
+
+          {/* Outside the empty branch on purpose: the range switcher above can
+              empty this screen while last month's reports still exist, and the
+              way in to them must not disappear with the figures. */}
+          <GroupHead label="What your clients got" />
+          <List>
+            <Row
+              grouped
+              leading={<IconMessage size={19} color={colors.ink3} />}
+              title="Weekly reports"
+              subtitle="Written every Sunday night · one per client"
+              trailing={<IconChevron size={16} color={colors.ink3} />}
+              onPress={() => navigation.navigate('Weekly')}
+            />
+          </List>
         </ScrollView>
       </Reveal>
 

@@ -14,6 +14,7 @@
 
 import React from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import { IconChevronDown } from './icons';
 import { colors, maxFontScale, space, tnum } from './tokens';
 
 export interface GroupHeadProps {
@@ -52,6 +53,12 @@ export default function GroupHead({
 
   if (!onPress) return <View style={[styles.head, style]}>{inner}</View>;
 
+  /* A collapsible group says so before it is tapped. The glyph points down when
+     the group is open — at the rows below it — and right when it is closed,
+     which is the direction the rows would come back from. It sits after the
+     count rather than before the label, because the label and its count are one
+     phrase and nothing belongs between them. */
+
   return (
     <Pressable
       onPress={onPress}
@@ -61,6 +68,9 @@ export default function GroupHead({
       style={({ pressed }) => [styles.head, pressed && styles.pressed, style]}
     >
       {inner}
+      <View style={collapsed ? styles.shut : undefined}>
+        <IconChevronDown size={13} color={fg} />
+      </View>
     </Pressable>
   );
 }
@@ -78,6 +88,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.canvas,
   },
   pressed: { backgroundColor: colors.surface },
-  label: { fontSize: 10.5, fontWeight: '800', letterSpacing: 1.37, textTransform: 'uppercase' },
+  // Takes the slack so the count and the chevron stay together on the right
+  // edge rather than being spread apart by `space-between`.
+  label: {
+    flex: 1,
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 1.37,
+    textTransform: 'uppercase',
+  },
   count: { fontSize: 10.5, fontWeight: '800', ...tnum },
+  shut: { transform: [{ rotate: '-90deg' }] },
 });

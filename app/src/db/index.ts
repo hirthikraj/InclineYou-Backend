@@ -26,13 +26,26 @@ import Coach from './models/Coach';
 import WeeklyReport from './models/WeeklyReport';
 import Batch from './models/Batch';
 
-// Use UUID v4 strings for IDs so they match PostgreSQL UUIDs
-setGenerator(() =>
-  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+/**
+ * A UUID v4 string, because every id in this app has to be a valid PostgreSQL
+ * `uuid` — the sync push casts them (`?::uuid`) and Postgres rejects anything
+ * that is not one.
+ *
+ * Exported, and that is the point. It was previously inlined into
+ * `setGenerator`, so anything that needed an id of its own had nothing to reach
+ * for and invented its own format — which is exactly how `bookSeries` came to
+ * write `series_ab12xy0` into a `uuid` column and wedge sync for the whole
+ * device. Use this for any id that will ever reach the server.
+ */
+export function uuid(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0;
     return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  })
-);
+  });
+}
+
+// WatermelonDB's own record ids, from the same generator for the same reason.
+setGenerator(uuid);
 
 const adapter = new SQLiteAdapter({
   schema,

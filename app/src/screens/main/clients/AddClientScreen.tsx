@@ -115,7 +115,7 @@ export default function AddClientScreen() {
           value={phone}
           onChangeText={setPhone}
           onBlur={() => setTouched(true)}
-          placeholder="98847 21160"
+          placeholder="98*** *****"
           keyboardType="phone-pad"
           seg="+91"
           error={touched && digits.length > 0 && !validPhone}

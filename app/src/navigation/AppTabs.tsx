@@ -23,6 +23,7 @@ import AddSheet, { type AddAction } from '../screens/main/home/AddSheet';
 import AppDrawer, { type DrawerKey } from '../screens/main/home/AppDrawer';
 import ModeSheet from '../screens/main/drawer/ModeSheet';
 import { isPaused } from '../api/auth';
+import { SELF_TRAINING_ENABLED } from '../settings/prefs';
 import { database } from '../db';
 import { useAuth } from '../store/AuthContext';
 import type ClientModel from '../db/models/Client';
@@ -75,6 +76,7 @@ function Tabs() {
   const shell = useShell();
   const { memberships, switchLens } = useAuth();
   const [modeOpen, setModeOpen] = useState(false);
+  // Never true while self-training is off, so the count never subscribes.
   const clientCount = useClientCount(modeOpen);
 
   const openAdd = (action: AddAction) => {
@@ -202,37 +204,42 @@ function Tabs() {
         visible={shell.drawerOpen}
         onClose={shell.closeDrawer}
         onNavigate={openDrawerItem}
-        onSwitchMode={() => setModeOpen(true)}
+        onSwitchMode={SELF_TRAINING_ENABLED ? () => setModeOpen(true) : undefined}
         onSignOut={confirmSignOut}
       />
       <AddSheet visible={shell.addOpen} onClose={shell.closeAdd} onPick={openAdd} />
 
       {/* 2b. Mounted in the shell rather than in the drawer, because the drawer
-          closes to open it and a sheet inside a closing panel closes with it. */}
-      <ModeSheet
-        visible={modeOpen}
-        clients={clientCount}
-        onClose={() => setModeOpen(false)}
-        onSwitched={(mode) => {
-          setModeOpen(false);
-          if (mode !== 'self') return;
-          // FR-11 · the other half of the lens. A trainer who is also somebody's
-          // client has a real book to switch into — their own plan, their own
-          // sets, read from the client side of the same records. A trainer who
-          // trains nobody's client still lands on the screen that says the
-          // self-training contents are not built, because inventing a second
-          // data model for them would be guessing.
-          //
-          // A live roster first. Since pause stopped being a wall, `memberships`
-          // carries paused ones too — and dropping a trainer who trains with
-          // somebody into the paused book they also have would be the wrong one
-          // of the two. A paused roster is still worth opening when it is all
-          // they have: the history is in it.
-          const mine = memberships.find((m) => !isPaused(m)) ?? memberships[0];
-          if (mine) void switchLens('client', mine.clientId);
-          else navigation.navigate('SelfTraining');
-        }}
-      />
+          closes to open it and a sheet inside a closing panel closes with it.
+
+          Not mounted at all while self-training is off. The sheet's only job is
+          to choose between two books, and there is one book. */}
+      {SELF_TRAINING_ENABLED ? (
+        <ModeSheet
+          visible={modeOpen}
+          clients={clientCount}
+          onClose={() => setModeOpen(false)}
+          onSwitched={(mode) => {
+            setModeOpen(false);
+            if (mode !== 'self') return;
+            // FR-11 · the other half of the lens. A trainer who is also somebody's
+            // client has a real book to switch into — their own plan, their own
+            // sets, read from the client side of the same records. A trainer who
+            // trains nobody's client still lands on the screen that says the
+            // self-training contents are not built, because inventing a second
+            // data model for them would be guessing.
+            //
+            // A live roster first. Since pause stopped being a wall, `memberships`
+            // carries paused ones too — and dropping a trainer who trains with
+            // somebody into the paused book they also have would be the wrong one
+            // of the two. A paused roster is still worth opening when it is all
+            // they have: the history is in it.
+            const mine = memberships.find((m) => !isPaused(m)) ?? memberships[0];
+            if (mine) void switchLens('client', mine.clientId);
+            else navigation.navigate('SelfTraining');
+          }}
+        />
+      ) : null}
     </>
   );
 }

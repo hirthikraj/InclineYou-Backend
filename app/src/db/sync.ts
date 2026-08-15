@@ -1,6 +1,7 @@
 import { synchronize, hasUnsyncedChanges } from '@nozbe/watermelondb/sync';
 import fetchLocalChanges from '@nozbe/watermelondb/sync/impl/fetchLocal';
 import { database } from './index';
+import { repairLocalData } from './repair';
 import { api } from '../api/client';
 import { resetLiveCaches } from './live';
 
@@ -116,7 +117,7 @@ export function setSyncScope(next: SyncScope | null) {
 }
 
 // One sync at a time. Foreground + reconnect can fire together, and two
-// concurrent synchronize() calls on the same database throw.
+// concurrent synchronize() calls on the same database throw. 
 let inFlight: Promise<void> | null = null;
 
 const clientScope = () => (scope?.clientId ? scope.clientId : null);
@@ -137,12 +138,26 @@ function cursor(lastPulledAt: number | null | undefined): string {
   return `${clientScope() ? '&' : '?'}lastPulledAt=${lastPulledAt}`;
 }
 
+/**
+ * Ran once per process, before the first push.
+ *
+ * `repairLocalData` fixes rows the server cannot accept. Doing it here rather
+ * than at app start is deliberate: this is the last point before anything
+ * leaves the device, so a poisoned row cannot slip out through a sync triggered
+ * by a reconnect or a foreground event that raced the startup path.
+ */
+let repaired: Promise<void> | null = null;
+
 export function syncDatabase(reason: string = 'manual'): Promise<void> {
   if (inFlight) return inFlight;
 
   setState({ phase: 'syncing', error: null });
 
-  inFlight = synchronize({
+  // Awaited inside the chain rather than before it, so `inFlight` is still
+  // assigned synchronously and two callers in the same tick share one sync.
+  if (!repaired) repaired = repairLocalData();
+
+  inFlight = repaired.then(() => synchronize({
     database,
     pullChanges: async ({ lastPulledAt }) => {
       const { data } = await api.get(`${pullPath()}${cursor(lastPulledAt)}`);
@@ -166,7 +181,7 @@ export function syncDatabase(reason: string = 'manual'): Promise<void> {
      * identical, minus a screenful of false alarms.
      */
     sendCreatedAsUpdated: true,
-  })
+  }))
     .then(async () => {
       setState({ phase: 'idle', lastSyncedAt: Date.now(), error: null });
       await refreshPending();

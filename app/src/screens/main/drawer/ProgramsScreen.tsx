@@ -11,10 +11,12 @@
  * template edit reach into a plan somebody was halfway through. Saying it on the
  * screen is cheap; the enforcement is in `db/training.ts` and on the server.
  *
- * What is refused here, and stated in the teardown: **building a twelve-week
- * program from scratch on a phone.** XRep shows, assigns and edits on mobile.
- * Authoring is a desk job, and pretending otherwise produces a bad program — so
- * the + offers to duplicate what exists rather than opening a blank builder.
+ * The + asks for a name, a length and the days of the week it trains on, then
+ * drops straight into 3b with those days already laid out. What is still refused
+ * is the thing the teardown actually objected to: **a blank twelve-week grid.**
+ * A later week repeats week 1 until a trainer copies a week into it and changes
+ * something, which is a decision they make one week at a time — not twelve empty
+ * cells asking to be filled on a phone.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -81,11 +83,11 @@ export default function ProgramsScreen() {
       .catch(() => setNotice('Could not rename that.'));
   };
 
-  const create = async (name: string, weeks: number | null) => {
+  const create = async (name: string, weeks: number | null, days: number[]) => {
     if (!trainerId) return;
     setCreating(false);
     try {
-      const template = await createTemplate(trainerId, name, weeks);
+      const template = await createTemplate(trainerId, name, weeks, days);
       // Straight into it: a program with no exercises is not finished, and 3b's
       // empty state is where the next thing to do actually is.
       navigation.navigate('Program', { templateId: template.id });
@@ -210,7 +212,7 @@ export default function ProgramsScreen() {
                 label: openCard.clients ? `Who's on it · ${openCard.clients}` : 'Nobody on it yet',
                 onPress: () => {
                   setMenuFor(null);
-                  if (openCard.clients) navigation.navigate('Clients');
+                  if (openCard.clients) navigation.navigate('Home', { screen: 'ClientsTab' } as never);
                   else setNotice('Assign it to somebody from inside the program.');
                 },
               },
@@ -230,7 +232,7 @@ export default function ProgramsScreen() {
 
       <NewProgramSheet
         visible={creating}
-        onCreate={(name, weeks) => void create(name, weeks)}
+        onCreate={(name, weeks, days) => void create(name, weeks, days)}
         onClose={() => setCreating(false)}
       />
 

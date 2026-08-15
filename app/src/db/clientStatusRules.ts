@@ -2,7 +2,6 @@ import type ClientModel from './models/Client';
 import type PackageModel from './models/Package';
 import type PaymentModel from './models/Payment';
 import type ProgramModel from './models/Program';
-import type { Tone } from '../theme';
 
 /**
  * The FR-1.6 roster chip rules, deliberately free of any database import so the
@@ -10,10 +9,18 @@ import type { Tone } from '../theme';
  * the queries; this file only decides what the signals mean.
  */
 
+/**
+ * What a chip means, not what colour it is.
+ *
+ * A rules file has no business importing from the design system — the mapping
+ * from meaning to `TagTone` belongs to whichever screen draws the chip.
+ */
+export type ChipTone = 'good' | 'warn' | 'danger' | 'neutral';
+
 export interface StatusChip {
   key: string;
   label: string;
-  tone: Tone;
+  tone: ChipTone;
 }
 
 /** Boolean view of the same signals, used to filter the roster. */

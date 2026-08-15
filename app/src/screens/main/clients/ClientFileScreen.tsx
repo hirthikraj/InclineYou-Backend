@@ -57,6 +57,7 @@ import {
   IconButton,
   IconCalendar,
   IconChart,
+  IconChevron,
   IconDots,
   IconLayers,
   IconMessage,
@@ -215,6 +216,10 @@ export default function ClientFileScreen() {
                   tone={head.status === 'active' ? 'ok' : head.status === 'paused' ? 'warn' : 'neutral'}
                 />
               </Pressable>
+              {/* Sits beside the status rather than replacing it, because it is
+                  not one: this client is active, and only their app access is
+                  impossible. */}
+              {head.cannotInvite ? <Tag label="Can't invite" tone="warn" /> : null}
             </>
           }
           actions={
@@ -311,6 +316,43 @@ export default function ClientFileScreen() {
                 />
               ))}
             </Kv>
+
+            {/* The one thing on this file the trainer did NOT compute: Sunday's
+                report, as the client received it. Its own row rather than a Kv
+                entry, because every Kv row is a figure and this is a screen. */}
+            <List style={styles.group}>
+              <Row
+                grouped
+                leading={<IconChart size={19} color={colors.ink3} />}
+                title="Weekly report"
+                subtitle={`What ${first} got on Sunday`}
+                trailing={<IconChevron size={16} color={colors.ink3} />}
+                onPress={() => navigation.navigate('WeekReport', { clientId })}
+              />
+            </List>
+
+            {/* A tag states the fact; this says what to do about it. Placed in
+                the overview rather than behind the status sheet, because the
+                trainer's mental model is "I invited them" and the only thing
+                that corrects it is reading the opposite where they already are. */}
+            {head.cannotInvite ? (
+              <Callout style={styles.note}>
+                <CalloutStrong>
+                  {head.phoneLabel ?? 'This number'} belongs to a trainer account.
+                </CalloutStrong>{' '}
+                They can&apos;t be invited to the client app on it — a number is either a
+                trainer&apos;s or a client&apos;s, never both. Everything else works: keep booking,
+                logging and billing as usual. To give them app access, change it to a number they
+                don&apos;t coach on.
+                <Button
+                  label="Change number"
+                  variant="ghost"
+                  size="sm"
+                  onPress={() => navigation.navigate('EditClient', { clientId })}
+                  style={styles.fixNumber}
+                />
+              </Callout>
+            ) : null}
 
             <Callout style={styles.note}>
               <CalloutStrong>
@@ -564,6 +606,7 @@ const styles = StyleSheet.create({
 
   kv: { marginTop: space.s3 },
   note: { marginTop: space.s3 },
+  fixNumber: { marginTop: space.s2, alignSelf: 'flex-start' },
   primary: { marginTop: space.s4 },
   group: { marginBottom: space.s2 },
   empty: { marginTop: space.s6 },

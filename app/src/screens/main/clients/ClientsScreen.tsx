@@ -221,6 +221,12 @@ export default function ClientsScreen() {
       case 'invite':
         void whatsapp(row, `Hi ${first}, here's your XRep invite again.`);
         return;
+      // The only attention item whose fix is an edit rather than a message.
+      // Straight to the form the number lives on — there is nothing to say to
+      // the client, and nothing they could do about it.
+      case 'unavailable':
+        navigation.navigate('EditClient', { clientId: row.id });
+        return;
       default:
         if (row.status === 'paused') void resume(row);
         else openClient(row);
@@ -350,7 +356,7 @@ export default function ClientsScreen() {
           tone="offline"
           icon={IconCloudOff}
           style={styles.banner}
-          onPress={() => navigation.navigate('Soon', { title: 'Sync queue' })}
+          onPress={() => navigation.navigate('SyncQueue')}
         >
           {`Offline — your roster is stored on this phone.${
             sync.pendingCount > 0 ? ` ${sync.pendingCount} changes waiting.` : ''
@@ -790,6 +796,9 @@ function Trailing({
   // A list with no verb is a report (§ 01) — but a verb inside a selection is a
   // second target competing with the checkbox.
   if (verb && !selecting) return <Button label={verb} size="sm" variant="ghost" onPress={onVerb} />;
+  // Ahead of "Invited", because a client who can never be invited must not be
+  // labelled as one — that tag is the exact wrong thing to tell the trainer here.
+  if (row.attention?.kind === 'unavailable') return <Tag label="Can't invite" tone="warn" />;
   if (row.status === 'invited') return <Tag label="Invited" tone="info" />;
   if (row.pack) return <Pack remaining={row.pack.remaining} total={row.pack.total} />;
   return null;

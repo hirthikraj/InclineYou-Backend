@@ -250,6 +250,7 @@ export default function ExercisesScreen() {
                   void addToBlueprint(pickFor.templateId, {
                     exerciseId: item.id,
                     day: pickFor.day,
+                    week: pickFor.week,
                   }).then(() => navigation.goBack());
                 }}
                 trailing={

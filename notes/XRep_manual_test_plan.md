@@ -1,8 +1,19 @@
 # XRep — Manual Test Plan & Test Case Document
 
-**Version:** 1.0 · **Date:** 14 Aug 2026 · **For:** manual QA of the MVP (trainer + client roles)
+**Version:** 1.1 · **Date:** 15 Aug 2026 · **For:** manual QA of the MVP (trainer + client roles)
 **Scope:** FR-1 – FR-11 and NFR-1 – NFR-13 of [`XRep_final_requirements_and_plan.md`](XRep_final_requirements_and_plan.md), all screens in [`XRep_MVP_interaction_map.md`](XRep_MVP_interaction_map.md), plus the Spring Boot backend surface.
 **Includes:** happy paths, edge cases, corner cases, offline/sync, business-logic abuse, and a full security section (§21).
+
+> **v1.1 — what changed.** Schema **V18** made one phone hold exactly one role and turned consent into a
+> first-class state. Two consequences run through this document:
+>
+> 1. **A number can no longer be both a trainer and a client.** `app_user.role` is single-valued and
+>    exclusive, and the roster refuses a number that already owns a trainer account. The old `TC` fixture
+>    and most of §16 tested a case that can no longer exist — both are rewritten rather than deleted, because
+>    "this must now be impossible" is itself a test.
+> 2. **A trainer adding a number is a claim, not a relationship.** New clients are born `invited` and must
+>    accept before anything of theirs is shared. New exits at sign-in: **invited**, **removed**,
+>    **unattached**. See §1.4.
 
 > This document is written to be executed on a device with the backend running locally. Every case is
 > pass/fail-able by one person with a phone, a terminal, and `curl`. Cases marked **⚠ known gap** are
@@ -17,8 +28,8 @@
 
 | Step | Command | Expected |
 |---|---|---|
-| 1 | `docker compose up -d` (repo root) | `xrep-postgres` healthy on 5432, db `xrepdb`, user `xrep` |
-| 2 | `cd backend && ./mvnw spring-boot:run` | Flyway applies V1–V15, app listens on 8080, exercise seed loads (873 exercises) |
+| 1 | `docker compose up -d` (repo root) | `xrep-postgres` healthy on 5432 (db `xrepdb`, user `xrep`) **and `xrep-redis` on 6379**. Confirm `docker exec xrep-redis redis-cli config get appendonly` returns `yes` — without AOF, SEC-OTP-02 silently regresses |
+| 2 | `cd backend && ./mvnw spring-boot:run` | Flyway applies V1–V18, app listens on 8080, exercise seed loads (873 exercises) |
 | 3 | `curl -i localhost:8080/health` | `200`, no auth required |
 | 4 | `cd app && npm run android` (device on same LAN) | App installs; set `EXPO_PUBLIC_API_URL=http://<your-LAN-IP>:8080` — `10.0.2.2` only works on the emulator |
 
@@ -38,7 +49,11 @@ and **10 codes per rolling 24 hours**, enforced from `otp_request` rows (so a ba
 clear it). Two ways out while testing:
 
 ```bash
-# Forget one number's send history — the cleanest reset
+# Forget one number's send history — the cleanest reset.
+# State lives in Redis now, so clear BOTH: the daily ceiling is a Bucket4j
+# bucket, the ladder is a sorted set, and the lock is mirrored to Postgres.
+docker exec xrep-redis redis-cli --scan --pattern 'otp:*98xxxxxx01*' | \
+  xargs -r docker exec -i xrep-redis redis-cli del
 docker exec xrep-postgres psql -U xrep -d xrepdb \
   -c "DELETE FROM otp_request WHERE phone = '98xxxxxx01';"
 
@@ -82,7 +97,14 @@ Counters are in memory, so a **restart also clears them** (unlike the OTP limits
   hand-added clients survive.
 - **Client-role account:** add a client from the trainer app whose phone is a *second* real number you can
   receive on / read the log for, then sign in on a second device (or after sign-out) with that number.
-- **Both-roles-on-one-phone:** make trainer A's own phone number also a client of trainer B.
+- **Invited-not-yet-accepted:** add a client from the trainer app with a number you can receive on, and
+  then *do not* sign in as them. That row sits at `membership_status = 'invited'` — this is the default
+  state of every new client now, so most of §4 is exercised against it.
+- **Un-invitable (V18):** put **trainer A's own number** on trainer B's roster. This used to create a
+  both-roles account; it is now refused as an invite and the row lands `unavailable`. The client record
+  still works completely — only app access is impossible.
+- **Removed-but-not-told:** accept an invite, then have the trainer end the coaching from `ClientEndScreen`
+  (**Archive**, not the hard remove — the purge deletes the row and leaves nothing to notify against).
 
 ### 0.4 Reference accounts to create before starting
 
@@ -93,9 +115,16 @@ Counters are in memory, so a **restart also clears them** (unlike the OTP limits
 | T0 | 98xxxxxx03 | Trainer, empty | Day-zero / first-run states |
 | C1 | 98xxxxxx04 | Client of T1 | Client-role happy path |
 | C2 | 98xxxxxx05 | Client of T2 | Client-vs-client isolation |
-| CB | 98xxxxxx06 | Client of T1 **and** T2 | Two-membership cases |
-| TC | 98xxxxxx01 | T1, also a client of T2 | Role toggle on one identity |
-| CN | — | Client of T1, **no phone** | Nudge/UPI degradation cases |
+| CB | 98xxxxxx06 | Client of T1 **and** T2 | Two-membership cases (still supported) |
+| CI | 98xxxxxx07 | Invited by T1, never signed in | Consent screen, invite states (§1.4) |
+| CD | 98xxxxxx08 | Invited by T1, then **declined** | Decline path, `unattached` |
+| CR | 98xxxxxx09 | Client of T1, then **archived** | Removal notice + local wipe |
+| CN | — | Client of T1, **no phone** | Nudge/UPI degradation cases. Born `accepted` — nobody to ask |
+
+> **`TC` (one phone, both roles) is gone.** It described the pre-V18 model and is now an impossible state,
+> not a fixture. What replaces it is **AUTH-42**, which asserts the *refusal*: put T1's number on T2's
+> roster and confirm it lands `unavailable` rather than creating a dual-role account. Anywhere this
+> document previously said "TC", the case is either that refusal or a **CB** multi-roster case.
 
 ### 0.5 Conventions
 
@@ -116,29 +145,29 @@ Config: OTP expiry **10 min**, max wrong attempts **3**, lock **10 min**, JWT ex
 | ID | Case | Steps | Expected | P/F |
 |---|---|---|---|---|
 | AUTH-01 | Valid number | Enter `9841657298` → Continue | OTP screen; backend logs a 6-digit code |P|
-| AUTH-02 | Leading 0–5 rejected | Enter `5841657298` → blur, then Send | Inline error **"Indian mobile numbers start with 6, 7, 8 or 9."** on blur *and* on send; **no request fired** (`PHONE_RE` mirrors the server's `^[6-9]\d{9}$`). Retyping the same number must **not** clear the error | |
+| AUTH-02 | Leading 0–5 rejected | Enter `5841657298` → blur, then Send | Inline error **"Indian mobile numbers start with 6, 7, 8 or 9."** on blur *and* on send; **no request fired** (`PHONE_RE` mirrors the server's `^[6-9]\d{9}$`). Retyping the same number must **not** clear the error |P|
 | AUTH-02a | Server-detail backstop | Temporarily tighten a server-side `@Pattern` the app doesn't know about, then submit | The screen quotes the server's own sentence (`readValidationDetail` reads the 400's `detail`, strips the `phone: ` prefix), never the generic "Couldn't send the code" | |
-| AUTH-03 | Too short | `98416` → Continue | Continue disabled or inline error; no 400 alert | |
-| AUTH-04 | Too long | Type 11 digits | Input caps at 10, or inline error | |
-| AUTH-05 | Non-digits | Paste `98a1-657 298` | Digits-only sanitising or a clear error; never a server 400 dialog | |
-| AUTH-06 | Leading/trailing spaces | Paste ` 9841657298 ` | Trimmed and accepted | |
-| AUTH-07 | +91 prefix pasted | Paste `+919841657298` | Either accepted (stripped to 10) or clearly rejected — must not silently send 12 digits | |
-| AUTH-08 | Unicode / emoji digits | Paste `९८४१६५७२९८` | Rejected cleanly, no crash | |
+| AUTH-03 | Too short | `98416` → Continue | Continue disabled or inline error; no 400 alert |P|
+| AUTH-04 | Too long | Type 11 digits | Input caps at 10, or inline error |P|
+| AUTH-05 | Non-digits | Paste `98a1-657 298` | Digits-only sanitising or a clear error; never a server 400 dialog |P|
+| AUTH-06 | Leading/trailing spaces | Paste ` 9841657298 ` | Trimmed and accepted |P|
+| AUTH-07 | +91 prefix pasted | Paste `+919841657298` | Either accepted (stripped to 10) or clearly rejected — must not silently send 12 digits |P|
+| AUTH-08 | Unicode / emoji digits | Paste `९८४१६५७२९८` | Rejected cleanly, no crash |P|
 | AUTH-09 | Offline 📵 | Radio off → Continue | Honest "no connection" message, retry affordance. This is the **one** flow allowed to require network | |
 | AUTH-10 | Backend down | Stop backend → Continue | Timeout after 15s (axios timeout), recoverable error, not a hang | |
-| AUTH-11 | Double-tap Continue | Tap Continue twice fast | One OTP request, button disabled while in flight (no two codes) | |
-| AUTH-12 | Back from OTP, change number | OTP screen → back → new number → Continue | New code for the new number; old code no longer relevant | |
+| AUTH-11 | Double-tap Continue | Tap Continue twice fast | One OTP request, button disabled while in flight (no two codes) |P|
+| AUTH-12 | Back from OTP, change number | OTP screen → back → new number → Continue | New code for the new number; old code no longer relevant |P|
 
 ### 1.2 OTP verification
 
 | ID | Case | Steps | Expected | P/F |
 |---|---|---|---|---|
-| AUTH-20 | Correct code | Enter the logged code | Signed in; lands per role (see 1.3) | |
-| AUTH-21 | Wrong code ×1 | Enter `000000` (assuming wrong) | `422 OTP_WRONG`, inline error, **"2 attempts left"** shown | |
-| AUTH-22 | Wrong code ×2 | Repeat | "1 attempt left" | |
-| AUTH-23 | Wrong code ×3 → lock | Repeat | `429 OTP_LOCKED`, countdown from `retryAfterSeconds` (600), input disabled | |
-| AUTH-24 | Request OTP while locked | Tap Resend during lock | `429` with `Retry-After`; UI shows the same countdown, does not send a code | |
-| AUTH-25 | Lock expiry | Wait out 10 min → request + verify | Works again. A `locked_until` in the past needs no clearing — it is simply over. Note the old code row still carries `wrong_attempts: 3`, so retrying the **old** code re-locks immediately; the recovery is a new code | |
+| AUTH-20 | Correct code | Enter the logged code | Signed in; lands per role (see 1.3) |P|
+| AUTH-21 | Wrong code ×1 | Enter `000000` (assuming wrong) | `422 OTP_WRONG`, inline error, **"2 attempts left"** shown |P|
+| AUTH-22 | Wrong code ×2 | Repeat | "1 attempt left" |P|
+| AUTH-23 | Wrong code ×3 → lock | Repeat | `429 OTP_LOCKED`, countdown from `retryAfterSeconds` (600), input disabled |P|
+| AUTH-24 | Request OTP while locked | Tap Resend during lock | `429` with `Retry-After`; UI shows the same countdown, does not send a code |P|
+| AUTH-25 | Lock expiry | Wait out 10 min → request + verify | Works again. A `locked_until` in the past needs no clearing — it is simply over. Note the old code row still carries `wrong_attempts: 3`, so retrying the **old** code re-locks immediately; the recovery is a new code |P|
 | AUTH-26 | Expired code | Wait 10 min → enter the old code | `410 OTP_EXPIRED`, copy says **send a new one** (not "wrong code") | |
 | AUTH-27 | Expired ≠ wrong attempt | 2 wrong attempts → let code expire → enter expired code → resend → 1 wrong attempt | Expired call must **not** burn an attempt; after the resend you still get "attempts left" behaviour consistent with a fresh code | |
 | AUTH-28 | Superseded code | Request OTP → Resend → enter the **first** code | First code fails as wrong (only the latest unverified row is checked) and **burns an attempt** — confirm the copy doesn't blame the user for a resend | |
@@ -151,14 +180,20 @@ Config: OTP expiry **10 min**, max wrong attempts **3**, lock **10 min**, JWT ex
 | AUTH-35 | Offline verify 📵 | Radio off → submit code | Clear network error, code not consumed, retry works when back online | |
 | AUTH-36 | Force-close mid-OTP | Kill app on OTP screen → reopen | Back at phone entry (or OTP with number intact), no crash, no stale session | |
 
-### 1.3 Role resolution (the four exits)
+### 1.3 Role resolution (the exits)
+
+Since V18 sign-in resolves in **one round trip** — `AppUserRepository.findIdentityByPhone` returns the role,
+the trainer's setup state and every roster's consent status in a single query. `app_user.role` is the whole
+answer to "which half of the product is this", and it is **exclusive**.
 
 | ID | Case | Precondition | Expected | P/F |
 |---|---|---|---|---|
-| AUTH-40 | Known trainer | T1 verifies | `role: trainer`, lands on the Deck; no role picker unless also a client | |
+| AUTH-40 | Known trainer | T1 verifies | `role: trainer`, lands on the Deck. `clientOf` is **empty** — a trainer is never also somebody's client now |P|
 | AUTH-41 | Somebody's client only | C1 verifies | `role: client`, client Today; **no trainer row created** in Postgres — verify with `select * from trainer where phone='<C1>'` (0 rows) | |
-| AUTH-42 | Both | TC verifies | Role picker (5a) with "Welcome back, <name>"; both lenses reachable | |
+| AUTH-42 | Dual role is impossible | Put T1's number on T2's roster, sync, then T1 verifies | `role: trainer` **only**, no role picker. The roster row lands `membership_status='unavailable'` (§4). Confirm `select role from app_user where phone='<T1>'` is exactly one row reading `trainer` | |
+| AUTH-42a | Claim blocked from the other side | Sign in on **C1's** number and try `POST /v1/auth/trainer` | `409` — "already on a trainer's roster as a client". The exclusivity is guarded at both doors, not just the roster one | |
 | AUTH-43 | Neither → 7a | New number verifies | `role: pending`, "we don't know this number" screen with two exits, no dead end | |
+| AUTH-43a | One query, not several | Watch the SQL log for a single verify | One `SELECT` resolves the identity; role and membership state arrive together. A second lookup to decide the screen is a regression | |
 | AUTH-44 | 7a → "I'm a trainer" | On 7a, tap it | `POST /v1/auth/trainer` with **no body**; trainer row created; trainer token returned; setup wizard starts | |
 | AUTH-45 | 7a claim idempotent | Tap "I'm a trainer" twice / retry after a dropped response | Exactly one trainer row; same account returned | |
 | AUTH-46 | 7a → "I'm a client" exit | Take the other exit | Explains their trainer must add them; no orphan trainer row | |
@@ -171,6 +206,32 @@ Config: OTP expiry **10 min**, max wrong attempts **3**, lock **10 min**, JWT ex
 | AUTH-53 | Returning session, offline 📵 | Signed-in trainer, radio off, cold start | Opens straight into local data — **never** the phone screen | |
 | AUTH-54 | Token expiry (7 days) | Force an expired token (see 🔒 SEC-AUTH-04) | App signs out gracefully with an explanation; no infinite 401 loop, no data loss of queued writes | |
 | AUTH-55 | Reinstall | Uninstall → reinstall → sign in | Local DB is empty, first sync repopulates from server; no duplicate rows | |
+| AUTH-56 | `gym_admin` is reserved | `update app_user set role='gym_admin' where phone='<T0>'` → verify | An honest stop — "Gym accounts aren't available yet" — **not** a trainer's Deck rendered over somebody else's data. No token is issued | |
+
+### 1.4 Consent — invite, decline, removal (V18)
+
+A trainer typing a number into their roster is a **claim**. Until the person on the other end accepts,
+nothing of theirs is shared — and the token behind the consent screen is deliberately incapable of
+opening a sync scope, so there is nothing to leak even by accident.
+
+| ID | Case | Precondition | Expected | P/F |
+|---|---|---|---|---|
+| AUTH-60 | Invited client signs in | CI verifies | `role: invited`; the **accept/decline** screen names the trainer, their gym, and the name they were added as | |
+| AUTH-61 | What accepting means is stated | On that screen | Three consequences readable *before* choosing: the trainer writes the plan, **they see everything logged**, and no other client or trainer ever does. Privacy Policy link present | |
+| AUTH-62 | Decline is a real exit | Inspect the footer | Decline sits in the same footer at the same weight as Accept. An accept that is the only way off the screen is not consent (S2 if it is hidden or absent) | |
+| AUTH-63 | 🔒 Invited token opens nothing | `GET /v1/sync/pull` **and** `/v1/client/sync/pull?clientId=<CI>` with the invited token | **`403` both** — this is the case the whole consent step rests on. S1 if either returns data | |
+| AUTH-64 | Accept | Tap Accept | `membership_status → accepted`, `accepted_at` stamped, `app_user.privacy_accepted_at` stamped, a real client token issued, client lens opens | |
+| AUTH-65 | Accept is idempotent | Double-tap / retry a dropped response | One state change; `accepted_at` does not move on the second call | |
+| AUTH-66 | Decline | CD taps Decline → confirm | `membership_status → declined`, `declined_at` stamped. **The row is kept** — the trainer's roster should still say what happened | |
+| AUTH-67 | Declined ≠ 7a | CD signs in again | `role: unattached` — the "you're not training with anyone" screen. It must **never** offer "I'm a trainer": that would quietly convert somebody who declined one invite (S3) | |
+| AUTH-68 | Two invites, answer one | Invite CD from T1 and T2, decline T1's | The screen re-renders for **T2's** invite rather than dropping them out of the flow | |
+| AUTH-69 | Live roster beats a pending invite | CB accepted with T1, freshly invited by T2 | Signs straight in as `client` — training is not held up by a consent screen. T2's invite still travels in `clientOf` for the app to surface inside | |
+| AUTH-70 | Removal is announced | CR (archived by T1) signs in | `role: removed`; the notice names the trainer and the date ("ended your coaching on 14 August 2026") | |
+| AUTH-71 | Removal wipes locally, keeps server | Tap OK | Local DB cleared; `removed_ack_at` stamped. In psql the client row, its payments and its sessions are **still there** — the trainer's books must not move because a client tapped OK (S1 if they vanish) | |
+| AUTH-72 | Shown exactly once | Sign in again after acknowledging | `role: unattached`, **no** removal notice. The row still reads `removed` forever, so a missing ack stamp means this screen is the app for the rest of time (S3) | |
+| AUTH-73 | Server-first ordering | Acknowledge with the radio off 📵 | The wipe does **not** run — the phone keeps its data and the notice returns. Wiping before the ack lands would erase the data *and* re-show the screen | |
+| AUTH-74 | Removed then re-added | T1 archives CR, then un-archives (resume) | `removed_ack_at` clears, so a second removal is announced again rather than silently swallowed | |
+| AUTH-75 | Legacy rows are not walled | A client created **before** V18 | `membership_status` defaulted to `accepted` — somebody who has trained for months must never meet a consent screen (S1 if a live client is locked out) | |
 
 ---
 
@@ -275,6 +336,24 @@ Derived by `app/src/db/clientStatusRules.ts` — never hand-set.
 | CLI-47 | 30+ clients scroll | No jank; index rail (if present) jumps correctly | |
 | CLI-48 | Paused client visibility | Stays in the roster, excluded from active counts and from weekly reports | |
 
+**Consent on the roster (V18).** `status` is the trainer's view (active/paused/archived); `membership_status`
+is the client's own answer and is **server-owned** — the app reads it and never writes it. The two can
+legitimately disagree, and the roster has to show both without conflating them.
+
+| ID | Case | Steps | Expected | P/F |
+|---|---|---|---|---|
+| CLI-50 | New client is `invited` | Add a client with a phone → sync → psql | `membership_status='invited'`, `invited_at` set. This is now the default for every new client | |
+| CLI-51 | Client with **no** phone | Add a client, leave the phone blank → sync | Born `accepted`, not `invited` — there is nobody to ask, so nothing should sit waiting on an answer that can never come | |
+| CLI-52 | Un-invitable number | Put T1's number on T2's roster → sync | Row **exists** (S1 if the client, their sessions or their payments are dropped), tagged **"Can't invite"** in `warn` tone. It must **not** read "Invited" | |
+| CLI-53 | The line says what to do | Look at the row's second line | "That number is a trainer account — they can't be invited". A tag alone that never explains itself is S3 | |
+| CLI-54 | Ranked above money | Give the same client an overdue payment | The un-invitable item still wins the row. Every other attention item became true over time; this one is a typo from seconds ago that takes seconds to fix, and burying it leaves the trainer believing they invited somebody they didn't | |
+| CLI-55 | Swipe verb is an edit | Swipe the row | **Fix number** → `EditClient`. It is the only attention item whose fix is an edit rather than a WhatsApp — there is nothing to say to the client and nothing they could do | |
+| CLI-56 | Correcting the number recovers it | Edit to a free number → sync | `membership_status → invited`, the tag clears, `app_user` gains a `client` row for the new number | |
+| CLI-57 | Editing back re-blocks | Edit back to the trainer's number → sync | `unavailable` again — never left claiming "invited" for an invite that cannot be delivered | |
+| CLI-58 | Invite age restarts on recovery | After CLI-56, check the roster line | Counts from when the number became **valid**, not from the first attempt. "Invited 30 days ago · not set up" about an invite that only became sendable today is a lie — nobody was ignoring it | |
+| CLI-59 | Roster redraws on pull | Leave the roster open while the correcting sync lands | The tag clears without a manual refresh (`membership_status` is in `observeWithColumns`; if it is missing the row goes stale until an unrelated edit rebuilds it) | |
+| CLI-59a | Un-invitable client still works | Book, log and bill the CLI-52 client | All normal. Only app access is impossible — the trainer's record is untouched | |
+
 ### 4.3 Client file, edit, end
 
 | ID | Case | Expected | P/F |
@@ -289,6 +368,10 @@ Derived by `app/src/db/clientStatusRules.ts` — never hand-set.
 | CLI-67 | Change payment mode after payments exist | Historic payments keep their original mode; the ledger doesn't rewrite history | |
 | CLI-68 | Change split % mid-month | Dashboard split recalculates per the rule the product intends — record which (retroactive or forward-only) | |
 | CLI-69 | Offline edit + trainer edits on device B 📵 | Last-write-wins, silently; no duplicate, no crash; recency is visible enough that the trainer isn't confused | |
+| CLI-70 | File explains an un-invitable number (open the CLI-52 client) | A **"Can't invite"** tag beside the status (not replacing it — they are still active) and a callout naming the number, why, and a **Change number** button | |
+| CLI-71 | Archive is the removal the client sees (`ClientEndScreen` → **Archive**) | `membership_status → removed`, `removed_at` stamped. This — not the hard remove — is what drives AUTH-70 | |
+| CLI-72 | Hard remove leaves nothing to notify (`ClientEndScreen` → remove/purge) | Row and its money are gone by design, so that client falls through to `unattached` at sign-in rather than a removal notice. Confirm the dialog says the money goes too | |
+| CLI-73 | Resuming an archived client (un-archive) | `membership_status` returns to `accepted`; a previously-acknowledged removal is re-armed (AUTH-74) | |
 
 ### 4.4 Body metrics (append-only, FR-1.3)
 
@@ -657,22 +740,37 @@ Trainer: `GET/POST /v1/sync/pull|push`. Client: `GET/POST /v1/client/sync/pull|p
 | CLNT-23 | Removed from a roster mid-session | Next sync refuses (403) — the app must not hard-crash; it explains and lands somewhere sane | |
 | CLNT-24 | Client help / profile | `ClientHelpScreen`, `ClientProfileScreen` render; sign-out works | |
 | CLNT-25 | Client notifications screen | Shows their own events only | |
+| CLNT-26 | Nothing before consent — as CI (invited, never accepted), sweep every client screen | There is no way into any of them; the invited token opens no scope (AUTH-63). A client screen reachable pre-acceptance is **S1**: it shows training data to somebody who has not agreed to share it | |
+| CLNT-27 | Accepting opens the lens cleanly | First sync populates plan/sessions/coach; no empty shell, no "no plan" screen for a client who has one | |
+| CLNT-28 | Second invite surfaced inside — CB accepted with T1, freshly invited by T2 | The outstanding invite is reachable from **inside** the lens (it travels in `clientOf`, AUTH-69) rather than only at the next sign-in | |
+| CLNT-29 | Removal notice copy (as CR) | Names the trainer and the date; explains the local data goes and the trainer keeps their own record; offers a WhatsApp to the trainer for "this must be a mistake" | |
+| CLNT-30 | Wipe scope — CB removed by T1 but still with T2 | ⚠ Verify what the wipe actually clears: `resetLocalDatabase()` is whole-database. Confirm T2's data returns on the next sync and record the gap if the intermediate state is visibly broken | |
 
 ---
 
-## 16 · ROLE — the toggle (both roles, one phone)
+## 16 · ROLE — the picker (a client of two trainers)
+
+**Rewritten for V18.** This section used to test one phone holding both roles. That state no longer
+exists: `app_user.role` is exclusive. What survives is the case it was conflated with — **a client on two
+trainers' rosters**, which is two client rows and one human being, and is still fully supported.
+`RoleScreen` now serves only that.
+
+The trainer↔client lens switch is therefore unreachable, and the point of ROLE-10/11 is that it degrades
+to *absent* rather than to *broken*.
 
 | ID | Case | Expected | P/F |
 |---|---|---|---|
-| ROLE-01 | Role picker appears for TC | Both lenses offered with the trainer's name | |
-| ROLE-02 | Switch trainer → client | Same token, no re-login; local queue flushed first | |
-| ROLE-03 | Switch client → trainer | Same | |
+| ROLE-01 | Picker appears for CB | Both **trainers** listed by name and gym; copy reads "You train with more than one trainer. Whose book do you want to open?" — no coaching card | |
+| ROLE-02 | Single live roster skips the picker (C1 signs in) | Straight into the lens. The picker must never appear for one membership | |
+| ROLE-03 | Switch between trainers, from the client drawer | Same token, no re-login; local queue flushed first | |
 | ROLE-04 | State not lost | Switching doesn't lose an in-progress log or form (or warns before discarding) | |
-| ROLE-05 | Lens persists across restart | Reopening lands in the last-used lens | |
-| ROLE-06 | Data separation | Trainer lens shows the roster; client lens shows only their own file — no bleed | |
-| ROLE-07 | Two memberships + trainer | Picker lists both memberships plus the coaching lens, each labelled | |
+| ROLE-05 | Lens persists across restart | Reopening lands on the last-used membership | |
+| ROLE-06 | Data separation | Each membership shows only its own trainer's plans, sessions and money — no bleed (see SEC-WALL-05) | |
+| ROLE-07 | Paused roster selectable but not preselected — CB paused by T1, active with T2 | T2's card is preselected; T1's is still tappable and labelled "Paused — your history is still here" | |
 | ROLE-08 | Switch while offline 📵 | Works from local data | |
-| ROLE-09 | Switch with queued writes | Nothing is lost or misattributed to the other lens | |
+| ROLE-09 | Switch with queued writes | Nothing is lost or misattributed to the other membership | |
+| ROLE-10 | No coaching card for a client (inspect `RoleScreen` as CB) | The trainer card and its roster count are gone. A client's `trainerId` is always null now, so an offered-but-dead "Switch to coaching" in `ClientDrawer` is S3 | |
+| ROLE-11 | No client card for a trainer — T1 → "My training" in the tab bar | Lands on **SelfTraining**, because a trainer's `clientOf` is always empty. It must not open an empty client lens (`AppTabs.tsx` falls through to `SelfTraining` when `memberships` is empty — confirm it does) | |
 
 ---
 
@@ -790,6 +888,53 @@ SELECT count(*) FROM client WHERE deleted_at IS NOT NULL;   -- rows still presen
 -- 10. No health data columns exist anywhere (DPDP)
 SELECT table_name, column_name FROM information_schema.columns
 WHERE column_name ~* 'injur|medic|condition|allerg|diagnos|disease';                                  -- expect 0 rows
+
+-- ── V18 · identity and consent ────────────────────────────────────────────
+
+-- 11. One phone, one role. The UNIQUE constraint enforces it, so a second row
+--     is impossible — what this catches is the same NUMBER living in both
+--     trainer and client, which is the state V18 exists to prevent.
+SELECT c.phone FROM client c JOIN trainer t ON t.phone = c.phone
+WHERE c.deleted_at IS NULL AND t.deleted_at IS NULL
+  AND c.membership_status <> 'unavailable';                                                           -- expect 0 rows
+
+-- 12. Every invitable client has an identity, and it says client
+SELECT c.phone, u.role FROM client c LEFT JOIN app_user u ON u.phone = c.phone
+WHERE c.phone IS NOT NULL AND c.deleted_at IS NULL
+  AND c.membership_status <> 'unavailable'
+  AND (u.phone IS NULL OR u.role <> 'client');                                                        -- expect 0 rows
+
+-- 13. Consent states are only the six we ship
+SELECT DISTINCT membership_status FROM client;
+--   expect a subset of: invited · accepted · declined · paused · removed · unavailable
+
+-- 14. Timestamps agree with the state they claim
+SELECT id, membership_status, invited_at, accepted_at, declined_at, removed_at FROM client
+WHERE (membership_status='accepted'    AND accepted_at IS NULL)
+   OR (membership_status='declined'    AND declined_at IS NULL)
+   OR (membership_status='removed'     AND removed_at  IS NULL)
+   OR (membership_status='unavailable' AND invited_at IS NOT NULL);                                    -- expect 0 rows
+
+-- 15. Nobody who predates V18 is sitting behind a consent wall
+SELECT count(*) FROM client
+WHERE created_at < (SELECT installed_on FROM flyway_schema_history WHERE version='18')
+  AND membership_status <> 'accepted' AND deleted_at IS NULL;                                          -- expect 0
+
+-- 17. The otp_request backlog, now that Redis carries the live path.
+--     Rows here should only appear from a Redis-down failover or a lock mirror.
+--     A large or growing count while Redis is healthy means the fallback is
+--     being taken silently — check the logs for "falling back to Postgres".
+SELECT count(*) FILTER (WHERE expires_at < NOW())  AS expired_backlog,
+       count(*) FILTER (WHERE locked_until IS NOT NULL) AS lock_mirrors,
+       count(*)                                     AS total
+FROM otp_request;
+
+-- 16. A removal never took the trainer's money with it (AUTH-71)
+SELECT c.id, c.membership_status, count(p.id) AS payments FROM client c
+LEFT JOIN payment p ON p.client_id = c.id AND p.deleted_at IS NULL
+WHERE c.membership_status = 'removed' GROUP BY 1,2;
+--   payments must be whatever it was BEFORE the client tapped OK — acknowledging
+--   a removal is a client-side wipe and must not touch the server's books.
 ```
 
 ---
@@ -834,6 +979,29 @@ curl -s -X POST $BASE/v1/auth/otp/verify -H 'Content-Type: application/json' \
 | SEC-AUTH-18 | Two Authorization headers | Send both a valid and an invalid one | Deterministic, safe outcome (no privilege from header confusion) | |
 | SEC-AUTH-19 | Very long token | 1MB `Bearer` value | Rejected without OOM | |
 | SEC-AUTH-20 | Concurrent sessions | Same trainer on two devices | Both work; no session fixation, no cross-device data bleed | |
+
+### 21.1b 🔒 Redis-backed OTP state and rate limiting
+
+The one-time code, its attempt counter, the lock and the send history moved to
+Redis; the API rate-limit buckets moved with them. Everything here has a
+Postgres/in-process fallback, so the cases split in two: does the fast path do
+what it claims, and does the slow path take over without dropping a limit.
+
+| ID | Case | How | Expected | P/F |
+|---|---|---|---|---|
+| SEC-RDS-01 | The code is never stored in the clear | `redis-cli hgetall otp:code:<phone>` after a request | A bcrypt hash (`$2a$10$…`), an `expiresAt`, an `attempts`. **S1** if the six digits are readable — anyone with Redis access would own every account | |
+| SEC-RDS-02 | TTL is set and matches config | `redis-cli ttl otp:code:<phone>` | ≈600s (`app.otp.expiry-minutes`). A key with `-1` never expires and is the growth bug moving house | |
+| SEC-RDS-03 | AOF is on | `redis-cli config get appendonly` | `yes`. Without it a restart clears every live lock and the brute-force ceiling becomes "three per restart" — SEC-OTP-02, reintroduced | |
+| SEC-RDS-04 | A lock survives a Redis restart | Lock a number → `docker restart xrep-redis` → verify again | Still `429 OTP_LOCKED`, TTL roughly intact. This is SEC-OTP-02 for the new store | |
+| SEC-RDS-05 | A lock survives Redis being **wiped** | Lock a number → `redis-cli flushall` → verify | Still locked — the Postgres mirror is the backstop, and `lockedUntil` takes the LATER of the two stores | |
+| SEC-RDS-06 | Redis down: sign-in still works | `docker stop xrep-redis` → request + verify a code | Both succeed, from `otp_request`. **S1 if sign-in fails** — a cache must never be the reason nobody can get in | |
+| SEC-RDS-07 | Redis down: limits still hold | While stopped, request codes past the ladder and the ceiling | Still refused with `OTP_THROTTLED`. Falling **open** here would be free brute force and an unbounded SMS bill | |
+| SEC-RDS-08 | Redis down: the app still BOOTS | Stop Redis → restart the backend → `/health` | `200`. The proxy manager connects lazily for exactly this reason; an eager connect turns "degrade" into "fail to boot" | |
+| SEC-RDS-09 | Recovery is automatic | Start Redis again, wait ~30s, make a request | `rl:*` keys reappear; the log says "rate limiting is using Redis". An app that stayed on in-memory buckets until the next deploy is running a weaker limit for days | |
+| SEC-RDS-10 | The attempt counter is atomic | Fire 10 parallel wrong-code verifies at a fresh code | Never more than `maxAttempts` accepted before the lock. This is SEC-OTP-06 — the race the old read-modify-write allowed | |
+| SEC-RDS-11 | Rate-limit buckets are shared, not per process | Restart the backend mid-way through spending a tier's budget | The count **survives** the restart. Under the old in-memory limiter it reset to full, which was the documented gap | |
+| SEC-RDS-12 | Keys are bounded | After a full run, `redis-cli --scan` and count | Every key has a TTL or an expiration strategy; nothing accumulates per caller forever. A rate limiter that eats memory becomes the outage | |
+| SEC-RDS-13 | Redis is not publicly reachable | From outside the private network, `redis-cli -h <host> ping` | Refused. Redis has no auth by default and holds every live code hash and lock — **S1** if it answers | |
 
 ### 21.2 OTP & account takeover
 
@@ -911,6 +1079,14 @@ Every trainer endpoint derives `trainerId` from the token subject; every path/bo
 | SEC-WALL-16 | Deleted trainer's client | Soft-delete T1, C1 pulls | `403` (resolve joins on a live trainer) | |
 | SEC-WALL-17 | Paused client's access | Pause C1, pull | Allowed by design — history and self-logging. Confirm the coaching layer isn't also served | |
 | SEC-WALL-18 | Cursor abuse | `lastPulledAt=-1`, `0`, `9999999999999`, `abc` | No crash, no unscoped dump, `400` for garbage | |
+| SEC-WALL-19 | 🔒 Invited token, both sync doors | Invited token (CI) → `/v1/sync/pull` and `/v1/client/sync/pull?clientId=<CI>` | **`403` both.** The consent step is worthless if the token that precedes it can read the data it is asking permission for — **S1** | |
+| SEC-WALL-20 | Invited token elsewhere | Same token → `/v1/clients`, `/v1/trainer`, `/v1/sync/push` | `403` — it is good for accept, decline and ack-removal only | |
+| SEC-WALL-21 | Answer somebody else's invite | Invited token for CI → `POST /v1/auth/membership/{CD_client_id}/accept` | `403 "Not your record."` — the client id in the path is untrusted until proved against the phone in the token. Identical answer for a **non-existent** id, so ids can't be probed | |
+| SEC-WALL-22 | Client token on the membership routes | Accepted client's token → `/v1/auth/membership/{own}/accept` | `403` — gated to `ROLE_INVITED`, so a live client cannot re-run consent transitions | |
+| SEC-WALL-23 | Trainer token accepts on a client's behalf | T1's token → `/v1/auth/membership/{CI}/accept` | `403`. A trainer manufacturing their own client's consent is **S1** — it is the one signature that must come from the other person | |
+| SEC-WALL-24 | Ack a removal you weren't given | Invited token → `ack-removal` on a foreign client id | `403`; no `removed_ack_at` written anywhere | |
+| SEC-WALL-25 | Forge a role claim | Re-sign a token with `role: client` (see SEC-AUTH-02 for the secret) | Rejected unless the signing key is known — and if it is, that is the finding, not this case | |
+| SEC-WALL-26 | Push a membership_status | Trainer pushes `clients` with `membership_status: 'accepted'` | Ignored — the column is derived server-side and never read from the push. A trainer must not be able to self-accept on behalf of a client (**S1**) | |
 
 ### 21.5 Injection & input handling
 
@@ -1102,10 +1278,14 @@ If you only have a day, run in this order — highest consequence first:
 | 8 | Mark the session done | Pack decrements by exactly 1 |
 | 9 | Record a payment | Ledger + Deck revenue update |
 | 10 | Open the pay sheet with no VPA | No broken UPI button |
-| 11 | Sign in as C1 on a second device | Sees the plan, the session, the amount owed |
-| 12 | `curl` C1's token against `/v1/clients` | `403` |
-| 13 | `curl` T1's token against T2's client id | `403` |
-| 14 | Sign out T1, sign in T2 | Zero trace of T1's data |
+| 11 | Sign in as the new client on a second device | Accept/decline screen — **not** the app |
+| 12 | `curl` that invited token against both sync doors | `403` both (SEC-WALL-19) |
+| 13 | Accept | Client lens opens; sees the plan, the session, the amount owed |
+| 14 | `curl` the client's token against `/v1/clients` | `403` |
+| 15 | `curl` T1's token against T2's client id | `403` |
+| 16 | Put T1's own number on T2's roster, sync | Row survives, tagged **Can't invite**; T1 still signs in as a trainer |
+| 17 | Archive the client, sign in as them | Removal notice names T1 and the date; OK wipes locally, server row stays |
+| 18 | Sign out T1, sign in T2 | Zero trace of T1's data |
 
 ---
 
@@ -1147,7 +1327,9 @@ For security findings add: **attacker model** (unauthenticated / another trainer
 | FR-8 sync & push | SYNC-01–24, PUSH-01–16 |
 | FR-9 WhatsApp nudges | NDG-01–17, SEC-BIZ-12 |
 | FR-10 weekly report | RPT-01–14, SEC-INJ-16, SEC-PRIV-04 |
-| FR-11 client role | CLNT-01–25, ROLE-01–09, SEC-WALL-01–18 |
+| FR-11 client role | CLNT-01–30, ROLE-01–11, SEC-WALL-01–26 |
+| V18 one phone one role | AUTH-40/42/42a/43a/56, CLI-52–59a, ROLE-10/11, §20 q11–13 |
+| V18 consent & removal | AUTH-60–75, CLNT-26–30, CLI-50/51/71–73, SEC-WALL-19–26, §20 q14–16 |
 | NFR-2 offline-first | every 📵 case, SYNC-* |
 | NFR-3 performance | PERF-01–08 |
 | NFR-4 sync integrity | SYNC-13/16/17/21, SEC-BIZ-09/10 |
@@ -1161,13 +1343,21 @@ For security findings add: **attacker model** (unauthenticated / another trainer
 
 | Area | Observation | Where |
 |---|---|---|
-| API rate-limit counters are per process | In memory by design; resets on restart and each instance keeps its own, so the ceiling is limit × instances. Needs a shared store before scaling out | `ratelimit/RateLimiter.java` · SEC-CFG-15e |
+| ~~API rate-limit counters are per process~~ **CLOSED** | Now Bucket4j buckets in Redis, shared across instances. `RateLimiter` remains as the fallback when Redis is unreachable, where the old per-process limitation applies for the length of the outage only | `ratelimit/Bucket4jLimiter.java` · SEC-CFG-15e |
 | Foreign/unknown client id on nudge → 500 | `EmptyResultDataAccessException` escapes as a 500 where 403/404 belongs. No leak, but the wrong contract and a stack trace per miss | `nudge/NudgeService.java` · SEC-IDOR-10 |
-| OTP attempt counting races | Parallel verifies can read the same `wrong_attempts` and lose an update, so a burst may buy more than 3 tries. Needs `@Lock(PESSIMISTIC_WRITE)` on `findLatestUnverified` | `auth/OtpService#verify` · SEC-OTP-06 |
-| OTP send limit is per-number only | 30/60/120s ladder + 10 per rolling day, from `otp_request` rows. No per-IP limit yet — many numbers from one host is still unbounded | `OtpService#throttle` · SEC-OTP-04e |
+| ~~OTP attempt counting races~~ **CLOSED** | `HINCRBY` on the Redis path is atomic; the Postgres fallback now takes `@Lock(PESSIMISTIC_WRITE)` via `findLatestUnverifiedForUpdate`. Both paths fixed, not just the fast one | `auth/RedisOtpStore`, `JpaOtpStore` · SEC-OTP-06 |
+| OTP send limit is per-number only | 30/60/120s ladder + 10/day. Still no per-IP limit — many numbers from one host is bounded only by the AUTH tier's own ceiling | `auth/OtpSendLimiter` · SEC-OTP-04e |
+| `otp_request` is no longer cleaned up — and never was | V1 claimed "cleaned up by a scheduled job"; no such job was ever written, so the table has grown since the first sign-in. Redis TTLs the live path, but the fallback still writes rows and the historical backlog is still there. A one-off delete of expired rows is owed | `V1__init_schema.sql` · §20 q17 |
+| Send history does not survive a Redis failover | The two stores do not share state, so a number mid-ladder when Redis drops reads as having no history and the ladder restarts — one extra code, once, per affected number. The LOCK does not have this problem: it is mirrored to Postgres and sign-in takes the later of the two | `auth/DelegatingOtpStore` · SEC-OTP-04f |
+| Daily ceiling recovers smoothly, not on a cliff | Bucket4j refills greedily, so a number that burned 10 codes gets one back every ~2.4h rather than all ten after 24h. Same ceiling, gentler edge — but `retryAfterSeconds` differs from the old rolling-window arithmetic | `ratelimit/Bucket4jLimiter` · SEC-OTP-04g |
 | OTP printed to logs in dev | Only while `sms-enabled: false` | `OtpService#send` · SEC-OTP-13 |
 | No token revocation | Sign-out is client-side only; tokens live 7 days | `JwtService` · SEC-AUTH-15 |
 | Tokens with no `role` claim = trainer | Deliberate pre-V14 compatibility | `JwtService#extractRole` · SEC-AUTH-07 |
+| Pre-V18 clients default to `accepted` | Deliberate. Every row that existed when V18 ran is a live arrangement whose trainer has been billing against it; defaulting them to `invited` would wall people who have trained for months | `V18__unified_user_and_membership.sql` · AUTH-75 |
+| Removal wipe is whole-database | `resetLocalDatabase()` is not per-membership, so a client of two trainers removed by one loses the local copy of both until the next sync repopulates. Server data is untouched, so it recovers — but the intermediate state is not designed | `RemovedScreen` · CLNT-30 |
+| Un-invitable clients are silent to the client | The person whose number it is is never told a trainer tried to add them. Deliberate — they own a trainer account and it is not their problem — but worth confirming nobody expects a notification | `SyncService#pushClients` · CLI-52 |
+| `gym_admin` is a reserved value only | No `gym` table, no UI, nothing mints one. Reaching it needs a hand-written psql UPDATE | `AppUser.ROLE_GYM_ADMIN` · AUTH-56 |
+| Trainer→client lens switch is now dead code | `AppTabs` and `ClientDrawer` still call `switchLens` across roles; both degrade to absent because the lists they read are always empty. Harmless, but it is unreachable code | `store/AuthContext#switchLens` · ROLE-10/11 |
 | Client devices can't register for push | `/v1/devices/**` is trainer-gated; only `trainer.fcm_token` exists | `push/DeviceController.java` · PUSH-05 |
 | Clients cannot write payments | By design — "tell your trainer" | `ClientSyncService.ACCEPTED` · CLNT-16, SEC-WALL-09 |
 | Dev defaults in config | `JWT_SECRET`, DB password, `http://10.0.2.2:8080`, `com.xrep: DEBUG` | `application.yml`, `api/client.ts` · SEC-CFG-01/03/09/10 |
@@ -1178,4 +1368,5 @@ For security findings add: **attacker model** (unauthenticated / another trainer
 
 ---
 
-*XRep Manual Test Plan · v1.0 · 14 Aug 2026 · traced to Final Requirements & Delivery Plan v2.0 and the MVP Interaction Map v1.0.*
+*XRep Manual Test Plan · v1.1 · 15 Aug 2026 · traced to Final Requirements & Delivery Plan v2.0 and the MVP Interaction Map v1.0.*
+*v1.1 covers schema V18 — one phone one role, and consent as a first-class state.*

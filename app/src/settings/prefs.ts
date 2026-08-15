@@ -44,6 +44,23 @@ export const QUIET_TO_HOUR = 7;
 /** Which book. `self` is the trainer's own training, `coaching` is the business. */
 export type Mode = 'coaching' | 'self';
 
+/**
+ * Self-training (2b) is switched off.
+ *
+ * Off, not deleted — the same treatment batches got. The sheet, the screen and
+ * this preference are all built and correct; what is missing is the decision
+ * behind them, which is whether a trainer's own training is a client record of
+ * themselves or a separate kind of record entirely. Until that is designed,
+ * every way in is hidden, because a mode whose contents are "not built yet" is
+ * a door onto an empty room and every trainer who opens it learns the app is
+ * unfinished.
+ *
+ * Flipping this to `true` restores the feature exactly as it was: the drawer
+ * row, the mode sheet, the log's "for yourself" path and the `SelfTraining`
+ * route are all still wired and still gated on this one constant.
+ */
+export const SELF_TRAINING_ENABLED = false;
+
 /** `system` follows the phone. The default, and what most people want. */
 export type Appearance = 'system' | 'dark' | 'light';
 
@@ -315,7 +332,15 @@ function merge(base: Prefs, patch: unknown): Prefs {
   }
 
   return {
-    mode: p.mode === 'coaching' || p.mode === 'self' ? p.mode : base.mode,
+    // Coerced rather than merged while the feature is off. A phone that had
+    // already switched to self before this build would otherwise come back in a
+    // mode with no sheet to leave it by — stranded in the one place the app no
+    // longer has a door out of.
+    mode: !SELF_TRAINING_ENABLED
+      ? 'coaching'
+      : p.mode === 'coaching' || p.mode === 'self'
+        ? p.mode
+        : base.mode,
     appearance:
       p.appearance === 'system' || p.appearance === 'dark' || p.appearance === 'light'
         ? p.appearance
