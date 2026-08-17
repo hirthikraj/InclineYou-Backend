@@ -1,5 +1,6 @@
 package com.xrep.xrep_backend.sync;
 
+import com.xrep.xrep_backend.client.ClientPhoneGuard;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -15,17 +16,19 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * What happens to a roster row when the number on it belongs to a trainer.
+ * Who a push is allowed to put on a roster.
  *
- * The rule is that one phone has one role, so a trainer's number can never be
- * invited as a client. The interesting part is what that does to the TRAINER's
- * record of that person, and the answer is: nothing. Only the invite is
- * impossible. Dropping the row — which is what this used to do — silently cost
- * the trainer a client, their sessions and their payments to enforce a rule
- * about app access, and told them nothing.
+ * One phone is one person and one person is in one place, so three numbers can
+ * never be added: one that owns a trainer account, one that is already another
+ * trainer's live client, and one that is already on the adder's own roster.
+ * All are refused outright — the row is not created — and the push says so in
+ * its response rather than failing the batch around it.
  *
- * The transitions below are a small state machine buried in a SQL CASE, which
- * is exactly the kind of thing that breaks quietly, so it is pinned here.
+ * This suite used to pin the opposite: a trainer's number was SAVED as
+ * `unavailable` and only the invite was withheld. That was the bug — T1 could
+ * add T2 and the roster showed a client who was somebody else. The recovery
+ * path out of `unavailable` is still tested below, because rows written before
+ * the rule hardened still carry it and still have to heal.
  *
  * `@Transactional` on the test rolls everything back — this suite runs against
  * the dev database and must not leave anything in it.
@@ -40,6 +43,8 @@ class SyncMembershipTest {
     /** A trainer's number, and a number belonging to nobody. */
     private static final String TRAINER_PHONE = "9100000001";
     private static final String CLIENT_PHONE = "9100000002";
+    /** On a third trainer's roster before this test starts. */
+    private static final String TAKEN_PHONE = "9100000004";
 
     private UUID adder;
     private UUID clientId;
@@ -57,24 +62,108 @@ class SyncMembershipTest {
     }
 
     @Test
-    @DisplayName("a trainer's number is saved as `unavailable`, not dropped")
-    void blockedNumberIsKept() {
-        push(created(TRAINER_PHONE));
+    @DisplayName("a trainer's number is refused, and the row is not created")
+    void trainerNumberIsRefused() {
+        var result = push(created(TRAINER_PHONE));
 
-        // The row exists. This is the whole regression: it used to be skipped.
-        assertThat(membershipStatus()).isEqualTo("unavailable");
-        assertThat(invitedAt()).isNull();
+        assertThat(exists()).isFalse();
+        assertThat(result.rejected()).singleElement().satisfies(r -> {
+            assertThat(r.table()).isEqualTo("clients");
+            assertThat(r.id()).isEqualTo(clientId.toString());
+            assertThat(r.field()).isEqualTo("phone");
+            assertThat(r.code()).isEqualTo(ClientPhoneGuard.CODE_TRAINER);
+            assertThat(r.kept()).isFalse();
+            assertThat(r.message()).isNotBlank();
+        });
 
         // And no client identity was minted for a number that is a trainer's.
         assertThat(role(TRAINER_PHONE)).isEqualTo("trainer");
     }
 
     @Test
-    @DisplayName("correcting the number makes the invite possible")
-    void correctingTheNumberRecovers() {
-        push(created(TRAINER_PHONE));
-        push(updated(CLIENT_PHONE));
+    @DisplayName("another trainer's client is refused too")
+    void otherTrainersClientIsRefused() {
+        UUID other = trainer("9100000005");
+        jdbc.update("""
+                INSERT INTO client (id, trainer_id, name, phone, membership_status)
+                VALUES (gen_random_uuid(), :tid::uuid, 'Meera', :p, 'accepted')
+                """, Map.of("tid", other.toString(), "p", TAKEN_PHONE));
 
+        var result = push(created(TAKEN_PHONE));
+
+        assertThat(exists()).isFalse();
+        assertThat(result.rejected()).singleElement()
+                .satisfies(r -> assertThat(r.code()).isEqualTo(ClientPhoneGuard.CODE_OTHER_ROSTER));
+    }
+
+    @Test
+    @DisplayName("a duplicate on the adder's OWN roster is refused too")
+    void ownDuplicateIsRefused() {
+        jdbc.update("""
+                INSERT INTO client (id, trainer_id, name, phone, membership_status)
+                VALUES (gen_random_uuid(), :tid::uuid, 'Meera', :p, 'accepted')
+                """, Map.of("tid", adder.toString(), "p", TAKEN_PHONE));
+
+        var result = push(created(TAKEN_PHONE));
+
+        assertThat(exists()).isFalse();
+        assertThat(result.rejected()).singleElement()
+                .satisfies(r -> assertThat(r.code()).isEqualTo(ClientPhoneGuard.CODE_OWN_ROSTER));
+    }
+
+    @Test
+    @DisplayName("a membership that is over does not block the next trainer")
+    void removedMembershipDoesNotBlock() {
+        UUID other = trainer("9100000006");
+        jdbc.update("""
+                INSERT INTO client (id, trainer_id, name, phone, status, membership_status)
+                VALUES (gen_random_uuid(), :tid::uuid, 'Meera', :p, 'archived', 'removed')
+                """, Map.of("tid", other.toString(), "p", TAKEN_PHONE));
+
+        var result = push(created(TAKEN_PHONE));
+
+        assertThat(result.rejected()).isEmpty();
+        assertThat(membershipStatus()).isEqualTo("invited");
+    }
+
+    @Test
+    @DisplayName("editing a live client onto a trainer's number keeps the rest of the edit")
+    void editOntoTrainerNumberKeepsTheRecord() {
+        push(created(CLIENT_PHONE));
+
+        var result = push(updated(TRAINER_PHONE, "Meera Pillai"));
+
+        // The name change landed; the number did not move.
+        assertThat(name()).isEqualTo("Meera Pillai");
+        assertThat(phone()).isEqualTo(CLIENT_PHONE);
+        assertThat(result.rejected()).singleElement().satisfies(r -> {
+            assertThat(r.code()).isEqualTo(ClientPhoneGuard.CODE_TRAINER);
+            assertThat(r.kept()).isTrue();
+        });
+    }
+
+    @Test
+    @DisplayName("re-pushing an unchanged row is never re-judged")
+    void unchangedRowIsNotRejudged() {
+        push(created(CLIENT_PHONE));
+        var result = push(updated(CLIENT_PHONE, "Meera"));
+
+        assertThat(result.rejected()).isEmpty();
+        assertThat(phone()).isEqualTo(CLIENT_PHONE);
+    }
+
+    @Test
+    @DisplayName("a row already saved as `unavailable` still heals when the number is fixed")
+    void legacyUnavailableRecovers() {
+        // Written the way the old push wrote it, before the rule hardened.
+        jdbc.update("""
+                INSERT INTO client (id, trainer_id, name, phone, membership_status)
+                VALUES (:id::uuid, :tid::uuid, 'Meera', :p, 'unavailable')
+                """, Map.of("id", clientId.toString(), "tid", adder.toString(), "p", TRAINER_PHONE));
+
+        var result = push(updated(CLIENT_PHONE, "Meera"));
+
+        assertThat(result.rejected()).isEmpty();
         assertThat(membershipStatus()).isEqualTo("invited");
         assertThat(invitedAt()).isNotNull();
         // The identity is created at the moment the number becomes invitable.
@@ -82,23 +171,11 @@ class SyncMembershipTest {
     }
 
     @Test
-    @DisplayName("editing back to a trainer's number blocks it again")
-    void editingBackReBlocks() {
-        push(created(TRAINER_PHONE));
-        push(updated(CLIENT_PHONE));
-        push(updated(TRAINER_PHONE));
-
-        // Not left as `invited` on the strength of having once been correct —
-        // the invite cannot be delivered, so the roster must not claim it was.
-        assertThat(membershipStatus()).isEqualTo("unavailable");
-        assertThat(invitedAt()).isNull();
-    }
-
-    @Test
     @DisplayName("a normal client is unaffected by any of this")
     void normalClientIsUntouched() {
-        push(created(CLIENT_PHONE));
+        var result = push(created(CLIENT_PHONE));
 
+        assertThat(result.rejected()).isEmpty();
         assertThat(membershipStatus()).isEqualTo("invited");
         assertThat(invitedAt()).isNotNull();
     }
@@ -118,26 +195,44 @@ class SyncMembershipTest {
 
     private Map<String, Object> created(String phone) {
         return Map.of("changes", Map.of("clients", Map.of(
-                "created", List.of(row(phone)), "updated", List.of(), "deleted", List.of())));
+                "created", List.of(row(phone, "Meera")), "updated", List.of(), "deleted", List.of())));
     }
 
-    private Map<String, Object> updated(String phone) {
+    private Map<String, Object> updated(String phone, String name) {
         return Map.of("changes", Map.of("clients", Map.of(
-                "created", List.of(), "updated", List.of(row(phone)), "deleted", List.of())));
+                "created", List.of(), "updated", List.of(row(phone, name)), "deleted", List.of())));
     }
 
-    private Map<String, Object> row(String phone) {
-        return Map.of("id", clientId.toString(), "name", "Meera",
+    private Map<String, Object> row(String phone, String name) {
+        return Map.of("id", clientId.toString(), "name", name,
                 "phone", phone, "status", "active");
     }
 
-    private void push(Map<String, Object> body) {
-        sync.push(adder, body);
+    private SyncService.PushResult push(Map<String, Object> body) {
+        return sync.push(adder, body);
+    }
+
+    private boolean exists() {
+        return Boolean.TRUE.equals(jdbc.queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM client WHERE id = :id::uuid)",
+                Map.of("id", clientId.toString()), Boolean.class));
     }
 
     private String membershipStatus() {
+        return column("membership_status");
+    }
+
+    private String name() {
+        return column("name");
+    }
+
+    private String phone() {
+        return column("phone");
+    }
+
+    private String column(String col) {
         return jdbc.queryForObject(
-                "SELECT membership_status FROM client WHERE id = :id::uuid",
+                "SELECT %s FROM client WHERE id = :id::uuid".formatted(col),
                 Map.of("id", clientId.toString()), String.class);
     }
 

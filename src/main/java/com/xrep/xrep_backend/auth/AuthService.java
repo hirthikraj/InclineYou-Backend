@@ -109,9 +109,7 @@ public class AuthService {
      */
     @Transactional
     public AuthResponse verifyOtp(String phone, String otp) {
-        // Throws OtpLockedException, OtpExpiredException or InvalidOtpException on
-        // failure — each surfaces as its own HTTP response via
-        // GlobalExceptionHandler, because each needs a different recovery.
+        // Throws OtpLockedException, OtpExpiredException or InvalidOtpException on failure — each surfaces as its own HTTP response via GlobalExceptionHandler, because each needs a different recovery.
         otpService.verify(phone, otp);
 
         List<Identity> rows = appUserRepo.findIdentityByPhone(phone);

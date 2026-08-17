@@ -27,6 +27,32 @@ public class ClientController {
         return clientService.create(trainerId(), req);
     }
 
+    /**
+     * Is this number addable, before anything is written?
+     *
+     * The roster is written offline and pushed later, so a refusal that only
+     * exists at push time reaches the trainer minutes after they typed the
+     * number, on a screen they have long since left. This is the same rule asked
+     * early, while the add form is still open and the answer is still useful. It
+     * is an optimisation, not the enforcement — {@code create} and the sync push
+     * both apply the rule again, because a phone with no signal skips this.
+     *
+     * Deliberately not a 4xx: nothing has failed, a question has been answered,
+     * and a 200 keeps a network error distinguishable from a taken number.
+     *
+     * POST for a question that writes nothing, because the alternative puts a
+     * phone number in a URL. Query strings are logged by everything they pass
+     * through — the access log, the reverse proxy, Railway's request log — and
+     * this particular number is not even the caller's own: it is somebody the
+     * trainer is asking about, quite possibly another trainer. A body is not
+     * secret, but it stays out of the places a URL ends up by default.
+     */
+    @PostMapping("/phone-availability")
+    public ClientPhoneGuard.Verdict phoneAvailability(
+            @Valid @RequestBody ClientService.PhoneCheckRequest req) {
+        return clientService.checkPhone(trainerId(), req.phone());
+    }
+
     @GetMapping("/{id}")
     public ClientService.ClientResponse get(@PathVariable UUID id) {
         return clientService.get(trainerId(), id);

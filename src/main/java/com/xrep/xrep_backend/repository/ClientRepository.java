@@ -25,9 +25,12 @@ public interface ClientRepository extends JpaRepository<Client, UUID> {
      * paused it and when — but a soft-deleted one is not, which is why the
      * filter is on `deletedAt` and not on `status`.
      *
-     * Note this can legitimately return more than one row: the same person can
-     * train with two trainers, and each keeps their own client record. Sign-in
-     * resolves a single one silently and asks only when it genuinely cannot.
+     * Note this can still return more than one row, and sign-in resolves a
+     * single one silently, asking only when it genuinely cannot. Two live
+     * memberships are no longer created — {@code ClientPhoneGuard} refuses a
+     * number that is already another trainer's client — but a person who left
+     * one trainer and joined another has a finished membership and a live one,
+     * and rows that predate the guard can be two live ones.
      */
     @Query("""
             SELECT c.id            AS clientId,

@@ -34,7 +34,7 @@
 - **FR-3.1** Build goal-based plans from the exercise library, with sets, reps, rest, and target load per exercise.
 - **FR-3.2** Save any plan as a **reusable template** and apply it across clients.
 - **FR-3.3** Assigning a template creates a **per-client program**; the trainer can then **tweak exercises for that client** without affecting the template or other clients.
-- **FR-3.4** Exercise library (pre-seeded, categorised) plus custom exercises (name, muscle group, optional image, optional video link).
+- **FR-3.4** Exercise library (pre-seeded, categorised — 1,324 exercises with body part, equipment, target muscle and written steps; no media, see the data model) plus custom exercises (name, muscle group, optional image, optional video link).
 
 ### FR-4 Workout logging (offline)
 - **FR-4.1** Log each session's sets — load, reps, RPE, optional note — with last values prefilled and minimal taps.
@@ -115,7 +115,7 @@ Twelve core entities plus `body_metric`: `trainer`, `client`, `exercise`, `progr
 Each phase lists the requirements it **completes** and its definition of done. Build vertical slices — each feature end-to-end (DB → API → sync → UI), offline-capable from the start.
 
 ### Phase 1 — Project setup & foundation *(start here)*
-- Monorepo; Spring Boot skeleton; PostgreSQL via Docker; **Flyway migration for the full schema**; phone-OTP auth + JWT; **sync scaffold**; exercise-library seed (free-exercise-db → Postgres, images to object storage); FCM setup; dev build on a real Android phone.
+- Monorepo; Spring Boot skeleton; PostgreSQL via Docker; **Flyway migration for the full schema**; phone-OTP auth + JWT; **sync scaffold**; exercise-library seed (exercises-dataset → Postgres, stills + demo GIFs to object storage); FCM setup; dev build on a real Android phone.
 - **Done when:** the vertical slice works — log in via OTP → create a client **offline** → it syncs → appears in Postgres → survives an app restart.
 
 ### Phase 2 — Clients, intake & plans
