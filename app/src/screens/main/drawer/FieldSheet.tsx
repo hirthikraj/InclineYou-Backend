@@ -45,7 +45,7 @@ export type FieldSpec =
     }
   | {
       kind: 'single';
-      key: 'experienceBand';
+      key: 'experienceBand' | 'workMode';
       title: string;
       meta: string;
       options: Option[];
@@ -97,7 +97,11 @@ export default function FieldSheet({ spec, onSave, onClose }: FieldSheetProps) {
   };
 
   const valid =
-    spec.kind !== 'text' || spec.optional === true || text.trim().length > 0;
+    spec.kind === 'text'
+      ? spec.optional === true || text.trim().length > 0
+      : // A single-choice save with nothing picked would CLEAR the answer —
+        // there is no field where that is what the trainer meant.
+        spec.kind !== 'single' || single != null;
 
   return (
     <Sheet visible onClose={onClose} title={spec.title}>

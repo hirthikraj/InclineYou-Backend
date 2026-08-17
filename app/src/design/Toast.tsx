@@ -7,11 +7,18 @@
  * indistinguishable from a broken button.
  *
  * It is a live region, so it is announced without stealing focus.
+ *
+ * It rides above the soft keyboard. Every screen parks its toast at the bottom
+ * edge, and Expo SDK 54 draws Android edge-to-edge, where the window does not
+ * resize for the keyboard — left alone, the message appears exactly underneath
+ * the keypad ("week 1 copied into week 3" after typing in a sheet, say). A
+ * transform rather than a margin: the lift must not reflow the screen behind it.
  */
 
 import React from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { colors, radius, space } from './tokens';
+import useKeyboardHeight from './useKeyboardHeight';
 import type { IconProps } from './icons';
 
 export interface ToastProps {
@@ -23,8 +30,13 @@ export interface ToastProps {
 }
 
 export default function Toast({ children, icon: Icon, action, style }: ToastProps) {
+  const keyboard = useKeyboardHeight();
   return (
-    <View style={[styles.toast, style]} accessibilityLiveRegion="polite" accessibilityRole="alert">
+    <View
+      style={[styles.toast, style, keyboard > 0 && { transform: [{ translateY: -keyboard }] }]}
+      accessibilityLiveRegion="polite"
+      accessibilityRole="alert"
+    >
       {Icon ? <Icon size={18} color={colors.ink} strokeWidth={2.2} /> : null}
       <Text style={styles.text}>{children}</Text>
       {action ? (

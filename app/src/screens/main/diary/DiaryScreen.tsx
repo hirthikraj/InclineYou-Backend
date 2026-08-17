@@ -18,6 +18,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Animated,
+  Easing,
   Linking,
   PanResponder,
   Pressable,
@@ -25,6 +26,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -135,12 +137,10 @@ const VIEWS = [
 
 /** Horizontal travel before this counts as a swipe and not a scroll or a tap. */
 const SWIPE_SLOP = 18;
-/** Travel that commits the turn on its own, however slowly it was made. */
-const SWIPE_COMMIT = 56;
-/** …or a flick this fast, which commits at any distance. */
+/** Fraction of the screen dragged that commits the turn on its own, however slowly. */
+const SWIPE_COMMIT_FRACTION = 0.25;
+/** …or a flick this fast (px/ms), which commits at any distance. */
 const SWIPE_VELOCITY = 0.35;
-/** How far off-screen the arriving day starts. Short: this is a hint, not a ride. */
-const SWIPE_ENTER = 40;
 
 export default function DiaryScreen() {
   const navigation = useNavigation<Nav>();
@@ -725,35 +725,59 @@ export default function DiaryScreen() {
 
   /**
    * Left for forward, right for back — the direction every calendar and photo
-   * gallery on the phone already uses. Dragging the page leftward pulls the
-   * *next* day in from the right, so the finger moves the content rather than
-   * the cursor. Whatever the view is stepping by, the gesture is the same one.
+   * gallery on the phone already uses. The page rides the finger 1:1 — it is
+   * the thing being dragged, not a cursor pointing at it — and a committed turn
+   * carries the old day the rest of the way off-screen while the new one slides
+   * in from the far edge, one continuous movement rather than a cut. Whatever
+   * the view is stepping by, the gesture is the same one.
    *
    * `PanResponder` rather than a gesture library because this app has neither
    * gesture-handler nor reanimated installed, and `Sheet` and `Drawer` already
    * do their dragging this way.
    */
+  const { width: pageWidth } = useWindowDimensions();
   const shift = useRef(new Animated.Value(0)).current;
   const reduceMotion = useReduceMotion();
+  /** Where the finger left the page, so the exit leg knows how far is left. */
+  const dragX = useRef(0);
 
   // Read through a ref so the responder can be built once and still see the
   // current view. Rebuilding it every render would drop a gesture in progress.
-  const stepper = useRef<(delta: 1 | -1) => void>(() => {});
+  const turner = useRef<(delta: 1 | -1, vx: number) => void>(() => {});
   useEffect(() => {
-    stepper.current = (delta) => {
-      setSelected((current) => stepAnchor(view, current, delta));
-      setOpenGap(null);
+    turner.current = (delta, vx) => {
+      const turn = () => {
+        setSelected((current) => stepAnchor(view, current, delta));
+        setOpenGap(null);
+      };
       if (reduceMotion) {
+        turn();
         shift.setValue(0);
         return;
       }
-      // The new day enters from the side the swipe was heading towards.
-      shift.setValue(delta * SWIPE_ENTER);
+      // Exit at roughly the speed the finger let go with, so the release
+      // reads as a handover rather than a restart. Slow drags get a floor —
+      // the page still has to arrive.
+      const remaining = Math.max(pageWidth - Math.abs(dragX.current), 0);
+      const exitMs = Math.min(200, Math.max(80, remaining / Math.max(Math.abs(vx), 0.7)));
       Animated.timing(shift, {
-        toValue: 0,
-        duration: 170,
+        toValue: -delta * pageWidth,
+        duration: exitMs,
+        easing: Easing.out(Easing.quad),
         useNativeDriver: true,
-      }).start();
+      }).start(({ finished }) => {
+        if (!finished) return;
+        turn();
+        // The new day enters from the side the swipe was heading towards,
+        // decelerating into place.
+        shift.setValue(delta * pageWidth);
+        Animated.timing(shift, {
+          toValue: 0,
+          duration: 240,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start();
+      });
     };
   });
 
@@ -770,35 +794,40 @@ export default function DiaryScreen() {
         // leave the content translated with nothing to settle it.
         onPanResponderTerminationRequest: () => false,
         onPanResponderMove: (_, g) => {
+          dragX.current = g.dx;
           if (reduceMotion) return;
-          // Damped, so the page resists rather than tracking the finger. It is
-          // a hint that the gesture registered, not a draggable surface.
-          shift.setValue(g.dx * 0.3);
+          shift.setValue(g.dx);
         },
         onPanResponderRelease: (_, g) => {
-          const far = Math.abs(g.dx) > SWIPE_COMMIT;
+          const far = Math.abs(g.dx) > pageWidth * SWIPE_COMMIT_FRACTION;
           const fast = Math.abs(g.vx) > SWIPE_VELOCITY;
           if (far || fast) {
-            // Distance decides when there is distance; otherwise the flick
-            // does. A swipe out and most of the way back leaves `dx` near
-            // zero with a decisive `vx`, and reading `dx` there would turn
-            // the page whichever way the noise fell.
-            const towards = far ? g.dx : g.vx;
-            stepper.current(towards < 0 ? 1 : -1);
-            return;
+            // A decisive flick names the direction even against the drag —
+            // swiping out and flicking back means "changed my mind", and the
+            // page should follow the flick, not the leftover displacement.
+            const towards = fast ? g.vx : g.dx;
+            turner.current(towards < 0 ? 1 : -1, g.vx);
+          } else {
+            Animated.spring(shift, {
+              toValue: 0,
+              useNativeDriver: true,
+              bounciness: 0,
+              speed: 20,
+            }).start();
           }
+          dragX.current = 0;
+        },
+        onPanResponderTerminate: () => {
+          dragX.current = 0;
           Animated.spring(shift, {
             toValue: 0,
             useNativeDriver: true,
             bounciness: 0,
-            speed: 18,
+            speed: 20,
           }).start();
         },
-        onPanResponderTerminate: () => {
-          shift.setValue(0);
-        },
       }),
-    [shift, reduceMotion],
+    [shift, reduceMotion, pageWidth],
   );
 
   /* ----------------------------------------------------------------- render */

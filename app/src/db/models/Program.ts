@@ -12,6 +12,8 @@ export default class Program extends Model {
   @text('start_date') startDate!: string;
   @text('end_date') endDate!: string;
   @text('status') status!: string;
+  /** [{"day":1,"weekday":2,"time":"06:30"}, …] — written by the server at apply time. */
+  @text('schedule') schedule!: string | null;
   @readonly @date('created_at') createdAt!: Date;
   @date('updated_at') updatedAt!: Date;
 }

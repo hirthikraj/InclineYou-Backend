@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 15,
+  version: 18,
   tables: [
     tableSchema({
       name: 'clients',
@@ -50,6 +50,11 @@ export const schema = appSchema({
         { name: 'equipment', type: 'string', isOptional: true },
         { name: 'movement_pattern', type: 'string', isOptional: true },
         { name: 'description', type: 'string', isOptional: true },
+        // Empty on every row the server sends. The library once carried a
+        // thumbnail and an animation GIF per exercise; both were © Gym visual and
+        // were retired rather than shipped unlicensed (backend V22). The columns
+        // stay because a WatermelonDB schema only grows — and because they are
+        // where a licensed, or freely licensed, image set would land.
         { name: 'image_url', type: 'string', isOptional: true },
         { name: 'video_url', type: 'string', isOptional: true },
         { name: 'is_custom', type: 'boolean' },
@@ -59,6 +64,12 @@ export const schema = appSchema({
         // already logged against the exercise would stop making sense. Null on
         // the whole shared library, and read as 'weight_reps'.
         { name: 'log_type', type: 'string', isOptional: true },
+        // V16 — the library's taxonomy, in two grains. `body_part` is the coarse
+        // ten-way split the list groups by ("chest", "upper legs"); `target` is
+        // the primary muscle the filter offers ("pectorals", "quads"). Null on a
+        // trainer's own exercises, which are grouped under "Yours" instead.
+        { name: 'body_part', type: 'string', isOptional: true },
+        { name: 'target', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],
@@ -82,11 +93,16 @@ export const schema = appSchema({
         // is still the only place that turns it into a client's program, because
         // assigning COPIES it and a copy is a transaction.
         { name: 'structure', type: 'string', isOptional: true },
-        // V15 — the weekdays this program trains on, "1,3,5" for Mon/Wed/Fri.
-        // The blueprint knows the day of every exercise on it, but a program is
-        // laid out before it is filled: the day exists as soon as the trainer
-        // says it does. Null reads as "not told" and the days fall back to
-        // whichever ones the blueprint uses.
+        // V15 — the day slots this program is laid out on, "1,2,3" for a
+        // three-day program. The blueprint knows the day of every exercise on
+        // it, but a program is laid out before it is filled: the day exists as
+        // soon as the trainer says it does. Null reads as "not told" and the
+        // days fall back to whichever ones the blueprint uses.
+        //
+        // Until V17 these numbers meant weekdays ("1,3,5" was Mon/Wed/Fri).
+        // They are ordinal now — "Day 1".."Day 7" — and the weekday each slot
+        // lands on is chosen per client at assign time (`programs.schedule`).
+        // Templates authored under the old meaning were cleared server-side.
         { name: 'training_days', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
@@ -103,6 +119,12 @@ export const schema = appSchema({
         { name: 'start_date', type: 'string', isOptional: true },
         { name: 'end_date', type: 'string', isOptional: true },
         { name: 'status', type: 'string' },
+        // V17 — which weekday each of the template's day slots landed on, and
+        // at what time: [{"day":1,"weekday":2,"time":"06:30"}, …]. Written by
+        // the server when the template is applied — the phone only reads it.
+        // Null on programs assigned before slots and weekdays were separate;
+        // their exercise rows already carry concrete weekdays.
+        { name: 'schedule', type: 'string', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],
@@ -115,6 +137,9 @@ export const schema = appSchema({
         { name: 'sets', type: 'number', isOptional: true },
         { name: 'reps', type: 'number', isOptional: true },
         { name: 'rest_seconds', type: 'number', isOptional: true },
+        // V18 — a timed prescription's seconds ("3 × 45s"), carried instead of
+        // reps. Null on every rep-counted row, which is all of them before V18.
+        { name: 'duration_seconds', type: 'number', isOptional: true },
         { name: 'target_load', type: 'number', isOptional: true },
         { name: 'notes', type: 'string', isOptional: true },
         { name: 'day_of_week', type: 'number', isOptional: true },
@@ -394,7 +419,7 @@ export const schema = appSchema({
       ],
     }),
     tableSchema({
-      // A star. A join table because 861 of the 873 exercises are the shared
+      // A star. A join table because all 1,324 seeded exercises are the shared
       // library — they belong to no trainer, and one trainer's star must not
       // show up in another's list.
       name: 'exercise_favourites',

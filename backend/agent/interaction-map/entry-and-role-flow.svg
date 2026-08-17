@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="230" viewBox="0 0 960 230" role="img" aria-label="App entry flow: launch checks for a stored session; without one the user enters a phone number and an OTP; with one the app opens offline straight into the resolved role, trainer or client, with a toggle between them" class="dg"><style>
+svg{color:#15162B;font-family:'DejaVu Sans Mono',Menlo,Consolas,monospace}
+text{fill:currentColor}
+.box{fill:none;stroke:currentColor;stroke-width:1.4}
+.box-fill{fill:#F0F2F8;stroke:currentColor;stroke-width:1.4}
+.ln{stroke:currentColor;stroke-width:1.4;fill:none}
+.acc{stroke:#4F46E5;color:#4F46E5}
+.acc-box{fill:#E9ECFF;stroke:#4F46E5;stroke-width:1.5}
+.acc-txt{fill:#4F46E5}
+.muted-txt{fill:#767D96}
+.lbl{font-size:11px}
+.ttl{font-size:13px;font-weight:600}
+.sm{font-size:10.5px}
+.dash{stroke-dasharray:5 4}
+</style>
+<rect width="960" height="230" fill="#FFFFFF"/>
+      <defs>
+        <marker id="ar0" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+        <marker id="ar0-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#4F46E5"/>
+        </marker>
+      </defs>
+
+      <rect class="box-fill" x="10" y="100" width="120" height="52" rx="4"/>
+      <text class="ttl" x="70" y="124" text-anchor="middle">Launch</text>
+      <text class="sm muted-txt" x="70" y="140" text-anchor="middle">app opens</text>
+
+      <line class="ln" x1="130" y1="126" x2="166" y2="126" marker-end="url(#ar0)"/>
+
+      <path class="box" d="M240 88 L310 126 L240 164 L170 126 Z"/>
+      <text class="sm" x="240" y="122" text-anchor="middle">session on</text>
+      <text class="sm" x="240" y="136" text-anchor="middle">this device?</text>
+
+      <line class="ln" x1="268" y1="102" x2="356" y2="46" marker-end="url(#ar0)"/>
+      <text class="lbl" x="296" y="78">no</text>
+
+      <rect class="box" x="360" y="14" width="120" height="48" rx="4"/>
+      <text class="ttl" x="420" y="36" text-anchor="middle">Phone entry</text>
+      <text class="sm muted-txt" x="420" y="52" text-anchor="middle">mobile number</text>
+
+      <line class="ln" x1="480" y1="38" x2="506" y2="38" marker-end="url(#ar0)"/>
+
+      <rect class="box" x="510" y="14" width="120" height="48" rx="4"/>
+      <text class="ttl" x="570" y="36" text-anchor="middle">OTP verify</text>
+      <text class="sm muted-txt" x="570" y="52" text-anchor="middle">needs network</text>
+
+      <line class="ln" x1="630" y1="44" x2="656" y2="104" marker-end="url(#ar0)"/>
+
+      <line class="ln acc" x1="310" y1="126" x2="656" y2="126" marker-end="url(#ar0-a)"/>
+      <text class="lbl acc-txt" x="483" y="116" text-anchor="middle">yes — opens offline, local data</text>
+
+      <rect class="box-fill" x="660" y="100" width="130" height="52" rx="4"/>
+      <text class="ttl" x="725" y="124" text-anchor="middle">resolve role</text>
+      <text class="sm muted-txt" x="725" y="140" text-anchor="middle">may be both</text>
+
+      <line class="ln" x1="790" y1="116" x2="826" y2="74" marker-end="url(#ar0)"/>
+      <line class="ln" x1="790" y1="138" x2="826" y2="168" marker-end="url(#ar0)"/>
+
+      <rect class="acc-box" x="830" y="40" width="120" height="52" rx="4"/>
+      <text class="ttl acc-txt" x="890" y="64" text-anchor="middle">Trainer</text>
+      <text class="sm acc-txt" x="890" y="80" text-anchor="middle">Home</text>
+
+      <rect class="acc-box" x="830" y="150" width="120" height="52" rx="4"/>
+      <text class="ttl acc-txt" x="890" y="174" text-anchor="middle">Client</text>
+      <text class="sm acc-txt" x="890" y="190" text-anchor="middle">Today</text>
+
+      <line class="ln dash" x1="890" y1="94" x2="890" y2="148" marker-start="url(#ar0)" marker-end="url(#ar0)"/>
+      <text class="lbl muted-txt" x="890" y="220" text-anchor="middle">role toggle, anytime</text>
+    </svg>

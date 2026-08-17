@@ -52,6 +52,8 @@ import {
   removeFromBlueprint,
   setTrainingDays,
   updateTemplate,
+  deleteTemplate,
+  nameTemplateDay,
   copyWeek,
   clearWeek,
 } from '../../../db/training';
@@ -61,6 +63,7 @@ import {
   Callout,
   CalloutStrong,
   Chip,
+  Control,
   Dialog,
   Empty,
   GroupHead,
@@ -70,6 +73,7 @@ import {
   IconCopy,
   IconLayers,
   IconPlus,
+  IconTrash,
   IconUsers,
   List,
   Reveal,
@@ -88,9 +92,12 @@ import {
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 type Rt = RouteProp<MainStackParamList, 'Program'>;
 
-/** 1 = Monday, the same convention the blueprint stores. */
-const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+/**
+ * Day slots, not weekdays. Which weekday "Day 2" lands on is the client's
+ * preference, chosen when the program is assigned — a template only knows how
+ * many days a week it trains.
+ */
+const DAY_COUNTS = [1, 2, 3, 4, 5, 6, 7];
 
 /** The lengths a trainer actually writes, plus the honest one-week answer. */
 const LENGTHS = [1, 4, 6, 8, 12];
@@ -108,10 +115,14 @@ export default function ProgramScreen() {
     null,
   );
   const [layingOut, setLayingOut] = useState(false);
-  const [draftDays, setDraftDays] = useState<number[]>([]);
+  const [draftCount, setDraftCount] = useState(3);
   const [draftWeeks, setDraftWeeks] = useState(1);
   const [copying, setCopying] = useState(false);
   const [resetting, setResetting] = useState(false);
+  /** The whole-program delete, awaiting its confirmation. */
+  const [erasing, setErasing] = useState(false);
+  /** The day being named, with what it is called now. Held as a draft until saved. */
+  const [naming, setNaming] = useState<{ day: number; text: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const view = useMemo(
@@ -141,7 +152,7 @@ export default function ProgramScreen() {
   }
 
   const openLayout = () => {
-    setDraftDays(view?.trainingDays ?? []);
+    setDraftCount(view?.trainingDays.length || 3);
     setDraftWeeks(view?.weeks ?? 1);
     setLayingOut(true);
   };
@@ -150,10 +161,11 @@ export default function ProgramScreen() {
    * Two writes, because they are two columns and one of them can fail on its
    * own. Shortening the program is allowed and it does not delete anything: the
    * weeks past the new end stop being drawn, and lengthening it again brings
-   * them back exactly as they were.
+   * them back exactly as they were — and the same is true of the day count,
+   * because a day taken off the layout keeps whatever is on it.
    */
   const saveLayout = () => {
-    const days = draftDays;
+    const days = Array.from({ length: draftCount }, (_, i) => i + 1);
     const length = draftWeeks;
     setLayingOut(false);
     if (length < week) setWeek(1);
@@ -163,9 +175,7 @@ export default function ProgramScreen() {
     ])
       .then(() =>
         setNotice(
-          days.length
-            ? `${days.length} day${days.length === 1 ? '' : 's'} a week, ${length} week${length === 1 ? '' : 's'} long.`
-            : 'No days on this program. Add one to start putting exercises somewhere.',
+          `${days.length} day${days.length === 1 ? '' : 's'} a week, ${length} week${length === 1 ? '' : 's'} long.`,
         ),
       )
       .catch(() => setNotice('Could not save that.'));
@@ -194,6 +204,38 @@ export default function ProgramScreen() {
       .catch(() => setNotice('Could not clear that week.'));
   };
 
+  /**
+   * Names one day — "Push A", "Upper" — or clears it back to plain "Day n".
+   * The name follows the day everywhere it is drawn: the headers here, the
+   * card's legend on the shelf, and (via the slot mapping) every copy assigned
+   * from now on. `nameTemplateDay` treats an empty string as "remove it".
+   */
+  const saveDayName = () => {
+    const target = naming;
+    setNaming(null);
+    if (!target) return;
+    void nameTemplateDay(params.templateId, target.day, target.text)
+      .then(() =>
+        setNotice(
+          target.text.trim()
+            ? `Day ${target.day} is called ${target.text.trim()} now.`
+            : `Day ${target.day} goes back to its number.`,
+        ),
+      )
+      .catch(() => setNotice('Could not name that day.'));
+  };
+
+  /**
+   * Back to the shelf on success rather than a toast: the card vanishing from
+   * the list IS the confirmation, and this screen no longer has a subject.
+   */
+  const erase = () => {
+    setErasing(false);
+    void deleteTemplate(params.templateId)
+      .then(() => navigation.goBack())
+      .catch(() => setNotice('Could not delete it.'));
+  };
+
   const add = (day: number) =>
     navigation.navigate('Exercises', {
       pickFor: { templateId: params.templateId, day, week },
@@ -212,7 +254,15 @@ export default function ProgramScreen() {
           subtitle={view?.subtitle}
           leading={<IconButton icon={IconBack} label="Back" bare onPress={() => navigation.goBack()} />}
           actions={
-            <IconButton icon={IconCalendar} label="Days it trains on" bare onPress={openLayout} />
+            <>
+              <IconButton icon={IconCalendar} label="Days it trains on" bare onPress={openLayout} />
+              <IconButton
+                icon={IconTrash}
+                label="Delete this program"
+                bare
+                onPress={() => setErasing(true)}
+              />
+            </>
           }
         />
       </View>
@@ -248,7 +298,7 @@ export default function ProgramScreen() {
                   <Empty
                     icon={IconCalendar}
                     title="No days on this program yet"
-                    body="Say which days of the week it trains on and each one gets a section to fill in. You can change them later."
+                    body="Say how many days a week it trains and each day gets a section to fill in. You can change the count later."
                     action={<Button label="Choose the days" icon={IconCalendar} onPress={openLayout} />}
                     style={styles.empty}
                   />
@@ -264,6 +314,7 @@ export default function ProgramScreen() {
                           count={day.exercises.length}
                           collapsed={closed}
                           onPress={() => toggle(day.day)}
+                          onLongPress={() => setNaming({ day: day.day, text: day.label ?? '' })}
                         />
 
                         {closed ? null : (
@@ -275,7 +326,13 @@ export default function ProgramScreen() {
                                     key={exercise.id}
                                     grouped
                                     dim={view.repeats}
-                                    leading={<Thumb size="sm" custom={exercise.custom} />}
+                                    leading={
+                                      <Thumb
+                                        size="sm"
+                                        uri={exercise.thumb}
+                                        custom={exercise.custom}
+                                      />
+                                    }
                                     title={exercise.name}
                                     subtitle={exercise.prescription}
                                     onPress={() =>
@@ -291,7 +348,7 @@ export default function ProgramScreen() {
                               </List>
                             ) : (
                               <Text style={styles.bare}>
-                                Nothing on {WEEKDAYS[day.day - 1] ?? 'this day'} yet.
+                                Nothing on day {day.day} yet.
                               </Text>
                             )}
 
@@ -344,7 +401,8 @@ export default function ProgramScreen() {
                   {/* Said once, at the point of action, rather than on every row. */}
                   <Text style={styles.fine}>
                     Assigning copies this onto them — every week of it. Editing it afterwards never
-                    touches their plan.
+                    touches their plan. Press and hold a day’s header to name it — “Push A”, “Upper”
+                    — and the name goes wherever the day is drawn.
                   </Text>
                 </>
               )}
@@ -358,25 +416,17 @@ export default function ProgramScreen() {
       <Sheet visible={layingOut} onClose={() => setLayingOut(false)} title="How this program runs">
         <Text style={styles.label}>Days a week</Text>
         <Seg>
-          {SHORT.map((label, i) => (
+          {DAY_COUNTS.map((n) => (
             <Chip
-              key={label}
-              label={label}
-              selected={draftDays.includes(i + 1)}
-              onPress={() =>
-                setDraftDays((current) =>
-                  current.includes(i + 1)
-                    ? current.filter((d) => d !== i + 1)
-                    : [...current, i + 1].sort((a, b) => a - b),
-                )
-              }
+              key={n}
+              label={String(n)}
+              selected={draftCount === n}
+              onPress={() => setDraftCount(n)}
             />
           ))}
         </Seg>
         <Text style={styles.meta}>
-          {draftDays.length
-            ? `${draftDays.length} day${draftDays.length === 1 ? '' : 's'} a week. Taking a day off the list leaves whatever is on it alone — remove those exercises yourself if you meant to.`
-            : 'A program with no days has nowhere to put an exercise.'}
+          {`Day 1 to Day ${draftCount}. Which weekdays they land on is chosen per client when you assign it. Cutting the count leaves whatever is on the later days alone — remove those exercises yourself if you meant to.`}
         </Text>
 
         <Text style={styles.label}>How long it runs</Text>
@@ -397,6 +447,29 @@ export default function ProgramScreen() {
         </Text>
 
         <Button label="Save it" variant="primary" size="lg" block onPress={saveLayout} />
+      </Sheet>
+
+      {/* One field, and empty is a valid answer: a day named in error goes
+          back to being "Day 2" by saving nothing. */}
+      <Sheet
+        visible={naming !== null}
+        onClose={() => setNaming(null)}
+        title={`Name day ${naming?.day ?? ''}`}
+      >
+        <Text style={styles.meta}>
+          What this day is called on its header, on the program’s card, and on every plan assigned
+          from it. Leave it empty to go back to “Day {naming?.day}”.
+        </Text>
+        <Control
+          value={naming?.text ?? ''}
+          onChangeText={(text) => setNaming((s) => (s ? { ...s, text } : s))}
+          placeholder="Push A"
+          autoCapitalize="words"
+          autoFocus
+          accessibilityLabel={`Name for day ${naming?.day ?? ''}`}
+          style={styles.nameField}
+        />
+        <Button label="Save it" variant="primary" size="lg" block onPress={saveDayName} />
       </Sheet>
 
       {/* Only asked when there is more than one week to copy from. One source
@@ -445,6 +518,17 @@ export default function ProgramScreen() {
       >
         Everything you wrote for week {week} goes, and the week repeats week 1 again. Other weeks
         are untouched.
+      </Dialog>
+
+      <Dialog
+        visible={erasing}
+        title={`Delete ${view?.name ?? 'this program'}?`}
+        confirmLabel="Delete it"
+        onCancel={() => setErasing(false)}
+        onConfirm={erase}
+      >
+        It comes off your shelf, on every device, and cannot be assigned again. Anyone already on
+        it keeps their copy — a plan a client is training on never changes because its source went.
       </Dialog>
 
       {notice ? (
@@ -496,6 +580,7 @@ const styles = StyleSheet.create({
     marginBottom: space.s2,
   },
   empty: { marginTop: space.s7 },
+  nameField: { marginBottom: space.s4 },
   add: { alignSelf: 'flex-start', marginTop: 2, marginBottom: space.s2 },
   copy: { marginTop: space.s4 },
   clear: { alignSelf: 'flex-start', marginTop: space.s3 },

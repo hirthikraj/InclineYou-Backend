@@ -48,6 +48,8 @@ export interface BlueprintEntry {
   sets: number | null;
   reps: number | null;
   restSeconds: number | null;
+  /** A timed prescription's seconds — "3 × 45s" — carried instead of reps. */
+  durationSeconds: number | null;
   notes: string | null;
   orderIndex: number;
 }
@@ -57,10 +59,22 @@ export interface BlueprintEntry {
 export interface LibExercise {
   id: string;
   name: string;
-  /** Comma-separated in the seed: "Chest, triceps". */
+  /** The primary muscle: "pectorals". Comma-separated on a trainer's own: "Chest, triceps". */
   muscleGroup?: string | null;
+  /** The coarse split the list groups by: "chest", "upper legs". Null on custom. */
+  bodyPart?: string | null;
+  /** The primary muscle again, but only when the library said so. Null on custom. */
+  target?: string | null;
   equipment?: string | null;
   description?: string | null;
+  /**
+   * A still for the row's tile. Null across the whole library today: the shared
+   * exercises are seeded text-only because upstream's pictures are © Gym visual,
+   * and a trainer's own exercise has never had a picture to upload. The field
+   * stays because the column does, and because it is the seam a licensed — or
+   * freely licensed — image set would arrive through.
+   */
+  imageUrl?: string | null;
   isCustom: boolean;
   /** 'weight_reps' | 'reps'. Null across the shared library, read as weight × reps. */
   logType?: string | null;
@@ -90,7 +104,10 @@ export interface LibTemplate {
   weeks?: number | null;
   structure?: string | null;
   dayLabels?: string | null;
-  /** "1,3,5". Null on a template authored before the layout step existed. */
+  /**
+   * "1,2,3" — ordinal day slots, not weekdays. Null on a template authored
+   * before the layout step existed.
+   */
   trainingDays?: string | null;
 }
 
@@ -123,9 +140,14 @@ export const EMPTY_TRAINING_INPUT: TrainingInput = {
 
 const DEAD_PROGRAM = new Set(['cancelled', 'canceled', 'completed', 'archived']);
 
-const WEEKDAY_NAMES = [
-  'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
-];
+/**
+ * A template's day numbers are ordinal slots, not weekdays — "Day 2" of the
+ * plan, wherever the client's week puts it. The weekday only exists on the
+ * assigned copy, chosen at apply time.
+ */
+export function dayName(day: number): string {
+  return `Day ${day}`;
+}
 
 /* ------------------------------------------------------- 3a · the programs */
 
@@ -139,7 +161,7 @@ export interface ProgramCard {
   daysPerWeek: number;
   meta: string;
   mostUsed: boolean;
-  /** Seven entries, Monday first. `null` is a rest day; a number is a legend tone. */
+  /** Seven entries, one per day slot ("Day 1" first). `null` is an unused slot; a number is a legend tone. */
   week: (number | null)[];
   /** One per distinct training day, in the order they first occur. */
   legend: ShapeLegendEntry[];
@@ -170,7 +192,7 @@ export function buildPrograms(input: TrainingInput, filter: string = 'all'): Pro
     perTemplate.set(p.templateId, set);
   });
 
-  // Built once for the whole shelf rather than per card: the library is 873 rows
+  // Built once for the whole shelf rather than per card: the library is 1,324 rows
   // and every card needs to look up the muscles behind its exercises.
   const musclesById = new Map(
     input.exercises.map((e) => [e.id, splitMuscles(e.muscleGroup)] as const),
@@ -261,8 +283,8 @@ function cardMeta(clients: number, daysPerWeek: number): string {
  * that order.
  *
  * The name is the trainer's label where the template has one, `nameDay`'s reading
- * of the muscles where it doesn't, and the weekday as a last resort. Every one of
- * those is something to show; none of them is a letter to decode.
+ * of the muscles where it doesn't, and the day number as a last resort. Every one
+ * of those is something to show; none of them is a letter to decode.
  */
 function weekShape(
   blueprint: BlueprintEntry[],
@@ -291,7 +313,7 @@ function weekShape(
     .sort((a, b) => a[0] - b[0])
     .forEach(([day, entries]) => {
       const muscles = entries.flatMap((e) => musclesById.get(e.exerciseId) ?? []);
-      const label = labels[day]?.trim() || nameDay(muscles) || WEEKDAY_NAMES[day - 1];
+      const label = labels[day]?.trim() || nameDay(muscles) || dayName(day);
 
       // Two days called the same thing share a colour, which is correct: they
       // are the same session run twice.
@@ -324,7 +346,7 @@ export function nameDay(muscles: string[]): string | null {
 
 export interface ProgramDay {
   day: number;
-  /** "Monday · Push A". */
+  /** "Day 1 · Push A". */
   title: string;
   /** The trainer's own name for the day, where they gave it one. */
   label: string | null;
@@ -335,6 +357,8 @@ export interface ProgramDay {
     /** "4 × 6–8 · 90s rest". */
     prescription: string;
     custom: boolean;
+    /** The library's still, so a day reads the same way the library does. */
+    thumb: string | null;
   }[];
 }
 
@@ -345,7 +369,7 @@ export interface ProgramView {
   weeks: number;
   /** The week these days were drawn from — what the chip row has selected. */
   week: number;
-  /** Every weekday the program trains on, whether or not it has been filled. */
+  /** Every day slot the program trains on, whether or not it has been filled. */
   trainingDays: number[];
   days: ProgramDay[];
   clients: number;
@@ -424,7 +448,7 @@ export function buildProgram(
 
       return {
         day,
-        title: [WEEKDAY_NAMES[day - 1] ?? `Day ${day}`, label].filter(Boolean).join(' · '),
+        title: [dayName(day), label].filter(Boolean).join(' · '),
         label,
         exercises: sorted.map((entry) => {
           const exercise = byId.get(entry.exerciseId);
@@ -436,6 +460,7 @@ export function buildProgram(
             name: exercise?.name ?? 'An exercise not on this phone yet',
             prescription: prescribe(entry),
             custom: exercise?.isCustom ?? false,
+            thumb: exercise?.imageUrl?.trim() || null,
           };
         }),
       };
@@ -456,11 +481,17 @@ export function buildProgram(
   };
 }
 
-/** "4 × 6–8 · 90s rest". Whatever is missing is simply not said. */
+/**
+ * "4 × 6–8 · 90s rest", or "3 × 45s · 60s rest" for a hold. Whatever is
+ * missing is simply not said. A duration wins over reps when both exist,
+ * because the writers never set both and the duration is the deliberate one.
+ */
 function prescribe(entry: BlueprintEntry): string {
   const parts: string[] = [];
-  if (entry.sets && entry.reps) parts.push(`${entry.sets} × ${entry.reps}`);
+  const work = entry.durationSeconds ? `${entry.durationSeconds}s` : entry.reps;
+  if (entry.sets && work) parts.push(`${entry.sets} × ${work}`);
   else if (entry.sets) parts.push(`${entry.sets} sets`);
+  else if (entry.durationSeconds) parts.push(`${entry.durationSeconds}s`);
   else if (entry.reps) parts.push(`${entry.reps} reps`);
   if (entry.restSeconds) parts.push(`${entry.restSeconds}s rest`);
   if (entry.notes) parts.push(entry.notes);
@@ -478,6 +509,8 @@ export interface ExerciseRow {
   favourite: boolean;
   /** The trainer's heaviest across all clients, when there is one. */
   best: string | null;
+  /** The row's still, when there is one. Null across the library today. */
+  thumb: string | null;
 }
 
 export interface ExerciseFilter {
@@ -551,8 +584,9 @@ interface IndexedExercise {
   /** Lowercased, for matching. */
   muscles: string[];
   equipment: string;
-  /** Lowercased name + muscles + equipment, so search is one `includes`. */
+  /** Lowercased name + muscles + equipment + body part, so search is one `includes`. */
   haystack: string;
+  thumb: string | null;
 }
 
 interface LibraryIndex {
@@ -590,6 +624,7 @@ function libraryIndex(exercises: LibExercise[]): LibraryIndex {
   const items = exercises.map<IndexedExercise>((e) => {
     const muscles = splitMuscles(e.muscleGroup);
     const equipment = (e.equipment ?? '').trim();
+    const bodyPart = (e.bodyPart ?? '').trim();
 
     muscles.forEach((m) => muscleOptions.add(m));
     if (equipment) equipmentOptions.add(equipment);
@@ -600,10 +635,28 @@ function libraryIndex(exercises: LibExercise[]): LibraryIndex {
       name: e.name,
       custom: e.isCustom,
       meta: [...muscles, equipment].filter(Boolean).join(' · '),
-      primary: muscles[0] ?? 'Other',
+      /*
+       * The section head. `bodyPart` first, because that is the question being
+       * asked — "another chest thing" wants one heading for the whole chest, and
+       * grouping by the primary muscle instead splits it across "pectorals",
+       * "serratus anterior" and "delts". The muscle is still what the filter and
+       * the row's meta line say; it is only too fine to be a heading.
+       *
+       * Falls through to the muscle for a trainer's own exercise, which has no
+       * body part — though in practice those are in the "Yours" section and never
+       * reach this value.
+       */
+      primary: bodyPart || muscles[0] || 'Other',
       muscles: muscles.map((m) => m.toLowerCase()),
       equipment: equipment.toLowerCase(),
-      haystack: `${e.name} ${muscles.join(' ')} ${equipment}`.toLowerCase(),
+      // Body part joins the haystack so "legs" finds the leg exercises, which it
+      // could not when the only muscle words on file were "quads" and "glutes".
+      haystack: `${e.name} ${muscles.join(' ')} ${equipment} ${bodyPart}`.toLowerCase(),
+      // Null for every exercise at the moment — the shared library is seeded
+      // without pictures and a custom one never had any — so `Thumb` draws its
+      // dumbbell glyph throughout. It reads as a deliberate tile rather than as a
+      // missing photograph, which is why the glyph was worth keeping.
+      thumb: e.imageUrl?.trim() || null,
     };
   });
 
@@ -661,6 +714,7 @@ export function buildExercises(
     custom: e.custom,
     favourite: favourites.has(e.id),
     best: bests.get(e.id) ?? null,
+    thumb: e.thumb,
   });
 
   const sections: ExerciseSection[] = [];
@@ -767,8 +821,13 @@ export function buildExercise(
   return {
     id: exercise.id,
     name: exercise.name,
-    meta: [...splitMuscles(exercise.muscleGroup), exercise.equipment]
+    // Body part leads the meta line — "chest · pectorals · barbell" — because it
+    // is the coarse fact and the header is read left to right.
+    meta: [exercise.bodyPart, ...splitMuscles(exercise.muscleGroup), exercise.equipment]
       .filter((part): part is string => Boolean(part && part.trim()))
+      // The library repeats itself when body part and muscle happen to agree
+      // ("chest · chest"), which reads as a bug rather than as two facts.
+      .filter((part, i, all) => all.findIndex((p) => p.toLowerCase() === part.toLowerCase()) === i)
       .join(' · '),
     custom: exercise.isCustom,
     favourite: input.favourites.includes(exercise.id),
@@ -885,7 +944,12 @@ function parseSteps(description: string | null | undefined): string[] {
     if (piece.length < 12 && out.length) out[out.length - 1] += ` ${piece}`;
     else out.push(piece);
   });
-  return out.slice(0, 8);
+  // Twelve, not eight. The old library was prose that this function had to guess
+  // sentence boundaries out of, and a cut at eight was a guard against that guess
+  // running away. The current one ships an ordered array — longest is eleven
+  // steps — which arrives here blank-line separated, so the cap now only ever
+  // fires on something genuinely malformed.
+  return out.slice(0, 12);
 }
 
 /* ------------------------------------------------------------------ shared */
@@ -961,6 +1025,7 @@ export function parseBlueprint(structure: string | null | undefined): BlueprintE
       sets: num(entry.sets),
       reps: num(entry.reps),
       restSeconds: num(entry.rest_seconds),
+      durationSeconds: num(entry.duration_seconds),
       notes: typeof entry.notes === 'string' && entry.notes ? entry.notes : null,
       orderIndex: num(entry.order_index) ?? index,
     });
@@ -971,7 +1036,7 @@ export function parseBlueprint(structure: string | null | undefined): BlueprintE
 }
 
 /**
- * The weekdays a program trains on.
+ * The day slots a program trains on — "Day 1".."Day 7", not weekdays.
  *
  * `training_days` is the trainer's own layout and wins when it is there. When it
  * is not — every template authored before the layout step existed — the days are
@@ -979,7 +1044,7 @@ export function parseBlueprint(structure: string | null | undefined): BlueprintE
  * template and an honest empty one for a template nobody has touched.
  *
  * Read across ALL weeks, not just the one on screen: a day belongs to the
- * program, and a week that happens to be empty does not remove Wednesday from it.
+ * program, and a week that happens to be empty does not remove Day 3 from it.
  */
 export function parseTrainingDays(
   trainingDays: string | null | undefined,
@@ -996,6 +1061,45 @@ export function parseTrainingDays(
     .map((entry) => entry.day)
     .filter((day): day is number => day != null && day >= 1 && day <= 7);
   return [...new Set(used)].sort((a, b) => a - b);
+}
+
+/** One landed day of an assigned program: slot `day` runs on `weekday` at `time`. */
+export interface ProgramScheduleEntry {
+  /** The template's ordinal day slot, 1–7. */
+  day: number;
+  /** 1 = Monday … 7 = Sunday. */
+  weekday: number;
+  /** "06:30", 24-hour. */
+  time: string;
+}
+
+/**
+ * The layout the client chose at assign time, off `programs.schedule`.
+ *
+ * Written only by the server's apply transaction, so a malformed value means a
+ * bug somewhere upstream — but the phone still reads it defensively, entry by
+ * entry, because one bad entry must not take the whole plan's headers down.
+ * Empty on every program assigned before slots and weekdays were separate.
+ */
+export function parseProgramSchedule(schedule: string | null | undefined): ProgramScheduleEntry[] {
+  if (!schedule) return [];
+  try {
+    const parsed: unknown = JSON.parse(schedule);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((entry): entry is ProgramScheduleEntry => {
+        const e = entry as ProgramScheduleEntry | null;
+        return (
+          !!e &&
+          typeof e.day === 'number' && e.day >= 1 && e.day <= 7 &&
+          typeof e.weekday === 'number' && e.weekday >= 1 && e.weekday <= 7 &&
+          typeof e.time === 'string'
+        );
+      })
+      .sort((a, b) => a.weekday - b.weekday);
+  } catch {
+    return [];
+  }
 }
 
 /**

@@ -53,15 +53,19 @@ export interface ShapeLegendEntry {
 }
 
 export interface WeekShapeProps {
-  /** Seven entries, Monday first. `null` is a rest day. */
+  /**
+   * Seven entries, one per day slot — "Day 1" first. Slots, not weekdays:
+   * which weekday a slot lands on is the client's choice, made at assign
+   * time, so the shelf has no weekday to draw. `null` is an unused slot.
+   */
   week: (number | null)[];
   /** One per distinct training day, in the order they first occur. */
   legend: ShapeLegendEntry[];
   style?: StyleProp<ViewStyle>;
 }
 
-const DAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-const DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+const DAYS = ['1', '2', '3', '4', '5', '6', '7'];
+const DAY_NAMES = ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Day 6', 'Day 7'];
 const GAP = 6;
 
 export default function WeekShape({ week, legend, style }: WeekShapeProps) {

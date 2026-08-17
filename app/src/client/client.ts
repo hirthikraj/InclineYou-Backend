@@ -70,6 +70,8 @@ export interface ClientPlanRow {
   exerciseId: string;
   sets: number | null;
   reps: number | null;
+  /** A timed prescription's seconds — "3 × 45s" — carried instead of reps. */
+  durationSeconds: number | null;
   targetLoad: number | null;
   dayOfWeek: number | null;
   /** Which week of the program. Null reads as week 1. */
@@ -534,7 +536,8 @@ function planRows(
 
   return programDay(input, programId, templateDay).map((row) => {
     const exercise = input.exercises.find((e) => e.id === row.exerciseId);
-    const target = row.sets && row.reps ? `${row.sets} × ${row.reps}` : null;
+    const work = row.durationSeconds ? `${row.durationSeconds}s` : row.reps;
+    const target = row.sets && work ? `${row.sets} × ${work}` : null;
     const last = lastTime(history, row.exerciseId, null, input);
     return {
       exerciseId: row.exerciseId,

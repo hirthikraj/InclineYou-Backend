@@ -16,6 +16,7 @@
 import { OVERDUE_DAYS, PACK_ENDING, QUIET_DAYS } from '../home/deck';
 import { readMode, type DeliveryMode } from '../home/mode';
 import { DAY_MS, daysBetween, rupees, startOfDay } from '../home/time';
+import { onboardingStep } from './schedule';
 
 /**
  * An invite this old has been ignored. Trainerize turns its account tag red at
@@ -46,6 +47,8 @@ export interface RosterClient {
    */
   membershipStatus?: string | null;
   deliveryMode?: string | null;
+  /** JSON `[{templateDay,weekday,time}]` — set on the week step of onboarding. */
+  weeklySchedule?: string | null;
   metadata?: unknown;
   createdAt: Date | number;
   updatedAt: Date | number;
@@ -99,7 +102,7 @@ export interface RosterInput {
 /* ------------------------------------------------------------------- output */
 
 export type RosterStatus = 'active' | 'paused' | 'invited' | 'archived' | 'inactive';
-export type AttentionKind = 'overdue' | 'quiet' | 'pack' | 'invite' | 'unavailable';
+export type AttentionKind = 'setup' | 'overdue' | 'quiet' | 'pack' | 'invite' | 'unavailable';
 export type Batch = 'morning' | 'evening' | 'night' | 'none';
 
 export interface RosterRow {
@@ -114,6 +117,8 @@ export interface RosterRow {
   line: string;
   severity?: 'alert' | 'critical';
   attention?: { kind: AttentionKind; action: string; weight: number };
+  /** Which onboarding step is still owed, when `attention.kind` is 'setup'. */
+  setupStep?: 'schedule' | 'plan';
   pack?: { remaining: number; total?: number };
   owed: number;
   quietDays: number | null;
@@ -389,10 +394,34 @@ function row(
    */
   const unavailable = lower(client.membershipStatus ?? '') === 'unavailable';
 
+  /**
+   * A client added but never onboarded: no week picked, or no plan on it, and
+   * nothing ever logged. They are not in the routine yet — the diary has no
+   * usual slot to suggest and the deck has nothing to build a day from — so
+   * this outranks money: an un-set-up client can't generate money to chase.
+   * Derived from the data rather than a flag, so finishing the steps anywhere
+   * (this verb, the add flow, the client file) clears it identically.
+   */
+  const setupStep =
+    status === 'active'
+      ? onboardingStep({
+          weeklySchedule: client.weeklySchedule,
+          hasLiveProgram: livePrograms.length > 0,
+          hasWorkouts: workouts.length > 0,
+        })
+      : null;
+
   if (unavailable) {
     attention = { kind: 'unavailable', action: 'Fix number', weight: 5000 };
     severity = 'alert';
     line = 'That number is a trainer account — they can’t be invited';
+  } else if (setupStep) {
+    attention = { kind: 'setup', action: 'Set up', weight: 4500 };
+    severity = 'alert';
+    line =
+      setupStep === 'schedule'
+        ? 'Not in your week yet — pick their training days'
+        : 'Week picked, no plan on it yet';
   } else if (status === 'paused') {
     const pausedAt = metaTime(client, 'pausedAt') ?? ms(client.updatedAt);
     const tail = sessionsLeft === null ? 'no pack' : `${sessionsLeft} sessions left`;
@@ -442,6 +471,7 @@ function row(
     line,
     severity,
     attention,
+    setupStep: setupStep ?? undefined,
     pack:
       sessionsLeft === null
         ? undefined

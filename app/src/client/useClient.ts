@@ -69,7 +69,7 @@ function observeExtra(clientId: string) {
       .observeWithColumns(['name', 'delivery_mode']),
     planRows
       .query(Q.sortBy('order_index', Q.asc))
-      .observeWithColumns(['sets', 'reps', 'target_load', 'day_of_week', 'week', 'order_index']),
+      .observeWithColumns(['sets', 'reps', 'duration_seconds', 'target_load', 'day_of_week', 'week', 'order_index']),
     packages
       .query()
       .observeWithColumns([
@@ -110,6 +110,7 @@ function observeExtra(clientId: string) {
         exerciseId: r.exerciseId,
         sets: r.sets,
         reps: r.reps,
+        durationSeconds: r.durationSeconds,
         targetLoad: r.targetLoad,
         dayOfWeek: r.dayOfWeek,
         week: r.week,

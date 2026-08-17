@@ -1,10 +1,11 @@
 /**
  * Subscribes the exercise library and the program shelf to local storage.
  *
- * The exercises query is the one to be careful with: the seeded library is 873
+ * The exercises query is the one to be careful with: the seeded library is 1,324
  * rows, and this is the only subscription in the app that reads a table that
- * size. It watches five columns rather than the whole row, so a set logged
- * against an exercise does not re-emit 873 objects into a `useMemo` chain.
+ * size. It watches nine columns rather than the whole row, so a set logged
+ * against an exercise does not re-emit 1,324 objects into a `useMemo` chain.
+ * Four of those nine arrived with the media — see the column list below.
  *
  * `sets` is unwindowed, which is the deliberate cost. An exercise's records are
  * "heaviest ever", not "heaviest this month", and a bounded query would make the
@@ -13,7 +14,7 @@
  * ── Why the subscription waits ────────────────────────────────────────────
  *
  * It is deferred past the running interaction, like every other hook in this app.
- * Without it, opening Exercises from the drawer read 873 exercises and 1,134 set
+ * Without it, opening Exercises from the drawer read the whole library and 1,134 set
  * logs on the same frames the drawer was using to slide shut — and the drawer
  * lost: measured on a device, it sat open for **over a second** after the tap
  * while the screen underneath did its work. The screen was never slow to load. It
@@ -53,7 +54,14 @@ function observeTraining() {
   return combineLatest([
     exercises
       .query(Q.sortBy('name', Q.asc))
-      .observeWithColumns(['name', 'muscle_group', 'equipment', 'is_custom', 'log_type']),
+      .observeWithColumns([
+        'name', 'muscle_group', 'equipment', 'is_custom', 'log_type',
+        // V16 — the library screen groups by body_part and draws image_url. Both
+        // change under the app on a sync that reshapes the library, so both are
+        // observed. `video_url` is not: nothing reads it now that the demo loop
+        // is gone, and observing a column no view renders only costs re-renders.
+        'body_part', 'target', 'image_url',
+      ]),
     favourites.query().observe(),
     setLogs.query().observeWithColumns(['load_kg', 'reps', 'rpe', 'set_number']),
     workouts.query().observeWithColumns(['session_date', 'client_id']),

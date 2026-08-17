@@ -23,10 +23,16 @@ public class ExerciseService {
             String id,
             String name,
             String muscleGroup,
+            /** "chest", "upper legs" — the ten-way split the library groups by. Null on custom. */
+            String bodyPart,
+            /** "pectorals", "quads" — the primary muscle. Mirrors muscleGroup on seeded rows. */
+            String target,
             String equipment,
             String movementPattern,
             String description,
+            /** 180×180 JPG thumbnail. © Gym visual — https://gymvisual.com/ */
             String imageUrl,
+            /** 180×180 animation GIF, the demo loop. Same attribution as imageUrl. */
             String videoUrl,
             String level,
             boolean isCustom,
@@ -35,7 +41,21 @@ public class ExerciseService {
 
     public record SearchResult(List<ExerciseResponse> exercises, int total) {}
 
-    public record MetaResponse(List<String> muscleGroups, List<String> equipment, List<String> levels) {}
+    /**
+     * The filter vocabularies, read off the library rather than hard-coded.
+     *
+     * <p>{@code levels} comes back empty since V21: the current dataset does not
+     * grade exercises beginner/expert. The list and the {@code level} filter stay
+     * on the API — an empty vocabulary renders as no filter, whereas a removed
+     * field breaks whichever client asks for it next.
+     */
+    public record MetaResponse(
+            List<String> muscleGroups,
+            List<String> bodyParts,
+            List<String> targets,
+            List<String> equipment,
+            List<String> levels
+    ) {}
 
     public record CreateExerciseRequest(
             @NotBlank String name,
@@ -49,8 +69,8 @@ public class ExerciseService {
 
     // ── Search ────────────────────────────────────────────────────────────────
 
-    public SearchResult search(UUID trainerId, String q, String muscleGroup,
-                               String equipment, String level, int page, int size) {
+    public SearchResult search(UUID trainerId, String q, String muscleGroup, String bodyPart,
+                               String target, String equipment, String level, int page, int size) {
         size = Math.min(size, 100);
 
         var params = new HashMap<String, Object>();
@@ -71,6 +91,14 @@ public class ExerciseService {
             params.put("muscleGroup", muscleGroup);
             conditions.add("muscle_group = :muscleGroup");
         }
+        if (bodyPart != null && !bodyPart.isBlank()) {
+            params.put("bodyPart", bodyPart);
+            conditions.add("body_part = :bodyPart");
+        }
+        if (target != null && !target.isBlank()) {
+            params.put("target", target);
+            conditions.add("target = :target");
+        }
         if (equipment != null && !equipment.isBlank()) {
             params.put("equipment", equipment);
             conditions.add("equipment = :equipment");
@@ -83,7 +111,7 @@ public class ExerciseService {
         String where = "WHERE " + String.join(" AND ", conditions);
 
         var rows = jdbc.queryForList(
-                "SELECT id::text, name, muscle_group, equipment, movement_pattern, " +
+                "SELECT id::text, name, muscle_group, body_part, target, equipment, movement_pattern, " +
                 "description, image_url, video_url, level, is_custom, created_at " +
                 "FROM exercise " + where +
                 " ORDER BY is_custom ASC, name ASC LIMIT :limit OFFSET :offset",
@@ -96,6 +124,8 @@ public class ExerciseService {
                 str(r.get("id")),
                 str(r.get("name")),
                 str(r.get("muscle_group")),
+                str(r.get("body_part")),
+                str(r.get("target")),
                 str(r.get("equipment")),
                 str(r.get("movement_pattern")),
                 str(r.get("description")),
@@ -118,19 +148,32 @@ public class ExerciseService {
                 ORDER BY val
                 """);
 
+        var parts = stringColumn("""
+                SELECT DISTINCT body_part AS val FROM exercise
+                WHERE is_custom = false AND deleted_at IS NULL AND body_part IS NOT NULL
+                ORDER BY val
+                """);
+
+        var targets = stringColumn("""
+                SELECT DISTINCT target AS val FROM exercise
+                WHERE is_custom = false AND deleted_at IS NULL AND target IS NOT NULL
+                ORDER BY val
+                """);
+
         var equips = stringColumn("""
                 SELECT DISTINCT equipment AS val FROM exercise
                 WHERE is_custom = false AND deleted_at IS NULL AND equipment IS NOT NULL
                 ORDER BY val
                 """);
 
+        // Empty since V21 — see MetaResponse. Kept so the shape does not change.
         var levels = stringColumn("""
                 SELECT DISTINCT level AS val FROM exercise
                 WHERE is_custom = false AND deleted_at IS NULL AND level IS NOT NULL
                 ORDER BY val
                 """);
 
-        return new MetaResponse(groups, equips, levels);
+        return new MetaResponse(groups, parts, targets, equips, levels);
     }
 
     // ── Custom exercise create ─────────────────────────────────────────────────
@@ -159,8 +202,12 @@ public class ExerciseService {
                     :description, :imageUrl, :videoUrl, true, :tid::uuid, :now, :now)
                 """, params);
 
+        // bodyPart and target stay null: they are the seeded library's taxonomy, and
+        // asking a trainer inventing "Ananya's shoulder rehab" to place it in a
+        // ten-way body-part split is a form to fill in for the library's benefit,
+        // not theirs. The app groups custom exercises under "Yours" regardless.
         return new ExerciseResponse(
-                id.toString(), req.name(), req.muscleGroup(), req.equipment(),
+                id.toString(), req.name(), req.muscleGroup(), null, null, req.equipment(),
                 req.movementPattern(), req.description(), req.imageUrl(), req.videoUrl(),
                 null, true, now.toEpochMilli()
         );

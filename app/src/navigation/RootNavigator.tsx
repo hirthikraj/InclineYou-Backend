@@ -12,7 +12,7 @@ import ClientStack from './ClientStack';
 import type { MainStackParamList } from './MainStack';
 
 export default function RootNavigator() {
-  const { token, isLoading, needsSetup, landing, clearLanding, lens } = useAuth();
+  const { token, trainerId, isLoading, needsSetup, landing, clearLanding, lens } = useAuth();
   const navRef = useNavigationContainerRef<MainStackParamList>();
 
   // All three only make sense once we have a token; they're no-ops otherwise.
@@ -25,8 +25,10 @@ export default function RootNavigator() {
   const inApp = !!token && (client || !needsSetup);
 
   // Only once setup is behind us: mid-flow there is nothing complete to send,
-  // and the flow's own `finish()` owns the first attempt.
-  useProfilePush(inApp);
+  // and the flow's own `finish()` owns the first attempt. Gated on a trainer
+  // account existing at all — the profile lives on `/v1/trainers/me`, and a
+  // client on somebody's roster has no such resource to push or pull.
+  useProfilePush(inApp && !!trainerId);
 
   /**
    * "Add my first client" finishes setup AND names where to land, but the two

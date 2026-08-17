@@ -57,6 +57,9 @@ public class TrainerService {
             List<String> languages,
             boolean setupComplete,
             Instant setupCompletedAt,
+            /* Screen 02 · what you sell. 'independent' | 'gym' | 'both' — the
+               onboarding answer, a defaults hint. Null means never asked. */
+            String workMode,
             /* Screen 06 · money. Null gym name means no gym, which is not the
                same as a 0% cut — one hides the "your share" line entirely, the
                other claims an arrangement that keeps all of it. */
@@ -84,6 +87,7 @@ public class TrainerService {
             List<String> certifications,
             List<String> languages,
             Boolean completeSetup,
+            String workMode,
             String gymName,
             BigDecimal gymSharePercent,
             Map<String, Object> preferences
@@ -129,6 +133,13 @@ public class TrainerService {
         if (req.specialities() != null) t.setSpecialities(clean(req.specialities(), "specialities"));
         if (req.certifications() != null) t.setCertifications(clean(req.certifications(), "certifications"));
         if (req.languages() != null) t.setLanguages(clean(req.languages(), "languages"));
+
+        if (req.workMode() != null) {
+            // Same contract as experienceBand: not checked against a fixed set,
+            // so a newer app's mode this build has never heard of is kept, not
+            // bounced with a 400. It is a display-and-defaults hint only.
+            t.setWorkMode(req.workMode().isBlank() ? null : trim(req.workMode(), 20));
+        }
 
         // An empty gym name is a real instruction — the trainer left the gym —
         // and it clears the percentage with it, so the app can never show a
@@ -236,6 +247,7 @@ public class TrainerService {
                 orEmpty(t.getLanguages()),
                 t.getSetupCompletedAt() != null,
                 t.getSetupCompletedAt(),
+                t.getWorkMode(),
                 t.getGymName(),
                 t.getGymSharePercent(),
                 prefsOf(t)

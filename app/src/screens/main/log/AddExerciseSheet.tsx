@@ -13,7 +13,7 @@
  * Because the answer to a busy rack is nearly always something they have already
  * done. Every recent row carries what they last lifted on it, so the choice is
  * made on numbers rather than on a name — which is the whole difference between
- * this and a search box over 873 rows.
+ * this and a search box over 1,324 rows.
  *
  * **Yours** is a first-class chip. A movement invented for one client's shoulder
  * is the one a trainer will hunt for hardest, and Hevy's mistake is burying it

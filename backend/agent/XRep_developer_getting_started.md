@@ -2,7 +2,7 @@
 
 **For:** the founding developer (Java + React background) building the MVP solo, with a designer (brother).
 **Reads alongside:** the PRD, the Dev/Designer Handover, and the Phase 0 Interview Script.
-**Stack (decided):** React Native (Expo + EAS) · Java + Spring Boot · PostgreSQL · SQLite (WatermelonDB) on-device · phone-OTP auth · UPI Intent deep link (MVP) · WhatsApp via a BSP · exercise data seeded from free-exercise-db.
+**Stack (decided):** React Native (Expo + EAS) · Java + Spring Boot · PostgreSQL · SQLite (WatermelonDB) on-device · phone-OTP auth · UPI Intent deep link (MVP) · WhatsApp via a BSP · exercise data seeded from exercises-dataset (text only — no media).
 
 > **The golden rule of this build:** ship the smallest thing that makes a trainer abandon their spreadsheet. Anything not in the 9 MVP features gets parked, not built.
 
@@ -19,7 +19,7 @@ Do these in the first 1–3 weeks. Some run in parallel with environment setup (
 
 ### 1.2 Lock the open decisions (so they don't block you mid-build)
 - [ ] **App structure:** one app with a trainer/client role toggle (faster to ship solo) **or** two separate app targets sharing a backend (cleaner store presence). Recommendation for a solo dev: **start as one app with a role toggle**, split later if store clarity demands it. Decide now — it shapes your repo.
-- [ ] **Exercise data:** confirmed — seed from free-exercise-db into Postgres, mirror images to your own storage.
+- [ ] **Exercise data:** confirmed — seed the *text* from exercises-dataset into Postgres. No media: upstream's stills and GIFs are © Gym visual rather than MIT, and are not seeded, so there is nothing to mirror and no licence to chase before launch.
 - [ ] **Payments (MVP):** confirmed — UPI Intent deep link to the trainer's own VPA. No payment gateway, no KYC for launch.
 - [ ] **WhatsApp BSP:** pick one to trial later (Gupshup / WATI / Interakt / Twilio). Not needed until the nudges phase.
 - [ ] **Hosting:** pick a simple managed host for the backend (Railway / Render / Fly.io) to start.
@@ -55,7 +55,7 @@ Do these in the first 1–3 weeks. Some run in parallel with environment setup (
 - [ ] **Expo CLI + EAS CLI** (`npm i -g eas-cli`).
 - [ ] **Android Studio** — for the SDK + an emulator.
 - [ ] **A real, low-cost Android phone** — essential. Your users are on cheap Androids in bad lighting with poor signal; the emulator won't tell you the truth.
-- [ ] **Docker** — run PostgreSQL locally via Docker Compose.
+- [ ] **Docker** — run PostgreSQL **and Redis** locally via Docker Compose (`docker compose up -d`).
 - [ ] **Git**, plus IntelliJ IDEA (backend) and VS Code (React Native).
 
 ### 2.3 Accounts to create
@@ -63,7 +63,7 @@ Do these in the first 1–3 weeks. Some run in parallel with environment setup (
 - [ ] **Expo / EAS** (builds).
 - [ ] **Google Play Console** (publishing + internal testing track).
 - [ ] **Firebase** — for FCM push (and optionally phone-OTP auth).
-- [ ] **Object storage** — AWS S3 or Cloudflare R2 (exercise images, report PDFs).
+- [ ] **Object storage** — AWS S3 or Cloudflare R2 (exercise stills and demo GIFs, report PDFs).
 - [ ] *Later, not now:* an OTP/SMS provider (MSG91) if not using Firebase Auth; a WhatsApp BSP; a payment gateway.
 
 ### 2.4 Repo layout (monorepo)
@@ -84,7 +84,7 @@ Goal of M0: a working skeleton and **one vertical slice through the hardest part
 
 ### 3.1 Backend skeleton
 1. Generate a Spring Boot project (Spring Initializr) with: Web, Spring Data JPA, PostgreSQL driver, Validation, Security.
-2. Bring up PostgreSQL with Docker Compose.
+2. Bring up PostgreSQL and Redis with Docker Compose. Redis holds the one-time codes (TTL'd) and the rate-limit buckets; the app runs without it, falling back to Postgres and in-process counters.
 3. Add a migration tool (Flyway or Liquibase) and create the core tables from the data model (Trainer, Client, Exercise, Program, WorkoutSession, SetLog, Package, Payment, ScheduledSession, NudgeLog).
 4. Build **phone-OTP auth**: request-OTP + verify-OTP endpoints, issue a JWT. (Stub SMS in dev; wire a real provider later.)
 5. Implement the **`/sync` endpoint** contract: accept a batch of changed records (client-generated UUIDs + `updated_at`), return server changes since the client's cursor. Use soft deletes.
@@ -101,7 +101,7 @@ Goal of M0: a working skeleton and **one vertical slice through the hardest part
 When that round-trip works, offline + auth + sync — the riskiest 20% — is done. Everything after is incremental.
 
 ### 3.4 Also in M0
-- [ ] Seed the **exercise library**: import free-exercise-db's combined JSON into Postgres; copy its images to your object storage; map its fields to your muscle-group / equipment / movement-pattern taxonomy.
+- [ ] Seed the **exercise library**: `backend/scripts/build-exercise-seed.py` trims upstream's 17 MB JSON (nine languages the app does not render) down to the committed seed; `ExerciseSeeder` imports it into Postgres on boot. Its fields map to your body-part / muscle-group / equipment taxonomy. The script drops upstream's `image` and `gif` paths — that media is © Gym visual, so there is nothing to mirror.
 - [ ] Basic CI (build + test on push).
 - [ ] Get a dev build onto your real Android phone via EAS.
 
@@ -158,7 +158,7 @@ iOS build · payment-gateway auto-reconciliation · AI program generation · Tam
 - **Ruthless scope.** A tempting idea outside the 9 features → straight to a "later" list.
 - **Design stays ahead.** Your brother prototypes the next hot flow while you build the current one.
 - **Small commits / small PRs, even solo.** Future-you will thank present-you.
-- **Don't gold-plate the exercise library or animations.** Text + optional image is enough (the trainer teaches the movement).
+- **Don't gold-plate the exercise library.** It is names, muscles, equipment and written steps, and that is the ceiling — the trainer teaches the movement. No video upload, no playback controls, no per-exercise media editing, and no scavenging for free GIFs: the ones that circulate are almost all the same licensed artwork re-uploaded.
 
 ---
 

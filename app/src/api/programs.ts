@@ -53,13 +53,35 @@ export async function deleteTemplate(id: string): Promise<void> {
   await api.delete(`/v1/templates/${id}`);
 }
 
+/**
+ * One day slot of the client's chosen layout: template "Day 2" lands on
+ * `weekday` (1 = Monday … 7 = Sunday) at `time` ("HH:mm", 24-hour).
+ */
+export interface ScheduleEntry {
+  day: number;
+  weekday: number;
+  time: string;
+}
+
+/**
+ * The schedule must cover the template's day slots exactly — one distinct
+ * weekday per slot — or the server refuses the whole apply with a 400 that
+ * says what to fix. The screen validates the same rule first; this is the
+ * backstop, because a half-scheduled plan must not exist.
+ */
 export async function applyTemplate(
   templateId: string,
   clientId: string,
+  schedule: ScheduleEntry[],
   name?: string,
   goal?: string,
 ): Promise<{ id: string }> {
-  const { data } = await api.post(`/v1/templates/${templateId}/apply`, { clientId, name, goal });
+  const { data } = await api.post(`/v1/templates/${templateId}/apply`, {
+    clientId,
+    name,
+    goal,
+    schedule,
+  });
   return data;
 }
 

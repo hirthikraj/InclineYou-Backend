@@ -2,17 +2,24 @@
  * 3c · Exercises.
  *
  * Hevy ships "400+ high-quality exercises" with filters for equipment and muscle
- * plus search. XRep shows 873 with the same two filters and one extra chip
+ * plus search. XRep shows 1,324 with the same two filters and one extra chip
  * Hevy buries: **Yours**. A custom exercise you built for one client's shoulder is
  * the one you will look for hardest, and burying it in the same alphabetical list
- * as the other 872 is the one thing that library gets wrong.
+ * as the other 1,323 is the one thing that library gets wrong.
+ *
+ * Every seeded row carries a still and an animation loop, so a row is a picture
+ * and a name rather than a name alone — which is most of what makes a library of
+ * this size scannable at all.
  *
  * Search matches **name, muscle and equipment** in one field, so typing "barbell"
  * works and nobody has to learn which box does what.
  *
  * Sectioned rather than one flat list: favourites first, then yours, then by
- * primary muscle. The grouping is how a trainer actually searches — "another
- * chest thing" is a real query and an alphabetical list cannot answer it.
+ * **body part**. The grouping is how a trainer actually searches — "another chest
+ * thing" is a real query and an alphabetical list cannot answer it. Body part and
+ * not the primary muscle, which is finer than a heading wants: grouping by muscle
+ * splits one chest into "pectorals", "serratus anterior" and "delts". The muscle
+ * is still what the filter offers and what each row's meta line says.
  *
  * **Pick mode** (`pickFor`) is the same screen with one behaviour changed: a row
  * adds the exercise to a program's day and returns, instead of opening it. The
@@ -59,11 +66,12 @@ import {
 } from '../../../design';
 import ExerciseFilterSheet from './ExerciseFilterSheet';
 import ExerciseSheet from './ExerciseSheet';
+import PrescriptionSheet from './PrescriptionSheet';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 
 /**
- * A `SectionList`, and the 873 rows are all really here.
+ * A `SectionList`, and the 1,324 rows are all really here.
  *
  * This was a `ScrollView` with the list capped at 120 rows, on the reasoning that
  * sections are variable-length and the common case is a search. Both halves of
@@ -82,7 +90,7 @@ type Nav = NativeStackNavigationProp<MainStackParamList>;
  *
  * Virtualised, only the rows on screen mount, so a warm cache is a benefit again
  * rather than a stall — and the cap can go, which means the library no longer has
- * to explain that it is hiding 753 exercises from you.
+ * to explain that it is hiding most of itself from you.
  */
 
 /** `Row`'s grouped height, which every row here has. */
@@ -91,7 +99,7 @@ const ROW_H = 64;
 /**
  * Section headers vary in height only with the type scale, so the list is told
  * one number rather than measuring. Getting it slightly wrong costs a scrollbar
- * that drifts; measuring 873 rows costs the frame this whole change was about.
+ * that drifts; measuring 1,324 rows costs the frame this whole change was about.
  */
 const itemLayout = (_: unknown, index: number) => ({
   length: ROW_H,
@@ -113,6 +121,8 @@ export default function ExercisesScreen() {
   const [favouritesOnly, setFavouritesOnly] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  /** Pick mode only: the tapped exercise, waiting for its numbers. */
+  const [prescribing, setPrescribing] = useState<{ id: string; name: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const filter = useMemo<ExerciseFilter>(
@@ -218,7 +228,7 @@ export default function ExercisesScreen() {
           // should open it rather than spend itself dismissing the keyboard.
           keyboardShouldPersistTaps="handled"
           // Every row is the same height, so the list can place a scrollbar and
-          // jump without measuring 873 of them.
+          // jump without measuring 1,324 of them.
           getItemLayout={itemLayout}
           initialNumToRender={12}
           windowSize={7}
@@ -239,7 +249,9 @@ export default function ExercisesScreen() {
             >
               <Row
                 grouped
-                leading={<Thumb size="sm" custom={item.custom} />}
+                leading={
+                  <Thumb size="sm" uri={item.thumb} custom={item.custom} />
+                }
                 title={item.name}
                 subtitle={item.meta}
                 onPress={() => {
@@ -247,11 +259,9 @@ export default function ExercisesScreen() {
                     navigation.navigate('Exercise', { exerciseId: item.id });
                     return;
                   }
-                  void addToBlueprint(pickFor.templateId, {
-                    exerciseId: item.id,
-                    day: pickFor.day,
-                    week: pickFor.week,
-                  }).then(() => navigation.goBack());
+                  // The numbers are asked before the write, on this screen —
+                  // see PrescriptionSheet for why.
+                  setPrescribing({ id: item.id, name: item.name });
                 }}
                 trailing={
                   <IconButton
@@ -297,6 +307,28 @@ export default function ExercisesScreen() {
         onCreated={(name) => {
           setCreating(false);
           setNotice(`${name} added. It's yours to reuse.`);
+        }}
+      />
+
+      <PrescriptionSheet
+        visible={prescribing !== null}
+        name={prescribing?.name ?? ''}
+        onClose={() => setPrescribing(null)}
+        onAdd={(prescription) => {
+          const target = prescribing;
+          setPrescribing(null);
+          if (!target || !pickFor) return;
+          void addToBlueprint(pickFor.templateId, {
+            exerciseId: target.id,
+            day: pickFor.day,
+            week: pickFor.week,
+            sets: prescription.sets,
+            reps: prescription.reps,
+            durationSeconds: prescription.durationSeconds,
+            restSeconds: prescription.restSeconds,
+          })
+            .then(() => navigation.goBack())
+            .catch(() => setNotice('Could not add that exercise.'));
         }}
       />
 

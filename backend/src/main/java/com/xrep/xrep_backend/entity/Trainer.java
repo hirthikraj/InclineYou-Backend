@@ -63,6 +63,13 @@ public class Trainer {
 
     /* ------------------------------------------------ the gym arrangement */
 
+    /**
+     * 'independent' | 'gym' | 'both' — the onboarding answer, a defaults hint
+     * only. Gym-vs-freelance stays per CLIENT; see V23__trainer_work_mode.sql.
+     */
+    @Column(name = "work_mode", length = 20)
+    private String workMode;
+
     /** NULL means no gym: an independent trainer keeps all of it. See V11__money.sql. */
     @Column(name = "gym_name", length = 120)
     private String gymName;

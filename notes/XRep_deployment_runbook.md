@@ -75,7 +75,8 @@ bucket per active caller, all TTL'd. A 256 MB instance is generous.
 
 ## 3. Object storage & media
 - Create an R2 (or S3) bucket; set CORS; generate keys → into the Railway env.
-- Upload the **seeded exercise images once**; serve via the bucket's public/CDN URL. (Progress photos and report PDFs land here later; R2 has no egress fees.)
+- **No exercise media to upload.** The seeded library is text-only: upstream's stills and demo GIFs are © Gym visual and are not redistributed by us, so there is no mirror step and no `EXERCISE_MEDIA_BASE_URL`. (The bucket is still worth creating — progress photos and report PDFs land here later, and R2 has no egress fees.)
+- If a Gym visual licence is ever bought, this is where the mirror step comes back: upload to the bucket, serve GIFs as `image/gif` (as `application/octet-stream` they download instead of animating), and restore the media columns in `ExerciseSeeder`.
 
 ---
 
@@ -156,7 +157,7 @@ Because it's React Native, **one codebase builds both**: `eas build --platform a
 4. [ ] WhatsApp templates approved; DLT done (or WhatsApp OTP chosen).
 5. [ ] Backend on **Railway**; managed Postgres; HTTPS live; `/health` green; **backups + restore-tested**.
 5b. [ ] **Redis provisioned with `appendonly yes` verified** — an OTP lock that a restart clears is not a lock.
-6. [ ] Object storage bucket live; exercise images uploaded.
+6. [ ] Object storage bucket live (progress photos, report PDFs). No exercise media — the library ships text-only, so no Gym visual licence is required to launch.
 7. [ ] FCM, BSP, OTP wired with prod keys.
 8. [ ] Prod smoke test passed (OTP → create client → sync → survives restart).
 9. [ ] `eas build --platform all` → **.aab + .ipa**; app points at prod API.

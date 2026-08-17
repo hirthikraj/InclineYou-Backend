@@ -2,7 +2,7 @@
  * Pick one exercise, hand it back, pop.
  *
  * A second, thinner copy of the library (3c) — and deliberately so. That screen
- * is 873 rows sectioned by muscle with filters, favourites and a create form,
+ * is 1,324 rows sectioned by body part with filters, favourites and a create form,
  * and its pick mode writes straight into a *template's* blueprint. This one is
  * asked for by a **client's own program**, which is a different table, so it
  * cannot reuse that path without teaching the library a second write.
@@ -45,7 +45,7 @@ import {
 
 type Props = NativeStackScreenProps<MainStackParamList, 'ExercisePicker'>;
 
-/** `Row`'s grouped height. The list is told it rather than measuring 873 rows. */
+/** `Row`'s grouped height. The list is told it rather than measuring 1,324 rows. */
 const ROW_H = 64;
 
 const itemLayout = (_: unknown, index: number) => ({
@@ -127,7 +127,13 @@ export default function ExercisePickerScreen({ navigation }: Props) {
             >
               <Row
                 grouped
-                leading={<Thumb size="sm" custom={item.isCustom} />}
+                leading={
+                  <Thumb
+                    size="sm"
+                    uri={item.imageUrl}
+                    custom={item.isCustom}
+                  />
+                }
                 title={item.name}
                 subtitle={item.muscleGroup || undefined}
                 highlight={query}

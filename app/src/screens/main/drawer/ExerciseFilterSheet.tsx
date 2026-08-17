@@ -2,7 +2,7 @@
  * Muscle and equipment, the two filters Hevy has and the two that matter.
  *
  * The draft is local and only applied on the button. A filter sheet that filtered
- * live would rebuild the list under a finger that is still choosing, and on 873
+ * live would rebuild the list under a finger that is still choosing, and on 1,324
  * rows that is felt.
  *
  * "Clear all" is a text action rather than a third chip: it is not a filter, and

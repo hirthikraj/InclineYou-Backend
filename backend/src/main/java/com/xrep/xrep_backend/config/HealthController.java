@@ -40,7 +40,6 @@ public class HealthController {
 
     @GetMapping("/health")
     public ResponseEntity<Map<String, String>> health() {
-        // Ordered so the two things that decide the status code read first.
         var body = new LinkedHashMap<String, String>();
 
         boolean dbUp;
@@ -54,19 +53,12 @@ public class HealthController {
         body.put("status", dbUp ? "UP" : "DOWN");
         body.put("db", dbUp ? "UP" : "DOWN");
 
-        // Asked SEPARATELY, and that is the point rather than duplication: the
-        // rate limiter holds its own Lettuce connection (byte values, for
-        // Bucket4j's Lua) and the OTP store uses Spring Data's template. They can
-        // genuinely disagree, so inferring one from the other would be a guess
-        // printed as a fact — on the endpoint whose whole job is to be trusted.
         boolean limitsOnRedis = limiter.distributed();
         RedisOtpStore store = otpStore.getIfAvailable();
         boolean otpOnRedis = store != null && store.available();
 
         body.put("rateLimiting", limitsOnRedis ? "redis" : "in-process (fallback)");
         body.put("otpStore", otpOnRedis ? "redis" : "postgres (fallback)");
-        // A single summary line for the common case, so nobody has to read two
-        // fields to answer "is Redis working".
         body.put("redis", (limitsOnRedis && otpOnRedis) ? "UP"
                 : (limitsOnRedis || otpOnRedis) ? "PARTIAL" : "DOWN");
 

@@ -8,14 +8,22 @@
  * The three records are Hevy's set exactly — **heaviest, estimated 1RM, best set**
  * — because those are the three a coach quotes out loud.
  *
- * ── No video ──────────────────────────────────────────────────────────────
+ * ── No demo loop ──────────────────────────────────────────────────────────
  *
- * The design opens this screen with a demo loop and a play button. **v1 does not
- * do video**, so there is nothing here where the frame was — not a placeholder
- * either. A 16:10 box reading "no demo yet" occupied the most valuable space on
- * the screen to advertise a feature that is not coming in this version, and it
- * pushed the records — the thing a coach actually opens this page for — below the
- * fold. The records lead now, which is the order Hevy uses and the right one.
+ * The design opens the How-to tab with a demonstration and there is none. The
+ * library briefly shipped one — a 180×180 animation per exercise — and it came
+ * out with the rest of the artwork: the frames are © Gym visual and we hold no
+ * licence for them, which is not a thing a fallback can paper over.
+ *
+ * So the tab opens on the numbered steps, which are MIT and genuinely ours. They
+ * were always the substance of it; the loop was the illustration. A coach reading
+ * "how do I set this up" gets an answer either way.
+ *
+ * Nothing here is stubbed for the loop's return. If a licence is bought, or a
+ * freely licensed set is adopted, this is where the frame goes back — above
+ * `GroupHead`, inside the tab rather than above the tabs, because the records are
+ * what a coach opens this page for and a frame across the top pushes them below
+ * the fold.
  *
  * ── Records and history are per client when you arrive from a client ──────
  *
@@ -311,6 +319,7 @@ const styles = StyleSheet.create({
 
   tabs: { marginTop: space.s4 },
   rail: { marginTop: space.s4 },
+
   section: { marginTop: space.s2 },
   timeline: { marginTop: space.s1 },
   headGap: { marginTop: space.s5, marginBottom: space.s3 },

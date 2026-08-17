@@ -131,8 +131,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       // Preferences come off SecureStore, and only reach for the server's copy
       // on a phone that has never had its own. Not awaited above: the app must
-      // not wait on the network to decide which screen to show.
-      if (token) void hydratePrefs();
+      // not wait on the network to decide which screen to show. The server's
+      // copy lives on `/v1/trainers/me`, so a session with no trainer account
+      // has nowhere to hydrate from — the defaults stand.
+      if (token && trainerId) void hydratePrefs();
     })();
   }, []);
 
@@ -172,12 +174,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   /**
    * The end of trainer setup — and the one moment a working week can be seeded.
    *
-   * Setup deliberately never asks for hours (`xreptrainersetup.html` § 06:
-   * "setting them before having clients is guessing"), but leaving the table
-   * empty is worse than guessing. With no rows the diary reports every day
-   * closed and offers no bookable slot anywhere, which reads as a broken app
-   * rather than as a setting nobody has touched. A default week is a visible,
-   * obviously-editable wrong answer, and a trainer corrects one of those.
+   * Setup asks for hours now (the `hours` step), because adding a client picks
+   * their slots FROM these windows — but the step is skippable, and a skipped
+   * answer must not leave the table empty. With no rows the diary reports every
+   * day closed and offers no bookable slot anywhere, which reads as a broken
+   * app rather than as a setting nobody has touched. A default week is a
+   * visible, obviously-editable wrong answer, and a trainer corrects one of
+   * those. `seedDefaultWorkingHours` no-ops if any row exists, so a trainer who
+   * answered the step keeps exactly what they said.
    *
    * Best-effort on purpose: this is a convenience, and a trainer who has just
    * finished setup must reach their deck whether or not the write lands.
@@ -221,11 +225,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
-    // Flush anything queued while the token is still valid, then wipe the
-    // local database so the next trainer on this phone starts clean.
+    // Flush anything queued while the token is still valid.
     await syncDatabase('sign-out');
     await unregisterPushToken();
-    await resetLocalDatabase();
     await clearDraft();
     // The next trainer on this phone must not inherit a queued push of someone
     // else's profile against their token.
@@ -251,6 +253,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clientId: null,
       memberships: [],
     });
+    // Only after the state flip. Dropping the token swaps the navigator to the
+    // auth stack, which unmounts every screen holding a live query — and
+    // Watermelon refuses to reset the database while any of those
+    // subscriptions are still attached.
+    await resetLocalDatabase();
   };
 
   return (

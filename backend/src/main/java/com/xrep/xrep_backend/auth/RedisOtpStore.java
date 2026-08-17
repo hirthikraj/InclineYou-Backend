@@ -123,8 +123,6 @@ public class RedisOtpStore implements OtpStore {
     @Override
     public Instant lockedUntil(String phone) {
         String raw = redis.opsForValue().get(lockKey(phone));
-        // Absence IS expiry here — no "is it in the past" check to get wrong,
-        // because Redis has already removed a lock that has run out.
         return raw == null ? null : Instant.ofEpochMilli(Long.parseLong(raw));
     }
 

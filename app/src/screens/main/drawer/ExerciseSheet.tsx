@@ -43,11 +43,15 @@ import {
 /**
  * The muscle and equipment lists the sheet offers.
  *
- * Short and fixed rather than pulled from the 873-row library: the library's own
- * values are inconsistent (the seed has both "Chest" and "chest, triceps"), and a
- * chip row of ninety options is not a control. A trainer whose exercise works
- * something not listed gets it from the name, which is what they will search on
- * anyway.
+ * Short and fixed rather than pulled from the 1,324-row library. The library's
+ * vocabulary is consistent now — one lower-case target muscle per row — but it is
+ * also the wrong vocabulary for this sheet: nineteen muscles and twenty-eight
+ * kinds of equipment, in the anatomist's words ("pectorals", "levator scapulae",
+ * "leverage machine"). A chip row of forty-seven options is not a control, and a
+ * trainer naming their own movement thinks "chest", not "pectorals".
+ *
+ * A trainer whose exercise works something not listed gets it from the name,
+ * which is what they will search on anyway.
  */
 const MUSCLES = [
   'Chest',

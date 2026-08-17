@@ -16,7 +16,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Linking, ScrollView, SectionList, StyleSheet, View } from 'react-native';
+import { Alert, Linking, ScrollView, SectionList, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -41,6 +41,7 @@ import {
   type SortKey,
 } from '../../../clients/roster';
 import { setClientStatus } from '../../../db/clients';
+import { dismissSyncNotice, syncDatabase } from '../../../db/sync';
 import { useSyncState } from '../../../db/useSync';
 import { rupeesShort } from '../../../home/time';
 import {
@@ -66,6 +67,7 @@ import {
   IconInbox,
   IconLayers,
   IconMenu,
+  IconCalendar,
   IconMessage,
   IconPause,
   IconRupee,
@@ -82,6 +84,7 @@ import {
   Search,
   SelectBar,
   SwipeRow,
+  SyncSpinner,
   Tag,
   Tally,
   Toast,
@@ -128,6 +131,37 @@ export default function ClientsScreen() {
   const { setChromeHidden } = shell;
 
   const offline = network.isConnected === false || network.isInternetReachable === false;
+
+  // One at a time — two refusals are two taps, not a wall of text over the list.
+  const refusal = sync.notices[0] ?? null;
+
+  // An empty local roster means one of two things: nobody exists, or this is a
+  // fresh install whose first pull hasn't landed yet — and only one outcome
+  // tells them apart: a pull that actually SUCCEEDED this launch. A failed
+  // attempt proves nothing — the startup sync can lose a race with the network
+  // or the token coming up, and counting that error as an answer put "your
+  // roster is empty" on screen while the retry that would load eight clients
+  // was seconds away. Never mid-sync, and never on the phone's own network
+  // guess — expo-network reads "unreachable" for the first moments of a
+  // launch. A roster with rows never waits: it paints from SQLite first, which
+  // is this screen's opening rule.
+  const syncConfirmed = sync.phase !== 'syncing' && sync.lastSyncedAt !== null;
+
+  // One beat between the pull landing and believing an empty roster: the rows
+  // a sync writes reach this screen through observables that re-query
+  // asynchronously, so right after `lastSyncedAt` flips the roster can still
+  // read empty while the clients are already in SQLite.
+  const [emptyStands, setEmptyStands] = useState(false);
+  useEffect(() => {
+    if (!(roster.ready && roster.firstRun && syncConfirmed)) {
+      setEmptyStands(false);
+      return;
+    }
+    const t = setTimeout(() => setEmptyStands(true), 400);
+    return () => clearTimeout(t);
+  }, [roster.ready, roster.firstRun, syncConfirmed]);
+
+  const settled = roster.ready && (!roster.firstRun || emptyStands);
 
   /* ------------------------------------------------------------------ rows */
 
@@ -209,6 +243,13 @@ export default function ClientsScreen() {
   const runVerb = (row: RosterRow) => {
     const first = row.name.split(/\s+/)[0] ?? row.name;
     switch (row.attention?.kind) {
+      // Straight back into the onboarding step still owed — the same screens
+      // the add flow runs, resumed with whatever was already answered.
+      case 'setup':
+        navigation.navigate(row.setupStep === 'plan' ? 'ClientPlan' : 'ClientSchedule', {
+          clientId: row.id,
+        });
+        return;
       case 'overdue':
         void whatsapp(row, `Hi ${first}, a payment is pending for your pack.`);
         return;
@@ -334,7 +375,7 @@ export default function ClientsScreen() {
   // Every branch below counts something, and a count of zero before the tables
   // have been read is a statement, not a placeholder. No subtitle at all until
   // there is one worth printing.
-  const subtitle = !roster.ready
+  const subtitle = !settled
     ? undefined
     : roster.firstRun
     ? 'No clients yet'
@@ -385,7 +426,7 @@ export default function ClientsScreen() {
         <SectionChips
           // Same rule as the subtitle: "ALL 0 · ACTIVE 0" across a roster of
           // eight is the exact wrong first impression.
-          counts={roster.ready ? roster.counts : undefined}
+          counts={settled ? roster.counts : undefined}
           value={segment}
           onPick={(next) => {
             setSegment(next);
@@ -396,7 +437,7 @@ export default function ClientsScreen() {
         />
       </ScrollView>
 
-      {segment === 'attention' && visible.length > 0 && roster.ready ? (
+      {segment === 'attention' && visible.length > 0 && settled ? (
         <Tally
           style={styles.tally}
           items={[
@@ -518,7 +559,12 @@ export default function ClientsScreen() {
         severity={row.severity}
         action={{
           label: row.attention.action,
-          icon: row.attention.kind === 'overdue' ? IconRupee : IconMessage,
+          icon:
+            row.attention.kind === 'overdue'
+              ? IconRupee
+              : row.attention.kind === 'setup'
+                ? IconCalendar
+                : IconMessage,
           tone: row.attention.kind === 'overdue' ? 'pay' : 'nudge',
         }}
         onAction={() => runVerb(row)}
@@ -530,11 +576,55 @@ export default function ClientsScreen() {
 
   /* ---------------------------------------------------------------- render */
 
-  // `ready` guards every empty state on this screen. Before the first
-  // emission the roster is empty because nothing has been read yet, not
-  // because there is nobody — and "Your roster is empty" is the wrong thing to
-  // say to a trainer with eight clients, even for one frame.
-  if (roster.firstRun && roster.ready) {
+  // Fresh install, nothing pulled yet: the only honest things to show are the
+  // sync doing its work, or the reason it can't. Never the empty roster and
+  // never skeleton rows — the first reads as "your clients are gone" to a
+  // trainer who has eight, the second promises rows we cannot promise. The
+  // add action stays in the bar throughout: a genuinely new trainer, online or
+  // not, is never blocked from their first client.
+  if (roster.ready && roster.firstRun && !settled) {
+    const failed = sync.phase === 'error';
+    return (
+      <SafeAreaView style={styles.safe} edges={['top']}>
+        <View style={styles.pad}>
+          <AppBar
+            title="Clients"
+            subtitle={failed ? 'Offline' : 'Syncing…'}
+            leading={<IconButton icon={IconMenu} label="Menu" bare onPress={shell.openDrawer} />}
+            actions={
+              <IconButton
+                icon={IconUserAdd}
+                label="Add client"
+                bare
+                onPress={() => navigation.navigate('AddClient')}
+              />
+            }
+          />
+        </View>
+        {failed ? (
+          <Empty
+            icon={IconCloudOff}
+            title="Couldn't reach XRep"
+            body="This phone hasn't finished its first sync, so your roster isn't here yet. Check your connection and try again."
+            style={styles.firstRun}
+            action={<Button label="Try again" onPress={() => void syncDatabase('retry')} />}
+          />
+        ) : (
+          <View style={styles.firstPull} accessibilityLiveRegion="polite">
+            <SyncSpinner size={26} />
+            <Text style={styles.firstPullText}>Syncing your clients…</Text>
+          </View>
+        )}
+      </SafeAreaView>
+    );
+  }
+
+  // `settled` guards every empty state on this screen. Before the first local
+  // emission — and, on a fresh install, before the first pull has had its say —
+  // the roster is empty because nothing has been read yet, not because there
+  // is nobody. "Your roster is empty" is the wrong thing to say to a trainer
+  // with eight clients, even for one frame.
+  if (roster.firstRun && settled) {
     return (
       <SafeAreaView style={styles.safe} edges={['top']}>
         <View style={styles.pad}>
@@ -612,7 +702,7 @@ export default function ClientsScreen() {
         {/* `fill`, so the list below is given a bounded height. Without it the
             animated wrapper sizes to its content and the SectionList renders
             every row instead of a window. */}
-        <Reveal ready={roster.ready} skeleton={<RosterSkeleton />} fill style={styles.reveal}>
+        <Reveal ready={settled} skeleton={<RosterSkeleton />} fill style={styles.reveal}>
         <SectionList
           ref={list}
           sections={sections}
@@ -621,7 +711,7 @@ export default function ClientsScreen() {
           ListHeaderComponent={header}
           ListFooterComponent={footer}
           ListEmptyComponent={
-            !roster.ready ? null : (
+            !settled ? null : (
             <Empty
               icon={IconUsers}
               title="Nobody here"
@@ -740,7 +830,17 @@ export default function ClientsScreen() {
         }}
       />
 
-      {notice ? (
+      {/* A refusal outranks anything this screen has to say for itself: the
+          client it names has just been taken off the phone, and the roster is
+          where the trainer would go looking for them. */}
+      {refusal ? (
+        <Toast
+          style={styles.toast}
+          action={{ label: 'Got it', onPress: () => dismissSyncNotice(refusal.id) }}
+        >
+          {refusal.message}
+        </Toast>
+      ) : notice ? (
         <Toast style={styles.toast} action={{ label: 'Dismiss', onPress: () => setNotice(null) }}>
           {notice}
         </Toast>
@@ -838,6 +938,11 @@ const styles = StyleSheet.create({
   gets: { gap: space.s1 },
 
   firstRun: { marginTop: 44 },
+
+  // Sits a touch above true centre — under the app bar the optical middle of
+  // the remaining canvas is higher than the geometric one.
+  firstPull: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14, paddingBottom: 88 },
+  firstPullText: { fontSize: 13, fontWeight: '500', color: colors.ink3 },
 
   selectActions: {
     flexDirection: 'row',

@@ -1,0 +1,986 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Copy deck for the Push More pre-launch waitlist page: every word, in page order, with intent notes and open decisions.">
+<meta name="color-scheme" content="light dark">
+<title>Push More Waitlist Copy Deck</title>
+<style>
+  :root {
+    --paper:   #EAE8E3;
+    --surface: #F5F4F0;
+    --sunk:    #E0DDD6;
+    --ink:     #16191A;
+    --ink-2:   #5A605F;
+    --ink-3:   #878C89;
+    --line:    #CFCCC4;
+    --accent:  #8A6100;
+    --accent-soft: rgba(201,138,12,.14);
+    --brand:   #4D7C0F;
+    --flag:    #9A2B1E;
+    --flag-soft: rgba(154,43,30,.10);
+
+    --display: ui-sans-serif, system-ui, "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --body: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:   #131513;
+      --surface: #1C1F1D;
+      --sunk:    #0D0F0E;
+      --ink:     #E9E7E1;
+      --ink-2:   #9DA39F;
+      --ink-3:   #767B78;
+      --line:    #30342F;
+      --accent:  #E0AC33;
+      --accent-soft: rgba(224,172,51,.13);
+      --brand:   #A3E635;
+      --flag:    #E08272;
+      --flag-soft: rgba(224,130,114,.11);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:   #131513;
+    --surface: #1C1F1D;
+    --sunk:    #0D0F0E;
+    --ink:     #E9E7E1;
+    --ink-2:   #9DA39F;
+    --ink-3:   #767B78;
+    --line:    #30342F;
+    --accent:  #E0AC33;
+    --accent-soft: rgba(224,172,51,.13);
+    --brand:   #A3E635;
+    --flag:    #E08272;
+    --flag-soft: rgba(224,130,114,.11);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.6;
+    margin: 0;
+    padding: 0 24px 120px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1040px; margin: 0 auto; }
+
+  /* the wordmark: Push lime, More ink */
+  .brand b { color: var(--brand); font-weight: 700; }
+
+  /* ---------- masthead ---------- */
+  .masthead {
+    padding: 72px 0 40px;
+    border-bottom: 3px solid var(--ink);
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .kicker {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .masthead h1 {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: clamp(38px, 6.5vw, 66px);
+    line-height: .97;
+    letter-spacing: -.03em;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .masthead h1 .brand b { font-weight: 800; }
+  .standfirst {
+    max-width: 60ch;
+    color: var(--ink-2);
+    font-size: 18px;
+    margin: 0;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 28px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding-top: 6px;
+  }
+  .meta-row b { color: var(--ink-2); font-weight: 500; }
+
+  /* ---------- legend ---------- */
+  .legend {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(215px, 1fr));
+    gap: 0 24px;
+    border-bottom: 1px solid var(--line);
+  }
+  .legend div {
+    padding: 20px 0 22px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--ink-2);
+  }
+  .legend strong {
+    display: block;
+    color: var(--ink);
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    font-size: 10.5px;
+    font-weight: 600;
+    margin-bottom: 6px;
+  }
+
+  /* ---------- sections ---------- */
+  section {
+    display: grid;
+    grid-template-columns: 108px minmax(0, 1fr);
+    gap: 0 32px;
+    padding: 52px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .rail {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    line-height: 1.5;
+    padding-top: 8px;
+  }
+  .rail .num {
+    display: block;
+    font-family: var(--display);
+    font-size: 30px;
+    font-weight: 800;
+    letter-spacing: -.03em;
+    color: var(--accent);
+    line-height: 1;
+    margin-bottom: 10px;
+  }
+  .col { min-width: 0; display: flex; flex-direction: column; gap: 22px; }
+  .col > * { margin: 0; }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 750;
+    font-size: clamp(24px, 3vw, 32px);
+    letter-spacing: -.02em;
+    line-height: 1.1;
+    margin: 0;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 15.5px;
+    letter-spacing: -.005em;
+    margin: 0;
+  }
+  .intent {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--ink-2);
+    max-width: 74ch;
+  }
+
+  /* ---------- copy block: the literal words ---------- */
+  .copy {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 26px 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 70ch;
+  }
+  .copy p { margin: 0; }
+  .copy .lede { font-size: 19px; line-height: 1.5; }
+  .copy .huge {
+    font-family: var(--display);
+    font-weight: 800;
+    font-size: clamp(26px, 4vw, 40px);
+    line-height: 1.02;
+    letter-spacing: -.03em;
+    text-wrap: balance;
+  }
+  .copy .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent);
+  }
+  .copy ul, .copy ol { margin: 0; padding-left: 1.15em; display: flex; flex-direction: column; gap: 9px; }
+  .copy hr { border: 0; border-top: 1px dashed var(--line); width: 100%; margin: 2px 0; }
+  .btn {
+    display: inline-block;
+    align-self: flex-start;
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 15px;
+    padding: 11px 22px;
+    background: var(--ink);
+    color: var(--paper);
+    letter-spacing: -.01em;
+  }
+  .micro { font-family: var(--mono); font-size: 12px; color: var(--ink-2); }
+
+  .alt {
+    border-left: 3px solid var(--accent-soft);
+    padding-left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .alt .tag {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .alt .line { font-family: var(--display); font-weight: 700; font-size: 19px; letter-spacing: -.02em; line-height: 1.2; }
+  .alt .why { font-family: var(--mono); font-size: 12px; color: var(--ink-2); line-height: 1.55; }
+
+  /* ---------- note to designer ---------- */
+  .note {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: var(--ink-2);
+    background: var(--sunk);
+    border-left: 2px solid var(--ink-3);
+    padding: 14px 18px;
+    max-width: 74ch;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .note::before {
+    content: "Design note";
+    font-size: 10px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .note ul { margin: 0; padding-left: 1.1em; display: flex; flex-direction: column; gap: 6px; }
+
+  .decide {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.65;
+    color: var(--flag);
+    background: var(--flag-soft);
+    border-left: 2px solid var(--flag);
+    padding: 14px 18px;
+    max-width: 74ch;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .decide::before {
+    content: "You must decide this before publishing";
+    font-size: 10px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    opacity: .85;
+  }
+  .decide ul { margin: 0; padding-left: 1.1em; display: flex; flex-direction: column; gap: 6px; }
+
+  .fill { color: var(--flag); font-family: var(--mono); font-size: .92em; white-space: nowrap; }
+
+  /* ---------- brand swatches ---------- */
+  .swatches { display: flex; flex-wrap: wrap; gap: 12px; }
+  .sw {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    padding: 9px 14px 9px 10px;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--ink-2);
+  }
+  .sw i { width: 20px; height: 20px; display: block; }
+
+  /* ---------- feature list ---------- */
+  .features { display: flex; flex-direction: column; gap: 0; max-width: 74ch; border-top: 1px solid var(--line); }
+  .feature {
+    display: grid;
+    grid-template-columns: 26px minmax(0,1fr);
+    gap: 0 16px;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .feature .fnum {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    padding-top: 4px;
+  }
+  .feature .fbody { display: flex; flex-direction: column; gap: 9px; min-width: 0; }
+  .feature p { margin: 0; }
+  .feature .src {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  /* ---------- table ---------- */
+  .scroll { overflow-x: auto; max-width: 100%; border: 1px solid var(--line); }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; background: var(--surface); }
+  th, td {
+    text-align: left;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    font-size: 14.5px;
+    vertical-align: top;
+  }
+  th {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: 12px;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ink-2);
+    background: var(--sunk);
+    white-space: nowrap;
+  }
+  td:first-child { font-family: var(--display); font-weight: 600; font-size: 14px; }
+  tbody tr:last-child td { border-bottom: 0; }
+  .yes { color: var(--brand); font-weight: 700; }
+
+  /* ---------- faq ---------- */
+  .faq { display: flex; flex-direction: column; gap: 0; max-width: 72ch; border-top: 1px solid var(--line); }
+  .qa { padding: 18px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+  .qa .q { font-family: var(--display); font-weight: 700; font-size: 15.5px; }
+  .qa .a { margin: 0; font-size: 16px; }
+
+  /* ---------- form spec ---------- */
+  .fields { display: flex; flex-direction: column; gap: 0; max-width: 74ch; border-top: 1px solid var(--line); }
+  .field {
+    display: grid;
+    grid-template-columns: minmax(150px, 210px) minmax(0,1fr);
+    gap: 4px 24px;
+    padding: 15px 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .field .fl { font-family: var(--display); font-weight: 700; font-size: 14.5px; }
+  .field .fd { font-family: var(--mono); font-size: 12px; color: var(--ink-2); line-height: 1.6; }
+  .field .fd em { color: var(--ink-3); font-style: normal; }
+
+  .wordlist { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 24px; max-width: 74ch; }
+  .wordlist ul { margin: 8px 0 0; padding-left: 1.1em; display: flex; flex-direction: column; gap: 6px; font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
+
+  footer {
+    padding: 44px 0 0;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-3);
+    line-height: 1.7;
+    max-width: 70ch;
+  }
+
+  @media (max-width: 720px) {
+    body { padding: 0 18px 80px; font-size: 16px; }
+    section { grid-template-columns: 1fr; gap: 0; padding: 40px 0; }
+    .rail { padding: 0 0 18px; display: flex; align-items: baseline; gap: 12px; }
+    .rail .num { margin-bottom: 0; font-size: 22px; }
+    .field { grid-template-columns: 1fr; }
+    .copy { padding: 20px; }
+  }
+</style>
+
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="kicker">Copy deck · v2 · for design</div>
+    <h1><span class="brand"><b>Push</b> More</span> waitlist page</h1>
+    <p class="standfirst">Every word for the pre-launch waitlist page, in the order it appears, with the job each section has to do. Words are final-ish; layout is yours.</p>
+    <div class="meta-row">
+      <span><b>Audience:</b> in-person personal trainers, 10–30 clients</span>
+      <span><b>Launch:</b> Chennai &amp; Coimbatore</span>
+      <span><b>Language:</b> English</span>
+      <span><b>One job:</b> phone number on the list</span>
+    </div>
+  </header>
+
+  <div class="legend">
+    <div><strong>Serif blocks</strong>The literal words that go on the page. Set them as written.</div>
+    <div><strong>Mono grey</strong>Notes to you — intent, hierarchy, what must be visible without scrolling.</div>
+    <div><strong>Red</strong>A blank the founder must fill before this page goes live. Nothing red ships as-is.</div>
+    <div><strong>Lime</strong>The wordmark. <span class="brand"><b>Push</b></span> is always lime; <em>More</em> never is.</div>
+  </div>
+
+  <section>
+    <div class="rail"><span class="num">00</span>Wordmark</div>
+    <div class="col">
+      <h2>The name, and the one rule about setting it</h2>
+      <p class="intent">The product is <strong>Push More</strong>. It's an instruction, not a noun — which is the whole reason it works for this audience. Two words in prose, always with the space.</p>
+
+      <div class="copy">
+        <p class="eyebrow">Wordmark</p>
+        <p class="huge"><span class="brand"><b>Push</b> More</span></p>
+        <hr>
+        <p class="micro"><strong>Push</strong> is lime. <strong>More</strong> is the same ink as the text around it. That contrast is the entire mark — don't colour both words, don't add a third colour, don't outline it.</p>
+      </div>
+
+      <div class="swatches">
+        <div class="sw"><i style="background:#4D7C0F"></i> #4D7C0F &nbsp;lime on light</div>
+        <div class="sw"><i style="background:#A3E635"></i> #A3E635 &nbsp;lime on dark</div>
+        <div class="sw"><i style="background:#16191A"></i> #16191A &nbsp;ink</div>
+      </div>
+
+      <div class="note">
+        <ul>
+          <li>Two limes, one mark. The bright lime is illegible on a white page and the dark lime dies on a black one — pick per background, never one for both.</li>
+          <li>In running text the name is plain: "Push More does this." Only the wordmark, the logo and the nav get the lime split. Colouring the name mid-paragraph every time it appears turns the page into confetti.</li>
+          <li>Lime is the brand's only saturated colour. Everything else on the landing page stays neutral, or the mark stops being the loudest thing on screen.</li>
+        </ul>
+      </div>
+      <div class="decide">
+        <ul>
+          <li>Set solid or spaced — "PushMore" as one tight lockup, or "Push More" with the space? The deck assumes a space. Decide before the logo is drawn, because it changes the domain and the handle too.</li>
+          <li>Check the name is free: Play Store, App Store, a .com or .in, and the Instagram handle. "Push" is a crowded word — do this before any of it is printed.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><span class="num">01</span>Hero</div>
+    <div class="col">
+      <h2>The first screen</h2>
+      <p class="intent">A trainer arrives from a gym-floor demo, an Instagram reel, or a WhatsApp forward from another trainer. They give this eight seconds on a mid-range Android, one-handed. Three things have to land in that time: this is for <em>me</em>, it fixes the thing I hate, and it costs me nothing to find out.</p>
+
+      <div class="copy">
+        <p class="eyebrow">For personal trainers in Chennai</p>
+        <p class="huge">Run 30 clients without a single spreadsheet.</p>
+        <p class="lede">Push More is the app for trainers who coach in person. Build programs once, log sets on the floor even with no signal, take fees straight into your own UPI, and send every client proof they're getting stronger.</p>
+        <a class="btn" href="#">Join the waitlist</a>
+        <p class="micro">20 seconds. We'll message you on WhatsApp when your batch opens.</p>
+      </div>
+
+      <div class="copy">
+        <p class="eyebrow">Three lines under the button</p>
+        <ul>
+          <li>Works in the basement gym with no network.</li>
+          <li>Fees go client → your UPI. We never touch the money and take no cut.</li>
+          <li>Free for the first <span class="fill">[100]</span> trainers, and we set you up ourselves.</li>
+        </ul>
+      </div>
+
+      <h3>Headline alternates</h3>
+      <div class="alt">
+        <span class="tag">A · recommended</span>
+        <span class="line">Run 30 clients without a single spreadsheet.</span>
+        <span class="why">Names the number they recognise and the object they hate. Concrete, no jargon, survives being read aloud in a noisy gym.</span>
+      </div>
+      <div class="alt">
+        <span class="tag">B · money-first</span>
+        <span class="line">Stop chasing payments. Start showing results.</span>
+        <span class="why">Leads with the sharpest pain. Use this if the ad or reel that brings them here is about getting paid.</span>
+      </div>
+      <div class="alt">
+        <span class="tag">C · craft-first</span>
+        <span class="line">Your training business, out of the notebook.</span>
+        <span class="why">Warmer, more respectful of the old way. Better for older, established trainers who don't like being told their system is broken.</span>
+      </div>
+      <div class="alt">
+        <span class="tag">D · name-first</span>
+        <span class="line">Push more. Chase less.</span>
+        <span class="why">The only headline that uses the name as a sentence, which is what the name is for. Weakest at saying what the app does, so it needs a very explicit subhead — but it's the one people will repeat.</span>
+      </div>
+
+      <div class="note">
+        <ul>
+          <li>The button and the "free for the first N" line must both be above the fold on a 6-inch phone. Everything else can wait.</li>
+          <li>If there's a hero image, it's a real trainer with a real client on a real Indian gym floor — not a stock studio, not a rendered dashboard floating in space.</li>
+          <li>A screenshot of the logging screen mid-set beats any illustration. That's the thing they'll do forty times a week.</li>
+        </ul>
+      </div>
+      <div class="decide">
+        <ul>
+          <li>How many founding spots — 50, 100, 200? The number is in the hero, the offer section, and the form. Pick once.</li>
+          <li>Do we say "Chennai" in the eyebrow? It sharpens relevance locally and rules out everyone else. Recommended yes for now — we can widen it later.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><span class="num">02</span>Problem</div>
+    <div class="col">
+      <h2>Name their evening back to them</h2>
+      <p class="intent">Recognition before pitch. Nothing here is a feature — it's a trainer reading their own week and thinking "how do they know that." Keep it short enough that it never becomes a complaint.</p>
+
+      <div class="copy">
+        <p class="huge">You didn't get certified to do admin.</p>
+        <ul>
+          <li>Someone asks if you're free at seven on Tuesday. You picture the week, say yes, and find out later you weren't.</li>
+          <li>A client asks what she lifted last Thursday. You scroll up four weeks of WhatsApp to find out.</li>
+          <li>Three people owe you this month. You're sure about two of the names.</li>
+          <li>You've rebuilt the same fat-loss program nine times, because the template only exists in your head.</li>
+          <li>The gym takes its cut and you work out your share on a calculator at the end of the month.</li>
+          <li>Your best client quit, and you had nothing to show him for eleven weeks of work.</li>
+        </ul>
+        <hr>
+        <p>None of that is training. It's the unpaid half of the job — and it's the half that makes clients leave.</p>
+      </div>
+
+      <div class="note">
+        <ul>
+          <li>Six lines is the ceiling. Seven starts to read as pity.</li>
+          <li>The scheduling line goes first on purpose — it's the one that happens daily and costs the least to admit to.</li>
+          <li>The last line is the hinge into the product. Give it air — its own line, not the tail of the list.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><span class="num">03</span>Product</div>
+    <div class="col">
+      <h2>What Push More actually does</h2>
+      <p class="intent">Eight blocks, in the order a trainer's day runs: plan → log → fill the day → move things around → prove it → get paid → split it → chase. Every claim here is something the app genuinely does today. Nothing is aspirational.</p>
+
+      <div class="features">
+        <div class="feature">
+          <div class="fnum">01</div>
+          <div class="fbody">
+            <h3>Build a program once. Reuse it forever.</h3>
+            <p>Pull from a full exercise library — sets, reps, rest, target load. Save any program as a template and hand it to the next client in one tap, then tweak it for that person without touching the template or anybody else's plan.</p>
+            <div class="src">Screenshot: program builder with a template being applied</div>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="fnum">02</div>
+          <div class="fbody">
+            <h3>Log on the floor. Signal or no signal.</h3>
+            <p>Open the client, tap the set, move on. Last session's load and reps are already filled in, so most sets take two taps. Everything saves on your phone first and syncs itself when you get network back — so a basement gym, a terrace, or a dead spot costs you nothing.</p>
+            <div class="src">Screenshot: set logger mid-session · this is the hero screenshot</div>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="fnum">03</div>
+          <div class="fbody">
+            <h3>See your day — and the free spots in it.</h3>
+            <p>Your diary opens on today, scrolled to right now. Sessions in order, and between them the gaps, marked with the times you could actually book. Someone asks if you're free at seven — you look, instead of guessing.</p>
+            <p>Tell Push More your working hours once and it stops offering slots you don't work. Block out a wedding, a holiday, or a Thursday morning and those hours go quiet. Try to book a slot that's already taken and it says so, and offers you the next free one.</p>
+            <div class="src">Screenshot: day view with an open gap expanded into bookable times · second hero screenshot</div>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="fnum">04</div>
+          <div class="fbody">
+            <h3>Set the week once. Move things without ten messages.</h3>
+            <p>Mondays, Wednesdays and Fridays at 7am for eight weeks — set it once and every session is on the calendar, with the dates shown to you before anything is booked.</p>
+            <p>When someone needs to move, change the time and the client is told for you. Mark a session done and it comes off their pack. Mark a no-show and it's on record. And if yesterday's sessions are still sitting unmarked, Push More tells you the moment you open the app, so the month doesn't end in guesswork.</p>
+            <div class="src">Screenshot: recurring-slot preview, and a session being rescheduled</div>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="fnum">05</div>
+          <div class="fbody">
+            <h3>Proof your client can see.</h3>
+            <p>Every set you log builds their chart. Personal bests get spotted on their own. Once a week each client gets a progress report — what they lifted, what they beat, how many sessions they turned up for — sent automatically, in your name.</p>
+            <div class="src">Screenshot: progress chart + a weekly report as the client receives it</div>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="fnum">06</div>
+          <div class="fbody">
+            <h3>Get paid, straight into your UPI.</h3>
+            <p>Send a link that opens your client's UPI app with your ID and the amount already filled in. The money goes from them to you — Push More never holds it and takes no commission. Session packs count themselves down, and you can see who's due before they go quiet on you.</p>
+            <div class="src">Screenshot: payment due chip → UPI app opening</div>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="fnum">07</div>
+          <div class="fbody">
+            <h3>The gym's cut, already calculated.</h3>
+            <p>Set the split per client, not per trainer — because most of us are on a gym's floor and taking private clients at the same time. Your dashboard shows this month's revenue with your share and the gym's share separated for you.</p>
+            <div class="src">Screenshot: dashboard revenue split</div>
+          </div>
+        </div>
+        <div class="feature">
+          <div class="fnum">08</div>
+          <div class="fbody">
+            <h3>Reminders that go where your clients already are.</h3>
+            <p>Session tomorrow. Payment due. Plan expiring. One tap sends it on WhatsApp, or let Push More send it for you. Nobody has to install anything to hear from you.</p>
+            <div class="src">Screenshot: WhatsApp reminder composer with a prefilled message</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="note">
+        <ul>
+          <li>Blocks 02, 03 and 06 carry the page — logging on the floor, seeing the day's free spots, and getting paid. If space forces a cut, cut 07 and 08 first, then 04. Never those three.</li>
+          <li>03 is the block most likely to be screenshotted and forwarded. It's the only claim on this page that nothing else in their life currently does. Give it the most room.</li>
+          <li>Every block needs its real screenshot. A feature list without product shots reads as vapourware to a trainer who's been burned by a gym-software demo.</li>
+          <li>Don't invent icons for these. Phone frames with real screens, or nothing.</li>
+        </ul>
+      </div>
+      <div class="decide">
+        <ul>
+          <li>Screenshots must come from a seeded demo account with plausible Chennai names and rupee amounts. Do not ship a screenshot containing a real client's name or number.</li>
+          <li>Nothing on this page mentions group or batch sessions — that feature is built but switched off for launch. Keep it out of the copy and out of every screenshot.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><span class="num">04</span>Client side</div>
+    <div class="col">
+      <h2>The part that makes them look good</h2>
+      <p class="intent">Trainers buy on time saved, but they <em>share</em> on how professional it makes them look. This section is also our distribution: every client who sees the app is a future trainer or a referral.</p>
+
+      <div class="copy">
+        <p class="huge">Your clients get the app free.</p>
+        <p>Invite a client and they get Push More in client mode: today's plan, their whole history, their charts, their upcoming sessions, and a one-tap way to pay you. On the days you're not there, they log their own sets — and it lands in your app.</p>
+        <p>They see a trainer who runs a real practice. It costs them nothing.</p>
+        <hr>
+        <p class="micro">A client has to accept your invite before anything is shared, and what they share stays between the two of you.</p>
+      </div>
+
+      <div class="note">
+        <ul>
+          <li>The consent line is small but it stays. It quietly answers "am I handing my clients to a company?" before that thought forms.</li>
+          <li>Good place for the only two-device shot on the page — trainer's phone and client's phone showing the same session.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><span class="num">05</span>Objection</div>
+    <div class="col">
+      <h2>Why not just keep the spreadsheet?</h2>
+      <p class="intent">Their real competition isn't another app — it's a Google Sheet and a notebook that already work well enough. Answer that head-on, and separate us from the online-coaching apps they've already tried and abandoned.</p>
+
+      <div class="scroll">
+        <table>
+          <thead>
+            <tr><th scope="col"></th><th scope="col">Spreadsheet + WhatsApp</th><th scope="col">Online coaching apps</th><th scope="col">Push More</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Works with no network</td><td>Sort of — if you remember to open it</td><td>No</td><td class="yes">Yes, by design</td></tr>
+            <tr><td>Logging a set on the floor</td><td>Typing on a phone keyboard, mid-set</td><td>Built for clients logging at home</td><td class="yes">Two taps, values prefilled</td></tr>
+            <tr><td>Knowing when you're free</td><td>You picture the week and guess</td><td>No diary — they train on their own time</td><td class="yes">Today's gaps, bookable in a tap</td></tr>
+            <tr><td>Moving a session</td><td>Four messages and a hope</td><td>Not their problem</td><td class="yes">Change the time, client told for you</td></tr>
+            <tr><td>Getting paid</td><td>You remember, or you don't</td><td>Card gateway, takes a cut</td><td class="yes">UPI to your own ID, no cut</td></tr>
+            <tr><td>The gym's share</td><td>Calculator, end of month</td><td>Doesn't exist</td><td class="yes">Per client, automatic</td></tr>
+            <tr><td>Proof for the client</td><td>Nothing to show</td><td>Yes, if they log it themselves</td><td class="yes">Weekly, sent for you</td></tr>
+            <tr><td>Built for</td><td>Whatever you made it</td><td>Online coaches with 200 clients</td><td class="yes">In-person trainers with 10–30</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="copy">
+        <p>A spreadsheet doesn't work without signal, doesn't remind anyone, doesn't chart anything, and can't send your client a report on Sunday morning. It's not that you're doing it wrong. It's that you're doing it by hand.</p>
+      </div>
+
+      <div class="note">
+        <ul>
+          <li>Table must scroll horizontally inside its own box on a phone. The page body never scrolls sideways.</li>
+          <li>Keep the middle column honest — online coaching apps genuinely do some things well. Overclaiming here is the fastest way to lose a trainer who has used one.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><span class="num">06</span>The maths</div>
+    <div class="col">
+      <h2>What it's worth, and how we make ours</h2>
+      <p class="intent">Two blocks that have to sit together. The first turns the product into rupees, so the price in the next section reads as small. The second says plainly how Push More earns — because every app that has ever touched an Indian trainer's money took a percentage, and saying our incentive out loud is worth more than another feature.</p>
+
+      <div class="copy">
+        <p class="eyebrow">What Push More is worth to you</p>
+        <p class="huge">It costs less than one session. It only has to save you one.</p>
+        <ul>
+          <li><strong>One gap filled a week.</strong> Your diary shows you the openings in today. Fill one at <span class="fill">[₹600]</span> and that's <span class="fill">[₹2,400]</span> a month you weren't earning before.</li>
+          <li><strong>One payment that stops slipping.</strong> Most trainers are carrying two or three late fees at any moment. Collecting one of them on time, every month, pays for Push More several times over.</li>
+          <li><strong>One client who stays a month longer.</strong> Clients who can see themselves getting stronger renew. One extra month on a <span class="fill">[₹4,000]</span> package is worth more than a year of the app.</li>
+          <li><strong>One no-show you saw coming.</strong> A reminder the evening before costs you a tap and saves you an empty hour.</li>
+          <li><strong>The evening back.</strong> Two hours a week of spreadsheets and scrolling for old numbers, at whatever your hour is worth.</li>
+        </ul>
+        <hr>
+        <p>We're not going to promise you more clients — we don't find you clients, and anyone who says they will is selling something else. What Push More does is stop you losing the clients and the rupees you already have.</p>
+      </div>
+
+      <div class="copy">
+        <p class="eyebrow">How we make money</p>
+        <p class="huge">One flat fee a month. Nothing else, from anyone.</p>
+        <ul>
+          <li><strong>No commission on your fees.</strong> Money goes from your client's UPI app to yours. It never passes through us, so there is nothing for us to take a cut of — not now, not when we're bigger.</li>
+          <li><strong>Your clients pay nothing.</strong> The client app is free and stays free. We don't want your clients to be a cost you have to justify.</li>
+          <li><strong>No ads, and we don't sell your data.</strong> You pay us, so you're the customer. That's the whole arrangement.</li>
+          <li><strong>Cancel and take your data with you.</strong> Your roster and your history export out. We'd rather earn next month than trap you in it.</li>
+        </ul>
+        <hr>
+        <p class="micro">We're telling you this before you sign up rather than after, because you've been burned by the other version.</p>
+      </div>
+
+      <div class="note">
+        <ul>
+          <li>These two blocks are one unit — value, then how we're paid. Splitting them across a scroll break loses the effect.</li>
+          <li>Set the rupee figures as the largest numbers on the page after the headline. This is the section a trainer does arithmetic in.</li>
+          <li>No graphs, no ROI calculator, no slider. A five-line list a trainer can check in their head is more persuasive than a widget they don't trust.</li>
+          <li>If the page runs long, this section can move below the offer — but it can never be cut. It's what makes the price feel like nothing.</li>
+        </ul>
+      </div>
+      <div class="decide">
+        <ul>
+          <li>Every rupee figure here must come from a real design-partner trainer's actual session rate and package price, not from our heads. An inflated number is spotted instantly by the only audience that matters.</li>
+          <li>"Cancel and take your data with you" promises an export. Confirm we'll have one, or cut that line — it's the easiest promise here to accidentally break.</li>
+          <li>Decide whether the monthly price appears on this page at all, or only after they join. Naming it is more honest and filters better; hiding it gets more signups. Recommended: name it.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><span class="num">07</span>Offer</div>
+    <div class="col">
+      <h2>The reason to join today instead of later</h2>
+      <p class="intent">A waitlist with no scarcity and no reward is a mailing list. This section converts. It's also our filter — white-glove onboarding only scales to the first cohort, and saying so out loud is what makes the limit believable.</p>
+
+      <div class="copy">
+        <p class="eyebrow">Founding trainers</p>
+        <p class="huge">The first <span class="fill">[100]</span> trainers get more than early access.</p>
+        <ul>
+          <li><strong>Free for <span class="fill">[X months]</span>.</strong> After that, founding price locked at <span class="fill">[₹X/month]</span> for as long as you stay.</li>
+          <li><strong>We set you up ourselves.</strong> One call where we load your clients, build your first program, and log your first session with you. You finish the call already running.</li>
+          <li><strong>You shape it.</strong> Founding trainers get a direct line to the people building this. What you ask for is what gets built next.</li>
+        </ul>
+        <hr>
+        <p class="micro">We're onboarding in small batches because every trainer gets that call. That's the only reason the number is limited.</p>
+      </div>
+
+      <div class="decide">
+        <ul>
+          <li>Free period and the locked monthly price. Both appear here and in the FAQ — they must match.</li>
+          <li>Is "locked for as long as you stay" a promise we'll honour in three years? If not, say "for your first year" instead. Don't write a cheque the pricing page can't cash.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><span class="num">08</span>Trust</div>
+    <div class="col">
+      <h2>The four fears, answered before they're asked</h2>
+      <p class="intent">A trainer's client list is their entire business. Every one of these is a thought they'll have on this page whether we address it or not. Short, flat, no hedging.</p>
+
+      <div class="copy">
+        <ul>
+          <li><strong>We take no cut of your fees.</strong> Payments go from your client to your UPI ID. The money never passes through us, so there's nothing for us to take.</li>
+          <li><strong>We're not a marketplace.</strong> Your clients will never be shown another trainer. We don't sell training — we sell you a tool.</li>
+          <li><strong>Your roster is yours.</strong> It lives in your account, not your gym's. If you change gyms, it moves with you.</li>
+          <li><strong>We keep almost nothing.</strong> A name, a phone number, and training numbers. No medical or health information, ever. Built to India's DPDP Act — ask us to delete your data and it's gone.</li>
+        </ul>
+        <hr>
+        <p class="micro">Made in Chennai, with trainers in Chennai.</p>
+      </div>
+
+      <div class="note">
+        <ul>
+          <li>Plain block, no shields or lock icons. Security theatre reads as something to hide.</li>
+          <li>"Your roster is yours" is the strongest line here for gym-employed trainers. Consider pulling it up first if the ground game is gym-led.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><span class="num">09</span>FAQ</div>
+    <div class="col">
+      <h2>Questions they'll actually ask</h2>
+      <p class="intent">These came off the objections a trainer raises in a two-minute gym-floor demo. Answer in their words, not ours. Nothing here should need a second read.</p>
+
+      <div class="faq">
+        <div class="qa"><div class="q">When do I get it?</div><p class="a">We're onboarding trainers in small batches from <span class="fill">[month]</span>, Chennai and Coimbatore first. You'll get a WhatsApp message when your batch opens.</p></div>
+        <div class="qa"><div class="q">What will it cost?</div><p class="a">Free while you're a founding trainer. After that, one flat monthly fee — less than what you charge for a single session. No commission on your payments, ever.</p></div>
+        <div class="qa"><div class="q">Do my clients have to pay or install anything?</div><p class="a">No. The client app is free, and clients who don't want an app still get their reminders and reports on WhatsApp, the way they do now.</p></div>
+        <div class="qa"><div class="q">I'm employed at a gym and I also take private clients. Which one is this for?</div><p class="a">Both, at the same time. Gym-collected or you-collected is a setting on each client, not on you. Your dashboard keeps the two straight.</p></div>
+        <div class="qa"><div class="q">Can my clients book their own sessions?</div><p class="a">Not for now — you own your calendar. When a client wants to move something they'll message you like they always have; the difference is you move it in two taps and they're told automatically. We'll open up client booking when trainers tell us they want it, not before.</p></div>
+        <div class="qa"><div class="q">Does a no-show cost my client a session from their pack?</div><p class="a">No. Only a session you mark done comes off the pack. A no-show is recorded so you both have the history, but it doesn't burn anything.</p></div>
+        <div class="qa"><div class="q">I train the same people every Monday, Wednesday and Friday.</div><p class="a">Set it once — days, time, how long, how many weeks — and every session is on your calendar. You'll see all the dates before anything is booked.</p></div>
+        <div class="qa"><div class="q">Will it work on my phone?</div><p class="a">Android and iPhone. It's built to run on a mid-range Android with a bad connection, because that's where the gym is.</p></div>
+        <div class="qa"><div class="q">I have 6 clients. I have 45 clients.</div><p class="a">It's built for 10 to 30. Below that it still saves you the evening; well above that, join anyway and tell us — we want to hear from you before we build for it.</p></div>
+        <div class="qa"><div class="q">Is my client list safe if I leave the gym?</div><p class="a">Yes. Your clients are attached to your account, not to any gym. Nobody at a gym can see or take them.</p></div>
+        <div class="qa"><div class="q">Tamil?</div><p class="a">English at launch. Tamil is the first thing we add after.</p></div>
+        <div class="qa"><div class="q">Does it write programs for me?</div><p class="a">No. You're the trainer — we're not going to pretend an app knows your client better than you do. What we do is make sure you never build the same program twice.</p></div>
+      </div>
+
+      <div class="note">
+        <ul>
+          <li>Accordion is fine, but the last two should be open by default — they're the ones that convert a hesitant gym-employed trainer.</li>
+        </ul>
+      </div>
+      <div class="decide">
+        <ul>
+          <li>Launch month.</li>
+          <li>Is the Tamil answer a commitment we're willing to be held to? It's currently scoped after launch, not in it. Soften to "Tamil is on the list" if that's shaky.</li>
+          <li><strong>The no-show rule is still open internally.</strong> Today a no-show doesn't touch the pack, and the answer above says so — but plenty of trainers charge for no-shows and will read "doesn't burn anything" as us costing them money. Settle the rule before this page goes live, and rewrite the answer to match.</li>
+          <li>The client-booking answer promises we'll add it "when trainers ask". Only keep that sentence if we mean it.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><span class="num">10</span>Form</div>
+    <div class="col">
+      <h2>The waitlist form</h2>
+      <p class="intent">Six fields is already generous for a phone form — every one of these earns its place either by qualifying a design partner or by telling us what to build. If a field does neither, cut it. Name and WhatsApp number are the only required ones.</p>
+
+      <div class="copy">
+        <p class="huge">Get your spot.</p>
+        <p>We're taking trainers in batches. Tell us where you train, and we'll message you on WhatsApp when yours opens.</p>
+      </div>
+
+      <div class="fields">
+        <div class="field"><div class="fl">Name</div><div class="fd">Required. Placeholder: <em>What your clients call you</em></div></div>
+        <div class="field"><div class="fl">WhatsApp number</div><div class="fd">Required. 10 digits, +91 prefixed and locked. This is the only channel we use. Label it "WhatsApp number", never "phone" — it sets the expectation of how we'll reach them.</div></div>
+        <div class="field"><div class="fl">City</div><div class="fd">Required. Free text with Chennai and Coimbatore as quick-picks. Tells us where the ground game goes next.</div></div>
+        <div class="field"><div class="fl">How many clients do you train right now?</div><div class="fd">Single choice: <em>1–5 · 6–15 · 16–30 · More than 30</em>. This is the design-partner filter — 6–30 gets a call first.</div></div>
+        <div class="field"><div class="fl">Where do you train them?</div><div class="fd">Multiple choice: <em>At a gym I work for · At gyms, as a freelancer · At home or in society gyms · Online as well</em>. Confirms the per-client payment-mode assumption is real before we bet the roadmap on it.</div></div>
+        <div class="field"><div class="fl">What eats the most time in your week right now?</div><div class="fd">Optional, one line. The single most valuable field on this page — it writes next quarter's roadmap and next month's ad copy. Placeholder: <em>Chasing payments, writing programs, remembering who's due…</em></div></div>
+      </div>
+
+      <div class="copy">
+        <p class="eyebrow">Button and states</p>
+        <p><strong>Button:</strong> Join the waitlist</p>
+        <p><strong>While sending:</strong> Adding you…</p>
+        <p><strong>Consent line under the button:</strong> We'll only message you about Push More. No marketing, and we never share your number.</p>
+        <hr>
+        <p><strong>Success:</strong> You're on the list. We'll WhatsApp you from <span class="fill">[number]</span> when your batch opens — save it now so you know it's us.</p>
+        <p><strong>Success, second line:</strong> Know another trainer who'd want this? Send them this page — trainers who come in together get onboarded together.</p>
+        <hr>
+        <p><strong>Bad number:</strong> That doesn't look like a 10-digit mobile number.</p>
+        <p><strong>Already on the list:</strong> You're already on it. We'll message you when your batch opens.</p>
+        <p><strong>Failed to send:</strong> That didn't save. Try once more, or just WhatsApp us on <span class="fill">[number]</span> and we'll add you.</p>
+      </div>
+
+      <div class="note">
+        <ul>
+          <li>Success state replaces the form in place. No redirect — the referral line has to be visible the second after they submit, while they're still feeling good about it.</li>
+          <li>The form appears twice: once here and once as a sticky bar on mobile that says "Join the waitlist" and scrolls to it.</li>
+          <li>Number pad keyboard on the phone field. Nothing kills a mobile form faster than a QWERTY keyboard for digits.</li>
+        </ul>
+      </div>
+      <div class="decide">
+        <ul>
+          <li>The WhatsApp business number that appears in the success and error copy.</li>
+          <li>Where submissions land, and who answers them within 24 hours. A waitlist nobody replies to is worse than no waitlist.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><span class="num">11</span>Closing</div>
+    <div class="col">
+      <h2>Last block and footer</h2>
+      <p class="intent">For the trainer who read everything and is still deciding. One line, one button, no new information.</p>
+
+      <div class="copy">
+        <p class="huge">Give us one evening back.</p>
+        <p>That's the whole promise. Get your diary, your programs, your logs and your money out of six different places and into one app that works on the gym floor.</p>
+        <a class="btn" href="#">Join the waitlist</a>
+      </div>
+
+      <div class="copy">
+        <p class="eyebrow">Footer</p>
+        <p class="micro"><span class="brand"><b>Push</b> More</span> · Made in Chennai for trainers who work in person.<br>
+        WhatsApp <span class="fill">[number]</span> · <span class="fill">[email]</span> · Instagram <span class="fill">[@handle]</span><br>
+        Privacy · Terms</p>
+      </div>
+
+      <div class="copy">
+        <p class="eyebrow">Nav bar (sticky, minimal)</p>
+        <p class="micro"><span class="brand"><b>Push</b> More</span> &nbsp;·&nbsp; What it does &nbsp;·&nbsp; Pricing &nbsp;·&nbsp; FAQ &nbsp;·&nbsp; <strong>[ Join the waitlist ]</strong></p>
+      </div>
+
+      <div class="copy">
+        <p class="eyebrow">Page title &amp; share preview</p>
+        <p class="micro"><strong>Title:</strong> Push More — the app for in-person personal trainers</p>
+        <p class="micro"><strong>Description:</strong> See your day and the free spots in it, log sets offline on the gym floor, take fees straight to your UPI, and send clients weekly proof. Free for the first <span class="fill">[100]</span> trainers in Chennai.</p>
+        <p class="micro"><strong>Share card headline:</strong> Run 30 clients without a spreadsheet.</p>
+        <p class="micro"><strong>Share card sub:</strong> Join the Push More waitlist — free for founding trainers.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail"><span class="num">12</span>Voice</div>
+    <div class="col">
+      <h2>How everything on this page should sound</h2>
+      <p class="intent">Rules for anything written later — ads, reels, the follow-up WhatsApp message — so it stays the same voice as the page.</p>
+
+      <div class="wordlist">
+        <div>
+          <h3>Do</h3>
+          <ul>
+            <li>Short sentences. Read them aloud; if you run out of breath, cut.</li>
+            <li>Say "you". Never "trainers can now…"</li>
+            <li>Use their words: clients, sets, reps, session pack, split, PR.</li>
+            <li>Rupees, always. ₹, not $.</li>
+            <li>Concrete numbers over adjectives — "two taps", "30 clients", "no signal".</li>
+            <li>Say what the app doesn't do. It's the fastest way to be believed.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>Don't</h3>
+          <ul>
+            <li>"Users", "leverage", "seamless", "empower", "elevate", "revolutionise", "game-changer", "10x".</li>
+            <li>"AI-powered". We don't do it, and trainers read it as "an app that thinks it knows better than me".</li>
+            <li>Any claim about growing their income. We don't get them clients and shouldn't imply we do.</li>
+            <li>Testimonials, trainer counts, or star ratings until they're real and attributed.</li>
+            <li>Streaks, leaderboards, gym-owner features, group or batch sessions, client self-booking, nutrition, wearables. None of it is in the first release — putting it on this page buys us churn.</li>
+            <li>Percentages of anything. The moment a trainer reads a % on a page about money, they assume we're taking one.</li>
+            <li>Talking down about spreadsheets. Their system got them here.</li>
+            <li>Punning on the name. "Push yourself", "push through", "no pain no gain" — the name already does that work, and doing it twice makes it a slogan instead of a product.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="decide">
+        <ul>
+          <li>No social proof exists yet. Every gap on this page for a testimonial, a trainer count, or a logo stays empty until a real design partner says a real sentence on the record. Placeholder proof is the one thing that will cost us this audience permanently.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    Sections run in the order a trainer reads them. Cut from the bottom, never the top — the page still works if it ends at 07.<br>
+    Every <span class="fill">[bracket]</span> is a decision, not a typo.
+  </footer>
+
+</div>
+
+</body>
+</html>

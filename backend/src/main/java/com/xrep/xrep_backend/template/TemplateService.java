@@ -57,12 +57,19 @@ public class TemplateService {
             Map<String, String> dayLabels
     ) {}
 
+    /**
+     * One day slot of the client's chosen layout: template "Day 2" lands on
+     * `weekday` (ISO, 1 = Monday) at `time` ("HH:mm", 24-hour).
+     */
+    public record ScheduleEntry(int day, int weekday, String time) {}
+
     public record ApplyTemplateRequest(
             @NotBlank String clientId,
             String name,
             String goal,
             Long startDate,
-            Long endDate
+            Long endDate,
+            List<ScheduleEntry> schedule
     ) {}
 
     public record TemplateResponse(
@@ -175,6 +182,15 @@ public class TemplateService {
 
     // ── Apply → creates an independent per-client program ─────────────────────
 
+    /**
+     * A template's day numbers are ordinal slots ("Day 1".."Day 7"), not
+     * weekdays. Which weekday each slot lands on is the client's preference,
+     * carried in `req.schedule` — so the copy below is also the translation:
+     * the client's `program_exercise` rows get the concrete weekday, which is
+     * what the phone's log and diary key on. The schedule must cover exactly
+     * the days the template has, or the apply is refused; a plan silently
+     * missing a day, or with a day nobody scheduled, is worse than an error.
+     */
     @Transactional
     public ProgramSummary apply(UUID templateId, UUID trainerId, ApplyTemplateRequest req) {
         var tmpl = findOwned(templateId, trainerId);
@@ -185,6 +201,20 @@ public class TemplateService {
         if (!Boolean.TRUE.equals(owned)) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Client not found");
         }
+
+        var blueprint = parseStructure(str(tmpl.get("structure")));
+
+        // The day slots this template actually has: the laid-out days plus any
+        // day an exercise already sits on — the same union the app draws.
+        var slots = new TreeSet<>(parseTrainingDaysCsv(str(tmpl.get("training_days"))));
+        for (var ex : blueprint) {
+            if (ex.get("day_of_week") instanceof Number n
+                    && n.intValue() >= 1 && n.intValue() <= 7) {
+                slots.add(n.intValue());
+            }
+        }
+
+        Map<Integer, ScheduleEntry> bySlot = validateSchedule(req.schedule(), slots);
 
         UUID programId = UUID.randomUUID();
         Instant now = Instant.now();
@@ -203,16 +233,18 @@ public class TemplateService {
         p.put("goal",      goal);
         p.put("startDate", startDate);
         p.put("endDate",   endDate);
+        p.put("schedule",  req.schedule() == null || req.schedule().isEmpty()
+                ? null : toJsonString(req.schedule()));
         p.put("now",       Timestamp.from(now));
 
         jdbc.update("""
                 INSERT INTO program (id, trainer_id, client_id, template_id, name, goal,
-                    start_date, end_date, status, created_at, updated_at)
+                    start_date, end_date, schedule, status, created_at, updated_at)
                 VALUES (:id::uuid, :tid::uuid, :cid::uuid, :tmplId::uuid, :name, :goal,
-                    :startDate, :endDate, 'active', :now, :now)
+                    :startDate, :endDate, CAST(:schedule AS jsonb), 'active', :now, :now)
                 """, p);
 
-        for (var ex : parseStructure(str(tmpl.get("structure")))) {
+        for (var ex : blueprint) {
             var ep = new HashMap<String, Object>();
             ep.put("id",          UUID.randomUUID().toString());
             ep.put("programId",   programId.toString());
@@ -220,9 +252,16 @@ public class TemplateService {
             ep.put("sets",        ex.get("sets"));
             ep.put("reps",        ex.get("reps"));
             ep.put("restSeconds", ex.get("rest_seconds"));
+            // V25. A timed prescription — "3 × 45s" — carried instead of reps.
+            ep.put("durationSeconds", ex.get("duration_seconds"));
             ep.put("targetLoad",  ex.get("target_load"));
             ep.put("notes",       str(ex.get("notes")));
-            ep.put("dayOfWeek",   ex.get("day_of_week"));
+            // The translation: ordinal template day → the weekday the client
+            // chose for it. Validation above guarantees every day the blueprint
+            // uses has a mapping; an entry with no day at all stays day-less.
+            Integer slot = ex.get("day_of_week") instanceof Number n ? n.intValue() : null;
+            ScheduleEntry landing = slot == null ? null : bySlot.get(slot);
+            ep.put("dayOfWeek",   landing == null ? null : landing.weekday());
             ep.put("orderIndex",  ex.getOrDefault("order_index", 0));
             // V20. A blueprint entry that predates multi-week programs has no
             // week on it and means week 1 — copying it as NULL would be the
@@ -233,9 +272,9 @@ public class TemplateService {
 
             jdbc.update("""
                     INSERT INTO program_exercise (id, program_id, exercise_id, sets, reps,
-                        rest_seconds, target_load, notes, day_of_week, week, order_index, created_at, updated_at)
+                        rest_seconds, duration_seconds, target_load, notes, day_of_week, week, order_index, created_at, updated_at)
                     VALUES (:id::uuid, :programId::uuid, :exerciseId::uuid, :sets, :reps,
-                        :restSeconds, :targetLoad, :notes, :dayOfWeek, :week, :orderIndex, :now, :now)
+                        :restSeconds, :durationSeconds, :targetLoad, :notes, :dayOfWeek, :week, :orderIndex, :now, :now)
                     """, ep);
         }
 
@@ -252,11 +291,62 @@ public class TemplateService {
     private Map<String, Object> findOwned(UUID id, UUID trainerId) {
         var rows = jdbc.queryForList(
                 "SELECT id::text, name, goal, description, structure::text AS structure, " +
-                "day_labels::text AS day_labels, created_at, updated_at " +
+                "day_labels::text AS day_labels, training_days, created_at, updated_at " +
                 "FROM template WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL",
                 Map.of("id", id.toString(), "tid", trainerId.toString()));
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Template not found");
         return rows.get(0);
+    }
+
+    /** "1,2,3" → {1,2,3}. Junk and out-of-range values are dropped, not thrown. */
+    private Set<Integer> parseTrainingDaysCsv(String csv) {
+        if (csv == null || csv.isBlank()) return Set.of();
+        var out = new TreeSet<Integer>();
+        for (String part : csv.split(",")) {
+            try {
+                int day = Integer.parseInt(part.trim());
+                if (day >= 1 && day <= 7) out.add(day);
+            } catch (NumberFormatException ignored) { /* not a day */ }
+        }
+        return out;
+    }
+
+    private static final java.util.regex.Pattern HHMM =
+            java.util.regex.Pattern.compile("^([01]\\d|2[0-3]):[0-5]\\d$");
+
+    /**
+     * The count-match rule: the schedule must name exactly the template's day
+     * slots — every slot placed on a distinct weekday, at a well-formed time.
+     * Anything else is a 400 that says what to fix, because the alternative is
+     * a client's plan with a day that never happens.
+     */
+    private Map<Integer, ScheduleEntry> validateSchedule(List<ScheduleEntry> schedule, Set<Integer> slots) {
+        int given = schedule == null ? 0 : schedule.size();
+        if (given != slots.size()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "This program trains %d day%s a week — schedule exactly %d weekday%s for it (got %d)."
+                            .formatted(slots.size(), slots.size() == 1 ? "" : "s",
+                                       slots.size(), slots.size() == 1 ? "" : "s", given));
+        }
+        if (slots.isEmpty()) return Map.of();
+
+        var bySlot = new HashMap<Integer, ScheduleEntry>();
+        var weekdays = new HashSet<Integer>();
+        for (ScheduleEntry entry : schedule) {
+            if (!slots.contains(entry.day()) || bySlot.put(entry.day(), entry) != null) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "The schedule must cover each of this program's days exactly once.");
+            }
+            if (entry.weekday() < 1 || entry.weekday() > 7 || !weekdays.add(entry.weekday())) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Each day needs its own weekday, Monday (1) through Sunday (7).");
+            }
+            if (entry.time() == null || !HHMM.matcher(entry.time()).matches()) {
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                        "Each day needs a time, as 24-hour HH:mm.");
+            }
+        }
+        return bySlot;
     }
 
     private TemplateResponse toResponse(Map<String, Object> r) {

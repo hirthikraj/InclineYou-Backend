@@ -14,7 +14,7 @@
  * is why the second line is a statement rather than a spinner.
  */
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
@@ -47,10 +47,22 @@ type Rt = RouteProp<MainStackParamList, 'ClientAdded'>;
 export default function ClientAddedScreen() {
   const navigation = useNavigation<Nav>();
   const { clientId } = useRoute<Rt>().params;
-  const { input, now } = useClientFile(clientId);
+  const { input, now, ready } = useClientFile(clientId);
   const roster = useRoster();
 
   const head = useMemo(() => buildHead(input, now), [input, now]);
+
+  // The sync that started with the write can come back refusing this person —
+  // a number that turns out to be a trainer's, or another trainer's client — and
+  // the row is then taken off this phone seconds after this screen opened. A
+  // congratulations page for somebody who no longer exists is worse than none,
+  // so it stands down to the roster, where the refusal is waiting as a toast.
+  //
+  // `ready` is what separates "gone" from "not read yet": both are a null head.
+  useEffect(() => {
+    if (ready && !head) navigation.popToTop();
+  }, [ready, head, navigation]);
+
   if (!head) return null;
 
   const first = head.name.split(' ')[0] || head.name;
@@ -59,6 +71,13 @@ export default function ClientAddedScreen() {
   const mornings = roster.rows.filter((r) => r.batch === 'morning').length;
   const evenings = roster.rows.filter((r) => r.batch === 'evening').length;
   const busiest = mornings === evenings ? null : mornings > evenings ? 'Mornings' : 'Evenings';
+
+  // The plan step books the standing week when it can, so "book their first
+  // session" would often be advice already taken. Count what's on the diary
+  // and let the row say which of the two states this client is in.
+  const booked = input.sessions.filter(
+    (s) => s.status === 'scheduled' && new Date(s.scheduledAt).getTime() > now,
+  ).length;
 
   return (
     <SafeAreaView edges={['top']} style={styles.safe}>
@@ -106,12 +125,22 @@ export default function ClientAddedScreen() {
         <List style={styles.list}>
           <Row
             grouped
-            title={`Book ${first}'s first session`}
-            subtitle={busiest ? `${busiest} are your busiest hours` : 'Pick a slot that repeats'}
+            title={
+              booked > 0
+                ? `${booked} session${booked === 1 ? '' : 's'} already booked`
+                : `Book ${first}'s first session`
+            }
+            subtitle={
+              booked > 0
+                ? 'From their plan — see them in the diary'
+                : busiest
+                  ? `${busiest} are your busiest hours`
+                  : 'Pick a slot that repeats'
+            }
             onPress={() =>
               navigation.navigate('Home', {
                 screen: 'DiaryTab',
-                params: { book: true, clientId },
+                params: booked > 0 ? { clientId } : { book: true, clientId },
               } as never)
             }
           />

@@ -11,7 +11,7 @@
  * template edit reach into a plan somebody was halfway through. Saying it on the
  * screen is cheap; the enforcement is in `db/training.ts` and on the server.
  *
- * The + asks for a name, a length and the days of the week it trains on, then
+ * The + asks for a name, a length and how many days a week it trains, then
  * drops straight into 3b with those days already laid out. What is still refused
  * is the thing the teardown actually objected to: **a blank twelve-week grid.**
  * A later week repeats week 1 until a trainer copies a week into it and changes

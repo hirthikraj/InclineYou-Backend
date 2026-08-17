@@ -103,6 +103,25 @@ export function observePacks() {
   return packsCollection.query(Q.sortBy('order_index', Q.asc)).observe();
 }
 
+/**
+ * Sessions this client has paid for and not yet used — the booking bound.
+ *
+ * The same rule as the diary's `packRemaining`, as a one-off read: the largest
+ * remaining count across their active packages. Null when nothing on their
+ * account counts sessions (no pack yet, or a monthly), which is a different
+ * answer from zero — null means "no bound", zero means "paid up and spent".
+ */
+export async function packSessionsLeft(clientId: string): Promise<number | null> {
+  const rows = await packagesCollection.query(Q.where('client_id', clientId)).fetch();
+  // Status compared case-blind, same as the diary — server-written rows have
+  // been seen carrying either casing.
+  const live = rows.filter((p) => (p.status ?? '').toLowerCase() === 'active');
+  const counts = live
+    .map((p) => p.sessionsRemaining)
+    .filter((n): n is number => typeof n === 'number');
+  return counts.length > 0 ? Math.max(0, Math.max(...counts)) : null;
+}
+
 /** 'trainer' | 'gym' — a price list belongs to one of two people. */
 export type PackOwner = 'trainer' | 'gym';
 

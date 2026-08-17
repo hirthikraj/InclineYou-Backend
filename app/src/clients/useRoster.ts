@@ -92,6 +92,10 @@ export function useRoster(active: boolean = true): LiveRoster {
           'status',
           'membership_status',
           'delivery_mode',
+          // The "Set up" attention verb derives from the client's week — saved
+          // on the onboarding schedule step, so it changes without the row
+          // being created or deleted.
+          'weekly_schedule',
           'metadata',
         ]),
       programs.query().observeWithColumns(['name', 'start_date', 'end_date', 'status']),

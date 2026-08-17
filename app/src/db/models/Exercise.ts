@@ -9,7 +9,9 @@ export default class Exercise extends Model {
   @text('equipment') equipment!: string;
   @text('movement_pattern') movementPattern!: string;
   @text('description') description!: string;
+  /** A still for the row's tile. Empty throughout the library — see `schema.ts`. */
   @text('image_url') imageUrl!: string;
+  /** Held the demo loop until the media was retired. Empty; nothing reads it. */
   @text('video_url') videoUrl!: string;
   @field('is_custom') isCustom!: boolean;
   @text('trainer_id') trainerId!: string;
@@ -24,6 +26,12 @@ export default class Exercise extends Model {
    * neither a stale device nor a later edit can move it.
    */
   @field('log_type') logType!: string | null;
+  /**
+   * The library's taxonomy, in two grains — "chest" and "pectorals". Both null on
+   * a trainer's own exercises, which the list groups under "Yours" regardless.
+   */
+  @text('body_part') bodyPart!: string | null;
+  @text('target') target!: string | null;
   @readonly @date('created_at') createdAt!: Date;
   @date('updated_at') updatedAt!: Date;
 }

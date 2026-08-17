@@ -25,6 +25,11 @@ export const SETUP_STEPS = [
   'specialities',
   'certifications',
   'languages',
+  // When you work, before what you sell — the physical facts of the week come
+  // before the commercial ones, and adding a client later offers their slots
+  // from these hours. The windows live in the synced `working_hours` table,
+  // not in this draft; only the count is here (same deal as packs below).
+  'hours',
   // What you sell, before how you get paid — the price comes before the pipe.
   // Packs themselves live in the synced database, not in this draft; only the
   // count is here, so the flow knows whether the step has been answered.
@@ -41,12 +46,13 @@ export const STEP_LABELS: Record<SetupStep, string> = {
   specialities: 'Specialities',
   certifications: 'Certifications',
   languages: 'Languages',
+  hours: 'When you work',
   packs: 'What you sell',
   payment: 'Getting paid',
 };
 
 /** Only `name` is mandatory — a client can't accept an invite from a blank name. */
-export const OPTIONAL_STEPS: SetupStep[] = ['certifications', 'packs', 'payment'];
+export const OPTIONAL_STEPS: SetupStep[] = ['certifications', 'hours', 'packs', 'payment'];
 
 export interface SetupDraft {
   name: string;
@@ -56,6 +62,14 @@ export interface SetupDraft {
   certifications: string[];
   languages: string[];
   upiId: string;
+  /**
+   * How many working-hour windows were saved, across the week.
+   *
+   * The windows themselves are rows in the synced `working_hours` table — the
+   * same table the diary and Settings edit. This count exists only so the
+   * resume screen and `nextStep` can tell answered from unanswered.
+   */
+  hoursCount: number;
   /**
    * How many packs are on the price list.
    *
@@ -76,6 +90,7 @@ export const EMPTY_DRAFT: SetupDraft = {
   certifications: [],
   languages: [],
   upiId: '',
+  hoursCount: 0,
   packCount: 0,
   skipped: [],
 };
@@ -93,6 +108,8 @@ export function isAnswered(step: SetupStep, draft: SetupDraft): boolean {
       return draft.certifications.length > 0;
     case 'languages':
       return draft.languages.length > 0;
+    case 'hours':
+      return draft.hoursCount > 0;
     case 'packs':
       return draft.packCount > 0;
     case 'payment':

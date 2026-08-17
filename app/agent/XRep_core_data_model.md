@@ -68,14 +68,24 @@ Types shown are Postgres. Every table also has the standard `id`, `created_at`, 
 | Column | Type | Null | Notes |
 |---|---|---|---|
 | name | varchar | no | |
-| muscle_group | varchar | yes | string taxonomy |
+| muscle_group | varchar | yes | string taxonomy; the **primary** muscle ("pectorals", "abs") |
+| body_part | varchar | yes | the coarse ten-way split — `back`, `cardio`, `chest`, `lower arms`, `lower legs`, `neck`, `shoulders`, `upper arms`, `upper legs`, `waist`. What the library screen groups by: the muscle is the right grain for a filter and too fine for a section heading, which would split one chest across "pectorals", "serratus anterior" and "delts" |
+| target | varchar | yes | the primary muscle again, but only where the seed said so. Null on a trainer's own exercise — which is what keeps custom rows out of the filter's vocabulary while `muscle_group` still describes them |
 | equipment | varchar | yes | string |
-| movement_pattern | varchar | yes | e.g. push/pull/hinge/squat |
-| level | varchar | yes | |
-| image_url | varchar | yes | optional |
-| video_url | varchar | yes | optional (trainer-supplied link) |
+| movement_pattern | varchar | yes | e.g. push/pull/hinge/squat. Unset on the current seed, which does not classify by force |
+| level | varchar | yes | unset on the current seed, which does not grade exercises beginner/expert |
+| image_url | varchar | yes | null on every seeded row — the library is text-only (see below). Retained as the seam a future image set would arrive through |
+| video_url | varchar | yes | null throughout; held the demo loop until the media was retired in V22. Nothing reads it |
 | owner_trainer_id | uuid (FK→trainer) | yes | null = shared/seeded library; set = this trainer's custom exercise |
-| source | varchar | no | origin: `custom`, `free-exercise-db`, or a future seed source. Single indicator of where the exercise came from (replaces a separate `is_custom` flag) |
+| source | varchar | no | origin: `custom`, `exercises-dataset`, or a future seed source. Single indicator of where the exercise came from (replaces a separate `is_custom` flag) |
+
+> **The seeded library is [`hasaneyldrm/exercises-dataset`](https://github.com/hasaneyldrm/exercises-dataset)** — 1,324 exercises: names, body parts, equipment, targets and step-by-step instructions. **Text only.**
+>
+> ⚠ **Its licence is split, and we take only the half that was offered.** The *data* is MIT and is what we seed. The *media* — a 180×180 still **and** a 180×180 animation GIF per exercise — is **© Gym visual (https://gymvisual.com/)**, redistributed upstream under a written permission granted to that repository and not travelling with a clone. It is therefore **not seeded**: `scripts/build-exercise-seed.py` drops the paths before they reach the classpath, and V22 cleared the rows that briefly carried them.
+> 
+> The stills fall under this too. They are frames of the same artwork, so dropping only the animations would have left the same problem in a quieter form. If a Gym visual licence is ever bought — a one-time N-CRFL, priced per asset — the media returns at full resolution and the seam is `image_url` / `video_url`, both of which still exist.
+>
+> **Replacing the seed source is a migration, not an edit.** Two libraries share no identifiers, so retiring one means soft-deleting its rows and seeding the new one alongside — per the evolution contract in §5. Programs and set logs pointing at a retired exercise keep their history and their foreign keys; the exercise simply reads as removed until it is re-picked. There is no honest automatic remapping between libraries, and guessing one silently rewrites what a trainer recorded.
 
 ### 3.4 `program`
 | Column | Type | Null | Notes |
@@ -84,6 +94,7 @@ Types shown are Postgres. Every table also has the standard `id`, `created_at`, 
 | name | varchar | yes | |
 | is_active | boolean | no | |
 | template_id | uuid (FK→template) | yes | set if created from a template |
+| schedule | jsonb | yes | the client's chosen layout, written by apply: `[{"day":1,"weekday":2,"time":"06:30"}, …]` — which weekday each template day slot lands on, and when. Null on programs assigned before slots and weekdays were separate |
 
 ### 3.5 `program_exercise` (which exercises are in a program)
 | Column | Type | Null | Notes |
@@ -94,6 +105,7 @@ Types shown are Postgres. Every table also has the standard `id`, `created_at`, 
 | order_index | int | no | ordering within the day |
 | target_sets | int | yes | |
 | target_reps | varchar | yes | **string** ("8–12") |
+| duration_seconds | int | yes | a timed prescription — "3 × 45s" — carried **instead of** reps, never alongside. Chosen per prescription when the exercise is added, because nothing in the library marks an exercise as a hold |
 | target_load | varchar | yes | **string** ("bodyweight", "60kg") |
 | notes | varchar | yes | |
 
@@ -103,6 +115,8 @@ Types shown are Postgres. Every table also has the standard `id`, `created_at`, 
 | trainer_id | uuid (FK→trainer) | no | |
 | name | varchar | no | |
 | structure | jsonb | no | reusable blueprint (days/exercises/targets); applied by copying into a `program` |
+
+> **A template's days are ordinal slots, not weekdays.** "Day 1".."Day 7" is what the blueprint and `training_days` mean; which weekday each slot lands on (and at what time) is the client's preference, captured at apply time in `program.schedule`. Apply refuses a schedule that does not cover the template's day slots exactly — one distinct weekday per slot — and translates each blueprint entry's slot to its landed weekday as it copies, so the client's `program_exercise` rows stay concrete. Templates authored before this (when the numbers meant weekdays) were soft-deleted rather than reinterpreted (server V24).
 
 ### 3.7 `workout_session`
 | Column | Type | Null | Notes |

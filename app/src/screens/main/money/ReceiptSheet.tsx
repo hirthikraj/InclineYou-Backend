@@ -56,6 +56,13 @@ export default function ReceiptSheet({
 }) {
   if (!receipt) return null;
 
+  // Money that came over the gym's counter got its receipt at the counter —
+  // the trainer just marks it done here, and the gym pays them their part.
+  // So the confirmation talks in the trainer's money: the counter's full
+  // figure is a line item, not the headline.
+  const gymCollected = receipt.method === 'gym_front_office';
+  const take = Math.max(0, receipt.amount - receipt.gymShare);
+
   const text = receiptText(receipt, gym);
 
   const send = async () => {
@@ -80,7 +87,7 @@ export default function ReceiptSheet({
         <View style={styles.tick}>
           <IconCheck size={24} color={colors.okFillInk} strokeWidth={3} />
         </View>
-        <Text style={styles.title}>{rupees(receipt.amount)} recorded</Text>
+        <Text style={styles.title}>{rupees(gymCollected ? take : receipt.amount)} recorded</Text>
       </View>
 
       <Receipt>
@@ -96,19 +103,33 @@ export default function ReceiptSheet({
         />
         <ReceiptRow label="Date" value={stamp(receipt.at)} />
         <ReceiptRow label="Receipt no." value={receipt.receiptNo} />
-        {receipt.gymShare > 0 ? (
-          <ReceiptRow label="Gym's share" value={`−${rupees(receipt.gymShare)}`} />
-        ) : null}
-        <ReceiptRow label="Received" value={rupees(receipt.amount)} total />
+        {gymCollected ? (
+          <>
+            <ReceiptRow label="Paid at the counter" value={rupees(receipt.amount)} />
+            {receipt.gymShare > 0 ? (
+              <ReceiptRow label="Gym keeps" value={`−${rupees(receipt.gymShare)}`} />
+            ) : null}
+            <ReceiptRow label="Yours" value={rupees(take)} total />
+          </>
+        ) : (
+          <>
+            {receipt.gymShare > 0 ? (
+              <ReceiptRow label="Gym's share" value={`−${rupees(receipt.gymShare)}`} />
+            ) : null}
+            <ReceiptRow label="Received" value={rupees(receipt.amount)} total />
+          </>
+        )}
       </Receipt>
 
       <View style={styles.actions}>
-        <Button
-          label="Send them the receipt"
-          block
-          icon={IconSend}
-          onPress={() => void send()}
-        />
+        {gymCollected ? null : (
+          <Button
+            label="Send them the receipt"
+            block
+            icon={IconSend}
+            onPress={() => void send()}
+          />
+        )}
         <Button label="Undo" variant="ghost" block onPress={onUndo} />
       </View>
 

@@ -19,11 +19,14 @@ public class ExerciseController {
     public ExerciseService.SearchResult search(
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String muscleGroup,
+            @RequestParam(required = false) String bodyPart,
+            @RequestParam(required = false) String target,
             @RequestParam(required = false) String equipment,
             @RequestParam(required = false) String level,
             @RequestParam(defaultValue = "0")  int page,
             @RequestParam(defaultValue = "20") int size) {
-        return exerciseService.search(trainerId(), q, muscleGroup, equipment, level, page, size);
+        return exerciseService.search(
+                trainerId(), q, muscleGroup, bodyPart, target, equipment, level, page, size);
     }
 
     @GetMapping("/meta")

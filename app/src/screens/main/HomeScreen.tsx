@@ -215,6 +215,27 @@ export default function HomeScreen() {
   const dayOver = deck.today.length > 0 && deck.todayDone === deck.today.length;
   const offline = network.isConnected === false || network.isInternetReachable === false;
 
+  // Same rule as the roster: an empty deck on a fresh install is unproven
+  // until a pull has succeeded this launch — "add your first client" reads as
+  // "your clients are gone" to a trainer who has eight and just signed in. The
+  // skeleton holds the stage while the first pull runs (the sync band above it
+  // says why), plus one beat after it lands for the observables to re-emit.
+  // A failed attempt lifts the hold: offline, the local read is all there is,
+  // and a genuinely new trainer still needs the add button.
+  const syncConfirmed = sync.phase !== 'syncing' && sync.lastSyncedAt !== null;
+  const [emptyStands, setEmptyStands] = useState(false);
+  useEffect(() => {
+    if (!(deck.ready && deck.firstRun && syncConfirmed)) {
+      setEmptyStands(false);
+      return;
+    }
+    const t = setTimeout(() => setEmptyStands(true), 400);
+    return () => clearTimeout(t);
+  }, [deck.ready, deck.firstRun, syncConfirmed]);
+  const firstRunProven =
+    emptyStands || (sync.phase === 'error' && sync.lastSyncedAt === null);
+  const deckSettled = deck.ready && (!deck.firstRun || firstRunProven);
+
   /* ---------------------------------------------------------------- actions */
 
   const openSession = (session: DeckSession) =>
@@ -418,7 +439,7 @@ export default function HomeScreen() {
         {/* Everything from here down is derived from the tables. The chrome
             above — bar, offline banner, sync band, profile meter — is real
             before the first read and stays put. */}
-        <Reveal ready={deck.ready} skeleton={<DeckSkeleton />}>
+        <Reveal ready={deckSettled} skeleton={<DeckSkeleton />}>
         <Hero
           deck={deck}
           starting={starting}
@@ -593,6 +614,22 @@ export default function HomeScreen() {
                     {rupees(deck.money.billed)}
                   </Text>
                 </View>
+                {/* Whose money it is, right next to what was billed. Only drawn
+                    when a gym cut makes the two differ — repeating the same
+                    figure twice would read as a bug. */}
+                {deck.money.yours < deck.money.billed ? (
+                  <View style={styles.moneyShare}>
+                    <Text style={styles.moneyLabel}>Your share</Text>
+                    <Text
+                      style={styles.moneyShareValue}
+                      numberOfLines={1}
+                      adjustsFontSizeToFit
+                      minimumFontScale={0.7}
+                    >
+                      {rupees(deck.money.yours)}
+                    </Text>
+                  </View>
+                ) : null}
                 {deck.money.trendPercent !== null ? (
                   <Tag
                     label={`${deck.money.trendPercent >= 0 ? '▲' : '▼'} ${Math.abs(deck.money.trendPercent)}%`}
@@ -864,6 +901,14 @@ const styles = StyleSheet.create({
     color: colors.ink3,
   },
   moneyValue: { fontSize: 30, fontWeight: '800', letterSpacing: -1.05, color: colors.ink, marginTop: 8 },
+  moneyShare: { alignItems: 'flex-end', flexShrink: 0 },
+  moneyShareValue: {
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: -0.66,
+    color: colors.ink,
+    marginTop: 8,
+  },
 
   weekHead: {
     flexDirection: 'row',

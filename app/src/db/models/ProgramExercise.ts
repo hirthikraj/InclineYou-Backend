@@ -9,6 +9,8 @@ export default class ProgramExercise extends Model {
   @field('sets') sets!: number;
   @field('reps') reps!: number;
   @field('rest_seconds') restSeconds!: number;
+  /** A timed prescription's seconds ("3 × 45s"), carried instead of reps. Null on rep-counted rows. */
+  @field('duration_seconds') durationSeconds!: number | null;
   @field('target_load') targetLoad!: number;
   @text('notes') notes!: string;
   @field('day_of_week') dayOfWeek!: number;

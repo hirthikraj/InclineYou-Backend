@@ -39,6 +39,29 @@ export const EXPERIENCE_BANDS: Option[] = [
   { id: '10_plus', label: '10+ years' },
 ];
 
+/**
+ * The three ways a trainer works — the profile's `workMode` vocabulary, in the
+ * same words setup screen 02 uses. A defaults hint (which price lists exist,
+ * who collects), never a gate: gym-vs-freelance is decided per client.
+ */
+export const WORK_MODES: Option[] = [
+  {
+    id: 'independent',
+    label: 'On my own',
+    note: 'Independent — your clients, your prices, you collect',
+  },
+  {
+    id: 'gym',
+    label: 'At a gym',
+    note: "The gym's counter sells its packages; you're paid a share",
+  },
+  {
+    id: 'both',
+    label: 'Both',
+    note: "Freelance clients of your own, plus the gym's floor",
+  },
+];
+
 /** Up to five, and the cap is the point — a trainer who "does everything" tells a client nothing. */
 export const SPECIALITY_CAP = 5;
 

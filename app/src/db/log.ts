@@ -598,6 +598,7 @@ async function swapInProgram(
           next.sets = pe.sets;
           next.reps = pe.reps;
           next.restSeconds = pe.restSeconds;
+          next.durationSeconds = pe.durationSeconds;
           next.targetLoad = pe.targetLoad;
           next.notes = pe.notes;
           next.dayOfWeek = pe.dayOfWeek;

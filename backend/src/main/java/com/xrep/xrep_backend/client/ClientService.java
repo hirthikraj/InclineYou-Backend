@@ -26,6 +26,7 @@ public class ClientService {
 
     private final ClientRepository clientRepo;
     private final BodyMetricRepository bodyMetricRepo;
+    private final ClientPhoneGuard phoneGuard;
     private final NamedParameterJdbcTemplate jdbc;
 
     // ── DTOs ──────────────────────────────────────────────────────────────────
@@ -59,6 +60,9 @@ public class ClientService {
             List<Map<String, Object>> weeklySchedule,
             String deliveryMode
     ) {}
+
+    /** One number to ask about, in a body rather than a query string. */
+    public record PhoneCheckRequest(@NotBlank String phone) {}
 
     public record StatusFlags(boolean paymentDue, boolean sessionPackLow, boolean planExpiring) {}
 
@@ -123,8 +127,18 @@ public class ClientService {
         return toResponse(client, flags);
     }
 
+    /** Can this trainer put this number on their roster? Asked before the form is submitted. */
+    public ClientPhoneGuard.Verdict checkPhone(UUID trainerId, String phone) {
+        return phoneGuard.check(trainerId.toString(), phone);
+    }
+
     @Transactional
     public ClientResponse create(UUID trainerId, CreateClientRequest req) {
+        // One phone, one person, one place — a trainer's number, another
+        // trainer's client and a duplicate on this trainer's own roster are all
+        // refused outright here. See ClientPhoneGuard.
+        phoneGuard.require(trainerId.toString(), req.phone());
+
         var client = new Client();
         client.setTrainerId(trainerId);
         client.setName(req.name());
@@ -146,6 +160,11 @@ public class ClientService {
     public ClientResponse update(UUID trainerId, UUID clientId, UpdateClientRequest req) {
         var client = findOwned(trainerId, clientId);
         if (req.name() != null)                client.setName(req.name());
+        // Only when it actually moves: re-saving a row whose number was already
+        // accepted must not start failing because the rule arrived after it.
+        if (req.phone() != null && !req.phone().equals(client.getPhone())) {
+            phoneGuard.require(trainerId.toString(), req.phone());
+        }
         if (req.phone() != null)               client.setPhone(req.phone());
         if (req.goal() != null)                client.setGoal(req.goal());
         if (req.status() != null)              client.setStatus(req.status());

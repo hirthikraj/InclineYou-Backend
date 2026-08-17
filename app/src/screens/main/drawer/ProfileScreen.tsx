@@ -33,6 +33,7 @@ import {
   EXPERIENCE_BANDS,
   LANGUAGES,
   SPECIALITIES,
+  WORK_MODES,
   labelFor,
 } from '../../../setup/options';
 import {
@@ -51,6 +52,7 @@ import {
   IconGlobe,
   IconPercent,
   IconUser,
+  IconUsers,
   IconWallet,
   Seg,
   Setting,
@@ -234,6 +236,22 @@ export default function ProfileScreen() {
             <GroupHead label="Where you work" />
             <SettingList>
               <Setting
+                icon={IconUsers}
+                label="How you work"
+                meta="Decides which price lists you keep and who collects by default"
+                value={workModeLabel(profile.workMode)}
+                onPress={() =>
+                  setField({
+                    kind: 'single',
+                    key: 'workMode',
+                    title: 'How you work',
+                    meta: 'A default, not a gate — whether any one client is freelance or the gym’s is still decided when you add them.',
+                    options: WORK_MODES,
+                    value: asWorkMode(profile.workMode),
+                  })
+                }
+              />
+              <Setting
                 icon={IconBuilding}
                 label="Gym"
                 meta={profile.gymName ?? 'On your own · you keep all of it'}
@@ -317,6 +335,17 @@ export default function ProfileScreen() {
       ) : null}
     </SafeAreaView>
   );
+}
+
+/** Only the three answers the vocabulary knows; anything else reads as unset. */
+function asWorkMode(value: string | null | undefined): string | null {
+  return value === 'independent' || value === 'gym' || value === 'both' ? value : null;
+}
+
+/** "On my own" · "At a gym" · "Both" — or "Not set" for a pre-workMode profile. */
+function workModeLabel(value: string | null | undefined): string {
+  const mode = asWorkMode(value);
+  return mode ? labelFor(mode, WORK_MODES) : 'Not set';
 }
 
 /** "+91 98840 21774" — the shape an Indian number is read in. */

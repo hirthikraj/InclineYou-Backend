@@ -61,6 +61,8 @@ export interface NewProgramExercise {
   sets?: number | null;
   reps?: number | null;
   restSeconds?: number | null;
+  /** Seconds, for a hold — "3 × 45s". Given INSTEAD of reps, never alongside. */
+  durationSeconds?: number | null;
 }
 
 function after(reason: string) {
@@ -86,13 +88,17 @@ export async function addProgramExercise(
   const order =
     existing.filter((pe) => weekOf(pe) === week && dayOf(pe) === input.day).length + 1;
 
+  // A timed entry gets no reps — inventing 10 reps of a plank would be a
+  // number nobody wrote. 3 × 10 stands in only when nothing was said.
+  const timed = input.durationSeconds != null && input.durationSeconds > 0;
   const created = await database.write(() =>
     programExercisesCollection.create((pe) => {
       pe.programId = programId;
       pe.exerciseId = input.exerciseId;
       pe.sets = input.sets ?? 3;
-      pe.reps = input.reps ?? 10;
+      if (!timed) pe.reps = input.reps ?? 10;
       pe.restSeconds = input.restSeconds ?? 60;
+      if (timed) pe.durationSeconds = input.durationSeconds ?? null;
       if (input.day != null) pe.dayOfWeek = input.day;
       pe.week = week;
       pe.orderIndex = order;
@@ -104,7 +110,13 @@ export async function addProgramExercise(
 
 export async function updateProgramExercise(
   id: string,
-  patch: { sets?: number | null; reps?: number | null; restSeconds?: number | null; day?: number | null },
+  patch: {
+    sets?: number | null;
+    reps?: number | null;
+    restSeconds?: number | null;
+    durationSeconds?: number | null;
+    day?: number | null;
+  },
 ): Promise<void> {
   const row = await programExercisesCollection.find(id);
   await database.write(() =>
@@ -112,6 +124,9 @@ export async function updateProgramExercise(
       if (patch.sets !== undefined) pe.sets = patch.sets as number;
       if (patch.reps !== undefined) pe.reps = patch.reps as number;
       if (patch.restSeconds !== undefined) pe.restSeconds = patch.restSeconds as number;
+      // Explicit null is a real answer here: switching a row from a hold back
+      // to reps clears the duration rather than leaving both to disagree.
+      if (patch.durationSeconds !== undefined) pe.durationSeconds = patch.durationSeconds;
       if (patch.day !== undefined && patch.day != null) pe.dayOfWeek = patch.day;
     }),
   );
@@ -154,6 +169,7 @@ export async function copyProgramWeek(
           next.sets = pe.sets;
           next.reps = pe.reps;
           next.restSeconds = pe.restSeconds;
+          next.durationSeconds = pe.durationSeconds;
           next.targetLoad = pe.targetLoad;
           next.notes = pe.notes;
           next.dayOfWeek = pe.dayOfWeek;

@@ -24,6 +24,8 @@ export interface GroupHeadProps {
   tone?: 'default' | 'alert';
   /** Collapses the group. Omit and the header is inert. */
   onPress?: () => void;
+  /** The header's second act — renaming, mostly. Only honoured alongside `onPress`. */
+  onLongPress?: () => void;
   collapsed?: boolean;
   style?: StyleProp<ViewStyle>;
 }
@@ -33,6 +35,7 @@ export default function GroupHead({
   count,
   tone = 'default',
   onPress,
+  onLongPress,
   collapsed = false,
   style,
 }: GroupHeadProps) {
@@ -62,6 +65,7 @@ export default function GroupHead({
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
       accessibilityRole="button"
       accessibilityState={{ expanded: !collapsed }}
       accessibilityLabel={count === undefined ? label : `${label}, ${count}`}

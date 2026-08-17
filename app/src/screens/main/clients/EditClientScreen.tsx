@@ -48,6 +48,7 @@ import {
   space,
 } from '../../../design';
 import { isPhone } from './AddClientScreen';
+import { checkClientPhone } from '../../../api/clients';
 
 type Nav = NativeStackNavigationProp<MainStackParamList>;
 type Rt = RouteProp<MainStackParamList, 'EditClient'>;
@@ -66,6 +67,8 @@ export default function EditClientScreen() {
   const [seeded, setSeeded] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  /** A new number that turns out to be somebody else. Same rule as the add form. */
+  const [taken, setTaken] = useState<{ digits: string; message: string } | null>(null);
 
   // Seeded once. Re-seeding on every emission would fight the trainer's typing
   // the moment a sync lands mid-edit.
@@ -77,12 +80,42 @@ export default function EditClientScreen() {
     setSeeded(true);
   }, [head, seeded]);
 
+  const digits = phone.replace(/\D/g, '');
+  const current = (head?.phone ?? '').replace(/\D/g, '');
+
+  // Only a number that actually moved is asked about. Their own current number
+  // is on another roster by definition — this client's — and asking would
+  // refuse the edit that changes nothing.
+  useEffect(() => {
+    if (!isPhone(digits) || digits === current) {
+      setTaken(null);
+      return;
+    }
+    let alive = true;
+    const timer = setTimeout(() => {
+      checkClientPhone(digits)
+        .then((verdict) => {
+          if (!alive) return;
+          setTaken(
+            verdict.available || !verdict.message ? null : { digits, message: verdict.message },
+          );
+        })
+        .catch(() => {
+          if (alive) setTaken(null);
+        });
+    }, 400);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [digits, current]);
+
   if (!head) return null;
 
-  const digits = phone.replace(/\D/g, '');
   const validPhone = digits.length === 0 || isPhone(digits);
-  const ready = name.trim().length > 0 && validPhone && !saving;
-  const changedPhone = digits !== (head.phone ?? '').replace(/\D/g, '');
+  const blocked = taken?.digits === digits ? taken : null;
+  const ready = name.trim().length > 0 && validPhone && !blocked && !saving;
+  const changedPhone = digits !== current;
 
   const done = input.sessions.filter((s) => s.status === 'done').length;
   const perSession =
@@ -140,15 +173,17 @@ export default function EditClientScreen() {
           onChangeText={setPhone}
           keyboardType="phone-pad"
           seg="+91"
-          error={!validPhone}
+          error={!validPhone || blocked != null}
           accessibilityLabel="Phone number"
         />
-        <FieldMsg tone={!validPhone ? 'error' : 'hint'}>
+        <FieldMsg tone={!validPhone || blocked ? 'error' : 'hint'}>
           {!validPhone
             ? 'An Indian mobile number is ten digits, starting 6 to 9'
-            : changedPhone
-              ? 'A new number resends the invite; the old link dies.'
-              : 'Reminders and the invite both go to this number.'}
+            : blocked
+              ? blocked.message
+              : changedPhone
+                ? 'A new number resends the invite; the old link dies.'
+                : 'Reminders and the invite both go to this number.'}
         </FieldMsg>
 
         <Text style={styles.group}>Where they train</Text>

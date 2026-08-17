@@ -52,6 +52,8 @@ export interface MoneyClient {
   name: string;
   phone?: string | null;
   deliveryMode?: string | null;
+  /** 'trainer_collects' (freelance) or 'gym_collects' (the gym's client). */
+  paymentMode?: string | null;
   metadata?: unknown;
   /** What the TRAINER keeps on this client, when the gym's usual cut differs. */
   trainerSplitPercent?: number | null;

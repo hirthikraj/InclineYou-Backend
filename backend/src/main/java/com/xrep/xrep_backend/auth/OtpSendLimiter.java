@@ -58,8 +58,7 @@ public class OtpSendLimiter {
     public void check(String phone, Instant now) {
         var otp = props.getOtp();
 
-        // The day's ceiling first. When both limits apply it is the longer wait,
-        // and quoting the 30-second one would be a promise the next request breaks.
+        // The day's ceiling first. When both limits apply it is the longer wait, and quoting the 30-second one would be a promise the next request breaks.
         var daily = buckets.tryConsume(
                 "otp:day:" + phone,
                 otp.getMaxSendsPerDay(),

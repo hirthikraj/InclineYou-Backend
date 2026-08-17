@@ -21,10 +21,18 @@ public class SyncController {
         return ResponseEntity.ok(syncService.pull(currentTrainerId(), lastPulledAt));
     }
 
+    /**
+     * 200 with a body rather than the 204 this used to answer.
+     *
+     * A push is no longer all-or-nothing: a roster row whose number belongs to a
+     * trainer, or to another trainer's client, is refused while everything
+     * around it lands. `rejected` is what the app puts in front of the trainer —
+     * empty on the overwhelming majority of pushes. WatermelonDB ignores the
+     * response body, so this breaks nothing that does not read it.
+     */
     @PostMapping("/push")
-    public ResponseEntity<Void> push(@RequestBody Map<String, Object> body) {
-        syncService.push(currentTrainerId(), body);
-        return ResponseEntity.noContent().build();
+    public ResponseEntity<SyncService.PushResult> push(@RequestBody Map<String, Object> body) {
+        return ResponseEntity.ok(syncService.push(currentTrainerId(), body));
     }
 
     private UUID currentTrainerId() {

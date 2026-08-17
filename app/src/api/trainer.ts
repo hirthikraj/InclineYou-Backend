@@ -22,6 +22,13 @@ export interface TrainerProfile {
   setupComplete: boolean;
   setupCompletedAt: string | null;
   /**
+   * Screen 02 · what you sell. 'independent' | 'gym' | 'both' — the trainer's
+   * onboarding answer. A HINT for defaults (which price lists to ask for, who
+   * collects by default), never a gate: gym-vs-freelance is decided per client.
+   * Null means the question was never answered.
+   */
+  workMode?: string | null;
+  /**
    * Screen 06 · money. A null gym name means no gym — an independent trainer
    * keeps all of it, and the "your share" line is hidden rather than shown as
    * a full bar that says nothing.
@@ -53,6 +60,8 @@ export interface TrainerUpdate {
   languages?: string[];
   /** Stamps setup as finished. The server never un-stamps it. */
   completeSetup?: boolean;
+  /** 'independent' | 'gym' | 'both'. An empty string clears the answer. */
+  workMode?: string;
   /** An empty string means "left the gym" — it clears the percentage too. */
   gymName?: string;
   gymSharePercent?: number;

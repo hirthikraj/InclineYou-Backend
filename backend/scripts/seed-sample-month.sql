@@ -244,8 +244,9 @@ ON CONFLICT (id) DO UPDATE SET
 -- seeded library by name, so a library that has not been seeded yields a template
 -- with a shape and no exercises — which draws correctly rather than breaking.
 --
--- The names below are the EXACT ones free-exercise-db ships, warts and all
--- ("Barbell Bench Press - Medium Grip"). The join is exact-match, so a plausible
+-- The names below are the EXACT ones the seeded library carries — upstream's
+-- own, lower-cased but for the first letter, warts and all ("Barbell full
+-- squat"). The join is exact-match, so a plausible
 -- near-miss silently drops that exercise and the day comes out short — a push day
 -- with no bench press on it, which reads as a bug in the app rather than a typo
 -- in a seed. The `\echo` at the end reports the entry count per template so a
@@ -264,21 +265,21 @@ CREATE TEMP TABLE seed_template (
 
 INSERT INTO seed_template VALUES
  ('ppl', md5(:'trainer_phone' || ':seed:template:ppl')::uuid, 'Push / Pull / Legs', 'Build strength', 8,
-  '{"1":["Barbell Bench Press - Medium Grip","Incline Dumbbell Press","Triceps Pushdown"],
-    "3":["Barbell Deadlift","Bent Over Barbell Row","Barbell Curl"],
-    "5":["Barbell Squat","Romanian Deadlift","Standing Calf Raises"]}',
+  '{"1":["Barbell bench press","Dumbbell incline bench press","Cable pushdown"],
+    "3":["Barbell deadlift","Barbell bent over row","Barbell curl"],
+    "5":["Barbell full squat","Barbell romanian deadlift","Barbell standing calf raise"]}',
   '{"1":"Push A","3":"Pull A","5":"Legs A"}'),
  ('full', md5(:'trainer_phone' || ':seed:template:full')::uuid, 'Full Body', 'General fitness', 12,
-  '{"1":["Barbell Squat","Barbell Bench Press - Medium Grip","Bent Over Barbell Row"],
-    "3":["Barbell Deadlift","Dumbbell Shoulder Press","Pullups"],
-    "5":["Leg Press","Dumbbell Bench Press","Elevated Cable Rows"]}',
+  '{"1":["Barbell full squat","Barbell bench press","Barbell bent over row"],
+    "3":["Barbell deadlift","Dumbbell seated shoulder press","Pull-up"],
+    "5":["Smith leg press","Dumbbell bench press","Cable rope elevated seated row"]}',
   '{"1":"Full Body A","3":"Full Body B","5":"Full Body C"}'),
  ('upper', md5(:'trainer_phone' || ':seed:template:upper')::uuid, 'Upper / Lower', 'Muscle gain', 6,
-  '{"2":["Barbell Bench Press - Medium Grip","Bent Over Barbell Row","Dumbbell Shoulder Press"],
-    "5":["Barbell Squat","Romanian Deadlift","Leg Press"]}',
+  '{"2":["Barbell bench press","Barbell bent over row","Dumbbell seated shoulder press"],
+    "5":["Barbell full squat","Barbell romanian deadlift","Smith leg press"]}',
   '{"2":"Upper","5":"Lower"}'),
  ('remote', md5(:'trainer_phone' || ':seed:template:remote')::uuid, 'Remote Core', 'Post-natal', 4,
-  '{"3":["Plank","Barbell Glute Bridge"],"7":["Plank","Dead Bug"]}',
+  '{"3":["Power point plank","Barbell glute bridge"],"7":["Power point plank","Dead bug"]}',
   '{"3":"Core A","7":"Core B"}');
 
 INSERT INTO template (id, trainer_id, name, goal, description, structure, day_labels, weeks, created_at)

@@ -52,7 +52,7 @@ export default function LanguagesScreen({ navigation }: Props) {
 
   const cont = () => {
     patch({ languages: chosen });
-    navigation.navigate('Packs');
+    navigation.navigate('Hours');
   };
 
   return (
@@ -78,11 +78,6 @@ export default function LanguagesScreen({ navigation }: Props) {
           <PickAdd label="+ Another language" onPress={() => setAdding(true)} />
         </Pick>
 
-        <Callout tone="accent" icon={IconMessage} style={styles.trailing}>
-          <CalloutStrong tone="accent">No competitor asks this.</CalloutStrong> In a market where a
-          client may specifically want a Tamil-speaking coach, it's one field no other app can
-          match.
-        </Callout>
       </SetupBody>
 
       <SetupFoot>

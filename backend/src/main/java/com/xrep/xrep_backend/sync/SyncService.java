@@ -1,5 +1,6 @@
 package com.xrep.xrep_backend.sync;
 
+import com.xrep.xrep_backend.client.ClientPhoneGuard;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -18,6 +19,7 @@ import java.util.*;
 public class SyncService {
 
     private final NamedParameterJdbcTemplate jdbc;
+    private final ClientPhoneGuard phoneGuard;
 
     // ── Response types ────────────────────────────────────────────────────────
 
@@ -28,6 +30,30 @@ public class SyncService {
             List<Map<String, Object>> updated,
             List<String> deleted
     ) {}
+
+    /**
+     * What the push refused, and why.
+     *
+     * A push used to answer 204 — everything you sent, we took. That is no
+     * longer true of a roster row whose number belongs to a trainer or to
+     * another trainer's client, and a silent refusal is the worst of the three
+     * options: the record sits on the phone looking synced and exists nowhere
+     * else. So the push says what it would not take, per record, in words the
+     * app can put on screen without inventing them.
+     *
+     * Empty on every push that had nothing to refuse, which is nearly all of
+     * them. WatermelonDB ignores the body, so reading this is the app's choice.
+     */
+    public record PushResult(List<Rejection> rejected) {}
+
+    /**
+     * @param field the column the refusal is about, so an app can highlight it
+     * @param code  {@link com.xrep.xrep_backend.client.ClientPhoneGuard} codes
+     * @param kept  false when nothing was written at all, true when the rest of
+     *              the record landed and only this field was left as it was
+     */
+    public record Rejection(
+            String table, String id, String field, String code, String message, boolean kept) {}
 
     // ── Pull ──────────────────────────────────────────────────────────────────
 
@@ -240,13 +266,14 @@ public class SyncService {
     // ── Push ──────────────────────────────────────────────────────────────────
 
     @Transactional
-    public void push(UUID trainerId, Map<String, Object> body) {
+    public PushResult push(UUID trainerId, Map<String, Object> body) {
         @SuppressWarnings("unchecked")
         var changes = (Map<String, Object>) body.get("changes");
-        if (changes == null) return;
+        if (changes == null) return new PushResult(List.of());
 
         String tid = trainerId.toString();
-        pushClients(tid, changes);
+        var rejected = new ArrayList<Rejection>();
+        pushClients(tid, changes, rejected);
         pushBodyMetrics(tid, changes);
         // Before the sessions: `scheduled_session.batch_id` is a foreign key to
         // it, and a phone that created a batch and its four attendees offline
@@ -275,6 +302,7 @@ public class SyncService {
         pushExerciseFavourites(tid, changes);
         warnOnUnhandledTables(tid, changes);
         log.debug("sync push trainer={} tables={}", tid, changes.keySet());
+        return new PushResult(List.copyOf(rejected));
     }
 
     private static final Set<String> HANDLED_PUSH_TABLES = Set.of(
@@ -302,42 +330,73 @@ public class SyncService {
     }
 
     @SuppressWarnings("unchecked")
-    private void pushClients(String tid, Map<String, Object> changes) {
+    private void pushClients(String tid, Map<String, Object> changes, List<Rejection> rejected) {
         var table = (Map<String, Object>) changes.get("clients");
         if (table == null) return;
 
         for (var record : mergeCreatedUpdated(table)) {
+            String id = str(record.get("id"));
+            if (id == null) {
+                log.warn("push client: trainer={} dropping a record with no id", tid);
+                continue;
+            }
             String phone = str(record.get("phone"));
 
-            // V18 · one number, one role.
-            //
-            // A number that already owns a trainer account cannot also sit on
-            // somebody's roster: `app_user.role` is exclusive, and sign-in reads
-            // it as the whole answer. Checked here rather than at add-time
-            // because the roster is written offline and there is no network to
-            // ask at the moment the trainer types the number.
-            //
-            // What this does NOT do is drop the row. Only the INVITE is
-            // impossible — the trainer's record of this person is perfectly
-            // valid, and the roster already tells them that an un-invited client
-            // can be scheduled, logged and billed exactly like any other. Losing
-            // the client, their sessions and their payments to enforce a rule
-            // about app access would cost the trainer far more than the rule is
-            // worth, and they would never find out why. So the row lands and
-            // says what happened; `unavailable` is what the roster renders.
-            boolean blocked = phone != null && ownedByATrainer(phone);
-            if (blocked) {
-                log.info("push client: {} owns a trainer account — saved, invite withheld", phone);
+            /*
+             * One number, one person, one place.
+             *
+             * A trainer's own number cannot sit on somebody else's roster
+             * (`app_user.role` is exclusive and sign-in reads it as the whole
+             * answer), and neither can a number that is already another
+             * trainer's live client. The rule is applied here, at the push,
+             * rather than only at add-time, because the roster is written
+             * offline: the add screen asks first when it has signal, but a phone
+             * on a gym floor with none does not, and this is where every write
+             * eventually arrives.
+             *
+             * ── Refused, not corrected ────────────────────────────────────────
+             *
+             * This used to save the row with `membership_status = 'unavailable'`
+             * — the record stood, only the invite was withheld — on the reasoning
+             * that losing a client and their sessions to enforce a rule about app
+             * access costs the trainer more than the rule is worth. That is still
+             * true of a client who cannot be REACHED. It is not true of a person
+             * who is somebody else, and the roster row was the bug: T1 could add
+             * T2 and it looked like it worked.
+             *
+             * So a NEW row with a claimed number is never created. An EXISTING
+             * one keeps everything except the number — the trainer's book must
+             * not lose a name change because the phone edit beside it was wrong —
+             * and both cases come back in the push response with a sentence.
+             */
+            // Existence and the stored number in one look: an absent row makes
+            // this a create, and a number that has not moved is not re-judged —
+            // a rule that arrived after a row did must not start failing the
+            // re-push of a record it already accepted.
+            var owned = jdbc.queryForList("""
+                    SELECT phone FROM client WHERE id = :id::uuid AND trainer_id = :tid::uuid
+                    """, Map.of("id", id, "tid", tid));
+            boolean isNew = owned.isEmpty();
+            String stored = isNew ? null : str(owned.get(0).get("phone"));
+
+            var verdict = phone != null && !phone.equals(stored)
+                    ? phoneGuard.check(tid, phone)
+                    : ClientPhoneGuard.Verdict.ok();
+
+            if (!verdict.available()) {
+                rejected.add(new Rejection(
+                        "clients", id, "phone", verdict.code(), verdict.message(), !isNew));
+                log.info("push client: trainer={} refused phone on {} — {}", tid, id, verdict.code());
+                if (isNew) continue;
+                // Everything else in the record still lands, on the old number.
+                phone = stored;
             }
 
             // The identity, created the moment a trainer names the number. This
             // is what an invite is FOR — the person does not exist to us until
             // somebody claims they train with them, and they have not agreed to
             // anything yet, which is exactly what `membership_status` carries.
-            //
-            // Skipped for a blocked number: an `app_user` already exists for it
-            // and it says trainer, which is the whole reason we are here.
-            if (phone != null && !blocked) {
+            if (phone != null) {
                 jdbc.update("""
                         INSERT INTO app_user (phone, role) VALUES (:phone, 'client')
                         ON CONFLICT (phone) DO NOTHING
@@ -345,11 +404,10 @@ public class SyncService {
             }
 
             var p = new HashMap<String, Object>();
-            p.put("id",                    str(record.get("id")));
+            p.put("id",                    id);
             p.put("tid",                   tid);
             p.put("name",                  str(record.get("name")));
-            p.put("phone",                 record.get("phone"));
-            p.put("blocked",               blocked);
+            p.put("phone",                 phone);
             p.put("goal",                  record.get("goal"));
             p.put("status",                strOrDefault(record.get("status"), "active"));
             p.put("payment_mode",          strOrDefault(record.get("payment_mode"), "trainer_collects"));
@@ -381,9 +439,9 @@ public class SyncService {
                         -- A client with no phone can never sign in to answer, so
                         -- there is nobody to ask and nothing to hold up: their
                         -- record is the trainer's alone and starts accepted.
-                        -- `unavailable` is the third case: the number is real but
-                        -- belongs to a trainer account, so no invite can ever be
-                        -- sent to it and the roster has to say so.
+                        -- There is no third case any more: a number that belongs
+                        -- to somebody else never reaches this statement, it is
+                        -- refused above and reported back to the phone.
                         -- CAST on every :phone here, and it is not decoration.
                         -- NamedParameterJdbcTemplate expands each occurrence
                         -- into its own `?`, so a :phone that appears only in an
@@ -391,11 +449,9 @@ public class SyncService {
                         -- refuses the statement with "could not determine data
                         -- type" — but ONLY when the value really is null, which
                         -- is exactly the client-with-no-phone case.
-                        CASE WHEN CAST(:blocked AS boolean)   THEN 'unavailable'
-                             WHEN CAST(:phone AS varchar) IS NULL THEN 'accepted'
+                        CASE WHEN CAST(:phone AS varchar) IS NULL THEN 'accepted'
                              ELSE 'invited' END,
-                        CASE WHEN CAST(:blocked AS boolean)
-                                   OR CAST(:phone AS varchar) IS NULL
+                        CASE WHEN CAST(:phone AS varchar) IS NULL
                              THEN NULL ELSE NOW() END,
                         CASE WHEN CAST(:phone AS varchar) IS NULL
                              THEN NOW() ELSE NULL END,
@@ -443,14 +499,12 @@ public class SyncService {
                         -- the hard purge deletes the row outright and has no
                         -- membership left to describe.
                         membership_status = CASE
-                            -- Still pointing at a trainer's number. Re-asserted
-                            -- on every push rather than latched, because the
-                            -- other side of it is the recovery below.
-                            WHEN CAST(:blocked AS boolean) THEN 'unavailable'
-                            -- The trainer corrected the number. This is the
-                            -- reason the block is a state and not a rejection:
-                            -- fixing the typo is a plain edit, and the invite
-                            -- that could not be sent before now can be.
+                            -- The trainer corrected a number that was refused
+                            -- before this rule hardened. No new row is ever
+                            -- written `unavailable` — the push refuses those
+                            -- outright now — but rows already carrying it have
+                            -- to be able to heal, and fixing the number is a
+                            -- plain edit that makes the invite possible.
                             WHEN client.membership_status = 'unavailable'
                                 THEN 'invited'
                             WHEN client.membership_status IN ('invited', 'declined')
@@ -469,12 +523,10 @@ public class SyncService {
                         -- only became sendable today. Nobody was ignoring it —
                         -- it could not be delivered.
                         invited_at = CASE
-                            WHEN CAST(:blocked AS boolean) THEN NULL
                             WHEN client.membership_status = 'unavailable' THEN NOW()
                             ELSE client.invited_at
                         END,
                         removed_at = CASE
-                            WHEN CAST(:blocked AS boolean) THEN NULL
                             WHEN client.membership_status IN ('invited', 'declined', 'unavailable')
                                 THEN client.removed_at
                             WHEN EXCLUDED.status = 'archived' AND client.status <> 'archived'
@@ -487,7 +539,6 @@ public class SyncService {
                         -- client who is removed, told, and later brought back is
                         -- told again if it happens a second time.
                         removed_ack_at = CASE
-                            WHEN CAST(:blocked AS boolean) THEN NULL
                             WHEN client.membership_status IN ('invited', 'declined', 'unavailable')
                                 THEN client.removed_ack_at
                             WHEN EXCLUDED.status = 'archived'
@@ -577,9 +628,10 @@ public class SyncService {
             // V12. How long the program runs, which is what the Programs screen
             // draws its weeks × days matrix from.
             p.put("weeks",       record.get("weeks"));
-            // V20. The weekdays the program trains on, "1,3,5". Held apart from
-            // the blueprint because a day exists as soon as the trainer lays it
-            // out, which is before anything has been put on it.
+            // V20, ordinal since V24. The day slots the program trains on,
+            // "1,2,3" — which weekday each slot lands on is per client, chosen
+            // at apply time. Held apart from the blueprint because a day exists
+            // as soon as the trainer lays it out, before anything is put on it.
             p.put("training_days", record.get("training_days"));
             p.put("created_at",  toTimestamp(record.get("created_at")));
             p.put("updated_at",  toTimestamp(record.get("updated_at")));
@@ -689,6 +741,8 @@ public class SyncService {
             p.put("sets",        record.get("sets"));
             p.put("reps",        record.get("reps"));
             p.put("restSeconds", record.get("rest_seconds"));
+            // V25. A timed prescription's seconds, carried instead of reps.
+            p.put("durationSeconds", record.get("duration_seconds"));
             p.put("targetLoad",  record.get("target_load"));
             p.put("notes",       record.get("notes"));
             p.put("dayOfWeek",   record.get("day_of_week"));
@@ -701,20 +755,21 @@ public class SyncService {
 
             jdbc.update("""
                     INSERT INTO program_exercise (id, program_id, exercise_id, sets, reps,
-                        rest_seconds, target_load, notes, day_of_week, week, order_index, created_at, updated_at)
+                        rest_seconds, duration_seconds, target_load, notes, day_of_week, week, order_index, created_at, updated_at)
                     VALUES (:id::uuid, :programId::uuid, :exerciseId::uuid, :sets, :reps,
-                        :restSeconds, :targetLoad, :notes, :dayOfWeek, :week, :orderIndex,
+                        :restSeconds, :durationSeconds, :targetLoad, :notes, :dayOfWeek, :week, :orderIndex,
                         COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
                     ON CONFLICT (id) DO UPDATE SET
-                        sets         = EXCLUDED.sets,
-                        reps         = EXCLUDED.reps,
-                        rest_seconds = EXCLUDED.rest_seconds,
-                        target_load  = EXCLUDED.target_load,
-                        notes        = EXCLUDED.notes,
-                        day_of_week  = EXCLUDED.day_of_week,
-                        week         = EXCLUDED.week,
-                        order_index  = EXCLUDED.order_index,
-                        updated_at   = EXCLUDED.updated_at
+                        sets             = EXCLUDED.sets,
+                        reps             = EXCLUDED.reps,
+                        rest_seconds     = EXCLUDED.rest_seconds,
+                        duration_seconds = EXCLUDED.duration_seconds,
+                        target_load      = EXCLUDED.target_load,
+                        notes            = EXCLUDED.notes,
+                        day_of_week      = EXCLUDED.day_of_week,
+                        week             = EXCLUDED.week,
+                        order_index      = EXCLUDED.order_index,
+                        updated_at       = EXCLUDED.updated_at
                     """, p);
         }
 
@@ -1704,23 +1759,6 @@ public class SyncService {
             log.warn("push: dropping malformed uuid in {} — {}", column, raw);
             return null;
         }
-    }
-
-    /**
-     * V18 · does this number already own a trainer account?
-     *
-     * The guard that keeps `app_user.role` exclusive from the roster side.
-     * Checked against `app_user` rather than `trainer` because that is the table
-     * sign-in believes, and a check against a different table than the one the
-     * decision is read from is a check that can disagree with it.
-     */
-    private boolean ownedByATrainer(String phone) {
-        return Boolean.TRUE.equals(jdbc.queryForObject("""
-                SELECT EXISTS(
-                    SELECT 1 FROM app_user
-                    WHERE phone = :phone AND role = 'trainer' AND deleted_at IS NULL
-                )
-                """, Map.of("phone", phone), Boolean.class));
     }
 
     private String strOrDefault(Object v, String defaultVal) {

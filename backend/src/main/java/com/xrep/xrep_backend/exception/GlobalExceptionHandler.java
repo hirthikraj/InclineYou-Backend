@@ -4,6 +4,7 @@ import com.xrep.xrep_backend.auth.InvalidOtpException;
 import com.xrep.xrep_backend.auth.OtpExpiredException;
 import com.xrep.xrep_backend.auth.OtpLockedException;
 import com.xrep.xrep_backend.auth.OtpThrottledException;
+import com.xrep.xrep_backend.client.PhoneUnavailableException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -63,6 +64,19 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                 .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
                 .body(pd);
+    }
+
+    /**
+     * 409, because the number is real and the request is well-formed — it is
+     * already spoken for. The app reads `code` to choose the recovery it offers:
+     * a trainer's number needs a different number, another trainer's client
+     * needs to leave that roster first.
+     */
+    @ExceptionHandler(PhoneUnavailableException.class)
+    ProblemDetail handlePhoneUnavailable(PhoneUnavailableException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        return pd;
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -84,13 +84,9 @@ public class AppProperties {
         public static class Exercises {
             private boolean enabled = true;
             private String resource = "seed/exercises.json";
-            /**
-             * Where the seeded exercise images are served from. Defaults to the
-             * upstream repo so a fresh clone works; point it at the R2/S3 bucket
-             * once the images have been mirrored (see scripts/mirror-exercise-images.sh).
-             */
-            private String imageBaseUrl =
-                    "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises";
+            // No media base URL: the seeded library is text only. Upstream's images
+            // and GIFs are © Gym visual and need a licence we do not hold, so there
+            // is nothing to point a base URL at. See ExerciseSeeder.
         }
     }
 

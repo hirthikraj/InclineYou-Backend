@@ -7,16 +7,23 @@
  * "₹375 a session" gets computed instead of guessed, and the Money screen has
  * something to group by.
  *
+ * **How you work is asked first**, because it decides which price lists exist.
+ * An independent trainer sells their own packs. A gym-employed trainer sells
+ * the packages the gym's counter sets. Plenty do both — freelance clients in
+ * the morning, the gym's floor in the evening — and they keep two lists. The
+ * answer lands on the profile as `workMode`, and it is a defaults hint, never
+ * a gate: who actually collects, and the gym's share, are still decided per
+ * client at add-client time, because the mix changes month to month.
+ *
  * Packs are written straight into the database as they are added — not held in
  * the setup draft — so a trainer who quits halfway through still has their
  * prices, and the rows sync like everything else.
  *
- * **A trainer employed at a gym is asked twice**, because they sell two things:
- * their own packs, and the packages the gym's counter sells. Adding a client
- * later asks who collects the money and then needs the matching price list, so
- * a gym-employed trainer with no gym packages has a dead end waiting for them.
- * That is why Continue holds until at least one is entered — Skip in the app bar
- * still passes on the whole step, which is a different and honest answer.
+ * **A gym needs a named price list before Continue**, because adding a client
+ * later asks who collects the money and then needs the matching prices — a
+ * gym-employed trainer with no gym packages has a dead end waiting for them.
+ * That is why Continue holds until at least one is entered — Skip in the app
+ * bar still passes on the whole step, which is a different and honest answer.
  *
  * Skippable, and honestly so: plenty of trainers quote a number per client. The
  * Money screen's empty state asks again at the moment it actually matters.
@@ -30,12 +37,13 @@ import type { SetupStackParamList } from '../../navigation/SetupStack';
 import { useSetup } from '../../setup/SetupContext';
 import { useAuth } from '../../store/AuthContext';
 import { createPack, packOwner, packsCollection, setPackStatus } from '../../db/money';
-import { getTrainer, updateTrainer } from '../../api/trainer';
+import { getTrainer, updateTrainer, type TrainerUpdate } from '../../api/trainer';
 import type PackModel from '../../db/models/Pack';
 import {
   Button,
   Callout,
   CalloutStrong,
+  ChoiceCard,
   Control,
   FieldLabel,
   FieldMsg,
@@ -45,7 +53,6 @@ import {
   IconWallet,
   List,
   Row,
-  Segmented,
   colors,
   space,
 } from '../../design';
@@ -55,6 +62,13 @@ import { SetupBar, SetupBody, SetupFoot, SetupScreen, SetupSub, SetupTitle } fro
 type Props = {
   navigation: NativeStackNavigationProp<SetupStackParamList, 'Packs'>;
 };
+
+/** The three ways a trainer works. The profile's `workMode` vocabulary. */
+type WorkMode = 'independent' | 'gym' | 'both';
+
+function asWorkMode(value: string | null | undefined): WorkMode | null {
+  return value === 'independent' || value === 'gym' || value === 'both' ? value : null;
+}
 
 /** ₹1,24,500 grouping, kept local — the design system's copy lives in `home/time`. */
 function money(n: number): string {
@@ -70,14 +84,15 @@ export default function PacksScreen({ navigation }: Props) {
   const [gymPacks, setGymPacks] = useState<PackModel[]>([]);
   const [editing, setEditing] = useState<PackDraft | null>(null);
 
-  /** Where they work. Null until the profile answers — the question is asked below. */
-  const [atGym, setAtGym] = useState<boolean | null>(null);
+  /** How they work. Null until they answer — the sections below hang off it. */
+  const [mode, setMode] = useState<WorkMode | null>(null);
+  const [savedMode, setSavedMode] = useState<WorkMode | null>(null);
   const [gymName, setGymName] = useState('');
   const [savedGym, setSavedGym] = useState<string | null>(null);
   const [pressed, setPressed] = useState(false);
 
-  // The gym, if there is one, comes from the profile rather than being asked
-  // again — a trainer who already told us where they work should not have to
+  // The answer, if there is one, comes from the profile rather than being asked
+  // again — a trainer who already told us how they work should not have to
   // repeat it to get a price list.
   useEffect(() => {
     let alive = true;
@@ -87,7 +102,12 @@ export default function PacksScreen({ navigation }: Props) {
         const name = data.gymName ?? '';
         setSavedGym(name || null);
         setGymName(name);
-        setAtGym(name.length > 0 ? true : null);
+        const saved = asWorkMode(data.workMode);
+        setSavedMode(saved);
+        // The old binary version of this screen stored only the gym. A trainer
+        // with a gym on file was shown both price lists, so 'both' is the
+        // faithful reading of pre-workMode data.
+        setMode(saved ?? (name ? 'both' : null));
       })
       .catch(() => {
         /* Offline. The question below is still answerable; it just has no default. */
@@ -120,15 +140,19 @@ export default function PacksScreen({ navigation }: Props) {
 
   useFocusEffect(reload);
 
-  /** Puts the typed gym name on the profile, once, and only when it changed. */
+  /** Puts the answers on the profile, once, and only what changed. */
   const persistGym = async () => {
     const next = gymName.trim();
-    if (!next || next === savedGym) return;
+    const up: TrainerUpdate = {};
+    if (next && next !== savedGym) up.gymName = next;
+    if (mode && mode !== savedMode) up.workMode = mode;
+    if (Object.keys(up).length === 0) return;
     try {
-      await updateTrainer({ gymName: next });
-      setSavedGym(next);
+      await updateTrainer(up);
+      if (up.gymName) setSavedGym(next);
+      if (up.workMode) setSavedMode(mode);
     } catch {
-      /* Offline. The packs are already on the phone; the name goes up later. */
+      /* Offline. The packs are already on the phone; the answers go up later. */
     }
   };
 
@@ -162,19 +186,39 @@ export default function PacksScreen({ navigation }: Props) {
     navigation.navigate('Payment');
   };
 
+  /** Which price lists this way of working keeps. */
+  const sellsOwn = mode === 'independent' || mode === 'both';
+  const sellsGym = mode === 'gym' || mode === 'both';
+
   const trimmedGym = gymName.trim();
   /** The gym is only real once it has a name — an unnamed price list belongs to nobody. */
-  const gym = atGym === true && trimmedGym.length > 0 ? trimmedGym : null;
+  const gym = sellsGym && trimmedGym.length > 0 ? trimmedGym : null;
   const needsGymPacks = gym != null && gymPacks.length === 0;
 
   const onContinue = async () => {
     setPressed(true);
-    if (atGym === true && trimmedGym.length === 0) return;
+    if (mode === null) return;
+    if (sellsGym && trimmedGym.length === 0) return;
     if (needsGymPacks) return;
 
-    // Written before leaving, in case the name was edited after the packages
+    // Written before leaving, in case an answer was edited after the packages
     // were added — the profile has to end up saying what the screen said.
-    if (atGym === true) await persistGym();
+    const up: TrainerUpdate = {};
+    if (mode !== savedMode) up.workMode = mode;
+    if (sellsGym) {
+      if (trimmedGym !== (savedGym ?? '')) up.gymName = trimmedGym;
+    } else if (savedGym) {
+      // "On my own" with a gym on file is the trainer leaving it. An empty
+      // string clears the name and its share together, server-side.
+      up.gymName = '';
+    }
+    if (Object.keys(up).length > 0) {
+      try {
+        await updateTrainer(up);
+      } catch {
+        /* Offline. The packs are already on the phone; the answers go up later. */
+      }
+    }
     navigation.navigate('Payment');
   };
 
@@ -189,50 +233,77 @@ export default function PacksScreen({ navigation }: Props) {
           price never changes a pack somebody already bought.
         </SetupSub>
 
-        {packs.length > 0 ? (
-          <List style={styles.list}>
-            {packs.map((pack) => (
-              <Row
-                key={pack.id}
-                grouped
-                title={`${pack.name} · ${money(pack.amount)}`}
-                subtitle={
-                  pack.sessions
-                    ? `${money(Math.round(pack.amount / pack.sessions))} a session`
-                    : 'Per month'
-                }
-                leading={<IconWallet size={20} color={colors.ink2} />}
-                trailing={<IconTrash size={18} color={colors.ink3} />}
-                onPress={() => void remove(pack.id)}
-              />
-            ))}
-          </List>
-        ) : (
-          <Text style={styles.blank}>Nothing yet. Most trainers start with one or two.</Text>
-        )}
+        {/* ------------------------------------------------- how they work */}
 
-        <Button
-          label={packs.length === 0 ? 'Add a pack' : 'Add another'}
-          variant="ghost"
-          block
-          icon={IconPlus}
-          style={styles.add}
-          onPress={() => setEditing({ ...BLANK_PACK })}
-        />
+        <Text style={styles.group}>How you work</Text>
+        <View style={styles.modes}>
+          <ChoiceCard
+            wide
+            title="On my own"
+            subtitle="Independent — your clients, your prices, you collect"
+            selected={mode === 'independent'}
+            onPress={() => setMode('independent')}
+          />
+          <ChoiceCard
+            wide
+            title="At a gym"
+            subtitle="The gym's counter sells its packages; you're paid a share"
+            selected={mode === 'gym'}
+            onPress={() => setMode('gym')}
+          />
+          <ChoiceCard
+            wide
+            title="Both"
+            subtitle="Freelance clients of your own, plus the gym's floor"
+            selected={mode === 'both'}
+            onPress={() => setMode('both')}
+          />
+        </View>
+        {pressed && mode === null ? (
+          <FieldMsg tone="error">Pick one — it decides which price lists to set up.</FieldMsg>
+        ) : null}
+
+        {/* ------------------------------------------------- their own list */}
+
+        {sellsOwn ? (
+          <>
+            <Text style={styles.group}>Your packs</Text>
+            {packs.length > 0 ? (
+              <List style={styles.list}>
+                {packs.map((pack) => (
+                  <Row
+                    key={pack.id}
+                    grouped
+                    title={`${pack.name} · ${money(pack.amount)}`}
+                    subtitle={
+                      pack.sessions
+                        ? `${money(Math.round(pack.amount / pack.sessions))} a session`
+                        : 'Per month'
+                    }
+                    leading={<IconWallet size={20} color={colors.ink2} />}
+                    trailing={<IconTrash size={18} color={colors.ink3} />}
+                    onPress={() => void remove(pack.id)}
+                  />
+                ))}
+              </List>
+            ) : (
+              <Text style={styles.blank}>Nothing yet. Most trainers start with one or two.</Text>
+            )}
+
+            <Button
+              label={packs.length === 0 ? 'Add a pack' : 'Add another'}
+              variant="ghost"
+              block
+              icon={IconPlus}
+              style={styles.add}
+              onPress={() => setEditing({ ...BLANK_PACK })}
+            />
+          </>
+        ) : null}
 
         {/* ------------------------------------------------- the gym's list */}
 
-        <Text style={styles.group}>Where you work</Text>
-        <Segmented
-          options={[
-            { key: 'own', label: 'On my own' },
-            { key: 'gym', label: 'At a gym' },
-          ]}
-          value={atGym === true ? 'gym' : 'own'}
-          onChange={(key) => setAtGym(key === 'gym')}
-        />
-
-        {atGym === true ? (
+        {sellsGym ? (
           <>
             <View style={styles.label}>
               <FieldLabel>Which gym</FieldLabel>
@@ -247,7 +318,7 @@ export default function PacksScreen({ navigation }: Props) {
             <FieldMsg tone={pressed && trimmedGym.length === 0 ? 'error' : 'hint'}>
               {pressed && trimmedGym.length === 0
                 ? 'The gym needs a name before its packages can be attributed to it'
-                : 'Their share of a session is set later, in Money → Gym share.'}
+                : 'Their share of a session is set per client, when you add them.'}
             </FieldMsg>
 
             {gym ? (
@@ -295,13 +366,15 @@ export default function PacksScreen({ navigation }: Props) {
               </>
             ) : null}
           </>
-        ) : (
+        ) : null}
+
+        {mode === 'independent' ? (
           <Callout icon={IconPercent} style={styles.note}>
             One rule worth knowing:{' '}
             <CalloutStrong>a shorter pack should cost more per session</CalloutStrong> than a longer
             one. Otherwise the longer one gives nobody a reason to commit.
           </Callout>
-        )}
+        ) : null}
       </SetupBody>
 
       <SetupFoot>
@@ -326,9 +399,10 @@ export default function PacksScreen({ navigation }: Props) {
 }
 
 const styles = StyleSheet.create({
+  modes: { gap: space.s2 },
   list: { marginTop: space.s2 },
   blank: { fontSize: 13.5, color: colors.ink3, marginTop: space.s3 },
-  add: { marginTop: space.s3 },
+  add: { marginTop: space.s3, marginBottom: space.s3 },
   label: { marginTop: space.s4 },
   group: {
     fontSize: 10.5,
@@ -339,5 +413,5 @@ const styles = StyleSheet.create({
     marginBottom: space.s2,
     marginTop: space.s6,
   },
-  note: { marginTop: 'auto' },
+  note: { marginTop: 'auto'},
 });

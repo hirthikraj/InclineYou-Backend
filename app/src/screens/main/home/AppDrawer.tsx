@@ -26,7 +26,7 @@
  *
  * Only where a number drives an action. Nudges carries how many drafts are
  * waiting, which is a job. Exercises carries the library size as the quiet
- * variant, because 873 is information. Settings is never badged — a permanently
+ * variant, because 1,324 is information. Settings is never badged — a permanently
  * badged drawer teaches people to ignore badges.
  *
  * Queries are gated on `visible`: the drawer is mounted for the life of the app,

@@ -86,8 +86,8 @@ app:
     exercises:
       enabled: ${SEED_EXERCISES:true}
       resource: seed/exercises.json
-      # Point at your own bucket once images are mirrored (scripts/mirror-exercise-images.sh)
-      image-base-url: ${EXERCISE_IMAGE_BASE_URL:https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises}
+      # Text only. Upstream's thumbnails and demo GIFs are © Gym visual and need a
+      # licence we do not hold, so no media is seeded and there is no base URL.
   fcm:
     # Raw service-account JSON, a file path, or classpath:… — blank disables push.
     credentials: ${FCM_CREDENTIALS:}

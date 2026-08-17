@@ -444,5 +444,94 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    {
+      /**
+       * V16 · the exercise library gets a demo loop, and a taxonomy to match.
+       *
+       * The shared library moved off free-exercise-db and onto a dataset that
+       * ships an animation GIF per exercise. The GIF itself needed no migration —
+       * `video_url` has been on this table since V1 and had never held anything,
+       * and a demo loop is what that column always meant. These two columns are
+       * the part that could not be squeezed into what already existed.
+       *
+       * `body_part` is the coarse split — ten values, "chest" through "waist" —
+       * and it is what the library groups by now. `muscle_group` cannot do that
+       * job: the new source puts the primary muscle there ("pectorals", "lats"),
+       * which is the right thing for a filter and too fine for a section header.
+       * A trainer scanning for "another chest thing" wants nine groups, not
+       * nineteen.
+       *
+       * `target` is the fine one, and it is a copy of `muscle_group` on every
+       * seeded row. Two columns holding the same string looks redundant and is
+       * not: `muscle_group` is the column a trainer's OWN exercise writes to and
+       * has meant "the muscle" since V1, while `target` means "the library said
+       * so". Collapsing them would make a custom exercise indistinguishable from
+       * a seeded one in the filter vocabulary.
+       *
+       * Both nullable, both null on custom exercises. The old library's rows
+       * arrive at this device soft-deleted on the next pull — see the server's
+       * V21 — so nothing here has to clean up after them.
+       */
+      toVersion: 16,
+      steps: [
+        addColumns({
+          table: 'exercises',
+          columns: [
+            { name: 'body_part', type: 'string', isOptional: true },
+            { name: 'target', type: 'string', isOptional: true },
+          ],
+        }),
+      ],
+    },
+    {
+      /**
+       * V17 · a template's days are slots; the weekdays belong to the client.
+       *
+       * A template's day numbers used to be weekdays, which pinned every
+       * program to one layout — a Mon/Wed/Fri template could not serve the
+       * client who trains Tue/Thu/Sat. The numbers now mean "Day 1".."Day 7",
+       * and the weekday (and time) each slot lands on is chosen per client
+       * when the template is applied.
+       *
+       * The one new column carries that choice: `schedule` on the program, as
+       * the JSON the server wrote at apply time. It is pull-only — the copy is
+       * a server transaction, and so is the translation from slots to
+       * weekdays, so the phone never authors this value.
+       *
+       * No template column changes. `training_days` keeps its shape and shifts
+       * its meaning, and every template authored under the old meaning was
+       * soft-deleted server-side (its V24) — the deletions arrive on the next
+       * pull. Programs applied before this migration have a null schedule and
+       * need nothing: their exercise rows already carry concrete weekdays.
+       */
+      toVersion: 17,
+      steps: [
+        addColumns({
+          table: 'programs',
+          columns: [{ name: 'schedule', type: 'string', isOptional: true }],
+        }),
+      ],
+    },
+    {
+      /**
+       * V18 · a prescription can be a hold, not a count.
+       *
+       * "3 × 45s plank" was unsayable: the only target fields were sets and
+       * reps, and writing 45 into reps would lie to everything that reads reps
+       * as a count. `duration_seconds` is the honest field — set instead of
+       * reps on a timed exercise, chosen when the exercise is added.
+       *
+       * The template's blueprint carries the same field inside its JSON, where
+       * it needs no migration; this column is the client's copy of it. Null
+       * reads as "a rep prescription", which every existing row is.
+       */
+      toVersion: 18,
+      steps: [
+        addColumns({
+          table: 'program_exercises',
+          columns: [{ name: 'duration_seconds', type: 'number', isOptional: true }],
+        }),
+      ],
+    },
   ],
 });

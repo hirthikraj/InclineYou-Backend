@@ -9,6 +9,7 @@ export * from './tokens';
 export { navTheme } from './navTheme';
 export * from './icons';
 export { default as useKeyboardVisible } from './useKeyboardVisible';
+export { default as useKeyboardHeight } from './useKeyboardHeight';
 export { default as useReduceMotion } from './useReduceMotion';
 
 /* ------------------------------------------------------------- brand · § 35 */

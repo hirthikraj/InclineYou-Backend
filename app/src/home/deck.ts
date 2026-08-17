@@ -113,6 +113,8 @@ export interface DeckPayment {
   method?: string;
   status: string;
   upiReference?: string;
+  /** The gym's cut, stored on the row at record time. */
+  gymShareAmount?: number | null;
   paidAt?: Date | number;
   createdAt: Date | number;
 }
@@ -207,6 +209,8 @@ export interface DeckMoney {
   billed: number;
   collected: number;
   pending: number;
+  /** The trainer's part of the month's billing — billed minus the gym's cut. */
+  yours: number;
   /** Month-on-month change in billing, null when there is no previous month. */
   trendPercent: number | null;
 }
@@ -587,6 +591,7 @@ function buildMoney(input: DeckInput, now: number): DeckMoney {
   let billed = 0;
   let collected = 0;
   let pending = 0;
+  let cut = 0;
   let previous = 0;
 
   for (const p of input.payments) {
@@ -595,6 +600,7 @@ function buildMoney(input: DeckInput, now: number): DeckMoney {
     const status = lower(p.status);
     if (at >= monthStart) {
       billed += amount;
+      cut += p.gymShareAmount ?? 0;
       if (PAID_PAYMENT.has(status)) collected += amount;
       else if (DUE_PAYMENT.has(status)) pending += amount;
     } else if (at >= previousStart) {
@@ -607,6 +613,7 @@ function buildMoney(input: DeckInput, now: number): DeckMoney {
     billed,
     collected,
     pending,
+    yours: Math.max(0, billed - cut),
     trendPercent: previous > 0 ? Math.round(((billed - previous) / previous) * 100) : null,
   };
 }

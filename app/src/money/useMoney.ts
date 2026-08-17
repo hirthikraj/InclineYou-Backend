@@ -104,6 +104,7 @@ export function useMoney(active: boolean = true): Money {
         'name',
         'phone',
         'delivery_mode',
+        'payment_mode',
         'trainer_split_percent',
         'metadata',
       ]),

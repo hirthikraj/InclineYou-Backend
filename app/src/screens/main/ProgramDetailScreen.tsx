@@ -60,7 +60,8 @@ import {
   weekOf,
   dayOf,
 } from '../../db/programs';
-import { readTrainingDays } from '../../db/training';
+import { readTrainingDays, readDayLabels } from '../../db/training';
+import { parseProgramSchedule } from '../../training/training';
 import { setPendingPick } from '../../db/exercisePick';
 import type ProgramExercise from '../../db/models/ProgramExercise';
 import type Program from '../../db/models/Program';
@@ -106,9 +107,15 @@ function dayTitle(day: number | null): string {
   return WEEKDAYS[day - 1] ?? `Day ${day}`;
 }
 
-/** The three numbers, as the row says them: "3 × 10 · 90s rest". */
+/** The work of one set: "10" reps, or "45s" for a hold. */
+function workOf(pe: ProgramExercise): string {
+  if (pe.durationSeconds) return `${pe.durationSeconds}s`;
+  return pe.reps != null ? String(pe.reps) : '—';
+}
+
+/** The three numbers, as the row says them: "3 × 10 · 90s rest", "3 × 45s · 60s rest". */
 function prescription(pe: ProgramExercise): string {
-  const core = `${pe.sets ?? '—'} × ${pe.reps ?? '—'}`;
+  const core = `${pe.sets ?? '—'} × ${workOf(pe)}`;
   return pe.restSeconds ? `${core} · ${pe.restSeconds}s rest` : core;
 }
 
@@ -125,8 +132,11 @@ function weeksBetween(from: string | null | undefined, to: string | null | undef
 interface EditState {
   pe: ProgramExercise;
   name: string;
+  /** Reps-counted or a timed hold — switchable, because a plank can be either. */
+  mode: 'reps' | 'time';
   sets: string;
   reps: string;
+  seconds: string;
   restSeconds: string;
 }
 
@@ -134,9 +144,15 @@ export default function ProgramDetailScreen({ route, navigation }: Props) {
   const { programId } = route.params;
 
   const [program, setProgram] = useState<Program | null>(null);
-  /** The days the program this was copied from trains on. Empty when it wasn't copied. */
-  const [sourceDays, setSourceDays] = useState<number[]>([]);
+  /**
+   * The source template's day list, read under the OLD semantics where its
+   * numbers were weekdays. Only consulted for programs assigned before the
+   * schedule existed — anything newer carries its own layout on the program.
+   */
+  const [legacyDays, setLegacyDays] = useState<number[]>([]);
   const [sourceWeeks, setSourceWeeks] = useState<number | null>(null);
+  /** The source template's day names — "Push A" — keyed by day slot. */
+  const [sourceLabels, setSourceLabels] = useState<Record<number, string>>({});
   const [rows, setRows] = useState<ProgramExercise[]>([]);
   const [exercises, setExercises] = useState<Record<string, Exercise>>({});
   const [ready, setReady] = useState(false);
@@ -166,12 +182,47 @@ export default function ProgramDetailScreen({ route, navigation }: Props) {
       .find(templateId)
       .then((template) => {
         if (!live) return;
-        setSourceDays(readTrainingDays(template.trainingDays, []));
+        setLegacyDays(readTrainingDays(template.trainingDays, []));
         setSourceWeeks(template.weeks ?? null);
+        setSourceLabels(readDayLabels(template.dayLabels));
       })
       .catch(() => undefined);
     return () => { live = false; };
   }, [program?.templateId]);
+
+  /**
+   * The layout chosen when this program was assigned — which weekday each of
+   * the template's day slots landed on, and at what time. This is the program's
+   * OWN fact, written by the apply transaction; the template's `training_days`
+   * cannot stand in for it because a template's days are slots, and two clients
+   * on the same template land them on different weekdays.
+   */
+  const schedule = useMemo(() => parseProgramSchedule(program?.schedule), [program?.schedule]);
+
+  /** The weekdays this plan trains on. Legacy programs fall back to the source template's old weekday list. */
+  const sourceDays = useMemo(
+    () => (schedule.length ? schedule.map((entry) => entry.weekday) : legacyDays),
+    [schedule, legacyDays],
+  );
+
+  /** "06:30" for a weekday the assignment scheduled, nothing for the rest. */
+  const timeOf = (day: number | null): string | null =>
+    day === null ? null : schedule.find((entry) => entry.weekday === day)?.time ?? null;
+
+  /**
+   * The trainer's name for the day — "Push A" — carried over from the source
+   * template. Its labels are keyed by day slot, so the schedule translates the
+   * weekday on screen back to the slot it came from; a legacy program's labels
+   * were keyed by weekday directly and need no translation.
+   */
+  const labelOf = (day: number | null): string | null => {
+    if (day === null) return null;
+    if (schedule.length) {
+      const slot = schedule.find((entry) => entry.weekday === day)?.day;
+      return slot != null ? sourceLabels[slot] ?? null : null;
+    }
+    return sourceLabels[day] ?? null;
+  };
 
   useEffect(() => {
     const sub = observeProgramExercises(programId).subscribe((next) => {
@@ -280,9 +331,14 @@ export default function ProgramDetailScreen({ route, navigation }: Props) {
     if (!editing) return;
     setSaving(true);
     try {
+      const timed = editing.mode === 'time';
+      // Switching modes clears the other measure: a row that is a hold now has
+      // no rep count, and one back on reps has no seconds. Leaving both would
+      // make the row say two different prescriptions.
       await updateProgramExercise(editing.pe.id, {
         sets: parseInt(editing.sets, 10) || undefined,
-        reps: parseInt(editing.reps, 10) || undefined,
+        reps: timed ? null : parseInt(editing.reps, 10) || undefined,
+        durationSeconds: timed ? parseInt(editing.seconds, 10) || undefined : null,
         restSeconds: parseInt(editing.restSeconds, 10) || undefined,
       });
       setEditing(null);
@@ -383,7 +439,9 @@ export default function ProgramDetailScreen({ route, navigation }: Props) {
                 return (
                   <View key={String(group.day)}>
                     <GroupHead
-                      label={dayTitle(group.day)}
+                      label={[dayTitle(group.day), labelOf(group.day), timeOf(group.day)]
+                        .filter(Boolean)
+                        .join(' · ')}
                       count={group.rows.length}
                       collapsed={closed}
                       onPress={() => toggle(group.day)}
@@ -398,12 +456,18 @@ export default function ProgramDetailScreen({ route, navigation }: Props) {
                                 key={pe.id}
                                 grouped
                                 dim={repeats}
-                                leading={<Thumb size="sm" custom={exercises[pe.exerciseId]?.isCustom} />}
+                                leading={
+                                  <Thumb
+                                    size="sm"
+                                    uri={exercises[pe.exerciseId]?.imageUrl}
+                                    custom={exercises[pe.exerciseId]?.isCustom}
+                                  />
+                                }
                                 title={nameOf(pe)}
                                 subtitle={exercises[pe.exerciseId]?.muscleGroup || undefined}
                                 trailing={
                                   <RowValue
-                                    value={`${pe.sets ?? '—'} × ${pe.reps ?? '—'}`}
+                                    value={`${pe.sets ?? '—'} × ${workOf(pe)}`}
                                     unit={pe.restSeconds ? `${pe.restSeconds}s rest` : undefined}
                                   />
                                 }
@@ -413,8 +477,11 @@ export default function ProgramDetailScreen({ route, navigation }: Props) {
                                         setEditing({
                                           pe,
                                           name: nameOf(pe),
+                                          mode: pe.durationSeconds ? 'time' : 'reps',
                                           sets: pe.sets != null ? String(pe.sets) : '',
                                           reps: pe.reps != null ? String(pe.reps) : '',
+                                          seconds:
+                                            pe.durationSeconds != null ? String(pe.durationSeconds) : '',
                                           restSeconds: pe.restSeconds != null ? String(pe.restSeconds) : '',
                                         })
                                     : undefined
@@ -516,6 +583,19 @@ export default function ProgramDetailScreen({ route, navigation }: Props) {
       <Sheet visible={editing !== null} onClose={() => setEditing(null)} title={editing?.name ?? 'Exercise'}>
         <Text style={styles.meta}>{editing ? prescription(editing.pe) : ''}</Text>
 
+        <Seg style={styles.mode}>
+          <Chip
+            label="Reps"
+            selected={editing?.mode === 'reps'}
+            onPress={() => setEditing((s) => (s ? { ...s, mode: 'reps' } : s))}
+          />
+          <Chip
+            label="Time"
+            selected={editing?.mode === 'time'}
+            onPress={() => setEditing((s) => (s ? { ...s, mode: 'time' } : s))}
+          />
+        </Seg>
+
         <View style={styles.fields}>
           <View style={styles.field}>
             <FieldLabel>Sets</FieldLabel>
@@ -526,15 +606,28 @@ export default function ProgramDetailScreen({ route, navigation }: Props) {
               placeholder="3"
             />
           </View>
-          <View style={styles.field}>
-            <FieldLabel>Reps</FieldLabel>
-            <Control
-              value={editing?.reps ?? ''}
-              onChangeText={(v) => setEditing((s) => (s ? { ...s, reps: v } : s))}
-              keyboardType="number-pad"
-              placeholder="10"
-            />
-          </View>
+          {editing?.mode === 'time' ? (
+            <View style={styles.field}>
+              <FieldLabel>Time</FieldLabel>
+              <Control
+                value={editing?.seconds ?? ''}
+                onChangeText={(v) => setEditing((s) => (s ? { ...s, seconds: v } : s))}
+                keyboardType="number-pad"
+                placeholder="30"
+                affix="sec"
+              />
+            </View>
+          ) : (
+            <View style={styles.field}>
+              <FieldLabel>Reps</FieldLabel>
+              <Control
+                value={editing?.reps ?? ''}
+                onChangeText={(v) => setEditing((s) => (s ? { ...s, reps: v } : s))}
+                keyboardType="number-pad"
+                placeholder="10"
+              />
+            </View>
+          )}
           <View style={styles.field}>
             <FieldLabel>Rest</FieldLabel>
             <Control
@@ -615,6 +708,7 @@ const styles = StyleSheet.create({
   bare: { fontSize: 13, lineHeight: 20, color: colors.ink3, paddingVertical: space.s2 },
 
   meta: { fontSize: 13, lineHeight: 20, color: colors.ink3, marginBottom: space.s4 },
+  mode: { marginBottom: space.s4 },
   fields: { flexDirection: 'row', gap: space.s2, marginBottom: space.s5 },
   field: { flex: 1 },
 

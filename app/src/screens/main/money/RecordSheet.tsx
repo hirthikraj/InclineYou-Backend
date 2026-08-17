@@ -4,11 +4,15 @@
  * Client, amount, method — in that order, because that is the order a trainer
  * has the facts in. Somebody hands over cash and says what it's for.
  *
- * Two things this sheet refuses to hide. **Gym counter is a full-width third
- * option**, not a smaller one tucked under UPI and Cash, and it says what it
- * means: your cut applies, worked out and shown before you commit. And on a
- * part payment the remainder is stated in amber BEFORE the button, so nobody
- * records ₹4,000 of a ₹9,000 debt and walks away thinking it's settled.
+ * The method follows the client, not the trainer. A freelance client pays the
+ * trainer directly — UPI or cash, nothing else — while a gym client pays at
+ * the counter, full stop: no method to pick, just mark it done, and the gym
+ * pays the trainer their part. Showing all three cards to everybody is how a
+ * freelance payment ends up with a gym cut on it.
+ *
+ * One thing this sheet refuses to hide: on a part payment the remainder is
+ * stated in amber BEFORE the button, so nobody records ₹4,000 of a ₹9,000
+ * debt and walks away thinking it's settled.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -73,7 +77,7 @@ export default function RecordSheet({
   const [picking, setPicking] = useState(false);
   const [who, setWho] = useState<string | null>(clientId ?? null);
   const [pkgId, setPkgId] = useState<string | null>(packageId ?? null);
-  const [method, setMethod] = useState<PaymentMethod>('upi_intent');
+  const [chosenMethod, setChosenMethod] = useState<PaymentMethod>('upi_intent');
   const [part, setPart] = useState(false);
   const [typed, setTyped] = useState(0);
 
@@ -85,7 +89,7 @@ export default function RecordSheet({
     if (visible) {
       setWho(clientId ?? null);
       setPkgId(packageId ?? null);
-      setMethod('upi_intent');
+      setChosenMethod('upi_intent');
       setPart(false);
       setTyped(0);
       setPicking(!clientId);
@@ -93,6 +97,16 @@ export default function RecordSheet({
   }
 
   const client = input.clients.find((c) => c.id === who);
+
+  // The method is derived, never trusted from state: switching from a gym
+  // client to a freelance one mid-sheet must not leave "gym counter" recorded
+  // against money that landed in the trainer's own hand.
+  const gymClient = client?.paymentMode === 'gym_collects';
+  const method: PaymentMethod = gymClient
+    ? 'gym_front_office'
+    : chosenMethod === 'gym_front_office'
+      ? 'upi_intent'
+      : chosenMethod;
 
   /** Their open debts, biggest first — the one being paid is almost always top. */
   const debts = useMemo<MoneyPackage[]>(() => {
@@ -108,6 +122,14 @@ export default function RecordSheet({
   const amount = part ? typed : owed;
   const remaining = Math.max(0, owed - amount);
   const cut = projectedCut(amount, client, input.gym);
+
+  // What lands in the trainer's hand. For a gym client the counter took the
+  // whole figure and pays the trainer their part, so this sheet talks in the
+  // trainer's money — the full figure is the counter's business, and it is
+  // still what gets recorded so the client's debt clears correctly. For a
+  // freelance client the whole amount is theirs, so take === amount.
+  const take = Math.max(0, amount - cut.amount);
+  const shown = gymClient ? take : amount;
 
   const owedByClient = useMemo(() => {
     const map = new Map<string, number>();
@@ -181,11 +203,16 @@ export default function RecordSheet({
               ? `${rupees(typed - owed)} more than owed — that's fine, it stays as credit`
               : 'That settles it'}
         </Text>
+        {/* The keypad takes what the client paid at the counter — that is the
+            figure the trainer knows — but the money that is theirs is the cut. */}
+        {gymClient && typed > 0 && cut.amount > 0 ? (
+          <Text style={styles.partYours}>{`${rupees(take)} of this comes to you`}</Text>
+        ) : null}
 
         <Keypad style={styles.pad} onKey={(key: KeypadKey) => setTyped((n) => applyKey(n, key))} />
 
         <Button
-          label={`Record ${rupees(typed)}`}
+          label={`Record ${rupees(gymClient ? take : typed)}`}
           size="lg"
           block
           disabled={typed <= 0 || !who}
@@ -226,12 +253,14 @@ export default function RecordSheet({
         onPress={() => setPicking(true)}
       />
 
+      {/* The headline is the trainer's money: the whole figure for a freelance
+          client, only their part when the gym collected and pays it on. */}
       <View style={styles.amountBox}>
-        <Amount value={grouped(owed)} size={34} />
+        <Amount value={grouped(shown)} size={34} />
       </View>
 
       <Seg style={styles.modes}>
-        <Chip label={`Full ${rupees(owed)}`} selected={!part} onPress={() => setPart(false)} />
+        <Chip label={`Full ${rupees(shown)}`} selected={!part} onPress={() => setPart(false)} />
         <Chip
           label="Part"
           selected={part}
@@ -258,45 +287,58 @@ export default function RecordSheet({
       ) : null}
 
       <Text style={styles.label}>How it came in</Text>
-      <ChoiceGrid style={styles.choices}>
-        <ChoiceCard
-          title="UPI"
-          subtitle="Into your own account"
-          icon={IconRupee}
-          selected={method === 'upi_intent'}
-          onPress={() => setMethod('upi_intent')}
-        />
-        <ChoiceCard
-          title="Cash"
-          subtitle="In your hand"
-          icon={IconCash}
-          selected={method === 'cash'}
-          onPress={() => setMethod('cash')}
-        />
-        <ChoiceCard
-          title="Gym counter"
-          subtitle={
-            input.gym.name
-              ? `They collected it — your cut applies`
-              : 'They collected it on your behalf'
-          }
-          icon={IconBuilding}
-          wide
-          selected={method === 'gym_front_office'}
-          onPress={() => setMethod('gym_front_office')}
-        />
-      </ChoiceGrid>
+      {gymClient ? (
+        // A gym client has no method to choose — the money went over their
+        // counter. Mark it done; the gym pays the trainer their part.
+        <ChoiceGrid style={styles.choices}>
+          <ChoiceCard
+            title="Gym counter"
+            subtitle={
+              input.gym.name
+                ? `${input.gym.name} collected it and pays you your part`
+                : 'They collected it and pay you your part'
+            }
+            icon={IconBuilding}
+            wide
+            selected
+            onPress={() => {}}
+          />
+        </ChoiceGrid>
+      ) : (
+        // Freelance: the money comes to the trainer directly, so there is no
+        // gym counter to offer.
+        <ChoiceGrid style={styles.choices}>
+          <ChoiceCard
+            title="UPI"
+            subtitle="Into your own account"
+            icon={IconRupee}
+            selected={method === 'upi_intent'}
+            onPress={() => setChosenMethod('upi_intent')}
+          />
+          <ChoiceCard
+            title="Cash"
+            subtitle="In your hand"
+            icon={IconCash}
+            selected={method === 'cash'}
+            onPress={() => setChosenMethod('cash')}
+          />
+        </ChoiceGrid>
+      )}
 
       {cut.amount > 0 ? (
         <Callout icon={IconBuilding} style={styles.note}>
-          {`${input.gym.name} takes ${rupees(cut.amount)} of this at ${cut.percent}%. ${rupees(
-            amount - cut.amount,
-          )} is yours.`}
+          {gymClient
+            ? `They paid ${rupees(amount)} at the counter. ${input.gym.name ?? 'The gym'} keeps ${rupees(
+                cut.amount,
+              )} at ${cut.percent}% and pays you ${rupees(take)}.`
+            : `${input.gym.name} takes ${rupees(cut.amount)} of this at ${cut.percent}%. ${rupees(
+                take,
+              )} is yours.`}
         </Callout>
       ) : null}
 
       <Button
-        label={`Record ${rupees(amount)}`}
+        label={`Record ${rupees(shown)}`}
         size="lg"
         block
         disabled={amount <= 0 || !who}
@@ -345,6 +387,7 @@ const styles = StyleSheet.create({
   partWho: { fontSize: 13.5, color: colors.ink3, textAlign: 'center' },
   partAmount: { alignItems: 'center', marginTop: 10, marginBottom: 2 },
   partLeft: { fontSize: 12.5, textAlign: 'center', color: colors.warn, fontWeight: '600' },
+  partYours: { fontSize: 12.5, textAlign: 'center', color: colors.ink3, marginTop: 2 },
   partClear: { color: colors.ok },
   pad: { marginTop: space.s4 },
 });

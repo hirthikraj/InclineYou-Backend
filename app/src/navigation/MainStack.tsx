@@ -7,6 +7,8 @@ import SearchScreen from '../screens/main/SearchScreen';
 import SoonScreen from '../screens/main/SoonScreen';
 import AddClientScreen from '../screens/main/clients/AddClientScreen';
 import AddClientPayScreen from '../screens/main/clients/AddClientPayScreen';
+import ClientScheduleScreen from '../screens/main/clients/ClientScheduleScreen';
+import ClientPlanScreen from '../screens/main/clients/ClientPlanScreen';
 import ClientAddedScreen from '../screens/main/clients/ClientAddedScreen';
 import ClientSearchScreen from '../screens/main/clients/ClientSearchScreen';
 import WorkingHoursScreen from '../screens/main/diary/WorkingHoursScreen';
@@ -67,6 +69,10 @@ export type MainStackParamList = {
   /** `name` arrives pre-filled from the search dead-end (2c). */
   AddClient: { name?: string } | undefined;
   AddClientPay: { name: string; phone: string };
+  /** 5c — the client's week: days and times, offered from the trainer's working hours. */
+  ClientSchedule: { clientId: string };
+  /** 5d — a plan that fits the week picked in 5c. The count must match. */
+  ClientPlan: { clientId: string };
   ClientAdded: { clientId: string };
   ClientDetail: { clientId: string };
   EditClient: { clientId: string };
@@ -202,6 +208,8 @@ export default function MainStack() {
       <Stack.Screen name="WorkingHours" component={WorkingHoursScreen} />
       <Stack.Screen name="AddClient" component={AddClientScreen} />
       <Stack.Screen name="AddClientPay" component={AddClientPayScreen} />
+      <Stack.Screen name="ClientSchedule" component={ClientScheduleScreen} />
+      <Stack.Screen name="ClientPlan" component={ClientPlanScreen} />
       <Stack.Screen name="ClientAdded" component={ClientAddedScreen} />
       <Stack.Screen name="ClientDetail" component={ClientFileScreen} />
       <Stack.Screen name="EditClient" component={EditClientScreen} />

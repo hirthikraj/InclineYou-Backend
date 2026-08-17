@@ -1484,7 +1484,7 @@ export function buildPicker(
   const yours = all.filter((r) => r.custom);
 
   // Capped at sixty rows, and the cap is safe only because the search box is
-  // above it: the library is 873 long, nobody scrolls to row 400, and the chip
+  // above it: the library is 1,324 long, nobody scrolls to row 400, and the chip
   // counts below still report the whole library rather than what fitted.
   const base = bucket === 'recent' ? recents : bucket === 'yours' ? yours : all;
   const matched = q ? base.filter((r) => r.name.toLowerCase().includes(q)) : base;

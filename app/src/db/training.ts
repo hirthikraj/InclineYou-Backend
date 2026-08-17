@@ -269,6 +269,8 @@ export async function addToBlueprint(
     sets?: number | null;
     reps?: number | null;
     restSeconds?: number | null;
+    /** Seconds, for a hold — "3 × 45s". Given INSTEAD of reps, never alongside. */
+    durationSeconds?: number | null;
     notes?: string | null;
   },
 ): Promise<void> {
@@ -277,13 +279,17 @@ export async function addToBlueprint(
   const week = Math.max(1, Math.round(entry.week ?? 1));
   const onDay = current.filter((e) => weekOf(e) === week && num(e.day_of_week) === entry.day);
 
+  // 3 × 10 stands in only when nothing was said. A timed entry gets no reps at
+  // all — inventing 10 reps of a plank would be a number nobody wrote.
+  const timed = entry.durationSeconds != null && entry.durationSeconds > 0;
   current.push({
     exercise_id: entry.exerciseId,
     day_of_week: entry.day,
     week,
     sets: entry.sets ?? 3,
-    reps: entry.reps ?? 10,
+    reps: timed ? null : entry.reps ?? 10,
     rest_seconds: entry.restSeconds ?? 60,
+    duration_seconds: timed ? entry.durationSeconds : null,
     notes: entry.notes ?? null,
     order_index: onDay.length + 1,
   });
@@ -344,7 +350,7 @@ export async function removeFromBlueprint(
   after('remove-from-blueprint');
 }
 
-/** Names a day — "Push A". Stored beside the blueprint, keyed by weekday. */
+/** Names a day — "Push A". Stored beside the blueprint, keyed by day number. */
 export async function nameTemplateDay(
   templateId: string,
   day: number,
@@ -397,6 +403,25 @@ function num(value: unknown): number | null {
 /** A raw entry's week. Missing means 1 — see `BlueprintEntry.week`. */
 function weekOf(entry: RawEntry): number {
   return Math.max(1, num(entry.week) ?? 1);
+}
+
+/**
+ * Takes a program off the shelf.
+ *
+ * A local soft-delete that rides the sync queue like every other template
+ * write — the push tells the server, which soft-deletes its row, and the
+ * next pull clears it off any other device. Deliberately NOT the template
+ * API's DELETE: a trainer clearing out their shelf in a basement should not
+ * need a connection for it.
+ *
+ * Clients already on a copy are untouched — assigning was a copy, and the
+ * copy never looks back at its source. The one thing that dies with the
+ * template is the ability to assign it again.
+ */
+export async function deleteTemplate(templateId: string): Promise<void> {
+  const row = await templatesCollection.find(templateId);
+  await database.write(() => row.markAsDeleted());
+  after('delete-template');
 }
 
 export async function updateTemplate(

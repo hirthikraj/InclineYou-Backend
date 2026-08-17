@@ -1,11 +1,36 @@
 import { synchronize, hasUnsyncedChanges } from '@nozbe/watermelondb/sync';
 import fetchLocalChanges from '@nozbe/watermelondb/sync/impl/fetchLocal';
 import { database } from './index';
-import { repairLocalData } from './repair';
+import { purgeLocalClient, repairLocalData } from './repair';
 import { api } from '../api/client';
 import { resetLiveCaches } from './live';
 
 export type SyncPhase = 'idle' | 'syncing' | 'error';
+
+/**
+ * One record the push would not take, as the server described it.
+ *
+ * `kept: false` means nothing was written and the local copy is a ghost —
+ * something has to remove it. `kept: true` means the record landed and one
+ * field did not, which needs no repair here: the next pull carries the server's
+ * value and WatermelonDB writes it over the local one.
+ */
+export interface SyncRejection {
+  table: string;
+  id: string;
+  field: string | null;
+  code: string;
+  message: string;
+  kept: boolean;
+}
+
+/** A refusal the trainer has not been told about yet. */
+export interface SyncNotice {
+  /** The refused record's id — also what keeps a retry from stacking duplicates. */
+  id: string;
+  code: string;
+  message: string;
+}
 
 export interface SyncState {
   phase: SyncPhase;
@@ -19,6 +44,14 @@ export interface SyncState {
    * the detail on top of it.
    */
   pendingCount: number;
+  /**
+   * What the server refused, waiting to be shown.
+   *
+   * Held until a screen dismisses it rather than cleared on the next sync: a
+   * refusal is the one sync outcome the trainer has to act on, and the sync
+   * that produced it usually ran while they were looking at something else.
+   */
+  notices: SyncNotice[];
   error: string | null;
 }
 
@@ -27,6 +60,7 @@ let state: SyncState = {
   lastSyncedAt: null,
   hasPending: false,
   pendingCount: 0,
+  notices: [],
   error: null,
 };
 
@@ -44,6 +78,11 @@ export function subscribeSync(listener: () => void): () => void {
 function setState(patch: Partial<SyncState>) {
   state = { ...state, ...patch };
   listeners.forEach((l) => l());
+}
+
+/** Read and cleared by whichever screen showed it. */
+export function dismissSyncNotice(id: string) {
+  setState({ notices: state.notices.filter((n) => n.id !== id) });
 }
 
 /**
@@ -148,10 +187,47 @@ function cursor(lastPulledAt: number | null | undefined): string {
  */
 let repaired: Promise<void> | null = null;
 
+/**
+ * Collected by `pushChanges`, acted on once `synchronize` has finished.
+ *
+ * Deleting a record from inside the push callback would be a write in the
+ * middle of a sync, which is the one thing WatermelonDB asks you not to do.
+ */
+let refused: SyncRejection[] = [];
+
+function isRejection(value: unknown): value is SyncRejection {
+  const r = value as SyncRejection | null;
+  return !!r && typeof r.id === 'string' && typeof r.message === 'string';
+}
+
+/**
+ * Erase the ghosts, and keep the sentences.
+ *
+ * Never throws: a purge that fails leaves a record that cannot sync, which is
+ * bad, but a purge that fails and takes the sync state down with it leaves the
+ * trainer with no idea anything happened at all.
+ */
+async function applyRejections(rejections: SyncRejection[]) {
+  for (const r of rejections) {
+    if (r.kept || r.table !== 'clients') continue;
+    try {
+      await purgeLocalClient(r.id);
+    } catch (e) {
+      console.warn(`[sync] could not purge refused client ${r.id}`, e);
+    }
+  }
+
+  const fresh = rejections
+    .filter((r) => !state.notices.some((n) => n.id === r.id))
+    .map(({ id, code, message }) => ({ id, code, message }));
+  if (fresh.length > 0) setState({ notices: [...state.notices, ...fresh] });
+}
+
 export function syncDatabase(reason: string = 'manual'): Promise<void> {
   if (inFlight) return inFlight;
 
   setState({ phase: 'syncing', error: null });
+  refused = [];
 
   // Awaited inside the chain rather than before it, so `inFlight` is still
   // assigned synchronously and two callers in the same tick share one sync.
@@ -163,8 +239,16 @@ export function syncDatabase(reason: string = 'manual'): Promise<void> {
       const { data } = await api.get(`${pullPath()}${cursor(lastPulledAt)}`);
       return { changes: data.changes, timestamp: data.timestamp };
     },
+    /**
+     * The push answers with what it would not take — a roster row whose number
+     * belongs to a trainer, or to another trainer's client. Everything else in
+     * the same batch landed, so this is read rather than thrown: failing the
+     * sync over one refused record would strand the morning's work behind it.
+     */
     pushChanges: async ({ changes, lastPulledAt }) => {
-      await api.post(pushPath(), { changes, lastPulledAt });
+      const { data } = await api.post(pushPath(), { changes, lastPulledAt });
+      const rejected: unknown = data?.rejected;
+      if (Array.isArray(rejected)) refused.push(...rejected.filter(isRejection));
     },
     migrationsEnabledAtVersion: 1,
     /**
@@ -183,6 +267,9 @@ export function syncDatabase(reason: string = 'manual'): Promise<void> {
     sendCreatedAsUpdated: true,
   }))
     .then(async () => {
+      // Before `refreshPending`: purging a ghost changes the queue, and a count
+      // taken first would include records that no longer exist.
+      if (refused.length > 0) await applyRejections(refused);
       setState({ phase: 'idle', lastSyncedAt: Date.now(), error: null });
       await refreshPending();
     })
@@ -196,6 +283,7 @@ export function syncDatabase(reason: string = 'manual'): Promise<void> {
     })
     .finally(() => {
       inFlight = null;
+      refused = [];
     });
 
   return inFlight;
@@ -203,13 +291,32 @@ export function syncDatabase(reason: string = 'manual'): Promise<void> {
 
 /** Called on sign-out so the next trainer on this device starts clean. */
 export async function resetLocalDatabase() {
-  await database.write(async () => {
-    await database.unsafeResetDatabase();
-  });
+  // The caller flips the auth state first, and the navigator swap that follows
+  // unmounts every screen holding a live query — but that commit races this
+  // call, and Watermelon refuses to reset while any subscription is still
+  // attached. Give the unmount a few frames before giving up.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await database.write(async () => {
+        await database.unsafeResetDatabase();
+      });
+      break;
+    } catch (e) {
+      if (attempt >= 10) throw e;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
   // The screens hold the last emission outside React for a warm start. Wiping
   // the tables is not enough — those caches would hand the next trainer the
   // previous one's roster for a frame.
   resetLiveCaches();
-  state = { phase: 'idle', lastSyncedAt: null, hasPending: false, pendingCount: 0, error: null };
+  state = {
+    phase: 'idle',
+    lastSyncedAt: null,
+    hasPending: false,
+    pendingCount: 0,
+    notices: [],
+    error: null,
+  };
   listeners.forEach((l) => l());
 }

@@ -17,7 +17,7 @@
  *
  * So the subscription starts on mount, and the cost is paid for with a narrow
  * projection rather than a delay: five columns of the exercise library instead
- * of the row, and no `buildExercises` pass over 873 of them. `liveCache` makes
+ * of the row, and no `buildExercises` pass over 1,324 of them. `liveCache` makes
  * the second and later opens of a session start from the last emission, which is
  * the normal case — a trainer opens the same log a dozen times in an hour.
  *

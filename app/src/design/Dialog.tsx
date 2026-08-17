@@ -27,6 +27,12 @@ export interface DialogProps {
   /** Defaults to Cancel. */
   cancelLabel?: string;
   confirmLabel: string;
+  /**
+   * Danger by default — most of these stand in front of a delete. 'primary'
+   * is for the confirmations that commit work rather than destroy it (booking
+   * a series of sessions), where a red button would claim a loss that isn't.
+   */
+  confirmVariant?: 'danger' | 'primary';
   onCancel: () => void;
   onConfirm: () => void;
 }
@@ -37,6 +43,7 @@ export default function Dialog({
   children,
   cancelLabel = 'Cancel',
   confirmLabel,
+  confirmVariant = 'danger',
   onCancel,
   onConfirm,
 }: DialogProps) {
@@ -55,14 +62,13 @@ export default function Dialog({
         />
         <View style={styles.dialog} accessibilityViewIsModal accessibilityRole="alert">
           <Text style={styles.title}>{title}</Text>
-          {typeof children === 'string' ? (
-            <Text style={styles.body}>{children}</Text>
-          ) : (
-            <View>{children}</View>
-          )}
+          {/* Always a Text wrapper: JSX like `week {n} goes` arrives as an
+              array of strings, and a bare string inside a View is a crash on
+              native. Emphasis nodes (`DialogStrong`) are Texts, which nest. */}
+          {children != null ? <Text style={styles.body}>{children}</Text> : null}
           <View style={styles.acts}>
             <Button label={cancelLabel} variant="ghost" onPress={onCancel} style={styles.act} />
-            <Button label={confirmLabel} variant="danger" onPress={onConfirm} style={styles.act} />
+            <Button label={confirmLabel} variant={confirmVariant} onPress={onConfirm} style={styles.act} />
           </View>
         </View>
       </View>
