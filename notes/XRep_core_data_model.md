@@ -94,6 +94,7 @@ Types shown are Postgres. Every table also has the standard `id`, `created_at`, 
 | name | varchar | yes | |
 | is_active | boolean | no | |
 | template_id | uuid (FK→template) | yes | set if created from a template |
+| schedule | jsonb | yes | the client's chosen layout, written by apply: `[{"day":1,"weekday":2,"time":"06:30"}, …]` — which weekday each template day slot lands on, and when. Null on programs assigned before slots and weekdays were separate |
 
 ### 3.5 `program_exercise` (which exercises are in a program)
 | Column | Type | Null | Notes |
@@ -104,6 +105,7 @@ Types shown are Postgres. Every table also has the standard `id`, `created_at`, 
 | order_index | int | no | ordering within the day |
 | target_sets | int | yes | |
 | target_reps | varchar | yes | **string** ("8–12") |
+| duration_seconds | int | yes | a timed prescription — "3 × 45s" — carried **instead of** reps, never alongside. Chosen per prescription when the exercise is added, because nothing in the library marks an exercise as a hold |
 | target_load | varchar | yes | **string** ("bodyweight", "60kg") |
 | notes | varchar | yes | |
 
@@ -113,6 +115,8 @@ Types shown are Postgres. Every table also has the standard `id`, `created_at`, 
 | trainer_id | uuid (FK→trainer) | no | |
 | name | varchar | no | |
 | structure | jsonb | no | reusable blueprint (days/exercises/targets); applied by copying into a `program` |
+
+> **A template's days are ordinal slots, not weekdays.** "Day 1".."Day 7" is what the blueprint and `training_days` mean; which weekday each slot lands on (and at what time) is the client's preference, captured at apply time in `program.schedule`. Apply refuses a schedule that does not cover the template's day slots exactly — one distinct weekday per slot — and translates each blueprint entry's slot to its landed weekday as it copies, so the client's `program_exercise` rows stay concrete. Templates authored before this (when the numbers meant weekdays) were soft-deleted rather than reinterpreted (server V24).
 
 ### 3.7 `workout_session`
 | Column | Type | Null | Notes |

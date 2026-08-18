@@ -39,6 +39,9 @@ web-build/
 
 # ── IDE ───────────────────────────────────────────────────────────────────────
 .idea/
+# IntelliJ's compile output. It once shipped a stale copy of application.yml and
+# V1__init_schema.sql into git; nothing builds from here.
+out/
 *.iml
 *.iws
 .vscode/
