@@ -109,9 +109,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         if (path.startsWith("/v1/auth/")) return Tier.AUTH;
         if (path.startsWith("/v1/sync/") || path.startsWith("/v1/client/sync/")) return Tier.SYNC;
-        // Each of these spends a WhatsApp message on somebody's behalf.
+        // Each of these spends a WhatsApp message on somebody's behalf. The team
+        // invite belongs with them for a second reason as well: it puts a
+        // message in front of somebody who never asked for one, so the 10/min
+        // ceiling is the anti-spam control and not only a cost control.
         if ("POST".equals(request.getMethod())
-                && (path.endsWith("/nudge") || path.endsWith("/report/weekly"))) {
+                && (path.endsWith("/nudge")
+                    || path.endsWith("/report/weekly")
+                    || path.endsWith("/team/invites"))) {
             return Tier.MESSAGING;
         }
         return Tier.STANDARD;

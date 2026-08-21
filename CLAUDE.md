@@ -8,9 +8,10 @@ and has its own `CLAUDE.md`.
 
 - `API.md` — the complete endpoint reference, the authorization table, the rate-limit
   tiers, and the error `code` catalogue. **Keep it in sync with any endpoint change.**
-- `agent/` — the five source-of-truth product docs (requirements, data model,
-  interaction map, getting-started, deployment runbook). Consult them before
-  inventing product behaviour; don't reopen decisions they've settled.
+- `agent/` — the eight source-of-truth product docs (requirements, data model,
+  interaction map, getting-started, manual test plan, growth roadmap, deployment
+  runbook, AI feature spec). Consult them before inventing product behaviour;
+  don't reopen decisions they've settled.
 
 ## Commands
 
@@ -33,7 +34,8 @@ phone you pass, which must be the phone signed in on the device.
 `*Controller` over a `*Service`:
 
 `auth` · `client` · `exercise` · `template` · `program` · `session` ·
-`progress` · `payment` · `report` · `nudge` · `push` · `sync` · `trainer`
+`progress` · `payment` · `report` · `nudge` · `push` · `sync` · `trainer` ·
+`team`
 
 Cross-cutting: `config` (security, Redis, health, `AppProperties`),
 `ratelimit`, `exception` (the global RFC-7807 handler), `entity` + `repository`
@@ -51,7 +53,7 @@ uses; do not "upgrade" a JDBC service to JPA.
 
 ### Schema evolution is additive-only
 
-Migrations live in `src/main/resources/db/migration` (`V1`…`V25`). **Never edit a
+Migrations live in `src/main/resources/db/migration` (`V1`…`V27`). **Never edit a
 migration that has run** — append a new `V{n}__name.sql`. Never drop or repurpose
 a column, and never remove or rename a response field: old app builds on
 trainers' phones must keep working. The client's WatermelonDB migrations in
@@ -63,6 +65,39 @@ Trainer-scoped endpoints read the trainer UUID from the JWT subject and filter
 every query by `trainer_id`. A wrong id therefore yields **404, not 403** — that
 is intentional, not a bug. Keep new queries scoped the same way (`findOwned(...)`
 is the pattern in `ClientService`).
+
+### A team widens reads; it never moves ownership
+
+`team` (V26) does not change the rule above — it adds a resolver. `TeamScope`
+answers "whose rows may this caller read", widening the set from `{me}` to
+`{me + my team}` for an owner or admin, and **every team-wide query takes its
+trainer-id set from there and nowhere else.** `trainer_id` keeps meaning what it
+always meant, no table gains a `team_id`, and none of the endpoints that predate
+V26 changed what they return — team reads live under `/v1/team/**`. Three rules
+that are decisions and not oversights, all argued in
+`agent/XRep_team_coaching_prd.md`:
+
+- **No role ever sees a teammate's money book.** `package`, `payment` and
+  `gym_settlement` must never be returned under a `/v1/team/**` path — with one
+  audited exception, `GET /v1/team/revenue`, which is **owner-only and totals
+  only** (no payment row, no client name). Adding money anywhere else under that
+  namespace breaks the promise the app's invitation screen makes.
+- **An admin editing a teammate's plan writes a `team_activity` row** (V27) and
+  pushes to the coach whose client it is. Editing your own writes nothing — a
+  `CHECK (actor <> subject)` enforces it. The log is append-only and readable by
+  the coach, not only by admins; that readability is the whole reason the editing
+  capability is acceptable.
+- **Team-wide data is online-only.** Only `team` and `team_member` enter sync, plus
+  team custom exercises; teammates' clients are REST reads.
+- **Reassigning a client moves the plan, not the history.** Logged sessions and
+  collected payments keep their original `trainer_id`. `client_assignment` is both
+  the audit log and the sync tombstone source: the pull filters
+  `trainer_id = :tid`, so the moved `program` / `program_exercise` /
+  `scheduled_session` rows must be named in `deleted` or they sit on the old
+  coach's phone forever. The **client row is the exception** — it stays there,
+  projected as `status: 'archived'`, because that device still holds payments and
+  workouts that resolve a name through `client_id`. `nudge_rule` never moves; it
+  has no `client_id`.
 
 ### Soft deletes everywhere
 
