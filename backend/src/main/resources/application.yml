@@ -82,6 +82,15 @@ app:
     sync:      { limit: 60,  window-seconds: 60 }
     messaging: { limit: 10,  window-seconds: 60 }   # each call spends a WhatsApp message
 
+  # Team coaching. `enabled: false` makes every /v1/team/** endpoint 404 and
+  # stops any caller's read scope widening — see AppProperties.Team. The seat
+  # limit is enforced when an invite is ACCEPTED, not when it is sent, so seats
+  # are consumed by people rather than by intentions.
+  team:
+    enabled: ${TEAM_ENABLED:true}
+    default-seat-limit: ${TEAM_SEAT_LIMIT:5}
+    invite-expiry-days: ${TEAM_INVITE_EXPIRY_DAYS:14}
+
   seed:
     exercises:
       enabled: ${SEED_EXERCISES:true}

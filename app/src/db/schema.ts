@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 18,
+  version: 19,
   tables: [
     tableSchema({
       name: 'clients',
@@ -472,6 +472,65 @@ export const schema = appSchema({
         { name: 'capacity', type: 'number' },
         /** Below this it isn't worth running, and the row says so in advance. */
         { name: 'min_size', type: 'number' },
+        { name: 'created_at', type: 'number' },
+        { name: 'updated_at', type: 'number' },
+      ],
+    }),
+    tableSchema({
+      /**
+       * V26 · the coaching team, as the server describes it.
+       *
+       * One row, always — a trainer is in one team or none. Pulled, never
+       * pushed: every write to a team is a permission change, and a permission
+       * change authored on a phone with no signal is one replayed at an unknown
+       * later time, potentially after the grant was revoked. The sync push
+       * refuses this table out loud (`TEAM_READ_ONLY`).
+       *
+       * It is here at all — rather than being fetched when the Team screen opens
+       * — because it is chrome: the drawer and the profile both name the team,
+       * and an admin standing on a gym floor with no signal should still be able
+       * to see who their coaches are. What is deliberately NOT synced is the
+       * rest of the team: teammates' clients, their programs, their money. Those
+       * are online-only REST reads. See `agent/XRep_team_coaching_prd.md` §0.3.
+       */
+      name: 'teams',
+      columns: [
+        { name: 'owner_trainer_id', type: 'string', isIndexed: true },
+        { name: 'name', type: 'string' },
+        { name: 'logo_url', type: 'string', isOptional: true },
+        /** Null means unlimited. Enforced server-side on accept, not on invite. */
+        { name: 'seat_limit', type: 'number', isOptional: true },
+        { name: 'created_at', type: 'number' },
+        { name: 'updated_at', type: 'number' },
+      ],
+    }),
+    tableSchema({
+      /**
+       * V26 · one row per coach in the team, pending invites included.
+       *
+       * An invite IS a membership that has not been agreed to, which is why it
+       * lives here rather than in a table of its own — the same shape V18 chose
+       * for `client.membership_status`.
+       *
+       * `trainer_id` is optional because an invite can precede the account: a
+       * gym owner can invite a coach who has never heard of XRep, and the row is
+       * written against the phone number until that number signs in. Which is
+       * also why `invited_phone` is the only thing we know about some rows.
+       *
+       * Pulled, never pushed, for the same reason as `teams`.
+       */
+      name: 'team_members',
+      columns: [
+        { name: 'team_id', type: 'string', isIndexed: true },
+        { name: 'trainer_id', type: 'string', isOptional: true, isIndexed: true },
+        { name: 'invited_phone', type: 'string', isOptional: true },
+        /** 'owner' | 'admin' | 'coach' */
+        { name: 'role', type: 'string' },
+        /** 'invited' | 'active' | 'declined' | 'removed' */
+        { name: 'status', type: 'string' },
+        { name: 'invited_by_trainer_id', type: 'string', isOptional: true },
+        { name: 'invited_at', type: 'number', isOptional: true },
+        { name: 'joined_at', type: 'number', isOptional: true },
         { name: 'created_at', type: 'number' },
         { name: 'updated_at', type: 'number' },
       ],

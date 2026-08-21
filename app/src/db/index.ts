@@ -25,6 +25,8 @@ import ExerciseFavourite from './models/ExerciseFavourite';
 import Coach from './models/Coach';
 import WeeklyReport from './models/WeeklyReport';
 import Batch from './models/Batch';
+import Team from './models/Team';
+import TeamMember from './models/TeamMember';
 
 /**
  * A UUID v4 string, because every id in this app has to be a valid PostgreSQL
@@ -84,5 +86,7 @@ export const database = new Database({
     Coach,
     WeeklyReport,
     Batch,
+    Team,
+    TeamMember,
   ],
 });

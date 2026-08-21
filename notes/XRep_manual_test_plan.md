@@ -1,6 +1,6 @@
 # XRep — Manual Test Plan & Test Case Document
 
-**Version:** 1.1 · **Date:** 15 Aug 2026 · **For:** manual QA of the MVP (trainer + client roles)
+**Version:** 1.2 · **Date:** 20 Aug 2026 · **For:** manual QA of the MVP (trainer + client roles)
 **Scope:** FR-1 – FR-11 and NFR-1 – NFR-13 of [`XRep_final_requirements_and_plan.md`](XRep_final_requirements_and_plan.md), all screens in [`XRep_MVP_interaction_map.md`](XRep_MVP_interaction_map.md), plus the Spring Boot backend surface.
 **Includes:** happy paths, edge cases, corner cases, offline/sync, business-logic abuse, and a full security section (§21).
 
@@ -14,6 +14,23 @@
 > 2. **A trainer adding a number is a claim, not a relationship.** New clients are born `invited` and must
 >    accept before anything of theirs is shared. New exits at sign-in: **invited**, **removed**,
 >    **unattached**. See §1.4.
+
+> **v1.2 — what changed.** Schema **V26** and **V27** added **team coaching**: a senior
+> trainer runs a team of trainers. It is a whole new feature area rather than a change
+> to an existing one, so it lands as **§16A** (plus §21.3b and §20 q18–q26) and nothing
+> else is renumbered. Three things in it are worth knowing before you execute anything:
+>
+> 1. **A team widens reads; it never moves ownership.** None of the 63 endpoints that
+>    predate V26 changed what they return, so every case outside §16A should behave
+>    exactly as it did in v1.1. If one does not, that is the finding.
+> 2. **Team coaching is the one part of the app that writes ONLINE.** Every write is a
+>    permission change, and one authored offline would be replayed at an unknown later
+>    time. §16A.8 checks that the app refuses honestly instead of queueing — the
+>    opposite of what every other 📵 case in this document asserts.
+> 3. **One money promise was deliberately narrowed.** Phase 1's invitation screen said
+>    nobody in a team could see what another coach collected; Phase 3's owner-only
+>    revenue roll-up makes that untrue, and the copy changed with it. **TEAM-104 tests
+>    the copy**, because a promise quietly narrowed is worse than one never made.
 
 > This document is written to be executed on a device with the backend running locally. Every case is
 > pass/fail-able by one person with a phone, a terminal, and `curl`. Cases marked **⚠ known gap** are
@@ -29,7 +46,7 @@
 | Step | Command | Expected |
 |---|---|---|
 | 1 | `docker compose up -d` (repo root) | `xrep-postgres` healthy on 5432 (db `xrepdb`, user `xrep`) **and `xrep-redis` on 6379**. Confirm `docker exec xrep-redis redis-cli config get appendonly` returns `yes` — without AOF, SEC-OTP-02 silently regresses |
-| 2 | `cd backend && ./mvnw spring-boot:run` | Flyway applies V1–V21, app listens on 8080, exercise seed loads (1,324 exercises); a second run reports `0 rows changed` |
+| 2 | `cd backend && ./mvnw spring-boot:run` | Flyway applies V1–V27, app listens on 8080, exercise seed loads (1,324 exercises); a second run reports `0 rows changed` |
 | 3 | `curl -i localhost:8080/health` | `200`, no auth required |
 | 4 | `cd app && npm run android` (device on same LAN) | App installs; set `EXPO_PUBLIC_API_URL=http://<your-LAN-IP>:8080` — `10.0.2.2` only works on the emulator |
 
@@ -120,6 +137,15 @@ Counters are in memory, so a **restart also clears them** (unlike the OTP limits
 | CD | 98xxxxxx08 | Invited by T1, then **declined** | Decline path, `unattached` |
 | CR | 98xxxxxx09 | Client of T1, then **archived** | Removal notice + local wipe |
 | CN | — | Client of T1, **no phone** | Nudge/UPI degradation cases. Born `accepted` — nobody to ask |
+| TA | 98xxxxxx10 | Trainer, joins T1's team | Teammate coach → promoted to admin (§16A.2) |
+| TB | 98xxxxxx11 | Trainer, joins T1's team | The second coach — reassignment needs somewhere to send people |
+| TX | 98xxxxxx12 | Trainer, owner of a **second** team | Cross-**team** isolation (§21.3b). Different from T2, deliberately: one trainer in no team and one in another team fail differently |
+| CX | 98xxxxxx13 | Client of **TA** | The reassignment fixture. Give them a program, a future session, a past session, a logged workout and a recorded payment before starting §16A.4 |
+
+> **T2 must never join a team.** Half of §21.3 depends on T2 being a trainer T1 has no
+> relationship with at all. Team-scoped isolation uses **TX** instead, and the two
+> refusals are genuinely different: T2's ids are outside every team T1 is in, TX's are
+> inside a team T1 is not in. A single fixture would test only one of them.
 
 > **`TC` (one phone, both roles) is gone.** It described the pre-V18 model and is now an impossible state,
 > not a fixture. What replaces it is **AUTH-42**, which asserts the *refusal*: put T1's number on T2's
@@ -779,6 +805,205 @@ to *absent* rather than to *broken*.
 
 ---
 
+## 16A · TEAM — team coaching (V26, V27)
+
+> **Numbered 16A rather than renumbering 17–27.** Every later section is
+> cross-referenced by number from a dozen places in this document (§21, §22.1,
+> §25), and shifting them would break more than it tidies. Same reason §21.1b
+> exists.
+
+Backend: `team/` — `TeamService`, `TeamScope`, `TeamPhoneGuard`, `TeamClientService`,
+`TeamLibraryService`, `TeamEditService`, `TeamRevenueService`. App: `src/team/`,
+drawer frames **6a–6l**. Design: [`XRep_team_coaching_prd.md`](XRep_team_coaching_prd.md).
+
+**The three rules under test.** Everything in this section is a way of checking one
+of them, and a failure against any of them is **S1**:
+
+1. **A team widens reads; it never moves ownership.** No table gained a `team_id`,
+   and none of the 63 endpoints that predate V26 changed what they return.
+2. **Nobody opens anybody else's money book.** `package`, `payment` and
+   `gym_settlement` never appear under `/v1/team/**` — with exactly one exception,
+   `GET /v1/team/revenue`, which is owner-only and totals-only.
+3. **Team-wide data is online-only.** Only `team` and `team_member` enter sync, plus
+   team custom exercises. Everything else team-wide needs a connection, and the
+   screens must say so rather than fake a cache.
+
+`TEAM_ENABLED=false` on the backend must make every case here answer `404` and the
+drawer row disappear — run **TEAM-01** first to confirm which mode you are in.
+
+### 16A.1 Forming a team, inviting, seats
+
+| ID | Case | Steps | Expected | P/F |
+|---|---|---|---|---|
+| TEAM-01 | Feature switch | Restart backend with `TEAM_ENABLED=false`; open the drawer | No **Team** row under Growth. `curl $BASE/v1/team -H "$T1"` → `404` with no `code`. Restore `true` before continuing | |
+| TEAM-02 | No team is not an error | As T1 (no team yet), `curl -i $BASE/v1/team -H "$T1"` | **`204`**, empty body. The screen shows the create pitch, not an error | |
+| TEAM-03 | Create a team | Drawer → Growth → Team → Create a team | Named from the gym name if T1 has one; T1 is `owner`, `activeMembers: 1`, seat limit 5 | |
+| TEAM-04 | One team per trainer | Try to create a second | `409 ALREADY_IN_TEAM` | |
+| TEAM-05 | Invite a number with an account | Invite TA's number | `201`; WhatsApp opens with the invitation prefilled from **T1's own number** | |
+| TEAM-06 | Back out of WhatsApp | Invite, then cancel the share sheet | The invitation **still exists**, listed as "Waiting for them to accept". Coupling it to the share sheet would make the list lie | |
+| TEAM-07 | Invite a number with **no** XRep account | Invite an unused number | `201`, `member.trainerId` is null, `phone` shown, no name. `team_member.invited_phone` set | |
+| TEAM-08 | …then that number signs up | Sign in as that number, complete trainer setup | The invitation is waiting on the Home card **and** the drawer badge. Accepting binds `trainer_id` | |
+| TEAM-09 | Invite a client's number | Invite C1's number | `409 PHONE_IS_CLIENT`. Pre-flight on the form says the same before submit | |
+| TEAM-10 | Invite a number already in another team | Invite TX (owner of a second team) | `409 PHONE_ALREADY_IN_TEAM`. 🔒 **The message must not name TX's team or TX** — see SEC-TEAM-02 | |
+| TEAM-11 | Invite yourself | Invite T1's own number | `422 PHONE_IS_SELF` | |
+| TEAM-12 | Invite twice | Invite TA again while pending | `409 PHONE_ALREADY_INVITED` | |
+| TEAM-13 | Re-invite after a decline | TA declines; invite again | Allowed. A rule that outlived the refusal would strand them | |
+| TEAM-14 | Pre-flight agrees with the write | For each refusal above, call `POST /v1/team/invites/phone-availability` first | Same `code`, `200` status, `available: false`. A form that says available and a save that refuses is the bug | |
+| TEAM-15 | Invite is `MESSAGING` tier | 11 invites inside a minute | 11th → `429 RATE_LIMITED`. This ceiling is the anti-spam control, not only a cost control | |
+| TEAM-16 | Seats are checked on **accept** | Set the limit to 1 (owner fills it); invite TA | Invite succeeds — seats are consumed by people, not intentions | |
+| TEAM-17 | …and refused there | TA accepts | `409 TEAM_SEAT_LIMIT` carrying `seatLimit: 1`. The app names the number without parsing the sentence | |
+| TEAM-18 | Raise the limit from the app | Team → ⋯ → Team seats → 5 | TA can now accept. **A limit with no editor would be a wall with no door** | |
+| TEAM-19 | Lower the limit below headcount | Set 5 → 2 with 3 coaches in | Allowed; nobody is removed; the next accept is refused. The sheet says so before saving | |
+| TEAM-20 | Invitation expiry | Set `TEAM_INVITE_EXPIRY_DAYS=0`, restart, list invitations | Expired ones are **omitted** from the list; accepting a stale id → `410 TEAM_INVITE_EXPIRED` | |
+| TEAM-21 | Accept changes nothing of theirs | Note TA's client count, programs and this month's collected before accepting; accept | All three identical afterwards. **This is the promise that makes joining safe to say yes to** | |
+| TEAM-22 | Two accepts at once | Two invitations to TA from two teams; accept both quickly | One wins, the other `409 ALREADY_IN_TEAM`. The partial unique index is the arbiter | |
+
+### 16A.2 Roles, removal, ownership
+
+| ID | Case | Expected | P/F |
+|---|---|---|---|
+| TEAM-23 | A coach is not widened | TA as plain `coach`: no **Team clients** row, `GET /v1/team/clients` → `403 NOT_TEAM_ADMIN`. Being in a team is not being an admin | |
+| TEAM-24 | …but does get the library | **Team programs** is reachable, and lists every coach's templates. This is most of what a coach joins for | |
+| TEAM-25 | Promote a coach to admin | Owner → coach row → Make them an admin. Push arrives; TA now sees Team clients | |
+| TEAM-26 | An admin cannot touch another admin | Promote TA and TB to admin; as TA try to demote or remove TB | `403 NOT_TEAM_OWNER` both ways, and neither action is drawn in the sheet | |
+| TEAM-27 | `owner` is not an assignable role | `PATCH /v1/team/members/{id}/role` with `"owner"` | `422 TEAM_ROLE_INVALID` — making somebody the owner is a transfer | |
+| TEAM-28 | The owner cannot be removed | As an admin, remove the owner | `422 CANNOT_REMOVE_OWNER`; the row offers no Remove | |
+| TEAM-29 | The owner cannot leave | Team → ⋯ → there is no Leave for an owner; `DELETE /v1/team/members/me` → `422 CANNOT_REMOVE_OWNER` | |
+| TEAM-30 | Transfer ownership | Coach sheet → Hand the team over → confirm | They become `owner`, T1 becomes `admin`, `team.owner_trainer_id` rewritten. The dialog **names them** | |
+| TEAM-31 | Removal ends visibility, not ownership | Remove TA; check TA's roster, programs and money book | All intact and still theirs. The dialog says exactly this before you confirm | |
+| TEAM-32 | Removed coach loses the team | TA's phone after the next sync: no team, no teammates, no team exercises. `GET /v1/team` → `204` | |
+| TEAM-33 | Removal tombstones reach every phone | On a **third** member's device, the removed coach disappears from the list after one sync | |
+| TEAM-34 | Delete the team | Owner → ⋯ → Delete the team | Every member freed; **no client data touched anywhere**; each ex-member can immediately create their own | |
+| TEAM-35 | Leave | As a non-owner coach, Leave the team | Their clients stay theirs; the team drops off their phone | |
+| TEAM-36 | Member ids outside the team | `DELETE /v1/team/members/{id_from_TX_team}` as T1 | `404 MEMBER_NOT_IN_TEAM` — outside your team is *not there*, per the standing convention | |
+
+### 16A.3 Team clients, and the money line
+
+| ID | Case | Expected | P/F |
+|---|---|---|---|
+| TEAM-37 | Roster grouped by coach | Team → Team clients: one group per coach, **caller's own first**, then alphabetical | |
+| TEAM-38 | Drift is stated, not left as a date | A client with no logged session for 25 days reads "Quiet 25 days" with an alert spine — not "last session 26 Jul". The screen exists to have done the subtraction | |
+| TEAM-39 | Drift thresholds match the roster | 10 days → warn, 21 days → danger, identical to the trainer's own roster. Two screens disagreeing about "quiet" is worse than either threshold being wrong | |
+| TEAM-40 | Gaps are one per row | A client with no plan *and* nothing booked shows one tag, not two. Drifting outranks both | |
+| TEAM-41 | Never logged | A brand-new client reads "Never logged a session", warn tone — not "Quiet 19710 days" | |
+| TEAM-42 | 🔒 No money on the client detail | Open a teammate's client. **No packages, no payments, no amount owed, no split.** `moneyHidden: true` in the response | |
+| TEAM-43 | …and the screen says why | The callout names the rule ("Money stays with the coach who collected it"). An absence with no explanation gets filed as data loss | |
+| TEAM-44 | Client ids outside the team | `GET /v1/team/clients/{C2_id}` (T2 is in no team) as T1 | `404 CLIENT_NOT_IN_TEAM` | |
+| TEAM-45 | A coach cannot read the roster | `GET /v1/team/clients` as a plain coach | `403 NOT_TEAM_ADMIN` | |
+| TEAM-46 | Archived clients are out | Archive one of TA's clients | Gone from the team roster; the count drops | |
+
+### 16A.4 Reassignment — the correctness gate
+
+> **Run this whole subsection on two devices, both signed in, both synced.** It is
+> the only part of team coaching where a bug is invisible on the screen that caused
+> it. Fixture: **CX**, a client of TA with a program, a future session, a past
+> session, a logged workout and a recorded payment.
+
+| ID | Case | Steps | Expected | P/F |
+|---|---|---|---|---|
+| TEAM-47 | Hand over, keep the plan | Team clients → CX → Hand to another coach → TB → Keep it | `200`; both coaches get a push; toast names TB | |
+| TEAM-48 | The plan moved | psql | `client`, `program` and the **future** `scheduled_session` now carry TB's `trainer_id` | |
+| TEAM-49 | The past did not | psql | The **past** session, the `workout_session` and the `payment` still carry TA's `trainer_id`. **S1 if any of them moved** | |
+| TEAM-50 | Nudge rules untouched | psql: `SELECT trainer_id, kind FROM nudge_rule` | Unchanged for both coaches. There is no such thing as a client-scoped nudge rule, and moving them would violate `(trainer_id, kind)` | |
+| TEAM-51 | Membership not reset | psql | `client.membership_status` still `accepted`. A client does not get re-invited because the gym changed who delivers | |
+| TEAM-52 | The client is told | CX's phone | A push naming the new coach. They are **not** asked to re-accept | |
+| TEAM-53 | New coach's device: gains | Sync TB | CX appears on the roster, with the program, **its exercises**, the future session and the whole measurement history | |
+| TEAM-54 | …exercises really do arrive | Open the program on TB's phone | Every exercise is there. They are `updated_at`-stamped by the handover precisely because nothing about them changed except who may see them | |
+| TEAM-55 | …and not the history | TB's money book for CX | Empty, starting now. The past sessions are not in their diary | |
+| TEAM-56 | Old coach's device: losses | Sync TA | The program, its exercises and the future session are **gone** — not stale, gone | |
+| TEAM-57 | **…but CX is still there, as archived** | TA's roster and money book | CX is **not** on the active roster, and the recorded payment still shows **CX's name**. `status` arrives as `archived` in TA's pull while psql still says `active` | |
+| TEAM-58 | The projection cannot leak back | Force a push from TA's phone after TEAM-57 | psql: CX still `active` and still TB's. Both write paths end in `WHERE client.trainer_id = :tid` | |
+| TEAM-59 | Start fresh | Hand another client over with **Start fresh** | Their programs are soft-deleted; the plan is gone from both phones; the new coach sees "No program yet" | |
+| TEAM-60 | Hand back | Hand CX from TB back to TA; sync both | TA has the plan again — **nothing stays deleted**. The tombstone test is `trainer_id <> me`, so a return simply stops matching | |
+| TEAM-61 | Same pull twice | `GET /v1/sync/pull?lastPulledAt=0` twice as TA | Identical `deleted` arrays. Deleting an absent record is a no-op | |
+| TEAM-62 | No-op handover | Hand CX to the coach who already has them | `200` with `noop: true`, and **no audit row**. A log of moves that did not happen is a log nobody can read | |
+| TEAM-63 | Audit row | Team clients → CX → Recent changes / Handovers | Who, to whom, by whom, what happened to the plan, and the note. Both coaches see it | |
+| TEAM-64 | A coach cannot reassign | `POST …/reassign` as a plain coach | `403 NOT_TEAM_ADMIN` | |
+| TEAM-65 | Target must be in the team | Reassign to T2 (in no team) | `404 MEMBER_NOT_IN_TEAM` | |
+| TEAM-66 | Reassign then remove the coach | Hand CX to TB, then remove TB from the team | CX stays TB's — removal never moves ownership. This is the sequence a gym owner will get wrong; confirm the copy warned them | |
+
+### 16A.5 The shared library
+
+| ID | Case | Expected | P/F |
+|---|---|---|---|
+| TEAM-67 | Team custom exercises ride sync | TA creates a custom exercise; sync T1 | It appears in T1's own exercise picker, tagged as the team's, **and works offline** | |
+| TEAM-68 | …because a copied plan needs them | Copy a template that uses TA's custom exercise, assign it, open it on the floor with the radio **off** 📵 | Exercise names render. A blank line here is the bug this exception exists to prevent | |
+| TEAM-69 | Only the team's | A custom exercise belonging to TX (another team) never appears | |
+| TEAM-70 | Leaving takes them back | Leave the team, sync | TA's custom exercises are gone from the picker; T1's own remain. Those rows never changed — the caller's relationship to them did | |
+| TEAM-71 | The shelf | Programs → Browse the team's programs, or Team → Team programs | Every coach's templates, **yours split into its own group**, each with days / exercises / how many clients are on it | |
+| TEAM-72 | Copy | Tap a teammate's template | `201`; toast names the copy; it appears in your own Programs after the sync | |
+| TEAM-73 | A copy is detached | After copying, have the original's owner rewrite theirs | Your copy is unchanged. **This is the bug every competitor shipped**; S1 if it moves | |
+| TEAM-74 | Template outside the team | `POST /v1/team/templates/{TX_template}/copy` | `404 TEMPLATE_NOT_IN_TEAM` | |
+| TEAM-75 | Editing a teammate's template | There is no way to. Copy-only is deliberate — a template two coaches use and one edits changes under the other's clients | |
+| TEAM-76 | A template with no blueprint | A template with null `structure` on the shelf | Reads "0 days · 0 exercises", does not crash the row | |
+
+### 16A.6 Admin editing, and the record that makes it safe (V27)
+
+> The case this exists for: the coach is off sick, their client is on the floor, and
+> the plan says 5×5 squat for a shoulder that is not having it.
+
+| ID | Case | Expected | P/F |
+|---|---|---|---|
+| TEAM-77 | Open a teammate's plan | Team clients → their client → tap a plan | Grouped by week and day; the app bar and a callout both name whose plan it is | |
+| TEAM-78 | Change a prescription | Tap an exercise → 4 × 6 → save | Saved; **the sheet opened seeded with 5 × 5**, not with 3 × 10 defaults. Overwriting a considered prescription with a default is the bug | |
+| TEAM-79 | A timed hold survives | Edit a plank: Hold → 45s | Stored in `duration_seconds`, not `reps`. ⚠ The older `/v1/programs/**` endpoints drop this field; the team path must not | |
+| TEAM-80 | Add an exercise | Day header → Add → pick → prescribe | Added to that day. The picker searches the **local** library, so the choice works offline even though the write does not | |
+| TEAM-81 | Remove an exercise | Long-press → Take it out | Soft-deleted; the dialog says logged sets stay in the client's history | |
+| TEAM-82 | A swap is two rows | Remove one exercise, add another | Two activity rows — "Removed …", "Added …" — not one that hides half of what happened | |
+| TEAM-83 | Every crossing is recorded | After TEAM-78, sign in as the **owning coach** → Team → Recent changes | The change, the admin's name, the time, and a sentence naming the client and the day | |
+| TEAM-84 | …and pushed | The owning coach's device | A push arrived at the time of the edit | |
+| TEAM-85 | Editing your **own** client records nothing | Edit one of your own clients' plans through the same path | No activity row. `CHECK (actor <> subject)` refuses one; there is nobody to account to | |
+| TEAM-86 | The coach can read the log | As a plain coach, `GET /v1/team/activity` | Their own crossings. **Not `403`** — a log only its authors could read is an account of nothing | |
+| TEAM-87 | Scope inverts by role | Same call as an admin | The whole team's crossings. The difference comes from `TeamScope`, not from a query parameter | |
+| TEAM-88 | The sentence is frozen | After TEAM-78, change the same exercise again to 2 × 20, then re-read the first row | The first row still says 4 × 6. Stored prose, not re-derived — otherwise every account of a change moves | |
+| TEAM-89 | Append-only | No delete in the UI; `DELETE /v1/team/activity/...` does not exist. The screen says nothing can be removed | |
+| TEAM-90 | The edit reaches the owning coach | Sync the owning coach after TEAM-78 | The new prescription is on their phone. Nothing had to be written for this: `trainer_id` never moved | |
+| TEAM-91 | …and not the admin's | Sync the admin | The teammate's program is **not** in their local database. Editing is not a claim | |
+| TEAM-92 | A coach cannot edit | `PATCH /v1/team/programs/{id}` as a plain coach | `403 NOT_TEAM_ADMIN` | |
+| TEAM-93 | Plans outside the team | Same call with TX's program id | `404 PROGRAM_NOT_IN_TEAM` | |
+| TEAM-94 | No create, no delete | There is no way to give a teammate's client a new plan or remove their plan | Deliberate — those are handover-shaped, and the handover is audited | |
+| TEAM-95 | Fix a shared exercise | Rename TA's "Barbell Squt" to "Barbell Squat" as an admin | Fixed for everyone; every program pointing at it now reads correctly; TA gets a row and a push | |
+| TEAM-96 | The seeded library is untouchable | `PATCH /v1/team/exercises/{seeded_id}` | `404 EXERCISE_NOT_IN_TEAM`. 1,324 rows belonging to nobody must stay identical for every trainer in the product | |
+
+### 16A.7 The owner's earnings
+
+> **Read §0.4 of the PRD before running this.** This endpoint is the one place money
+> crosses between coaches, and it narrowed a promise the invitation screen used to
+> make. TEAM-104 checks that the copy was narrowed with it.
+
+| ID | Case | Expected | P/F |
+|---|---|---|---|
+| TEAM-97 | Owner only | Team → Team earnings is drawn for the owner only. `GET /v1/team/revenue` as an admin → `403 NOT_TEAM_OWNER`; as a coach → same | |
+| TEAM-98 | Totals per coach | Record payments for two coaches | Each row: collected, payment count, paying-client count. Team total = the sum | |
+| TEAM-99 | 🔒 No client is ever named | Grep the whole response | No client name and **no client id**. "Who paid what" must not be derivable, or this is the money book by another route | |
+| TEAM-100 | `paid_at`, not `created_at` | Record today a payment taken 40 days ago | Falls in the 60-day range, not in this month's. Cash arrives in basements; the date it happened is the date that counts | |
+| TEAM-101 | Pending money is not revenue | Leave a payment `pending` | Excluded from every range | |
+| TEAM-102 | A coach who took nothing | A coach with no payments in the range | Appears as **₹0**, not absent. A missing row reads as "no data" and sends an owner hunting for a bug | |
+| TEAM-103 | The gym's cut | With a gym share recorded | Shown as a slice **of** what was collected, with the split legend. With no gym, the right-hand figure is the coach count and the bar is hidden — a ₹0 "gym's cut" would claim an arrangement that does not exist | |
+| TEAM-104 | The promise matches the code | Read the money line on the invitation screen (6d) and on 6a | Both say **totals only, and that the owner sees them**. Neither claims nobody can see anything. ⚠ **If either still says "not the admins, not the owner", the copy regressed and the product is lying** — S1 for trust, not for data | |
+| TEAM-105 | Backwards range | `?from=2026-08-20&to=2026-08-01` | `422 TEAM_RANGE_INVALID`, not an empty month | |
+| TEAM-106 | Ranges | This month / Last month / This year | Boundaries inclusive; the subtitle names the dates being shown | |
+
+### 16A.8 📵 Offline behaviour
+
+> Team coaching is the only part of XRep that **writes online**. Every write here is
+> a permission change, and one authored offline is one replayed at an unknown later
+> time — possibly after the grant was revoked. So these cases check that the app is
+> honest about it rather than queueing.
+
+| ID | Case | Expected | P/F |
+|---|---|---|---|
+| TEAM-107 | The team still draws 📵 | Radio off, open Team | Name, your role, seats and the whole coach list are there. `team`/`team_member` are synced for exactly this | |
+| TEAM-108 | Writes are refused, once | Radio off | One banner ("changes need a connection"), and the write buttons disabled. **Not** one toast per attempt | |
+| TEAM-109 | Nothing is queued | Radio off, try to invite / promote / remove | Nothing appears in the sync queue and nothing lands when the radio comes back | |
+| TEAM-110 | Push refuses team tables | Craft a push with a `team_members` row: `POST /v1/sync/push` | `200` with a rejection carrying `"code": "TEAM_READ_ONLY"`, and psql unchanged. **Refused out loud, not dropped** — a silent refusal leaves a record that looks synced and exists nowhere | |
+| TEAM-111 | Team-wide reads are honest dead ends 📵 | Radio off, open Team clients / Team programs / Team earnings / Recent changes | Each says it needs a connection **and points at the offline thing that does work** ("your own clients are on the Clients tab") | |
+| TEAM-112 | A failed refresh keeps the list | Load Team clients, drop the network, pull to refresh | The correct list from a minute ago stays on screen. Replacing it with an error page is the bug | |
+| TEAM-113 | Invitations are online-only | Radio off, open the Home invitation card | Answering is disabled with a reason, and the invitation is still there afterwards | |
+| TEAM-114 | Sign out clears team state | Sign out T1, sign in TA on the same phone | No trace of T1's team, invitations or badge. The invitation cache is REST-only, so `unsafeResetDatabase` does not reach it — it is cleared explicitly | |
+
+---
+
 ## 17 · SET — settings, profile, sign-out, deletion
 
 | ID | Case | Expected | P/F |
@@ -944,6 +1169,68 @@ WHERE c.membership_status = 'removed' GROUP BY 1,2;
 
 ---
 
+
+### 20.1 Team coaching (V26/V27)
+
+```sql
+-- 18. One team per trainer. The partial unique index should make this impossible;
+--     a row here means the index is missing, not that the service is wrong.
+SELECT trainer_id, count(*) FROM team_member
+WHERE status='active' AND deleted_at IS NULL AND trainer_id IS NOT NULL
+GROUP BY 1 HAVING count(*) > 1;                                                       -- expect 0
+
+-- 19. One owner per team, and team.owner_trainer_id agrees with the member row.
+--     Two representations of one fact; they must never disagree.
+SELECT t.id, t.owner_trainer_id, m.trainer_id AS member_owner
+FROM team t LEFT JOIN team_member m
+  ON m.team_id=t.id AND m.role='owner' AND m.status='active' AND m.deleted_at IS NULL
+WHERE t.deleted_at IS NULL AND (m.trainer_id IS NULL OR m.trainer_id <> t.owner_trainer_id);  -- expect 0
+
+-- 20. No table gained a team_id. The whole design rests on this.
+SELECT table_name FROM information_schema.columns
+WHERE column_name='team_id' AND table_schema='public';                                 -- expect ONLY team_member, client_assignment, team_activity
+
+-- 21. Every membership identifies somebody — a trainer id, or the phone it was sent to.
+SELECT count(*) FROM team_member WHERE trainer_id IS NULL AND invited_phone IS NULL;   -- expect 0
+
+-- 22. Seats: no team is over its own limit.
+SELECT t.id, t.seat_limit, count(m.id) AS active FROM team t
+JOIN team_member m ON m.team_id=t.id AND m.status='active' AND m.deleted_at IS NULL
+WHERE t.deleted_at IS NULL AND t.seat_limit IS NOT NULL
+GROUP BY 1,2 HAVING count(m.id) > t.seat_limit;                                        -- expect 0
+
+-- 23. Reassignment moved the plan and kept the history. For every handover, the
+--     client is with the new coach while the logged work and the money are not.
+SELECT ca.client_id, ca.from_trainer_id, ca.to_trainer_id,
+       c.trainer_id                                                   AS client_now,
+       (SELECT count(*) FROM workout_session w
+         WHERE w.client_id=ca.client_id AND w.trainer_id=ca.to_trainer_id) AS history_that_moved,
+       (SELECT count(*) FROM payment p
+         WHERE p.client_id=ca.client_id AND p.trainer_id=ca.to_trainer_id) AS money_that_moved
+FROM client_assignment ca JOIN client c ON c.id=ca.client_id;
+-- client_now = to_trainer_id for the latest row; history_that_moved and
+-- money_that_moved must be 0 unless the new coach logged/collected since. S1 otherwise.
+
+-- 24. Nudge rules were never client-scoped, so a handover must not have created a
+--     second rule of the same kind for anybody.
+SELECT trainer_id, kind, count(*) FROM nudge_rule
+WHERE deleted_at IS NULL GROUP BY 1,2 HAVING count(*) > 1;                             -- expect 0
+
+-- 25. The activity log records crossings only, and nothing has been rewritten.
+SELECT count(*) FROM team_activity WHERE actor_trainer_id = subject_trainer_id;        -- expect 0
+SELECT count(*) FROM information_schema.columns
+WHERE table_name='team_activity' AND column_name IN ('updated_at','deleted_at');       -- expect 0
+
+-- 26. The revenue roll-up agrees with the payments it claims to sum, for one team.
+SELECT p.trainer_id, sum(p.amount) FROM payment p
+JOIN team_member m ON m.trainer_id=p.trainer_id AND m.status='active' AND m.deleted_at IS NULL
+WHERE m.team_id = :team_id AND p.status='paid' AND p.deleted_at IS NULL
+  AND p.paid_at >= date_trunc('month', now())
+GROUP BY 1;                                          -- compare against 6l, per coach
+```
+
+---
+
 ## 21 · 🔒 Security testing
 
 Run these against **your own local/staging instance only**. Nothing here needs a tool beyond `curl`,
@@ -1059,6 +1346,45 @@ Every trainer endpoint derives `trainerId` from the token subject; every path/bo
 | SEC-IDOR-16 | Nil / random uuid | `GET /v1/clients/00000000-0000-0000-0000-000000000000` | Clean 403/404 | |
 | SEC-IDOR-17 | Deleted client access | Soft-delete a client, then fetch it by id | Treated as gone | |
 | SEC-IDOR-18 | Device token hijack | `POST /v1/devices/token` with another trainer's id in the body | Token binds to the **caller** only | |
+
+### 21.3b 🔒 Team scope (V26/V27)
+
+A team is the first thing in this product that lets one trainer read another's rows,
+so it is the first place where "ownership is a query filter" has a second answer. Every
+case here is about the boundary of that answer.
+
+`TeamScope` is the only source of the trainer-id set. A query that assembles its own
+list of teammates is the vulnerability, not the symptom — **SEC-TEAM-14** is how you
+look for one.
+
+Set up: T1 owns a team with TA (admin) and TB (coach). TX owns a **different** team.
+T2 is in no team.
+
+| ID | Case | How | Expected | P/F |
+|---|---|---|---|---|
+| SEC-TEAM-01 | A coach cannot read teammates' clients | `GET $BASE/v1/team/clients` with TB's token | `403 NOT_TEAM_ADMIN`. Being in a team is not being an admin | |
+| SEC-TEAM-02 | Refusals never name the other team | Invite TX's number; read the message | "already part of a coaching team" and nothing more. Naming it hands any gym owner with a phone book a way to **enumerate a competitor's staff one number at a time** — the same rule `ClientPhoneGuard` follows | |
+| SEC-TEAM-03 | Another team's client | `GET /v1/team/clients/{TX_client_id}` as T1 | `404 CLIENT_NOT_IN_TEAM`, no data | |
+| SEC-TEAM-04 | Another team's member | `DELETE /v1/team/members/{TX_member_id}` as T1 | `404 MEMBER_NOT_IN_TEAM`; psql shows TX's team intact | |
+| SEC-TEAM-05 | Another team's template | `POST /v1/team/templates/{TX_template}/copy` | `404 TEMPLATE_NOT_IN_TEAM`; nothing written | |
+| SEC-TEAM-06 | Another team's plan | `PATCH /v1/team/programs/{TX_program}` | `404 PROGRAM_NOT_IN_TEAM`; psql unchanged | |
+| SEC-TEAM-07 | Reassign **out** of the team | `POST /v1/team/clients/{CX}/reassign` with `toTrainerId` = T2 or TX | `404 MEMBER_NOT_IN_TEAM`. A client must not be able to leave the team through this door | |
+| SEC-TEAM-08 | Reassign somebody else's client **in** | Reassign T2's client id to TB | `404 CLIENT_NOT_IN_TEAM`. S1 if it works — that is theft of a roster | |
+| SEC-TEAM-09 | 🔒 **No money under `/v1/team/**`** | For every path in §16A, `curl` it and grep the body for `amount`, `package`, `payment`, `gym_share`, `settlement` and a known payment figure | Nothing, on every path except `/v1/team/revenue`. **S1** — this is the promise the whole money book rests on | |
+| SEC-TEAM-10 | Revenue is owner-only | `GET /v1/team/revenue` with TA's (admin) token, then TB's | `403 NOT_TEAM_OWNER` both. An admin runs the roster; the numbers belong to whoever owns the business | |
+| SEC-TEAM-11 | Revenue names no client | Grep the response for client names and ids | Neither. Totals, counts and a client **count** only — "who paid what" must not be derivable | |
+| SEC-TEAM-12 | Revenue is scoped to the team | Give TX's coaches payments; read as T1 | TX's numbers absent. Diff the total against psql for T1's team only | |
+| SEC-TEAM-13 | Team tables are pull-only | `POST /v1/sync/push` with a `team_members` row promoting yourself to `owner` | `200` with `"code": "TEAM_READ_ONLY"` per record, `role` unchanged in psql. **A permission change must never be authorable offline** | |
+| SEC-TEAM-14 | The widening has one source | `grep -rn "IN (:visible\|visibleTrainerId" backend/src/main/java` | Every team-wide query takes its set from `TeamScope`. A hand-rolled teammate list is a finding even if it currently returns the right rows | |
+| SEC-TEAM-15 | Removal is effective immediately | Remove TA; **without letting TA's app sync**, replay a `/v1/team/clients` request with TA's still-valid token | `403`/`404`. Authorisation is a live database read, not a token claim — which is also why team data is not cached offline | |
+| SEC-TEAM-16 | A removed admin keeps no offline copy | TA's device after removal + one sync | No teammate clients on the device, because there never were any. **This is the whole argument for team data being online-only** | |
+| SEC-TEAM-17 | The archived projection cannot be weaponised | After a handover, push CX back from the old coach's token with `status: 'active'`, a new name, and `trainer_id` = the old coach | Every field unchanged in psql. Both write paths end in `WHERE client.trainer_id = :tid` | |
+| SEC-TEAM-18 | Feature switch closes the whole namespace | `TEAM_ENABLED=false`, then `curl` all 29 team paths | `404` on every one, and `TeamScope` widens nobody — verify a team admin's `/v1/clients` returns only their own | |
+| SEC-TEAM-19 | The activity log cannot be edited or erased | Try `DELETE`/`PATCH` on `/v1/team/activity`; then `UPDATE team_activity` in psql and re-read | No such endpoints. The table has no `deleted_at` and no `updated_at` — an account of a change that can be rewritten is not an account | |
+| SEC-TEAM-20 | An edit cannot be laundered as your own | `INSERT` a `team_activity` row where actor = subject via psql | Refused by `CHECK (actor_trainer_id <> subject_trainer_id)`. The table records crossings; a self-row would be a place to hide one | |
+| SEC-TEAM-21 | The seeded library is immutable | `PATCH /v1/team/exercises/{seeded_id}` as an owner | `404 EXERCISE_NOT_IN_TEAM`. One trainer editing a row 1,324 of which every trainer in the product shares would be a cross-tenant write | |
+| SEC-TEAM-22 | Team endpoints are gated to trainers | Replay any `/v1/team/**` path with a **client** token, then an `invited` token | `403` both. `/v1/team/**` falls through to `hasRole("TRAINER")` — confirm nothing was added above it in `SecurityConfig` | |
+| SEC-TEAM-23 | Malformed and nil ids | `not-a-uuid` and the nil uuid on every `/v1/team/**` path taking one | `400` and a clean `404`; never a `500` with a stack trace | |
 
 ### 21.4 The client wall (FR-11 isolation)
 
@@ -1264,9 +1590,13 @@ If you only have a day, run in this order — highest consequence first:
 5. **SEC-AUTH, SEC-IDOR, SEC-WALL** (cross-tenant leaks are unrecoverable reputationally)
 6. **CLI + DIA + PRG** (the daily loop)
 7. **CLNT + ROLE** (the second half of the product)
-8. **PRO, NDG, RPT, PUSH**
-9. **XCUT / state matrix sweep**
-10. **SEC-CFG / SEC-DEV / SEC-PRIV** before any real-user pilot
+8. **TEAM §16A.4 + SEC-TEAM-09/13/17** — only if the trainer under test is in a team.
+   Reassignment is the one place in the product where a bug is invisible on the
+   screen that caused it, and SEC-TEAM-09 is the money promise
+9. **PRO, NDG, RPT, PUSH**
+10. **The rest of TEAM §16A**
+11. **XCUT / state matrix sweep**
+12. **SEC-CFG / SEC-DEV / SEC-PRIV** before any real-user pilot
 
 ---
 
@@ -1292,6 +1622,11 @@ If you only have a day, run in this order — highest consequence first:
 | 16 | Put T1's own number on T2's roster, sync | Row survives, tagged **Can't invite**; T1 still signs in as a trainer |
 | 17 | Archive the client, sign in as them | Removal notice names T1 and the date; OK wipes locally, server row stays |
 | 18 | Sign out T1, sign in T2 | Zero trace of T1's data |
+| 19 | T1 creates a team and invites TA | WhatsApp opens; the invite shows as waiting even if you cancel the share sheet |
+| 20 | TA accepts on a second device | TA's own clients and money are untouched (TEAM-21) |
+| 21 | `curl` T1's token at `/v1/team/clients` and grep for `payment` | Nothing (SEC-TEAM-09) |
+| 22 | Hand a client from TA to T1, sync both | T1 gains the plan; TA loses the plan but still sees the client's name on their old payment (TEAM-57) |
+| 23 | Radio **off**, open Team, try to invite | Team list still draws; the invite button is disabled with a reason, and nothing queues (TEAM-107/109) |
 
 ---
 
@@ -1336,7 +1671,13 @@ For security findings add: **attacker model** (unauthenticated / another trainer
 | FR-11 client role | CLNT-01–30, ROLE-01–11, SEC-WALL-01–26 |
 | V18 one phone one role | AUTH-40/42/42a/43a/56, CLI-52–59a, ROLE-10/11, §20 q11–13 |
 | V18 consent & removal | AUTH-60–75, CLNT-26–30, CLI-50/51/71–73, SEC-WALL-19–26, §20 q14–16 |
-| NFR-2 offline-first | every 📵 case, SYNC-* |
+| V26 team coaching · membership | TEAM-01–36, SEC-TEAM-01/02/13/15/16/18/22, §20 q18–q22 |
+| V26 team coaching · client reads | TEAM-37–46, SEC-TEAM-03/09, §20 q20 |
+| V26 team coaching · reassignment | TEAM-47–66, SEC-TEAM-07/08/17, §20 q23/q24 |
+| V26 team coaching · shared library | TEAM-67–76, SEC-TEAM-05/21 |
+| V27 team coaching · admin editing | TEAM-77–96, SEC-TEAM-06/19/20, §20 q25 |
+| V27 team coaching · owner's earnings | TEAM-97–106, SEC-TEAM-10/11/12, §20 q26 |
+| NFR-2 offline-first | every 📵 case, SYNC-*, **except TEAM §16A.8 — which asserts the opposite on purpose** |
 | NFR-3 performance | PERF-01–08 |
 | NFR-4 sync integrity | SYNC-13/16/17/21, SEC-BIZ-09/10 |
 | NFR-8 security & privacy | all of §21 |
@@ -1370,9 +1711,15 @@ For security findings add: **attacker model** (unauthenticated / another trainer
 | Errors are native system alerts | Being replaced in the design pass | interaction map §03 · XCUT-05 |
 | Status carried by colour alone | Known defect | interaction map §05 · XCUT-13 |
 | Batches switched off | `BATCHES_ENABLED` — frame 3d must not be reachable | DIA-28 |
+| Team seats are not wired to billing | `seat_limit`, the accept-time check and the owner's editor all exist; nothing makes a seat cost anything, because there is no billing system. Not a team-coaching gap | `AppProperties.Team` · TEAM-16–19 |
+| A teammate's template cannot be edited, only copied | Deliberate, and it is §3.1 of the PRD: a template two coaches use and one coach edits is a template that changed under the other's clients | `TeamLibraryService` · TEAM-75 |
+| A handed-over client stays on the old coach's phone as `archived` | Deliberate. Their `payment` and `workout_session` rows for that person are still theirs and resolve a name through `client_id`, so tombstoning the client would leave the money book drawing payments with nobody's name on them. psql still says `active`; the projection is per-caller | `SyncService#fetchClients` · TEAM-57/58 |
+| The owner sees per-coach monthly totals | Deliberate as of Phase 3, and the copy on 6a/6d was changed in the same commit to stop claiming otherwise. **If either screen still says "not the admins, not the owner", that is a regression in the copy, not a gap** | `TeamRevenueService` · TEAM-104 |
+| Team-wide screens have no offline mode at all | Deliberate — an offline copy leaves with the phone when an admin is removed. They are honest dead ends that point at the offline thing that does work | §16A.8 |
 | Drawer frames 6a–8c prose-only | Weekly report / share / delivery state / sync queue screens not drawn | interaction map — expect gaps, not bugs |
 
 ---
 
-*XRep Manual Test Plan · v1.1 · 15 Aug 2026 · traced to Final Requirements & Delivery Plan v2.0 and the MVP Interaction Map v1.0.*
+*XRep Manual Test Plan · v1.2 · 20 Aug 2026 · traced to Final Requirements & Delivery Plan v2.0 and the MVP Interaction Map v1.0.*
 *v1.1 covers schema V18 — one phone one role, and consent as a first-class state.*
+*v1.2 adds §16A, §20.1 and §21.3b for schema V26–V27 — team coaching, traced to Team Coaching PRD v1.4.*

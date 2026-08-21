@@ -27,6 +27,8 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import type { MainStackParamList } from '../../../navigation/MainStack';
 import { useTraining } from '../../../training/useTraining';
+import { useTeam } from '../../../team/useTeam';
+import { buildTeam } from '../../../team/team';
 import { buildPrograms } from '../../../training/training';
 import { createTemplate, updateTemplate } from '../../../db/training';
 import { useAuth } from '../../../store/AuthContext';
@@ -50,6 +52,7 @@ import {
   Seg,
   Skeleton,
   Tag,
+  IconUsers,
   Toast,
   WeekShape,
   colors,
@@ -64,6 +67,9 @@ export default function ProgramsScreen() {
   const navigation = useNavigation<Nav>();
   const { input, ready } = useTraining();
   const { trainerId } = useAuth();
+  // Read from the synced team tables, so this costs nothing when there is no
+  // team — which is almost every trainer.
+  const { input: teamInput } = useTeam();
 
   const [filter, setFilter] = useState('all');
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -72,6 +78,7 @@ export default function ProgramsScreen() {
   const [creating, setCreating] = useState(false);
 
   const view = useMemo(() => buildPrograms(input, filter), [input, filter]);
+  const inTeam = useMemo(() => !buildTeam(teamInput).empty, [teamInput]);
   const openCard = view.cards.find((c) => c.id === menuFor) ?? null;
 
   const rename = (name: string) => {
@@ -171,6 +178,22 @@ export default function ProgramsScreen() {
                   </Pressable>
                 ))}
               </View>
+
+              {/* Discovery matters more than tidiness here: a coach hunting for
+                  a plan comes to this screen, not to the team screen, so the
+                  team's shelf has to be reachable from the shelf they are
+                  already looking at. */}
+              {inTeam ? (
+                <Button
+                  label="Browse the team's programs"
+                  variant="secondary"
+                  size="lg"
+                  block
+                  icon={IconUsers}
+                  onPress={() => navigation.navigate('TeamLibrary')}
+                  style={styles.teamShelf}
+                />
+              ) : null}
 
               <Callout icon={IconCopy} style={styles.note}>
                 A program is a <CalloutStrong>template</CalloutStrong>. Assigning it copies it onto a
@@ -286,6 +309,7 @@ const styles = StyleSheet.create({
   meta: { fontSize: 12, color: colors.ink3, marginTop: 3 },
   grid: {},
 
+  teamShelf: { marginTop: space.s5 },
   note: { marginTop: space.s4 },
   empty: { marginTop: space.s7 },
 

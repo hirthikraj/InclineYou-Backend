@@ -5,6 +5,7 @@ import com.xrep.xrep_backend.auth.OtpExpiredException;
 import com.xrep.xrep_backend.auth.OtpLockedException;
 import com.xrep.xrep_backend.auth.OtpThrottledException;
 import com.xrep.xrep_backend.client.PhoneUnavailableException;
+import com.xrep.xrep_backend.team.TeamRuleException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -77,6 +78,24 @@ public class GlobalExceptionHandler {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
         pd.setProperty("code", ex.getCode());
         return pd;
+    }
+
+    /**
+     * Team rules, all fifteen of them, through one handler.
+     *
+     * The exception carries its own status because these failures genuinely
+     * differ: 403 when the caller is in the team but not high enough, 404 when
+     * the thing is outside their team (the standing cross-trainer convention,
+     * unchanged), 409 when the state says no, 410 for a lapsed invitation, and
+     * 422 for a request that is well-formed and asks for something that cannot
+     * exist. `code` is what the app branches on in every case.
+     */
+    @ExceptionHandler(TeamRuleException.class)
+    ResponseEntity<ProblemDetail> handleTeamRule(TeamRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        if (ex.getSeatLimit() != null) pd.setProperty("seatLimit", ex.getSeatLimit());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

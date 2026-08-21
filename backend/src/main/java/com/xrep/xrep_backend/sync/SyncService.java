@@ -67,13 +67,16 @@ public class SyncService {
         log.debug("sync pull trainer={} cursor={}", tid, cursor);
 
         var changes = new LinkedHashMap<String, TableChanges>();
-        changes.put("clients",              fetchDirect("client",            "trainer_id", tid, cursor));
+        changes.put("clients",              fetchClients(                                  tid, cursor));
         changes.put("body_metrics",         fetchViaClient("body_metric",                  tid, cursor));
         changes.put("exercises",            fetchExercises(                                tid, cursor));
         changes.put("templates",            fetchDirect("template",          "trainer_id", tid, cursor));
-        changes.put("programs",             fetchDirect("program",           "trainer_id", tid, cursor));
+        // V26 Phase 2 · these three MOVE when a client is reassigned, so each one
+        // also has to be able to say "this left your scope" — see
+        // `handedOverIds` and the note above it.
+        changes.put("programs",             fetchMovable("program",          tid, cursor));
         changes.put("program_exercises",    fetchViaProgramDirect(                         tid, cursor));
-        changes.put("scheduled_sessions",   fetchDirect("scheduled_session", "trainer_id", tid, cursor));
+        changes.put("scheduled_sessions",   fetchMovable("scheduled_session", tid, cursor));
         changes.put("workout_sessions",     fetchDirect("workout_session",   "trainer_id", tid, cursor));
         changes.put("set_logs",             fetchViaWorkout("set_log",                     tid, cursor));
         // Screen 17 · the workout log. What was actually in each session, as
@@ -119,8 +122,153 @@ public class SyncService {
          * indexes exactly this access path.
          */
         changes.put("weekly_reports",       fetchDirect("weekly_report",     "trainer_id", tid, cursor));
+        /*
+         * Team coaching · V26. The only two team tables that enter the offline
+         * scope, and everything else about a team is online-only REST.
+         *
+         * These two are here because they are the UI chrome: without them the
+         * app cannot draw "Iron House · you are an admin" or name the coach a
+         * client is being handed to, and both are read on every drawer open. They
+         * are also tiny — one team row and a handful of members.
+         *
+         * PULL ONLY, and that is a rule rather than an omission. Every write to
+         * either table is a permission change, and a permission change that can
+         * be authored offline and replayed later can be replayed AFTER the grant
+         * was revoked. `pushTeamTables` refuses them out loud.
+         *
+         * What is deliberately NOT here: teammates' clients, programs, sessions
+         * or money. Mirroring them would multiply every admin's local database by
+         * the size of the team, and an offline copy leaves with the phone — an
+         * admin removed on Tuesday must not still be holding forty clients'
+         * history on Wednesday. See the PRD §0.3.
+         */
+        changes.put("teams",                fetchTeams(                                    tid, cursor));
+        changes.put("team_members",         fetchTeamMembers(                              tid, cursor));
 
         return new PullResponse(Instant.now().toEpochMilli(), changes);
+    }
+
+    /* ─── V26 Phase 2 · reassignment and the shape of a device's scope ───────
+     *
+     * A client can move between coaches in a team. `trainer_id` is rewritten,
+     * which is what makes the new coach's queries find them — and what makes the
+     * old coach's queries stop. Two consequences, and both are load-bearing.
+     *
+     * ── 1. The old coach KEEPS the client row ────────────────────────────────
+     *
+     * The obvious move is to tombstone the client on the old coach's phone. It
+     * is also wrong, and expensively so: that device still holds their
+     * `payment`, `package`, `workout_session` and `weekly_report` rows for this
+     * person — history that is theirs and stays theirs by design (PRD §0.5) —
+     * and every one of those rows resolves a name through `client_id`. Delete
+     * the client locally and the money book, which is the reason this product
+     * was adopted, starts drawing payments with no name against them.
+     *
+     * So the predicate below keeps the row: mine, OR one I handed over. It is
+     * not a widening of what the coach can see — they coached this person
+     * yesterday and hold their whole history already.
+     *
+     * ── 2. …and sees it as `archived` ────────────────────────────────────────
+     *
+     * The row is projected, not mirrored. From the old coach's side this client
+     * IS archived: not training with them, history retained, which is exactly
+     * what `archived` has always meant in this schema. Projecting it there means
+     * the roster, the deck, the diary and every picker drop them without a
+     * single screen having to learn a new concept, while the money book — which
+     * reads history rather than the roster — keeps working.
+     *
+     * Safe in both directions because both write paths in `pushClients` end in
+     * `WHERE client.trainer_id = :tid`, so a phone echoing the projected row
+     * back is a no-op rather than an archive landing on the new coach.
+     *
+     * ── 3. What moved has to be deleted locally ──────────────────────────────
+     *
+     * `program`, `program_exercise` and the future `scheduled_session` rows
+     * genuinely became somebody else's. They stop MATCHING the old coach's
+     * filter rather than becoming deleted, so without `handedOverIds` they would
+     * appear in neither `updated` nor `deleted` and sit on that phone forever —
+     * live, editable, and invisible to the server. This fires on the first
+     * reassignment any team ever performs.
+     */
+
+    /**
+     * Clients this device may hold: mine, plus anyone I handed over.
+     *
+     * @param alias the table alias the caller used, because this fragment is
+     *              spliced into queries that join `client` under three names
+     */
+    private static String clientInScope(String alias) {
+        return """
+                (%s.trainer_id = :tid::uuid OR EXISTS (
+                     SELECT 1 FROM client_assignment ca
+                     WHERE ca.client_id = %s.id AND ca.from_trainer_id = :tid::uuid))
+                """.formatted(alias, alias);
+    }
+
+    /**
+     * Rows of `table` that belonged to a client I handed over and are not mine
+     * any more.
+     *
+     * The test is `trainer_id <> :tid`, which is what makes this
+     * self-healing: a client moved A → B → A has `trainer_id = :tid` again, so
+     * the condition is simply false and nothing is deleted. No "unless a later
+     * move brought them back" clause is needed, and there is no ordering to get
+     * wrong.
+     *
+     * `GREATEST(…, ca.created_at)` is the other half. The rows themselves may
+     * not have changed since the cursor — their OWNER changed — so the
+     * assignment's own timestamp is what carries them past it.
+     */
+    private List<String> handedOverIds(String table, String tid, Timestamp cursor) {
+        return queryIds("""
+                SELECT DISTINCT t.id::text FROM %s t
+                JOIN client_assignment ca ON ca.client_id = t.client_id
+                                         AND ca.from_trainer_id = :tid::uuid
+                WHERE t.trainer_id <> :tid::uuid
+                  AND GREATEST(t.updated_at, ca.created_at) > :cursor
+                """.formatted(table), Map.of("tid", tid, "cursor", cursor));
+    }
+
+    /** `client`, kept for anyone I handed over and projected as archived. */
+    private TableChanges fetchClients(String tid, Timestamp cursor) {
+        var params = Map.of("tid", tid, "cursor", cursor);
+        String scope = clientInScope("c");
+
+        var alive = queryNormalized("""
+                SELECT c.* FROM client c
+                WHERE %s
+                  AND c.deleted_at IS NULL
+                  AND c.updated_at > :cursor
+                ORDER BY c.updated_at ASC
+                """.formatted(scope), params);
+
+        // Projected in Java rather than in the SELECT, deliberately: a
+        // `CASE … AS status` alongside `c.*` relies on which of two same-named
+        // result columns the row mapper keeps, and the schema is additive-only,
+        // so listing columns by hand would silently drop the next one added.
+        var projected = alive.stream().map(row -> {
+            if (tid.equals(String.valueOf(row.get("trainer_id")))) return row;
+            var copy = new LinkedHashMap<>(row);
+            copy.put("status", "archived");
+            return (Map<String, Object>) copy;
+        }).toList();
+
+        var dead = queryIds("""
+                SELECT c.id::text FROM client c
+                WHERE %s
+                  AND c.deleted_at IS NOT NULL
+                  AND c.updated_at > :cursor
+                """.formatted(scope), params);
+
+        return splitAlive(projected, cursor, dead);
+    }
+
+    /** A table whose rows move with the client: alive as mine, dead once handed over. */
+    private TableChanges fetchMovable(String table, String tid, Timestamp cursor) {
+        var base = fetchDirect(table, "trainer_id", tid, cursor);
+        var dead = new ArrayList<>(base.deleted());
+        dead.addAll(handedOverIds(table, tid, cursor));
+        return new TableChanges(base.created(), base.updated(), List.copyOf(dead));
     }
 
     // trainer_id FK is directly on this table
@@ -145,47 +293,208 @@ public class SyncService {
         return splitAlive(queryNormalized(aliveSql, params), cursor, queryIds(deadSql, params));
     }
 
-    // body_metric → client.trainer_id
+    /**
+     * body_metric → client.
+     *
+     * Scoped to clients I hold rather than to clients I own, so a measurement
+     * series survives a handover on both phones: the new coach inherits the
+     * trend they are now responsible for, and the old coach's past reports keep
+     * the numbers they were written from.
+     */
     private TableChanges fetchViaClient(String table, String tid, Timestamp cursor) {
         var params = Map.of("tid", tid, "cursor", cursor);
+        String scope = clientInScope("c");
 
         String aliveSql = """
                 SELECT bm.* FROM %s bm
                 JOIN client c ON c.id = bm.client_id
-                WHERE c.trainer_id = :tid::uuid
+                WHERE %s
                   AND bm.deleted_at IS NULL
                   AND bm.updated_at > :cursor
                 ORDER BY bm.updated_at ASC
-                """.formatted(table);
+                """.formatted(table, scope);
 
         String deadSql = """
                 SELECT bm.id::text FROM %s bm
                 JOIN client c ON c.id = bm.client_id
-                WHERE c.trainer_id = :tid::uuid
+                WHERE %s
                   AND bm.deleted_at IS NOT NULL
                   AND bm.updated_at > :cursor
-                """.formatted(table);
+                """.formatted(table, scope);
 
         return splitAlive(queryNormalized(aliveSql, params), cursor, queryIds(deadSql, params));
     }
 
-    // exercises: global (is_custom=false) OR trainer's own custom
+    /**
+     * The one exception to team data being online-only: a custom exercise any
+     * teammate created rides the caller's cursor.
+     *
+     * It has to. A program copied from a teammate points at their exercise rows,
+     * and a phone that does not hold them opens that program on the gym floor
+     * and draws blank lines. Custom exercises are a few hundred bytes each and
+     * rarely number more than a few dozen per team, so carrying the team's set is
+     * cheap; carrying the team's clients is not, and that is the whole line the
+     * PRD's §0.3 draws.
+     *
+     * <p>Writing is unchanged — a coach still only ever writes their own. The
+     * {@code ON CONFLICT … WHERE exercise.trainer_id = :tid} in
+     * {@code pushExercises} already made that true, so a teammate's row pushed
+     * back by this phone is a no-op rather than a hijack.
+     *
+     * <p>With no team, the subquery is empty and this behaves exactly as it did
+     * before V26.
+     */
     private TableChanges fetchExercises(String tid, Timestamp cursor) {
         var params = Map.of("tid", tid, "cursor", cursor);
 
+        // Kept as a subquery on :tid rather than a bound list of ids: one
+        // parameter, one place for the membership rule to live, and it stays
+        // correct when the caller's team changes between two pulls.
+        String visibleAuthors = """
+                    trainer_id = :tid::uuid
+                    OR trainer_id IN (
+                        SELECT peer.trainer_id FROM team_member peer
+                        WHERE peer.status = 'active'
+                          AND peer.deleted_at IS NULL
+                          AND peer.trainer_id IS NOT NULL
+                          AND peer.team_id = (
+                              SELECT mine.team_id FROM team_member mine
+                              WHERE mine.trainer_id = :tid::uuid
+                                AND mine.status = 'active'
+                                AND mine.deleted_at IS NULL
+                              LIMIT 1))
+                """;
+
         String aliveSql = """
                 SELECT * FROM exercise
-                WHERE (is_custom = false OR trainer_id = :tid::uuid)
+                WHERE (is_custom = false OR %s)
                   AND deleted_at IS NULL
                   AND updated_at > :cursor
                 ORDER BY updated_at ASC
-                """;
+                """.formatted(visibleAuthors);
 
         String deadSql = """
                 SELECT id::text FROM exercise
-                WHERE (is_custom = false OR trainer_id = :tid::uuid)
+                WHERE (is_custom = false OR %s)
                   AND deleted_at IS NOT NULL
                   AND updated_at > :cursor
+                """.formatted(visibleAuthors);
+
+        var deleted = new ArrayList<>(queryIds(deadSql, params));
+
+        /*
+         * Leaving a team has to take the team's exercises off the phone, and the
+         * query above cannot say so: those rows did not change, the caller's
+         * relationship to them did, so `updated_at > :cursor` is false for every
+         * one of them and they would sit in the local library forever.
+         *
+         * The membership row IS the change, so it is what this branch keys off —
+         * which also bounds the work: it produces rows only in the pull
+         * immediately after a membership moved, and nothing at all in the
+         * millions of pulls where nobody joined or left. Same shape as the
+         * reassignment tombstone the PRD sets out in §5.2, and the same reason
+         * behind it: a scope change is expressed to a device that only ever sees
+         * its own slice by deleting locally. Nothing is lost — the rows are still
+         * there on the server, under their author.
+         */
+        deleted.addAll(queryIds("""
+                SELECT e.id::text FROM exercise e
+                WHERE e.is_custom
+                  AND e.deleted_at IS NULL
+                  AND e.trainer_id IS NOT NULL
+                  AND e.trainer_id <> :tid::uuid
+                  AND EXISTS (
+                      SELECT 1 FROM team_member m
+                      WHERE m.trainer_id = :tid::uuid AND m.updated_at > :cursor)
+                  AND NOT (%s)
+                """.formatted(visibleAuthors), params));
+
+        return splitAlive(queryNormalized(aliveSql, params), cursor, List.copyOf(deleted));
+    }
+
+    /**
+     * The caller's one team.
+     *
+     * The deletion half is doing more work than it looks like it should, and it
+     * is the same trap the reassignment tombstone falls into (PRD §5.2): the
+     * alive query joins through an ACTIVE membership, so the moment a coach is
+     * removed the team stops matching their filter — appearing in neither
+     * `updated` nor `deleted`, and staying drawn on their phone forever. So the
+     * dead query deliberately does not require the membership to be live: it
+     * asks "is there a team I have some relationship with that I am no longer an
+     * active member of", and reads the membership row's own `updated_at`,
+     * because when a coach is removed that row is the only thing that changed.
+     */
+    private TableChanges fetchTeams(String tid, Timestamp cursor) {
+        var params = Map.of("tid", tid, "cursor", cursor);
+
+        String aliveSql = """
+                SELECT t.* FROM team t
+                JOIN team_member tm ON tm.team_id = t.id
+                WHERE tm.trainer_id = :tid::uuid
+                  AND tm.status = 'active'
+                  AND tm.deleted_at IS NULL
+                  AND t.deleted_at IS NULL
+                  AND GREATEST(t.updated_at, tm.updated_at) > :cursor
+                ORDER BY t.updated_at ASC
+                """;
+
+        String deadSql = """
+                SELECT DISTINCT t.id::text FROM team t
+                JOIN team_member tm ON tm.team_id = t.id AND tm.trainer_id = :tid::uuid
+                WHERE GREATEST(t.updated_at, tm.updated_at) > :cursor
+                  AND (t.deleted_at IS NOT NULL
+                       OR NOT EXISTS (
+                           SELECT 1 FROM team_member live
+                           WHERE live.team_id = t.id
+                             AND live.trainer_id = :tid::uuid
+                             AND live.status = 'active'
+                             AND live.deleted_at IS NULL))
+                """;
+
+        return splitAlive(queryNormalized(aliveSql, params), cursor, queryIds(deadSql, params));
+    }
+
+    /**
+     * Every member of the caller's team, invited ones included — the coach list
+     * is drawn from this and a pending invite is part of it.
+     *
+     * The subquery returns NULL for a trainer in no team, which makes
+     * `m.team_id = NULL` match nothing. That is the correct answer and it is
+     * worth stating: a trainer with no team syncs no member rows at all.
+     *
+     * The dead query mirrors {@link #fetchTeams} and for the identical reason —
+     * when the caller leaves, every teammate's row must come off their phone,
+     * and none of those rows changed.
+     */
+    private TableChanges fetchTeamMembers(String tid, Timestamp cursor) {
+        var params = Map.of("tid", tid, "cursor", cursor);
+
+        String aliveSql = """
+                SELECT m.* FROM team_member m
+                WHERE m.team_id = (
+                        SELECT mine.team_id FROM team_member mine
+                        WHERE mine.trainer_id = :tid::uuid
+                          AND mine.status = 'active'
+                          AND mine.deleted_at IS NULL
+                        LIMIT 1)
+                  AND m.deleted_at IS NULL
+                  AND m.updated_at > :cursor
+                ORDER BY m.updated_at ASC
+                """;
+
+        String deadSql = """
+                SELECT DISTINCT m.id::text FROM team_member m
+                JOIN team_member mine ON mine.team_id = m.team_id
+                                     AND mine.trainer_id = :tid::uuid
+                WHERE GREATEST(m.updated_at, mine.updated_at) > :cursor
+                  AND (m.deleted_at IS NOT NULL
+                       OR NOT EXISTS (
+                           SELECT 1 FROM team_member live
+                           WHERE live.team_id = m.team_id
+                             AND live.trainer_id = :tid::uuid
+                             AND live.status = 'active'
+                             AND live.deleted_at IS NULL))
                 """;
 
         return splitAlive(queryNormalized(aliveSql, params), cursor, queryIds(deadSql, params));
@@ -212,7 +521,28 @@ public class SyncService {
                   AND pe.updated_at > :cursor
                 """;
 
-        return splitAlive(queryNormalized(aliveSql, params), cursor, queryIds(deadSql, params));
+        var dead = new ArrayList<>(queryIds(deadSql, params));
+
+        /*
+         * And the exercises of a program that moved to another coach.
+         *
+         * `program_exercise` carries neither a `trainer_id` nor a `client_id`,
+         * so it cannot use `handedOverIds` and has to reach its owner through
+         * two joins. It needs the branch for the same reason the program does —
+         * and needs it MORE, because WatermelonDB does not cascade: a program
+         * deleted locally without its exercises leaves orphan rows that the
+         * program screen draws as empty days.
+         */
+        dead.addAll(queryIds("""
+                SELECT DISTINCT pe.id::text FROM program_exercise pe
+                JOIN program p            ON p.id = pe.program_id
+                JOIN client_assignment ca ON ca.client_id = p.client_id
+                                         AND ca.from_trainer_id = :tid::uuid
+                WHERE p.trainer_id <> :tid::uuid
+                  AND GREATEST(pe.updated_at, p.updated_at, ca.created_at) > :cursor
+                """, params));
+
+        return splitAlive(queryNormalized(aliveSql, params), cursor, List.copyOf(dead));
     }
 
     // set_log and workout_exercise → workout_session.trainer_id
@@ -290,16 +620,20 @@ public class SyncService {
         // in one round trip rather than three.
         pushWorkoutExercises(tid, changes);
         pushSetLogs(tid, changes);
+        // Before the packages: `package.pack_id` is a foreign key to it, and a
+        // trainer who created their own pack and sold it in the same sitting
+        // pushes both rows in one round trip.
+        pushPacks(tid, changes);
         pushPackages(tid, changes);
         pushPayments(tid, changes);
         pushNudgeLogs(tid, changes);
         pushWorkingHours(tid, changes);
         pushTimeBlocks(tid, changes);
-        pushPacks(tid, changes);
         pushGymSettlements(tid, changes);
         pushExercises(tid, changes);
         pushNudgeRules(tid, changes);
         pushExerciseFavourites(tid, changes);
+        pushTeamTables(tid, changes, rejected);
         warnOnUnhandledTables(tid, changes);
         log.debug("sync push trainer={} tables={}", tid, changes.keySet());
         return new PushResult(List.copyOf(rejected));
@@ -312,7 +646,49 @@ public class SyncService {
             "working_hours", "time_blocks",
             "packs", "gym_settlements",
             "exercises", "nudge_rules", "exercise_favourites",
-            "batches");
+            "batches",
+            // Handled by being refused — see pushTeamTables. Listed here so the
+            // unhandled-table warning does not also log them as dropped, which
+            // would be true and misleading in the same line.
+            "teams", "team_members");
+
+    /**
+     * Team rows are server-authored, and a push carrying one is refused rather
+     * than dropped.
+     *
+     * <p>Refused because every write to `team` or `team_member` is a permission
+     * change. Replaying one from a phone means replaying it at an unknown later
+     * time — potentially after the grant was revoked — which is the one class of
+     * write that must never be authored offline. The app reads these two tables
+     * and edits them through `/v1/team/**` while online, or not at all.
+     *
+     * <p>Out loud rather than silently, because a silent refusal is the worst of
+     * the three options: the record sits on the phone looking synced and exists
+     * nowhere else. That is the whole reason {@link Rejection} exists.
+     */
+    @SuppressWarnings("unchecked")
+    private void pushTeamTables(String tid, Map<String, Object> changes, List<Rejection> rejected) {
+        for (String table : List.of("teams", "team_members")) {
+            var payload = (Map<String, Object>) changes.get(table);
+            if (payload == null) continue;
+
+            var ids = new ArrayList<String>();
+            for (var record : mergeCreatedUpdated(payload)) {
+                String id = str(record.get("id"));
+                if (id != null) ids.add(id);
+            }
+            ids.addAll(deletedIds(payload));
+            if (ids.isEmpty()) continue;
+
+            log.warn("sync push trainer={}: refusing {} server-authored record(s) for '{}'",
+                    tid, ids.size(), table);
+            for (String id : ids) {
+                rejected.add(new Rejection(table, id, null, "TEAM_READ_ONLY",
+                        "Team membership is managed online — this change was not saved. "
+                        + "Open the team screen while connected.", false));
+            }
+        }
+    }
 
     @SuppressWarnings("unchecked")
     private void warnOnUnhandledTables(String tid, Map<String, Object> changes) {

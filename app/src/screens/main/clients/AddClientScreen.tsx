@@ -90,7 +90,10 @@ export default function AddClientScreen() {
   const [packCount, setPackCount] = useState<number | null>(null);
   useEffect(() => {
     const sub = observePacks().subscribe((rows) =>
-      setPackCount(rows.filter((p) => p.status === 'active').length),
+      // Case-blind, same as packSessionsLeft — server-written rows have been
+      // seen carrying either casing, and a pack counted as 'Active' would
+      // otherwise leave this gate wrongly closed.
+      setPackCount(rows.filter((p) => (p.status ?? '').toLowerCase() === 'active').length),
     );
     return () => sub.unsubscribe();
   }, []);

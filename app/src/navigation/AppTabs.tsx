@@ -120,6 +120,9 @@ function Tabs() {
       case 'exercises':
         navigation.navigate('Exercises');
         return;
+      case 'team':
+        navigation.navigate('Team');
+        return;
       case 'reports':
         navigation.navigate('Reports');
         return;

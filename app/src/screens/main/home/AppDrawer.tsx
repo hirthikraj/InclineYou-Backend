@@ -48,6 +48,8 @@ import type NudgeLogModel from '../../../db/models/NudgeLog';
 import { buildWaiting, type NudgeInput } from '../../../nudges/rules';
 import { loadDraft } from '../../../setup/draft';
 import { SELF_TRAINING_ENABLED } from '../../../settings/prefs';
+import { TEAM_ENABLED } from '../../../team/team';
+import { useTeamInvitations } from '../../../team/useTeamInvitations';
 import { usePrefs } from '../../../settings/usePrefs';
 import {
   Avatar,
@@ -65,6 +67,7 @@ import {
   IconRefresh,
   IconSettings,
   IconShield,
+  IconUsers,
   colors,
   radius,
 } from '../../../design';
@@ -97,6 +100,7 @@ export type DrawerKey =
   | 'profile'
   | 'programs'
   | 'exercises'
+  | 'team'
   | 'reports'
   | 'adherence'
   | 'nudges'
@@ -110,6 +114,15 @@ export default function AppDrawer({
   onSwitchMode,
   onSignOut,
 }: AppDrawerProps) {
+  /**
+   * Invitations addressed to this trainer, gated on `visible` like every other
+   * query here — the drawer is mounted for the life of the app.
+   *
+   * It is the one badge on this panel that is not derived from local data, and
+   * it earns the request: an invited coach has no other reason to look for a
+   * Team screen, so this number is how they find out the invitation exists.
+   */
+  const invitations = useTeamInvitations(visible && TEAM_ENABLED);
   const [name, setName] = useState('');
   const [counts, setCounts] = useState<DrawerCounts>(NO_COUNTS);
   const { prefs } = usePrefs();
@@ -217,6 +230,22 @@ export default function AppDrawer({
       />
 
       <DrawerLabel>Growth</DrawerLabel>
+      {/* Team leads Growth rather than earning a group of its own — a group of
+          one is what the note at the top of this file removed twice. And it does
+          belong here: hiring coaches is how a trainer grows past their own
+          hours, which is what the other three rows are also about.
+
+          Badged with invitations waiting for YOU, never with the size of the
+          team: a number on a drawer item is a job, and "you have 4 coaches" is
+          not one. */}
+      {TEAM_ENABLED ? (
+        <DrawerItem
+          icon={IconUsers}
+          label="Team"
+          badge={invitations.count}
+          onPress={go('team')}
+        />
+      ) : null}
       <DrawerItem icon={IconChart} label="Reports" onPress={go('reports')} />
       <DrawerItem icon={IconBadge} label="Adherence" onPress={go('adherence')} />
       <DrawerItem icon={IconMessage} label="Nudges" badge={counts.waiting} onPress={go('nudges')} />

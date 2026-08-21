@@ -53,6 +53,16 @@ import GettingPaidScreen from '../screens/main/drawer/GettingPaidScreen';
 import NotifySettingsScreen from '../screens/main/drawer/NotifySettingsScreen';
 import HelpScreen from '../screens/main/drawer/HelpScreen';
 import SignOutScreen from '../screens/main/drawer/SignOutScreen';
+// 6a–6e · the coaching team
+import TeamScreen from '../screens/main/drawer/TeamScreen';
+import InviteCoachScreen from '../screens/main/drawer/InviteCoachScreen';
+import InvitationScreen from '../screens/main/drawer/InvitationScreen';
+import TeamClientsScreen from '../screens/main/drawer/TeamClientsScreen';
+import TeamClientScreen from '../screens/main/drawer/TeamClientScreen';
+import TeamLibraryScreen from '../screens/main/drawer/TeamLibraryScreen';
+import TeamProgramScreen from '../screens/main/drawer/TeamProgramScreen';
+import TeamRevenueScreen from '../screens/main/drawer/TeamRevenueScreen';
+import TeamActivityScreen from '../screens/main/drawer/TeamActivityScreen';
 
 export type MainStackParamList = {
   /** The four-tab shell. Everything else in this stack pushes over it. */
@@ -150,6 +160,54 @@ export type MainStackParamList = {
    * is what the tap map means by "per client when you arrive from a client".
    */
   Exercise: { exerciseId: string; clientId?: string };
+  /**
+   * 6a — the coaching team, or the page that explains what one is for.
+   *
+   * One route for both states because which one a trainer sees is a fact about
+   * them and not a place they navigate to: almost nobody has a team, so the
+   * no-team state is the screen most often drawn.
+   */
+  Team: undefined;
+  /** 6b — invite a coach by number. Admin+; the screen assumes nothing. */
+  InviteCoach: undefined;
+  /**
+   * 6d — answering an invitation.
+   *
+   * The team's name and the inviter travel as params rather than being refetched
+   * by id: the list that offered this row already had them, and a consent screen
+   * that opens blank while it looks up who is asking is a consent screen nobody
+   * reads.
+   */
+  TeamInvitation: { invitationId: string; teamName: string; invitedByName: string | null };
+  /**
+   * 6f — the team's whole roster, grouped by coach. Admin+.
+   *
+   * Online-only, and the screen says so: this data is deliberately not synced,
+   * so there is no offline version of it to fall back to.
+   */
+  TeamClients: undefined;
+  /**
+   * 6g — one teammate's client, read-only and money-free.
+   *
+   * `name` travels as a param so the app bar has a title before the fetch lands.
+   * The list that offered this row already knew it, and a header that appears
+   * blank for 300ms reads as a broken screen.
+   */
+  TeamClient: { clientId: string; name: string };
+  /** 6i — the team's shared program shelf. Any member. */
+  TeamLibrary: undefined;
+  /**
+   * 6j — a teammate's plan, and the one place an admin may change it. Admin+.
+   *
+   * `name` travels so the app bar has a title before the fetch lands; the screen
+   * is otherwise fetched by id, because a plan an admin is editing must be read
+   * fresh rather than from whatever the list had cached.
+   */
+  TeamProgram: { programId: string; name: string };
+  /** 6k — who changed what, on whose clients. Any member. */
+  TeamActivity: { clientId?: string } | undefined;
+  /** 6l — what the team took, per coach. Owner only. */
+  TeamRevenue: undefined;
   /** 4a — reports. */
   Reports: undefined;
   /** 4b — inside a metric. */
@@ -244,6 +302,15 @@ export default function MainStack() {
       <Stack.Screen name="Metric" component={MetricScreen} />
       <Stack.Screen name="Weekly" component={WeeklyScreen} />
       <Stack.Screen name="WeekReport" component={WeekReportScreen} />
+      <Stack.Screen name="Team" component={TeamScreen} />
+      <Stack.Screen name="InviteCoach" component={InviteCoachScreen} />
+      <Stack.Screen name="TeamInvitation" component={InvitationScreen} />
+      <Stack.Screen name="TeamClients" component={TeamClientsScreen} />
+      <Stack.Screen name="TeamClient" component={TeamClientScreen} />
+      <Stack.Screen name="TeamLibrary" component={TeamLibraryScreen} />
+      <Stack.Screen name="TeamProgram" component={TeamProgramScreen} />
+      <Stack.Screen name="TeamActivity" component={TeamActivityScreen} />
+      <Stack.Screen name="TeamRevenue" component={TeamRevenueScreen} />
       <Stack.Screen name="Adherence" component={AdherenceScreen} />
       <Stack.Screen name="NudgeRules" component={NudgeRulesScreen} />
       <Stack.Screen name="Settings" component={SettingsScreen} />

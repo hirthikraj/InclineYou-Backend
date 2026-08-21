@@ -4,6 +4,7 @@ import { database } from './index';
 import { purgeLocalClient, repairLocalData } from './repair';
 import { api } from '../api/client';
 import { resetLiveCaches } from './live';
+import { resetTeamInvitations } from '../team/useTeamInvitations';
 
 export type SyncPhase = 'idle' | 'syncing' | 'error';
 
@@ -310,6 +311,10 @@ export async function resetLocalDatabase() {
   // the tables is not enough — those caches would hand the next trainer the
   // previous one's roster for a frame.
   resetLiveCaches();
+  // Team invitations never touch SQLite — they are REST-only — so
+  // `unsafeResetDatabase` does not reach them. Without this, the next trainer to
+  // sign in on this phone opens to somebody else's invitation.
+  resetTeamInvitations();
   state = {
     phase: 'idle',
     lastSyncedAt: null,

@@ -58,6 +58,7 @@ import {
   Figures,
   IconBack,
   IconButton,
+  IconPlus,
   List,
   Radio,
   Row,
@@ -147,7 +148,9 @@ export default function AddClientPayScreen() {
     const sub = observePacks().subscribe((rows) => {
       setPacks(
         rows
-          .filter((p) => p.status === 'active')
+          // Case-blind for the same reason as packSessionsLeft: a pack the
+          // add-client gate counted must also show up on this price list.
+          .filter((p) => (p.status ?? '').toLowerCase() === 'active')
           .map((p) => ({
             id: p.id,
             name: p.name,
@@ -390,19 +393,34 @@ export default function AddClientPayScreen() {
                         <Radio checked={row.id === chosenId} />
                       </ChoiceSlot>
                     }
-                    // Tapping the chosen one again unpicks it: adding a client
-                    // without selling them anything yet is a real answer.
+                    // Tapping the chosen one again unpicks it — changing your
+                    // mind mid-pick shouldn't need a second tap on the other row.
+                    // The Add button below stays dead until something is picked.
                     onPress={() => setChosenId((current) => (current === row.id ? null : row.id))}
                   />
                 ))}
               </List>
             ) : (
-              <Text style={styles.blank}>
-                {kind === 'gym'
-                  ? `No ${gymName} packages on the list yet — add them in Money → Packs and they'll be pickable here.`
-                  : 'No packs on your price list yet — add them in Money → Packs. You can still add ' +
-                    `${first} now and sell one later.`}
-              </Text>
+              /* An empty price list is a dead end this step can't work around —
+                 sessions are sold from a pack, so there is nothing to offer
+                 until one exists. The button pushes Packs onto the stack;
+                 backing out lands right here, form intact, and the live packs
+                 subscription shows the new pack without a refresh. */
+              <>
+                <Text style={styles.blank}>
+                  {kind === 'gym'
+                    ? `No ${gymName} packages on the list yet. ${first} gets signed up on one of them — add what the counter charges and it's pickable right here.`
+                    : `No packs on your price list yet. ${first} gets sold sessions from it — create a pack, come back, and it's pickable right here.`}
+                </Text>
+                <Button
+                  label={kind === 'gym' ? `Add a ${gymName} package` : 'Create a pack'}
+                  variant="ghost"
+                  block
+                  icon={IconPlus}
+                  onPress={() => navigation.navigate('MoneyPacks')}
+                  style={styles.blankGo}
+                />
+              </>
             )}
 
             {/* ------------------------------- freelance: the price is theirs to set */}
@@ -526,14 +544,21 @@ export default function AddClientPayScreen() {
 
             <Button
               // The agreed number rides on the button, so the last thing read
-              // before the tap is the thing being agreed to.
+              // before the tap is the thing being agreed to. Dead until a pack
+              // is picked: a client is sold sessions from a pack, so there is
+              // nothing to agree to before one is chosen.
               label={agreedLabel ? `Add ${first} on ${agreedLabel}` : `Add ${first}`}
               size="lg"
               block
-              disabled={saving}
+              disabled={saving || !chosen}
               onPress={() => void save(true)}
               style={styles.go}
             />
+            {!chosen ? (
+              <FieldMsg style={styles.goMsg}>
+                Pick a pack above — {first} is added on it.
+              </FieldMsg>
+            ) : null}
           </>
         ) : null}
       </ScrollView>
@@ -559,6 +584,7 @@ const styles = StyleSheet.create({
   choices: { flexDirection: 'row', gap: space.s2 },
   label: { marginTop: space.s5 },
   blank: { fontSize: 13.5, color: colors.ink3, lineHeight: 20 },
+  blankGo: { marginTop: space.s3 },
   rupee: { fontSize: 16, fontWeight: '500', color: colors.ink },
   shareRow: { flexDirection: 'row', gap: space.s2, alignItems: 'center' },
   shareField: { flex: 1 },
@@ -569,4 +595,5 @@ const styles = StyleSheet.create({
   basis: { fontSize: 12.5, color: colors.ink3, marginTop: space.s2 },
   note: { marginTop: space.s3 },
   go: { marginTop: space.s6 },
+  goMsg: { marginTop: space.s2, textAlign: 'center' },
 });

@@ -47,6 +47,7 @@ import {
   IconBadge,
   IconBuilding,
   IconButton,
+  IconCalendar,
   IconClock,
   IconEye,
   IconGlobe,
@@ -250,6 +251,12 @@ export default function ProfileScreen() {
                     value: asWorkMode(profile.workMode),
                   })
                 }
+              />
+              <Setting
+                icon={IconCalendar}
+                label="When you work"
+                meta="Your hours and closed days"
+                onPress={() => navigation.navigate('WorkingHours')}
               />
               <Setting
                 icon={IconBuilding}

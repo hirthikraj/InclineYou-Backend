@@ -134,6 +134,8 @@ export type { WeekColumnProps, WeekPipProps, PipKind } from './WeekGrid';
 export { default as MonthGrid } from './MonthGrid';
 export type { MonthCellProps } from './MonthGrid';
 export { default as AvailRow } from './AvailRow';
+export { default as DayTimeline } from './DayTimeline';
+export type { DayTimelineProps } from './DayTimeline';
 export { default as TimeField, formatMinute, MINUTES_IN_DAY } from './TimeField';
 export type { TimeFieldProps } from './TimeField';
 

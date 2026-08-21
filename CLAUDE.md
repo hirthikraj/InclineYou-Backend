@@ -19,8 +19,8 @@ authorization table, rate-limit tiers, and the error `code` catalogue the app
 branches on. Change an endpoint, change that file in the same commit.
 
 **Schema evolution is additive-only, on both sides, in lockstep.** The backend's
-Flyway migrations (`backend/src/main/resources/db/migration`, V1…V25) and the
-app's WatermelonDB migrations (`app/src/db/migrations.ts`, schema v18) follow the
+Flyway migrations (`backend/src/main/resources/db/migration`, V1…V27) and the
+app's WatermelonDB migrations (`app/src/db/migrations.ts`, schema v19) follow the
 same law: append a new version, never edit one that has run, never drop or
 repurpose a column, never remove a response field. Trainers' phones carry data we
 cannot refetch, and old builds must keep working.
@@ -38,6 +38,16 @@ Three rules that touch both halves:
 - The exercise library is **text-only**. The upstream artwork is © Gym visual and
   unlicensed for us; V22 dropped the media columns on 17 Aug 2026. Every "free"
   GIF dataset is the same artwork re-uploaded.
+- **A team widens reads; it never moves ownership.** V26 added team coaching
+  (`backend/agent/XRep_team_coaching_prd.md`). No table gained a `team_id`, no
+  existing endpoint changed what it returns, and only `team` + `team_member` enter
+  sync — teammates' clients are online-only REST, and no role ever sees a
+  teammate's money book — except an owner-only, totals-only revenue roll-up, whose
+  arrival changed the app's copy in the same commit. All three phases are built on
+  both halves (drawer 6a–6l).
+  The team screens are the one place in the app that writes online instead of to
+  SQLite, because a permission change must never be queued — and reassignment is
+  the one place a client row is *projected* per caller rather than mirrored.
 - Template days are **ordinal slots**. Weekdays and times are chosen per client at
   apply time into `program.schedule`; the count must match or apply 400s.
 
@@ -66,10 +76,10 @@ AOF turns "three attempts" into "three attempts per deploy". Don't drop the flag
 
 ## Product docs — three copies, kept identical
 
-The seven source-of-truth docs (requirements and plan, core data model,
+The eight source-of-truth docs (requirements and plan, core data model,
 interaction map, developer getting-started, manual test plan, growth roadmap,
-deployment runbook) exist in **three places**, and as of 18 Aug 2026 all three are
-byte-identical:
+deployment runbook, AI feature spec) exist in **three places**, and as of
+20 Aug 2026 all three are byte-identical:
 
 - `notes/` — the tracked copy, and the only one under version control
 - `backend/agent/` and `app/agent/` — untracked working copies

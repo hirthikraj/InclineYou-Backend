@@ -533,5 +533,49 @@ export const migrations = schemaMigrations({
         }),
       ],
     },
+    {
+      /**
+       * V26 · team coaching. Two tables, both pull-only.
+       *
+       * A trainer's own book is untouched by this migration, and that is the
+       * point of the feature as much as of the migration: joining a team does
+       * not move a single client, program or rupee, and leaving does not move
+       * them back. No existing table gains a `team_id` — a row belongs to a
+       * coach, a coach belongs to a team, and the team is one join away.
+       *
+       * Both tables are written by the server and only ever read here. The sync
+       * push refuses them per record with `TEAM_READ_ONLY` rather than dropping
+       * them silently, so a phone that somehow authors one is told.
+       */
+      toVersion: 19,
+      steps: [
+        createTable({
+          name: 'teams',
+          columns: [
+            { name: 'owner_trainer_id', type: 'string', isIndexed: true },
+            { name: 'name', type: 'string' },
+            { name: 'logo_url', type: 'string', isOptional: true },
+            { name: 'seat_limit', type: 'number', isOptional: true },
+            { name: 'created_at', type: 'number' },
+            { name: 'updated_at', type: 'number' },
+          ],
+        }),
+        createTable({
+          name: 'team_members',
+          columns: [
+            { name: 'team_id', type: 'string', isIndexed: true },
+            { name: 'trainer_id', type: 'string', isOptional: true, isIndexed: true },
+            { name: 'invited_phone', type: 'string', isOptional: true },
+            { name: 'role', type: 'string' },
+            { name: 'status', type: 'string' },
+            { name: 'invited_by_trainer_id', type: 'string', isOptional: true },
+            { name: 'invited_at', type: 'number', isOptional: true },
+            { name: 'joined_at', type: 'number', isOptional: true },
+            { name: 'created_at', type: 'number' },
+            { name: 'updated_at', type: 'number' },
+          ],
+        }),
+      ],
+    },
   ],
 });

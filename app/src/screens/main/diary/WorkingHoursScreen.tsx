@@ -9,7 +9,15 @@
  * And it keeps Trainerize's best rule, stated on the screen: these constrain
  * what a client can self-book. They never constrain the trainer.
  *
- * Editable at any time, from here or from Settings. Changing them is the
+ * The editing sheet leads with a picture, not a form: a timeline of the day
+ * with each window drawn as a block, redrawing as the fields are nudged, so a
+ * split shift and the break inside it are visible rather than inferred from
+ * two pairs of numbers. And because a trainer's week is mostly the same shape
+ * six times over, the sheet can apply the day being edited to other weekdays
+ * in the same save — one edit and a row of day chips instead of six repeat
+ * visits.
+ *
+ * Editable at any time, from here or from the trainer's profile. Changing them is the
  * expected case, not an exception — a trainer's week moves with the season, the
  * gym's timings and their own. What a change must never do is silently strand
  * somebody already booked, so a save that would leave a client outside the new
@@ -28,6 +36,7 @@ import {
   Button,
   Callout,
   Chip,
+  DayTimeline,
   Dialog,
   FieldMsg,
   IconBack,
@@ -42,6 +51,7 @@ import {
   colors,
   formatMinute,
   space,
+  tnum,
 } from '../../../design';
 import { useAuth } from '../../../store/AuthContext';
 import {
@@ -82,9 +92,10 @@ export function formatWindow(w: { startMinute: number; endMinute: number }): str
 
 /** A save that is waiting on the trainer, because somebody is booked in it. */
 interface PendingChange {
-  weekday: number;
+  /** The day being edited first, then any days the hours are copied to. */
+  weekdays: number[];
   windows: HourWindow[];
-  hits: HoursConflict[];
+  hits: (HoursConflict & { weekday: number })[];
 }
 
 export default function WorkingHoursScreen() {
@@ -93,6 +104,7 @@ export default function WorkingHoursScreen() {
   const [rows, setRows] = useState<{ weekday: number; startMinute: number; endMinute: number }[]>([]);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState<HourWindow[]>([]);
+  const [copyDays, setCopyDays] = useState<number[]>([]);
   const [pending, setPending] = useState<PendingChange | null>(null);
   const [checking, setChecking] = useState(false);
 
@@ -126,8 +138,19 @@ export default function WorkingHoursScreen() {
 
   const open = (weekday: number) => {
     setDraft(byDay.get(weekday) ?? []);
+    // Copying is opted into per edit, never remembered: hours that were right
+    // for the whole week last time are exactly the ones that are not this time.
+    setCopyDays([]);
     setEditing(weekday);
   };
+
+  /** A day chip is a toggle: the hours being edited will also replace that day. */
+  const toggleCopyDay = (weekday: number) =>
+    setCopyDays((current) =>
+      current.includes(weekday)
+        ? current.filter((d) => d !== weekday)
+        : [...current, weekday].sort((a, b) => a - b),
+    );
 
   /** A preset is a toggle: tap to add that window, tap again to take it back. */
   const togglePreset = (window: HourWindow) =>
@@ -206,19 +229,28 @@ export default function WorkingHoursScreen() {
   const save = async () => {
     if (editing === null || !trainerId || invalid) return;
     const windows = mergeWindows(draft);
+    const weekdays = [editing, ...copyDays.filter((d) => d !== editing)];
 
     setChecking(true);
     try {
-      const hits = await conflictingSessions(editing, windows);
+      // Checked day by day, because that is how it will be saved — and every
+      // day's conflicts go into one dialog, so the trainer answers the whole
+      // change once rather than being interrogated once per weekday.
+      const hits: PendingChange['hits'] = [];
+      for (const weekday of weekdays) {
+        const dayHits = await conflictingSessions(weekday, windows);
+        hits.push(...dayHits.map((hit) => ({ ...hit, weekday })));
+      }
       if (hits.length > 0) {
         // The sheet closes and the dialog takes its place rather than stacking
         // on top of it — two modals at once is a platform coin-flip, and the
         // draft is held in state either way, so Cancel puts it back untouched.
-        setPending({ weekday: editing, windows, hits });
+        hits.sort((a, b) => a.at - b.at);
+        setPending({ weekdays, windows, hits });
         setEditing(null);
         return;
       }
-      await saveWorkingHours(trainerId, editing, windows);
+      for (const weekday of weekdays) await saveWorkingHours(trainerId, weekday, windows);
       setEditing(null);
     } finally {
       setChecking(false);
@@ -228,14 +260,15 @@ export default function WorkingHoursScreen() {
   /** The trainer read the list and still wants the change. */
   const confirmPending = async () => {
     if (!pending || !trainerId) return;
-    await saveWorkingHours(trainerId, pending.weekday, pending.windows);
+    for (const weekday of pending.weekdays) await saveWorkingHours(trainerId, weekday, pending.windows);
     setPending(null);
   };
 
-  /** Back to the sheet, with the draft exactly as they left it. */
+  /** Back to the sheet, with the draft and day chips exactly as they left them. */
   const cancelPending = () => {
     if (!pending) return;
-    setEditing(pending.weekday);
+    setEditing(pending.weekdays[0]);
+    setCopyDays(pending.weekdays.slice(1));
     setPending(null);
   };
 
@@ -283,6 +316,12 @@ export default function WorkingHoursScreen() {
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
+          {/* The receipt for everything below it: presets and nudges redraw
+              these blocks live, and it draws the *merged* draft — two windows
+              that touch become one block here because they become one window
+              on save, and the picture must not promise otherwise. */}
+          <DayTimeline windows={mergeWindows(draft)} style={styles.timeline} />
+
           <Text style={styles.label}>Quick fill</Text>
           <Seg style={styles.seg}>
             {PRESETS.map((preset) => (
@@ -306,33 +345,56 @@ export default function WorkingHoursScreen() {
               Nothing set — this day will be closed, and no client can self-book on it.
             </Text>
           ) : (
-            draft.map((window, i) => (
-              // Keyed by position: these windows have no identity until they are
-              // saved, and two of them can legitimately read the same while the
-              // trainer is halfway through nudging one onto the other.
-              <View key={i} style={styles.window}>
-                <View style={styles.windowFields}>
-                  <TimeField
-                    label="Starts"
-                    value={window.startMinute}
-                    onChange={(next) => editWindow(i, 'start', next)}
-                    style={styles.field}
-                  />
-                  <TimeField
-                    label="Ends"
-                    value={window.endMinute}
-                    onChange={(next) => editWindow(i, 'end', next)}
-                    style={styles.field}
-                  />
-                  <IconButton
-                    icon={IconTrash}
-                    label={`Remove ${formatWindow(window)}`}
-                    bare
-                    onPress={() => removeWindow(i)}
-                  />
+            draft.map((window, i) => {
+              // The break line reads off the previous *row*, not a sorted copy:
+              // rows never reorder under a thumb mid-nudge, so while a window is
+              // being dragged past its neighbour the line simply disappears
+              // rather than jumping between rows.
+              const prev = i > 0 ? draft[i - 1] : null;
+              const gap =
+                prev && window.startMinute > prev.endMinute
+                  ? { startMinute: prev.endMinute, endMinute: window.startMinute }
+                  : null;
+              return (
+                // Keyed by position: these windows have no identity until they are
+                // saved, and two of them can legitimately read the same while the
+                // trainer is halfway through nudging one onto the other.
+                <View key={i} style={styles.window}>
+                  {gap ? (
+                    <Text style={styles.gapLine}>
+                      break · {formatWindow(gap)} ·{' '}
+                      {formatDuration(gap.endMinute - gap.startMinute)}
+                    </Text>
+                  ) : null}
+                  <View style={styles.windowHead}>
+                    <Text style={styles.windowName}>Window {i + 1}</Text>
+                    <Text style={styles.windowDur}>
+                      {formatDuration(window.endMinute - window.startMinute)}
+                    </Text>
+                  </View>
+                  <View style={styles.windowFields}>
+                    <TimeField
+                      label="Starts"
+                      value={window.startMinute}
+                      onChange={(next) => editWindow(i, 'start', next)}
+                      style={styles.field}
+                    />
+                    <TimeField
+                      label="Ends"
+                      value={window.endMinute}
+                      onChange={(next) => editWindow(i, 'end', next)}
+                      style={styles.field}
+                    />
+                    <IconButton
+                      icon={IconTrash}
+                      label={`Remove ${formatWindow(window)}`}
+                      bare
+                      onPress={() => removeWindow(i)}
+                    />
+                  </View>
                 </View>
-              </View>
-            ))
+              );
+            })
           )}
 
           <Button
@@ -354,8 +416,31 @@ export default function WorkingHoursScreen() {
             </Text>
           ) : null}
 
+          {/* A week is mostly the same day six times over. These chips let one
+              edit be that week, instead of six more trips through this sheet. */}
+          <Text style={[styles.label, styles.labelGap]}>Also apply to</Text>
+          <Seg style={styles.seg}>
+            {DAYS.map((_, d) => d)
+              .filter((d) => d !== editing)
+              .map((d) => (
+                <Chip
+                  key={d}
+                  label={SHORT[d]}
+                  selected={copyDays.includes(d)}
+                  onPress={() => toggleCopyDay(d)}
+                />
+              ))}
+          </Seg>
+          {copyDays.length > 0 ? (
+            <Text style={styles.hint}>
+              {draft.length === 0 ? 'Closing' : 'Saving'} replaces{' '}
+              {copyDays.map((d) => DAYS[d]).join(', ')} with{' '}
+              {draft.length === 0 ? 'a closed day' : 'these hours'} too.
+            </Text>
+          ) : null}
+
           <Button
-            label={draft.length === 0 ? 'Close this day' : 'Save hours'}
+            label={ctaLabel(draft.length === 0, 1 + copyDays.length)}
             size="lg"
             block
             loading={checking}
@@ -380,11 +465,7 @@ export default function WorkingHoursScreen() {
       >
         <View>
           <Text style={styles.dialogBody}>
-            {pending && pending.windows.length === 0
-              ? `Closing ${pending ? DAYS[pending.weekday] : ''} leaves these already booked:`
-              : `These ${pending ? DAYS[pending.weekday] : ''} sessions fall outside ${
-                  pending ? pending.windows.map(formatWindow).join(' and ') : ''
-                }:`}
+            {pending ? pendingBody(pending) : ''}
           </Text>
 
           {pending?.hits.slice(0, MAX_LISTED).map((hit) => (
@@ -415,6 +496,31 @@ export default function WorkingHoursScreen() {
 /** Enough to recognise the problem; past this the dialog stops being readable. */
 const MAX_LISTED = 5;
 
+/** "4 h", "2 h 30 m" — how long a window or a break runs. */
+function formatDuration(minutes: number): string {
+  const whole = Math.max(0, Math.round(minutes));
+  const h = Math.floor(whole / 60);
+  const m = whole % 60;
+  if (h === 0) return `${m} m`;
+  return m === 0 ? `${h} h` : `${h} h ${m} m`;
+}
+
+/** "Close this day" · "Close 3 days" · "Save hours" · "Save for 3 days". */
+function ctaLabel(closing: boolean, dayCount: number): string {
+  if (closing) return dayCount > 1 ? `Close ${dayCount} days` : 'Close this day';
+  return dayCount > 1 ? `Save for ${dayCount} days` : 'Save hours';
+}
+
+/** The dialog's first line, for one day or several — the dates on each row say which day each hit is. */
+function pendingBody(pending: PendingChange): string {
+  const days = pending.weekdays.map((d) => DAYS[d]).join(', ');
+  if (pending.windows.length === 0) return `Closing ${days} leaves these already booked:`;
+  const hours = pending.windows.map(formatWindow).join(' and ');
+  return pending.weekdays.length > 1
+    ? `Sessions on ${days} fall outside ${hours}:`
+    : `These ${days} sessions fall outside ${hours}:`;
+}
+
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** "23 Aug · 07:00 – 08:00" — the date matters, these are all the same weekday. */
@@ -443,7 +549,17 @@ const styles = StyleSheet.create({
   },
   labelGap: { marginTop: space.s6 },
   seg: { marginTop: space.s3 },
+  timeline: { marginTop: space.s2, marginBottom: space.s5 },
   window: { marginTop: space.s3 },
+  windowHead: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  windowName: { fontSize: 12, fontWeight: '800', color: colors.ink2 },
+  windowDur: { fontSize: 12, fontWeight: '700', color: colors.ink3, ...tnum },
+  gapLine: { fontSize: 11.5, color: colors.ink3, marginBottom: space.s2, ...tnum },
   windowFields: { flexDirection: 'row', alignItems: 'flex-end', gap: space.s2 },
   field: { flex: 1 },
   add: { marginTop: space.s3 },

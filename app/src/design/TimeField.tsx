@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
   value: {
     flex: 1,
     textAlign: 'center',
-    fontSize: 19,
+    fontSize: 12,
     fontWeight: '700',
     color: colors.ink,
     ...tnum,

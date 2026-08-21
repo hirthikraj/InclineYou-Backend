@@ -388,6 +388,9 @@ export function projectedCut(
   gym: GymProfile,
 ): { amount: number; percent: number } {
   if (!gym.name || gym.percent == null) return { amount: 0, percent: 0 };
+  // The split exists only on the gym's own clients. A trainer's own client
+  // pays the trainer everything, even when they train on the gym floor.
+  if (client?.paymentMode !== 'gym_collects') return { amount: 0, percent: 0 };
   const mode = modeOf(client);
   if (mode === 'remote') return { amount: 0, percent: 0 };
   // `trainerSplitPercent` is what the TRAINER keeps, so the gym keeps the rest.

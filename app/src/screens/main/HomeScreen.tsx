@@ -23,6 +23,8 @@ import { useFocusEffect, useIsFocused, useNavigation } from '@react-navigation/n
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import * as SecureStore from 'expo-secure-store';
 import { useNetworkState } from 'expo-network';
+import { TEAM_ENABLED } from '../../team/team';
+import { useTeamInvitations } from '../../team/useTeamInvitations';
 import { Q } from '@nozbe/watermelondb';
 
 import type { MainStackParamList } from '../../navigation/MainStack';
@@ -60,6 +62,7 @@ import {
   Meter,
   RestTimer,
   Reveal,
+  List,
   Row,
   RowTime,
   SectionHead,
@@ -214,6 +217,8 @@ export default function HomeScreen() {
 
   const dayOver = deck.today.length > 0 && deck.todayDone === deck.today.length;
   const offline = network.isConnected === false || network.isInternetReachable === false;
+  // Cached and shared with the drawer's badge, so the two never disagree.
+  const invitations = useTeamInvitations(TEAM_ENABLED);
 
   // Same rule as the roster: an empty deck on a fresh install is unproven
   // until a pull has succeeded this launch — "add your first client" reads as
@@ -434,6 +439,37 @@ export default function HomeScreen() {
             says they're done being asked. */}
         {!profileComplete && !meterHidden ? (
           <Meter items={meterItems} why={METER_WHY} onClose={hideMeter} style={styles.meter} />
+        ) : null}
+
+        {/*
+          A coaching-team invitation, waiting on an answer.
+          
+          Here rather than only behind the drawer, because an invited trainer has
+          no reason to go looking for a Team screen — the same argument the sync
+          queue makes for itself: nobody hunts for a queue, they tap the thing
+          that told them something was waiting. Somebody is waiting on this
+          answer, which is why it sits above the day.
+        */}
+        {TEAM_ENABLED && invitations.rows.length > 0 ? (
+          <List style={styles.invites}>
+            {invitations.rows.map((invitation) => (
+              <Row
+                key={invitation.id}
+                grouped
+                leading={<Avatar name={invitation.teamName} size="sm" square />}
+                title={invitation.teamName}
+                subtitle={`${invitation.invitedByName?.trim() || 'A trainer'} invited you to coach here`}
+                trailing={<Tag label="Invitation" tone="accent" />}
+                onPress={() =>
+                  navigation.navigate('TeamInvitation', {
+                    invitationId: invitation.id,
+                    teamName: invitation.teamName,
+                    invitedByName: invitation.invitedByName,
+                  })
+                }
+              />
+            ))}
+          </List>
         ) : null}
 
         {/* Everything from here down is derived from the tables. The chrome
@@ -873,6 +909,7 @@ const styles = StyleSheet.create({
 
   banner: { marginBottom: space.s3 },
   meter: { marginBottom: space.s3 },
+  invites: { marginBottom: space.s3 },
   rail: { marginTop: space.s3 },
   rest: { marginTop: space.s3 },
   stack: { gap: space.cardGap },

@@ -33,7 +33,6 @@ import {
   IconBack,
   IconBell,
   IconButton,
-  IconCalendar,
   IconCopy,
   IconDownload,
   IconEye,
@@ -127,12 +126,6 @@ export default function SettingsScreen() {
             label="Getting paid"
             meta="UPI ID, gym cut, reminders"
             onPress={() => navigation.navigate('GettingPaid')}
-          />
-          <Setting
-            icon={IconCalendar}
-            label="When you work"
-            meta="Your hours and closed days"
-            onPress={() => navigation.navigate('WorkingHours')}
           />
         </SettingList>
 

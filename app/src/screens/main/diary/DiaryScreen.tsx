@@ -391,11 +391,11 @@ export default function DiaryScreen() {
         </Banner>
       ) : null}
 
+      <Segmented options={VIEWS} value={view} onChange={setView} style={styles.segmented} />
+
       {view === 'day' ? (
         <DayStrip days={strip} selected={selected} onSelect={setSelected} style={styles.strip} />
       ) : null}
-
-      <Segmented options={VIEWS} value={view} onChange={setView} style={styles.segmented} />
     </>
   );
 
@@ -1089,8 +1089,8 @@ const styles = StyleSheet.create({
   swipe: { flex: 1 },
   body: { paddingHorizontal: space.inset, paddingBottom: space.s10 },
   banner: { marginBottom: space.s2 },
-  strip: { marginTop: 10 },
-  segmented: { marginTop: space.s3 },
+  strip: { marginTop: space.s3 },
+  segmented: { marginTop: 10 },
   viewBody: { marginTop: space.s4 },
   agenda: { marginTop: space.s2 },
   empty: { marginTop: 20 },
