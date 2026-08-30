@@ -4308,3 +4308,123 @@ at the top of that file. `backend/API.md` documents all five routes.
   nothing on a trainer's path reads that claim. A phone signed in to a deleted
   account keeps working offline until its next sync, which then 404s.
 
+## The component library's 2026 pass — and the stylesheet moved under the product · 30 Aug 2026
+
+The design set's library (`../Design/webapp/webapp/webapp-components.html` and
+its seven `webapp-c-*.html` pages) was audited against what production systems
+ship in 2026 and re-worked; **`app/styles/webapp.css` was updated in the same
+pass with the identical edits**, so the product renders all of it now. §-section
+numbering is preserved and every change is inside §01 (tokens), §04
+(components) and §24 (glass) — the re-copy rule still holds for the next pass.
+
+What the audit found, so nobody re-finds it: dark `--tx-e1`/`--tx-e2` were
+`none` (every card FLAT on the theme the product ships in), dark
+`--tx-field-inset` was `none` (and `none` inside a composite shadow list
+invalidates the declaration), `--tx-skeleton` had never been used, and there
+was not a single `:active` state or `@keyframes` rule in 3,200 lines.
+
+What is new and available to screens, all additive: press physics on `.btn`
+and `.chip`; `.btn--loading` (label yields to a ring, width holds,
+`aria-busy`); focus that lifts `.ctl`'s fill; spring knobs on switch / check /
+radio; `.card--raise` for card-shaped links; `.stat__delta` + `.spark` on the
+stat tile; `.skel` (six shapes, container carries `aria-busy`); `.toast` /
+`.toasts` (LAST resort — the row is still the receipt; `role="status"`,
+danger is `role="alert"` and sticky); `.tip` (inverse tooltip; the control
+still carries `aria-label`); `.ring` (conic pack progress, `--ring-v`);
+`.av--ring`; entrance choreography on panel / modal / palette / menu / scrim.
+Glass now also covers the row menu and the toast — §24's overlay-only line,
+which Apple's Liquid Glass (iOS 26) landed on too. Everything collapses under
+`prefers-reduced-motion` / `prefers-reduced-transparency`.
+
+Two rules the pass sets: the motion vocabulary is the eight `tx-*` keyframes
+and nothing more (anything else is a transition), and `backdrop-filter` is
+never animated. The usability gate for new components is
+`../Design/webapp/webapp/UIUX-SKILL.md` — NN/g's heuristics in this product's
+vocabulary. Colours are untouched; the brand question is a separate, later
+pass. Verified by rendering both themes headless against the real stylesheet;
+`npx next build` passes.
+
+### The affix and the select, rebuilt — caught by looking at 1:1 · 30 Aug 2026
+
+The 2026 pass above shipped without rendering these two at 1:1, and the review
+that did caught both. Recorded here because each is a class of bug, not an
+instance.
+
+**`.affix` contradicted its own spec table** ("one border, shared, never
+doubled"): input and affix each carried a border, so the seam doubled; a
+TRAILING affix collided with `.affix .ctl`'s hard-coded right radius and lived
+on per-instance inline styles; focus ringed the input and orphaned the affix
+outside the halo; disabled dimmed one half of one control. Rebuilt on the
+group-owns-the-chrome model (shadcn/Untitled UI/HeroUI input addons): `.affix`
+carries border, fill, radius, inset and the `:focus-within` halo; the inner
+`.ctl` is flat in every state; a trailing `.affix__p` after the input flips the
+seam automatically — **trailing affixes work now**, so `PackSheet.tsx`'s
+"prefix only" comment is stale, and Team's previously unstyled `.affix__pre` is
+styled by the same rule. `.fld--err` rings the group; `:has(.ctl[disabled])`
+dims the whole control. Sign-in's 44px inline heights still land: the group is
+46px outer, exactly what the old model measured.
+
+**`select.ctl`'s chevron was two 4px gradient triangles** pinned 15px from the
+top — off-centre, and at 1:1 they read as dirt. It is a real glyph now via a
+per-theme `--tx-chevron` data URI (a background-image cannot take
+currentColor), centred to any field height, with `cursor:pointer`.
+
+Two more findings from the same review, both already fixed: the library page's
+select Focus and Disabled specimens had **duplicate `style` attributes** (HTML
+ignores the second, so those states had never rendered), and §24's
+`[data-glass] .panel .ctl{background:var(--tx-surface-2)}` used the
+**shorthand**, which resets `background-image` and silently deleted the
+select's chevron inside every glass panel — it is `background-color` now.
+The rule this sets for the next pass: **a component is not delivered until it
+has been rendered and looked at, at 1:1, in both themes, resting and focused.**
+
+### The dropdown — the select's popup, claimed · 30 Aug 2026
+
+The user opened a select on the forms page and the popup was the OS's: a white
+list with a blue hover, on either theme — correctly filed as *looks like a
+bug*. It was the last piece of platform chrome left in a form, and it could
+never be styled before because the popup lived outside CSS. Chromium 135+
+ships customizable selects (`appearance:base-select` + `::picker(select)`), so
+**the popup is drawn by webapp.css now** — component 47, *Dropdown*, FORMS
+group — as pure progressive enhancement: no new markup, the same `<select>`,
+and every other browser keeps the platform popup, which the doc names as a
+state rather than a failure. The picker wears the row menu's anatomy (32px
+rows, `--w-hover`, selected answer in `--tx-accent-text` with `::checkmark` on
+the right edge, optgroup headings in the `.lgrp` mono voice), `:open` reads as
+focus plus a flipped chevron (`--tx-chevron-up`), the entrance is 140ms via
+`@starting-style`, and glass applies under §24's overlay rule with both
+accessibility exits. Verified OPEN, not just closed: a stdlib CDP driver
+(`scratchpad/cdp.py` pattern — /json/list, raw WebSocket frames,
+Input.dispatchMouseEvent, Page.captureScreenshot) clicked the real control in
+headless Chrome 151 and screenshotted plain, grouped and light-theme pickers.
+
+The same pass finished the FORMS category's state coverage against the text
+field's eight: **Affixed field** gained Hover and Error rows, **Select** gained
+Hover, Open and Error, **Textarea** gained Hover and Error — and Textarea's
+Focus and Disabled specimens had the duplicate-`style`-attribute bug the
+selects had (HTML drops the second attribute silently), so those two states
+had never rendered either. That bug has now been found on FIVE specimens in
+one page; when touching any faked state in this design set, check the
+attribute count first.
+
+### The shorthand strikes the pass that named it · 30 Aug 2026
+
+The user opened a select on the light forms page and the button was a row of
+tiled chevrons. Root cause: `.ctl:focus` — MY rule from this same pass — used
+the `background` SHORTHAND, which resets `background-image/repeat/position`;
+it outranks `select.ctl`'s longhands, so focus wiped the chevron closed and
+tiled it from 0,0 while open. That is the third occurrence of one bug class in
+one day (§24's panel rule, the library's specimens, now the focus rule), so it
+is now a stated law: **a state rule touches `background-color`, never the
+`background` shorthand — on anything, because you do not know which element
+carries an image.** Base rules that DEFINE a resting background may keep the
+shorthand. Gate: `grep -n 'background:var(--tx-field-hover)' app/styles/*` must
+come back empty.
+
+The verification lesson is blunter: the dropdown pass screenshotted the open
+POPUP and never looked at the BUTTON, and never shot closed-plus-focus at all.
+The gate is therefore stated harder: **every state × both themes, and the
+WHOLE control in frame — a state change on one part of a composite control is
+verified on all of its parts.** (The "bad alignment" half of the report was
+the same bug plus the 3px focus halo, which probes as a 3px offset but is the
+ring, not the box: the popup's border aligns with the button's border exactly.)

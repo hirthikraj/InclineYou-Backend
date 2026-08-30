@@ -48,6 +48,9 @@
   --tx-t-instant:120ms; --tx-t-fast:180ms; --tx-t-base:240ms; --tx-t-slow:320ms;
   --tx-ease:cubic-bezier(.2,.8,.2,1);
   --tx-ease-exit:cubic-bezier(.4,0,1,1);
+  /* 2026 pass — one overshoot curve for small state knobs (switch, check,
+     radio) and nothing bigger: overshoot on a layout-sized move reads as lag. */
+  --tx-ease-spring:cubic-bezier(.3,1.4,.5,1);
 
   /* avatar palette · white initials, every one clears 5.9:1 */
   --tx-av-1:#4A5568; --tx-av-2:#4B44C4; --tx-av-3:#0E6E62; --tx-av-4:#2F6B33;
@@ -121,15 +124,25 @@
   --tx-field-hover:rgba(255,255,255,.06);
   --tx-field-line:rgba(255,255,255,.10);
   --tx-field-line-hover:rgba(255,255,255,.17);
-  --tx-field-inset:none;
+  /* was `none`: a field with no inner depth reads as a painted rectangle, and
+     `none` inside any composite `box-shadow:<ring>,var(--tx-field-inset)` list
+     silently invalidates the whole declaration. The light theme always had one. */
+  --tx-field-inset:inset 0 1px 2px rgba(0,0,0,.40);
   --tx-focus:#C6F24E;
   --tx-focus-halo:rgba(198,242,78,.17);
 
-  --tx-e1:none;
-  --tx-e2:none;
+  /* 2026 pass — e1/e2 were `none`, so on the theme the product ships in every
+     card and stat tile rendered FLAT: one hairline on one fill. Real ambient +
+     drop now, kept low so borders still carry the structure. */
+  --tx-e1:0 1px 2px rgba(0,0,0,.30);
+  --tx-e2:0 2px 4px rgba(0,0,0,.30),0 10px 24px -12px rgba(0,0,0,.55);
   --tx-e3:0 10px 30px rgba(0,0,0,.6);
   --tx-e4:0 -8px 40px rgba(0,0,0,.7);
   --tx-skeleton:linear-gradient(90deg,#14171C 25%,#1C2027 37%,#14171C 63%);
+  /* the select's arrow — ink-2 for this theme, since a data URI cannot read
+     currentColor */
+  --tx-chevron:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23A2A9B4' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --tx-chevron-up:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23A2A9B4' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 15 6-6 6 6'/%3E%3C/svg%3E");
 
   /* web-only: the rail sits one step below the canvas so the content plane
      reads as the thing in front */
@@ -190,6 +203,8 @@
   --tx-e3:0 10px 30px -8px rgba(16,19,26,.22);
   --tx-e4:0 -8px 40px -12px rgba(16,19,26,.25);
   --tx-skeleton:linear-gradient(90deg,#E9EBE7 25%,#F3F5F1 37%,#E9EBE7 63%);
+  --tx-chevron:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234E5560' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  --tx-chevron-up:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234E5560' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 15 6-6 6 6'/%3E%3C/svg%3E");
 
   --w-rail-bg:#EDEFEC;
   --w-top-bg:rgba(244,245,243,.88);
@@ -829,10 +844,22 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
   color:var(--tx-ink);cursor:pointer;white-space:nowrap;
   transition:background var(--tx-t-instant) var(--tx-ease),
              border-color var(--tx-t-instant) var(--tx-ease),
-             color var(--tx-t-instant) var(--tx-ease);
+             color var(--tx-t-instant) var(--tx-ease),
+             box-shadow var(--tx-t-fast) var(--tx-ease),
+             transform var(--tx-t-instant) var(--tx-ease);
 }
-.btn--primary{background:var(--tx-accent);color:var(--tx-accent-ink);font-weight:700}
-.btn--primary:hover{background:var(--tx-accent-press)}
+/* 2026 pass — press physics. A control that does not move under the pointer
+   reads as a screenshot; every current system (Material 3, shadcn/ui, HeroUI)
+   ships a pressed transform, and the published guidance is direct: visible
+   press feedback reduces double submissions. 1px + 1.5% — felt, not watched. */
+.btn:active{transform:translateY(1px) scale(.985)}
+.btn--primary{background:var(--tx-accent);color:var(--tx-accent-ink);font-weight:700;
+  /* the lit top edge — the same trick §24 uses on glass. Depth without a new
+     colour: the fill is still the accent token, so the FILL rule holds. */
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.28),0 1px 2px rgba(0,0,0,.25)}
+.btn--primary:hover{background:var(--tx-accent-press);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.28),var(--tx-accent-glow)}
+.btn--primary:active{box-shadow:inset 0 1px 2px rgba(0,0,0,.20)}
 .btn--secondary{border-color:var(--tx-line-strong);color:var(--tx-ink)}
 .btn--secondary:hover{background:var(--tx-surface-2)}
 .btn--ghost{color:var(--tx-ink-2)}
@@ -844,6 +871,18 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
 .btn--icon.btn--lg{width:var(--w-tap-touch)}
 .btn[disabled],.btn[aria-disabled="true"]{opacity:.5;pointer-events:none}
 .btn kbd{font-family:var(--tx-mono);font-size:10px;opacity:.7}
+/* 2026 pass — the working state. A submit that answers over the network needs
+   the button itself to say so (NN/g heuristic 1: visibility of system status).
+   The label yields to a ring, the width holds so nothing reflows, and the
+   button refuses a second press WITHOUT greying to the disabled 50% — it is
+   busy, not unavailable. Markup adds aria-busy="true" and keeps the name. */
+.btn--loading{pointer-events:none;position:relative;color:transparent!important}
+.btn--loading::after{content:'';position:absolute;left:50%;top:50%;margin:-7px 0 0 -7px;
+  width:14px;height:14px;border-radius:50%;
+  border:2px solid var(--tx-ink-2);border-top-color:transparent;
+  animation:tx-spin .7s linear infinite}
+.btn--primary.btn--loading{background:var(--tx-accent);opacity:.85}
+.btn--primary.btn--loading::after{border-color:var(--tx-accent-ink);border-top-color:transparent}
 
 .btngroup{display:inline-flex;border:1px solid var(--tx-line-strong);border-radius:var(--tx-r2);
   overflow:hidden}
@@ -860,31 +899,162 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
   background:var(--tx-field);border:1px solid var(--tx-field-line);
   box-shadow:var(--tx-field-inset);
   color:var(--tx-ink);font-size:13.5px;font-family:var(--tx-font);
-  transition:border-color var(--tx-t-fast) var(--tx-ease);
+  transition:border-color var(--tx-t-fast) var(--tx-ease),
+             background var(--tx-t-fast) var(--tx-ease),
+             box-shadow var(--tx-t-fast) var(--tx-ease);
 }
 .ctl::placeholder{color:var(--tx-ink-3)}      /* ink-off is 2.3:1 on a field */
 .ctl:hover{border-color:var(--tx-field-line-hover)}
-.ctl:focus{outline:none;border-color:var(--tx-focus);box-shadow:0 0 0 3px var(--tx-focus-halo)}
+/* 2026 pass — focus lifts the fill a step as well as ringing it: the field
+   visibly OPENS. Halo + inset in one list, which is why the inset token is
+   never `none` (an invalid item drops the whole ring silently). */
+.ctl:focus{outline:none;border-color:var(--tx-focus);
+  /* background-COLOR, never the shorthand: a select.ctl carries its chevron
+     as a background-IMAGE, and this rule outranks the select's longhands —
+     the shorthand wiped the image on focus and tiled it from 0,0 while open.
+     Third instance of this bug class in one pass; the rule is now general:
+     state rules touch background-color only. */
+  background-color:var(--tx-field-hover);
+  box-shadow:0 0 0 3px var(--tx-focus-halo),var(--tx-field-inset)}
 textarea.ctl{height:auto;min-height:76px;padding:9px 11px;line-height:1.5;resize:vertical}
-select.ctl{appearance:none;
-  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),
-                   linear-gradient(135deg,currentColor 50%,transparent 50%);
-  background-position:calc(100% - 15px) 15px,calc(100% - 11px) 15px;
-  background-size:4px 4px,4px 4px;background-repeat:no-repeat;padding-right:30px}
+/* REBUILT 30 Aug 2026: the chevron was two 4px gradient triangles pinned 15px
+   from the top — off the vertical centre, and at 1:1 they read as dirt on the
+   field rather than as an arrow. A real glyph now, as a per-theme data URI
+   (a background-image cannot take currentColor), centred to whatever height
+   the field is, and the control takes the pointer cursor a closed list
+   implies. Hover and focus are inherited from .ctl unchanged. */
+select.ctl{appearance:none;cursor:pointer;
+  background-image:var(--tx-chevron);
+  background-repeat:no-repeat;
+  background-position:right 10px center;
+  background-size:14px 14px;
+  padding-right:32px}
+
+/* ── the dropdown — the select's popup, claimed · 30 Aug 2026 ─────────────
+   The open list was the last piece of platform chrome left in a form: the
+   button obeyed this stylesheet and the popup was the OS's — a white list
+   with a blue hover, on either theme, which reads as a BUG beside fields this
+   considered. It genuinely could not be styled before: the popup lived
+   outside CSS. Chromium 135+ ships customizable selects
+   (appearance:base-select + the ::picker(select) pseudo-element —
+   developer.chrome.com/blog/a-customizable-select), so the popup is drawn by
+   this stylesheet where the browser allows and REMAINS THE PLATFORM POPUP
+   everywhere else. The fallback is not a failure: it is the same native
+   control this library keeps on purpose, keyboard and all.
+   The picker sits in the top layer over content, which makes it §24 overlay
+   material — the same family as the row menu and the command palette, so it
+   wears the same anatomy: menu-height rows, w-hover, the selected answer in
+   accent text with the checkmark on the right edge. */
+@supports (appearance:base-select){
+  select.ctl,select.ctl::picker(select){appearance:base-select}
+  /* our chevron is the button's arrow; the UA's would double it */
+  select.ctl::picker-icon{display:none}
+  /* open is a state, and it looks like focus plus a flipped chevron */
+  select.ctl:open{border-color:var(--tx-focus);background-color:var(--tx-field-hover);
+    background-image:var(--tx-chevron-up);
+    box-shadow:0 0 0 3px var(--tx-focus-halo),var(--tx-field-inset)}
+  select.ctl::picker(select){
+    background:var(--tx-surface);border:1px solid var(--tx-line-strong);
+    border-radius:var(--tx-r2);box-shadow:var(--tx-e3);
+    padding:5px;margin-top:4px;
+    /* the same 140ms arrival the row menu gets, via @starting-style —
+       transitioning display/overlay needs allow-discrete */
+    opacity:1;transform:translateY(0);
+    transition:opacity var(--tx-t-fast) var(--tx-ease),
+               transform var(--tx-t-fast) var(--tx-ease),
+               overlay var(--tx-t-fast) allow-discrete,
+               display var(--tx-t-fast) allow-discrete}
+  @starting-style{
+    select.ctl::picker(select){opacity:0;transform:translateY(-4px)}
+  }
+  select.ctl option{
+    display:flex;align-items:center;gap:9px;min-height:32px;padding:0 9px;
+    border-radius:var(--tx-r2);font-family:var(--tx-font);font-size:13.5px;
+    letter-spacing:normal;text-transform:none;color:var(--tx-ink-2);
+    cursor:pointer}
+  select.ctl option:hover,select.ctl option:focus{
+    background:var(--w-hover);color:var(--tx-ink);outline:none}
+  select.ctl option:checked{color:var(--tx-accent-text);font-weight:600}
+  select.ctl option::checkmark{order:1;margin-left:auto;
+    color:var(--tx-accent-text)}
+  select.ctl option:disabled{opacity:.45;cursor:default}
+  select.ctl option:disabled:hover{background:none;color:var(--tx-ink-2)}
+  /* a group is a heading, not a border — the .lgrp / .pal__gk voice. The
+     voice goes on the OPTGROUP itself (Chromium renders the label attribute
+     as an implicit heading a child selector cannot reach) and every property
+     it would leak into the options is reset in the option rule above. */
+  select.ctl optgroup{
+    font-family:var(--tx-mono);font-size:10px;font-weight:800;
+    letter-spacing:.13em;text-transform:uppercase;color:var(--tx-ink-3);
+    padding:7px 9px 3px}
+  /* glass, under §24's rule: the picker floats over content, so it may wear
+     the overlay material — with the same two exits every glass surface has */
+  [data-glass="on"] select.ctl::picker(select){
+    background:var(--g-fill-strong);
+    -webkit-backdrop-filter:blur(16px) saturate(var(--g-sat)) var(--g-lift);
+    backdrop-filter:blur(16px) saturate(var(--g-sat)) var(--g-lift);
+    border-color:var(--g-line);border-top-color:var(--g-edge);
+    box-shadow:var(--g-shadow),var(--g-inset)}
+  @media (prefers-reduced-transparency:reduce){
+    [data-glass="on"] select.ctl::picker(select){
+      -webkit-backdrop-filter:none !important;backdrop-filter:none !important;
+      background:var(--tx-surface)}
+  }
+  @media (prefers-reduced-motion:reduce){
+    select.ctl::picker(select){transition:none}
+  }
+}
 .fld--err .ctl{border-color:var(--tx-danger);box-shadow:0 0 0 3px var(--tx-danger-soft)}
 .fld__e{font-size:12px;font-weight:600;color:var(--tx-danger);display:flex;gap:5px}
 .ctl--num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--tx-mono)}
 
-/* the affix group — ₹ and +91 belong outside the input, not in the placeholder */
-.affix{display:flex}
-.affix__p{
+/* the affix group — ₹ and +91 belong outside the input, not in the placeholder.
+   REBUILT 30 Aug 2026, after a rendering audit caught the old model
+   contradicting its own spec table ("one border, shared, never doubled"):
+   the input and the affix each carried a border so the seam doubled, a
+   TRAILING affix collided with the input's hard-coded right radius and needed
+   per-instance inline styles, focus ringed the input and orphaned the affix
+   outside the halo, and disabled dimmed one half of one control.
+   The GROUP owns the chrome now — border, fill, radius, inset, halo — and the
+   children are flat regions inside it. Leading and trailing both work with no
+   per-instance styling: the seam follows the affix's side. This is the model
+   every current system uses for input addons (shadcn/ui, Untitled UI, HeroUI:
+   one bordered group, focus via :focus-within). */
+.affix{display:flex;align-items:stretch;min-height:34px;
+  background:var(--tx-field);border:1px solid var(--tx-field-line);
+  border-radius:var(--tx-r2);box-shadow:var(--tx-field-inset);
+  transition:border-color var(--tx-t-fast) var(--tx-ease),
+             background var(--tx-t-fast) var(--tx-ease),
+             box-shadow var(--tx-t-fast) var(--tx-ease)}
+.affix:hover{border-color:var(--tx-field-line-hover)}
+.affix:focus-within{border-color:var(--tx-focus);background-color:var(--tx-field-hover);
+  box-shadow:0 0 0 3px var(--tx-focus-halo),var(--tx-field-inset)}
+/* the input is a flat region inside the group: no border, no fill, no shadow,
+   no radius of its own — in EVERY state, or the group's chrome doubles.
+   height:auto + stretch, so a taller prefix (sign-in's 44px +91) grows the
+   group and the input follows instead of floating at its own height. */
+.affix .ctl,.affix .ctl:hover,.affix .ctl:focus{
+  height:auto;align-self:stretch;border:0;border-radius:0;
+  background:transparent;box-shadow:none;outline:none}
+.affix__p,.affix__pre{
   display:grid;place-items:center;padding:0 11px;flex:0 0 auto;
-  border:1px solid var(--tx-field-line);border-right:0;
-  border-radius:var(--tx-r2) 0 0 var(--tx-r2);
   background:var(--tx-surface-2);color:var(--tx-ink-2);
   font-family:var(--tx-mono);font-size:13px;
-}
-.affix .ctl{border-radius:0 var(--tx-r2) var(--tx-r2) 0}
+  border:0;border-right:1px solid var(--tx-field-line);
+  border-radius:calc(var(--tx-r2) - 1px) 0 0 calc(var(--tx-r2) - 1px)}
+/* trailing: the same element AFTER the input — the seam and rounding flip,
+   and nothing else is needed. (.affix__pre is Team's +91, styled the same.) */
+.affix .ctl~.affix__p,.affix .ctl~.affix__pre{
+  border-right:0;border-left:1px solid var(--tx-field-line);
+  border-radius:0 calc(var(--tx-r2) - 1px) calc(var(--tx-r2) - 1px) 0}
+/* one disabled CONTROL, dimmed whole — never an input at half strength
+   welded to a unit at full */
+.affix:has(.ctl[disabled]),.affix:has(.ctl[aria-disabled="true"]){opacity:.55}
+.affix:has(.ctl[disabled]) .ctl,.affix:has(.ctl[aria-disabled="true"]) .ctl{opacity:1}
+/* the error ring moves up to the group with the rest of the chrome */
+.fld--err .affix{border-color:var(--tx-danger);
+  box-shadow:0 0 0 3px var(--tx-danger-soft),var(--tx-field-inset)}
+.fld--err .affix .ctl{border:0;box-shadow:none}
 
 .switch{
   display:inline-flex;flex:0 0 auto;   /* a span is inline; width would be ignored */
@@ -896,7 +1066,8 @@ select.ctl{appearance:none;
 .switch::before{content:'';position:absolute;inset:-5px}
 .switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;
   border-radius:50%;background:var(--tx-ink-2);
-  transition:transform var(--tx-t-fast) var(--tx-ease),background var(--tx-t-fast)}
+  box-shadow:0 1px 2px rgba(0,0,0,.35);   /* the knob floats over the track */
+  transition:transform var(--tx-t-base) var(--tx-ease-spring),background var(--tx-t-fast)}
 .switch[aria-checked="true"]{background:var(--tx-accent);border-color:var(--tx-accent)}
 .switch[aria-checked="true"]::after{transform:translateX(16px);background:var(--tx-accent-ink)}
 
@@ -907,12 +1078,14 @@ select.ctl{appearance:none;
 .check{position:relative}
 .check::before{content:'';position:absolute;inset:-7px}  /* 18 + 14 = 32px target */
 .check[aria-checked="true"]{background:var(--tx-accent);border-color:var(--tx-accent)}
-.check svg{opacity:0}
+.check svg{opacity:0;transform:scale(.4);
+  transition:opacity var(--tx-t-instant) var(--tx-ease),
+             transform var(--tx-t-base) var(--tx-ease-spring)}
 /* the tick has to be knocked OUT of the lime, not laid on top of it. It was
    inheriting ink-2 from whatever cell it sat in, which measures ~1.5:1 on the
    accent fill — the same mistake the one rule at the top of this file exists to
    prevent. accent-ink is 15.2:1 on it. */
-.check[aria-checked="true"] svg{opacity:1;color:var(--tx-accent-ink)}
+.check[aria-checked="true"] svg{opacity:1;transform:scale(1);color:var(--tx-accent-ink)}
 
 /* ── chips, tags, pills ───────────────────────────────────────────────────── */
 .chip{
@@ -924,7 +1097,12 @@ select.ctl{appearance:none;
 /* 28px is under the 32px floor, so the hit area is extended with slop rather
    than by making the chip look clumsy. Documented, measured, not guessed. */
 .chip::before{content:'';position:absolute;inset:-3px -2px}
+.chip{transition:background var(--tx-t-instant) var(--tx-ease),
+  border-color var(--tx-t-instant) var(--tx-ease),
+  color var(--tx-t-instant) var(--tx-ease),
+  transform var(--tx-t-instant) var(--tx-ease)}
 .chip:hover{border-color:var(--tx-line-strong);color:var(--tx-ink)}
+.chip:active{transform:scale(.96)}
 .chip[aria-pressed="true"]{background:var(--tx-accent);border-color:var(--tx-accent);
   color:var(--tx-accent-ink)}
 .chip__x{width:14px;height:14px;display:grid;place-items:center;opacity:.7}
@@ -962,6 +1140,16 @@ select.ctl{appearance:none;
 .card__acts{margin-left:auto;display:flex;gap:6px}
 .card__b{padding:16px}
 .card__b--flush{padding:0}
+/* 2026 pass — a card that is a LINK earns a hover lift; content cards stay
+   still, because motion is a claim of interactivity and the content plane
+   must not make it. */
+.card--raise{cursor:pointer;
+  transition:transform var(--tx-t-fast) var(--tx-ease),
+             box-shadow var(--tx-t-fast) var(--tx-ease),
+             border-color var(--tx-t-fast) var(--tx-ease)}
+.card--raise:hover{transform:translateY(-2px);box-shadow:var(--tx-e2);
+  border-color:var(--tx-line-strong)}
+.card--raise:active{transform:translateY(0);box-shadow:var(--tx-e1)}
 
 .kv{display:flex;align-items:baseline;justify-content:space-between;gap:16px;
   padding:9px 0;border-bottom:1px solid var(--tx-line)}
@@ -987,6 +1175,23 @@ select.ctl{appearance:none;
 .stat--acc .stat__v{color:var(--tx-accent-text)}
 .stat--warn .stat__v{color:var(--tx-warn)}
 .stat--danger .stat__v{color:var(--tx-danger)}
+/* 2026 pass — the delta and the spark. A figure alone answers "how much"; a
+   dashboard tile's job is "and is that good". Every current dashboard system
+   treats these as the ANATOMY of a stat, not an extra (Tremor is the
+   open-source reference for the pattern). Both use only existing tokens. */
+.stat__delta{display:inline-flex;align-items:center;gap:4px;margin-top:7px;
+  height:20px;padding:0 8px;border-radius:var(--tx-rfull);
+  font-size:11.5px;font-weight:700;font-variant-numeric:tabular-nums}
+.stat__delta--up{background:var(--tx-ok-soft);color:var(--tx-ok)}
+.stat__delta--down{background:var(--tx-danger-soft);color:var(--tx-danger)}
+.stat__delta--flat{background:var(--tx-surface-3);color:var(--tx-ink-2)}
+/* the spark: up to eight bars, CSS only, data as inline heights on a 24px
+   track. The current period is the accent — a fill, which is the rule — and
+   history is structure. Decorative, so the markup carries aria-hidden. */
+.spark{display:flex;align-items:flex-end;gap:3px;height:24px;margin-top:10px}
+.spark i{flex:1;min-width:4px;max-width:10px;border-radius:2px 2px 0 0;
+  background:var(--tx-surface-3)}
+.spark i.hot{background:var(--tx-accent)}
 
 /* ── the data table ──────────────────────────────────────────────────────
    The web's answer to a list of cards. A card list is right on a phone,
@@ -1906,6 +2111,143 @@ button.ev--late{border-left-color:var(--tx-warn)}
   *,*::before,*::after{transition-duration:.001ms!important;animation-duration:.001ms!important}
 }
 
+
+/* ── THE 2026 PASS · motion, loading truth, and the three missing components ──
+   Dated 30 Aug 2026. Sources, because "modern" should be checkable, not a mood:
+   · Press states / micro-interactions — createbytes.com "Microinteractions UI
+     Best Practices: A 2026 Guide"; skillvalix.com "CSS Micro Animations &
+     Micro-Interactions 2026": feedback under 400ms, one motion language.
+   · Skeletons vs spinners — cpcloudhosting.com "Loading States & Skeleton
+     Screens (2026)"; thehangline.com on perceived performance: skeletons for
+     structured content, spinners for single actions, NOTHING under ~300ms.
+   · Glass stays on the overlay layer — Apple shipped Liquid Glass across
+     iOS 26 / macOS Tahoe doing exactly what §24 argued first: glass floats,
+     content stays flat (clay.global/blog/glassmorphism-ui;
+     designsignal.ai/articles/glassmorphism-vs-liquid-glass). The pass extends
+     §24 to the two floaters it missed — the row menu and the toast.
+   Everything here is ADDITIVE: no existing class renders differently except
+   where a state that did not exist now does.
+
+   The motion vocabulary is EIGHT keyframe names, and that is the budget.
+   Anything else animates as a transition or not at all. */
+@keyframes tx-spin{to{transform:rotate(360deg)}}
+@keyframes tx-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}
+@keyframes tx-pop{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+@keyframes tx-pop-c{from{opacity:0;transform:translate(-50%,-50%) scale(.96)}
+  to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+@keyframes tx-pal-in{from{opacity:0;transform:translateX(-50%) translateY(-6px)}
+  to{opacity:1;transform:translateX(-50%) translateY(0)}}
+@keyframes tx-slide-l{from{opacity:.4;transform:translateX(24px)}
+  to{opacity:1;transform:translateX(0)}}
+@keyframes tx-rise{from{opacity:0;transform:translateY(10px) scale(.98)}
+  to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes tx-fade{from{opacity:0}to{opacity:1}}
+
+/* entrances. The overlay layer ARRIVES now instead of appearing mid-paint: the
+   panel slides from its edge, the modal grows from centre, the palette drops,
+   the menu pops from its origin, the scrim fades. 180–240ms, entrance curve
+   only. backdrop-filter itself is never animated — §24's rule — which is
+   exactly why these animate transform and opacity instead. */
+.panel{animation:tx-slide-l var(--tx-t-base) var(--tx-ease)}
+.modal{animation:tx-pop-c var(--tx-t-base) var(--tx-ease)}
+.pal{animation:tx-pal-in var(--tx-t-fast) var(--tx-ease)}
+.menu{animation:tx-pop var(--tx-t-fast) var(--tx-ease);transform-origin:top right}
+.scrim{animation:tx-fade var(--tx-t-base) var(--tx-ease)}
+/* the meter answers a value change by moving to it, not jumping */
+.meter i{transition:width var(--tx-t-slow) var(--tx-ease)}
+
+/* ── skeleton ─────────────────────────────────────────────────────────────
+   The --tx-skeleton token has existed since v1 of this file and NOTHING ever
+   used it — there was no loading state in the whole library, so every screen
+   went from blank to full in one paint. Shapes mirror the content they stand
+   for (a row, an avatar, a stat), which is the entire point of a skeleton
+   over a spinner: the reader builds the page's map before the data lands.
+   Markup rule: the CONTAINER carries aria-busy="true"; each .skel is
+   aria-hidden. Under ~300ms show nothing at all. */
+.skel{background:var(--tx-skeleton);background-size:200% 100%;
+  border-radius:var(--tx-r1);animation:tx-shimmer 1.6s linear infinite}
+.skel--t{height:12px}
+.skel--t-lg{height:18px;width:40%}
+.skel--av{width:32px;height:32px;border-radius:var(--tx-rfull)}
+.skel--row{height:var(--w-row)}
+.skel--stat{height:92px;border-radius:var(--tx-r3)}
+.skel--btn{height:34px;width:120px;border-radius:var(--tx-r2)}
+
+/* ── toast ────────────────────────────────────────────────────────────────
+   LAST resort, not first: this product answers a write on the row it changed
+   (the roster row is the receipt), and that stays the rule. The toast exists
+   for the confirm with no row on screen to land on — a save that redirects, an
+   export that finished, an undo window. Bottom-right, one at a time, an action
+   at most. Anatomy follows the pattern sonner standardised for the ecosystem.
+   role="status" in markup, so it is announced without stealing focus. */
+.toasts{position:fixed;right:20px;bottom:20px;z-index:60;display:flex;
+  flex-direction:column;gap:8px;width:340px;max-width:calc(100% - 40px)}
+.toast{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;
+  border-radius:var(--tx-r3);background:var(--tx-surface);
+  border:1px solid var(--tx-line-strong);box-shadow:var(--tx-e3);
+  font-size:13px;line-height:1.5;color:var(--tx-ink-2);
+  animation:tx-rise var(--tx-t-base) var(--tx-ease)}
+.toast b{color:var(--tx-ink);font-weight:600}
+.toast>svg{flex:0 0 auto;margin-top:2px;color:var(--tx-ink-3)}
+.toast--ok>svg{color:var(--tx-ok)}
+.toast--danger>svg{color:var(--tx-danger)}
+.toast--warn>svg{color:var(--tx-warn)}
+.toast__m{flex:1;min-width:0}
+.toast__act{flex:0 0 auto;background:none;border:0;cursor:pointer;padding:0;
+  font:inherit;font-weight:700;color:var(--tx-accent-text)}
+.toast__x{flex:0 0 auto;width:20px;height:20px;display:grid;place-items:center;
+  background:none;border:0;cursor:pointer;border-radius:var(--tx-r1);
+  color:var(--tx-ink-3);position:relative}
+.toast__x::before{content:'';position:absolute;inset:-6px}  /* 32px target */
+.toast__x:hover{color:var(--tx-ink);background:var(--w-hover)}
+
+/* ── tooltip, generic ─────────────────────────────────────────────────────
+   The rail always had its own (it is that component's only label); everything
+   else pointed at nothing. Inverse fill, so it holds maximum contrast in both
+   themes without a new token. Never for content a task depends on — a tooltip
+   is a reminder, not a hiding place. */
+.tip{position:absolute;z-index:70;padding:5px 9px;border-radius:var(--tx-r1);
+  background:var(--tx-ink);color:var(--tx-surface);
+  font-size:11.5px;font-weight:600;white-space:nowrap;pointer-events:none;
+  box-shadow:var(--tx-e2);animation:tx-fade var(--tx-t-fast) var(--tx-ease)}
+.tip kbd{font-family:var(--tx-mono);font-size:10px;opacity:.75;margin-left:5px}
+
+/* ── progress ring ────────────────────────────────────────────────────────
+   The meter's circular sibling, for the one number a pack IS (8 of 12). Conic
+   gradient, no SVG, value as a custom property so a screen can set it inline:
+   style="--ring-v:66". The markup carries the real fraction as text inside,
+   so the ring is never the only encoding. */
+.ring{--ring-v:0;--ring-c:var(--tx-accent);
+  width:44px;height:44px;border-radius:50%;position:relative;flex:0 0 auto;
+  background:conic-gradient(var(--ring-c) calc(var(--ring-v)*1%),var(--tx-surface-3) 0);
+  display:grid;place-items:center}
+.ring::before{content:'';position:absolute;inset:4px;border-radius:50%;
+  background:var(--tx-surface)}
+.ring>span{position:relative;font-family:var(--tx-mono);font-size:10.5px;
+  font-weight:600;color:var(--tx-ink);font-variant-numeric:tabular-nums}
+.ring--warn{--ring-c:var(--tx-warn)}
+.ring--danger{--ring-c:var(--tx-danger)}
+.ring--lg{width:64px;height:64px}
+.ring--lg>span{font-size:12.5px}
+
+/* ── avatar ring ──────────────────────────────────────────────────────────
+   A presence halo for "this one, now": the running session's client on Today,
+   the row the panel is editing. Outline, not border, so the 32px metric and
+   every layout that depends on it are untouched. */
+.av--ring{outline:2px solid var(--tx-accent);outline-offset:2px}
+.av--ring-warn{outline:2px solid var(--tx-warn);outline-offset:2px}
+.av--ring-danger{outline:2px solid var(--tx-danger);outline-offset:2px}
+
+/* the whole vocabulary collapses for anyone who asked for less motion —
+   states still change, they just stop travelling. */
+@media (prefers-reduced-motion:reduce){
+  .panel,.modal,.pal,.menu,.scrim,.toast,.tip{animation:none}
+  .skel{animation:none;background:var(--tx-surface-2)}
+  .btn:active{transform:none}
+  .chip:active{transform:none}
+  .card--raise:hover,.card--raise:active{transform:none}
+}
+
 /* ═════════════════════════════════════════ 05 · DEEP-LINK LANDING ════════
    The information architecture links to a single frame. On arrival the frame
    gets a lime ring for two seconds so the reviewer's eye lands in the right
@@ -2313,6 +2655,25 @@ button.ev--late{border-left-color:var(--tx-warn)}
   backdrop-filter:blur(16px) saturate(var(--g-sat));
   box-shadow:var(--g-inset)}
 
+/* 6 · the row menu and the toast — the 2026 pass. Both float over content,
+      which is this section's whole test, and both were solid only because
+      they postdate the first glass pass. Strong fill on the menu because
+      13.5px labels sit directly on it. Validation that this line — glass
+      floats, content stays flat — is where production systems landed: Apple's
+      Liquid Glass ships exactly it across iOS 26 / macOS Tahoe. */
+[data-glass="on"] .menu{
+  background:var(--g-fill-strong);
+  -webkit-backdrop-filter:blur(16px) saturate(var(--g-sat)) var(--g-lift);
+  backdrop-filter:blur(16px) saturate(var(--g-sat)) var(--g-lift);
+  border:1px solid var(--g-line);border-top-color:var(--g-edge);
+  box-shadow:var(--g-shadow),var(--g-inset)}
+[data-glass="on"] .toast{
+  background:var(--g-fill-strong);
+  -webkit-backdrop-filter:blur(16px) saturate(var(--g-sat)) var(--g-lift);
+  backdrop-filter:blur(16px) saturate(var(--g-sat)) var(--g-lift);
+  border-color:var(--g-line);border-top-color:var(--g-edge);
+  box-shadow:var(--g-shadow),var(--g-inset)}
+
 /* ── where glass explicitly does NOT go ───────────────────────────────────
    Listed as real declarations rather than as a comment, so a future edit that
    tries to glass the content plane has to delete a rule that says why. */
@@ -2332,15 +2693,25 @@ button.ev--late{border-left-color:var(--tx-warn)}
 [data-glass="on"] .pal__i[aria-selected="true"]{
   backdrop-filter:none;-webkit-backdrop-filter:none}
 [data-glass="on"] .panel .ctl,[data-glass="on"] .modal .ctl{
-  background:var(--tx-surface-2)}
+  /* background-COLOR, not the shorthand: the shorthand resets background-image
+     and silently deleted the select's chevron inside every glass panel. */
+  background-color:var(--tx-surface-2)}
+/* …except inside an affix group, where the GROUP is the solid and the input
+   must stay flat or the chrome doubles (the affix rebuild's one rule) */
+[data-glass="on"] .panel .affix,[data-glass="on"] .modal .affix{
+  background-color:var(--tx-surface-2)}
+[data-glass="on"] .panel .affix .ctl,[data-glass="on"] .modal .affix .ctl{
+  background-color:transparent}
 
 /* the accessibility exit. A user who has asked their OS for less transparency
    gets solid surfaces, everywhere, with no negotiation. */
 @media (prefers-reduced-transparency:reduce){
   [data-glass="on"] .top,[data-glass="on"] .panel,[data-glass="on"] .modal,
-  [data-glass="on"] .pal,[data-glass="on"] .bulk,[data-glass="on"] .glassy{
+  [data-glass="on"] .pal,[data-glass="on"] .bulk,[data-glass="on"] .glassy,
+  [data-glass="on"] .menu,[data-glass="on"] .toast{
     -webkit-backdrop-filter:none !important;backdrop-filter:none !important;
   }
+  [data-glass="on"] .menu,[data-glass="on"] .toast{background:var(--tx-surface)}
   [data-glass="on"] .top{background:var(--tx-canvas)}
   [data-glass="on"] .panel,[data-glass="on"] .modal,[data-glass="on"] .pal,
   [data-glass="on"] .glassy{background:var(--tx-surface)}
@@ -2420,6 +2791,8 @@ button.lrow,label.lrow{
   border:1.5px solid var(--tx-field-line-hover);background:var(--tx-field);
   display:grid;place-items:center;cursor:pointer}
 .rad::before{content:'';position:absolute;inset:-7px}  /* 18 + 14 = 32px target */
+.rad{transition:border-color var(--tx-t-fast) var(--tx-ease),
+  border-width var(--tx-t-base) var(--tx-ease-spring)}
 .rad--on{border-color:var(--tx-accent);border-width:5px}
 
 /* the draft block. It reuses `.ev--ghost` — accent, dashed, "not real yet" —
