@@ -1,6 +1,6 @@
 # XRep — Manual Test Plan & Test Case Document
 
-**Version:** 1.2 · **Date:** 20 Aug 2026 · **For:** manual QA of the MVP (trainer + client roles)
+**Version:** 1.3 · **Date:** 23 Aug 2026 · **For:** manual QA of the MVP (trainer + client roles)
 **Scope:** FR-1 – FR-11 and NFR-1 – NFR-13 of [`XRep_final_requirements_and_plan.md`](XRep_final_requirements_and_plan.md), all screens in [`XRep_MVP_interaction_map.md`](XRep_MVP_interaction_map.md), plus the Spring Boot backend surface.
 **Includes:** happy paths, edge cases, corner cases, offline/sync, business-logic abuse, and a full security section (§21).
 
@@ -31,6 +31,25 @@
 >    nobody in a team could see what another coach collected; Phase 3's owner-only
 >    revenue roll-up makes that untrue, and the copy changed with it. **TEAM-104 tests
 >    the copy**, because a promise quietly narrowed is worse than one never made.
+
+> **v1.3 — what changed.** The **gym platform** (`XRep_gym_platform_prd.md`, schema
+> V28–V30) is designed but **not built**. Its cases land as **§16B**, plus §20.2 and
+> §21.3c, and nothing is renumbered — same reason §16A is §16A. Everything in those
+> three sections is **blocked** until V28 exists; they are written now because four
+> of the cases describe bugs that are cheap to write and invisible on the screen
+> that causes them (GYM-25, GYM-26, GYM-51, GYM-59). Three things to know:
+>
+> 1. **There are two states, and today's is the majority one.** If the gym is not on
+>    XRep the trainer manages the whole arrangement themselves, and **none of that is
+>    being deprecated**. §16B.0 is the regression gate for it, and it should be run
+>    first and again last.
+> 2. **"One phone = one role" is reversed.** V18 made `app_user.role` exclusive; V28
+>    makes it the role the app *opens in* and moves authority to `user_role`. So the
+>    v1.1 note above is superseded: **§16 and the `TC` fixture become live again**,
+>    and GYM-07 tests the case v1.1 said could no longer exist.
+> 3. **`client.gym_id IS NULL` means trainer-managed, not "independent".** It covers
+>    clients at gyms that never signed up. Any test — or any query — that treats the
+>    two as the same thing is testing the wrong wall.
 
 > This document is written to be executed on a device with the backend running locally. Every case is
 > pass/fail-able by one person with a phone, a terminal, and `curl`. Cases marked **⚠ known gap** are
@@ -593,16 +612,65 @@ There is **no gateway**. Reconciliation is manual by design. The ledger must fee
 | PAY-12 | Write-off reversal | Correctable by a reversing entry, not an edit | |
 | PAY-13 | Pack for a paused client | Consistent with the pause story | |
 
+### 10.1b The pack's life — pause, resume, extend, renew (V30) · web
+
+New in V30, and **backend + web only** — none of it is on the phone, which does
+not know about pause and will still decrement a paused pack from its own SQLite.
+Run these on `/clients/:id/payments`.
+
+Selling a pack from the price list is itself new: before V30 the web could not
+sell one at all, and every *Sell a pack* path looped back to a panel that only
+records payments.
+
+| ID | Case | Expected | P/F |
+|---|---|---|---|
+| PAY-70 | Sell from the price list | Picking a pack fills type, sessions, price; `validityDays` becomes a real end date counted from the start; `packId` is stored — check `pack.activeClients` on Business · Packages goes **up by one** | |
+| PAY-71 | Sell at a discount | Amount edited below the list price → `discountAmount` recorded, `amount` is the net figure, the pack card says "₹X off the list price", **and nobody else is re-quoted** | |
+| PAY-72 | Sell with no price list | Empty list → the panel says so and the terms can still be typed by hand | |
+| PAY-73 | Renew · one tap | *Renew* on the live pack card posts with no form. Same type, price, session count; a **new** row — the old one is untouched and still on the file | |
+| PAY-74 | Renew **early** | Current pack runs to the 30th → the new one starts on the **1st**, not today. Nobody is charged twice for the same fortnight | |
+| PAY-75 | Renew **late** | Current pack lapsed three weeks ago → the new one starts **today**. Back-dating would hand back validity nobody had | |
+| PAY-76 | Renew a pack with no expiry | New pack also has none; runs until the sessions are used | |
+| PAY-77 | Renew after the price list changed | Repeats **what this client paid**, not the new list price. A renewal must never silently raise somebody's fee | |
+| PAY-78 | Pause | Clock stops. Card shows *Paused since …*. **`status` stays `active`** — the client is still on the roster, still counted by Business · Packages, and the money on the pack is still owed | |
+| PAY-79 | Mark a session done while paused | `sessionsRemaining` **unchanged**. With a second live pack, the charge falls through to that one instead. With nothing chargeable, the session is marked done for free — same as a client with no pack | |
+| PAY-80 | Resume | End date pushed out by **exactly** the days paused; `pausedDays` accumulates; the card says so | |
+| PAY-81 | Back-dated pause | Pause dated to last Thursday → resuming today gives back the days from **Thursday**, not from when it was typed. Catching up on a Sunday must not cost the client three days | |
+| PAY-82 | Pause twice / resume a running pack | `409` with a sentence — *That pack is already paused* / *That pack is not paused* — never a silent no-op | |
+| PAY-83 | Extend | End date out by N days; **sessions unchanged**; a row in the history with the reason | |
+| PAY-84 | Extend `0`, `-5`, `900` | All refused: *Extend by a number of days between 1 and 365* | |
+| PAY-85 | Extend a pack with no expiry | `409` *That pack has no expiry date, so there is nothing to extend* — not a silent success | |
+| PAY-86 | Pause / extend a finished pack | `409` *That pack has finished. Renew it instead.* | |
+| PAY-87 | The history | *N changes to this pack* lists every pause, resume and extension oldest-first with its reason. **Append-only** — nothing can be edited or deleted | |
+| PAY-88 | Paused client on Today and the roster | Raises **no** attention row. Check across two days that it does not drift toward "expires today" — the end date is frozen and today is not | |
+
+### 10.1c The lifecycle sweep (V30)
+
+Nothing in the product ever moved a package off `active` before this. Verify it
+does now, and that it never touches a paused one.
+
+| ID | Case | Expected | P/F |
+|---|---|---|---|
+| PAY-90 | Last session of a pack | Pack becomes **`completed`**, `closed_at` stamped. Business · Packages *On it now* drops by one | |
+| PAY-91 | Validity lapses with sessions left | Pack becomes **`expired`**, not `completed` — the client lost something they paid for, and that is a different conversation from a renewal | |
+| PAY-92 | Both true on the same day | **`completed`** wins. The sessions were delivered | |
+| PAY-93 | A paused pack past its end date | **Untouched.** Still `active`, still paused. This is the whole point of a pause | |
+| PAY-94 | `GET /v1/packages?status=active` | Contains **no** pack with zero sessions left and none past its end date | |
+| PAY-95 | Finished pack, money still owed | The commonest debt in this business. It is closed, and *Record payment* on Business **still offers it** — the panel asks `amountDue > 0`, not `status = 'active'`. Regression check: this is what a naive sweep breaks | |
+
 ### 10.2 Recording payments
 
 | ID | Case | Expected | P/F |
 |---|---|---|---|
-| PAY-20 | Trainer-collects, mark paid | Ledger row: amount, method, collected-by, who confirmed, date | |
+| PAY-20 | Trainer-collects, mark paid | Ledger row: amount, method, collected-by, who confirmed, date. `gymShareAmount` is **0** — the trainer collected, whatever the mode and even on the gym's own floor | |
+| PAY-20b | Gym-collects, then confirm | On confirmation `gym_share_amount` and `share_percent` are **stamped onto the row** from the trainer's percentage at that instant (V11's whole point; nothing wrote them before V30). Client file shows *The gym's share* and a correct *What you keep* | |
+| PAY-20c | Change the gym % and re-read an old payment | The old split does **not** move. Re-confirming cannot re-derive it either — the first confirmation is the one that counts | |
+| PAY-20d | A paid-up client's file | Overview, header and Payments all show **collected = billed, outstanding = nothing**. Regression: these three summed `status === 'confirmed'` while the API writes `'paid'`, so a client who had paid in full read as owing every rupee | |
 | PAY-21 | Gym-collects, mark paid | No UPI link anywhere; trainer marks paid/unpaid | |
 | PAY-22 | Gym-collects with no amount | Allowed (paid/unpaid only); revenue must not invent a number | |
 | PAY-23 | Cash method | `method: cash` has a full path | |
-| PAY-24 | Partial payment | Half now → remainder still owed; both visible; figures add up | |
-| PAY-25 | Overpayment | More than owed → refused with a reason, or recorded as credit — deliberate, never a negative owed that reads as a debt | |
+| PAY-24 | Partial payment | Half now → remainder still owed; both visible; figures add up. The panel seeds the **balance**, not the sticker price, and its warning line counts down from the balance — a client paying the third instalment of four must not be told they owe the whole pack less that instalment | |
+| PAY-25 | Overpayment | More than owed → recorded; `amountDue` is **floored at zero**, never a negative owed that reads as a debt the wrong way. `amountPaid` still shows the true figure and the ledger draws every row | |
 | PAY-26 | Payment amount `0` / negative | Rejected | |
 | PAY-27 | Marked paid by mistake | Correction is a **reversing entry** (append-only), not a delete | |
 | PAY-28 | Undo window | Within `UNDO_WINDOW_MS` (24h) undo is offered; after it, only a reversing entry | |
@@ -1004,6 +1072,194 @@ drawer row disappear — run **TEAM-01** first to confirm which mode you are in.
 
 ---
 
+## 16B · GYM — the gym platform (V28–V30)
+
+> **⚠ NOTHING IN THIS SECTION IS BUILT YET.** V28–V30 do not exist; there is no
+> `/v1/gym/**`, no `gym` table, and `app_user.role` is still single-valued. The
+> section is here because these are the cases that must pass *before* the gym tier
+> is sold to anybody, and because several of them describe bugs that are easy to
+> write and invisible on the screen that causes them. Treat the whole section as
+> **B — blocked** until V28 lands. Design:
+> [`XRep_gym_platform_prd.md`](XRep_gym_platform_prd.md).
+
+> **Numbered 16B for the same reason 16A is 16A** — §17–§27 are cross-referenced
+> by number from a dozen places and shifting them breaks more than it tidies.
+
+**The four rules under test.** Every case here checks one of them, and a failure
+against any is **S1**:
+
+1. **State A is untouched.** A trainer whose gym is not on XRep keeps managing
+   everything themselves. This is the majority path; §16B.0 is its regression gate.
+2. **A gym is a visibility grant.** `client.trainer_id` never moves. What crosses
+   over on a claim is *authorship* of the commercial facts, not ownership.
+3. **`client.gym_id` is the wall, and `NULL` means trainer-managed** — which
+   includes clients at gyms that never signed up. A gym must not see them, count
+   them, or aggregate them.
+4. **The trainer is paid on what was collected**, and every payment records which
+   payout consumed it.
+
+`GYM_ENABLED=false` must make every case here `404` and remove every gym surface —
+run **GYM-05** first to confirm which mode you are in.
+
+**Fixtures to create before starting.** More than usual, because the leaks in this
+feature only appear when two gyms and two states exist at once.
+
+| Fixture | What |
+|---|---|
+| **G1** | A gym org. Owner **GA**, who is a `gym_admin` and **not** a trainer |
+| **G1-B2** | A second branch of G1 |
+| **FD** | Front-desk staff at G1 — an `app_user` with no trainer profile |
+| **G2** | A **second** gym org, owner GA2. Exists only to be leaked into |
+| **T1** | State-A trainer. `trainer.gym_name = 'Iron House'` (free text, never on XRep), 2 clients there with `payment_mode='gym_collects'`, plus 2 private clients |
+| **T3** | The trainer who joins G1. Starts in State A at 'FitZone' with 3 clients, 2 private |
+| **M1–M20** | Gym members of G1. Only M1–M3 ever get PT |
+
+### 16B.0 State A regression — run this first, and run it again at the end
+
+The gym tier is worthless if it costs the trainers who will never have a gym org.
+Every case here should be **identical to v1.2 behaviour**; a difference is the
+finding.
+
+| ID | Case | Steps | Expected | P/F |
+|---|---|---|---|---|
+| GYM-01 | The whole money book, unchanged | With **no gym org anywhere**, execute §10 (PAY) end to end as T1 | Every case passes exactly as in v1.2. State A is not a migration | |
+| GYM-02 | `gym_name` stays free text | Set T1's gym to `Iron House`; check psql | `trainer.gym_name = 'Iron House'`, **no `gym` row created**, `client.gym_id` NULL on all four clients. An implicit gym row would be the beginning of the sweep bug | |
+| GYM-03 | Settlement is still the trainer's own arithmetic | Record floor payments, open Gym share | Figures computed **on the phone** as before; `gym_settlement` written by sync, not by a server job | |
+| GYM-04 | The transcribed price list still works | Create a `pack` with `owner='gym'`; try to discount it on sale | Creatable, and the discount field is refused with the existing copy. A trainer with no gym org must still be able to say "these are the gym's prices" | |
+| GYM-05 | Feature switch | `GYM_ENABLED=false`, restart | No gym surface anywhere; `curl $BASE/v1/gym -H "$T1"` → `404`, no `code`. Restore before continuing | |
+| GYM-06 | A State-A trainer sees no gym UI | As T1 (never invited anywhere), open every screen | No gym rows, no "join a gym" pitch, no empty gym states. Phase 1 is inert for them | |
+
+### 16B.1 Multi-role identity (V28)
+
+Testable with no gym at all, and worth shipping alone.
+
+| ID | Case | Steps | Expected | P/F |
+|---|---|---|---|---|
+| GYM-07 | A trainer can be somebody's client | As T2, add **T1's** number to the roster | **`201`.** `PHONE_IS_TRAINER` no longer fires for a *different* trainer's number — this is the V18 reversal | |
+| GYM-08 | …but not your own | As T1, add T1's own number | Still `422 PHONE_IS_TRAINER`. The code stays in the catalogue for exactly this case | |
+| GYM-09 | The picker offers both | Sign in as T1 after GYM-07 and accepting | Role picker lists the coaching account **and** the roster T1 is on. The coaching card is back (V18 removed it) | |
+| GYM-10 | `app_user.role` is the landing, not the limit | psql: `app_user.role` for T1 | Still `'trainer'`, and it decides which role the app **opens in**. It is no longer consulted for authorisation | |
+| GYM-11 | Backfill is exact | psql q27 (§20.2) | Every `app_user` has exactly one `active` `user_role` row matching its `role`. Zero rows either side | |
+| GYM-12 | The token carries the active role | Get a token as T1-the-client; call `GET /v1/clients` | `403`. A person with a trainer role must not reach trainer endpoints on a client-role token | |
+| GYM-13 | Switching re-issues | Switch role in the app; capture both tokens | Different tokens. The old one does **not** widen; using it after the switch still has the old active role | |
+| GYM-14 | ⚠ Rate-limit buckets are per role | Spend the `AUTH`/`STANDARD` bucket as T1-trainer, switch to T1-client, retry | The client role must **not** inherit a spent bucket, and must not get a free one that lets the same human double the ceiling. `RateLimitFilter` keys on the subject today — this is the case that catches it | |
+| GYM-15 | Two roles, no bleed | As T1-the-client, try to read T1-the-trainer's roster and vice versa | Neither reaches the other. One human, two scopes | |
+| GYM-16 | Admin *and* trainer | Make Priya both `gym_admin` at G1 and a coach there | Both roles work; the picker offers both; no deadlock and no implicit promotion of one from the other | |
+
+### 16B.2 The gym org, staff, and branches
+
+| ID | Case | Expected | P/F |
+|---|---|---|---|
+| GYM-17 | A gym owner need not be a trainer | GA creates G1 with no trainer profile. Admin console works fully. `gym.owner_app_user_id` set; **no `trainer` row created** | |
+| GYM-18 | Non-trainer staff | Invite FD as `front_desk`. `gym_staff.app_user_id` set, no trainer row. This is why gym staff cannot be `team_member` rows | |
+| GYM-19 | Invite before the account | Invite a number with no XRep account → `gym_staff.invited_phone` set, `app_user_id` NULL. It binds on first sign-in | |
+| GYM-20 | Consent one changes nothing | T3 accepts G1's staff invite. **Then check G1's client list: empty.** T3's roster, programs, money book: all identical to before | |
+| GYM-21 | A gym does not break teams | T3 is in G1 **and** leads their own `team`. Both work; `uq_team_member_active_trainer` is untouched because gym staff is not a `team_member` | |
+| GYM-22 | 🔒 Refusals never name another gym | Invite a trainer already on G2's staff | Refused without naming G2 or its owner. Same rule as SEC-TEAM-02 — otherwise a phone book enumerates a competitor's staff | |
+| GYM-23 | Branches | Assign T3 to G1-B2; check the owner's rollup | Per-branch figures, and a total that equals their sum | |
+
+### 16B.3 The claim — State A → State B
+
+**The riskiest subsection in the document.** On one side of this transition a
+trainer's money is theirs to record; on the other it is a gym's. Run it on two
+devices.
+
+| ID | Case | Steps | Expected | P/F |
+|---|---|---|---|---|
+| GYM-24 | The claim is per client, by the trainer | T3 nominates one client | `client.gym_id` = G1. `trainer_id` **unchanged** | |
+| GYM-25 | ⚠🔒 **No sweep by `gym_name`** | T1 is at 'Iron House' (not on XRep). Have T1 accept a G1 staff invite. Attempt every claim path | G1 must **never** offer or auto-claim T1's Iron House clients. Matching free text would hand G1 a window into a gym that never signed up — and "FitZone" vs "Fit Zone" makes the match wrong even when the gym *is* right. **S1** | |
+| GYM-26 | ⚠🔒 **No sweep by `payment_mode`** | T1's Iron House clients are `gym_collects` | They must not be claimable by G1 on that basis. `gym_collects` is true of clients at gyms that will never sign up. **S1** | |
+| GYM-27 | A gym admin cannot claim | GA calls the claim endpoint for an unclaimed client of T3 | `403`. Only the trainer initiates; the gym cannot help itself to a roster | |
+| GYM-28 | Past money does not move | Note G1's revenue for last month. Claim a client with 3 historical payments. Re-read | **Unchanged.** Those payments keep `gym_id` NULL — stamped at write time — and the gym has no claim on the record of money it never collected | |
+| GYM-29 | Settlement history stays the trainer's | T3's pre-claim `gym_settlement` rows | Still T3's, still on their phone, and **not visible to G1** | |
+| GYM-30 | Transcribed packs retire, not vanish | T3's `pack.owner='gym'` rows after the claim | `status='inactive'`, rows still present. Every `package` sold from them still resolves its name and price | |
+| GYM-31 | The claim is audited | psql `client_management_change` | One row: client, gym, `to_manager='gym'`, the trainer, the actor, a timestamp. No `updated_at`, no `deleted_at` — check the columns do not exist | |
+| GYM-32 | Coaching data untouched | Diff the client's program, sessions, workouts and body metrics across the claim | Byte-identical. Only the commercial half changes hands | |
+| GYM-33 | Two consents, in order | Try to claim a client before accepting the staff invite | Refused. Joining and claiming are separate decisions and a cautious trainer sits between them for a month | |
+
+### 16B.4 Gym members are not clients
+
+| ID | Case | Expected | P/F |
+|---|---|---|---|
+| GYM-34 | 20 members, 0 clients | Add M1–M20 to G1. **No trainer's roster changes.** psql: zero new `client` rows | |
+| GYM-35 | Assignment creates the client row | GA assigns M1 to T3 | New `client`: `trainer_id`=T3, `gym_id`=G1, `membership_status='invited'`. Push to T3 | |
+| GYM-36 | Consent is unchanged | M1 accepts on their own phone | The existing §1.4 flow, verbatim. A gym assignment is still a claim, not a relationship | |
+| GYM-37 | Two lifecycles | End M1's PT engagement | `client` archived; **M1 is still a gym member**. Ending one must not end the other | |
+| GYM-38 | No PT, no client row | psql q31 | Every `gym_member` without an assignment has no `client` row. If `client.trainer_id` were nullable this test would not exist — that is why it stays `NOT NULL` | |
+| GYM-39 | Reassignment reuses the team machinery | Reassign M1 from T3 to another G1 coach | Run **§16A.4 in full**. Same `client_assignment` rows, same tombstones, same `archived` projection on T3's phone | |
+
+### 16B.5 🔒 The money wall — every case here is S1
+
+| ID | Case | How | Expected | P/F |
+|---|---|---|---|---|
+| GYM-40 | The gym sees its own clients' money | Console → M1 | Full package amount, discount, what is outstanding, every payment. It collected this money; hiding it would be theatre | |
+| GYM-41 | 🔒 …and nothing of a trainer-managed client | G1 console, and `GET /v1/gym/clients` as GA | T3's 2 private clients and T1's Iron House clients are **absent**. Not redacted — absent | |
+| GYM-42 | 🔒 The gym cannot **count** them | Compare G1's client count and revenue totals against T3's true roster | Counts equal claimed clients only. An aggregate that includes an unclaimable row leaks its existence, which is why `GymScope` resolves a **client-id set** rather than a trainer-id set | |
+| GYM-43 | 🔒 Cross-gym | `GET /v1/gym/clients/{G1_client}` with GA2's token | `404`. And G2's dashboard totals do not move | |
+| GYM-44 | 🔒 One trainer, two gyms, one on XRep | T1 in G1 (org) and Iron House (State A) | G1 sees only what T1 claimed. **This is the case GYM-25 exists to prevent, verified from the other side** | |
+| GYM-45 | 🔒 The team rule survives intact | `GET /v1/team/clients/{id}` for a teammate's client | Still `moneyHidden: true`, still no `package`/`payment`/`gym_settlement`. A gym seeing money does not license a *teammate* to | |
+| GYM-46 | The trainer still sees everything of theirs | T3 opens a claimed client's money | Full gross, the share, the payout it belongs to. A trainer who cannot audit their own payout will not trust the tier | |
+| GYM-47 | 🔒 Front desk is not an admin | FD calls the revenue and payout endpoints | `403`. Taking a payment at the counter is not reading the book | |
+
+### 16B.6 The payout — collected basis
+
+| ID | Case | Steps | Expected | P/F |
+|---|---|---|---|---|
+| GYM-48 | Part payment pays a part share | M1 buys a ₹12,000 pack, pays ₹6,000. Close the month | `trainer_payout`: `gross_collected` 6000, `gross_sold` 12000, `basis='collected'`, share computed on **6000** | |
+| GYM-49 | The balance pays out when it lands | M1 pays the other ₹6,000 next month. Close again | A **second** payout in that month. Nothing is backdated into the first | |
+| GYM-50 | Every payment is stamped | psql: payments consumed by payout P | All carry `payout_id = P`; the count and sum match the payout's figures | |
+| GYM-51 | ⚠ **Backdated payment after close** | Close the month. Then record a payment with `paid_at` inside it | It gets `payout_id` NULL and is swept into the **next** run. **Never dropped, never counted twice.** Without the stamp this is invisible in both directions — **S1** | |
+| GYM-52 | A write-off costs the trainer nothing | Write off M2's unpaid ₹6,000 | No share, and **no correcting entry**. Never collected, never paid out — the collected basis makes this correct for free | |
+| GYM-53 | Stored figures win over arithmetic | Refund a payment, then re-read the closed payout | `gym_share` stays what was settled. It is stored precisely because `gross − trainer_share` stops holding the moment anything else happens | |
+| GYM-54 | The trainer can audit it | Open the payout on T3's phone | The payments that made it, itemised. Offline too (GYM-67) | |
+| GYM-55 | The gym's percentage wins | Change `client.trainer_split_percent` on a claimed client from the app | Either refused, or accepted and **ignored by the payout**. Two parties computing one percentage from columns of opposite polarity is the dispute this prevents | |
+| GYM-56 | Both directions in one month | T3 has gym-collected clients **and** takes floor cash from a G1 member | One `trainer_payout` (gym owes T3) **and** one `gym_settlement` (T3 owes G1). Both present, neither netted against the other | |
+
+### 16B.7 Chasing the balance
+
+| ID | Case | Steps | Expected | P/F |
+|---|---|---|---|---|
+| GYM-57 | The trainer stops chasing gym money | T3 opens Nudges with an overdue claimed client | The `overdue` rule is **suppressed for that client** and says why. The rule itself is not deleted — it still fires for trainer-managed clients | |
+| GYM-58 | The gym chases instead | GA sends a payment reminder to M1 | `nudge_log` row with `gym_id`=G1 and `sent_by_app_user_id`=GA. `trainer_id` still T3 — the row is still in that coach's book | |
+| GYM-59 | ⚠🔒 **The cooldown spans both senders** | GA sends a reminder. Sync T3's phone. Immediately try to nudge M1 from the app | **Refused, with the wait stated.** `COOLDOWN_DAYS = 7` is computed on the phone from `nudge_log`, so the gym's row must reach the device. If it does not, the member gets two WhatsApp messages in one afternoon — from a product whose rule editor says limits protect you from yourself. **S1** | |
+| GYM-60 | The window applies to the gym | Send a gym reminder at 21:00 | Refused or queued to 09:00, same as the trainer path | |
+| GYM-61 | Gym chase is `MESSAGING` | 11 gym reminders in a minute | 11th → `429 RATE_LIMITED` | |
+| GYM-62 | Trainer-managed nudges unaffected | Nudge a private client of T3 | Works exactly as §11. No `gym_id`, no suppression | |
+
+### 16B.8 Trainer feedback
+
+| ID | Case | Expected | P/F |
+|---|---|---|---|
+| GYM-63 | Request and submit | GA requests feedback on T3 from M1; M1 submits a rating and a comment | |
+| GYM-64 | 🔒 The gym reads verbatim | G1 console shows the comment text and who wrote it | |
+| GYM-65 | 🔒 The trainer reads only the aggregate | T3 sees a rolling average and a count — **no names, no comment text**. If a coach can read what a member wrote about them by name, no member writes anything true | |
+| GYM-66 | The copy states the asymmetry on both sides | The member is told the gym will read it; T3 is told they will not see names. **Test the copy** — same reason TEAM-104 exists | |
+| GYM-67 | No health data | Try to submit a comment describing a medical condition | Nothing in the product invites it and no field is typed for it. Per §21.8 | |
+
+### 16B.9 📵 Offline behaviour
+
+Gym-managed data is online-only, so most of this section asserts the **opposite**
+of every other 📵 case in this document — the same inversion §16A.8 makes.
+
+| ID | Case | Steps | Expected | P/F |
+|---|---|---|---|---|
+| GYM-68 | 📵 Gym-managed rows refuse, out loud | Airplane mode; edit a gym-collected payment on a claimed client; go online | Per-record `GYM_MANAGED_READ_ONLY` rejection, and the app **says so**. Not dropped: a record that sits on a phone looking synced and exists nowhere else is the worst outcome | |
+| GYM-69 | 📵 One rule, not three guards | Repeat for a gym-owned `package` and `pack` | Same rejection code. Three separate guards is three chances to forget one | |
+| GYM-70 | 📵 Coaching still writes offline | Airplane mode; log a full workout for a **claimed** client | Queues and syncs normally. The claim must not touch the floor screen — this is the case that proves authorship moved and ownership did not | |
+| GYM-71 | 📵 The payout reads offline | Airplane mode; open the payout | Readable from the local copy. A trainer checking their pay on a gym floor with no signal is the whole reason it syncs | |
+| GYM-72 | 📵 The cooldown holds offline | With the gym's reminder synced, go offline and try to nudge | Still refused. The check is local by design | |
+
+### 16B.10 Leaving, and reverting to State A
+
+| ID | Case | Expected | P/F |
+|---|---|---|---|
+| GYM-73 | Leaving splits the roster correctly | T3 leaves G1: claimed clients **stay with G1** and are reassigned to another coach; T3's private clients are untouched and still theirs | |
+| GYM-74 | The dialog says which is which | Before confirming, T3 is told exactly how many clients they keep and how many they lose. An absence discovered afterwards gets filed as data loss | |
+| GYM-75 | Deleting the org reverts to State A | Delete G1 | Its clients revert to trainer-managed: `gym_id` NULL, a second `client_management_change` row, all history intact | |
+| GYM-76 | State A works again afterwards | After GYM-75, T3 records a payment and opens Gym share | Trainer-authored again, `gym_settlement` computed on the phone. **This reversibility is what makes the claim safe to offer** | |
+
+---
+
 ## 17 · SET — settings, profile, sign-out, deletion
 
 | ID | Case | Expected | P/F |
@@ -1231,6 +1487,67 @@ GROUP BY 1;                                          -- compare against 6l, per 
 
 ---
 
+### 20.2 The gym platform (V28–V30) — ⚠ not built yet
+
+```sql
+-- 27. The role backfill is exact: one active user_role per identity, matching the
+--     home role. A count either side means the backfill guessed.
+SELECT count(*) FROM app_user u
+LEFT JOIN user_role r ON r.app_user_id=u.id AND r.status='active'
+                     AND r.role=u.role AND r.deleted_at IS NULL
+WHERE u.deleted_at IS NULL AND r.id IS NULL;                                          -- expect 0
+
+-- 28. Ownership never moved. This is the whole design in one query.
+SELECT count(*) FROM client WHERE trainer_id IS NULL;                                 -- expect 0
+
+-- 29. gym_id did not spread into ownership. Only these tables may carry it.
+SELECT DISTINCT table_name FROM information_schema.columns
+WHERE column_name='gym_id' AND table_schema='public';
+-- expect ONLY: client, pack, package, payment, gym_settlement, gym_branch, gym_staff,
+--   gym_member, trainer_feedback, trainer_payout, client_management_change,
+--   nudge_log, and the Part-4 ops tables. NOT program, session, workout, set_log.
+
+-- 30. Trainer-managed clients are in no payout, ever. The money wall, checked from
+--     the money side rather than the API side.
+SELECT count(*) FROM payment p
+JOIN client c ON c.id=p.client_id
+WHERE c.gym_id IS NULL AND p.payout_id IS NOT NULL;                                   -- expect 0
+
+-- 31. A gym member with no PT assignment has no client row.
+SELECT count(*) FROM gym_member m
+JOIN client c ON c.gym_member_id=m.id
+WHERE NOT EXISTS (SELECT 1 FROM client c2 WHERE c2.gym_member_id=m.id
+                  AND c2.deleted_at IS NULL);                                         -- expect 0
+
+-- 32. Historical payments were never re-attributed by a claim. Any payment whose
+--     gym_id is set must predate nothing — it must have been WRITTEN by the gym.
+SELECT count(*) FROM payment p JOIN client c ON c.id=p.client_id
+JOIN client_management_change m ON m.client_id=c.id AND m.to_manager='gym'
+WHERE p.gym_id IS NOT NULL AND p.created_at < m.created_at;                            -- expect 0
+
+-- 33. A payout's figures agree with the payments it consumed (absent refunds).
+SELECT o.id, o.gross_collected, sum(p.amount) AS from_payments
+FROM trainer_payout o JOIN payment p ON p.payout_id=o.id
+WHERE o.deleted_at IS NULL
+GROUP BY 1,2 HAVING o.gross_collected <> sum(p.amount);        -- investigate each; refunds are the legitimate cause
+
+-- 34. Nothing was paid out twice. The FK makes it structurally impossible, so a
+--     row here means somebody added a second payout column.
+SELECT payout_id, count(*) FROM payment WHERE payout_id IS NOT NULL
+GROUP BY 1 HAVING count(DISTINCT payout_id) > 1;                                      -- expect 0
+
+-- 35. Gym staff identify somebody — an account, or the phone it was invited to.
+SELECT count(*) FROM gym_staff
+WHERE app_user_id IS NULL AND invited_phone IS NULL;                                  -- expect 0
+
+-- 36. The two append-only logs really are append-only.
+SELECT table_name, column_name FROM information_schema.columns
+WHERE table_name IN ('client_management_change','trainer_feedback')
+  AND column_name IN ('updated_at','deleted_at');                                     -- expect 0 rows
+```
+
+---
+
 ## 21 · 🔒 Security testing
 
 Run these against **your own local/staging instance only**. Nothing here needs a tool beyond `curl`,
@@ -1385,6 +1702,44 @@ T2 is in no team.
 | SEC-TEAM-21 | The seeded library is immutable | `PATCH /v1/team/exercises/{seeded_id}` as an owner | `404 EXERCISE_NOT_IN_TEAM`. One trainer editing a row 1,324 of which every trainer in the product shares would be a cross-tenant write | |
 | SEC-TEAM-22 | Team endpoints are gated to trainers | Replay any `/v1/team/**` path with a **client** token, then an `invited` token | `403` both. `/v1/team/**` falls through to `hasRole("TRAINER")` — confirm nothing was added above it in `SecurityConfig` | |
 | SEC-TEAM-23 | Malformed and nil ids | `not-a-uuid` and the nil uuid on every `/v1/team/**` path taking one | `400` and a clean `404`; never a `500` with a stack trace | |
+
+### 21.3c 🔒 Gym scope and multi-role tokens (V28–V30) — ⚠ not built yet
+
+Two new attack surfaces arrive together, and they compound.
+
+**The scope.** `GymScope` resolves to a **set of client ids** — not a set of trainer
+ids the way `TeamScope` does — and that difference *is* the security control. A
+trainer's other clients are unreachable because they were never in the set, rather
+than because forty queries each remembered `AND gym_id IS NOT NULL`. A query that
+assembles its own client list is the vulnerability, not the symptom; **SEC-GYM-09**
+is how you look for one.
+
+**The tokens.** One person can now hold several roles, so a token is no longer
+answerable from its subject alone. Every authorisation decision must read the
+*active role* claim, and the failure mode is a trainer token that reaches a gym
+admin endpoint because the person happens to be both.
+
+Set up: G1 (owner GA, coach T3, front desk FD), G2 (owner GA2). T1 is at 'Iron
+House' — State A, never on XRep. T3 has 3 claimed clients and 2 private ones.
+Priya is both `gym_admin` and a coach at G1. T1 is also a client of T2.
+
+| ID | Case | How | Expected | P/F |
+|---|---|---|---|---|
+| SEC-GYM-01 | Cross-gym IDOR | `GET $BASE/v1/gym/clients/{G1_client}` with GA2's token | `404`, no data, and G2's totals unmoved | |
+| SEC-GYM-02 | 🔒 The count leak | Compare G1's dashboard client count and monthly totals against T3's real roster size | Claimed clients only. **An aggregate that includes an unclaimable row leaks its existence** — the subtlest leak in this feature and the one a totals-only screen invites | |
+| SEC-GYM-03 | The other gym's clients | As GA, attempt every gym path against T1's Iron House clients | Unreachable by id, absent from every list, excluded from every total. G1 must not learn that a competitor's clients exist | |
+| SEC-GYM-04 | 🔒 Independent income is not inferable | As GA, read every gym endpoint for T3 and diff against T3's own money screen | The gym's view must not permit reconstructing T3's private earnings — not by subtraction from a total, not from a client count, not from a session count | |
+| SEC-GYM-05 | Role escalation by identity | Priya's **coach** token calls `GET /v1/gym/revenue` | `403`. Being a gym admin *as a person* is not being one *on this token*. Holding two roles must never make the weaker one stronger | |
+| SEC-GYM-06 | Stale token after leaving | Capture T3's token; remove T3 from G1's staff; replay it | Every `/v1/gym/**` path `403`/`404` **before** the token expires. Membership is checked per request, never trusted from the claim | |
+| SEC-GYM-07 | Stale token after unclaiming | Capture GA's token; T3's client reverts to trainer-managed; replay the client read | `404`. The scope is resolved per request from `client.gym_id` | |
+| SEC-GYM-08 | Staff role separation | FD (front desk) calls the payout, revenue and feedback endpoints | `403` on all three. Taking cash at a counter is not reading the book or reading a coach's reviews | |
+| SEC-GYM-09 | The scope is the only source | Read the gym package for a query building its own client id list — anything not routed through `GymScope` | None. The `TeamScope` equivalent is SEC-TEAM-14 and the reasoning is identical | |
+| SEC-GYM-10 | Client-role token on a trainer path | T1's **client** token → `GET /v1/clients` | `403`. The same human owns a trainer account; the token does not | |
+| SEC-GYM-11 | Trainer-role token on a client path | T1's **trainer** token → `GET /v1/client/sync/pull?clientId=...` | `403`. Both directions, or the role switch is decoration | |
+| SEC-GYM-12 | 🔒 Refusals do not name gyms | Invite a trainer already on G2's staff; read the message and the response body | No gym name, no owner name, no member count. Otherwise a phone book enumerates a competitor's payroll — the rule `ClientPhoneGuard` and SEC-TEAM-02 already follow | |
+| SEC-GYM-13 | A gym cannot write coaching data | As GA, attempt to edit a claimed client's program, sessions or set logs | `403` unless §8.4 of the PRD is decided otherwise — and if it is, every edit must write a `gym_activity` row the coach can read, exactly as V27 requires for teams | |
+| SEC-GYM-14 | The claim cannot be self-served | As GA, `POST` the claim endpoint for an unclaimed client of T3 | `403`. A gym that can claim without the trainer has taken a roster, not been given one | |
+| SEC-GYM-15 | Feedback anonymity holds under the API | As T3, call every feedback endpoint and read every field | No member name, no comment text, no id that resolves to one. §16B.8's promise must hold at the API and not only on the screen | |
 
 ### 21.4 The client wall (FR-11 isolation)
 
@@ -1598,6 +1953,12 @@ If you only have a day, run in this order — highest consequence first:
 11. **XCUT / state matrix sweep**
 12. **SEC-CFG / SEC-DEV / SEC-PRIV** before any real-user pilot
 
+**§16B (GYM) is not in this order because it is not built.** When it is, it does not
+go at the bottom: **§16B.0 moves to position 0** — it is a regression gate on the
+money book of every trainer who will never have a gym org, and it is cheap. Then
+§16B.3, §16B.5 and GYM-51/59 belong beside PAY at position 4, because they are the
+cases where money is wrong or a member gets spammed and nothing on screen says so.
+
 ---
 
 ## 24 · 30-minute smoke suite (run on every build)
@@ -1677,7 +2038,13 @@ For security findings add: **attacker model** (unauthenticated / another trainer
 | V26 team coaching · shared library | TEAM-67–76, SEC-TEAM-05/21 |
 | V27 team coaching · admin editing | TEAM-77–96, SEC-TEAM-06/19/20, §20 q25 |
 | V27 team coaching · owner's earnings | TEAM-97–106, SEC-TEAM-10/11/12, §20 q26 |
-| NFR-2 offline-first | every 📵 case, SYNC-*, **except TEAM §16A.8 — which asserts the opposite on purpose** |
+| V28 multi-role identity ⚠ | GYM-07–16, SEC-GYM-05/10/11, §20.2 q27. **Supersedes the V18 row above** |
+| V29 gym org, staff, the claim ⚠ | GYM-17–33, SEC-GYM-01/03/12/14, §20.2 q29/q32/q35/q36 |
+| V29 the money wall ⚠ | GYM-40–47, SEC-GYM-02/03/04/08, §20.2 q30 |
+| V30 members & assignment ⚠ | GYM-34–39, §20.2 q28/q31 |
+| V30 payout & chasing ⚠ | GYM-48–62, SEC-GYM-06/07, §20.2 q33/q34 |
+| V30 feedback ⚠ | GYM-63–67, SEC-GYM-15 |
+| NFR-2 offline-first | every 📵 case, SYNC-*, **except TEAM §16A.8 and GYM §16B.9 — both of which assert the opposite on purpose** |
 | NFR-3 performance | PERF-01–08 |
 | NFR-4 sync integrity | SYNC-13/16/17/21, SEC-BIZ-09/10 |
 | NFR-8 security & privacy | all of §21 |
@@ -1703,7 +2070,12 @@ For security findings add: **attacker model** (unauthenticated / another trainer
 | Pre-V18 clients default to `accepted` | Deliberate. Every row that existed when V18 ran is a live arrangement whose trainer has been billing against it; defaulting them to `invited` would wall people who have trained for months | `V18__unified_user_and_membership.sql` · AUTH-75 |
 | Removal wipe is whole-database | `resetLocalDatabase()` is not per-membership, so a client of two trainers removed by one loses the local copy of both until the next sync repopulates. Server data is untouched, so it recovers — but the intermediate state is not designed | `RemovedScreen` · CLNT-30 |
 | Un-invitable clients are silent to the client | The person whose number it is is never told a trainer tried to add them. Deliberate — they own a trainer account and it is not their problem — but worth confirming nobody expects a notification | `SyncService#pushClients` · CLI-52 |
-| `gym_admin` is a reserved value only | No `gym` table, no UI, nothing mints one. Reaching it needs a hand-written psql UPDATE | `AppUser.ROLE_GYM_ADMIN` · AUTH-56 |
+| `gym_admin` is a reserved value only | No `gym` table, no UI, nothing mints one. Reaching it needs a hand-written psql UPDATE. **V29 is what fills this in** — until then AUTH-56 is the whole of it | `AppUser.ROLE_GYM_ADMIN` · AUTH-56 |
+| **The entire gym platform is unbuilt** | §16B, §20.2 and §21.3c describe V28–V30, which do not exist. Every case is **B — blocked**, not F. They are written early because GYM-25/26 (claim-by-string-match), GYM-51 (backdated payment) and GYM-59 (nudge cooldown across senders) are cheap bugs to write and invisible on the screen that causes them | `XRep_gym_platform_prd.md` · all of §16B |
+| One phone = one role is *scheduled* to be reversed | Today's behaviour is still V18's and the v1.1 note stands: a trainer's number cannot be on a roster. GYM-07 will pass only after V28. Do not file today's `422 PHONE_IS_TRAINER` as a bug | `ClientPhoneGuard` · CLI-52, GYM-07 |
+| `trainer.gym_name` is unjoinable free text — deliberately | There is no gym row to point at in State A, so the string is the honest record. It must **never** be used to decide which clients belong to a gym org: forty trainers spell one gym forty ways, and the gym next door has the same name | `V11__money.sql` · GYM-02/25 |
+| Two split percentages of opposite polarity | `trainer.gym_share_percent` ("what the gym keeps") and `client.trainer_split_percent` ("the trainer's split") describe one number from two ends, and **neither is used server-side** — the app freezes the result onto `payment.share_percent`. Harmless while one party computes it; V30 makes it a payout dispute if both do | `BookScreen`, `TrainerService` · GYM-55 |
+| `RateLimitFilter` keys on the token subject | Correct today, because a subject is one role. After V28 the same human holds several, and a bucket keyed on the subject alone either leaks a spent bucket across roles or hands out a second ceiling | `ratelimit/RateLimitFilter` · GYM-14 |
 | Trainer→client lens switch is now dead code | `AppTabs` and `ClientDrawer` still call `switchLens` across roles; both degrade to absent because the lists they read are always empty. Harmless, but it is unreachable code | `store/AuthContext#switchLens` · ROLE-10/11 |
 | Client devices can't register for push | `/v1/devices/**` is trainer-gated; only `trainer.fcm_token` exists | `push/DeviceController.java` · PUSH-05 |
 | Clients cannot write payments | By design — "tell your trainer" | `ClientSyncService.ACCEPTED` · CLNT-16, SEC-WALL-09 |
@@ -1720,6 +2092,7 @@ For security findings add: **attacker model** (unauthenticated / another trainer
 
 ---
 
-*XRep Manual Test Plan · v1.2 · 20 Aug 2026 · traced to Final Requirements & Delivery Plan v2.0 and the MVP Interaction Map v1.0.*
+*XRep Manual Test Plan · v1.3 · 23 Aug 2026 · traced to Final Requirements & Delivery Plan v2.0 and the MVP Interaction Map v1.0.*
 *v1.1 covers schema V18 — one phone one role, and consent as a first-class state.*
 *v1.2 adds §16A, §20.1 and §21.3b for schema V26–V27 — team coaching, traced to Team Coaching PRD v1.4.*
+*v1.3 adds §16B, §20.2 and §21.3c for schema V28–V30 — the gym platform, traced to Gym Platform PRD (design, unbuilt). Every case in those three sections is blocked until V28 lands.*
