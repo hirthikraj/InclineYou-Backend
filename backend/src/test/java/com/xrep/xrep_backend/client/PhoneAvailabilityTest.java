@@ -48,6 +48,7 @@ class PhoneAvailabilityTest {
 
     private MockMvc mvc;
 
+    private static final String ASKER_PHONE = "9100000010";
     private static final String TRAINER_PHONE = "9100000011";
     private static final String FREE_PHONE = "9100000012";
     private static final String ROSTER_PHONE = "9100000013";
@@ -58,7 +59,7 @@ class PhoneAvailabilityTest {
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
 
-        asker = trainer("9100000010");
+        asker = trainer(ASKER_PHONE);
         trainer(TRAINER_PHONE);
         jdbc.update("""
                 INSERT INTO app_user (phone, role) VALUES (:p, 'trainer')
@@ -84,9 +85,17 @@ class PhoneAvailabilityTest {
     }
 
     @Test
-    @DisplayName("a trainer's number comes back with the reason, not a 400")
-    void trainersNumber() throws Exception {
+    @DisplayName("another trainer's number is addable now — trainer/client duality is allowed")
+    void anotherTrainersNumberIsAvailable() throws Exception {
         ask(TRAINER_PHONE)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.available").value(true));
+    }
+
+    @Test
+    @DisplayName("the asker's own number still comes back with the reason, not a 400")
+    void ownNumber() throws Exception {
+        ask(ASKER_PHONE)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.available").value(false))
                 .andExpect(jsonPath("$.code").value(ClientPhoneGuard.CODE_TRAINER))

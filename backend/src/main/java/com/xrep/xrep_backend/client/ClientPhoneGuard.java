@@ -9,13 +9,19 @@ import java.util.Map;
 /**
  * Who a trainer is allowed to put on their roster.
  *
- * Three numbers can never be added, and all of them are the same rule wearing
- * different clothes — one phone is one person, and one person is in one place:
+ * Trainer↔client duality is now allowed: one phone can hold a trainer account
+ * and be a client on somebody else's roster at the same time (see
+ * `AuthService#trainerView` and the `/v1/auth/mode/**` switch endpoints).
+ * `app_user.role` is no longer an exclusivity lock — it is just the *home*
+ * role, which mode sign-in opens into by default. Two numbers can still never
+ * be added, and both are the same rule wearing different clothes — a phone
+ * number IS the identity, so a second row behind the same number in the wrong
+ * place is one account wearing two names:
  *
- *   1. A number that owns a TRAINER account. `app_user.role` is exclusive and
- *      sign-in reads it as the whole answer, so a trainer sitting on somebody
- *      else's roster is a person the router cannot place. This is the reported
- *      bug: T1 could add T2 and the row landed.
+ *   1. The CALLER'S OWN number. Adding yourself as your own client is the
+ *      unresolved "self-training" question (see `SELF_TRAINING_ENABLED` on
+ *      the app side) and stays out of this guard's scope — it is not the same
+ *      thing as another trainer's number, which is now fine to add.
  *
  *   2. A number that is already ANOTHER trainer's client. A live membership is
  *      an arrangement between two people; a second trainer claiming the same
@@ -30,6 +36,11 @@ import java.util.Map;
  *      here and nowhere else: it is the caller's own book.
  *
  * ── What does NOT block ───────────────────────────────────────────────────────
+ *
+ * A number that owns SOMEBODY ELSE'S trainer account. That used to be refused
+ * outright (T1 could not add T2); now it is exactly what lets a trainer be
+ * added to another trainer's roster, and the added trainer can switch into
+ * "client mode" for that membership via `POST /v1/auth/mode/client`.
  *
  * A membership that is over. `archived` on the trainer's side, `removed` or
  * `declined` on the client's — somebody who left trainer A in March must be
@@ -51,7 +62,7 @@ public class ClientPhoneGuard {
 
     private final NamedParameterJdbcTemplate jdbc;
 
-    /** The number owns a trainer account. Recovery: a different number. */
+    /** The number is the caller's own. Recovery: a different number. */
     public static final String CODE_TRAINER = "PHONE_IS_TRAINER";
 
     /** The number is on another trainer's roster. Recovery: they leave it. */
@@ -61,8 +72,8 @@ public class ClientPhoneGuard {
     public static final String CODE_OWN_ROSTER = "PHONE_ON_YOUR_ROSTER";
 
     private static final String MSG_TRAINER =
-            "This number belongs to a trainer's XRep account, so it can't be added as a client. "
-            + "If they also train with you, ask them for a different number.";
+            "That's your own number — you can't add yourself as a client. "
+            + "Use a different number, or edit your own trainer profile instead.";
 
     private static final String MSG_OTHER_ROSTER =
             "This number is already on another trainer's roster. Someone can only be one "
@@ -88,18 +99,9 @@ public class ClientPhoneGuard {
         var row = jdbc.queryForMap("""
                 SELECT
                     EXISTS(
-                        SELECT 1 FROM app_user
-                        WHERE phone = :phone AND role = 'trainer' AND deleted_at IS NULL
-                    )
-                    -- Belt and braces against a `trainer` row whose identity was
-                    -- never minted. Sign-in believes `app_user`, but a number
-                    -- with a workspace behind it is a trainer whichever table
-                    -- says so, and being wrong in this direction only ever
-                    -- refuses an invite that could not have worked anyway.
-                    OR EXISTS(
                         SELECT 1 FROM trainer
-                        WHERE phone = :phone AND deleted_at IS NULL
-                    ) AS is_trainer,
+                        WHERE phone = :phone AND id = :tid::uuid AND deleted_at IS NULL
+                    ) AS is_self,
                     EXISTS(
                         SELECT 1 FROM client
                         WHERE phone = :phone
@@ -108,9 +110,6 @@ public class ClientPhoneGuard {
                           AND status <> 'archived'
                           AND membership_status NOT IN ('removed', 'declined', 'unavailable')
                     ) AS on_other_roster,
-                    -- The name, not a boolean: this one is the caller's own book,
-                    -- so saying WHO already has the number is safe and is the
-                    -- whole difference between a refusal and an answer.
                     (
                         SELECT name FROM client
                         WHERE phone = :phone
@@ -123,7 +122,7 @@ public class ClientPhoneGuard {
                     ) AS own_client_name
                 """, Map.of("phone", phone, "tid", trainerId));
 
-        if (Boolean.TRUE.equals(row.get("is_trainer"))) {
+        if (Boolean.TRUE.equals(row.get("is_self"))) {
             return new Verdict(false, CODE_TRAINER, MSG_TRAINER);
         }
         Object ownClient = row.get("own_client_name");

@@ -2,7 +2,9 @@ package com.xrep.xrep_backend.client;
 
 import com.xrep.xrep_backend.entity.BodyMetric;
 import com.xrep.xrep_backend.entity.Client;
+import com.xrep.xrep_backend.entity.ClientNote;
 import com.xrep.xrep_backend.repository.BodyMetricRepository;
+import com.xrep.xrep_backend.repository.ClientNoteRepository;
 import com.xrep.xrep_backend.repository.ClientRepository;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -18,6 +20,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 
+import static org.springframework.http.HttpStatus.BAD_REQUEST;
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 
 @Service
@@ -26,6 +29,7 @@ public class ClientService {
 
     private final ClientRepository clientRepo;
     private final BodyMetricRepository bodyMetricRepo;
+    private final ClientNoteRepository clientNoteRepo;
     private final ClientPhoneGuard phoneGuard;
     private final NamedParameterJdbcTemplate jdbc;
 
@@ -84,7 +88,25 @@ public class ClientService {
             String deliveryMode,
             StatusFlags statusFlags,
             long createdAt,
-            long updatedAt
+            long updatedAt,
+            /*
+             * V18's `membership_status` — 'accepted' | 'invited' | 'declined' |
+             * 'removed' | 'unavailable'. It is the state of the *invitation*, not
+             * of the coaching: `status` above says whether this person is an
+             * active client, this says whether their phone can be reached at all.
+             *
+             * The column has existed since V18 and travels in the sync envelope;
+             * this DTO never carried it, which cost the roster one whole attention
+             * band. 'unavailable' fires when the number a trainer typed already
+             * signs in as a trainer account — the invite can never be delivered,
+             * so the row needs a *Fix number* action rather than a silent wait.
+             * The phone reads the field out of SQLite and draws the band; the web
+             * had no way to know, so the band simply did not exist there.
+             *
+             * APPENDED LAST — every existing caller destructures by name, so a
+             * reader written against the eighteen-field shape keeps working.
+             */
+            String membershipStatus
     ) {}
 
     public record BodyMetricRequest(
@@ -104,6 +126,29 @@ public class ClientService {
             String notes,
             long recordedAt,
             long createdAt
+    ) {}
+
+    /* ── V29 · the trainer's own notes ─────────────────────────────────────
+       Free text and a pin. There is no injury field, no condition field and no
+       PAR-Q flag in this request, and there must never be one — the interaction
+       map excludes health data outright under the DPDP Act 2023, and a field
+       that tells a medical note apart from any other note makes this a health
+       record whatever it is called. `V29__client_note.sql` carries the whole
+       argument, including the sanctioned path to structured health data, which
+       is a separate consented table and not a wider version of this one. */
+
+    public record NoteRequest(
+            @NotBlank String body,
+            Boolean pinned
+    ) {}
+
+    public record NoteResponse(
+            UUID id,
+            UUID clientId,
+            String body,
+            boolean pinned,
+            long createdAt,
+            long updatedAt
     ) {}
 
     // ── Client CRUD ───────────────────────────────────────────────────────────
@@ -134,9 +179,6 @@ public class ClientService {
 
     @Transactional
     public ClientResponse create(UUID trainerId, CreateClientRequest req) {
-        // One phone, one person, one place — a trainer's number, another
-        // trainer's client and a duplicate on this trainer's own roster are all
-        // refused outright here. See ClientPhoneGuard.
         phoneGuard.require(trainerId.toString(), req.phone());
 
         var client = new Client();
@@ -214,6 +256,69 @@ public class ClientService {
         return toMetricResponse(m);
     }
 
+    // ── Notes (V29) ───────────────────────────────────────────────────────────
+
+    /**
+     * A trainer's note is capped at 4,000 characters.
+     *
+     * The column is TEXT and takes anything; this is about a note staying a note.
+     * The cap is checked before the write so the answer is a 400 with a reason
+     * rather than a silent truncation of something somebody just typed.
+     */
+    private static final int NOTE_MAX = 4_000;
+
+    /**
+     * This trainer's own notes on this client, newest first.
+     *
+     * Two checks, and the second is not redundant: {@code findOwned} says the
+     * CLIENT is this trainer's, and the repository predicate says the NOTES are.
+     * A team lets a coach hold a teammate's client, so ownership of the client is
+     * not ownership of the notes on it.
+     */
+    public List<NoteResponse> listNotes(UUID trainerId, UUID clientId) {
+        findOwned(trainerId, clientId);
+        return clientNoteRepo
+                .findByClientIdAndTrainerIdAndDeletedAtIsNullOrderByCreatedAtDesc(clientId, trainerId)
+                .stream().map(this::toNoteResponse).toList();
+    }
+
+    @Transactional
+    public NoteResponse addNote(UUID trainerId, UUID clientId, NoteRequest req) {
+        findOwned(trainerId, clientId);
+        var note = new ClientNote();
+        note.setClientId(clientId);
+        note.setTrainerId(trainerId);
+        note.setBody(noteBody(req.body()));
+        note.setPinned(Boolean.TRUE.equals(req.pinned()));
+        clientNoteRepo.save(note);
+        return toNoteResponse(note);
+    }
+
+    /**
+     * Edit the text, the pin, or both.
+     *
+     * `pinned` is nullable in the request and absent means UNCHANGED, which is
+     * what lets the strip's pin toggle and the notes tab's editor be the same
+     * route without either one clobbering the other's field.
+     */
+    @Transactional
+    public NoteResponse updateNote(UUID trainerId, UUID clientId, UUID noteId, NoteRequest req) {
+        findOwned(trainerId, clientId);
+        var note = findOwnedNote(trainerId, clientId, noteId);
+        if (req.body() != null) note.setBody(noteBody(req.body()));
+        if (req.pinned() != null) note.setPinned(req.pinned());
+        clientNoteRepo.save(note);
+        return toNoteResponse(note);
+    }
+
+    @Transactional
+    public void deleteNote(UUID trainerId, UUID clientId, UUID noteId) {
+        findOwned(trainerId, clientId);
+        var note = findOwnedNote(trainerId, clientId, noteId);
+        note.setDeletedAt(Instant.now());
+        clientNoteRepo.save(note);
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
@@ -235,6 +340,36 @@ public class ClientService {
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Client not found"));
     }
 
+    /**
+     * A 404 rather than a 403 for somebody else's note, and that is the point:
+     * a trainer asking about a note they did not write should not learn that it
+     * exists. Same shape as {@code findOwned} above, for the same reason.
+     */
+    private ClientNote findOwnedNote(UUID trainerId, UUID clientId, UUID noteId) {
+        return clientNoteRepo
+                .findByIdAndClientIdAndTrainerIdAndDeletedAtIsNull(noteId, clientId, trainerId)
+                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Note not found"));
+    }
+
+    private static String noteBody(String raw) {
+        var body = raw == null ? "" : raw.strip();
+        if (body.isEmpty()) {
+            throw new ResponseStatusException(BAD_REQUEST, "A note needs some text");
+        }
+        if (body.length() > NOTE_MAX) {
+            throw new ResponseStatusException(
+                    BAD_REQUEST, "A note is capped at " + NOTE_MAX + " characters");
+        }
+        return body;
+    }
+
+    private NoteResponse toNoteResponse(ClientNote n) {
+        return new NoteResponse(
+                n.getId(), n.getClientId(), n.getBody(), n.isPinned(),
+                n.getCreatedAt().toEpochMilli(), n.getUpdatedAt().toEpochMilli()
+        );
+    }
+
     private ClientResponse toResponse(Client c, StatusFlags flags) {
         return new ClientResponse(
                 c.getId(), c.getTrainerId(), c.getName(), c.getPhone(), c.getGoal(),
@@ -243,7 +378,8 @@ public class ClientService {
                 c.getSessionsPerWeek(), c.getSessionDurationMinutes(), c.getWeeklySchedule(),
                 c.getDeliveryMode(),
                 flags,
-                c.getCreatedAt().toEpochMilli(), c.getUpdatedAt().toEpochMilli()
+                c.getCreatedAt().toEpochMilli(), c.getUpdatedAt().toEpochMilli(),
+                c.getMembershipStatus()
         );
     }
 

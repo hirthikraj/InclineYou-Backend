@@ -18,17 +18,19 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Who a push is allowed to put on a roster.
  *
- * One phone is one person and one person is in one place, so three numbers can
- * never be added: one that owns a trainer account, one that is already another
- * trainer's live client, and one that is already on the adder's own roster.
- * All are refused outright — the row is not created — and the push says so in
- * its response rather than failing the batch around it.
+ * Trainer/client duality is now allowed: another trainer's number is a normal
+ * add. Two numbers can still never be added: the adder's OWN number (the
+ * unresolved "self-training" case), and one that is already another
+ * trainer's live client or already on the adder's own roster. Those are
+ * refused outright — the row is not created — and the push says so in its
+ * response rather than failing the batch around it.
  *
- * This suite used to pin the opposite: a trainer's number was SAVED as
- * `unavailable` and only the invite was withheld. That was the bug — T1 could
- * add T2 and the roster showed a client who was somebody else. The recovery
- * path out of `unavailable` is still tested below, because rows written before
- * the rule hardened still carry it and still have to heal.
+ * This suite used to pin a stricter rule — ANY trainer's number was refused —
+ * and, before that, an even older bug where a trainer's number was SAVED as
+ * `unavailable` and only the invite was withheld (T1 could add T2 and the
+ * roster showed a client who was somebody else). The recovery path out of
+ * `unavailable` is still tested below, because rows written before the rule
+ * hardened still carry it and still have to heal.
  *
  * `@Transactional` on the test rolls everything back — this suite runs against
  * the dev database and must not leave anything in it.
@@ -40,9 +42,11 @@ class SyncMembershipTest {
     @Autowired SyncService sync;
     @Autowired NamedParameterJdbcTemplate jdbc;
 
-    /** A trainer's number, and a number belonging to nobody. */
+    /** Another trainer's number, and a number belonging to nobody. */
     private static final String TRAINER_PHONE = "9100000001";
     private static final String CLIENT_PHONE = "9100000002";
+    /** The adder's own number. */
+    private static final String ADDER_PHONE = "9100000003";
     /** On a third trainer's roster before this test starts. */
     private static final String TAKEN_PHONE = "9100000004";
 
@@ -51,8 +55,8 @@ class SyncMembershipTest {
 
     @BeforeEach
     void setUp() {
-        adder = trainer("9100000003");
-        // The number that is already spoken for, and the identity that says so.
+        adder = trainer(ADDER_PHONE);
+        // Another trainer's identity, now addable as a client.
         trainer(TRAINER_PHONE);
         jdbc.update("""
                 INSERT INTO app_user (phone, role) VALUES (:p, 'trainer')
@@ -62,9 +66,21 @@ class SyncMembershipTest {
     }
 
     @Test
-    @DisplayName("a trainer's number is refused, and the row is not created")
-    void trainerNumberIsRefused() {
+    @DisplayName("another trainer's number is accepted — trainer/client duality is allowed")
+    void otherTrainersNumberIsAccepted() {
         var result = push(created(TRAINER_PHONE));
+
+        assertThat(exists()).isTrue();
+        assertThat(result.rejected()).isEmpty();
+        assertThat(phone()).isEqualTo(TRAINER_PHONE);
+        // The client identity insert no-ops against the existing trainer one.
+        assertThat(role(TRAINER_PHONE)).isEqualTo("trainer");
+    }
+
+    @Test
+    @DisplayName("the adder's own number is refused, and the row is not created")
+    void ownNumberIsRefused() {
+        var result = push(created(ADDER_PHONE));
 
         assertThat(exists()).isFalse();
         assertThat(result.rejected()).singleElement().satisfies(r -> {
@@ -75,9 +91,6 @@ class SyncMembershipTest {
             assertThat(r.kept()).isFalse();
             assertThat(r.message()).isNotBlank();
         });
-
-        // And no client identity was minted for a number that is a trainer's.
-        assertThat(role(TRAINER_PHONE)).isEqualTo("trainer");
     }
 
     @Test
@@ -127,11 +140,23 @@ class SyncMembershipTest {
     }
 
     @Test
-    @DisplayName("editing a live client onto a trainer's number keeps the rest of the edit")
-    void editOntoTrainerNumberKeepsTheRecord() {
+    @DisplayName("editing a live client onto another trainer's number now lands")
+    void editOntoOtherTrainersNumberLands() {
         push(created(CLIENT_PHONE));
 
         var result = push(updated(TRAINER_PHONE, "Meera Pillai"));
+
+        assertThat(name()).isEqualTo("Meera Pillai");
+        assertThat(phone()).isEqualTo(TRAINER_PHONE);
+        assertThat(result.rejected()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("editing a live client onto the adder's own number keeps the rest of the edit")
+    void editOntoOwnNumberKeepsTheRecord() {
+        push(created(CLIENT_PHONE));
+
+        var result = push(updated(ADDER_PHONE, "Meera Pillai"));
 
         // The name change landed; the number did not move.
         assertThat(name()).isEqualTo("Meera Pillai");

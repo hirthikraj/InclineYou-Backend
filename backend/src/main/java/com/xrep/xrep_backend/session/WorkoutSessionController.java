@@ -1,5 +1,6 @@
 package com.xrep.xrep_backend.session;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
@@ -34,6 +35,23 @@ public class WorkoutSessionController {
             @RequestBody WorkoutSessionService.CreateSessionRequest req
     ) {
         return service.create(trainerId(auth), req);
+    }
+
+    /**
+     * Every set one client has logged, optionally on one exercise.
+     *
+     * <p>Mapped above {@code /{id}} deliberately: {@code /v1/workouts/sets} is a
+     * literal and Spring ranks literals over templates, so this wins the match
+     * rather than reaching {@code get()} and failing to parse "sets" as a UUID.
+     * Keeping them adjacent is what makes that visible to the next reader.
+     */
+    @GetMapping("/sets")
+    public List<WorkoutSessionService.SetLogResponse> listSetsForClient(
+            Authentication auth,
+            @RequestParam String clientId,
+            @RequestParam(required = false) String exerciseId
+    ) {
+        return service.listSetsForClient(trainerId(auth), clientId, exerciseId);
     }
 
     @GetMapping("/{id}")
@@ -89,5 +107,45 @@ public class WorkoutSessionController {
             @PathVariable UUID setId
     ) {
         service.deleteSet(id, setId, trainerId(auth));
+    }
+
+    // ── Today's card list — V13's workout_exercise ────────────────────────────
+
+    @GetMapping("/{id}/exercises")
+    public List<WorkoutSessionService.WorkoutExerciseResponse> listExercises(
+            Authentication auth,
+            @PathVariable UUID id
+    ) {
+        return service.listExercises(id, trainerId(auth));
+    }
+
+    @PostMapping("/{id}/exercises")
+    @ResponseStatus(HttpStatus.CREATED)
+    public WorkoutSessionService.WorkoutExerciseResponse addExercise(
+            Authentication auth,
+            @PathVariable UUID id,
+            @Valid @RequestBody WorkoutSessionService.CreateWorkoutExerciseRequest req
+    ) {
+        return service.addExercise(id, trainerId(auth), req);
+    }
+
+    @PutMapping("/{id}/exercises/{rowId}")
+    public WorkoutSessionService.WorkoutExerciseResponse updateExercise(
+            Authentication auth,
+            @PathVariable UUID id,
+            @PathVariable UUID rowId,
+            @RequestBody WorkoutSessionService.UpdateWorkoutExerciseRequest req
+    ) {
+        return service.updateExercise(id, rowId, trainerId(auth), req);
+    }
+
+    @DeleteMapping("/{id}/exercises/{rowId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteExercise(
+            Authentication auth,
+            @PathVariable UUID id,
+            @PathVariable UUID rowId
+    ) {
+        service.deleteExercise(id, rowId, trainerId(auth));
     }
 }

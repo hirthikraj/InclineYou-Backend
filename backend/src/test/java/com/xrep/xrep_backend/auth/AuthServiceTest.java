@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
@@ -138,7 +139,7 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("a trainer opens the coaching lens and carries no rosters")
+    @DisplayName("a trainer with no other rosters opens the coaching lens and carries none")
     void trainerSignsIn() {
         stubTokens();
         when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of(
@@ -149,7 +150,38 @@ class AuthServiceTest {
         assertThat(res.role()).isEqualTo(AuthService.VIEW_TRAINER);
         assertThat(res.token()).isNotNull();
         assertThat(res.setupComplete()).isTrue();
-        // V18 · role is exclusive, so a trainer is never also somebody's client.
+        assertThat(res.clientOf()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("a trainer with a LIVE membership elsewhere sees it in clientOf")
+    void trainerWithLiveMembershipSeesIt() {
+        stubTokens();
+        when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of(
+                row(AppUser.ROLE_TRAINER, UUID.randomUUID(), "Ravi Kannan", Instant.now(),
+                        "Anand", "active", "accepted", null, null, null)));
+
+        var res = auth.verifyOtp(PHONE, "123456");
+
+        // Trainer stays the destination — home role wins — but the membership
+        // is not hidden.
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_TRAINER);
+        assertThat(res.clientOf()).hasSize(1);
+        assertThat(res.clientOf().get(0).trainerName()).isEqualTo("Anand");
+    }
+
+    @Test
+    @DisplayName("a trainer's OUTSTANDING invite elsewhere does not interrupt the coaching sign-in")
+    void trainerWithPendingInviteIsUnaffected() {
+        stubTokens();
+        when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of(
+                row(AppUser.ROLE_TRAINER, UUID.randomUUID(), "Ravi Kannan", Instant.now(),
+                        "Anand", "active", "invited", null, null, null)));
+
+        var res = auth.verifyOtp(PHONE, "123456");
+
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_TRAINER);
+        // Deliberately out of scope for this pass — see AuthService#trainerView.
         assertThat(res.clientOf()).isEmpty();
     }
 
@@ -224,6 +256,83 @@ class AuthServiceTest {
         assertThat(res.role()).isEqualTo(AuthService.VIEW_UNATTACHED);
         assertThat(res.role()).isNotEqualTo(AuthService.VIEW_PENDING);
         assertThat(res.clientOf()).isEmpty();
+    }
+
+    /* --------------------------------------------------------- claim (7a) */
+
+    @Test
+    @DisplayName("a phone that is already somebody's client can still claim a trainer account")
+    void clientCanClaimTrainer() {
+        stubTokens();
+        var existing = new AppUser();
+        existing.setPhone(PHONE);
+        existing.setRole(AppUser.ROLE_CLIENT);
+        when(appUserRepo.findByPhoneAndDeletedAtIsNull(PHONE)).thenReturn(java.util.Optional.of(existing));
+        when(trainerRepo.findByPhoneAndDeletedAtIsNull(PHONE)).thenReturn(java.util.Optional.empty());
+        when(trainerRepo.save(org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> {
+            var t = (com.xrep.xrep_backend.entity.Trainer) inv.getArgument(0);
+            t.setId(UUID.randomUUID());
+            return t;
+        });
+
+        var res = auth.claimTrainer(PHONE);
+
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_TRAINER);
+        assertThat(res.token()).isNotNull();
+        // Claiming is what makes trainer the home role — the existing row is
+        // updated, not refused.
+        assertThat(existing.getRole()).isEqualTo(AppUser.ROLE_TRAINER);
+    }
+
+    /* -------------------------------------------------------- mode switch */
+
+    @Test
+    @DisplayName("switching to trainer mode mints a trainer token when one exists")
+    void switchToTrainerModeSucceeds() {
+        stubTokens();
+        UUID trainerId = UUID.randomUUID();
+        when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of(
+                trainerRow(trainerId, "Ravi Kannan", Instant.now())));
+
+        var res = auth.switchToTrainer(PHONE);
+
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_TRAINER);
+        assertThat(res.trainerId()).isEqualTo(trainerId.toString());
+    }
+
+    @Test
+    @DisplayName("switching to trainer mode 404s when this number owns no trainer account")
+    void switchToTrainerModeFailsWithoutAccount() {
+        when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of(
+                client("Ravi Kannan", "active", "accepted", null)));
+
+        assertThatThrownBy(() -> auth.switchToTrainer(PHONE))
+                .extracting("statusCode")
+                .isEqualTo(org.springframework.http.HttpStatusCode.valueOf(404));
+    }
+
+    @Test
+    @DisplayName("switching to client mode mints a client token when a live membership exists")
+    void switchToClientModeSucceeds() {
+        stubTokens();
+        when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of(
+                client("Ravi Kannan", "active", "accepted", null)));
+
+        var res = auth.switchToClient(PHONE);
+
+        assertThat(res.role()).isEqualTo(AuthService.VIEW_CLIENT);
+        assertThat(res.clientOf()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("switching to client mode 404s with no live membership anywhere")
+    void switchToClientModeFailsWithoutMembership() {
+        when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of(
+                trainerRow(UUID.randomUUID(), "Ravi Kannan", Instant.now())));
+
+        assertThatThrownBy(() -> auth.switchToClient(PHONE))
+                .extracting("statusCode")
+                .isEqualTo(org.springframework.http.HttpStatusCode.valueOf(404));
     }
 
     /* ------------------------------------------------------------- fixtures */

@@ -41,8 +41,48 @@ public class JwtService {
      */
     public static final String ROLE_INVITED = "invited";
 
+    /**
+     * Proof that a trainer just verified the number they are signed in WITH.
+     *
+     * <p>Changing a phone number is two proofs: possession of the number being
+     * left, and possession of the number being taken. They arrive on two
+     * separate requests minutes apart, so something has to remember the first
+     * one — and this is that memory, in the only form that cannot go stale in a
+     * table nobody sweeps.
+     *
+     * <p><b>It is never an Authorization header.</b> It travels in the body of
+     * the two calls that follow, alongside the trainer's real bearer token,
+     * because it is a second factor rather than a credential: on its own it
+     * opens nothing. {@code SecurityConfig} is what makes that true rather than
+     * merely intended — {@code anyRequest().hasRole("TRAINER")} refuses a
+     * {@code phone_change} role outright, so a ticket presented as a bearer
+     * token authenticates nothing at all.
+     *
+     * <p>Ten minutes, which is {@code app.otp.expiry-minutes}: the ticket must
+     * not outlive the codes it sits between, or a trainer who walked away could
+     * come back to a half-finished change that still believed in the SIM they
+     * were holding.
+     */
+    public static final String ROLE_PHONE_CHANGE = "phone_change";
+
+    /** Matches app.otp.expiry-minutes. See {@link #ROLE_PHONE_CHANGE}. */
+    public static final int PHONE_CHANGE_MINUTES = 10;
+
     public String generate(UUID trainerId, String phone) {
         return build(trainerId.toString(), phone, ROLE_TRAINER);
+    }
+
+    /**
+     * A ticket saying {@code trainerId} proved {@code currentPhone} just now.
+     *
+     * <p>The phone claim is the number that was PROVED, and it is checked
+     * against the trainer's stored number when the ticket is spent. Without
+     * that check a ticket minted before a first change would still be spendable
+     * after it, which is a ticket for a SIM nobody holds any more.
+     */
+    public String generatePhoneChangeTicket(UUID trainerId, String currentPhone) {
+        return build(trainerId.toString(), currentPhone, ROLE_PHONE_CHANGE,
+                PHONE_CHANGE_MINUTES * 60_000L);
     }
 
     /**
@@ -75,8 +115,11 @@ public class JwtService {
     }
 
     private String build(String subject, String phone, String role) {
+        return build(subject, phone, role, (long) props.getJwt().getExpiryMinutes() * 60 * 1000);
+    }
+
+    private String build(String subject, String phone, String role, long expiryMs) {
         long now = System.currentTimeMillis();
-        long expiryMs = (long) props.getJwt().getExpiryMinutes() * 60 * 1000;
         return Jwts.builder()
                 .subject(subject)
                 .claim("phone", phone)

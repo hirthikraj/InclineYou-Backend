@@ -66,7 +66,8 @@ public class Bucket4jLimiter {
         ProxyManager<String> manager = proxyManager.get();
         if (manager != null) {
             try {
-                return decide(manager.builder().build(key, configuration(capacity, period))
+                return decide(manager.builder()
+                        .build(key, () -> configuration(capacity, period))
                         .tryConsumeAndReturnRemaining(1));
             } catch (RuntimeException e) {
                 // Drop the connection before falling back, so the next request does not queue behind the same dead socket.

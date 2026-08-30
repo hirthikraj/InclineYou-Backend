@@ -118,22 +118,22 @@ public class TeamRuleException extends RuntimeException {
     /* ── 422: well-formed, and asking for something that cannot exist ─────── */
 
     public static TeamRuleException cannotRemoveOwner() {
-        return new TeamRuleException(HttpStatus.UNPROCESSABLE_ENTITY, "CANNOT_REMOVE_OWNER",
+        return new TeamRuleException(HttpStatus.UNPROCESSABLE_CONTENT, "CANNOT_REMOVE_OWNER",
                 "The team owner cannot be removed. Transfer ownership to another coach first.");
     }
 
     public static TeamRuleException cannotDemoteOwner() {
-        return new TeamRuleException(HttpStatus.UNPROCESSABLE_ENTITY, "CANNOT_DEMOTE_OWNER",
+        return new TeamRuleException(HttpStatus.UNPROCESSABLE_CONTENT, "CANNOT_DEMOTE_OWNER",
                 "The team owner's role cannot be changed. Transfer ownership instead.");
     }
 
     public static TeamRuleException badDateRange() {
-        return new TeamRuleException(HttpStatus.UNPROCESSABLE_ENTITY, "TEAM_RANGE_INVALID",
+        return new TeamRuleException(HttpStatus.UNPROCESSABLE_CONTENT, "TEAM_RANGE_INVALID",
                 "That date range ends before it starts.");
     }
 
     public static TeamRuleException invalidRole() {
-        return new TeamRuleException(HttpStatus.UNPROCESSABLE_ENTITY, "TEAM_ROLE_INVALID",
+        return new TeamRuleException(HttpStatus.UNPROCESSABLE_CONTENT, "TEAM_ROLE_INVALID",
                 "A member can be made an admin or a coach. Making someone the owner is a transfer.");
     }
 }

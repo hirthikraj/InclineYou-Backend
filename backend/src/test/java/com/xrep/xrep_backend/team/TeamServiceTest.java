@@ -115,8 +115,8 @@ class TeamServiceTest {
     class InviteGuard {
 
         @Test
-        @DisplayName("a number on somebody's roster cannot be invited as a coach")
-        void clientNumberIsRefused() {
+        @DisplayName("a number on somebody's roster CAN be invited as a coach — trainer/client duality is allowed")
+        void clientNumberIsInvitable() {
             createTeam();
             UUID otherTrainer = trainer("9200000009", "Someone");
             jdbc.update("""
@@ -126,7 +126,10 @@ class TeamServiceTest {
             jdbc.update("INSERT INTO app_user (phone, role) VALUES (:p, 'client') ON CONFLICT DO NOTHING",
                     Map.of("p", "9200000003"));
 
-            assertRefused("9200000003", TeamPhoneGuard.CODE_IS_CLIENT, HttpStatus.CONFLICT);
+            var invite = service.invite(owner, new TeamService.InviteRequest("9200000003"));
+
+            assertThat(invite.member().phone()).isEqualTo("9200000003");
+            assertThat(invite.member().status()).isEqualTo("invited");
         }
 
         @Test
@@ -146,7 +149,7 @@ class TeamServiceTest {
         @DisplayName("inviting your own number is a 422, not a conflict — nothing is in conflict")
         void ownNumberIsRefused() {
             createTeam();
-            assertRefused("9200000001", TeamPhoneGuard.CODE_IS_SELF, HttpStatus.UNPROCESSABLE_ENTITY);
+            assertRefused("9200000001", TeamPhoneGuard.CODE_IS_SELF, HttpStatus.UNPROCESSABLE_CONTENT);
         }
 
         @Test

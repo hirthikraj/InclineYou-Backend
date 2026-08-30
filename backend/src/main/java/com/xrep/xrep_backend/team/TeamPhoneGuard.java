@@ -14,13 +14,12 @@ import java.util.Map;
  * in the same shape and refusing for the same family of reasons — one phone is
  * one person, and one person is in one place.
  *
- * <p>Four numbers cannot be invited:
+ * <p>Trainer↔client duality is now allowed (see {@code ClientPhoneGuard} and
+ * {@code AuthService#trainerView}): a client's number can also be invited as a
+ * coach, and can switch between the two via {@code /v1/auth/mode/**}. Three
+ * numbers still cannot be invited:
  *
  * <ol>
- *   <li><b>A number that is somebody's CLIENT.</b> {@code app_user.role} is
- *       exclusive and sign-in reads it as the whole answer, so a client who is
- *       also a coach is a person the router cannot place. It is the mirror of
- *       {@code ClientPhoneGuard}'s first rule, from the other side.</li>
  *   <li><b>A number already in a coaching TEAM.</b> One team per trainer, and the
  *       partial unique index in V26 is the backstop; refusing here is what turns
  *       a constraint violation into a sentence.</li>
@@ -34,10 +33,14 @@ import java.util.Map;
  * A number with a trainer account and no team — which is the common case and the
  * whole point. A number with <em>no account at all</em>, which is the acquisition
  * case: the invite is written against the phone and bound to a trainer id the
- * first time that number signs in. And a number whose invite was declined or
- * whose membership was ended, for the same reason {@code ClientPhoneGuard} lets
- * an ended membership go: somebody who said no in March may say yes in April,
- * and a rule that outlives the refusal it describes strands them forever.
+ * first time that number signs in. A number that is somebody's client — they
+ * accept the invite the same way anyone does, by first claiming a trainer
+ * account (`POST /v1/auth/trainer`) if they have not already, which coexists
+ * with their client memberships rather than replacing them. And a number whose
+ * invite was declined or whose membership was ended, for the same reason
+ * {@code ClientPhoneGuard} lets an ended membership go: somebody who said no in
+ * March may say yes in April, and a rule that outlives the refusal it describes
+ * strands them forever.
  *
  * <h2>What the message never says</h2>
  *
@@ -52,9 +55,6 @@ public class TeamPhoneGuard {
 
     private final NamedParameterJdbcTemplate jdbc;
 
-    /** The number is on a roster as somebody's client. Recovery: a different number. */
-    public static final String CODE_IS_CLIENT = "PHONE_IS_CLIENT";
-
     /** The number is already in a coaching team. Recovery: they leave it first. */
     public static final String CODE_ALREADY_IN_TEAM = "PHONE_ALREADY_IN_TEAM";
 
@@ -63,10 +63,6 @@ public class TeamPhoneGuard {
 
     /** The caller's own number. Recovery: none needed. */
     public static final String CODE_IS_SELF = "PHONE_IS_SELF";
-
-    private static final String MSG_IS_CLIENT =
-            "This number is registered as a client, so it can't be invited as a coach. "
-            + "One number is either a trainer or a client — ask them for a different number.";
 
     private static final String MSG_ALREADY_IN_TEAM =
             "This number is already part of a coaching team. A trainer can only be in one team "
@@ -82,7 +78,7 @@ public class TeamPhoneGuard {
     /**
      * Available, or the reason it is not.
      *
-     * @param status the status the refusal deserves. Three of the four are 409 —
+     * @param status the status the refusal deserves. Two of the three are 409 —
      *               the number is real and the request is well-formed, it is
      *               already spoken for — and inviting yourself is a 422, because
      *               nothing is in conflict, the request just does not mean
@@ -94,37 +90,19 @@ public class TeamPhoneGuard {
 
     /**
      * @param teamId    the inviting team — its own pending invites are what rule
-     *                  3 looks at, and another team's are rule 2's business
-     * @param callerPhone the inviter's number, for rule 4
+     *                  2 looks at, and another team's are rule 1's business
+     * @param callerPhone the inviter's number, for rule 3
      */
     public Verdict check(String teamId, String callerPhone, String phone) {
         if (phone == null || phone.isBlank()) return Verdict.ok();
 
         String normalized = phone.trim();
         if (normalized.equalsIgnoreCase(callerPhone)) {
-            return new Verdict(false, CODE_IS_SELF, MSG_IS_SELF, HttpStatus.UNPROCESSABLE_ENTITY);
+            return new Verdict(false, CODE_IS_SELF, MSG_IS_SELF, HttpStatus.UNPROCESSABLE_CONTENT);
         }
 
         var row = jdbc.queryForMap("""
                 SELECT
-                    EXISTS(
-                        SELECT 1 FROM app_user
-                        WHERE phone = :phone AND role = 'client' AND deleted_at IS NULL
-                    )
-                    -- Belt and braces against a roster row whose identity was
-                    -- never minted, the same way ClientPhoneGuard double-checks
-                    -- the trainer table. A number with a live membership behind
-                    -- it is a client whichever table says so, and being wrong in
-                    -- this direction only ever refuses an invite that could not
-                    -- have worked anyway.
-                    OR EXISTS(
-                        SELECT 1 FROM client
-                        WHERE phone = :phone
-                          AND deleted_at IS NULL
-                          AND status <> 'archived'
-                          AND membership_status NOT IN ('removed', 'declined', 'unavailable')
-                    ) AS is_client,
-
                     -- Any team, including this one. Matched on the trainer's own
                     -- number and on the number an unbound invite was sent to,
                     -- because an active membership may still be carrying either.
@@ -146,9 +124,6 @@ public class TeamPhoneGuard {
                     ) AS invited_here
                 """, Map.of("phone", normalized, "teamId", teamId));
 
-        if (Boolean.TRUE.equals(row.get("is_client"))) {
-            return new Verdict(false, CODE_IS_CLIENT, MSG_IS_CLIENT, HttpStatus.CONFLICT);
-        }
         if (Boolean.TRUE.equals(row.get("in_a_team"))) {
             return new Verdict(false, CODE_ALREADY_IN_TEAM, MSG_ALREADY_IN_TEAM, HttpStatus.CONFLICT);
         }

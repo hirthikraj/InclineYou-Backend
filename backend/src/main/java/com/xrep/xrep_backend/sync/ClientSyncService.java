@@ -93,13 +93,30 @@ public class ClientSyncService {
 
     @Transactional(readOnly = true)
     public SyncService.PullResponse pull(Scope scope, Long lastPulledAt) {
+        return pull(scope, lastPulledAt, null);
+    }
+
+    @Transactional(readOnly = true)
+    public SyncService.PullResponse pull(Scope scope, Long lastPulledAt, Long libraryPulledAt) {
         Timestamp cursor = (lastPulledAt != null && lastPulledAt > 0)
                 ? Timestamp.from(Instant.ofEpochMilli(lastPulledAt))
                 : Timestamp.from(Instant.EPOCH);
 
+        /*
+         * The library's own cursor — the same second cursor the trainer pull
+         * takes, and the same reasoning behind it. Absent means the main cursor,
+         * which is what an older build received before this existed; the
+         * referential clause in `exercises` below is what keeps such a device
+         * correct, not this fallback.
+         */
+        Timestamp libraryCursor = (libraryPulledAt != null && libraryPulledAt > 0)
+                ? Timestamp.from(Instant.ofEpochMilli(libraryPulledAt))
+                : (libraryPulledAt != null ? Timestamp.from(Instant.EPOCH) : cursor);
+
         String cid = scope.clientId().toString();
         String tid = scope.trainerId().toString();
-        var params = Map.of("cid", cid, "tid", tid, "cursor", cursor);
+        var params = Map.of("cid", cid, "tid", tid,
+                            "cursor", cursor, "libraryCursor", libraryCursor);
 
         var changes = new LinkedHashMap<String, SyncService.TableChanges>();
 
@@ -120,12 +137,63 @@ public class ClientSyncService {
                 FROM trainer WHERE id = :tid::uuid
                 """, params, cursor));
 
-        // The exercise library, plus their trainer's own custom exercises —
-        // otherwise a plan built around "Ravi's cable press" would arrive with a
-        // blank name on the client's phone.
-        changes.put("exercises", scoped("""
+        /*
+         * The exercise library, plus their trainer's own custom exercises —
+         * otherwise a plan built around "Ravi's cable press" would arrive with a
+         * blank name on the client's phone.
+         *
+         * That comment described the failure this used to have. One cursor over
+         * a collection that is not the caller's data answers the wrong question:
+         * the shared library changes only when `ExerciseSeeder` runs, so
+         * `updated_at > :cursor` asks "has it been re-imported since you last
+         * synced" — almost always no — while the device is asking "do I hold it
+         * at all". A client whose cursor is newer than the last import was sent
+         * their whole plan and none of the exercises naming it, and every line
+         * of it drew blank.
+         *
+         * So the two halves get two cursors. A CUSTOM exercise is their coach's
+         * data and rides `:cursor`, as it always did. The shared library rides
+         * `:libraryCursor`, which a device sets to zero to mean "none of it".
+         *
+         * And the third clause is the safety net for a build that never asks: if
+         * this pull carries a plan row, a logged exercise or a set that NAMES an
+         * exercise, it carries the exercise too. Bounded by what is already being
+         * sent, so a steady-state pull adds nothing. A client has no
+         * `exercise_favourite` rows — those are the trainer's — so unlike the
+         * trainer-side clause there are three sources here, not five.
+         */
+        String namedByThisPull = """
+                    id IN (
+                        SELECT pe.exercise_id
+                          FROM program_exercise pe
+                          JOIN program p ON p.id = pe.program_id
+                         WHERE p.client_id = :cid::uuid
+                           AND pe.updated_at > :cursor
+                        UNION
+                        SELECT we.exercise_id
+                          FROM workout_exercise we
+                          JOIN workout_session w ON w.id = we.workout_session_id
+                         WHERE w.client_id = :cid::uuid
+                           AND we.updated_at > :cursor
+                        UNION
+                        -- A swap names two exercises and the log draws both.
+                        SELECT we.swapped_from_exercise_id
+                          FROM workout_exercise we
+                          JOIN workout_session w ON w.id = we.workout_session_id
+                         WHERE w.client_id = :cid::uuid
+                           AND we.swapped_from_exercise_id IS NOT NULL
+                           AND we.updated_at > :cursor
+                        UNION
+                        SELECT sl.exercise_id
+                          FROM set_log sl
+                          JOIN workout_session w ON w.id = sl.workout_session_id
+                         WHERE w.client_id = :cid::uuid
+                           AND sl.updated_at > :cursor)
+                """;
+
+        changes.put("exercises", twoCursor("""
                 SELECT * FROM exercise WHERE is_custom = false OR trainer_id = :tid::uuid
-                """, params, cursor));
+                """, params, namedByThisPull));
 
         // Only the templates their own programs were copied from, for the week
         // count and the day labels. Never the trainer's library.
@@ -183,8 +251,9 @@ public class ClientSyncService {
                 SELECT * FROM weekly_report WHERE client_id = :cid::uuid
                 """, params, cursor));
 
-        log.debug("client sync pull client={} cursor={}", cid, cursor);
-        return new SyncService.PullResponse(Instant.now().toEpochMilli(), changes);
+        log.debug("client sync pull client={} cursor={} libraryCursor={}", cid, cursor, libraryCursor);
+        long now = Instant.now().toEpochMilli();
+        return new SyncService.PullResponse(now, now, changes);
     }
 
     /**
@@ -197,6 +266,35 @@ public class ClientSyncService {
      * the trainer's pull uses, paired with `sendCreatedAsUpdated` on the phone.
      * See the long note on `SyncService.splitAlive`.
      */
+    /**
+     * {@link #scoped} for the one collection that needs two cursors and a
+     * referential clause: the exercise library. Tombstones deliberately do NOT
+     * use the referential clause — a deleted exercise is not "needed" by
+     * anything, and the rows that named it keep their id and resolve against a
+     * name the device already holds.
+     */
+    private SyncService.TableChanges twoCursor(String base, Map<String, ?> params, String alsoIfShared) {
+        String changed = """
+                (r.is_custom AND r.updated_at > :cursor)
+                OR (NOT r.is_custom AND r.updated_at > :libraryCursor)
+                OR (NOT r.is_custom AND %s)
+                """.formatted(alsoIfShared.replace("id IN (", "r.id IN ("));
+
+        String alive = "SELECT * FROM (%s) r WHERE r.deleted_at IS NULL AND (%s) ORDER BY r.updated_at ASC"
+                .formatted(base, changed);
+        String dead = """
+                SELECT r.id::text AS id FROM (%s) r WHERE r.deleted_at IS NOT NULL
+                  AND ((r.is_custom AND r.updated_at > :cursor)
+                       OR (NOT r.is_custom AND r.updated_at > :libraryCursor))
+                """.formatted(base);
+
+        var rows = jdbc.queryForList(alive, params).stream().map(SyncRows::normalizeRow).toList();
+        var deleted = jdbc.queryForList(dead, params).stream()
+                .map(r -> r.get("id").toString())
+                .toList();
+        return new SyncService.TableChanges(List.of(), rows, deleted);
+    }
+
     private SyncService.TableChanges scoped(String base, Map<String, ?> params, Timestamp cursor) {
         String alive = "SELECT * FROM (%s) r WHERE r.deleted_at IS NULL AND r.updated_at > :cursor ORDER BY r.updated_at ASC"
                 .formatted(base);

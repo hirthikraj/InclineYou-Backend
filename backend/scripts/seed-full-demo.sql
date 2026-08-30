@@ -32,11 +32,11 @@
 --     `metadata->>'seed' = 'demo'`, and a re-run tombstones exactly those and
 --     everything hanging off them. Clients you added by hand are never touched.
 --
---     It also retires clients tagged `'true'` — the small seed's tag. The two
---     seeds are alternatives, not layers: they both write the trainer's working
+--     It also retires clients tagged `'true'` and `'real20'` — the other two
+--     seeds' tags. The three seeds are alternatives, not layers: they both write the trainer's working
 --     hours, price list and templates, and running one on top of the other
---     leaves a diary with two of every shift on it. Running either gives you
---     that seed's world and only that one.
+--     leaves a diary with two of every shift on it. Running any one of them
+--     gives you that seed's world and only that one.
 --
 --     Every id is `md5` of a key that starts with the trainer's phone, so
 --     seeding two trainers on one database is safe and a re-run upserts instead
@@ -95,7 +95,7 @@ END $$;
 
 CREATE TEMP TABLE old_clients ON COMMIT DROP AS
 SELECT c.id FROM client c, seed_trainer t
-WHERE c.trainer_id = t.id AND c.metadata->>'seed' IN ('demo', 'true');
+WHERE c.trainer_id = t.id AND c.metadata->>'seed' IN ('demo', 'true', 'real20');
 
 UPDATE set_log SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND workout_session_id IN
@@ -115,6 +115,17 @@ UPDATE payment           SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND client_id IN (SELECT id FROM old_clients);
 UPDATE package           SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND client_id IN (SELECT id FROM old_clients);
+-- Before the programs themselves: `program_exercise` carries neither a
+-- `trainer_id` nor a `client_id`, so it can only be reached through its
+-- program — and once the program is tombstoned this query finds nothing. It was
+-- missing here, and the rows it left behind were invisible until an id scheme
+-- changed: the upserts below kept overwriting the same ids, so the stale rows
+-- were silently the same rows. The moment `program_exercise.id` started hashing
+-- an ordinal day instead of a weekday, the old copies stopped colliding with the
+-- new ones and every plan quietly held both.
+UPDATE program_exercise  SET deleted_at = now(), updated_at = now()
+    WHERE deleted_at IS NULL AND program_id IN
+        (SELECT id FROM program WHERE client_id IN (SELECT id FROM old_clients));
 UPDATE program           SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND client_id IN (SELECT id FROM old_clients);
 UPDATE body_metric       SET deleted_at = now(), updated_at = now()
@@ -130,7 +141,7 @@ UPDATE working_hours      SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND trainer_id IN (SELECT id FROM seed_trainer);
 UPDATE time_block         SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND trainer_id IN (SELECT id FROM seed_trainer)
-      AND metadata->>'seed' IN ('demo', 'true');
+      AND metadata->>'seed' IN ('demo', 'true', 'real20');
 UPDATE batch              SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND trainer_id IN (SELECT id FROM seed_trainer);
 UPDATE exercise_favourite SET deleted_at = now(), updated_at = now()
@@ -170,7 +181,7 @@ UPDATE trainer SET
     gym_name           = 'Iron House, Adyar',
     gym_share_percent  = 50,
     experience_band    = '6_10',
-    specialities       = '["strength","fat_loss","post_natal","custom:Powerlifting"]'::jsonb,
+    specialities       = '["strength","weight_loss","natal","custom:Powerlifting"]'::jsonb,
     certifications     = '["acsm_cpt","custom:K11 Level 3"]'::jsonb,
     languages          = '["ta","en","hi"]'::jsonb,
     setup_completed_at = COALESCE(setup_completed_at, now() - INTERVAL '200 days'),
@@ -205,12 +216,12 @@ INSERT INTO working_hours (id, trainer_id, weekday, start_minute, end_minute)
 SELECT md5(:'trainer_phone' || ':demo:hours:' || w.weekday || ':' || w.start_minute)::uuid,
        t.id, w.weekday, w.start_minute, w.end_minute
 FROM seed_trainer t,
-     (VALUES (0, 360, 660), (0, 1020, 1260),
-             (1, 360, 660), (1, 1020, 1260),
-             (3, 360, 660), (3, 1020, 1260),
-             (4, 360, 660), (4, 1020, 1260),
-             (5, 360, 660), (5, 1020, 1260),
-             (6, 420, 660), (6, 1080, 1200)
+     (VALUES (0, 360, 660), (0, 1020, 1320),
+             (1, 360, 660), (1, 1020, 1320),
+             (2, 360, 660), (2, 1020, 1320),
+             (3, 360, 660), (3, 1020, 1320),
+             (4, 360, 660), (4, 1020, 1320),
+             (5, 360, 660), (5, 1020, 1320)
      ) AS w(weekday, start_minute, end_minute)
 ON CONFLICT (id) DO UPDATE SET
     start_minute = EXCLUDED.start_minute, end_minute = EXCLUDED.end_minute,
@@ -242,16 +253,27 @@ ON CONFLICT (id) DO UPDATE SET
 -- rows in it never draws the custom badge, the edit affordance, or the
 -- reps-only set row, which are three of the four things that make the exercise
 -- screens different from a printed list.
+--
+-- `equipment` is free text — `/v1/exercises/meta` builds the filter list with a
+-- plain `SELECT DISTINCT`, so there is no vocabulary to violate and nothing
+-- rejects a new word. That is exactly why these four have to use the library's
+-- own words: 'bands' next to the library's 'band' is two filter chips for one
+-- rack of resistance bands, and 'other' is a chip that sorts nothing. It also
+-- matters further down, where the starting-load table keys off this column —
+-- 'other' on a `weight_reps` exercise gave the sled push reps and no weight,
+-- the row contradicting its own log_type. The two `reps` exercises still carry
+-- no load, but now because 'rope' and 'band' genuinely have none rather than
+-- because their equipment word matched nothing.
 
 INSERT INTO exercise (id, name, muscle_group, equipment, movement_pattern, description,
                       is_custom, trainer_id, log_type, created_at)
 SELECT md5(:'trainer_phone' || ':demo:ex:' || x.slug)::uuid, x.name, x.muscle, x.equip, x.pattern,
        x.descr, TRUE, t.id, x.log_type, (CURRENT_DATE - 150)::timestamptz
 FROM seed_trainer t,
-     (VALUES ('sled',   'Sled Push · Turf',        'quadriceps', 'other',     'push',  'Two lengths of the turf. Load on the sled, not on the back.', 'weight_reps'),
-             ('rope',   'Battle Rope Waves',       'shoulders',  'other',     'carry', 'Thirty seconds on, thirty off. Counted as reps, not seconds.', 'reps'),
-             ('bandpu', 'Assisted Pull-up (Band)', 'lats',       'bands',     'pull',  'Green band under the knee until five clean reps, then drop a band.', 'reps'),
-             ('farmer', 'Farmer Carry · 20m',      'forearms',   'dumbbell',  'carry', 'Twenty metres each way. The weight is per hand.', 'weight_reps')
+     (VALUES ('sled',   'Sled Push · Turf',        'quadriceps', 'sled machine', 'push',  'Two lengths of the turf. Load on the sled, not on the back.', 'weight_reps'),
+             ('rope',   'Battle Rope Waves',       'shoulders',  'rope',         'carry', 'Thirty seconds on, thirty off. Counted as reps, not seconds.', 'reps'),
+             ('bandpu', 'Assisted Pull-up (Band)', 'lats',       'band',         'pull',  'Green band under the knee until five clean reps, then drop a band.', 'reps'),
+             ('farmer', 'Farmer Carry · 20m',      'forearms',   'dumbbell',     'carry', 'Twenty metres each way. The weight is per hand.', 'weight_reps')
      ) AS x(slug, name, muscle, equip, pattern, descr, log_type)
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name, muscle_group = EXCLUDED.muscle_group,
@@ -262,14 +284,22 @@ ON CONFLICT (id) DO UPDATE SET
 
 -- Stars. Favourites sort to the top of the library, which is the only thing on
 -- the exercise screen that makes 1,324 rows usable one-handed.
+--
+-- Matched case-insensitively, and on the names the library carries AFTER V21 —
+-- "Barbell full squat", not "Barbell Squat"; "Pull-up", not "Pullups". The four
+-- library names here were the old dataset's and had resolved to nothing since
+-- the swap, so this whole INSERT wrote two rows instead of six and the screen
+-- looked like a feature nobody had built. The blueprint join below already
+-- lower-cases both sides; this one now does too, so a future change to
+-- `ExerciseSeeder.displayName` cannot break it again.
 INSERT INTO exercise_favourite (id, trainer_id, exercise_id, created_at)
 SELECT md5(:'trainer_phone' || ':demo:fav:' || e.id)::uuid, t.id, e.id, (CURRENT_DATE - 100)::timestamptz
 FROM seed_trainer t
 JOIN exercise e ON e.deleted_at IS NULL
                 AND (e.is_custom = FALSE OR e.trainer_id = t.id)
-                AND e.name IN ('Barbell Squat', 'Barbell Deadlift',
-                               'Barbell Bench Press - Medium Grip', 'Pullups',
-                               'Sled Push · Turf', 'Battle Rope Waves')
+                AND lower(e.name) IN ('barbell full squat', 'barbell deadlift',
+                                      'barbell bench press', 'pull-up',
+                                      'sled push · turf', 'battle rope waves')
 ON CONFLICT (id) DO UPDATE SET deleted_at = NULL, updated_at = now();
 
 -- ── The price list ──────────────────────────────────────────────────────────
@@ -358,46 +388,46 @@ CREATE TEMP TABLE demo_template (
     descr    text,
     weeks    int,      -- how long the program runs
     authored int,      -- how many weeks the blueprint spells out
-    days     text,     -- the layout, ISO weekdays: "1,4,6"
+    slots    text,     -- the ordinal day slots: "1,2,3" (V24)
     plan     jsonb,    -- weekday → exercise names, in order
     labels   jsonb
 ) ON COMMIT DROP;
 
 INSERT INTO demo_template VALUES
  ('ppl', md5(:'trainer_phone' || ':demo:template:ppl')::uuid, 'Push / Pull / Legs', 'Build strength',
-  'Three days, one pattern each. The default for anybody past their first three months.', 8, 1, '1,4,6',
+  'Three days, one pattern each. The default for anybody past their first three months.', 8, 1, '1,2,3',
   '{"1":["Barbell bench press","Dumbbell incline bench press","Cable pushdown"],
-    "4":["Barbell deadlift","Barbell bent over row","Barbell curl"],
-    "6":["Barbell full squat","Barbell romanian deadlift","Barbell standing calf raise"]}',
-  '{"1":"Push A","4":"Pull A","6":"Legs A"}'),
+    "2":["Barbell deadlift","Barbell bent over row","Barbell curl"],
+    "3":["Barbell full squat","Barbell romanian deadlift","Barbell standing calf raise"]}',
+  '{"1":"Push A","2":"Pull A","3":"Legs A"}'),
  ('full', md5(:'trainer_phone' || ':demo:template:full')::uuid, 'Full Body', 'General fitness',
-  'Everything every session. For two or three days a week, which is most people.', 12, 1, '2,5,7',
-  '{"2":["Barbell full squat","Barbell bench press","Barbell bent over row"],
-    "5":["Barbell deadlift","Dumbbell seated shoulder press","Pull-up"],
-    "7":["Smith leg press","Dumbbell bench press","Cable rope elevated seated row"]}',
-  '{"2":"Full Body A","5":"Full Body B","7":"Full Body C"}'),
- ('upper', md5(:'trainer_phone' || ':demo:template:upper')::uuid, 'Upper / Lower', 'Muscle gain',
-  'Two days split down the middle. The evening crowd''s programme.', 6, 1, '2,5',
-  '{"2":["Barbell bench press","Barbell bent over row","Dumbbell seated shoulder press"],
-    "5":["Barbell full squat","Barbell romanian deadlift","Smith leg press"]}',
-  '{"2":"Upper","5":"Lower"}'),
- ('remote', md5(:'trainer_phone' || ':demo:template:remote')::uuid, 'Remote Core', 'Post-natal',
-  'Over a call, on a mat, with nothing that needs a rack.', 4, 1, '4,7',
-  '{"4":["Power point plank","Barbell glute bridge","Mountain climber"],
-    "7":["Power point plank","Dead bug","Russian twist"]}',
-  '{"4":"Core A","7":"Core B"}'),
- ('strength4', md5(:'trainer_phone' || ':demo:template:strength4')::uuid, 'Strength · 4 Day', 'Powerlifting',
-  'Four weeks written out, sets up and reps down as it goes. Week four is the heavy one.', 4, 4, '1,2,4,6',
+  'Everything every session. For two or three days a week, which is most people.', 12, 1, '1,2,3',
   '{"1":["Barbell full squat","Barbell bench press","Barbell bent over row"],
     "2":["Barbell deadlift","Dumbbell seated shoulder press","Pull-up"],
-    "4":["Barbell full squat","Dumbbell incline bench press","Cable low seated row"],
-    "6":["Barbell romanian deadlift","Dumbbell bench press","Farmers walk"]}',
-  '{"1":"Squat day","2":"Pull day","4":"Bench day","6":"Carry day"}'),
+    "3":["Smith leg press","Dumbbell bench press","Cable rope elevated seated row"]}',
+  '{"1":"Full Body A","2":"Full Body B","3":"Full Body C"}'),
+ ('upper', md5(:'trainer_phone' || ':demo:template:upper')::uuid, 'Upper / Lower', 'Muscle gain',
+  'Two days split down the middle. The evening crowd''s programme.', 6, 1, '1,2',
+  '{"1":["Barbell bench press","Barbell bent over row","Dumbbell seated shoulder press"],
+    "2":["Barbell full squat","Barbell romanian deadlift","Smith leg press"]}',
+  '{"1":"Upper","2":"Lower"}'),
+ ('remote', md5(:'trainer_phone' || ':demo:template:remote')::uuid, 'Remote Core', 'Post-natal',
+  'Over a call, on a mat, with nothing that needs a rack.', 6, 1, '1,2',
+  '{"1":["Power point plank","Barbell glute bridge","Mountain climber"],
+    "2":["Power point plank","Dead bug","Russian twist"]}',
+  '{"1":"Core A","2":"Core B"}'),
+ ('strength4', md5(:'trainer_phone' || ':demo:template:strength4')::uuid, 'Strength · 4 Day', 'Powerlifting',
+  'Four weeks written out, sets up and reps down as it goes. Week four is the heavy one.', 4, 4, '1,2,3,4',
+  '{"1":["Barbell full squat","Barbell bench press","Barbell bent over row"],
+    "2":["Barbell deadlift","Dumbbell seated shoulder press","Pull-up"],
+    "3":["Barbell full squat","Dumbbell incline bench press","Cable low seated row"],
+    "4":["Barbell romanian deadlift","Dumbbell bench press","Farmers walk"]}',
+  '{"1":"Squat day","2":"Pull day","3":"Bench day","4":"Carry day"}'),
  ('beginner', md5(:'trainer_phone' || ':demo:template:beginner')::uuid, 'Beginner Full Body', 'General fitness',
-  'Machines and dumbbells for the first month. Nothing that needs a spotter.', 4, 1, '2,5',
-  '{"2":["Smith leg press","Dumbbell bench press","Cable rope elevated seated row"],
-    "5":["Barbell glute bridge","Dumbbell seated shoulder press","Battling ropes"]}',
-  '{"2":"Machines A","5":"Machines B"}');
+  'Machines and dumbbells for the first month. Nothing that needs a spotter.', 6, 1, '1,2',
+  '{"1":["Smith leg press","Dumbbell bench press","Cable rope elevated seated row"],
+    "2":["Barbell glute bridge","Dumbbell seated shoulder press","Battling ropes"]}',
+  '{"1":"Machines A","2":"Machines B"}');
 
 INSERT INTO template (id, trainer_id, name, goal, description, structure, day_labels, weeks,
                       training_days, created_at)
@@ -419,16 +449,16 @@ SELECT st.id, t.id, st.name, st.goal, st.descr,
                   'rest_seconds', CASE WHEN ord = 1 THEN 120 ELSE 60 END,
                   'target_load',  NULL,
                   'notes',        NULL,
-                  'day_of_week',  day::int,
+                  'day_of_week',  slot::int,
                   'order_index',  ord - 1)
-                ORDER BY wk, day::int, ord)
+                ORDER BY wk, slot::int, ord)
          FROM generate_series(1, st.authored) AS wk,
-              jsonb_each(st.plan) AS d(day, names),
+              jsonb_each(st.plan) AS d(slot, names),
               LATERAL jsonb_array_elements_text(d.names) WITH ORDINALITY AS x(nm, ord)
          JOIN exercise e ON lower(e.name) = lower(x.nm) AND e.deleted_at IS NULL
                         AND (e.is_custom = FALSE OR e.trainer_id = t.id)
        ), '[]'::jsonb),
-       st.labels, st.weeks, st.days, (CURRENT_DATE - 140)::timestamptz
+       st.labels, st.weeks, st.slots, (CURRENT_DATE - 140)::timestamptz
 FROM demo_template st, seed_trainer t
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name, goal = EXCLUDED.goal, description = EXCLUDED.description,
@@ -444,20 +474,52 @@ ON CONFLICT (id) DO UPDATE SET
 --
 --   tpl        which template they are on. NULL means nothing is set up yet,
 --              which is a real state and the roster says "waiting for you".
---   at_time    the hour they train. Also what puts them in a batch: the roster
---              segments by morning / evening / night off this.
+--   band       am | pm — the half of the split shift their slot sits in.
+--   days       the ISO weekdays they train, ascending. Its LENGTH must equal the
+--              number of ordinal slots their template has, because that is the
+--              rule `POST /v1/templates/{id}/apply` enforces; the assertion
+--              below refuses the seed otherwise.
+--   books      whether they are ON THE DIARY. See the note under it — this is
+--              the column that lets forty-four clients belong to one trainer.
 --   hist_weeks how far back their history runs, clamped to when they joined.
 --   dark_days  a recent silence. Nothing is generated inside it, which is what
 --              makes a client genuinely quiet rather than quiet-looking.
 --   pay_state  paid | overdue | partial | fresh | writeoff | none
 --   remaining  sessions left on the live pack. NULL for monthly and for nobody.
---   batch      am | pm — they train inside a group of that name.
 --
--- The days they train on are NOT typed here. They are the first `per_week` days
--- of their own template's layout, derived below — which is what guarantees a
--- client is never booked on a day their plan says nothing about. Typing both
--- numbers by hand is how the small seed ended up with every client opening the
--- log on "Nothing planned".
+-- ── Why only nineteen of them are booked ────────────────────────────────────
+--
+-- One trainer coaches one client at a time. That is the rule this seed now
+-- keeps, and it collides with the reason this seed exists.
+--
+-- Forty-four actively-training clients is 138 sessions and 137 coaching hours a
+-- week. A split shift of 06:00–11:00 and 17:00–22:00, Monday to Saturday, is
+-- sixty hours and — at the 75-minute pitch the timetable below uses — 48
+-- sessions. The old version of this file resolved that by double-booking: five
+-- people at 6am, and a Tuesday carrying fifty-one hours of one-to-one coaching.
+-- It was never a timetable that could exist.
+--
+-- So the roster keeps all forty-four rows and books nineteen of them. The other
+-- twenty-five are on the books in states that legitimately have no sessions this
+-- quarter — paused, inactive, invited, archived, declined, removed, a number
+-- that belongs to a trainer account, one who has not been set up yet, and a
+-- group who have simply not trained since before the window opens. That is what
+-- a five-year-old client list actually looks like, and it is the honest way to
+-- have both an A–Z rail that exists (`INDEX_RAIL_MIN = 40`) and a diary one
+-- person could work.
+--
+-- A `books = FALSE` client still carries a plan, a pack, a payment history,
+-- body measurements and a weekly slot on file — everything except a row on the
+-- diary. Their slot is the one they used to hold, which is why they still read
+-- as "Tue & Fri, 7:15am" on their own screen.
+--
+-- ── And why there are no batches ────────────────────────────────────────────
+--
+-- A batch is several clients in one slot. That is its whole definition, and it
+-- is the one shape this dataset cannot draw. The `batch` table, the two groups
+-- and the `batch_id` on every attendee are gone from this seed; the diary's
+-- batch row is a real thing and needs a seed that permits it, which this is no
+-- longer.
 
 CREATE TEMP TABLE demo_client (
     key        text PRIMARY KEY,
@@ -466,8 +528,9 @@ CREATE TEMP TABLE demo_client (
     phone      text,
     goal       text,
     tpl        text,
-    at_time    text,
-    per_week   int,
+    band       text,     -- am | pm
+    days       text,     -- ISO weekdays, ascending: "1,3,5"
+    books      boolean,  -- on the diary, or on the books only
     duration   int,
     mode       text,     -- floor | remote
     pay_mode   text,     -- trainer_collects | gym_collects
@@ -481,90 +544,175 @@ CREATE TEMP TABLE demo_client (
     dark_days  int,
     pack_slug  text,
     pay_state  text,
-    remaining  int,
-    batch      text
+    remaining  int
 ) ON COMMIT DROP;
 
-INSERT INTO demo_client (key, name, phone, goal, tpl, at_time, per_week, duration, mode, pay_mode,
+INSERT INTO demo_client (key, name, phone, goal, tpl, band, days, books, duration, mode, pay_mode,
                          split, height, activity, status, membership, joined, hist_weeks, dark_days,
-                         pack_slug, pay_state, remaining, batch) VALUES
--- ── the long-standing ones · ten weeks of history each ──────────────────────
- ('ananya',  'Ananya Iyer',          '9840110001', 'Build strength',  'ppl',       '06:00', 3, 60, 'floor',  'trainer_collects', NULL, 164, 'moderate',    'active',   'accepted',    250, 10,  0, 'p16', 'paid',     11, 'am'),
- ('arjun',   'Arjun Nair',           '9840110002', 'Powerlifting',    'strength4', '06:00', 4, 75, 'floor',  'trainer_collects', NULL, 178, 'active',      'active',   'accepted',    220, 10,  0, 'p16', 'paid',      9, 'am'),
- ('bhavana', 'Bhavana Reddy',        '9840110003', 'General fitness', 'full',      '09:30', 2, 60, 'floor',  'gym_collects',       60, 158, 'sedentary',   'active',   'accepted',    190, 10,  0, 'p12', 'paid',      7, NULL),
- ('chandran','Chandran Pillai',      '9840110004', 'Fat loss',        'upper',     '18:00', 2, 60, 'floor',  'trainer_collects', NULL, 172, 'light',       'active',   'accepted',    175, 10,  0, 'p12', 'overdue',   6, 'pm'),
- ('divya',   'Divya Menon',          '9840110005', 'Fat loss',        'ppl',       '17:30', 2, 60, 'floor',  'gym_collects',       55, 167, 'moderate',    'active',   'accepted',    160, 10,  0, 'p8',  'paid',      2, NULL),
- ('farhan',  'Farhan Qureshi',       '9840110006', 'Muscle gain',     'upper',     '18:00', 2, 60, 'floor',  'trainer_collects', NULL, 180, 'active',      'active',   'accepted',    150, 10,  0, 'p12', 'overdue',   5, 'pm'),
- ('gayathri','Gayathri Subramanian', '9840110007', 'Post-natal',      'remote',    '19:00', 2, 45, 'remote', 'trainer_collects', NULL, 160, 'light',       'active',   'accepted',    140, 10,  0, 'pm',  'paid',   NULL, NULL),
- ('harish',  'Harish Kumar',         '9840110008', 'Muscle gain',     'ppl',       '07:00', 3, 60, 'floor',  'trainer_collects', NULL, 175, 'moderate',    'active',   'accepted',    130, 10,  0, 'p16', 'partial',   8, NULL),
- ('ishaan',  'Ishaan Verma',         '9840110009', 'Fat loss',        'full',      '06:00', 2, 60, 'floor',  'trainer_collects', NULL, 169, 'light',       'active',   'accepted',    125, 10,  0, 'p8',  'paid',      0, 'am'),
- ('jyothi',  'Jyothi Balan',         '9840110010', 'General fitness', 'beginner',  '10:00', 2, 60, 'floor',  'gym_collects',       50, 155, 'sedentary',   'active',   'accepted',    118, 10,  0, 'g12', 'paid',     10, NULL),
- ('karthik', 'Karthik Raman',        '9840110011', 'Fat loss',        'ppl',       '07:00', 2, 60, 'floor',  'trainer_collects', NULL, 176, 'light',       'active',   'accepted',    112, 10, 16, 'p12', 'paid',      8, NULL),
- ('lakshmi', 'Lakshmi Narayanan',    '9840110012', 'General fitness', 'remote',    '18:30', 2, 45, 'remote', 'trainer_collects', NULL, 161, 'light',       'active',   'accepted',    105, 10,  0, 'pm',  'paid',   NULL, NULL),
- ('mohan',   'Mohan Das',            '9840110013', 'Build strength',  'strength4', '19:00', 3, 60, 'floor',  'trainer_collects', NULL, 174, 'active',      'active',   'accepted',     98, 10,  0, 'p16', 'paid',     12, NULL),
- ('nithya',  'Nithya Krishnan',      '9840110014', 'Fat loss',        'full',      '09:30', 2, 60, 'floor',  'gym_collects',       60, 157, 'sedentary',   'active',   'accepted',     92, 10,  0, 'p16', 'writeoff',  4, NULL),
- ('omar',    'Omar Sheikh',          '9840110015', 'Muscle gain',     'upper',     '20:00', 2, 60, 'floor',  'trainer_collects', NULL, 181, 'moderate',    'active',   'accepted',     85, 10,  0, 'p8',  'fresh',     6, NULL),
- ('priya',   'Priya Ramesh',         '9840110016', 'Fat loss',        'remote',    '19:00', 2, 45, 'remote', 'trainer_collects', NULL, 163, 'moderate',    'active',   'accepted',     78, 10,  0, 'p12', 'paid',      7, NULL),
- ('quadir',  'Quadir Ahmed',         '9840110017', 'Build strength',  'beginner',  '17:30', 2, 60, 'floor',  'trainer_collects', NULL, 170, 'light',       'active',   'accepted',     72, 10,  0, 'p8',  'paid',      5, NULL),
- ('rekha',   'Rekha Pillai',         '9840110018', 'General fitness', 'ppl',       '06:00', 3, 60, 'floor',  'trainer_collects', NULL, 159, 'moderate',    'active',   'accepted',     66, 10,  0, 'p16', 'paid',     13, 'am'),
- ('sneha',   'Sneha Rao',            '9840110019', 'Post-natal',      'remote',    '19:00', 2, 45, 'remote', 'trainer_collects', NULL, 162, 'light',       'active',   'accepted',     60, 10,  0, 'pm',  'fresh',  NULL, NULL),
- ('tarun',   'Tarun Gopal',          '9840110020', 'Muscle gain',     'upper',     '18:00', 2, 60, 'floor',  'trainer_collects', NULL, 177, 'light',       'paused',   'accepted',     54, 10, 21, 'p12', 'paid',      6, 'pm'),
- ('usha',    'Usha Menon',           '9840110021', 'General fitness', 'full',      '09:30', 3, 60, 'floor',  'gym_collects',       55, 156, 'sedentary',   'active',   'accepted',     48, 10,  0, 'g8',  'paid',      3, NULL),
- ('vikram',  'Vikram Chandra',       '9840110022', 'Powerlifting',    'strength4', '06:00', 4, 75, 'floor',  'trainer_collects', NULL, 179, 'very_active', 'active',   'accepted',     44, 10,  0, 'p16', 'paid',     10, 'am'),
--- ── the newer half · four weeks each, and the awkward states ────────────────
- ('wasim',   'Wasim Akhtar',         '9840110023', 'Fat loss',        'beginner',  '17:00', 2, 60, 'floor',  'trainer_collects', NULL, 173, 'light',       'active',   'accepted',     38,  4,  0, 'p8',  'paid',      6, NULL),
- ('yamini',  'Yamini Rajan',         '9840110024', 'General fitness', 'beginner',  '10:30', 2, 60, 'floor',  'trainer_collects', NULL, 158, 'sedentary',   'active',   'accepted',     34,  4,  0, 'p8',  'fresh',     7, NULL),
- ('zara',    'Zara Khan',            '9840110025', 'Fat loss',        'remote',    '19:00', 2, 45, 'remote', 'trainer_collects', NULL, 164, 'light',       'active',   'accepted',     31,  4,  0, 'pm',  'paid',   NULL, NULL),
- ('aditi',   'Aditi Sharma',         '9840110026', 'Muscle gain',     'beginner',  '07:30', 2, 60, 'floor',  'trainer_collects', NULL, 165, 'moderate',    'active',   'accepted',     29,  4,  0, 'p8',  'paid',      5, NULL),
- ('balaji',  'Balaji Sundar',        '9840110027', 'Fat loss',        'full',      '18:30', 2, 60, 'floor',  'gym_collects',       50, 171, 'light',       'active',   'accepted',     27,  4,  0, 'g12', 'paid',      9, NULL),
+                         pack_slug, pay_state, remaining) VALUES
+-- ── on the diary · the nineteen this trainer actually coaches ───────────────
+-- The morning shift. 06:00 · 07:15 · 08:30 · 09:45, four to a morning.
+ ('ananya',  'Ananya Iyer',          '9840110001', 'Build strength',  'ppl',       'am', '1,3,5',   TRUE,  60, 'floor',  'trainer_collects', NULL, 164, 'moderate',    'active',   'accepted',    250, 10,  0, 'p16', 'paid',     11),
+ ('arjun',   'Arjun Nair',           '9840110002', 'Powerlifting',    'strength4', 'am', '1,3,4,6', TRUE,  60, 'floor',  'trainer_collects', NULL, 178, 'active',      'active',   'accepted',    220, 10,  0, 'p16', 'paid',      9),
+ ('bhavana', 'Bhavana Reddy',        '9840110003', 'General fitness', 'upper',     'am', '2,5',     TRUE,  60, 'floor',  'gym_collects',       60, 158, 'sedentary',   'active',   'accepted',    190, 10,  0, 'p12', 'paid',      7),
+ ('harish',  'Harish Kumar',         '9840110008', 'Muscle gain',     'ppl',       'am', '2,4,6',   TRUE,  60, 'floor',  'trainer_collects', NULL, 175, 'moderate',    'active',   'accepted',    130, 10,  0, 'p16', 'partial',   8),
+ ('ishaan',  'Ishaan Verma',         '9840110009', 'Fat loss',        'full',      'am', '1,3,5',   TRUE,  60, 'floor',  'trainer_collects', NULL, 169, 'light',       'active',   'accepted',    125, 10,  0, 'p8',  'paid',      0),
+ ('jyothi',  'Jyothi Balan',         '9840110010', 'General fitness', 'beginner',  'am', '2,4',     TRUE,  45, 'floor',  'gym_collects',       50, 155, 'sedentary',   'active',   'accepted',    118, 10,  0, 'g12', 'paid',     10),
+ ('usha',    'Usha Menon',           '9840110021', 'General fitness', 'full',      'am', '2,4,6',   TRUE,  60, 'floor',  'gym_collects',       55, 156, 'sedentary',   'active',   'accepted',     48, 10,  0, 'g8',  'paid',      3),
+ ('varun',   'Varun Joshi',          '9840110042', 'Build strength',  'upper',     'am', '1,5',     TRUE,  60, 'floor',  'trainer_collects', NULL, 180, 'active',      'active',   'accepted',     13,  4,  0, 'p12', 'paid',      9),
+ ('yamini',  'Yamini Rajan',         '9840110024', 'General fitness', 'beginner',  'am', '3,6',     TRUE,  45, 'floor',  'trainer_collects', NULL, 158, 'sedentary',   'active',   'accepted',     34,  4,  0, 'p8',  'fresh',     7),
+-- The evening shift. 17:00 · 18:15 · 19:30 · 20:45.
+ ('chandran','Chandran Pillai',      '9840110004', 'Fat loss',        'upper',     'pm', '2,5',     TRUE,  60, 'floor',  'trainer_collects', NULL, 172, 'light',       'active',   'accepted',    175, 10,  0, 'p12', 'overdue',   6),
+ ('farhan',  'Farhan Qureshi',       '9840110006', 'Muscle gain',     'upper',     'pm', '1,4',     TRUE,  60, 'floor',  'trainer_collects', NULL, 180, 'active',      'active',   'accepted',    150, 10,  0, 'p12', 'overdue',   5),
+ ('gayathri','Gayathri Subramanian', '9840110007', 'Post-natal',      'remote',    'pm', '3,6',     TRUE,  45, 'remote', 'trainer_collects', NULL, 160, 'light',       'active',   'accepted',    140, 10,  0, 'pm',  'paid',   NULL),
+ ('lakshmi', 'Lakshmi Narayanan',    '9840110012', 'General fitness', 'remote',    'pm', '1,5',     TRUE,  45, 'remote', 'trainer_collects', NULL, 161, 'light',       'active',   'accepted',    105, 10,  0, 'pm',  'paid',   NULL),
+ ('mohan',   'Mohan Das',            '9840110013', 'Build strength',  'ppl',       'pm', '1,3,6',   TRUE,  60, 'floor',  'trainer_collects', NULL, 174, 'active',      'active',   'accepted',     98, 10,  0, 'p16', 'paid',     12),
+ ('nithya',  'Nithya Krishnan',      '9840110014', 'Fat loss',        'full',      'pm', '2,4,6',   TRUE,  60, 'floor',  'gym_collects',       60, 157, 'sedentary',   'active',   'accepted',     92, 10,  0, 'p16', 'writeoff',  4),
+ ('omar',    'Omar Sheikh',          '9840110015', 'Muscle gain',     'upper',     'pm', '3,5',     TRUE,  60, 'floor',  'trainer_collects', NULL, 181, 'moderate',    'active',   'accepted',     85, 10,  0, 'p8',  'fresh',     6),
+ ('quadir',  'Quadir Ahmed',         '9840110017', 'Build strength',  'beginner',  'pm', '2,4',     TRUE,  45, 'floor',  'trainer_collects', NULL, 170, 'light',       'active',   'accepted',     72, 10,  0, 'p8',  'paid',      5),
+ ('rekha',   'Rekha Pillai',         '9840110018', 'General fitness', 'ppl',       'pm', '1,3,5',   TRUE,  60, 'floor',  'trainer_collects', NULL, 159, 'moderate',    'active',   'accepted',     66, 10,  0, 'p16', 'paid',     13),
+ ('sneha',   'Sneha Rao',            '9840110019', 'Post-natal',      'remote',    'pm', '2,6',     TRUE,  45, 'remote', 'trainer_collects', NULL, 162, 'light',       'active',   'accepted',     60, 10,  0, 'pm',  'fresh',  NULL),
+-- ── on the books · a slot on file, nothing on the diary ─────────────────────
+-- Their `days` and `band` are the slot they used to hold, so their own screens
+-- still read "Tue & Fri, 7:15am". `books = FALSE` keeps them off the timetable,
+-- which is what makes the nineteen above fit a shift one person could work.
+ ('divya',   'Divya Menon',          '9840110005', 'Fat loss',        'ppl',       'pm', '1,3,5',   FALSE, 60, 'floor',  'gym_collects',       55, 167, 'moderate',    'paused',   'accepted',    160, 10, 30, 'p8',  'paid',      2),
+ ('karthik', 'Karthik Raman',        '9840110011', 'Fat loss',        'upper',     'am', '2,5',     FALSE, 60, 'floor',  'trainer_collects', NULL, 176, 'light',       'inactive', 'accepted',    112, 10, 40, 'p12', 'paid',      8),
+ ('priya',   'Priya Ramesh',         '9840110016', 'Fat loss',        'remote',    'pm', '2,6',     FALSE, 45, 'remote', 'trainer_collects', NULL, 163, 'moderate',    'paused',   'accepted',     78, 10, 35, 'p12', 'paid',      7),
+ ('tarun',   'Tarun Gopal',          '9840110020', 'Muscle gain',     'upper',     'pm', '1,4',     FALSE, 60, 'floor',  'trainer_collects', NULL, 177, 'light',       'paused',   'accepted',     54, 10, 21, 'p12', 'paid',      6),
+ ('vikram',  'Vikram Chandra',       '9840110022', 'Powerlifting',    'strength4', 'am', '1,2,4,6', FALSE, 75, 'floor',  'trainer_collects', NULL, 179, 'very_active', 'inactive', 'accepted',     44, 10, 32, 'p16', 'paid',     10),
+ ('wasim',   'Wasim Akhtar',         '9840110023', 'Fat loss',        'beginner',  'am', '3,6',     FALSE, 60, 'floor',  'trainer_collects', NULL, 173, 'light',       'inactive', 'accepted',     38,  4, 25, 'p8',  'paid',      6),
+ ('zara',    'Zara Khan',            '9840110025', 'Fat loss',        'remote',    'pm', '3,6',     FALSE, 45, 'remote', 'trainer_collects', NULL, 164, 'light',       'paused',   'accepted',     31,  4, 22, 'pm',  'paid',   NULL),
+ ('aditi',   'Aditi Sharma',         '9840110026', 'Muscle gain',     'beginner',  'am', '1,4',     FALSE, 60, 'floor',  'trainer_collects', NULL, 165, 'moderate',    'inactive', 'accepted',     29,  4, 24, 'p8',  'paid',      5),
+ ('balaji',  'Balaji Sundar',        '9840110027', 'Fat loss',        'full',      'pm', '1,3,5',   FALSE, 60, 'floor',  'gym_collects',       50, 171, 'light',       'paused',   'accepted',     27,  4, 23, 'g12', 'paid',      9),
  -- Added yesterday and nothing set up yet. No template, so no plan, no bookings
  -- and no pack — the roster's "waiting for you", which is a different thing from
  -- a client who has gone quiet.
- ('charu',   'Charu Anand',          '9840110028', 'General fitness', NULL,        NULL,    0, 60, 'floor',  'trainer_collects', NULL, 160, 'sedentary',   'active',   'accepted',      1,  0,  0, NULL,  'none',   NULL, NULL),
- ('deepak',  'Deepak Iyer',          '9840110029', 'Muscle gain',     'upper',     '19:30', 2, 60, 'floor',  'trainer_collects', NULL, 176, 'active',      'active',   'accepted',     24,  4,  0, 'p12', 'paid',      8, NULL),
- ('elakiya', 'Elakiya Murugan',      '9840110030', 'Fat loss',        'beginner',  '08:00', 2, 60, 'floor',  'trainer_collects', NULL, 157, 'light',       'active',   'accepted',     23,  4, 12, 'p8',  'paid',      4, NULL),
- ('ganesh',  'Ganesh Rao',           '9840110031', 'Build strength',  'full',      '07:00', 2, 60, 'floor',  'trainer_collects', NULL, 174, 'moderate',    'active',   'accepted',     22,  4,  0, 'p12', 'overdue',   5, NULL),
+ ('charu',   'Charu Anand',          '9840110028', 'General fitness', NULL,        NULL, NULL,      FALSE, 60, 'floor',  'trainer_collects', NULL, 160, 'sedentary',   'active',   'accepted',      1,  0,  0, NULL,  'none',   NULL),
+ ('deepak',  'Deepak Iyer',          '9840110029', 'Muscle gain',     'upper',     'pm', '2,5',     FALSE, 60, 'floor',  'trainer_collects', NULL, 176, 'active',      'inactive', 'accepted',     24,  4, 20, 'p12', 'paid',      8),
+ ('elakiya', 'Elakiya Murugan',      '9840110030', 'Fat loss',        'beginner',  'am', '2,4',     FALSE, 60, 'floor',  'trainer_collects', NULL, 157, 'light',       'paused',   'accepted',     23,  4, 19, 'p8',  'paid',      4),
+ ('ganesh',  'Ganesh Rao',           '9840110031', 'Build strength',  'full',      'am', '1,3,6',   FALSE, 60, 'floor',  'trainer_collects', NULL, 174, 'moderate',    'inactive', 'accepted',     22,  4, 18, 'p12', 'overdue',   5),
  -- Invited six days back and never opened it. Past `INVITE_STALE_DAYS`, so the
  -- roster stops saying "invited" and starts saying "resend".
- ('hema',    'Hema Suresh',          '9840110032', 'General fitness', 'beginner',  '17:00', 2, 60, 'floor',  'trainer_collects', NULL, 159, 'sedentary',   'invited',  'invited',       6,  0,  0, 'p8',  'fresh',     8, NULL),
- ('irfan',   'Irfan Ali',            '9840110033', 'Muscle gain',     'upper',     '20:00', 2, 60, 'floor',  'trainer_collects', NULL, 178, 'moderate',    'invited',  'invited',       0,  0,  0, 'p8',  'fresh',     8, NULL),
+ ('hema',    'Hema Suresh',          '9840110032', 'General fitness', 'beginner',  'am', '2,5',     FALSE, 60, 'floor',  'trainer_collects', NULL, 159, 'sedentary',   'invited',  'invited',       6,  0,  0, 'p8',  'fresh',     8),
+ ('irfan',   'Irfan Ali',            '9840110033', 'Muscle gain',     'upper',     'pm', '1,4',     FALSE, 60, 'floor',  'trainer_collects', NULL, 178, 'moderate',    'invited',  'invited',       0,  0,  0, 'p8',  'fresh',     8),
  -- No number on file. Everything works except anything that has to leave the
  -- phone: her weekly report is written and has nowhere to go.
- ('kavya',   'Kavya Ravi',           NULL,         'Fat loss',        'beginner',  '09:00', 2, 60, 'floor',  'trainer_collects', NULL, 161, 'light',       'active',   'accepted',     21,  4,  0, 'p8',  'paid',      5, NULL),
- ('manoj',   'Manoj Pillai',         '9840110035', 'General fitness', 'full',      '18:00', 2, 60, 'floor',  'trainer_collects', NULL, 170, 'light',       'inactive', 'declined',     20,  4,  9, 'p12', 'paid',      7, 'pm'),
- ('nandhini','Nandhini Selvam',      '9840110036', 'Fat loss',        'beginner',  '07:00', 2, 60, 'floor',  'trainer_collects', NULL, 156, 'sedentary',   'inactive', 'removed',      30,  4, 14, 'p8',  'paid',      6, NULL),
+ ('kavya',   'Kavya Ravi',           NULL,         'Fat loss',        'beginner',  'am', '3,6',     FALSE, 60, 'floor',  'trainer_collects', NULL, 161, 'light',       'paused',   'accepted',     21,  4, 17, 'p8',  'paid',      5),
+ ('manoj',   'Manoj Pillai',         '9840110035', 'General fitness', 'full',      'pm', '2,4,6',   FALSE, 60, 'floor',  'trainer_collects', NULL, 170, 'light',       'inactive', 'declined',     20,  4,  9, 'p12', 'paid',      7),
+ ('nandhini','Nandhini Selvam',      '9840110036', 'Fat loss',        'beginner',  'am', '1,5',     FALSE, 60, 'floor',  'trainer_collects', NULL, 156, 'sedentary',   'inactive', 'removed',      30,  4, 14, 'p8',  'paid',      6),
  -- The number turns out to own a trainer account, so no invite can ever reach
  -- it. `ClientPhoneGuard` refuses this at the door now; the row exists because
  -- rows in this state predate the guard, and because it is the one attention
  -- item on the roster that is a typo rather than a fact about the client.
- ('pavan',   'Pavan Kulkarni',       '9840110037', 'Muscle gain',     'upper',     '19:00', 2, 60, 'floor',  'trainer_collects', NULL, 177, 'moderate',    'active',   'unavailable',  18,  4,  0, 'p12', 'paid',      4, NULL),
- ('radha',   'Radha Krishnan',       '9840110038', 'General fitness', 'beginner',  '09:00', 2, 60, 'floor',  'gym_collects',       50, 154, 'sedentary',   'active',   'accepted',     17,  4,  0, 'g8',  'paid',      5, NULL),
- ('sathish', 'Sathish Kumar',        '9840110039', 'Fat loss',        'full',      '18:00', 2, 60, 'floor',  'trainer_collects', NULL, 172, 'light',       'paused',   'accepted',     40,  4, 12, 'p12', 'paid',      8, 'pm'),
- ('thanya',  'Thanya Prakash',       '9840110040', 'Muscle gain',     'beginner',  '08:30', 2, 60, 'floor',  'trainer_collects', NULL, 163, 'moderate',    'active',   'accepted',     15,  4,  0, 'p8',  'paid',      6, NULL),
- ('uma',     'Uma Bhat',             '9840110041', 'General fitness', 'remote',    '19:00', 2, 45, 'remote', 'trainer_collects', NULL, 158, 'light',       'active',   'accepted',     14,  4,  0, 'pm',  'paid',   NULL, NULL),
- ('varun',   'Varun Joshi',          '9840110042', 'Build strength',  'upper',     '06:30', 2, 60, 'floor',  'trainer_collects', NULL, 180, 'active',      'active',   'accepted',     13,  4,  0, 'p12', 'paid',      9, NULL),
- ('yusuf',   'Yusuf Rahman',         '9840110043', 'Fat loss',        'beginner',  '18:30', 2, 60, 'floor',  'trainer_collects', NULL, 175, 'light',       'active',   'accepted',     12,  4,  0, 'p8',  'paid',      2, NULL),
- ('zoya',    'Zoya Mirza',           '9840110044', 'General fitness', 'full',      '07:30', 2, 60, 'floor',  'trainer_collects', NULL, 162, 'sedentary',   'archived', 'accepted',     45,  4, 16, 'p12', 'paid',      7, NULL);
+ ('pavan',   'Pavan Kulkarni',       '9840110037', 'Muscle gain',     'upper',     'pm', '3,6',     FALSE, 60, 'floor',  'trainer_collects', NULL, 177, 'moderate',    'active',   'unavailable',  18,  4,  0, 'p12', 'paid',      4),
+ ('radha',   'Radha Krishnan',       '9840110038', 'General fitness', 'beginner',  'am', '2,4',     FALSE, 60, 'floor',  'gym_collects',       50, 154, 'sedentary',   'inactive', 'accepted',     17,  4, 15, 'g8',  'paid',      5),
+ ('sathish', 'Sathish Kumar',        '9840110039', 'Fat loss',        'full',      'pm', '2,4,6',   FALSE, 60, 'floor',  'trainer_collects', NULL, 172, 'light',       'paused',   'accepted',     40,  4, 12, 'p12', 'paid',      8),
+ ('thanya',  'Thanya Prakash',       '9840110040', 'Muscle gain',     'beginner',  'am', '1,4',     FALSE, 60, 'floor',  'trainer_collects', NULL, 163, 'moderate',    'inactive', 'accepted',     15,  4, 13, 'p8',  'paid',      6),
+ ('uma',     'Uma Bhat',             '9840110041', 'General fitness', 'remote',    'pm', '1,5',     FALSE, 45, 'remote', 'trainer_collects', NULL, 158, 'light',       'paused',   'accepted',     14,  4, 11, 'pm',  'paid',   NULL),
+ ('yusuf',   'Yusuf Rahman',         '9840110043', 'Fat loss',        'beginner',  'pm', '3,6',     FALSE, 60, 'floor',  'trainer_collects', NULL, 175, 'light',       'inactive', 'accepted',     12,  4, 10, 'p8',  'paid',      2),
+ ('zoya',    'Zoya Mirza',           '9840110044', 'General fitness', 'full',      'am', '1,3,5',   FALSE, 60, 'floor',  'trainer_collects', NULL, 162, 'sedentary',   'archived', 'accepted',     45,  4, 16, 'p12', 'paid',      7);
+
+-- The count-match rule, checked here rather than discovered later. `apply`
+-- refuses a schedule that does not cover each of the template's ordinal days
+-- exactly once, so a client whose `days` list is the wrong length would be a
+-- program the product could not have produced.
+DO $$
+DECLARE bad text;
+BEGIN
+    SELECT string_agg(format('%s: %s days for a %s-day template', c.key,
+                             cardinality(string_to_array(c.days, ',')),
+                             cardinality(string_to_array(t.slots, ','))), '; ' ORDER BY c.key)
+    INTO bad
+    FROM demo_client c JOIN demo_template t ON t.key = c.tpl
+    WHERE cardinality(string_to_array(c.days, ',')) <> cardinality(string_to_array(t.slots, ','));
+    IF bad IS NOT NULL THEN
+        RAISE EXCEPTION 'Schedule does not cover the template''s days: %', bad;
+    END IF;
+END $$;
 
 UPDATE demo_client SET id = md5(:'trainer_phone' || ':demo:client:' || key)::uuid;
 
--- ── When each of them trains ────────────────────────────────────────────────
+-- ── The timetable ───────────────────────────────────────────────────────────
 --
--- The first `per_week` days of their own template's layout, at their own hour.
--- Derived rather than typed, so `templateDay` always equals `weekday` and both
--- always name a day the client's template actually defines.
+-- One trainer coaches one person at a time, so a slot is a scarce thing and the
+-- data has to behave like it. This is the part the old version of this file got
+-- wrong: it typed an hour per client, five of them said 06:00, and the diary
+-- drew five people in one room.
+--
+-- Each (weekday, band) is a queue instead. The clients on the diary that morning
+-- are stacked into four positions in a stable order, and the position decides
+-- the time — 06:00, 07:15, 08:30, 09:45, then 17:00, 18:15, 19:30, 20:45.
+-- Because position comes from `row_number()` over that exact partition, two
+-- clients on the same day CANNOT be given the same time. It is not a property
+-- somebody has to remember when they add a forty-fifth client.
+--
+-- The 75-minute pitch is what holds the frame with mixed durations: a 45-minute
+-- call and a 60-minute floor session both fit one position, with the remainder
+-- as turnaround. Anything longer than 75 would not, and the overflow check below
+-- is watching for exactly that.
+--
+-- `books = FALSE` clients are queued SEPARATELY, over the same four positions.
+-- They generate no sessions, so they can hold a slot a booked client also holds
+-- without the two ever meeting on a real date — which is the whole reason
+-- forty-four clients can share one trainer's week. What they get out of it is a
+-- weekly slot on file that reads like the one they used to have.
+--
+-- The ordinal slot each weekday carries — `template_day` — is the day's position
+-- in the client's own ascending list, which is what `parseWeeklySchedule`
+-- derives on the phone. Day 1 is the earliest weekday.
 
 CREATE TEMP TABLE demo_slot ON COMMIT DROP AS
-SELECT c.key,
-       c.id AS client_id,
-       c.duration,
-       d.day::int AS weekday,        -- ISO: 1 = Monday
-       c.at_time,
-       d.ord::int AS slot_no
-FROM demo_client c
-JOIN demo_template t ON t.key = c.tpl
-CROSS JOIN LATERAL unnest(string_to_array(t.days, ',')) WITH ORDINALITY AS d(day, ord)
-WHERE d.ord <= c.per_week;
+WITH raw AS (
+    SELECT c.key, c.id AS client_id, c.duration, c.band, c.books,
+           d.day::int AS weekday,
+           d.ord::int AS template_day
+    FROM demo_client c
+    CROSS JOIN LATERAL unnest(string_to_array(c.days, ',')) WITH ORDINALITY AS d(day, ord)
+    WHERE c.days IS NOT NULL
+),
+queued AS (
+    -- Ordered by key: arbitrary, but stable across runs, which is what keeps a
+    -- re-run from reshuffling everybody's 6am.
+    SELECT r.*,
+           CASE WHEN r.books
+                -- On the diary: the position IS the slot, and there are four.
+                -- A fifth booked client on one morning has nowhere to go, which
+                -- is what the overflow check below refuses.
+                THEN row_number() OVER (PARTITION BY r.weekday, r.band, r.books ORDER BY r.key)
+                -- On the books only: wrapped back into the same four. Two paused
+                -- clients may both read "Tue 07:15" on their own screen and it
+                -- costs nothing — neither of them is on the diary, so they never
+                -- meet there or anywhere else. Without the wrap a ninth such
+                -- client would be given a slot at half past noon, which is a
+                -- lie on a profile even when nothing is booked into it.
+                ELSE ((row_number() OVER (PARTITION BY r.weekday, r.band, r.books ORDER BY r.key) - 1) % 4) + 1
+           END AS position
+    FROM raw r
+)
+SELECT q.key, q.client_id, q.duration, q.weekday, q.template_day, q.band, q.books, q.position,
+       b.opens + (q.position - 1) * 75 AS start_minute,
+       b.opens + (q.position - 1) * 75 + q.duration AS end_minute,
+       b.closes,
+       to_char(make_interval(mins => (b.opens + (q.position - 1) * 75)::int), 'HH24:MI') AS at_time
+FROM queued q
+JOIN (VALUES ('am', 360, 660), ('pm', 1020, 1320)) AS b(band, opens, closes) ON b.band = q.band;
+
+-- Does the day still fit inside the shift? A fifth client on one morning, or a
+-- 90-minute session, pushes the last position past 11:00 — and a diary that
+-- books people outside the trainer's own hours contradicts itself on screen.
+DO $$
+DECLARE bad text;
+BEGIN
+    SELECT string_agg(format('%s on weekday %s runs to %s, shift closes %s', key, weekday,
+                             to_char(make_interval(mins => end_minute::int), 'HH24:MI'),
+                             to_char(make_interval(mins => closes::int), 'HH24:MI')),
+                      '; ' ORDER BY weekday, start_minute)
+    INTO bad FROM demo_slot WHERE end_minute > closes;
+    IF bad IS NOT NULL THEN
+        RAISE EXCEPTION 'The timetable overflows the working day: %', bad;
+    END IF;
+END $$;
 
 INSERT INTO client (id, trainer_id, name, phone, goal, status, payment_mode, trainer_split_percent,
                     height_cm, activity_level, delivery_mode, sessions_per_week,
@@ -572,11 +720,16 @@ INSERT INTO client (id, trainer_id, name, phone, goal, status, payment_mode, tra
                     invited_at, accepted_at, declined_at, removed_at, paused_at,
                     metadata, created_at)
 SELECT c.id, t.id, c.name, c.phone, c.goal, c.status, c.pay_mode, c.split,
-       c.height, c.activity, c.mode, NULLIF(c.per_week, 0), c.duration,
+       c.height, c.activity, c.mode,
+       NULLIF(cardinality(COALESCE(string_to_array(c.days, ','), '{}')), 0), c.duration,
+       -- `[{templateDay, weekday, time}]`, the canonical shape in
+       -- `app/src/clients/schedule.ts`. `templateDay` is the ORDINAL slot the
+       -- day carries, `weekday` is the calendar day it falls on — the two
+       -- meanings V24 separated.
        COALESCE((SELECT jsonb_agg(jsonb_build_object(
-                          'templateDay', s.weekday,
+                          'templateDay', s.template_day,
                           'weekday',     s.weekday,
-                          'time',        s.at_time) ORDER BY s.slot_no)
+                          'time',        s.at_time) ORDER BY s.weekday)
                  FROM demo_slot s WHERE s.key = c.key), '[]'::jsonb),
        c.membership,
        (CURRENT_DATE - c.joined)::timestamptz,
@@ -661,13 +814,23 @@ FROM demo_client c
 JOIN demo_template t ON t.key = c.tpl;
 
 INSERT INTO program (id, trainer_id, client_id, template_id, name, goal, start_date, end_date,
-                     status, created_at)
+                     schedule, status, created_at)
 SELECT p.id, t.id, p.client_id, p.template_id, p.name, p.goal, p.start_date,
-       p.start_date + p.weeks * 7, p.status, p.start_date::timestamptz
+       p.start_date + p.weeks * 7,
+       -- V24 · which weekday and time each ordinal day landed on. Written once
+       -- by apply and read by the phone on sync; it is the only record of the
+       -- choice, because `program_exercise` below carries the answer but not
+       -- the question.
+       (SELECT jsonb_agg(jsonb_build_object('day', s.template_day,
+                                            'weekday', s.weekday,
+                                            'time', s.at_time) ORDER BY s.template_day)
+        FROM demo_slot s WHERE s.key = p.key),
+       p.status, p.start_date::timestamptz
 FROM demo_program p, seed_trainer t
 ON CONFLICT (id) DO UPDATE SET
     template_id = EXCLUDED.template_id, name = EXCLUDED.name, goal = EXCLUDED.goal,
     start_date = EXCLUDED.start_date, end_date = EXCLUDED.end_date,
+    schedule = EXCLUDED.schedule,
     status = EXCLUDED.status, deleted_at = NULL, updated_at = now();
 
 -- One finished program, so the client file's Programs tab has a history rather
@@ -705,40 +868,33 @@ SELECT md5(:'trainer_phone' || ':demo:progex:' || p.key || ':'
        (entry->>'reps')::int,
        (entry->>'rest_seconds')::int,
        NULL, NULL,
-       (entry->>'day_of_week')::int,
+       -- The translation V24 introduced: the blueprint's `day_of_week` is an
+       -- ORDINAL SLOT, and the row landing in the client's plan carries the
+       -- concrete WEEKDAY that slot was scheduled on. The phone's log keys on
+       -- this — `fetchProgramExercisesForDay` matches it against the session's
+       -- weekday — so getting it wrong means a plan that exists and a log that
+       -- cannot find it.
+       sl.weekday,
        COALESCE((entry->>'week')::int, 1),
        (entry->>'order_index')::int,
        p.start_date::timestamptz
 FROM demo_program p
 JOIN template tpl ON tpl.id = p.template_id
 CROSS JOIN LATERAL jsonb_array_elements(tpl.structure) AS entry
+JOIN demo_slot sl ON sl.key = p.key AND sl.template_day = (entry->>'day_of_week')::int
 ON CONFLICT (id) DO UPDATE SET
     exercise_id = EXCLUDED.exercise_id, sets = EXCLUDED.sets, reps = EXCLUDED.reps,
     rest_seconds = EXCLUDED.rest_seconds, day_of_week = EXCLUDED.day_of_week,
     week = EXCLUDED.week, order_index = EXCLUDED.order_index,
     deleted_at = NULL, updated_at = now();
 
--- ── Batches ─────────────────────────────────────────────────────────────────
+-- ── No batches ──────────────────────────────────────────────────────────────
 --
--- A batch is NOT one session with many people. Every attendee keeps their own
--- `scheduled_session` row and they share a `batch_id` — which is what lets a
--- pack move per person, lets one attendee no-show while the rest train, and
--- keeps the 24-hour undo exact.
---
--- The evening batch is deliberately under its own minimum most weeks: two of
--- its five are paused or gone quiet, so the agenda row has something to warn
--- about while there is still time to fill it.
-
-INSERT INTO batch (id, trainer_id, name, capacity, min_size, created_at)
-SELECT md5(:'trainer_phone' || ':demo:batch:' || b.slug)::uuid, t.id, b.name, b.capacity,
-       b.min_size, (CURRENT_DATE - 120)::timestamptz
-FROM seed_trainer t,
-     (VALUES ('am', 'Morning batch · 6am',  8,  4),
-             ('pm', 'Evening batch · 6pm', 10,  4)
-     ) AS b(slug, name, capacity, min_size)
-ON CONFLICT (id) DO UPDATE SET
-    name = EXCLUDED.name, capacity = EXCLUDED.capacity, min_size = EXCLUDED.min_size,
-    deleted_at = NULL, updated_at = now();
+-- There used to be two here, and the diary's batch row is a real shape worth
+-- seeding. It is also, by definition, several clients in one slot — so it is the
+-- one thing this dataset cannot contain now that it books one person at a time.
+-- The `batch` table is still retired at the top of this file, so a previous
+-- run's groups do not survive into this one.
 
 -- ── Packs sold ──────────────────────────────────────────────────────────────
 --
@@ -982,7 +1138,7 @@ WITH days AS (
     SELECT generate_series(CURRENT_DATE - 77, CURRENT_DATE + 14, INTERVAL '1 day')::date AS d
 ),
 raw AS (
-    SELECT sl.key, sl.client_id, sl.duration, sl.weekday,
+    SELECT sl.key, sl.client_id, sl.duration, sl.weekday, sl.template_day,
            ((d.d + sl.at_time::time) AT TIME ZONE :'tz') AS at,
            d.d AS on_date,
            -- Deterministic per client, date and time, so a re-run inside the same
@@ -992,7 +1148,12 @@ raw AS (
     FROM days d
     JOIN demo_slot sl ON EXTRACT(ISODOW FROM d.d)::int = sl.weekday
     JOIN demo_client c ON c.key = sl.key
-    WHERE d.d >= GREATEST(CURRENT_DATE - c.hist_weeks * 7, CURRENT_DATE - c.joined)
+    -- The line that lets forty-four clients belong to one trainer. A client on
+    -- the books but not on the diary keeps their slot on file and generates no
+    -- sessions, so their slot can be one a booked client also holds — the two
+    -- never meet on a real date. See the roster's note.
+    WHERE sl.books
+      AND d.d >= GREATEST(CURRENT_DATE - c.hist_weeks * 7, CURRENT_DATE - c.joined)
       -- The silence. Nothing is generated inside it, in either direction: a
       -- paused client has no future bookings either.
       AND (c.dark_days = 0 OR d.d < CURRENT_DATE - c.dark_days)
@@ -1016,29 +1177,35 @@ FROM past p
 JOIN (VALUES
         -- No-shows. They cost the trainer the hour and the pack still moves,
         -- which is the rule the money side turns on.
-        ('divya', 2, 'no_show'), ('divya', 7, 'no_show'),
+        ('ishaan', 2, 'no_show'), ('ishaan', 7, 'no_show'),
         ('farhan', 3, 'no_show'), ('chandran', 5, 'no_show'),
-        ('yusuf', 2, 'no_show'), ('ganesh', 4, 'no_show'),
+        ('omar', 2, 'no_show'), ('quadir', 4, 'no_show'),
         ('harish', 9, 'no_show'), ('mohan', 12, 'no_show'),
         -- Cancellations. The client called; that is the behaviour to encourage,
         -- and it must not score as a miss anywhere.
         ('bhavana', 3, 'cancelled'), ('sneha', 4, 'cancelled'),
         ('usha', 2, 'cancelled'), ('rekha', 6, 'cancelled'),
-        ('arjun', 8, 'cancelled'), ('deepak', 3, 'cancelled')
+        ('arjun', 8, 'cancelled'), ('varun', 3, 'cancelled')
      ) AS x(key, nth, status) ON x.key = p.key AND x.nth = p.nth;
 
 UPDATE demo_session ss SET status = e.status FROM demo_exception e WHERE e.id = ss.id;
 
 INSERT INTO scheduled_session (id, trainer_id, client_id, program_id, scheduled_at,
                                duration_minutes, status, notes, day_label, template_day,
-                               delivery_mode, series_id, cancelled_by, batch_id,
+                               delivery_mode, series_id, cancelled_by,
                                pack_delta, pack_package_id, pack_applied_at, created_at)
 SELECT ss.id, t.id, ss.client_id, pr.id, ss.at, ss.duration, ss.status,
        CASE WHEN ss.status = 'no_show' THEN 'Didn''t turn up, no message.' END,
        -- The template's own name for THAT day, not the program's. A session
        -- labelled "Push A" while the plan for that day says "Pull A" is the kind
        -- of thing the workout log puts side by side and makes obvious.
-       COALESCE(tpl.day_labels->>ss.weekday::text, pr.name),
+       -- The template's own name for that ORDINAL day. `day_labels` is keyed by
+       -- slot, which is why this reads `template_day` from the slot table.
+       COALESCE(tpl.day_labels->>ss.template_day::text, pr.name),
+       -- ...whereas the COLUMN called `template_day` holds the WEEKDAY. The name
+       -- predates V24; what reads it is `seedLogFromPlan`, which hands it to
+       -- `fetchProgramExercisesForDay` to match `program_exercise.day_of_week` —
+       -- and that carries the concrete weekday after the translation above.
        ss.weekday,
        -- Per-session mode. Null means "inherit the client's", which is the
        -- overwhelming majority; one override is set further down.
@@ -1047,8 +1214,6 @@ SELECT ss.id, t.id, ss.client_id, pr.id, ss.at, ss.duration, ss.status,
        md5(:'trainer_phone' || ':demo:series:' || ss.key || ':' || ss.weekday)::uuid,
        CASE WHEN ss.status = 'cancelled'
             THEN CASE WHEN ss.n % 3 = 0 THEN 'trainer' ELSE 'client' END END,
-       CASE WHEN c.batch IS NOT NULL
-            THEN md5(:'trainer_phone' || ':demo:batch:' || c.batch)::uuid END,
        -- The pack moves on done or no-show, never on booked. Stamped so the
        -- 24-hour undo has something exact to reverse.
        --
@@ -1070,10 +1235,60 @@ ON CONFLICT (id) DO UPDATE SET
     status = EXCLUDED.status, notes = EXCLUDED.notes, day_label = EXCLUDED.day_label,
     template_day = EXCLUDED.template_day, program_id = EXCLUDED.program_id,
     delivery_mode = EXCLUDED.delivery_mode, series_id = EXCLUDED.series_id,
-    cancelled_by = EXCLUDED.cancelled_by, batch_id = EXCLUDED.batch_id,
+    cancelled_by = EXCLUDED.cancelled_by,
     pack_delta = EXCLUDED.pack_delta, pack_package_id = EXCLUDED.pack_package_id,
     pack_applied_at = EXCLUDED.pack_applied_at,
     deleted_at = NULL, updated_at = now();
+
+-- ── One client at a time ────────────────────────────────────────────────────
+--
+-- The invariant this file used to break, checked against the rows that were
+-- actually written rather than against the arithmetic that produced them. Two
+-- sessions clash when each starts before the other has finished; a shared start
+-- time is only the most obvious case, and a 90-minute session laid over a
+-- 75-minute pitch would slip past a start-time check untouched.
+--
+-- A clash between two of this seed's own clients is a bug in this file and
+-- aborts the run. A clash with a client somebody added by hand is their diary
+-- and their call, so it warns — but it still says so.
+DO $$
+DECLARE mine text; theirs text; n_mine bigint; n_theirs bigint;
+BEGIN
+    CREATE TEMP TABLE demo_clash ON COMMIT DROP AS
+    SELECT ca.name AS a_name, cb.name AS b_name,
+           (a.scheduled_at AT TIME ZONE current_setting('TimeZone')) AS at,
+           (ca.metadata->>'seed' = 'demo' AND cb.metadata->>'seed' = 'demo') AS both_ours
+    FROM scheduled_session a
+    JOIN scheduled_session b
+      ON b.trainer_id = a.trainer_id AND b.id > a.id AND b.deleted_at IS NULL
+     AND b.status <> 'cancelled'
+     AND b.scheduled_at < a.scheduled_at + make_interval(mins => COALESCE(a.duration_minutes, 60))
+     AND a.scheduled_at < b.scheduled_at + make_interval(mins => COALESCE(b.duration_minutes, 60))
+    JOIN client ca ON ca.id = a.client_id
+    JOIN client cb ON cb.id = b.client_id
+    WHERE a.trainer_id IN (SELECT id FROM seed_trainer)
+      AND a.deleted_at IS NULL AND a.status <> 'cancelled'
+      AND (ca.metadata->>'seed' = 'demo' OR cb.metadata->>'seed' = 'demo');
+
+    -- The first few and a count. One mistake in the timetable repeats every week
+    -- for twelve weeks, and an error listing three hundred identical pairs
+    -- buries the one fact you need: which two people.
+    SELECT count(*), string_agg(line, E'\n           ' ORDER BY line) INTO n_mine, mine
+    FROM (SELECT format('%s and %s at %s', a_name, b_name, to_char(at, 'Dy DD Mon HH24:MI')) AS line
+          FROM demo_clash WHERE both_ours ORDER BY at LIMIT 5) f;
+    IF n_mine > 0 THEN
+        RAISE EXCEPTION E'Two clients booked at the same time (% clashes in all):\n           %',
+              (SELECT count(*) FROM demo_clash WHERE both_ours), mine;
+    END IF;
+
+    SELECT count(*), string_agg(line, E'\n           ' ORDER BY line) INTO n_theirs, theirs
+    FROM (SELECT format('%s and %s at %s', a_name, b_name, to_char(at, 'Dy DD Mon HH24:MI')) AS line
+          FROM demo_clash WHERE NOT both_ours ORDER BY at LIMIT 5) f;
+    IF n_theirs > 0 THEN
+        RAISE WARNING E'A seeded session overlaps a client you added by hand (% in all):\n           %',
+              (SELECT count(*) FROM demo_clash WHERE NOT both_ours), theirs;
+    END IF;
+END $$;
 
 -- A client with a plan and no sessions at all is always a mistake in the roster
 -- above, and it is a quiet one: their file opens, their pack has a balance and
@@ -1085,7 +1300,7 @@ DECLARE missing text;
 BEGIN
     SELECT string_agg(c.key, ', ' ORDER BY c.key) INTO missing
     FROM demo_client c
-    WHERE c.tpl IS NOT NULL
+    WHERE c.tpl IS NOT NULL AND c.books
       AND NOT EXISTS (SELECT 1 FROM demo_session s WHERE s.key = c.key);
     IF missing IS NOT NULL THEN
         RAISE WARNING 'Clients with a plan but no sessions (dark_days outran joined?): %', missing;
@@ -1117,7 +1332,7 @@ UPDATE scheduled_session
 SET client_confirmed_at = now() - INTERVAL '19 hours', updated_at = now()
 WHERE id IN (
     SELECT ss.id FROM demo_session ss
-    WHERE ss.key IN ('ananya', 'rekha', 'priya') AND ss.at > now()
+    WHERE ss.key IN ('ananya', 'rekha', 'gayathri') AND ss.at > now()
     ORDER BY ss.at LIMIT 3
 );
 
@@ -1238,12 +1453,16 @@ FROM (
            we2.id,
            we2.exercise_id AS from_id,
            (SELECT e.id FROM exercise e
-            WHERE e.name = 'Dumbbell Bench Press' AND e.deleted_at IS NULL LIMIT 1) AS to_id
+            WHERE lower(e.name) = 'dumbbell bench press' AND e.deleted_at IS NULL LIMIT 1) AS to_id
     FROM demo_logged l
     JOIN workout_exercise we2 ON we2.workout_session_id = l.workout_id AND we2.deleted_at IS NULL
     JOIN exercise e2 ON e2.id = we2.exercise_id
     WHERE l.key IN ('ananya', 'harish', 'chandran')
-      AND e2.name = 'Barbell Bench Press - Medium Grip'
+      -- V21's name for it. The old dataset's "Barbell Bench Press - Medium Grip"
+      -- matched nothing after the swap, which meant the `to_id` subquery was
+      -- also dead and no row was ever swapped — the one thing this block exists
+      -- to demonstrate.
+      AND lower(e2.name) = 'barbell bench press'
     ORDER BY l.key, l.at DESC
 ) AS sub
 WHERE we.id = sub.id AND sub.to_id IS NOT NULL
@@ -1262,8 +1481,11 @@ INSERT INTO workout_exercise (id, workout_session_id, exercise_id, order_index, 
 SELECT md5(:'trainer_phone' || ':demo:woex:extra:' || r.workout_id)::uuid,
        r.workout_id, e.id, 90, 'unplanned', 3, 12, 60, r.at + INTERVAL '35 minutes'
 FROM demo_recent r
-JOIN exercise e ON e.name = 'Face Pull' AND e.deleted_at IS NULL
-WHERE r.key IN ('arjun', 'mohan', 'vikram') AND r.nth = 1
+-- The V21 library has no "Face Pull"; this is its nearest equivalent and it is
+-- a real row. A name that matches nothing turns this INSERT into a no-op, and
+-- an unplanned-exercise demo with no unplanned exercise in it says nothing.
+JOIN exercise e ON lower(e.name) = 'cable rear delt row (with rope)' AND e.deleted_at IS NULL
+WHERE r.key IN ('arjun', 'mohan', 'nithya') AND r.nth = 1
 ON CONFLICT (id) DO UPDATE SET
     source = EXCLUDED.source, deleted_at = NULL, updated_at = now();
 
@@ -1277,7 +1499,7 @@ FROM (
     SELECT DISTINCT ON (r.key) we2.id, r.at
     FROM demo_recent r
     JOIN workout_exercise we2 ON we2.workout_session_id = r.workout_id AND we2.deleted_at IS NULL
-    WHERE r.key IN ('bhavana', 'deepak') AND r.nth = 1
+    WHERE r.key IN ('bhavana', 'jyothi') AND r.nth = 1
     ORDER BY r.key, we2.order_index DESC
 ) AS sub
 WHERE we.id = sub.id;
@@ -1312,14 +1534,25 @@ FROM workout_exercise we
 JOIN (SELECT DISTINCT workout_id, key, n, at FROM demo_logged) l ON l.workout_id = we.workout_session_id
 JOIN exercise e ON e.id = we.exercise_id
 CROSS JOIN LATERAL (
+    -- These are V21's equipment strings, which are the upstream dataset's own.
+    -- Three of them used to be the old library's — 'e-z curl bar', 'machine' and
+    -- 'kettlebells' — and a CASE arm that matches nothing falls through to NULL,
+    -- so every machine lift in the seed logged as a bodyweight one. Smith leg
+    -- press is on two of the templates above, which made it visible: reps and no
+    -- weight, on a leg press.
     SELECT CASE lower(COALESCE(e.equipment, ''))
-                WHEN 'barbell'       THEN 40
-                WHEN 'e-z curl bar'  THEN 20
-                WHEN 'dumbbell'      THEN 14
-                WHEN 'machine'       THEN 35
-                WHEN 'cable'         THEN 25
-                WHEN 'kettlebells'   THEN 16
-                WHEN 'medicine ball' THEN 6
+                WHEN 'barbell'          THEN 40
+                WHEN 'ez barbell'       THEN 20
+                WHEN 'dumbbell'         THEN 14
+                WHEN 'leverage machine' THEN 35
+                WHEN 'smith machine'    THEN 30
+                -- The trainer's own sled. It is `weight_reps`, so it needs an
+                -- arm here or it logs as a bodyweight movement — which is the
+                -- bug 'other' used to cause from the other direction.
+                WHEN 'sled machine'     THEN 60
+                WHEN 'cable'            THEN 25
+                WHEN 'kettlebell'       THEN 16
+                WHEN 'medicine ball'    THEN 6
                 -- Bodyweight and the odds and ends. No load, so the set row asks
                 -- for reps only — which is also what `log_type = 'reps'` means on
                 -- the trainer's own exercises.
@@ -1635,6 +1868,37 @@ COMMIT;
 -- with no rows still opens, and both look like an app bug from the outside.
 
 \echo ''
+\echo 'The timetable — one trainer, one client at a time:'
+SELECT to_char(make_interval(mins => min(ss.start_min)::int), 'HH24:MI') AS "time",
+       max(CASE WHEN ss.weekday = 1 THEN ss.who END) AS "Mon",
+       max(CASE WHEN ss.weekday = 2 THEN ss.who END) AS "Tue",
+       max(CASE WHEN ss.weekday = 3 THEN ss.who END) AS "Wed",
+       max(CASE WHEN ss.weekday = 4 THEN ss.who END) AS "Thu",
+       max(CASE WHEN ss.weekday = 5 THEN ss.who END) AS "Fri",
+       max(CASE WHEN ss.weekday = 6 THEN ss.who END) AS "Sat"
+FROM (
+    SELECT DISTINCT
+           EXTRACT(ISODOW FROM (s.scheduled_at AT TIME ZONE :'tz'))::int AS weekday,
+           to_char(s.scheduled_at AT TIME ZONE :'tz', 'HH24:MI') AS slot,
+           EXTRACT(HOUR FROM (s.scheduled_at AT TIME ZONE :'tz'))::int * 60
+             + EXTRACT(MINUTE FROM (s.scheduled_at AT TIME ZONE :'tz'))::int AS start_min,
+           split_part(c.name, ' ', 1) || ' · ' || s.duration_minutes || 'm' AS who
+    FROM scheduled_session s
+    JOIN client c ON c.id = s.client_id
+    -- Scoped to THIS trainer, not just to the tag. Seeding two trainers on one
+    -- database is supported and the tag is the same on both, so without the join
+    -- the other one's week is drawn into this one's — which reads as a timetable
+    -- that double-books and is nothing of the kind.
+    JOIN trainer t ON t.id = c.trainer_id AND t.phone = :'trainer_phone'
+    WHERE c.metadata->>'seed' = 'demo' AND s.deleted_at IS NULL
+      AND (s.scheduled_at AT TIME ZONE :'tz')::date
+          BETWEEN date_trunc('week', CURRENT_DATE)::date
+              AND date_trunc('week', CURRENT_DATE)::date + 6
+) ss
+GROUP BY ss.slot
+ORDER BY min(ss.start_min);
+
+\echo ''
 \echo 'Seeded:'
 WITH mine AS (
     SELECT c.id FROM client c JOIN trainer t ON t.id = c.trainer_id
@@ -1644,6 +1908,9 @@ me AS (SELECT id FROM trainer WHERE phone = :'trainer_phone' AND deleted_at IS N
 SELECT 'clients' AS what, (SELECT count(*) FROM mine) AS count
 UNION ALL SELECT '  · needing attention', count(*) FROM client c WHERE c.id IN (SELECT id FROM mine)
       AND (c.status IN ('paused', 'inactive', 'invited') OR c.membership_status = 'unavailable')
+UNION ALL SELECT '  · on the diary', count(DISTINCT client_id) FROM scheduled_session
+    WHERE client_id IN (SELECT id FROM mine) AND deleted_at IS NULL
+      AND scheduled_at > now() - INTERVAL '14 days'
 UNION ALL SELECT 'sessions', count(*) FROM scheduled_session
     WHERE client_id IN (SELECT id FROM mine) AND deleted_at IS NULL
 UNION ALL SELECT '  · done', count(*) FROM scheduled_session
@@ -1657,8 +1924,6 @@ UNION ALL SELECT '  · left open', count(*) FROM scheduled_session
       AND status = 'scheduled' AND scheduled_at < now()
 UNION ALL SELECT '  · upcoming', count(*) FROM scheduled_session
     WHERE client_id IN (SELECT id FROM mine) AND deleted_at IS NULL AND scheduled_at > now()
-UNION ALL SELECT '  · in a batch', count(*) FROM scheduled_session
-    WHERE client_id IN (SELECT id FROM mine) AND deleted_at IS NULL AND batch_id IS NOT NULL
 UNION ALL SELECT 'workouts logged', count(*) FROM workout_session
     WHERE client_id IN (SELECT id FROM mine) AND deleted_at IS NULL
 UNION ALL SELECT '  · still open', count(*) FROM workout_session
@@ -1721,8 +1986,6 @@ UNION ALL SELECT 'nudge rules', count(*) FROM nudge_rule
 UNION ALL SELECT 'custom exercises', count(*) FROM exercise
     WHERE trainer_id IN (SELECT id FROM me) AND is_custom AND deleted_at IS NULL
 UNION ALL SELECT 'favourites', count(*) FROM exercise_favourite
-    WHERE trainer_id IN (SELECT id FROM me) AND deleted_at IS NULL
-UNION ALL SELECT 'batches', count(*) FROM batch
     WHERE trainer_id IN (SELECT id FROM me) AND deleted_at IS NULL
 UNION ALL SELECT 'working hours', count(*) FROM working_hours
     WHERE trainer_id IN (SELECT id FROM me) AND deleted_at IS NULL

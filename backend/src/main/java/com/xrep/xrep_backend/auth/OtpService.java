@@ -67,16 +67,10 @@ public class OtpService {
 
     public void send(String phone) {
         Instant now = Instant.now();
-
         requireUnlocked(phone, now);
-
-        // Before anything is generated or sent: a refused request must cost nothing, least of all an SMS.
         limiter.check(phone, now);
-
         String otp = String.format("%06d", secureRandom.nextInt(1_000_000));
         Instant expiresAt = now.plusSeconds(props.getOtp().getExpiryMinutes() * 60L);
-
-        // Hashed, never stored in the clear — the store is a cache to everything that can read it, and a readable code is a readable account.
         store.saveCode(phone, bcrypt.encode(otp), expiresAt);
         store.recordSend(phone, now);
         sender.send(phone, otp);
@@ -102,11 +96,10 @@ public class OtpService {
         // 3. Check it.
         if (!bcrypt.matches(otp, code.hash())) {
             int used = store.recordWrongAttempt(phone);
-
             int maxAttempts = props.getOtp().getMaxAttempts();
-            int lockSeconds = props.getOtp().getLockMinutes() * 60;
 
             if (used >= maxAttempts) {
+                int lockSeconds = props.getOtp().getLockMinutes() * 60;
                 store.lock(phone, now.plusSeconds(lockSeconds));
                 throw new OtpLockedException(lockSeconds);
             }

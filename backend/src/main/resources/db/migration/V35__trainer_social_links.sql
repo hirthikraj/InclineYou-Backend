@@ -1,0 +1,60 @@
+-- Where a client can go and look for themselves — the last section of the
+-- profile a CLIENT reads, and the only one that points OFF this product.
+--
+-- V33 gave that person the trainer's own words (headline, bio, intro video) and
+-- V34 gave them the place and the way the coaching is delivered. This answers
+-- the question both of those raise and neither can settle: *is any of this
+-- true?* A trainer's Instagram is three years of gym-floor video shot by
+-- somebody who was not trying to sell a client anything, and a client will
+-- check it before they reply to an invite whether or not we link it.
+--
+-- So we link it. **Clients following their trainer is a good outcome for
+-- everybody** — the trainer's audience is the trainer's, this product does not
+-- want to sit between them, and a profile that hid the one thing every client
+-- looks for anyway would only be teaching them to search for it.
+--
+-- ── TWO COLUMNS, NOT A LINK LIST ────────────────────────────────────────────
+--
+-- The obvious generalisation is `social_links JSONB` — a label and a URL, any
+-- number of them — and it is the wrong shape here for the same reason
+-- `service_areas` is right as free text and `training_modes` is right as ids: a
+-- column should be as specific as the question. Instagram and YouTube are what
+-- an Indian personal trainer actually posts to. A generic list would need a
+-- platform catalogue to render an icon, would let one trainer file the same
+-- handle under "insta" and another under "Instagram", and would put a
+-- validation problem (which of these is a real profile URL?) behind a shape
+-- that cannot express which platform a row is for. Two named columns can be
+-- checked, canonicalised and rendered exactly.
+--
+-- A third platform is a migration, and that is the honest price. It is also a
+-- price we have paid twice already without regret (V33's three, V34's three).
+--
+-- ── AND BOTH ARE CANONICALISED, UNLIKE `map_link` ───────────────────────────
+--
+-- V34 stores `map_link` verbatim and says at length why a normaliser would
+-- eventually break somebody's working link. These two go the other way, with
+-- `intro_video_url`, and the seam is this: **a profile has one identifying
+-- handle; a place does not.** `instagram.com/ravi.trains`,
+-- `@ravi.trains` typed bare, and the share-sheet URL with an `igsh=` tracking
+-- blob are three spellings of one account, and the blob is a share token that
+-- does not belong in a column a client reads. A maps URL carries a place id,
+-- coordinates and sometimes a plus code, none of which is redundant.
+--
+-- What the canonicaliser is NOT allowed to do is rewrite the identifying part,
+-- which is why a YouTube channel keeps whichever of the four addressing shapes
+-- the trainer has (`/@handle`, `/channel/UC…`, `/c/…`, `/user/…`) — those are
+-- not interchangeable and resolving between them would need a network call.
+-- See SocialLink.java.
+--
+-- Additive only: two nullable columns on an existing table. NULL means never
+-- answered, which is what every trainer created before today is.
+
+ALTER TABLE trainer
+    -- Canonical `https://www.instagram.com/<handle>`, or NULL.
+    ADD COLUMN IF NOT EXISTS instagram_url TEXT,
+
+    -- Canonical `https://www.youtube.com/<@handle | channel/… | c/… | user/…>`,
+    -- or NULL. Deliberately a CHANNEL and not a video: `intro_video_url` (V33)
+    -- is one video the trainer chose, this is everything they have posted, and
+    -- the two are different promises to a client.
+    ADD COLUMN IF NOT EXISTS youtube_url TEXT;
