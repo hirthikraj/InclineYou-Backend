@@ -1,0 +1,3110 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   X REP · WEB APPLICATION — one stylesheet, v1.0
+   ═══════════════════════════════════════════════════════════════════════════
+
+   This is the desktop sibling of trainx-design-system.html, not a rewrite.
+   Every colour, radius and spacing step below is the SAME TOKEN the app uses,
+   copied verbatim, so a value can never drift between the phone and the web.
+   What changes on the web is DENSITY, NAVIGATION and INPUT — and each of those
+   changes is justified in a comment where it happens.
+
+   THE ONE RULE THAT DECIDES EVERYTHING (unchanged from the app)
+   #C6F24E is a FILL colour. It measures 1.17:1 on --tx-surface-2 light and
+   1.3:1 on white, so it is never a stroke and never text on a light ground.
+   On light it steps to --tx-accent-text (#4F6B0A, 6.1:1). Lime at full
+   strength survives on light only as a FIELD with #0A0B0D knocked out of it
+   (15.2:1). This rule has caused four real bugs in this project.
+
+   THREE THINGS THE WEB CHANGES, AND WHY
+   1 · DENSITY. The app's row is 56px because a thumb needs it mid-session.
+       A mouse does not: WCAG 2.2 SC 2.5.8 asks 24×24 CSS px for a pointer
+       target, so the web row is 44px and the web control floor is 32px.
+       Anything a trainer might touch on a convertible laptop keeps 40px.
+   2 · NAVIGATION. The app has a bottom nav (4 tabs) plus a drawer (7 more).
+       That split exists because a phone has room for four. The web has a
+       persistent rail showing all eleven destinations at once, so the drawer
+       — an entire mobile screen — DISAPPEARS on the web rather than being
+       ported. Navigation you can see is not navigation you have to open.
+   3 · INPUT. A keyboard exists. Every list is arrow-navigable, every panel
+       closes on Escape, and ⌘K opens a command palette. None of this has a
+       phone equivalent, and leaving it out is the most common way a ported
+       mobile design feels wrong on a desktop.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════════════════ 01 · TOKENS ══════ */
+
+:root{
+  /* spacing · 4pt base — identical to the app */
+  --tx-s1:4px;  --tx-s2:8px;  --tx-s3:12px; --tx-s4:16px; --tx-s5:20px;
+  --tx-s6:24px; --tx-s7:32px; --tx-s8:40px; --tx-s9:48px; --tx-s10:64px;
+
+  /* radius · 8pt system — identical to the app */
+  --tx-r1:4px; --tx-r2:8px; --tx-r3:12px; --tx-r4:18px; --tx-rfull:999px;
+
+  --tx-font:'Inter','SF Pro Text',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  --tx-brand:'Archivo',var(--tx-font);
+  --tx-mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+
+  --tx-t-instant:120ms; --tx-t-fast:180ms; --tx-t-base:240ms; --tx-t-slow:320ms;
+  --tx-ease:cubic-bezier(.2,.8,.2,1);
+  --tx-ease-exit:cubic-bezier(.4,0,1,1);
+
+  /* avatar palette · white initials, every one clears 5.9:1 */
+  --tx-av-1:#4A5568; --tx-av-2:#4B44C4; --tx-av-3:#0E6E62; --tx-av-4:#2F6B33;
+  --tx-av-5:#8A5A12; --tx-av-6:#96421F; --tx-av-7:#7A3A73; --tx-av-8:#1F5A9E;
+  --tx-av-9:#8E2F45; --tx-av-10:#5C6B18; --tx-av-11:#10627E; --tx-av-12:#5B3FA8;
+
+  /* ── touch, re-based for the web ──────────────────────────────────────
+     The app floor is 48 / 56. On the web a pointer target needs 24 (WCAG
+     2.2 AA), so we set 32 as the practical floor and keep 40 for anything
+     a convertible laptop might get a finger on. --w-row is the density
+     dial for the whole application: change it and every list re-tunes. */
+  --w-tap:32px;          /* pointer-only controls: icon buttons, chips */
+  --w-tap-touch:40px;    /* anything plausibly touched on a laptop */
+  --w-row:44px;          /* the standard list / table row */
+  --w-row-lg:56px;       /* rows carrying two lines of text */
+
+  /* ── the shell ───────────────────────────────────────────────────────── */
+  --w-rail:248px;        /* the navigation rail, expanded */
+  --w-rail-min:64px;     /* icon-only */
+  --w-top:56px;          /* the top bar */
+  --w-panel:420px;       /* the right-hand editing panel */
+  --w-list:400px;        /* the list pane in a list-detail split */
+  --w-gutter:24px;
+  --w-measure:72ch;      /* prose width, e.g. an empty-state explanation */
+
+  /* the design-review frame. Every screen below is drawn at 1440×900 and
+     scaled to fit the reviewer's window; --z is the dial. */
+  --z:0.72;
+  --w-frame:1440px;
+  --w-frame-h:900px;
+}
+
+[data-theme="dark"]{
+  color-scheme:dark;
+  --tx-canvas:#08090B;
+  --tx-surface:#101216;
+  --tx-surface-2:#171A20;
+  --tx-surface-3:#1F232B;
+  --tx-line:#1E222A;
+  --tx-line-strong:#2A2F39;
+  --tx-scrim:rgba(0,0,0,.66);
+  --tx-scrim-soft:rgba(0,0,0,.26);   /* behind a PANEL, not a modal */
+
+  --tx-ink:#F2F4F6;
+  --tx-ink-2:#A2A9B4;
+  --tx-ink-3:#8B939F;
+  --tx-ink-off:#4A505A;
+  --tx-ink-inverse:#0A0B0D;
+
+  --tx-accent:#C6F24E;
+  --tx-accent-press:#B2DE3A;
+  --tx-accent-ink:#0A0B0D;
+  --tx-accent-text:#C6F24E;
+  --tx-accent-soft:rgba(198,242,78,.12);
+  --tx-accent-line:rgba(198,242,78,.34);
+  --tx-accent-glow:0 0 24px rgba(198,242,78,.16);
+
+  --tx-ok:#3DDC84;        --tx-ok-soft:rgba(61,220,132,.13);
+  --tx-warn:#FFB020;      --tx-warn-soft:rgba(255,176,32,.13);
+  --tx-danger:#FF5A5A;    --tx-danger-soft:rgba(255,90,90,.13);
+  --tx-info:#6FB6FF;      --tx-info-soft:rgba(111,182,255,.13);
+  --tx-danger-fill:#D93036; --tx-danger-fill-ink:#FFFFFF;
+  --tx-ok-fill:#3DDC84;     --tx-ok-fill-ink:#052912;
+  --tx-info-fill:#2E6FC7;   --tx-info-fill-ink:#FFFFFF;
+
+  --tx-floor:#9FD3FF;     --tx-floor-soft:rgba(159,211,255,.12);
+  --tx-remote:#C9A8FF;    --tx-remote-soft:rgba(201,168,255,.12);
+  --tx-pr:#FFC861;        --tx-pr-soft:rgba(255,200,97,.14);
+
+  --tx-field:rgba(255,255,255,.035);
+  --tx-field-hover:rgba(255,255,255,.06);
+  --tx-field-line:rgba(255,255,255,.10);
+  --tx-field-line-hover:rgba(255,255,255,.17);
+  --tx-field-inset:none;
+  --tx-focus:#C6F24E;
+  --tx-focus-halo:rgba(198,242,78,.17);
+
+  --tx-e1:none;
+  --tx-e2:none;
+  --tx-e3:0 10px 30px rgba(0,0,0,.6);
+  --tx-e4:0 -8px 40px rgba(0,0,0,.7);
+  --tx-skeleton:linear-gradient(90deg,#14171C 25%,#1C2027 37%,#14171C 63%);
+
+  /* web-only: the rail sits one step below the canvas so the content plane
+     reads as the thing in front */
+  --w-rail-bg:#060709;
+  --w-top-bg:rgba(8,9,11,.86);
+  --w-hover:rgba(255,255,255,.038);
+  --w-selected:rgba(198,242,78,.10);
+  --w-grid:rgba(255,255,255,.045);
+}
+
+[data-theme="light"]{
+  color-scheme:light;
+  --tx-canvas:#F4F5F3;
+  --tx-surface:#FFFFFF;
+  --tx-surface-2:#EDEFEC;
+  --tx-surface-3:#E4E7E2;
+  --tx-line:#DFE2DC;
+  --tx-line-strong:#C7CCC3;
+  --tx-scrim:rgba(16,19,26,.42);
+  --tx-scrim-soft:rgba(16,19,26,.16);
+
+  --tx-ink:#10131A;
+  --tx-ink-2:#4E5560;
+  --tx-ink-3:#5A626D;
+  --tx-ink-off:#A9AFB8;
+  --tx-ink-inverse:#FFFFFF;
+
+  --tx-accent:#C6F24E;
+  --tx-accent-press:#B2DE3A;
+  --tx-accent-ink:#0A0B0D;
+  --tx-accent-text:#4F6B0A;      /* ← the whole rule, in one line */
+  --tx-accent-soft:#EDF6D6;
+  --tx-accent-line:#CFE39A;
+  --tx-accent-glow:0 6px 18px -6px rgba(150,190,40,.5);
+
+  --tx-ok:#0E7034;        --tx-ok-soft:#E4F4EA;
+  --tx-warn:#8F5100;      --tx-warn-soft:#FBEEDC;
+  --tx-danger:#C0281E;    --tx-danger-soft:#FBE7E5;
+  --tx-info:#1B5FA8;      --tx-info-soft:#E5EFF9;
+  --tx-danger-fill:#C0281E; --tx-danger-fill-ink:#FFFFFF;
+  --tx-ok-fill:#0E7034;     --tx-ok-fill-ink:#FFFFFF;
+  --tx-info-fill:#1B5FA8;   --tx-info-fill-ink:#FFFFFF;
+
+  --tx-floor:#1B5FA8;     --tx-floor-soft:#E5EFF9;
+  --tx-remote:#6B3FC4;    --tx-remote-soft:#EFE9FB;
+  --tx-pr:#8A6000;        --tx-pr-soft:#FBF0D9;
+
+  --tx-field:#FFFFFF;
+  --tx-field-hover:#FFFFFF;
+  --tx-field-line:rgba(16,19,26,.14);
+  --tx-field-line-hover:rgba(16,19,26,.24);
+  --tx-field-inset:inset 0 1px 2px rgba(16,19,26,.05);
+  --tx-focus:#4F6B0A;
+  --tx-focus-halo:rgba(79,107,10,.15);
+
+  --tx-e1:0 1px 2px rgba(16,19,26,.05);
+  --tx-e2:0 1px 3px rgba(16,19,26,.07),0 6px 16px -8px rgba(16,19,26,.12);
+  --tx-e3:0 10px 30px -8px rgba(16,19,26,.22);
+  --tx-e4:0 -8px 40px -12px rgba(16,19,26,.25);
+  --tx-skeleton:linear-gradient(90deg,#E9EBE7 25%,#F3F5F1 37%,#E9EBE7 63%);
+
+  --w-rail-bg:#EDEFEC;
+  --w-top-bg:rgba(244,245,243,.88);
+  --w-hover:rgba(16,19,26,.04);
+  --w-selected:#EDF6D6;
+  --w-grid:rgba(16,19,26,.06);
+}
+
+/* Any element that switches theme must RE-APPLY the inherited properties.
+   `color` inherits as a computed value, so redeclaring --tx-ink on a subtree
+   does not repaint text that inherited its colour from the other theme. */
+[data-theme]{color:var(--tx-ink);background-color:var(--tx-canvas)}
+
+
+/* ═════════════════════════════════════════ 02 · THE REVIEW PAGE ══════════
+   Everything from here to §04 is the wrapper this design file is presented
+   in — it is NOT part of the application. The app starts at .app.           */
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth;scroll-padding-top:80px}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{
+  margin:0;background:var(--tx-canvas);color:var(--tx-ink);
+  font-family:var(--tx-font);font-size:15px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+}
+img,svg,canvas{display:block;max-width:100%}
+button,input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3,h4,h5,p,ul,ol,figure,dl,dd,table{margin:0}
+ul,ol{padding:0;list-style:none}
+a{color:var(--tx-accent-text);text-decoration:none}
+table{border-collapse:collapse;width:100%}
+::selection{background:var(--tx-accent);color:var(--tx-accent-ink)}
+:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px;
+  border-radius:var(--tx-r1);box-shadow:0 0 0 4px var(--tx-focus-halo)}
+:focus:not(:focus-visible){outline:none}
+.vh{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+.page{max-width:1580px;margin-inline:auto;padding:0 32px 120px}
+
+.doc__top{
+  position:sticky;top:0;z-index:60;background:var(--tx-canvas);
+  border-bottom:1px solid var(--tx-line);
+  display:flex;align-items:center;gap:18px;flex-wrap:wrap;
+  padding:14px 0;margin-bottom:34px;
+}
+.doc__id{
+  display:inline-flex;align-items:center;height:24px;padding:0 9px;
+  border-radius:var(--tx-r1);background:var(--tx-accent);color:var(--tx-accent-ink);
+  font-family:var(--tx-brand);font-weight:800;font-size:12px;letter-spacing:.04em;
+}
+.doc__t{font-family:var(--tx-brand);font-weight:800;font-size:17px;letter-spacing:-.02em}
+.doc__nav{display:flex;flex-wrap:wrap;gap:4px;margin-left:auto}
+.doc__nav a{
+  display:inline-flex;align-items:center;height:var(--w-tap-touch);padding:0 11px;
+  border-radius:var(--tx-r1);color:var(--tx-ink-3);
+  font-size:11.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+}
+.doc__nav a:hover{background:var(--w-hover);color:var(--tx-ink)}
+.doc__nav a[aria-current="page"]{background:var(--tx-accent);color:var(--tx-accent-ink)}
+
+.doc h1{font-family:var(--tx-brand);font-weight:800;letter-spacing:-.035em;
+  font-size:clamp(30px,3.4vw,46px);line-height:1.04;max-width:22ch;text-wrap:balance}
+.doc__lede{font-size:17px;line-height:1.6;color:var(--tx-ink-2);max-width:var(--w-measure);
+  margin-top:16px;text-wrap:pretty}
+.doc__meta{display:flex;flex-wrap:wrap;gap:8px 26px;margin-top:22px;
+  font-family:var(--tx-mono);font-size:11.5px;color:var(--tx-ink-3)}
+.doc__meta b{color:var(--tx-ink-2);font-weight:500}
+
+h2.sec{
+  font-family:var(--tx-brand);font-weight:800;font-size:23px;letter-spacing:-.025em;
+  margin:72px 0 6px;padding-top:22px;border-top:1px solid var(--tx-line);
+  display:flex;align-items:baseline;gap:12px;
+}
+h2.sec .n{font-family:var(--tx-mono);font-size:12px;font-weight:500;color:var(--tx-accent-text);
+  letter-spacing:.08em}
+h3.sub{font-family:var(--tx-brand);font-weight:800;font-size:17px;letter-spacing:-.015em;
+  margin:40px 0 10px}
+.note{font-size:14.5px;line-height:1.62;color:var(--tx-ink-2);max-width:var(--w-measure);
+  margin-top:10px;text-wrap:pretty}
+.note b,.note strong{color:var(--tx-ink);font-weight:600}
+.note code,code{font-family:var(--tx-mono);font-size:.9em;background:var(--tx-surface-2);
+  border:1px solid var(--tx-line);border-radius:var(--tx-r1);padding:1px 5px}
+.rule{height:1px;background:var(--tx-line);border:0;margin:28px 0}
+
+/* the callout that carries a design decision */
+.why{
+  border-left:2px solid var(--tx-accent);background:var(--tx-accent-soft);
+  border-radius:0 var(--tx-r2) var(--tx-r2) 0;
+  padding:14px 18px;margin-top:18px;max-width:var(--w-measure);
+}
+.why__k{font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--tx-accent-text);margin-bottom:6px}
+.why p{font-size:14.5px;line-height:1.6;color:var(--tx-ink-2)}
+.why--warn{border-left-color:var(--tx-warn);background:var(--tx-warn-soft)}
+.why--warn .why__k{color:var(--tx-warn)}
+.why--danger{border-left-color:var(--tx-danger);background:var(--tx-danger-soft)}
+.why--danger .why__k{color:var(--tx-danger)}
+
+/* ── the frame scaffold ──────────────────────────────────────────────────
+   .unit > .unit__label + .viewport > .browser > .app , then .unit__note.
+   The 1440×900 app is drawn at full size and scaled by --z so a reviewer can
+   see a whole screen without a horizontal scrollbar. transform, not zoom:
+   predictable in every engine. */
+.units{display:flex;flex-direction:column;gap:52px;margin-top:30px}
+.unit{scroll-margin-top:96px}
+.unit__label{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:11px;
+}
+.unit__id{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:30px;height:20px;padding:0 6px;border-radius:var(--tx-r1);
+  background:var(--tx-surface-3);color:var(--tx-ink-2);
+  font-family:var(--tx-mono);font-size:11px;font-weight:500;
+}
+.unit__name{font-family:var(--tx-brand);font-weight:800;font-size:15px;letter-spacing:-.01em}
+.unit__from{
+  font-family:var(--tx-mono);font-size:11px;color:var(--tx-ink-3);
+  padding-left:10px;border-left:1px solid var(--tx-line);
+}
+.unit__from b{color:var(--tx-accent-text);font-weight:500}
+.unit__note{font-size:14px;line-height:1.6;color:var(--tx-ink-2);max-width:var(--w-measure);
+  margin-top:14px;text-wrap:pretty}
+.unit__note b{color:var(--tx-ink);font-weight:600}
+
+.viewport{
+  width:calc(var(--w-frame) * var(--z));
+  height:calc((var(--w-frame-h) + 34px) * var(--z));
+  max-width:100%;
+  overflow:hidden;
+  border-radius:var(--tx-r3);
+  border:1px solid var(--tx-line-strong);
+  background:var(--tx-surface-2);
+  box-shadow:var(--tx-e3);
+}
+.viewport__in{
+  width:var(--w-frame);
+  transform:scale(var(--z));
+  transform-origin:top left;
+}
+/* browser chrome — it tells the reviewer this is a 1440px window, and it
+   carries the URL, which is where a web app's state actually lives */
+.browser__bar{
+  height:34px;display:flex;align-items:center;gap:8px;padding:0 12px;
+  background:var(--tx-surface-3);border-bottom:1px solid var(--tx-line);
+}
+.browser__dots{display:flex;gap:6px}
+.browser__dots i{width:9px;height:9px;border-radius:50%;background:var(--tx-ink-off);display:block}
+.browser__url{
+  flex:1;height:20px;border-radius:var(--tx-rfull);background:var(--tx-canvas);
+  border:1px solid var(--tx-line);
+  display:flex;align-items:center;padding:0 10px;
+  font-family:var(--tx-mono);font-size:11px;color:var(--tx-ink-3);
+  max-width:520px;margin-inline:auto;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.browser__url b{color:var(--tx-ink-2);font-weight:500}
+
+/* the zoom control */
+.zoomer{display:flex;align-items:center;gap:6px;margin-left:auto}
+.zoomer button{
+  height:var(--w-tap-touch);min-width:var(--w-tap-touch);padding:0 10px;
+  border-radius:var(--tx-r1);border:1px solid var(--tx-line);
+  background:var(--tx-surface);color:var(--tx-ink-2);
+  font-family:var(--tx-mono);font-size:11.5px;cursor:pointer;
+}
+.zoomer button:hover{background:var(--tx-surface-2);color:var(--tx-ink)}
+.zoomer button[aria-pressed="true"]{background:var(--tx-accent);color:var(--tx-accent-ink);
+  border-color:var(--tx-accent)}
+
+/* documentation tables */
+.dt{margin-top:18px;font-size:13.5px}
+.dt th,.dt td{text-align:left;padding:10px 14px;border-bottom:1px solid var(--tx-line);
+  vertical-align:top}
+.dt thead th{font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--tx-ink-3);border-bottom-color:var(--tx-line-strong);
+  white-space:nowrap}
+.dt tbody th{font-weight:600;color:var(--tx-ink);width:24%}
+.dt td{color:var(--tx-ink-2)}
+.dt code{white-space:nowrap}
+.dt tr:hover td,.dt tr:hover th{background:var(--w-hover)}
+
+/* swatches */
+/* fixed four-up, not auto-fill: at 1400px auto-fill laid 8 swatches out as
+   7 + 1 and the orphan read as a mistake. Groups here are 4, 8 or 12. */
+.sw{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-top:18px}
+@media (max-width:1100px){.sw{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.sw__i{border:1px solid var(--tx-line);border-radius:var(--tx-r2);overflow:hidden;
+  background:var(--tx-surface)}
+.sw__c{height:60px;display:flex;align-items:flex-end;padding:7px 9px}
+.sw__m{font-family:var(--tx-mono);font-size:10px;color:var(--tx-ink-3);padding:8px 9px 9px;
+  border-top:1px solid var(--tx-line);line-height:1.5}
+.sw__m b{display:block;color:var(--tx-ink);font-weight:600;font-family:var(--tx-font);
+  font-size:11.5px;margin-bottom:2px}
+
+
+/* ═══════════════════════════════════════ 03 · THE APPLICATION SHELL ══════
+   Grid, not flex: the rail and the panel are fixed tracks and the content is
+   the only thing that flexes, so nothing reflows when a panel opens. */
+
+.app{
+  width:var(--w-frame);height:var(--w-frame-h);
+  background:var(--tx-canvas);color:var(--tx-ink);
+  font-family:var(--tx-font);font-size:14px;line-height:1.45;
+  display:grid;
+  grid-template-columns:var(--w-rail) minmax(0,1fr);
+  grid-template-rows:var(--w-top) minmax(0,1fr);
+  grid-template-areas:"rail top" "rail main";
+  overflow:hidden;position:relative;
+  container-type:inline-size;
+}
+.app--rail-min{grid-template-columns:var(--w-rail-min) minmax(0,1fr)}
+.app--noshell{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);
+  grid-template-areas:"main"}   /* the rows reset matters: without it "main"
+     lands in the 56px top row and the whole page renders 56px tall */
+
+/* ── the rail ─────────────────────────────────────────────────────────────
+   Eleven destinations, always visible. The app's navigation drawer is a
+   whole screen you have to open; here it is furniture you never open. */
+.rail{
+  grid-area:rail;background:var(--w-rail-bg);border-right:1px solid var(--tx-line);
+  display:flex;flex-direction:column;min-height:0;
+}
+.rail__top{
+  height:var(--w-top);display:flex;align-items:center;gap:10px;
+  padding:0 14px;border-bottom:1px solid var(--tx-line);flex:0 0 auto;
+}
+.rail__mark{width:28px;height:28px;border-radius:7px;background:var(--tx-accent);
+  display:grid;place-items:center;flex:0 0 auto}
+.rail__word{font-family:var(--tx-brand);font-weight:800;font-size:15px;letter-spacing:-.02em;
+  white-space:nowrap}
+.rail__body{flex:1;min-height:0;overflow-y:auto;padding:10px 8px 14px}
+.rail__group{margin-top:16px}
+.rail__group:first-child{margin-top:0}
+.rail__gk{
+  font-family:var(--tx-mono);font-size:10px;font-weight:500;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--tx-ink-3);padding:0 8px 7px;
+}
+.rail__i{
+  display:flex;align-items:center;gap:11px;
+  height:var(--w-tap-touch);padding:0 9px;border-radius:var(--tx-r2);
+  color:var(--tx-ink-2);font-size:13.5px;font-weight:500;cursor:pointer;
+  position:relative;
+}
+.rail__i:hover{background:var(--w-hover);color:var(--tx-ink)}
+.rail__i svg{flex:0 0 auto;color:currentColor}
+.rail__i span{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the current destination: a lime bar and a lime label. Not a filled row —
+   a filled lime row would put 14px text on lime and break the colour rule
+   at the one place a user looks most often. */
+.rail__i[aria-current="page"]{background:var(--w-selected);color:var(--tx-accent-text);
+  font-weight:600}
+.rail__i[aria-current="page"]::before{
+  content:'';position:absolute;left:-8px;top:9px;bottom:9px;width:2px;
+  border-radius:0 2px 2px 0;background:var(--tx-accent);
+}
+.rail__n{
+  font-family:var(--tx-mono);font-size:10.5px;min-width:19px;height:18px;padding:0 5px;
+  border-radius:var(--tx-rfull);background:var(--tx-surface-3);color:var(--tx-ink-2);
+  display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;
+}
+.rail__n--alert{background:var(--tx-danger-soft);color:var(--tx-danger)}
+.rail__n--acc{background:var(--tx-accent-soft);color:var(--tx-accent-text)}
+.rail__foot{flex:0 0 auto;border-top:1px solid var(--tx-line);padding:9px 8px}
+.app--rail-min .rail__word,.app--rail-min .rail__gk,
+.app--rail-min .rail__i span{display:none}   /* .rail__n used to be in this
+   list. It became a dot instead — see "collapsed, a count becomes a DOT". */
+.app--rail-min .rail__i{justify-content:center;padding:0}
+
+/* the trainer / client role switch, pinned to the rail foot. Two books, one
+   login — the app calls this "switch to own training". */
+.roleswap{
+  display:flex;align-items:center;gap:10px;height:var(--w-tap-touch);padding:0 9px;
+  border-radius:var(--tx-r2);cursor:pointer;color:var(--tx-ink-2);font-size:13px;
+}
+.roleswap:hover{background:var(--w-hover);color:var(--tx-ink)}
+
+/* ── the rail, second pass ───────────────────────────────────────────────
+   The block above is the first pass and every rule in it still stands. What
+   follows adds the four things the audit found missing — a collapse control
+   that is a control, a group of the clients you have TODAY, a keyboard
+   accelerator on every row, and a foot that opens instead of switching — plus
+   one correction: the collapsed rail used to hide the count badges, which threw
+   away the red 3 on Money at exactly the width where a red 3 matters most.
+
+   Nothing here is a new colour or a new radius. The only new measurement is the
+   7px badge dot, and it is 7px because that is the diameter the sync pill's own
+   status dot already uses. */
+
+/* the collapse control, in the brand row. Always drawn, never hover-revealed:
+   a control that appears when the pointer arrives is a control a keyboard user
+   has to already know about. */
+.rail__col{
+  margin-left:auto;flex:0 0 auto;width:var(--w-tap);height:var(--w-tap);
+  border:0;background:none;border-radius:var(--tx-r2);cursor:pointer;
+  display:grid;place-items:center;color:var(--tx-ink-3);
+  transition:background var(--tx-t-instant) var(--tx-ease),
+             color var(--tx-t-instant) var(--tx-ease);
+}
+.rail__col:hover{background:var(--w-hover);color:var(--tx-ink-2)}
+/* At 64px the brand row cannot hold a 28px mark AND a 32px control with this
+   system's padding — 28+32+10 is 70. So in the collapsed state the mark IS the
+   way out: same lime square, now a button, named by its tooltip like every
+   other glyph at this width. Between the logo and the escape hatch, one of them
+   had to also be the other. */
+.app--rail-min .rail__top{padding:0;justify-content:center}
+.app--rail-min .rail__col{display:none}
+.rail__mark--btn{border:0;padding:0;cursor:pointer;position:relative}
+.rail__mark--btn:hover{box-shadow:0 0 0 3px var(--tx-accent-soft)}
+
+/* the accelerator. Hidden at rest — eleven visible key hints is a keyboard map,
+   not a navigation column — and shown on hover, on focus, and for as long as G
+   is held (§07). */
+.rail__k{
+  flex:0 0 auto;font-family:var(--tx-mono);font-size:10px;line-height:1.5;
+  padding:1px 5px;border-radius:var(--tx-r1);border:1px solid var(--tx-line);
+  background:var(--tx-surface-2);color:var(--tx-ink-3);
+  opacity:0;transition:opacity var(--tx-t-instant) var(--tx-ease);
+}
+.rail__i:hover .rail__k,.rail__i:focus-visible .rail__k,
+.rail__pin:hover .rail__k,.rail--keys .rail__k{opacity:1}
+.rail__k + .rail__n{margin-left:6px}
+.app--rail-min .rail__k{display:none}
+
+/* the tooltip. The collapsed rail's only label, which is why it is specified
+   here and not left to the browser: title= waits about a second, cannot be
+   styled, and never appears for a keyboard user at all. 140ms in, none out. */
+.rail__tip{
+  position:absolute;left:calc(100% + 10px);top:50%;transform:translateY(-50%);
+  z-index:14;white-space:nowrap;pointer-events:none;
+  padding:5px 9px;border-radius:var(--tx-r2);font-size:12.5px;font-weight:500;
+  background:var(--tx-surface-3);color:var(--tx-ink);
+  border:1px solid var(--tx-line-strong);box-shadow:var(--tx-e3);
+}
+.rail__tip::after{
+  content:'';position:absolute;left:-4px;top:50%;width:7px;height:7px;
+  transform:translateY(-50%) rotate(45deg);
+  background:var(--tx-surface-3);border-left:1px solid var(--tx-line-strong);
+  border-bottom:1px solid var(--tx-line-strong);
+}
+
+/* collapsed, a count becomes a DOT and keeps its tone. The rule it replaces
+   was `display:none`, which is why the money badge used to vanish at 64px —
+   the one number on this rail that costs a trainer real rupees, hidden by the
+   act of making room. A dot cannot say "three", but it can say "look here",
+   and the aria-label still says three. */
+/* The three-class selectors are not decoration. `.app--rail-min .rail__i span`
+   above hides EVERY span in the row, which is how the badge disappeared in the
+   first place — the label has no class of its own, so the rule that hides it
+   catches the count and the tooltip too. These out-specify it rather than
+   narrowing it, because two other files draw the collapsed rail and a narrowed
+   rule would stop hiding their labels. */
+.app--rail-min .rail__i .rail__n{
+  display:block;position:absolute;top:5px;right:10px;width:7px;height:7px;
+  min-width:0;padding:0;font-size:0;border-radius:50%;background:var(--tx-ink-3);
+}
+.app--rail-min .rail__i .rail__n--alert{background:var(--tx-danger)}
+/* --tx-accent-text, not --tx-accent. The rule at the top of this file says lime
+   is a fill and never text on a light ground, and a 7px dot passes that test on
+   a technicality: it IS a fill. But it is a fill the size of a full stop, and at
+   that size it is competing with the surface rather than covering it — #C6F24E
+   on the light rail's #EDEFEC is 1.1:1, which is a dot nobody can see. The
+   accent's text token is #C6F24E on dark and #4F6B0A on light, which is exactly
+   the behaviour a small mark wants in both. */
+.app--rail-min .rail__i .rail__n--acc{background:var(--tx-accent-text)}
+.app--rail-min .rail__i .rail__tip,.app--rail-min .rail__mark--btn .rail__tip{display:block}
+/* A tooltip that lives inside a scrolling box is a tooltip with a vertical
+   guillotine: `overflow-y:auto` on the body computes overflow-x to auto as
+   well, so anything positioned past 64px is cut off. At this width the body
+   holds nineteen rows before it needs to scroll at all — there are no kickers
+   to pay for — so the collapsed rail simply does not scroll. A real
+   implementation puts the tooltip in the top layer (popover, anchor
+   positioning) and stops depending on this. */
+.app--rail-min .rail__body{overflow:visible}
+/* and the groups keep their grouping, as a hairline rather than as a kicker */
+.app--rail-min .rail__group{margin-top:10px;padding-top:10px;border-top:1px solid var(--tx-line)}
+.app--rail-min .rail__group:first-child{margin-top:0;padding-top:0;border-top:0}
+
+/* ── today's clients ──────────────────────────────────────────────────────
+   The one structural addition. Not the whole roster — 22 clients at 40px is
+   880px, which is the entire rail — but the five with a session today, which is
+   the set a trainer actually touches. Derived from the schedule, so it needs no
+   curating, and LAST in the rail so that a group whose length changes daily can
+   never move the furniture above it. It is also the only group allowed to
+   scroll. */
+.rail__group--pins{margin-top:18px}
+.rail__gk span{margin-left:7px;color:var(--tx-ink-3);opacity:.72}
+.rail__pin{
+  display:flex;align-items:center;gap:9px;position:relative;
+  height:var(--w-tap-touch);padding:0 9px;border-radius:var(--tx-r2);
+  color:var(--tx-ink-2);font-size:13px;font-weight:500;cursor:pointer;
+}
+.rail__pin:hover{background:var(--w-hover);color:var(--tx-ink)}
+.rail__pn{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rail__pt{
+  flex:0 0 auto;font-family:var(--tx-mono);font-size:11px;color:var(--tx-ink-3);
+  font-variant-numeric:tabular-nums;
+}
+.rail__pt--done{opacity:.65}
+/* the session happening right now. The same 12% wash the current destination
+   uses, because it is the same statement: this is where you are. */
+.rail__pt--now{
+  font-family:var(--tx-font);font-size:10.5px;font-weight:600;
+  padding:2px 7px;border-radius:var(--tx-rfull);
+  background:var(--tx-accent-soft);color:var(--tx-accent-text);
+}
+.rail__pin--now{background:var(--w-selected)}
+.rail__pin--now .rail__pn{color:var(--tx-ink);font-weight:600}
+.rail__pin--done{color:var(--tx-ink-3)}
+.rail__pin--done .av{opacity:.5}
+/* the row's own menu, in the slot the time was in — so opening it costs no
+   width and moves nothing */
+.rail__pm{
+  flex:0 0 auto;width:24px;height:24px;border:0;background:none;cursor:pointer;
+  border-radius:var(--tx-r1);display:grid;place-items:center;color:var(--tx-ink-3);
+}
+.rail__pm:hover,.rail__pm[aria-expanded="true"]{background:var(--tx-surface-3);color:var(--tx-ink)}
+.app--rail-min .rail__pin{justify-content:center;padding:0}
+.app--rail-min .rail__pn,.app--rail-min .rail__pt,.app--rail-min .rail__pm{display:none}
+
+/* ── the foot ─────────────────────────────────────────────────────────────
+   It used to be a switch: one click and you were in your own training book.
+   That feature is behind SELF_TRAINING_ENABLED in the app and the flag is off,
+   so the rail's one permanent slot was spending itself on a door to a room
+   nobody can enter. It is now the account button, and everything weekly —
+   profile, settings, help, signing out — is behind it. */
+.rail__acct{
+  display:flex;align-items:center;gap:10px;width:100%;
+  height:var(--w-tap-touch);padding:0 9px;border-radius:var(--tx-r2);
+  border:0;background:none;cursor:pointer;text-align:left;
+  font-family:inherit;font-size:13px;color:var(--tx-ink-2);
+}
+.rail__acct:hover,.rail__acct[aria-expanded="true"]{background:var(--w-hover);color:var(--tx-ink)}
+.rail__acct__n{flex:1;min-width:0;display:flex;flex-direction:column;line-height:1.22;
+  white-space:nowrap;overflow:hidden}
+.rail__acct__n i{font-style:normal;font-size:11px;color:var(--tx-ink-3)}
+.rail__acct > svg{flex:0 0 auto;color:var(--tx-ink-3)}
+.rail__foot{position:relative}
+.app--rail-min .rail__acct{justify-content:center;padding:0}
+.app--rail-min .rail__acct__n,.app--rail-min .rail__acct > svg{display:none}
+
+/* a menu that names who it belongs to. Sign out is the most consequential row
+   in this product's chrome — there are six entries queued on this device right
+   now — so the menu says whose account is about to be left. */
+.menu__hd{
+  display:flex;align-items:center;gap:9px;padding:6px 9px 9px;margin:0 0 5px;
+  border-bottom:1px solid var(--tx-line);
+}
+.menu__hd > span{display:flex;flex-direction:column;min-width:0;line-height:1.25}
+.menu__hd b{font-size:13px;color:var(--tx-ink)}
+.menu__hd i{font-style:normal;font-family:var(--tx-mono);font-size:11px;color:var(--tx-ink-3)}
+/* a menu row that DOES something is a button; the reset keeps it looking like
+   the rows around it */
+button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:inherit}
+
+/* ── the top bar ─────────────────────────────────────────────────────────
+   Breadcrumb + search + sync + account. The breadcrumb is not decoration:
+   on a phone "back" is unambiguous because there is one stack. On the web a
+   user can arrive anywhere from a URL, so where-am-I has to be written down. */
+.top{
+  grid-area:top;background:var(--w-top-bg);border-bottom:1px solid var(--tx-line);
+  display:flex;align-items:center;gap:14px;padding:0 18px;min-width:0;
+}
+.crumbs{display:flex;align-items:center;gap:7px;min-width:0;font-size:13px}
+.crumbs a{color:var(--tx-ink-3)}
+.crumbs a:hover{color:var(--tx-ink)}
+.crumbs i{color:var(--tx-ink-off);font-style:normal;font-size:11px}
+.crumbs b{color:var(--tx-ink);font-weight:600;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+
+.omni{
+  margin-left:auto;display:flex;align-items:center;gap:9px;
+  width:320px;height:34px;padding:0 11px;
+  background:var(--tx-field);border:1px solid var(--tx-field-line);
+  border-radius:var(--tx-r2);color:var(--tx-ink-3);font-size:13px;cursor:text;
+}
+.omni:hover{border-color:var(--tx-field-line-hover)}
+.omni kbd{
+  margin-left:auto;font-family:var(--tx-mono);font-size:10.5px;
+  padding:2px 5px;border-radius:var(--tx-r1);
+  background:var(--tx-surface-3);border:1px solid var(--tx-line);color:var(--tx-ink-3);
+}
+.top__acts{display:flex;align-items:center;gap:6px}
+
+/* the sync pill. Offline-first is the app's architecture, so the web app has
+   to say out loud what is queued — otherwise the trainer cannot tell whether
+   what they typed on the floor has landed. */
+.sync{
+  display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 10px;
+  border-radius:var(--tx-rfull);font-size:12px;font-weight:600;
+  background:var(--tx-ok-soft);color:var(--tx-ok);
+}
+.sync--queued{background:var(--tx-warn-soft);color:var(--tx-warn)}
+.sync--offline{background:var(--tx-danger-soft);color:var(--tx-danger)}
+.sync i{width:7px;height:7px;border-radius:50%;background:currentColor;display:block}
+
+/* ── main ────────────────────────────────────────────────────────────────── */
+.main{grid-area:main;min-width:0;min-height:0;display:flex;flex-direction:column;
+  overflow:hidden;position:relative}
+
+/* the page header inside main: title, meta, actions, then optional tabs */
+.ph{
+  flex:0 0 auto;padding:20px 24px 0;border-bottom:1px solid var(--tx-line);
+  background:var(--tx-canvas);
+}
+.ph__row{display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap}
+.ph__t{font-family:var(--tx-brand);font-weight:800;font-size:22px;letter-spacing:-.025em;
+  text-wrap:nowrap;white-space:nowrap}
+.ph__sub{font-size:13px;color:var(--tx-ink-3);margin-top:4px}
+.ph__acts{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+/* safety net: if a name and its status tags ever cannot sit on one line, the
+   tags wrap under the name rather than overflowing the header block */
+.ph__row .row{flex-wrap:wrap;row-gap:6px}
+.ph__tabs{display:flex;gap:2px;margin-top:16px}
+.tab{
+  display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 12px;
+  border-radius:var(--tx-r2) var(--tx-r2) 0 0;
+  color:var(--tx-ink-3);font-size:13.5px;font-weight:600;cursor:pointer;
+  border-bottom:2px solid transparent;margin-bottom:-1px;
+  /* A tab is a button. It had never been used as one — every .tab in the other
+     five files that carry them is a <div>, which is the same defect the library
+     already fixed for .menu__i and .ev — so nobody noticed the reset at the top
+     of this file sets only `font` and `color`, and a real <button> came out with
+     the UA's grey ButtonFace and its default border. See the clients file, §01. */
+  background:transparent;border-top:0;border-left:0;border-right:0;
+  font-family:inherit;
+}
+.tab:hover{background:var(--w-hover);color:var(--tx-ink)}
+.tab[aria-selected="true"]{color:var(--tx-ink);border-bottom-color:var(--tx-accent)}
+.tab .rail__n{background:var(--tx-surface-3)}
+
+.body{flex:1;min-height:0;overflow-y:auto;padding:20px 24px 32px}
+.body--flush{padding:0}
+
+/* ── the list-detail split ───────────────────────────────────────────────
+   THE defining desktop pattern and the biggest single change from the app.
+   On a phone, choosing a client and reading a client are two screens and a
+   navigation event. Here they are one screen: the roster stays put while the
+   file changes, so comparing two clients costs two clicks instead of four
+   navigations. */
+.split{flex:1;min-height:0;display:grid;
+  grid-template-columns:var(--w-list) minmax(0,1fr);overflow:hidden}
+.split--wide{grid-template-columns:min(46%,560px) minmax(0,1fr)}
+.split__l{border-right:1px solid var(--tx-line);display:flex;flex-direction:column;
+  min-height:0;min-width:0;background:var(--tx-canvas)}
+.split__r{min-width:0;min-height:0;overflow-y:auto;background:var(--tx-canvas)}
+.split__hd{flex:0 0 auto;padding:12px;border-bottom:1px solid var(--tx-line);
+  display:flex;flex-direction:column;gap:10px}
+.split__scroll{flex:1;min-height:0;overflow-y:auto}
+
+/* ── the right panel ─────────────────────────────────────────────────────
+   Replaces the app's bottom sheet. A sheet slides over the thing you were
+   looking at; a panel sits beside it, so you can read the client while you
+   edit the client. Escape closes it. */
+.panel{
+  position:absolute;top:0;right:0;bottom:0;width:var(--w-panel);
+  background:var(--tx-surface);border-left:1px solid var(--tx-line-strong);
+  box-shadow:var(--tx-e3);display:flex;flex-direction:column;z-index:30;
+}
+.panel__hd{
+  flex:0 0 auto;height:52px;display:flex;align-items:center;gap:12px;
+  padding:0 14px 0 18px;border-bottom:1px solid var(--tx-line);
+}
+.panel__t{font-family:var(--tx-brand);font-weight:800;font-size:15px;letter-spacing:-.01em}
+.panel__body{flex:1;min-height:0;overflow-y:auto;padding:18px}
+.panel__foot{
+  flex:0 0 auto;padding:14px 18px;border-top:1px solid var(--tx-line);
+  display:flex;gap:9px;justify-content:flex-end;background:var(--tx-surface);
+}
+
+/* the modal — centre stage, and ONLY for a destructive confirm or a
+   two-field form. Anything longer belongs in the panel. */
+/* the base scrim sits UNDER a panel (z 30) and OVER the content. A modal
+   needs one above the panel layer instead — hence the two levels. Getting
+   this wrong paints a 66% black wash over the panel and kills the material. */
+.scrim{position:absolute;inset:0;background:var(--tx-scrim);z-index:20}
+.scrim--top{z-index:40}
+/* MEASURED BUG, KEPT AS A COMMENT SO NOBODY UNDOES IT:
+   a 66% scrim behind a 420px panel dropped the ledger text to 1.8:1 — which
+   contradicts the panel's whole reason for existing. A modal's background must
+   be unusable; a PANEL's background must stay readable, because a payment is
+   decided while looking at it. 26% holds the ledger at 6.4:1. */
+.scrim--soft{background:var(--tx-scrim-soft);z-index:20}
+.modal{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:472px;max-width:calc(100% - 48px);z-index:41;
+  background:var(--tx-surface);border:1px solid var(--tx-line-strong);
+  border-radius:var(--tx-r3);box-shadow:var(--tx-e3);overflow:hidden;
+}
+.modal__hd{padding:20px 22px 0}
+.modal__t{font-family:var(--tx-brand);font-weight:800;font-size:18px;letter-spacing:-.02em}
+.modal__body{padding:12px 22px 20px;font-size:14px;line-height:1.6;color:var(--tx-ink-2)}
+.modal__foot{padding:14px 22px;border-top:1px solid var(--tx-line);
+  display:flex;gap:9px;justify-content:flex-end;background:var(--tx-surface-2)}
+
+/* ── the command palette ─────────────────────────────────────────────────
+   ⌘K. There is no phone equivalent, and its absence is the loudest tell
+   that a desktop app was ported from a phone. */
+.pal{
+  position:absolute;left:50%;top:92px;transform:translateX(-50%);
+  width:620px;max-width:calc(100% - 64px);z-index:50;
+  background:var(--tx-surface);border:1px solid var(--tx-line-strong);
+  border-radius:var(--tx-r3);box-shadow:var(--tx-e3);overflow:hidden;
+}
+.pal__in{
+  height:50px;display:flex;align-items:center;gap:11px;padding:0 16px;
+  border-bottom:1px solid var(--tx-line);font-size:15px;color:var(--tx-ink);
+}
+.pal__in span{color:var(--tx-ink-3)}
+.pal__car{width:1px;height:18px;background:var(--tx-accent);display:block}
+.pal__list{max-height:340px;overflow-y:auto;padding:7px}
+.pal__gk{font-family:var(--tx-mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--tx-ink-3);padding:9px 9px 5px}
+.pal__i{display:flex;align-items:center;gap:11px;height:38px;padding:0 9px;
+  border-radius:var(--tx-r2);color:var(--tx-ink-2);font-size:13.5px;cursor:pointer}
+.pal__i:hover,.pal__i[aria-selected="true"]{background:var(--w-selected);
+  color:var(--tx-accent-text)}
+.pal__i kbd{margin-left:auto;font-family:var(--tx-mono);font-size:10.5px;padding:2px 5px;
+  border-radius:var(--tx-r1);background:var(--tx-surface-3);border:1px solid var(--tx-line);
+  color:var(--tx-ink-3)}
+
+
+/* ═════════════════════════════════════════════ 04 · COMPONENTS ═══════════ */
+
+/* ── buttons ──────────────────────────────────────────────────────────────
+   Same three ranks as the app. Height 34, not 48: a mouse does not need 48
+   and a 48px button in a desktop toolbar reads as a mobile app in a window. */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  height:34px;padding:0 13px;border-radius:var(--tx-r2);
+  border:1px solid transparent;background:transparent;
+  font-family:var(--tx-font);font-size:13px;font-weight:600;
+  color:var(--tx-ink);cursor:pointer;white-space:nowrap;
+  transition:background var(--tx-t-instant) var(--tx-ease),
+             border-color var(--tx-t-instant) var(--tx-ease),
+             color var(--tx-t-instant) var(--tx-ease);
+}
+.btn--primary{background:var(--tx-accent);color:var(--tx-accent-ink);font-weight:700}
+.btn--primary:hover{background:var(--tx-accent-press)}
+.btn--secondary{border-color:var(--tx-line-strong);color:var(--tx-ink)}
+.btn--secondary:hover{background:var(--tx-surface-2)}
+.btn--ghost{color:var(--tx-ink-2)}
+.btn--ghost:hover{background:var(--w-hover);color:var(--tx-ink)}
+.btn--danger{background:var(--tx-danger-fill);color:var(--tx-danger-fill-ink);font-weight:700}
+.btn--lg{height:var(--w-tap-touch);padding:0 18px;font-size:14px}
+.btn--sm{height:28px;padding:0 10px;font-size:12.5px}
+.btn--icon{width:var(--w-tap);padding:0}
+.btn--icon.btn--lg{width:var(--w-tap-touch)}
+.btn[disabled],.btn[aria-disabled="true"]{opacity:.5;pointer-events:none}
+.btn kbd{font-family:var(--tx-mono);font-size:10px;opacity:.7}
+
+.btngroup{display:inline-flex;border:1px solid var(--tx-line-strong);border-radius:var(--tx-r2);
+  overflow:hidden}
+.btngroup .btn{height:32px;border-radius:0;border:0;border-left:1px solid var(--tx-line-strong)}
+.btngroup .btn:first-child{border-left:0}
+.btngroup .btn[aria-pressed="true"]{background:var(--tx-surface-3);color:var(--tx-ink)}
+
+/* ── fields ───────────────────────────────────────────────────────────────── */
+.fld{display:flex;flex-direction:column;gap:6px}
+.fld__l{font-size:12.5px;font-weight:600;color:var(--tx-ink-2)}
+.fld__h{font-size:12px;color:var(--tx-ink-3);line-height:1.5}
+.ctl{
+  width:100%;height:34px;padding:0 11px;border-radius:var(--tx-r2);
+  background:var(--tx-field);border:1px solid var(--tx-field-line);
+  box-shadow:var(--tx-field-inset);
+  color:var(--tx-ink);font-size:13.5px;font-family:var(--tx-font);
+  transition:border-color var(--tx-t-fast) var(--tx-ease);
+}
+.ctl::placeholder{color:var(--tx-ink-3)}      /* ink-off is 2.3:1 on a field */
+.ctl:hover{border-color:var(--tx-field-line-hover)}
+.ctl:focus{outline:none;border-color:var(--tx-focus);box-shadow:0 0 0 3px var(--tx-focus-halo)}
+textarea.ctl{height:auto;min-height:76px;padding:9px 11px;line-height:1.5;resize:vertical}
+select.ctl{appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),
+                   linear-gradient(135deg,currentColor 50%,transparent 50%);
+  background-position:calc(100% - 15px) 15px,calc(100% - 11px) 15px;
+  background-size:4px 4px,4px 4px;background-repeat:no-repeat;padding-right:30px}
+.fld--err .ctl{border-color:var(--tx-danger);box-shadow:0 0 0 3px var(--tx-danger-soft)}
+.fld__e{font-size:12px;font-weight:600;color:var(--tx-danger);display:flex;gap:5px}
+.ctl--num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--tx-mono)}
+
+/* the affix group — ₹ and +91 belong outside the input, not in the placeholder */
+.affix{display:flex}
+.affix__p{
+  display:grid;place-items:center;padding:0 11px;flex:0 0 auto;
+  border:1px solid var(--tx-field-line);border-right:0;
+  border-radius:var(--tx-r2) 0 0 var(--tx-r2);
+  background:var(--tx-surface-2);color:var(--tx-ink-2);
+  font-family:var(--tx-mono);font-size:13px;
+}
+.affix .ctl{border-radius:0 var(--tx-r2) var(--tx-r2) 0}
+
+.switch{
+  display:inline-flex;flex:0 0 auto;   /* a span is inline; width would be ignored */
+  width:38px;height:22px;border-radius:var(--tx-rfull);background:var(--tx-surface-3);
+  border:1px solid var(--tx-line-strong);position:relative;cursor:pointer;flex:0 0 auto;
+  transition:background var(--tx-t-fast) var(--tx-ease)}
+/* the track is 22px tall because a taller toggle looks like a button; the
+   target is 48x32 via slop, which is what SC 2.5.8 actually measures */
+.switch::before{content:'';position:absolute;inset:-5px}
+.switch::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;
+  border-radius:50%;background:var(--tx-ink-2);
+  transition:transform var(--tx-t-fast) var(--tx-ease),background var(--tx-t-fast)}
+.switch[aria-checked="true"]{background:var(--tx-accent);border-color:var(--tx-accent)}
+.switch[aria-checked="true"]::after{transform:translateX(16px);background:var(--tx-accent-ink)}
+
+.check{
+  width:18px;height:18px;border-radius:var(--tx-r1);flex:0 0 auto;
+  border:1.5px solid var(--tx-field-line-hover);background:var(--tx-field);
+  display:grid;place-items:center;cursor:pointer}
+.check{position:relative}
+.check::before{content:'';position:absolute;inset:-7px}  /* 18 + 14 = 32px target */
+.check[aria-checked="true"]{background:var(--tx-accent);border-color:var(--tx-accent)}
+.check svg{opacity:0}
+/* the tick has to be knocked OUT of the lime, not laid on top of it. It was
+   inheriting ink-2 from whatever cell it sat in, which measures ~1.5:1 on the
+   accent fill — the same mistake the one rule at the top of this file exists to
+   prevent. accent-ink is 15.2:1 on it. */
+.check[aria-checked="true"] svg{opacity:1;color:var(--tx-accent-ink)}
+
+/* ── chips, tags, pills ───────────────────────────────────────────────────── */
+.chip{
+  display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;
+  border-radius:var(--tx-rfull);background:var(--tx-surface-2);
+  border:1px solid var(--tx-line);color:var(--tx-ink-2);
+  font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;position:relative;
+}
+/* 28px is under the 32px floor, so the hit area is extended with slop rather
+   than by making the chip look clumsy. Documented, measured, not guessed. */
+.chip::before{content:'';position:absolute;inset:-3px -2px}
+.chip:hover{border-color:var(--tx-line-strong);color:var(--tx-ink)}
+.chip[aria-pressed="true"]{background:var(--tx-accent);border-color:var(--tx-accent);
+  color:var(--tx-accent-ink)}
+.chip__x{width:14px;height:14px;display:grid;place-items:center;opacity:.7}
+
+.tag{
+  display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;
+  border-radius:var(--tx-r1);font-size:11px;font-weight:700;letter-spacing:.02em;
+  background:var(--tx-surface-3);color:var(--tx-ink-2);white-space:nowrap;
+}
+.tag--ok{background:var(--tx-ok-soft);color:var(--tx-ok)}
+.tag--warn{background:var(--tx-warn-soft);color:var(--tx-warn)}
+.tag--danger{background:var(--tx-danger-soft);color:var(--tx-danger)}
+.tag--info{background:var(--tx-info-soft);color:var(--tx-info)}
+.tag--acc{background:var(--tx-accent-soft);color:var(--tx-accent-text)}
+.tag--floor{background:var(--tx-floor-soft);color:var(--tx-floor)}
+.tag--remote{background:var(--tx-remote-soft);color:var(--tx-remote)}
+.tag--pr{background:var(--tx-pr-soft);color:var(--tx-pr)}
+
+/* ── avatar ───────────────────────────────────────────────────────────────── */
+.av{
+  width:32px;height:32px;border-radius:var(--tx-rfull);flex:0 0 auto;
+  display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700;
+  font-family:var(--tx-font);
+}
+.av--sm{width:24px;height:24px;font-size:10px}
+.av--lg{width:48px;height:48px;font-size:17px}
+.av--xl{width:64px;height:64px;font-size:22px}
+
+/* ── card, kv, stat ───────────────────────────────────────────────────────── */
+.card{background:var(--tx-surface);border:1px solid var(--tx-line);border-radius:var(--tx-r3);
+  box-shadow:var(--tx-e1)}
+.card__hd{padding:14px 16px;border-bottom:1px solid var(--tx-line);
+  display:flex;align-items:center;gap:12px}
+.card__t{font-size:14px;font-weight:700;color:var(--tx-ink)}
+.card__acts{margin-left:auto;display:flex;gap:6px}
+.card__b{padding:16px}
+.card__b--flush{padding:0}
+
+.kv{display:flex;align-items:baseline;justify-content:space-between;gap:16px;
+  padding:9px 0;border-bottom:1px solid var(--tx-line)}
+.kv:last-child{border-bottom:0}
+.kv__k{font-size:13px;color:var(--tx-ink-3)}
+.kv__v{font-size:13.5px;font-weight:600;color:var(--tx-ink);
+  font-variant-numeric:tabular-nums;text-align:right}
+
+.stats{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+/* When the count is known, say so: auto-fit left a single orphan tile on its
+   own row in the client file, which reads as a bug rather than as a layout. */
+.stats--4{grid-template-columns:repeat(4,minmax(0,1fr))}
+.stats--3{grid-template-columns:repeat(3,minmax(0,1fr))}
+.stats--2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.stat{background:var(--tx-surface);border:1px solid var(--tx-line);border-radius:var(--tx-r3);
+  padding:14px 16px}
+.stat__k{font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--tx-ink-3)}
+.stat__v{font-family:var(--tx-brand);font-weight:800;font-size:27px;letter-spacing:-.03em;
+  line-height:1.05;margin-top:8px;font-variant-numeric:tabular-nums}
+.stat__d{font-size:12.5px;color:var(--tx-ink-3);margin-top:5px}
+.stat__d b{font-weight:600}
+.stat--acc .stat__v{color:var(--tx-accent-text)}
+.stat--warn .stat__v{color:var(--tx-warn)}
+.stat--danger .stat__v{color:var(--tx-danger)}
+
+/* ── the data table ──────────────────────────────────────────────────────
+   The web's answer to a list of cards. A card list is right on a phone,
+   where you read one row at a time; a table is right here, because the whole
+   job at a desk is comparing rows. Sortable headers, right-aligned money,
+   sticky head, row selection with a checkbox column. */
+.tbl{font-size:13.5px}
+.tbl thead th{
+  position:sticky;top:0;z-index:2;background:var(--tx-canvas);
+  text-align:left;padding:0 12px;height:36px;white-space:nowrap;
+  font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--tx-ink-3);
+  border-bottom:1px solid var(--tx-line-strong);
+}
+.tbl thead th[aria-sort]{cursor:pointer;color:var(--tx-ink-2)}
+.tbl thead th[aria-sort]:hover{color:var(--tx-ink)}
+.tbl thead th[aria-sort="ascending"]::after{content:' ↑';color:var(--tx-accent-text)}
+.tbl thead th[aria-sort="descending"]::after{content:' ↓';color:var(--tx-accent-text)}
+.tbl tbody td{padding:0 12px;height:var(--w-row);border-bottom:1px solid var(--tx-line);
+  color:var(--tx-ink-2);vertical-align:middle}
+.tbl tbody tr:hover td{background:var(--w-hover)}
+.tbl tbody tr[aria-selected="true"] td{background:var(--w-selected)}
+.tbl .num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--tx-mono);
+  color:var(--tx-ink);white-space:nowrap}
+.tbl .strong{color:var(--tx-ink);font-weight:600}
+/* a table cell is a single line unless it says otherwise. Two-word plan names
+   were wrapping and knocking rows out of the 44px rhythm. */
+.tbl tbody td{white-space:nowrap}
+.tbl tbody td.wrap{white-space:normal}
+/* an icon in a table cell inherits ink-2 and reads as a smudge at 15px —
+   give it its own weight and colour */
+.tbl td>svg{color:var(--tx-ink-3);stroke-width:1.8}
+.tbl .who{display:flex;align-items:center;gap:9px;min-width:0}
+.tbl .who b{font-weight:600;color:var(--tx-ink);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.tbl .sel{width:38px;padding-left:14px}
+.tbl__row--tall td{height:var(--w-row-lg)}
+.tbl tfoot td{padding:0 12px;height:44px;border-top:1px solid var(--tx-line-strong);
+  font-weight:700;color:var(--tx-ink);background:var(--tx-surface-2)}
+
+/* the bulk-action bar that appears when rows are selected. Multi-select is a
+   desktop-native idea: the app has no way to act on eight clients at once. */
+.bulk{
+  display:flex;align-items:center;gap:12px;height:44px;padding:0 14px;
+  background:var(--tx-accent-soft);border-bottom:1px solid var(--tx-accent-line);
+  font-size:13px;color:var(--tx-accent-text);font-weight:600;
+}
+.bulk__acts{margin-left:auto;display:flex;gap:7px}
+
+/* ── the list row (for the list pane of a split) ──────────────────────────── */
+.lrow{
+  display:flex;align-items:center;gap:11px;padding:0 12px;min-height:var(--w-row-lg);
+  border-bottom:1px solid var(--tx-line);cursor:pointer;position:relative;
+}
+.lrow:hover{background:var(--w-hover)}
+.lrow[aria-selected="true"]{background:var(--w-selected)}
+.lrow[aria-selected="true"]::before{content:'';position:absolute;left:0;top:0;bottom:0;
+  width:2px;background:var(--tx-accent)}
+.lrow__m{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.lrow__t{font-size:13.5px;font-weight:600;color:var(--tx-ink);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.lrow__s{font-size:12px;color:var(--tx-ink-3);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.lrow__r{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.lrow__n{font-family:var(--tx-mono);font-size:12px;color:var(--tx-ink-2);
+  font-variant-numeric:tabular-nums}
+
+/* ── toolbar / filter bar ─────────────────────────────────────────────────── */
+.tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tools__sp{flex:1}
+.search{
+  display:flex;align-items:center;gap:8px;padding:0 11px;flex:1;min-width:150px;
+  min-height:34px;   /* min-height, not height: with flex:1 in a COLUMN the
+     flex algorithm owns the main size and a plain height is ignored, which
+     collapsed this box to 23px everywhere it was stacked instead of inlined */
+  background:var(--tx-field);border:1px solid var(--tx-field-line);border-radius:var(--tx-r2);
+  color:var(--tx-ink-3);font-size:13px;
+}
+.search input{flex:1;align-self:stretch;background:none;border:0;outline:none;color:var(--tx-ink);font-size:13px}
+.search input::placeholder{color:var(--tx-ink-3)}
+
+/* ── empty state ─────────────────────────────────────────────────────────
+   A desktop empty state has room to explain and to offer the action. The
+   app's version is a line of text; this one earns its space. */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  text-align:center;padding:64px 24px;gap:12px;min-height:280px}
+.empty__ic{width:48px;height:48px;border-radius:var(--tx-r3);background:var(--tx-surface-2);
+  border:1px solid var(--tx-line);display:grid;place-items:center;color:var(--tx-ink-3)}
+.empty__t{font-family:var(--tx-brand);font-weight:800;font-size:17px;letter-spacing:-.015em}
+.empty__b{font-size:13.5px;color:var(--tx-ink-3);max-width:46ch;line-height:1.6}
+
+/* ── meter / progress ─────────────────────────────────────────────────────── */
+.meter{height:6px;border-radius:var(--tx-rfull);background:var(--tx-surface-3);overflow:hidden;
+  display:flex;gap:2px}
+.meter i{display:block;height:100%;border-radius:var(--tx-rfull);background:var(--tx-accent)}
+.meter i.warn{background:var(--tx-warn)}
+.meter i.ok{background:var(--tx-ok)}
+.meter i.dim{background:var(--tx-surface-3)}
+.meter--lg{height:9px}
+
+/* ── the calendar grid · FIRST PASS, SUPERSEDED ──────────────────────────
+   Seven columns × the working day, as a matrix of hour cells. Kept because
+   removing a class is not additive and because the component library's
+   specimens still measure against it — but nothing draws it any more. It
+   could not place an 07:30 start or a 90-minute session; see the `.cw` block
+   below and §01 of webapp-schedule.html. Do not build on it. */
+.cal{display:grid;grid-template-columns:56px repeat(7,minmax(0,1fr));
+  border-left:1px solid var(--tx-line)}
+.cal__hd{position:sticky;top:0;z-index:2;background:var(--tx-canvas);
+  border-bottom:1px solid var(--tx-line-strong);border-right:1px solid var(--tx-line);
+  padding:8px 10px;text-align:center}
+.cal__d{font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--tx-ink-3)}
+.cal__n{font-family:var(--tx-brand);font-weight:800;font-size:17px;margin-top:3px}
+.cal__hd--today .cal__d,.cal__hd--today .cal__n{color:var(--tx-accent-text)}
+/* which day the clash is on. The gutter bracket says WHEN; across seven
+   columns it cannot say WHERE, and the head is the one row that is sticky. */
+.cal__hd--clash{box-shadow:inset 0 -2px 0 var(--tx-danger)}
+.cal__hd__w{display:inline-flex;align-items:center;gap:4px;color:var(--tx-danger)}
+.cal__t{border-right:1px solid var(--tx-line);border-bottom:1px solid var(--tx-line);
+  height:48px;padding:3px 6px 0;text-align:right;
+  font-family:var(--tx-mono);font-size:10.5px;color:var(--tx-ink-3)}
+.cal__c{border-right:1px solid var(--tx-line);border-bottom:1px solid var(--tx-line);
+  height:48px;position:relative;padding:2px}
+.cal__c:hover{background:var(--w-hover)}
+.cal__c--off{background:repeating-linear-gradient(45deg,transparent 0 6px,var(--w-grid) 6px 7px)}
+.ev{
+  position:absolute;left:2px;right:2px;border-radius:var(--tx-r1);
+  padding:4px 7px;overflow:hidden;cursor:pointer;
+  background:var(--tx-floor-soft);
+  border-left:2px solid var(--tx-floor);
+  font-size:11.5px;line-height:1.35;
+}
+.ev b{display:block;color:var(--tx-ink);font-weight:600;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.ev span{color:var(--tx-ink-3);font-family:var(--tx-mono);font-size:10.5px}
+.ev--remote{background:var(--tx-remote-soft);border-left-color:var(--tx-remote)}
+.ev--done{background:var(--tx-ok-soft);border-left-color:var(--tx-ok)}
+.ev--noshow{background:var(--tx-danger-soft);border-left-color:var(--tx-danger)}
+.ev--ghost{background:var(--tx-accent-soft);border-left-color:var(--tx-accent);
+  border-style:dashed;border-width:0 0 0 2px}
+.ev--conflict{box-shadow:inset 0 0 0 1px var(--tx-danger)}
+
+/* ── the week, minute-true ───────────────────────────────────────────────
+   ONE MINUTE IS ONE PIXEL. `--cw-hour:60px` is not a tuning value, it is the
+   whole geometry: a block's `top` is its start minute minus its segment's,
+   and its `height` is its duration in minutes. No scale factor, no rounding,
+   and every number in the specification is the number in the data.
+
+   The first pass was a MATRIX — eight columns by fourteen 48px hour cells,
+   each cell its own containing block, each session absolutely positioned
+   inside one cell. All 102 sessions in that file carried the identical inline
+   style `top:2px;height:42px`, which is what a matrix forces: an 07:30 start
+   has no `top` to sit at that does not spill into a sibling cell with its own
+   background and its own border, and a 90-minute session has no height at
+   all. The app has stored `session_duration_minutes` per client since V2, its
+   `TimeField` steps by 15 minutes ("the one that keeps 07:30 and 06:45
+   reachable"), and `conflicts.ts` reasons in `[startMinute, endMinute)` — the
+   grid could express none of it.
+
+   So the cells are gone. A day is ONE positioned track per segment, and the
+   hour lines are drawn ON it rather than BEING it. */
+:root{
+  --cw-hour:60px;       /* 1 min = 1 px. Changing this breaks the identity. */
+  --cw-gut:58px;        /* the time gutter */
+  --cw-band:30px;       /* the collapsed quiet band */
+}
+.cw{display:grid;grid-template-columns:var(--cw-gut) repeat(7,minmax(0,1fr));
+  border-left:1px solid var(--tx-line)}
+.cw--day{grid-template-columns:var(--cw-gut) minmax(0,42fr) minmax(0,58fr)}
+
+/* one day, one segment. `height` is inline because it is data: the segment's
+   length in minutes IS its length in pixels. */
+.cw__seg{position:relative;border-right:1px solid var(--tx-line);
+  border-bottom:1px solid var(--tx-line);overflow:hidden}
+.cw__seg--gut{background:var(--tx-canvas);overflow:visible}
+.cw__seg--dtl{overflow:visible;padding:0 0 0 14px}
+/* the column being dragged in. A read-out clipped at the column edge is the
+   one thing on the screen that must not be clipped — a real implementation
+   renders it in the top layer, and this is the static equivalent. */
+.cw__seg--drag{overflow:visible;z-index:10}
+.cw__seg--today{background:var(--w-selected)}
+
+/* the rulings. An hour is a line, not a row. */
+.cw__l{position:absolute;left:0;right:0;height:0;border-top:1px solid var(--tx-line)}
+.cw__l--h{border-top-color:var(--tx-line-strong)}
+/* the 15-minute marks. Drawn only while dragging — permanently they are 15px
+   apart and read as hatching, which is noise on a surface whose whole job is
+   to be scanned. Precision on demand, not precision as decoration. */
+.cw__l--q{border-top-style:dotted;border-top-color:var(--tx-line-strong)}
+.cw__tl{position:absolute;right:8px;transform:translateY(-50%);
+  font-family:var(--tx-mono);font-size:10.5px;color:var(--tx-ink-3);
+  font-variant-numeric:tabular-nums;background:var(--tx-canvas);padding:0 2px}
+
+/* outside the trainer's working windows. Hatched, never blocked: working
+   hours constrain what a CLIENT can self-book and they have never constrained
+   the trainer — the rule `WorkingHoursScreen` states on itself. */
+.cw__off{position:absolute;left:0;right:0;pointer-events:none;
+  background:repeating-linear-gradient(45deg,transparent 0 6px,var(--w-grid) 6px 7px)}
+
+/* the quiet band — a contiguous span that falls outside EVERY day's working
+   windows, and holds nothing, collapsed to one 30px seam. It is not a
+   generic "hide empty hours": an empty hour inside working hours is the
+   sellable gap this screen exists to price, and collapsing that would hide
+   the money. See §04. */
+.cw__band{grid-column:1/-1;height:var(--cw-band);width:100%;display:flex;
+  align-items:center;gap:10px;padding:0 14px;text-align:left;cursor:pointer;
+  border:0;border-top:1px solid var(--tx-line-strong);
+  border-bottom:1px solid var(--tx-line-strong);
+  background:var(--tx-surface-2);color:var(--tx-ink-3);font:inherit;font-size:11.5px}
+.cw__band:hover{background:var(--w-hover)}
+.cw__band b{font-family:var(--tx-mono);font-weight:500;color:var(--tx-ink-2);
+  font-variant-numeric:tabular-nums}
+.cw__band em{font-style:normal;margin-left:auto;color:var(--tx-ink-3);
+  font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.06em;
+  text-transform:uppercase}
+.cw__band svg{flex:0 0 auto;color:var(--tx-ink-3)}
+
+/* now. The line is --tx-ink because red is taken by the clash and by the
+   no-show, and lime is a fill colour in this system and never a stroke — so
+   the accent appears as the 7px dot, which is a fill. */
+.cw__now{position:absolute;left:0;right:0;height:0;z-index:5;
+  border-top:1px solid var(--tx-ink);pointer-events:none}
+.cw__now i{position:absolute;left:-4px;top:-4px;width:8px;height:8px;
+  border-radius:50%;background:var(--tx-accent)}
+.cw__nt{position:absolute;right:6px;transform:translateY(-50%);z-index:6;
+  background:var(--tx-ink);color:var(--tx-canvas);font-family:var(--tx-mono);
+  font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;
+  font-variant-numeric:tabular-nums}
+
+/* the clash bracket. A red ring on a block is invisible when the block is
+   below the fold; the bracket lives in the gutter, which is sticky-adjacent
+   and always in the same place. */
+.cw__br{position:absolute;left:5px;width:6px;z-index:4;
+  border:1px solid var(--tx-danger);border-right:0;border-radius:3px 0 0 3px}
+
+/* ── the session block, second pass ──────────────────────────────────────
+   Positioned by minute, and its content ladder is set by its DURATION class —
+   which, at 1 min = 1 px, is a height class. The library already published
+   this ladder ("a 30-minute session is 23px and drops the plan line", "min
+   legible 23px"); nothing implemented it, because in a 48px hour cell every
+   session was 42px whatever its length. */
+/* the four rungs, written out even where the rule is "nothing", because a
+   class in the markup with no rule in the stylesheet is the kind of thing
+   this page's §01 exists to catch. 30 and 45 drop the plan line; 60 is the
+   base three-line block; 90 has room for the glyph to clear the text. */
+/* `button.ev` sets display:block at (0,1,1); a bare .ev--m30 at (0,1,0)
+   loses to it and the 30-minute block stacks its two lines into 30px. Out-
+   specified rather than narrowed, because the block is a button everywhere. */
+button.ev--m30{display:flex;align-items:baseline;gap:7px;padding:2px 7px}
+.ev--m30{padding:2px 7px}
+.ev--m30 .ev__p{display:none}
+.ev--m45 .ev__p{display:none}
+.ev--m60{padding:3px 7px}
+.ev--m90{padding:4px 7px}
+.ev--m90 .ev__p{margin-bottom:14px}
+.ev__t{display:block;font-family:var(--tx-mono);font-size:10.5px;font-weight:600;
+  color:var(--tx-ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ev__n{display:block;color:var(--tx-ink);font-weight:600;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;min-width:0}
+.ev__p{display:block;color:var(--tx-ink-3);white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.ev__g{position:absolute;right:6px;bottom:5px;color:var(--tx-ink-3)}
+.ev--noshow .ev__g,.ev--conflict .ev__g{color:var(--tx-danger)}
+.ev--done .ev__g{color:var(--tx-ok)}
+/* a block is a button, so it is reachable. 102 of them were <div>s. */
+/* No `display` here. It used to say `block`, which tied with .ev--m30's
+   `flex` on specificity and won on source order — stacking two lines into a
+   30px block. Absolute positioning blockifies an inline-block button anyway,
+   so the declaration was doing nothing except breaking the rung above. */
+button.ev{border:0;border-left:2px solid var(--tx-floor);font:inherit;
+  text-align:left;color:inherit;width:auto}
+button.ev--remote{border-left-color:var(--tx-remote)}
+button.ev--done{border-left-color:var(--tx-ok)}
+button.ev--noshow{border-left-color:var(--tx-danger)}
+button.ev:hover{filter:brightness(1.06)}
+button.ev:focus-visible{outline:2px solid var(--tx-focus);outline-offset:1px;z-index:8}
+
+/* in progress. Not a new colour: the left edge thickens and the block gains
+   the accent ring, which is the same "this one, now" the rail's pin uses. */
+.ev--live{box-shadow:inset 0 0 0 1px var(--tx-accent-line)}
+.ev--live .ev__t{color:var(--tx-accent-text)}
+
+/* started, and nobody opened a log. The app can tell the difference — the
+   scheduled session is neither done nor dead and `buildRunning` finds no open
+   workout against it — and the block ladder had no state for it, so a session
+   twelve minutes past its start looked exactly like one twelve minutes before.
+   Three rings now, three meanings: accent is running, warn is unopened, danger
+   is a clash. Warn was the only one of the three not yet spent on a block. */
+.ev--late{box-shadow:inset 0 0 0 1px var(--tx-warn)}
+button.ev--late{border-left-color:var(--tx-warn)}
+.ev--late .ev__t{color:var(--tx-warn)}
+
+/* the clash. The library specified "a hatched overlay plus a warning glyph —
+   the one state that must be noticed"; the stylesheet had a 1px red ring and
+   no hatch and no glyph. Both are here, and the two blocks split the column
+   rather than stacking — see §05. */
+.ev--conflict{box-shadow:inset 0 0 0 1px var(--tx-danger);
+  background-image:repeating-linear-gradient(45deg,transparent 0 5px,
+    var(--tx-danger-soft) 5px 7px)}
+/* n overlapping sessions, n columns. Two covers every case a one-to-one
+   trainer can produce; the third is a rounding error and gets the same rule. */
+.ev--sp1{right:auto;width:calc(50% - 3px)}
+.ev--sp2{left:auto;right:2px;width:calc(50% - 3px)}
+.ev--sp1 .ev__p,.ev--sp2 .ev__p{display:none}
+
+/* a free interval inside working hours, long enough to sell. Dashed on all
+   four sides so it can never be misread as a booking, and labelled with what
+   it is worth, because free time is the most expensive thing on this screen. */
+.gapb{position:absolute;left:3px;right:3px;border-radius:var(--tx-r1);
+  border:1px dashed var(--tx-accent-line);background:transparent;
+  padding:4px 8px;overflow:hidden;cursor:pointer;text-align:left;font:inherit;
+  display:block;width:auto}
+.gapb b{display:block;font-family:var(--tx-mono);font-size:10.5px;font-weight:600;
+  color:var(--tx-accent-text);font-variant-numeric:tabular-nums}
+.gapb span{display:block;font-size:11px;color:var(--tx-ink-3);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.gapb:hover{background:var(--tx-accent-soft);border-style:solid}
+.gapb:hover b{color:var(--tx-accent-text)}
+.gapb:focus-visible{outline:2px solid var(--tx-focus);outline-offset:1px}
+
+/* the drag read-out. A time you are dragging to must be readable as a time,
+   not inferred from where the block landed. */
+.cw__cur{position:absolute;z-index:9;background:var(--tx-ink);color:var(--tx-canvas);
+  border-radius:var(--tx-r1);padding:4px 8px;font-family:var(--tx-mono);
+  font-size:10.5px;font-weight:500;line-height:1.45;white-space:nowrap;
+  box-shadow:var(--tx-e2);pointer-events:none}
+.cw__cur b{color:var(--tx-canvas);font-weight:700}
+.cw__cur i{font-style:normal;opacity:.7}
+
+/* ── a move, and the ten seconds it can be taken back in ─────────────────
+   The set's rule, from the heuristic audit: a destructive action is
+   "reversible for ten seconds in place, in the row that changed". Moving a
+   session is destructive in a way a drag does not look like — the session
+   panel's own history reads "Moved from Monday 17:00 · Nikhil asked. He was
+   told automatically", so a mis-drop sends a WhatsApp.
+
+   Undo after the message has gone is not undo. So the message is HELD for the
+   ten seconds, the block says so, and the countdown is the receipt. */
+.ev--just{box-shadow:inset 0 0 0 1px var(--tx-accent-line),0 0 0 3px var(--tx-accent-soft)}
+.cw__cur--undo{padding:0;min-width:196px;white-space:normal;overflow:hidden;
+  pointer-events:auto}
+.cw__cur--undo p{padding:7px 10px 6px;line-height:1.5}
+.cw__cur--undo .u__r{display:flex;align-items:center;gap:8px;
+  padding:0 6px 6px 10px}
+.cw__cur--undo .u__b{flex:0 0 auto;background:none;border:0;font:inherit;
+  font-family:var(--tx-mono);font-size:10.5px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--tx-canvas);text-decoration:underline;
+  text-underline-offset:2px;cursor:pointer;padding:3px 5px;border-radius:3px}
+.cw__cur--undo .u__b:hover{background:rgba(255,255,255,.14)}
+/* the countdown. A bar and not a number alone, because "8s" without a moving
+   edge is a fact you have to keep re-reading. */
+.cw__bar{height:2px;background:rgba(255,255,255,.22)}
+.cw__bar i{display:block;height:2px;background:var(--tx-accent)}
+
+/* the read-out, by verdict. Clear is the house ink chip; a clash has to be
+   the danger tone, because the one state that must be noticed is the one
+   where the drop is a mistake. §09. */
+/* MEASURED, AND THE FIRST ATTEMPT FAILED: filling this chip with
+   --tx-danger and writing on it in white gives 3.06:1 in the dark theme,
+   because --tx-danger is a LIGHT red there (255,90,90). At 10.5px that is a
+   fail — 3:1 is the large-text floor and this is not large text.
+   So the surface does not change. The chip keeps the inverted ink ground it
+   has in both themes, which is high-contrast by construction, and the danger
+   is carried by a 3px edge (a graphical object at 3.06:1, which is its own
+   floor) plus a glyph plus the word "clashes". Colour is never the only
+   signal, and no text contrast is spent on the tone. */
+.cw__cur--warn{border-left:3px solid var(--tx-danger);padding-left:9px}
+.cw__cur--warn i{opacity:1}
+.cw__cur--warn svg{vertical-align:-2px;margin-right:4px}
+/* and the ghost changes with it — an accent-dashed target reads as "yes, here"
+   and must not be what a clashing slot looks like. */
+.ev--ghost.ev--bad{border-left-color:var(--tx-danger);
+  background:var(--tx-danger-soft);box-shadow:inset 0 0 0 1px var(--tx-danger)}
+
+/* the day view's context lane — one card per session, positioned at the same
+   minute as the block it belongs to, so the day reads as one timeline and not
+   as a grid beside a list. */
+.dtl{position:absolute;left:14px;right:14px;display:grid;align-items:center;
+  grid-template-columns:minmax(0,1fr) 104px auto auto auto;
+  gap:14px;padding:0 2px;overflow:hidden}
+.dtl__p{font-size:12.5px;color:var(--tx-ink-2);min-width:0}
+.dtl__p b{color:var(--tx-ink);font-weight:600}
+.dtl__m{font-family:var(--tx-mono);font-size:11px;color:var(--tx-ink-3);
+  font-variant-numeric:tabular-nums}
+
+
+/* ── the month — density, not geometry ───────────────────────────────────
+   The week is one minute to one pixel. A month at that scale is 28,000px, so
+   this is the one view that must NOT be that grid: it answers a different
+   question (which weeks are thin, when am I away) and therefore needs a
+   different encoding.
+
+   Three channels, each doing exactly one job, so no axis changes meaning
+   between the week view and this one:
+     length of the bar  = utilisation, booked minutes over that day's own
+                          working minutes — which is why a Sunday with four
+                          sessions can read fuller than a Monday with four
+     fill of the bar    = floor against remote, the set's single colour axis,
+                          kept intact as a stacked segment
+     the figure         = the session count, exact and uncapped
+   The app's phone grid caps its dots at three, so six sessions and eleven look
+   identical there; a 46px cell has no better option. This one has 150px and no
+   excuse. `full` (the app's six-or-more rule) marks the FIGURE, not the bar,
+   because it is a count fact and the bar is a time fact. */
+:root{ --mo-rail:158px; --mo-cell:84px; --mo-strip:17px; }
+.mo{border-left:1px solid var(--tx-line)}
+/* rows, not one wrapping run of 42 — the same reason MonthGrid.tsx gives:
+   a percentage width of 100/7 rounds up, the seventh cell stops fitting, and
+   the calendar silently becomes six columns wide, which is a wrong calendar
+   rather than a cosmetic one. */
+.mo__r{display:grid;grid-template-columns:repeat(7,minmax(0,1fr)) var(--mo-rail);
+  position:relative}
+.mo__hd{position:sticky;top:0;z-index:3;background:var(--tx-canvas);
+  border-bottom:1px solid var(--tx-line-strong);border-right:1px solid var(--tx-line);
+  padding:8px 10px;text-align:center;font-family:var(--tx-mono);font-size:10.5px;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--tx-ink-3)}
+.mo__c{min-height:var(--mo-cell);border-right:1px solid var(--tx-line);
+  border-bottom:1px solid var(--tx-line);padding:var(--mo-strip) 9px 9px;
+  display:flex;flex-direction:column;gap:6px;text-align:left;font:inherit;
+  background:none;cursor:pointer;position:relative}
+.mo__c:hover{background:var(--w-hover)}
+.mo__c:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2px;z-index:4}
+.mo__c--today{background:var(--w-selected);box-shadow:inset 0 0 0 1px var(--tx-accent-line)}
+/* a day inside an all-day block. Same hatch the week uses for out-of-hours,
+   because it means the same thing: not available, not merely empty. */
+.mo__c--off{background:repeating-linear-gradient(45deg,transparent 0 6px,var(--w-grid) 6px 7px)}
+.mo__top{display:flex;align-items:baseline;gap:6px}
+.mo__d{font-family:var(--tx-mono);font-size:13px;font-weight:600;color:var(--tx-ink-2);
+  font-variant-numeric:tabular-nums}
+/* outside the month. Dimmed, but its DATA is not removed — the week rail totals
+   whole weeks, and a half-drawn first row would make its total look wrong. */
+.mo__c--out .mo__d{color:var(--tx-ink-off)}
+.mo__c--today .mo__d{color:var(--tx-accent-text);font-weight:800}
+.mo__n{margin-left:auto;font-family:var(--tx-mono);font-size:11px;
+  color:var(--tx-ink-3);font-variant-numeric:tabular-nums}
+.mo__n--full{color:var(--tx-warn);font-weight:700}
+.mo__n--clash{color:var(--tx-danger);font-weight:700}
+.mo__n svg{vertical-align:-2px}
+.mo__bar{height:6px;border-radius:3px;background:var(--w-grid);overflow:hidden;
+  display:flex;margin-top:auto}
+.mo__bar i{height:6px;background:var(--tx-floor)}
+.mo__bar s{height:6px;background:var(--tx-remote);text-decoration:none}
+.mo__u{font-family:var(--tx-mono);font-size:10px;color:var(--tx-ink-3);
+  font-variant-numeric:tabular-nums}
+
+/* a dated hole — `time_blocks`, which has a table, a schema comment and until
+   now no representation anywhere in this design set. An all-day block SPANS,
+   because a fortnight away is one thing and not fourteen; the week grid can
+   only ever show it as seven hatched columns with no beginning and no end,
+   which is why this is the view it belongs in. */
+/* text-align:left because a <button> centres its label by default, which put
+   "Away · Coimbatore workshop" in the middle of Wednesday instead of at the
+   start of Monday. */
+.mo__blk{position:absolute;top:3px;height:14px;z-index:2;border-radius:3px;
+  text-align:left;line-height:14px;
+  background:var(--tx-ink-2);color:var(--tx-canvas);font-size:10.5px;font-weight:600;
+  padding:0 7px;white-space:nowrap;overflow:hidden;border:0;
+  text-overflow:ellipsis;cursor:pointer}
+.mo__blk--l{border-top-left-radius:0;border-bottom-left-radius:0}
+.mo__blk--r{border-top-right-radius:0;border-bottom-right-radius:0}
+/* a part-day block. A notch, not a strip: it is an afternoon, and a strip
+   across the whole cell would claim the day. */
+.mo__pt{position:absolute;top:2px;right:6px;width:0;height:0;z-index:2;
+  border-left:8px solid transparent;border-top:8px solid var(--tx-ink-3)}
+
+/* one row of the week, on the right. The month's rows ARE weeks, which is how
+   a trainer talks about a month, so the row gets the same four figures the
+   week view's own header carries. */
+.mo__wk{border-bottom:1px solid var(--tx-line);border-left:1px solid var(--tx-line);
+  padding:var(--mo-strip) 12px 9px;display:flex;flex-direction:column;gap:3px;
+  text-align:left;font:inherit;background:none;cursor:pointer}
+.mo__wk:hover{background:var(--w-hover)}
+.mo__wk:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2px}
+.mo__wk b{font-size:12px;color:var(--tx-ink);font-weight:600}
+.mo__wk span{font-family:var(--tx-mono);font-size:10.5px;color:var(--tx-ink-3);
+  font-variant-numeric:tabular-nums}
+.mo__wk--thin b{color:var(--tx-warn)}
+.mo__wk em{font-style:normal;font-family:var(--tx-mono);font-size:10.5px;
+  color:var(--tx-accent-text);font-weight:600}
+
+/* the legend. A bar with no scale is a decoration; one line fixes it. */
+.mo__key{display:flex;align-items:center;gap:18px;padding:11px 24px;
+  border-bottom:1px solid var(--tx-line);font-size:11.5px;color:var(--tx-ink-3);
+  flex-wrap:wrap}
+.mo__key span{display:inline-flex;align-items:center;gap:6px}
+.mo__key i{width:22px;height:6px;border-radius:3px;display:inline-block}
+
+/* ── the program builder grid ────────────────────────────────────────────
+   Days across, exercises down, sets in the cell. This is the single job the
+   phone is worst at and the desk is best at: on a phone a 5-day × 6-exercise
+   template is thirty sheets; here it is one grid you can see. */
+.bld{display:grid;grid-template-columns:220px repeat(var(--bld-days,5),minmax(150px,1fr));
+  border:1px solid var(--tx-line);border-radius:var(--tx-r2);overflow:hidden}
+.bld__hd{background:var(--tx-surface-2);border-bottom:1px solid var(--tx-line-strong);
+  border-right:1px solid var(--tx-line);padding:9px 11px;
+  font-size:12px;font-weight:700;color:var(--tx-ink)}
+.bld__hd span{display:block;font-family:var(--tx-mono);font-size:10px;font-weight:500;
+  color:var(--tx-ink-3);margin-top:2px}
+.bld__ex{border-right:1px solid var(--tx-line);border-bottom:1px solid var(--tx-line);
+  padding:9px 11px;background:var(--tx-surface);display:flex;align-items:center;gap:9px}
+.bld__ex b{font-size:12.5px;font-weight:600;color:var(--tx-ink);flex:1;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bld__c{border-right:1px solid var(--tx-line);border-bottom:1px solid var(--tx-line);
+  padding:6px;min-height:46px;display:flex;flex-wrap:wrap;gap:4px;align-content:flex-start}
+.bld__c:hover{background:var(--w-hover)}
+.bld__s{display:inline-flex;align-items:center;height:22px;padding:0 7px;
+  border-radius:var(--tx-r1);background:var(--tx-surface-3);
+  font-family:var(--tx-mono);font-size:11px;color:var(--tx-ink);white-space:nowrap}
+.bld__s--pr{background:var(--tx-pr-soft);color:var(--tx-pr)}
+.bld__add{display:inline-flex;align-items:center;justify-content:center;height:24px;
+  min-width:24px;border-radius:var(--tx-r1);border:1px dashed var(--tx-line-strong);
+  color:var(--tx-ink-3);font-size:13px;cursor:pointer;position:relative}
+/* 24px is the SC 2.5.8 floor; the TARGET is 32 via slop, because a 32px
+   dashed square would out-shout the exercises it sits between */
+.bld__add::before{content:'';position:absolute;inset:-4px}
+.bld__add:hover{border-color:var(--tx-accent);color:var(--tx-accent-text)}
+
+/* ── the day-column builder ──────────────────────────────────────────────
+   SUPERSEDES .bld above for /programs. The matrix is kept because the
+   component library and the domain page still specimen it, but the programs
+   builder no longer uses it, and the reason is not taste:
+
+   1 · A template day is an ORDERED LIST. `program_exercises.order_index` is
+       the order the client works in, and a matrix of exercise × day has no
+       way to show it — the row position is alphabetical accident. Trainerize
+       took eleven years to ship drag-to-reorder inside a day (requested 2013,
+       107 votes, completed Jan 2024) and the request that finally moved it
+       said an out-of-order day risks "an injury if a client doesn't do the
+       workouts in the correct order". Order is a safety property, so it gets
+       an ordinal printed on the row, not an inferred position.
+   2 · The matrix was 67% empty. Nine exercises across five slots is 45 cells
+       holding 15 prescriptions; the other 30 were dashed + boxes asking to be
+       filled. A column that ends when the day ends has no empty cells at all.
+   3 · A slot is not a weekday. Columns are Day 1..Day n — the template's
+       ordinal slots — and there is never a Rest column, because rest is the
+       absence of a slot and the absence is already drawn by there being no
+       column. Which weekday each slot lands on is the client's, chosen at
+       assign time into programs.schedule.
+
+   Density: the column is 236px, which fits "Romanian deadlift" and a
+   "3 × 12 · 90s rest · slow eccentric" prescription without truncating
+   either. Five columns plus the 400px list pane is 1,180 + gutters, so a
+   five-day template needs no horizontal scroll at 1440. Six and up scroll,
+   and the set keeps its own scroller rather than the page. */
+/* the plane the columns sit on. A flex column so the set can claim the height
+   that is left after a callout or a bulk bar has taken its share. */
+.bplane{flex:1;min-height:0;overflow:auto;padding:16px 20px;
+  display:flex;flex-direction:column;gap:14px}
+/* stretch, not flex-start: a day is a LANE, and the empty part of a lane is
+   the drop target. A column sized to its content gives a four-exercise day a
+   40px target and a nine-exercise day a 400px one, which is backwards — the
+   short day is the one you are more likely to be dropping into. */
+.dayc-set{display:flex;gap:10px;align-items:stretch;min-width:0;overflow-x:auto;
+  flex:1 1 auto;min-height:0;padding-bottom:4px}
+.dayc{flex:0 0 236px;background:var(--tx-surface);border:1px solid var(--tx-line);
+  border-radius:var(--tx-r3);display:flex;flex-direction:column;overflow:hidden;
+  position:relative}
+/* the drop target while an exercise is being dragged, and the same treatment
+   the keyboard "move to…" path uses for the destination it is about to land in,
+   so both paths report the same thing */
+.dayc--drop{border-color:var(--tx-accent-line);background:var(--tx-accent-soft)}
+/* a week that has nothing of its own is showing week 1 dimmed. Not a disabled
+   state — it is real content, just not this week's — so it keeps full contrast
+   on the name and drops only the chrome. */
+.dayc--repeat{border-style:dashed;background:var(--tx-canvas)}
+
+.dayc__hd{display:flex;align-items:center;gap:8px;padding:10px 11px;
+  background:var(--tx-surface-2);border-bottom:1px solid var(--tx-line-strong)}
+.dayc__hd b{font-size:12.5px;font-weight:700;color:var(--tx-ink);white-space:nowrap}
+.dayc__hd i{font-style:normal;font-size:12.5px;color:var(--tx-ink-3);flex:1;min-width:0;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Everfit puts the count in the day header and it is the right call: it is the
+   number you scan a week for ("is Thursday light?") and it survives collapsing. */
+.dayc__ct{flex:0 0 auto;font-family:var(--tx-mono);font-size:10.5px;font-weight:500;
+  color:var(--tx-ink-3);background:var(--tx-surface-3);border-radius:var(--tx-r1);
+  padding:2px 5px;font-variant-numeric:tabular-nums}
+
+.dayc__b{flex:1;display:flex;flex-direction:column;padding:5px;gap:2px}
+.dayc__ex{display:grid;grid-template-columns:14px 16px minmax(0,1fr);gap:7px;
+  align-items:start;padding:7px 6px;border-radius:var(--tx-r2);cursor:default;
+  position:relative}
+.dayc__ex:hover{background:var(--w-hover)}
+.dayc__ex[aria-selected="true"]{background:var(--w-selected);
+  box-shadow:inset 0 0 0 1px var(--tx-accent-line)}
+.dayc__h{color:var(--tx-ink-off);cursor:grab;padding-top:1px;display:grid;
+  place-items:center;height:16px}
+.dayc__ex:hover .dayc__h{color:var(--tx-ink-3)}
+/* the ordinal is the order the client works in. Mono and tabular so 9 and 10
+   do not shift the name beside them. */
+.dayc__o{font-family:var(--tx-mono);font-size:11px;color:var(--tx-ink-3);
+  font-variant-numeric:tabular-nums;text-align:right;padding-top:1px}
+.dayc__m{min-width:0;display:flex;flex-direction:column;gap:2px}
+.dayc__n{font-size:12.5px;font-weight:600;color:var(--tx-ink);line-height:1.35;
+  overflow-wrap:anywhere}
+/* sets × reps · rest, in the app's own notation from training/training.ts
+   prescribe(). NOT "@ load": a template has no load. The blueprint carries
+   sets, reps, duration_seconds, rest_seconds and notes; target_load lives on
+   program_exercises, which is the client's copy. Printing a load here would
+   promise a number the template cannot store. */
+.dayc__p{font-family:var(--tx-mono);font-size:11px;color:var(--tx-ink-3);
+  line-height:1.4;font-variant-numeric:tabular-nums}
+/* the one figure that changed from the week before, in the week-across view */
+.dayc__p em{font-style:normal;color:var(--tx-accent-text);font-weight:500}
+/* a failure set, on the row. Same tone as the panel's F. */
+.dayc__p .fail{color:var(--tx-danger);font-weight:600}
+.dayc__ex--ghost .dayc__n{color:var(--tx-ink-2)}
+.dayc__ex--ghost .dayc__p{color:var(--tx-ink-off)}
+
+/* the add row is a type-ahead, not a + that opens a picker. TrueCoach's
+   builder is the fastest in the category for one reason — you type the
+   exercise name and never leave the keyboard — and a trainer adding a ninth
+   exercise knows its name. The library panel stays for browsing and for
+   adding six at once, which is the job typing is bad at. */
+.dayc__add{display:flex;align-items:center;gap:7px;min-height:32px;padding:0 7px;
+  border-radius:var(--tx-r2);border:1px dashed var(--tx-line-strong);
+  color:var(--tx-ink-3);font-size:12.5px;cursor:text;margin:3px 0 1px}
+.dayc__add:hover{border-color:var(--tx-accent-line);color:var(--tx-ink-2)}
+.dayc__ta{border:1px solid var(--tx-focus);border-radius:var(--tx-r2);
+  box-shadow:0 0 0 3px var(--tx-focus-halo);margin:3px 0 1px;overflow:hidden}
+.dayc__ta input{display:block;width:100%;height:32px;padding:0 9px;background:var(--tx-field);
+  border:0;outline:none;color:var(--tx-ink);font-size:12.5px;font-family:var(--tx-font)}
+.dayc__opt{display:flex;align-items:center;gap:7px;padding:6px 9px;font-size:12px;
+  color:var(--tx-ink-2);border-top:1px solid var(--tx-line);cursor:pointer}
+.dayc__opt[aria-selected="true"]{background:var(--w-selected);color:var(--tx-accent-text)}
+.dayc__opt span{margin-left:auto;font-family:var(--tx-mono);font-size:10px;
+  color:var(--tx-ink-3)}
+
+/* ── a superset, an alternate, and reps to failure ───────────────────────
+   Three things a trainer asked for that the blueprint could not say. Each is
+   ONE additive field — see the schema note on the programs page — and each
+   degrades honestly in a build that predates it, which is the whole test under
+   the additive-only law.
+
+   SUPERSET. Members share a nullable `group_id` and sit adjacent, so an old
+   reader that knows nothing about groups renders two exercises in order and
+   the client does them back to back — a superset performed as straight sets.
+   Degraded, not wrong. The pair is drawn as one block with a spine because
+   the thing being scanned for is "how many blocks is this day", not "how many
+   exercises". Ordinals go 4a / 4b rather than A1 / A2: the number still says
+   which position in the day you are at, and the letter says these two are one
+   position. Rest is printed ONCE, on the group, because a superset's rest is
+   after the round and not between the movements — getting that wrong is how a
+   superset turns back into two straight sets on the gym floor. */
+.dayc__grp{background:var(--tx-surface-2);border-left:2px solid var(--tx-accent-line);
+  border-radius:0 var(--tx-r2) var(--tx-r2) 0;padding:2px;margin:3px 0}
+.dayc__grp .dayc__ex:hover{background:var(--w-hover)}
+.dayc__gr{display:flex;align-items:center;gap:6px;padding:4px 7px 3px;
+  border-top:1px dashed var(--tx-line-strong);margin:2px 4px 0;
+  font-family:var(--tx-mono);font-size:10px;color:var(--tx-ink-3);
+  letter-spacing:.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dayc__gr b{color:var(--tx-accent-text);font-weight:500}
+
+/* ALTERNATE. A nullable `alt_exercise_id` on the entry, and the word is "or"
+   because that is what a trainer says when the machine is taken. It inherits
+   the prescription rather than carrying its own: a second set of numbers per
+   row doubles the editing surface to serve the rarer half of the case, and at
+   template level there is no load to differ anyway. */
+.dayc__alt{display:flex;align-items:center;gap:5px;font-size:11px;
+  color:var(--tx-ink-3);line-height:1.35}
+.dayc__alt svg{flex:0 0 auto;color:var(--tx-ink-off)}
+.dayc__alt b{font-weight:500;color:var(--tx-ink-2);min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* LINK. The affordance lives in the GAP between two rows, which is where the
+   relationship it creates lives. TrueCoach puts a link icon between two
+   movements and PT Distinction unlinks by clicking again; both are right, and
+   both are pointer-only, so this is also on the row menu and on ⌘L. Hidden
+   until the body is hovered, because six of these stacked down a column would
+   read as the content. */
+.dayc__link{height:0;position:relative;opacity:0;transition:opacity var(--tx-t-fast) var(--tx-ease)}
+.dayc__b:hover .dayc__link,.dayc__link--on{opacity:1;height:18px}
+.dayc__link::before{content:'';position:absolute;left:8px;right:8px;top:9px;height:1px;
+  background:var(--tx-line-strong)}
+.dayc__link i{position:absolute;left:50%;top:0;transform:translateX(-50%);
+  display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 7px;
+  border-radius:var(--tx-rfull);background:var(--tx-surface-3);
+  border:1px solid var(--tx-line-strong);color:var(--tx-ink-3);
+  font-size:10px;font-weight:600;font-style:normal;cursor:pointer;white-space:nowrap}
+.dayc__link i:hover{border-color:var(--tx-accent-line);color:var(--tx-accent-text);
+  background:var(--tx-accent-soft)}
+
+/* ── the set list ────────────────────────────────────────────────────────
+   One row per set. A GRID, not a table, and that is the whole point: the
+   header and every row share one `grid-template-columns`, so a centred header
+   and a centred control cannot drift apart. The first attempt reused .sets
+   from the workout console, whose `th` carries 10px of side padding and whose
+   `td` carries 5px — two different content boxes in the same column, which put
+   the FAILURE header and its checkbox on two different axes.
+
+   34px holds a two-digit set number; 64px holds the header word and centres a
+   32px target under it; 30px is the remove button. The reps box takes what is
+   left, which is 232px inside a 420px panel. */
+.setlist{display:grid;grid-template-columns:34px minmax(0,1fr) 64px 30px;
+  align-items:center;gap:7px 8px}
+.setlist__k{font-family:var(--tx-mono);font-size:10px;font-weight:500;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--tx-ink-3);
+  padding-bottom:2px;white-space:nowrap}
+.setlist__k--c{justify-self:center}
+.setlist__n{font-family:var(--tx-mono);font-size:12px;color:var(--tx-ink-3);
+  font-variant-numeric:tabular-nums}
+.setlist .ctl{height:32px;font-family:var(--tx-mono);text-align:right}
+.setlist .check{justify-self:center}
+.setlist .btn--icon{justify-self:center}
+
+/* a set taken to failure. F, in the danger tone — it is the one figure on the
+   row that is not a number, and it wants to be findable at a glance down a
+   column of them. The tone is borrowed rather than owned: red means
+   "destructive" everywhere else in this system, and it means "this is the hard
+   set" here, which is a deliberate overload and the only one in the file. */
+/* .ctl--said sets a colour further down this file, so the modifier that
+   overrides it has to out-specify it rather than rely on order. */
+.ctl.ctl--fail{color:var(--tx-danger);font-weight:700;letter-spacing:.06em}
+.fail{color:var(--tx-danger);font-weight:600}
+
+/* ── the row menu ────────────────────────────────────────────────────────
+   The system had no menu, and the roster page learned the hard way why it
+   needs one: five glyph-only actions per row is unreadable at 18px in a hurry,
+   so the rule became ONE overflow button per row. That rule needs somewhere
+   for the actions to go. 196px wide so it sits inside a 236px column without
+   escaping it. */
+.menu{position:absolute;z-index:12;min-width:196px;padding:5px;
+  background:var(--tx-surface);border:1px solid var(--tx-line-strong);
+  border-radius:var(--tx-r2);box-shadow:var(--tx-e3)}
+.menu__i{display:flex;align-items:center;gap:9px;height:32px;padding:0 9px;
+  border-radius:var(--tx-r1);font-size:12.5px;font-weight:500;color:var(--tx-ink-2);
+  cursor:pointer;white-space:nowrap}
+.menu__i:hover{background:var(--w-hover);color:var(--tx-ink)}
+.menu__i svg{flex:0 0 auto;color:var(--tx-ink-3)}
+.menu__i:hover svg{color:var(--tx-ink-2)}
+.menu__i kbd{margin-left:auto;font-family:var(--tx-mono);font-size:10px;padding:1px 4px;
+  border-radius:var(--tx-r1);background:var(--tx-surface-3);border:1px solid var(--tx-line);
+  color:var(--tx-ink-3)}
+.menu__i--danger{color:var(--tx-danger)}
+.menu__i--danger svg{color:var(--tx-danger)}
+.menu__i--danger:hover{background:var(--tx-danger-soft);color:var(--tx-danger)}
+.menu__sep{height:1px;background:var(--tx-line);margin:4px 2px}
+
+/* the row that owns an open menu keeps its hover tint, so the menu is clearly
+   about THAT row and not the one the pointer drifted onto */
+.dayc__ex--menu{background:var(--w-hover)}
+
+/* a field the mode has taken over — "to failure" is not typed, it is chosen,
+   so the box reports the choice instead of pretending to be editable */
+.ctl--said{background:var(--tx-surface-3);border-color:var(--tx-line);
+  color:var(--tx-ink-2);font-family:var(--tx-mono);cursor:default}
+
+/* the footer of a repeating column: the offer that makes the week its own */
+.dayc__f{margin-top:auto;padding:9px;border-top:1px dashed var(--tx-line-strong);
+  font-size:11.5px;color:var(--tx-ink-3);line-height:1.5}
+
+/* ── the week strip ──────────────────────────────────────────────────────
+   A program is `weeks` long and a week with nothing of its own REPEATS week 1.
+   That distinction is the whole model, so the strip draws it: a solid chip is
+   a week somebody authored, a ghost chip is a week that repeats. Twelve empty
+   chips would be the blank twelve-week grid the app deliberately refuses. */
+.wk{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.wk__k{font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--tx-ink-3);margin-right:2px}
+.chip--ghost{background:transparent;border-style:dashed;color:var(--tx-ink-3)}
+.chip--ghost:hover{color:var(--tx-ink-2)}
+.chip--ghost[aria-pressed="true"]{background:var(--tx-accent-soft);
+  border-color:var(--tx-accent-line);border-style:solid;color:var(--tx-accent-text)}
+
+/* ── the shape strip, on a shelf row ────────────────────────────────────
+   Ported from the app's WeekShape. A trainer choosing between six templates
+   is choosing between SHAPES — "8 weeks, 6 clients" says nothing about
+   whether it trains five days or three. Seven cells because seven is the
+   most slots a template can have; the filled ones are the slots it trains,
+   toned by day so Push/Pull/Legs is legible without a legend. */
+.shape{display:flex;gap:2px;align-items:center}
+.shape__c{width:9px;height:16px;border-radius:2px;background:var(--tx-surface-3)}
+.shape__c--1{background:var(--tx-accent)}
+.shape__c--2{background:var(--tx-floor)}
+.shape__c--3{background:var(--tx-remote)}
+.shape__c--off{background:transparent;box-shadow:inset 0 0 0 1px var(--tx-line-strong)}
+
+/* the undo state of the bulk bar. In place, in the bar that did the thing,
+   because a corner toast for a move you just made is a second place to look. */
+.bulk--done{background:var(--tx-ok-soft);border-bottom-color:var(--tx-ok);
+  color:var(--tx-ok)}
+
+/* ── the set-entry grid (workout console) ────────────────────────────────
+   Keyboard-first: tab moves across a row, Enter commits and creates the next
+   set. That is the desk equivalent of the app's two-tap stepper. */
+.sets{font-size:13px}
+.sets th{font-family:var(--tx-mono);font-size:10px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--tx-ink-3);font-weight:500;text-align:left;padding:0 10px 7px}
+.sets td{padding:3px 5px}
+.sets td:first-child{padding-left:0;width:44px;
+  font-family:var(--tx-mono);color:var(--tx-ink-3);font-size:12px}
+.sets .ctl{height:32px;font-family:var(--tx-mono);text-align:right}
+.sets tr[data-state="done"] .ctl{background:transparent;border-color:transparent;
+  color:var(--tx-ink-2)}
+.sets tr[data-state="active"] .ctl{border-color:var(--tx-accent-line)}
+
+/* ── the sync queue row ───────────────────────────────────────────────────── */
+/* MEASURED, AND THE FIRST TWO NUMBERS HERE WERE WRONG. This was 11px, and the
+   comment that replaced it claimed 9px landed the row on 44px — --w-row. It
+   does not: the row carries TWO lines of text, they are 38px together at the
+   inherited line-height, and 9px of padding made the row 57. Rendering the
+   card and measuring the band gave 387px for six rows and a head, which is
+   what pushed the offline frame past 900.
+   A two-line row's target is --w-row-lg (56), not --w-row (44). So the line
+   heights are pinned rather than inherited and the padding is 8px, which
+   measures 54 — inside the token instead of one past the wrong one. */
+.q{display:flex;align-items:center;gap:11px;padding:8px 12px;
+  border-bottom:1px solid var(--tx-line)}
+/* 24, not 26: every other mark at the head of a row in this set is 24px
+   (.av--sm), so this one was the odd size out. It does NOT drive the row
+   height — the two stacked lines beside it are taller — which is what the
+   first version of this comment got wrong. */
+.q__ic{width:24px;height:24px;border-radius:var(--tx-r2);display:grid;place-items:center;
+  flex:0 0 auto;background:var(--tx-warn-soft);color:var(--tx-warn);font-size:12px}
+.q__ic--ok{background:var(--tx-ok-soft);color:var(--tx-ok)}
+.q__ic--err{background:var(--tx-danger-soft);color:var(--tx-danger)}
+.q__m{flex:1;min-width:0}
+/* MEASURED BUG, FOUND BY RENDERING. Neither of these carried a `display`, and
+   both are <span>s in every markup in the set — so a queued entry's title and
+   its timestamp, which are two lines by design, came out as one run of text
+   with a space in the middle: "Push A · Meera K · 12 sets 06:52 · queued 41
+   min". The page this file's Today screen replaces had it too, in the same
+   component, unnoticed through four passes. */
+.q__t{display:block;font-size:13px;line-height:1.45;font-weight:600;color:var(--tx-ink)}
+.q__s{display:block;font-size:11.5px;line-height:1.45;color:var(--tx-ink-3);
+  font-family:var(--tx-mono)}
+
+/* ── timeline (client history, audit trail) ───────────────────────────────── */
+.tl{position-area:none;padding-left:26px;position:relative}
+.tl::before{content:'';position:absolute;left:7px;top:5px;bottom:5px;width:1px;
+  background:var(--tx-line)}
+.tl__i{position:relative;padding:0 0 18px}
+.tl__i::before{content:'';position:absolute;left:-23px;top:4px;width:9px;height:9px;
+  border-radius:50%;background:var(--tx-surface-3);
+  box-shadow:0 0 0 3px var(--tx-canvas)}
+.tl__i--acc::before{background:var(--tx-accent)}
+.tl__d{font-family:var(--tx-mono);font-size:10.5px;color:var(--tx-ink-3);letter-spacing:.06em}
+.tl__t{font-size:13px;font-weight:600;color:var(--tx-ink);margin-top:2px}
+.tl__b{font-size:12.5px;color:var(--tx-ink-3);margin-top:2px;line-height:1.5}
+
+/* ── keyboard hint strip, bottom of a screen ──────────────────────────────── */
+.keys{
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  padding:9px 24px;border-top:1px solid var(--tx-line);background:var(--tx-surface);
+  font-size:11.5px;color:var(--tx-ink-3);flex:0 0 auto;
+}
+.keys b{display:inline-flex;align-items:center;gap:5px;font-weight:400}
+.keys kbd{font-family:var(--tx-mono);font-size:10.5px;padding:2px 5px;
+  border-radius:var(--tx-r1);background:var(--tx-surface-3);
+  border:1px solid var(--tx-line);color:var(--tx-ink-2)}
+
+/* ── the auth / marketing-adjacent canvas (no shell) ─────────────────────── */
+.authwrap{
+  display:grid;grid-template-columns:minmax(0,1fr) 520px;height:100%;
+}
+.authwrap__l{padding:56px;display:flex;flex-direction:column;
+  background:
+    radial-gradient(80% 60% at 12% 8%,var(--tx-accent-soft),transparent 62%),
+    var(--tx-canvas)}
+.authwrap__r{border-left:1px solid var(--tx-line);background:var(--tx-surface);
+  padding:56px 60px;display:flex;flex-direction:column;justify-content:center;
+  overflow-y:auto}
+.authwrap__quote{margin-top:auto;font-family:var(--tx-brand);font-weight:800;
+  font-size:26px;letter-spacing:-.03em;line-height:1.16;max-width:20ch;text-wrap:balance}
+.authwrap__by{font-family:var(--tx-mono);font-size:11.5px;color:var(--tx-ink-3);margin-top:14px}
+
+/* the wizard rail — six setup steps, all visible. A phone shows step 3 of 6;
+   a desk shows all six and lets you jump back to 1 without losing 3. */
+.wiz{display:flex;flex-direction:column;gap:2px}
+.wiz__i{display:flex;align-items:flex-start;gap:12px;padding:9px 10px;border-radius:var(--tx-r2);
+  cursor:pointer}
+.wiz__i:hover{background:var(--w-hover)}
+.wiz__n{width:22px;height:22px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;
+  font-family:var(--tx-mono);font-size:11px;background:var(--tx-surface-3);color:var(--tx-ink-3)}
+.wiz__i--done .wiz__n{background:var(--tx-accent);color:var(--tx-accent-ink)}
+.wiz__i--now .wiz__n{background:var(--tx-accent-soft);color:var(--tx-accent-text);
+  box-shadow:inset 0 0 0 1px var(--tx-accent-line)}
+/* both are spans, so both need display:block — inline they ran together and
+   read as one sentence: "Your name and business Anbu R · Adyar" */
+.wiz__t{display:block;font-size:13px;font-weight:600;color:var(--tx-ink-2);line-height:1.35}
+.wiz__i--now .wiz__t{color:var(--tx-ink)}
+.wiz__s{display:block;font-size:11.5px;color:var(--tx-ink-3);margin-top:2px;line-height:1.4}
+
+/* ── the client portal is a narrower, calmer app ──────────────────────────── */
+.portal{max-width:920px;margin-inline:auto;width:100%}
+
+/* ── utilities, used sparingly ────────────────────────────────────────────── */
+.row{display:flex;align-items:center;gap:10px}
+.row--top{align-items:flex-start}
+.col{display:flex;flex-direction:column}
+.gap2{gap:8px}.gap3{gap:12px}.gap4{gap:16px}.gap6{gap:24px}
+.mt2{margin-top:8px}.mt3{margin-top:12px}.mt4{margin-top:16px}.mt6{margin-top:24px}
+.sp{flex:1}
+.mono{font-family:var(--tx-mono);font-variant-numeric:tabular-nums}
+.tnum{font-variant-numeric:tabular-nums}
+.ink{color:var(--tx-ink)}.ink2{color:var(--tx-ink-2)}.ink3{color:var(--tx-ink-3)}
+.acc{color:var(--tx-accent-text)}
+.ok{color:var(--tx-ok)}.warn{color:var(--tx-warn)}.danger{color:var(--tx-danger)}
+.h4{font-family:var(--tx-brand);font-weight:800;font-size:15px;letter-spacing:-.015em}
+.h5{font-size:13px;font-weight:700;color:var(--tx-ink)}
+.micro{font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--tx-ink-3)}
+.small{font-size:12.5px;color:var(--tx-ink-3);line-height:1.55}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.sect{border-top:1px solid var(--tx-line);margin-top:20px;padding-top:16px}
+.sect:first-child{border-top:0;margin-top:0;padding-top:0}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{transition-duration:.001ms!important;animation-duration:.001ms!important}
+}
+
+/* ═════════════════════════════════════════ 05 · DEEP-LINK LANDING ════════
+   The information architecture links to a single frame. On arrival the frame
+   gets a lime ring for two seconds so the reviewer's eye lands in the right
+   place out of twenty on the page. */
+.unit.landed .viewport{
+  border-color:var(--tx-accent);
+  box-shadow:0 0 0 3px var(--tx-accent-soft),var(--tx-e3);
+}
+.unit.landed .unit__id{background:var(--tx-accent);color:var(--tx-accent-ink)}
+
+/* the auto-built frame index */
+.fx{display:flex;flex-wrap:wrap;gap:5px;margin-top:16px}
+.fx a{
+  display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 10px;
+  border-radius:var(--tx-r1);border:1px solid var(--tx-line);
+  background:var(--tx-surface);color:var(--tx-ink-2);font-size:12px;
+}
+.fx a:hover{border-color:var(--tx-accent-line);color:var(--tx-ink);background:var(--tx-surface-2)}
+.fx a b{font-family:var(--tx-mono);font-size:10.5px;color:var(--tx-accent-text);font-weight:500}
+
+/* the IA's own furniture */
+.ia__legend{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:18px;font-size:12.5px;
+  color:var(--tx-ink-3)}
+.ia__legend b{display:inline-flex;align-items:center;gap:7px;font-weight:400}
+.ia__legend i{width:9px;height:9px;border-radius:2px;display:block}
+.map{margin-top:22px;display:flex;flex-direction:column;gap:1px}
+.map__r{
+  display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1.5fr) 104px minmax(0,1.25fr);
+  gap:14px;align-items:start;padding:11px 14px;background:var(--tx-surface);
+  border:1px solid var(--tx-line);border-radius:var(--tx-r2);font-size:13px;
+}
+.map__r:hover{border-color:var(--tx-line-strong)}
+.map__r--h{background:transparent;border:0;padding:0 14px 6px;
+  font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--tx-ink-3)}
+.map__n{font-weight:600;color:var(--tx-ink)}
+.map__n span{display:block;font-family:var(--tx-mono);font-size:10.5px;font-weight:500;
+  color:var(--tx-ink-3);margin-top:2px}
+.map__w{color:var(--tx-ink-2);line-height:1.5}
+.map__c a{font-family:var(--tx-mono);font-size:12px}
+.map__c{line-height:1.7}
+.grp{margin-top:38px}
+.grp__t{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.grp__t h4{font-family:var(--tx-brand);font-weight:800;font-size:15px;letter-spacing:-.01em}
+.grp__t span{font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--tx-accent-text)}
+.grp__t::after{content:'';flex:1;height:1px;background:var(--tx-line)}
+
+@media (max-width:1000px){
+  .map__r{grid-template-columns:minmax(0,1fr);gap:6px}
+  .map__r--h{display:none}
+  .map__c::before{content:'Covered by · ';font-family:var(--tx-mono);font-size:10.5px;
+    text-transform:uppercase;letter-spacing:.11em;color:var(--tx-ink-3)}
+}
+
+/* ══════════════════════════════════════ 22 · IA DOCUMENT ONLY ══════════ */
+/* Used by webapp-information-architecture.html and nowhere else. A decision
+   kicker sits at the head of the "becomes" cell so the matrix can be read
+   down one column: what happened to this use case on the way to the web. */
+.dec{display:inline-block;font-family:var(--tx-mono);font-size:9.5px;font-weight:500;
+  letter-spacing:.12em;text-transform:uppercase;padding:2px 6px;border-radius:var(--tx-r1);
+  margin-right:8px;vertical-align:1.5px;border:1px solid transparent;white-space:nowrap}
+.dec--same {color:var(--tx-ink-3);background:var(--tx-surface-3)}
+.dec--merge{color:var(--tx-info);background:var(--tx-info-soft)}
+.dec--promo{color:var(--tx-accent-text);background:var(--tx-accent-soft);border-color:var(--tx-accent-line)}
+.dec--shape{color:var(--tx-warn);background:var(--tx-warn-soft)}
+.dec--kill {color:var(--tx-danger);background:var(--tx-danger-soft)}
+.dec--new  {color:var(--tx-ok);background:var(--tx-ok-soft)}
+
+/* the site map. A tree, not a list, because the one thing a reader needs to
+   see at a glance is that every destination is one click from every other. */
+.tree{margin-top:26px;border:1px solid var(--tx-line);border-radius:var(--tx-r3);
+  background:var(--tx-surface);padding:22px;overflow-x:auto}
+.tree svg{display:block;width:100%;min-width:1000px;height:auto}
+.tree text{font-family:var(--tx-font)}
+
+.rt{width:100%;border-collapse:collapse;margin-top:18px;font-size:13px}
+.rt th{text-align:left;padding:0 12px;height:34px;white-space:nowrap;
+  font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--tx-ink-3);border-bottom:1px solid var(--tx-line-strong)}
+.rt td{padding:9px 12px;border-bottom:1px solid var(--tx-line);color:var(--tx-ink-2);
+  vertical-align:top;line-height:1.55}
+.rt tr:hover td{background:var(--w-hover)}
+.rt td.u{font-family:var(--tx-mono);font-size:12px;color:var(--tx-ink);white-space:nowrap}
+.rt td.u b{color:var(--tx-accent-text);font-weight:500}
+.rt td.y{width:88px;white-space:nowrap}
+
+/* ═══════════════════════════════════════════ 23 · COMPONENT LIBRARY ══════ */
+/* The library is NOT the app shell, and specimens are NOT screenshots. A
+   component shown inside a fake browser window is being reviewed as part of a
+   screen; a component shown on a neutral bench is being reviewed as itself.
+   Structure follows the Design System Doc Spec block set — anatomy, variants,
+   states, specs, content, interactions, accessibility, api — and Carbon's
+   habit of one component per page rather than a wall of every control. */
+
+.lib{display:grid;grid-template-columns:236px minmax(0,1fr);gap:44px;align-items:start;
+  margin-top:34px}
+.lib__body{min-width:0}   /* without this the grid track refuses to shrink and every
+   wide specimen pushes the page into a horizontal scroll */
+.lib__nav{position:sticky;top:96px;max-height:calc(100vh - 130px);overflow-y:auto;
+  padding-right:8px;border-right:1px solid var(--tx-line)}
+.lib__nav::-webkit-scrollbar{width:8px}
+.lib__nav::-webkit-scrollbar-thumb{background:var(--tx-surface-3);border-radius:4px}
+.lib__gk{font-family:var(--tx-mono);font-size:10px;font-weight:500;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--tx-ink-3);padding:0 0 6px;margin-top:20px}
+.lib__gk:first-child{margin-top:0}
+.lib__nav a{display:flex;align-items:center;gap:8px;min-height:28px;padding:4px 9px;
+  border-radius:var(--tx-r2);font-size:13px;color:var(--tx-ink-2);text-decoration:none;
+  border:1px solid transparent}
+.lib__nav a:hover{background:var(--w-hover);color:var(--tx-ink)}
+.lib__nav a[data-here]{color:var(--tx-ink)}
+.lib__nav a[aria-current="page"]{background:var(--w-selected);color:var(--tx-accent-text);
+  font-weight:600;border-color:var(--tx-accent-line)}
+.lib__nav a b{font-family:var(--tx-mono);font-size:9px;font-weight:500;letter-spacing:.08em;
+  background:var(--tx-warn-soft);color:var(--tx-warn);border-radius:var(--tx-r1);padding:1px 4px}
+.lib__nav a[href="webapp-components.html"] b{background:var(--tx-surface-3);color:var(--tx-ink-3)}
+.lib__nav a i{flex:1;font-style:normal}
+.lib__nav a b{font-family:var(--tx-mono);font-size:9.5px;font-weight:500;color:var(--tx-ink-3)}
+
+/* ── a component page ─────────────────────────────────────────────────────── */
+.cmp{scroll-margin-top:110px;padding-bottom:8px}
+.cmp + .cmp{margin-top:76px;border-top:1px solid var(--tx-line-strong);padding-top:54px}
+.cmp__hd{display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.cmp__n{font-family:var(--tx-brand);font-weight:800;font-size:27px;letter-spacing:-.03em;
+  line-height:1.1}
+.cmp__st{display:inline-flex;align-items:center;gap:6px;min-height:22px;padding:0 8px;
+  border-radius:var(--tx-rfull);font-family:var(--tx-mono);font-size:10px;font-weight:500;
+  letter-spacing:.1em;text-transform:uppercase;margin-top:5px}
+.cmp__st--stable{background:var(--tx-ok-soft);color:var(--tx-ok)}
+.cmp__st--beta{background:var(--tx-warn-soft);color:var(--tx-warn)}
+.cmp__st--todo{background:var(--tx-surface-3);color:var(--tx-ink-3)}
+.cmp__cls{font-family:var(--tx-mono);font-size:12px;color:var(--tx-accent-text);
+  background:var(--tx-accent-soft);border:1px solid var(--tx-accent-line);
+  border-radius:var(--tx-r1);padding:3px 8px;margin-top:5px}
+.cmp__def{font-size:16px;line-height:1.55;color:var(--tx-ink-2);max-width:68ch;
+  margin-top:12px;text-wrap:pretty}
+.cmp__meta{display:flex;flex-wrap:wrap;gap:6px 22px;margin-top:14px;
+  font-family:var(--tx-mono);font-size:11px;color:var(--tx-ink-3)}
+.cmp__meta b{color:var(--tx-ink-2);font-weight:500}
+
+.blk{margin-top:34px}
+.blk__t{display:flex;align-items:baseline;gap:11px;margin-bottom:14px}
+.blk__t h4{font-size:13px;font-weight:700;letter-spacing:.02em;color:var(--tx-ink)}
+.blk__t span{font-family:var(--tx-mono);font-size:10px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--tx-ink-3)}
+.blk__t::after{content:'';flex:1;height:1px;background:var(--tx-line)}
+.blk__p{font-size:14px;line-height:1.6;color:var(--tx-ink-2);max-width:70ch;
+  margin:-4px 0 14px;text-wrap:pretty}
+.blk__p b{color:var(--tx-ink);font-weight:600}
+
+/* the bench: a neutral surface with a faint grid so alignment is checkable */
+.bench{border:1px solid var(--tx-line);border-radius:var(--tx-r3);padding:30px 28px;
+  background:var(--tx-surface);
+  background-image:linear-gradient(var(--w-grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--w-grid) 1px,transparent 1px);
+  background-size:8px 8px;background-position:-1px -1px}
+.bench--plain{background-image:none}
+.bench--pad{padding:40px 36px}
+.bench--tight{padding:18px}
+.bench__row{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.bench__col{display:flex;flex-direction:column;gap:16px}
+
+/* a labelled cell — every specimen carries its own caption, so a screenshot of
+   one row still says what it is */
+.cell{display:flex;flex-direction:column;gap:9px;align-items:flex-start}
+.cell__l{font-family:var(--tx-mono);font-size:9.5px;font-weight:500;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--tx-ink-3)}
+.cell--c{align-items:center}
+
+/* the state matrix */
+.mtx{display:grid;gap:1px;background:var(--tx-line);border:1px solid var(--tx-line);
+  border-radius:var(--tx-r2);overflow:hidden}
+.mtx__h,.mtx__c{background:var(--tx-surface);padding:13px 14px;display:flex;
+  align-items:center;gap:10px;min-height:60px}
+.mtx__h{background:var(--tx-surface-2);min-height:34px;
+  font-family:var(--tx-mono);font-size:9.5px;font-weight:500;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--tx-ink-3)}
+.mtx__rh{background:var(--tx-surface-2);padding:13px 14px;display:flex;align-items:center;
+  font-size:12.5px;font-weight:600;color:var(--tx-ink)}
+
+/* anatomy: a numbered specimen plus a legend that names the token */
+.anat{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:26px;
+  align-items:start}
+.anat__fig{border:1px solid var(--tx-line);border-radius:var(--tx-r3);
+  background:var(--tx-canvas);padding:62px 48px;display:flex;justify-content:center;
+  align-items:center;min-height:210px}
+.anat__l{display:flex;flex-direction:column;gap:0}
+.anat__i{display:flex;gap:12px;padding:9px 0;border-bottom:1px solid var(--tx-line)}
+.anat__i:last-child{border-bottom:0}
+.anat__n{flex:0 0 auto;width:19px;height:19px;border-radius:50%;display:grid;
+  place-items:center;background:var(--tx-accent);color:var(--tx-accent-ink);
+  font-family:var(--tx-mono);font-size:10.5px;font-weight:500;margin-top:1px}
+.anat__b b{display:block;font-size:13px;font-weight:600;color:var(--tx-ink)}
+.anat__b span{display:block;font-size:12.5px;line-height:1.5;color:var(--tx-ink-2);
+  margin-top:2px}
+.anat__b code{font-size:11px}
+.pin{position:relative;display:inline-block}
+.pin>i{position:absolute;width:18px;height:18px;border-radius:50%;
+  background:var(--tx-accent);color:var(--tx-accent-ink);display:grid;place-items:center;
+  font-family:var(--tx-mono);font-size:10px;font-style:normal;font-weight:500;
+  box-shadow:0 0 0 2px var(--tx-canvas);z-index:3}
+/* a pin sits OUTSIDE the specimen and points at it with a leader. Pins drawn on
+   top of the component cover the thing they are annotating, which is the most
+   common way an anatomy diagram becomes useless. */
+.pin>i::after{content:'';position:absolute;background:var(--tx-accent-line)}
+.pin>i[data-l="d"]::after{left:50%;top:100%;width:1px;height:var(--l,16px)}
+.pin>i[data-l="u"]::after{left:50%;bottom:100%;width:1px;height:var(--l,16px)}
+.pin>i[data-l="r"]::after{top:50%;left:100%;height:1px;width:var(--l,16px)}
+.pin>i[data-l="l"]::after{top:50%;right:100%;height:1px;width:var(--l,16px)}
+
+/* do / don't */
+.dd{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.dd__i{border:1px solid var(--tx-line);border-radius:var(--tx-r3);overflow:hidden;
+  background:var(--tx-surface)}
+.dd__k{display:flex;align-items:center;gap:8px;padding:9px 14px;
+  font-family:var(--tx-mono);font-size:10px;font-weight:500;letter-spacing:.12em;
+  text-transform:uppercase;border-bottom:1px solid var(--tx-line)}
+.dd__i--do .dd__k{background:var(--tx-ok-soft);color:var(--tx-ok)}
+.dd__i--no .dd__k{background:var(--tx-danger-soft);color:var(--tx-danger)}
+.dd__f{padding:24px 20px;display:flex;align-items:center;justify-content:center;
+  min-height:104px;background:var(--tx-canvas)}
+.dd__c{padding:12px 14px 14px;font-size:12.5px;line-height:1.55;color:var(--tx-ink-2);
+  border-top:1px solid var(--tx-line)}
+.dd__c b{color:var(--tx-ink);font-weight:600}
+
+/* spec + api tables reuse .rt from the IA doc, with a narrower first column */
+.st{width:100%;border-collapse:collapse;font-size:13px}
+.st th{text-align:left;padding:0 12px;height:32px;white-space:nowrap;
+  font-family:var(--tx-mono);font-size:10px;font-weight:500;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--tx-ink-3);border-bottom:1px solid var(--tx-line-strong)}
+.st td{padding:8px 12px;border-bottom:1px solid var(--tx-line);color:var(--tx-ink-2);
+  vertical-align:top;line-height:1.5}
+.st tr:hover td{background:var(--w-hover)}
+.st td:first-child{color:var(--tx-ink);font-weight:600;white-space:nowrap}
+.st td.t,.st td code{font-family:var(--tx-mono)}
+.st td.t{font-size:11.5px;color:var(--tx-accent-text);white-space:nowrap}
+.st td.v{font-family:var(--tx-mono);font-size:12px;color:var(--tx-ink);white-space:nowrap}
+
+@media (max-width:1180px){
+  .lib{grid-template-columns:minmax(0,1fr)}
+  .lib__nav{position:static;max-height:none;border-right:0;border-bottom:1px solid var(--tx-line);
+    padding-bottom:14px;display:flex;flex-wrap:wrap;gap:4px}
+  .lib__gk{display:none}
+  .anat{grid-template-columns:minmax(0,1fr)}
+}
+
+/* ── the library index card ───────────────────────────────────────────────
+   A stretched link on a DIV, not an <a> wrapping everything. Wrapping the
+   card in an anchor nested <a> inside <a> wherever a thumbnail contained a
+   link (breadcrumb, top bar, inline link), and the HTML parser's adoption
+   agency algorithm answered by cloning empty 2x2 anchors into the specimens. */
+.libcard{position:relative;display:flex;flex-direction:column;transition:
+  border-color var(--tx-t-fast) var(--tx-ease)}
+.libcard:hover{border-color:var(--tx-accent-line)}
+.libcard:focus-within{border-color:var(--tx-focus);box-shadow:0 0 0 3px var(--tx-focus-halo)}
+.libcard__fig{flex:1;display:flex;align-items:center;justify-content:center;
+  min-height:104px;padding:16px;overflow:hidden;pointer-events:none;
+  background:var(--tx-canvas);
+  background-image:linear-gradient(var(--w-grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--w-grid) 1px,transparent 1px);
+  background-size:8px 8px}
+.libcard__fig>div{max-width:100%;display:flex;align-items:center;justify-content:center;
+  gap:8px;flex-wrap:wrap}   /* several specimens are two or three siblings — .check and
+     .av are block-level, so without a row they stacked diagonally */
+.libcard__m{border-top:1px solid var(--tx-line);padding:11px 14px}
+.libcard__n{font-size:13.5px;font-weight:600;color:var(--tx-ink);text-decoration:none}
+.libcard__n::after{content:'';position:absolute;inset:0;border-radius:var(--tx-r3)}
+.libcard:hover .libcard__n{color:var(--tx-accent-text)}
+.libcard__d{font-size:12.5px;line-height:1.5;color:var(--tx-ink-2);margin-top:5px}
+
+/* ═══════════════════════════════════════════════ 24 · GLASS (OVERLAY ONLY) ══
+   X REP Glass — the material for the OVERLAY layer, and nothing else.
+
+   THE RULE
+   Glass goes on things that sit ON TOP of content: the top bar, the right
+   panel, the modal, the command palette, the bulk bar. It never goes on the
+   content plane — not tables, not cards, not stat tiles, not the rail.
+
+   WHY THAT LINE AND NOT "EVERYWHERE"
+   Four findings from the research, each of which this product trips:
+   1 · Glass is wrong for long-form and data-dense text. A blurred ground
+       behind 13.5px tabular figures is exactly the case every guide warns off.
+   2 · Glass is wrong where there is nothing behind to blur. The rail sits on
+       the canvas with no content under it — glass there is GPU cost for an
+       invisible effect. It stays solid.
+   3 · Glass is wrong in trust-heavy, money-carrying contexts. This app is a
+       solo trainer's income. A ledger row must never be a judgement call.
+   4 · Glass is expensive on older Android and cheap laptops — visible jank and
+       battery drain. That is the actual device this product ships to.
+
+   WHY IT IS STILL RIGHT FOR THE OVERLAY LAYER
+   The panel's whole design argument is already "the thing behind it matters" —
+   a payment is decided while looking at the ledger. Glass is the literal
+   material expression of that argument, not decoration. And this product has
+   NO PHOTOGRAPHS anywhere, so the ground behind glass is always a near-uniform
+   surface: contrast over it is predictable, which is the thing that makes glass
+   fail on iOS wallpapers.
+
+   THE CONSTRAINTS, ALL FROM PUBLISHED GUIDANCE
+   · One glass sheet per view. Never glass on glass — a modal over a panel
+     forces the panel back to solid.
+   · Controls inside glass sit on SOLID fills, never on more glass.
+   · Text on glass measures 4.5:1 after the blur, in both themes.
+   · prefers-reduced-transparency → solid. Non-negotiable, and the reason
+     Apple shipped a Tinted control in iOS 26.1 after the legibility backlash.
+   · backdrop-filter is NEVER animated — the browser recomputes the blur every
+     frame. Opacity and background alpha animate instead.
+   · blur stays in the 8–24px band; past that the cost climbs and the effect
+     does not.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+[data-theme="dark"]{
+  --g-fill:rgba(22,26,32,.64);
+  --g-fill-strong:rgba(22,26,32,.70);
+  --g-line:rgba(255,255,255,.10);
+  --g-edge:rgba(255,255,255,.22);      /* the lit top edge */
+  --g-inset:inset 0 1px 0 rgba(255,255,255,.07);
+  --g-shadow:0 18px 52px -14px rgba(0,0,0,.80);
+  --g-blur:20px;
+  --g-sat:170%;
+  /* on dark, glass reads as a plane only if it is LIGHTER than the ground.
+     1.2 is the ceiling: at 1.35 a lime stat tile behind the panel dropped the
+     panel's own text to 4.5:1, and 1.2 holds it at 6.2:1 worst case. */
+  --g-lift:brightness(1.2);
+}
+[data-theme="light"]{
+  --g-fill:rgba(255,255,255,.68);
+  --g-fill-strong:rgba(255,255,255,.88);
+  --g-line:rgba(16,19,26,.10);
+  --g-edge:rgba(255,255,255,.92);
+  --g-inset:inset 0 1px 0 rgba(255,255,255,.9);
+  --g-shadow:0 18px 52px -14px rgba(16,19,26,.22);
+  --g-blur:20px;
+  --g-sat:150%;
+  --g-lift:brightness(1.02);   /* light glass needs almost none */
+}
+
+/* the material itself. Applied by component selectors below, never used raw,
+   so there is exactly one place to change what glass means. */
+@supports ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  [data-glass="on"] .glassy{
+    background:var(--g-fill);
+    -webkit-backdrop-filter:blur(var(--g-blur)) saturate(var(--g-sat)) var(--g-lift);
+    backdrop-filter:blur(var(--g-blur)) saturate(var(--g-sat)) var(--g-lift);
+    border-color:var(--g-line);
+    box-shadow:var(--g-shadow),var(--g-inset);
+  }
+  /* the lit edge — a 1px top highlight is the whole difference between
+     "translucent box" and "a pane of glass with a light above it" */
+  [data-glass="on"] .glassy--edge{border-top-color:var(--g-edge)}
+}
+
+/* ── where glass goes ─────────────────────────────────────────────────────── */
+
+/* 1 · the top bar. Content scrolls under it, so there is genuinely something
+      to blur. This one was already translucent before glass existed. */
+[data-glass="on"] .top{
+  background:var(--g-fill);
+  -webkit-backdrop-filter:blur(var(--g-blur)) saturate(var(--g-sat)) var(--g-lift);
+  backdrop-filter:blur(var(--g-blur)) saturate(var(--g-sat)) var(--g-lift);
+  border-bottom-color:var(--g-line);
+}
+
+/* 2 · the right panel. The ledger behind it staying legible IS the reason the
+      panel exists rather than a bottom sheet. */
+[data-glass="on"] .panel{
+  background:var(--g-fill-strong);
+  -webkit-backdrop-filter:blur(var(--g-blur)) saturate(var(--g-sat)) var(--g-lift);
+  backdrop-filter:blur(var(--g-blur)) saturate(var(--g-sat)) var(--g-lift);
+  border-left-color:var(--g-line);
+  box-shadow:var(--g-shadow),var(--g-inset);
+}
+[data-glass="on"] .panel{border-top:1px solid var(--g-edge)}
+[data-glass="on"] .panel__hd,[data-glass="on"] .panel__foot{
+  background:transparent;border-color:var(--g-line)}
+
+/* 3 · the modal. Stronger fill than the panel, because a modal must be read
+      and answered, not looked past. */
+[data-glass="on"] .modal{
+  background:var(--g-fill-strong);
+  -webkit-backdrop-filter:blur(26px) saturate(var(--g-sat)) var(--g-lift);
+  backdrop-filter:blur(26px) saturate(var(--g-sat)) var(--g-lift);
+  border:1px solid var(--g-line);border-top-color:var(--g-edge);
+  box-shadow:var(--g-shadow),var(--g-inset);
+}
+[data-glass="on"] .modal__hd,[data-glass="on"] .modal__foot{
+  background:transparent;border-color:var(--g-line)}
+
+/* 4 · the command palette. It floats over a whole screen — the most glass-
+      shaped object in the product. */
+[data-glass="on"] .pal{
+  background:var(--g-fill-strong);
+  -webkit-backdrop-filter:blur(24px) saturate(var(--g-sat)) var(--g-lift);
+  backdrop-filter:blur(24px) saturate(var(--g-sat)) var(--g-lift);
+  border-color:var(--g-line);border-top-color:var(--g-edge);
+  box-shadow:var(--g-shadow),var(--g-inset);
+}
+[data-glass="on"] .pal__in{background:transparent;border-bottom-color:var(--g-line)}
+
+/* 5 · the bulk bar. It replaces the toolbar over rows that must stay readable,
+      which is the same argument as the panel. Keeps its lime tint on top of
+      the glass rather than instead of it. */
+[data-glass="on"] .bulk{
+  -webkit-backdrop-filter:blur(16px) saturate(var(--g-sat));
+  backdrop-filter:blur(16px) saturate(var(--g-sat));
+  box-shadow:var(--g-inset)}
+
+/* ── where glass explicitly does NOT go ───────────────────────────────────
+   Listed as real declarations rather than as a comment, so a future edit that
+   tries to glass the content plane has to delete a rule that says why. */
+[data-glass="on"] .rail{                 /* nothing behind it to blur */
+  background:var(--w-rail-bg);backdrop-filter:none;-webkit-backdrop-filter:none}
+[data-glass="on"] .card,
+[data-glass="on"] .stat,
+[data-glass="on"] .tbl,
+[data-glass="on"] .lrow,
+[data-glass="on"] .sets,
+[data-glass="on"] .ev{                   /* the content plane. Money lives here */
+  backdrop-filter:none;-webkit-backdrop-filter:none}
+
+/* controls inside glass sit on solid fills — never glass on glass */
+[data-glass="on"] .panel .ctl,[data-glass="on"] .modal .ctl,
+[data-glass="on"] .panel .btn,[data-glass="on"] .modal .btn,
+[data-glass="on"] .pal__i[aria-selected="true"]{
+  backdrop-filter:none;-webkit-backdrop-filter:none}
+[data-glass="on"] .panel .ctl,[data-glass="on"] .modal .ctl{
+  background:var(--tx-surface-2)}
+
+/* the accessibility exit. A user who has asked their OS for less transparency
+   gets solid surfaces, everywhere, with no negotiation. */
+@media (prefers-reduced-transparency:reduce){
+  [data-glass="on"] .top,[data-glass="on"] .panel,[data-glass="on"] .modal,
+  [data-glass="on"] .pal,[data-glass="on"] .bulk,[data-glass="on"] .glassy{
+    -webkit-backdrop-filter:none !important;backdrop-filter:none !important;
+  }
+  [data-glass="on"] .top{background:var(--tx-canvas)}
+  [data-glass="on"] .panel,[data-glass="on"] .modal,[data-glass="on"] .pal,
+  [data-glass="on"] .glassy{background:var(--tx-surface)}
+}
+/* same for anyone who has asked for less motion — no specular drift at all */
+@media (prefers-reduced-motion:reduce){
+  [data-glass="on"] .glassy{transition:none}
+}
+
+/* the toggle in the document header */
+.zoomer [data-glass-toggle][aria-pressed="true"]{
+  background:var(--tx-accent);color:var(--tx-accent-ink);
+  border-color:var(--tx-accent)}
+
+/* ── tinted grounds ───────────────────────────────────────────────────────
+   MEASURED: --tx-ink-3 (#8B939F) on an accent-soft card measures 4.58:1 with
+   flat surfaces and 4.45:1 once the panel behind it is glass. Passing 4.5 by
+   0.08 is not passing — it is a rounding error away from failing, and it did
+   fail the moment the material under it changed.
+
+   The fix is general rather than per-instance: on ANY tinted ground, dim text
+   steps up one level. --tx-ink-3 becomes --tx-ink-2, and the small print goes
+   with it. Costs nothing, and removes a whole class of future near-misses. */
+.card--acc{background:var(--tx-accent-soft);border-color:var(--tx-accent-line)}
+.card--acc .kv__k,.card--acc .small,.card--acc .stat__k,.card--acc .stat__d,
+.card--acc .fld__h,.card--acc .lrow__s,.card--acc .micro,
+.why .small,.why .kv__k{color:var(--tx-ink-2)}
+.card--acc .kv__v,.card--acc b,.card--acc strong{color:var(--tx-ink)}
+/* the same rule as a standalone tint, for a selected row that is not a card */
+.tinted{background:var(--tx-accent-soft);border-color:var(--tx-accent-line)}
+.tinted .small,.tinted .kv__k,.tinted .fld__h,.tinted .micro{color:var(--tx-ink-2)}
+
+/* ── the booking form: a picking list, and a radio ─────────────────────────
+   Added for the schedule's "New session" panel (§08 of webapp-schedule.html),
+   which needed three things the library did not have.
+
+   1. `.lrow` as a CONTROL. It was written for a div with cursor:pointer, and
+      a row that picks a client is a button — so it needs the four
+      declarations that stop a <button> looking like a button, exactly as
+      `.gapb` did. `text-align:left` is in there because a <button> centres
+      its text, which is the same bug that put the month's "Away ·
+      Coimbatore workshop" label in the middle of a Wednesday.
+   2. A group header inside a list. The suggested clients are a GROUP, not a
+      re-sort — "trains at this hour" has to be sayable, or the ranking is
+      just a mysterious order.
+   3. A radio. There was no radio in this stylesheet at all: every earlier
+      form chose with chips or a switch. Repeat needs one, because "does not
+      repeat" and "every Wednesday" are mutually exclusive and a chip pair
+      that looks like a filter would read as one. */
+button.lrow,label.lrow{
+  width:100%;font:inherit;text-align:left;background:none;
+  border:0;border-bottom:1px solid var(--tx-line)}
+.lrow:last-child{border-bottom:0}
+.lrow[aria-pressed="true"]{background:var(--w-selected)}
+.lrow[aria-pressed="true"]::before{content:'';position:absolute;left:0;top:0;bottom:0;
+  width:2px;background:var(--tx-accent)}
+.lrow:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2px}
+
+.lgl{border:1px solid var(--tx-line);border-radius:var(--tx-r2);overflow:hidden;
+  background:var(--tx-surface-2)}
+.lgl .lrow{background:var(--tx-surface)}
+.lgl .lrow[aria-pressed="true"]{background:var(--w-selected)}
+.lgrp{display:flex;align-items:center;gap:8px;padding:7px 12px 6px;
+  font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--tx-ink-3);background:var(--tx-surface-2);
+  border-bottom:1px solid var(--tx-line)}
+.lgrp em{font-style:normal;font-family:var(--tx-mono);font-weight:600;
+  letter-spacing:.02em;font-variant-numeric:tabular-nums}
+/* the tail of a truncated list. Not a row, because it is not a client — it is
+   a count of the ones this panel is not showing, and a fake row you cannot
+   pick is worse than a sentence. */
+.lgrp--f{border-bottom:0;border-top:1px solid var(--tx-line);text-transform:none;
+  letter-spacing:.01em;font-size:11.5px;font-weight:500}
+
+.rad{
+  width:18px;height:18px;border-radius:var(--tx-rfull);flex:0 0 auto;position:relative;
+  border:1.5px solid var(--tx-field-line-hover);background:var(--tx-field);
+  display:grid;place-items:center;cursor:pointer}
+.rad::before{content:'';position:absolute;inset:-7px}  /* 18 + 14 = 32px target */
+.rad--on{border-color:var(--tx-accent);border-width:5px}
+
+/* the draft block. It reuses `.ev--ghost` — accent, dashed, "not real yet" —
+   rather than getting a tone of its own, because a booking draft and a drag
+   target are the same claim about the same grid: something is going to be
+   here, and it is not here yet. Two dashed accents meaning two different
+   things would be worse than one meaning both. */
+
+/* the house row in a comparison table. A tint and not bold type, because the
+   comparison is the content and X REP is one row of it rather than the
+   conclusion. Introduced by the schedule's booking section (§08), which is the
+   first table in the set that puts us in the same column as the market. */
+.dt tr.dt__hl>th,.dt tr.dt__hl>td{background:var(--tx-accent-soft)}
+.dt tr.dt__hl>th{color:var(--tx-accent-text)}
+
+/* ── the hours editor: figure and ground, swapped ──────────────────────────
+   Same grid, same minute, opposite subject. On the schedule the sessions are
+   the figure and `working_hours` is the negative — a hatch meaning "not this".
+   Here the hours ARE what is being edited, so the window becomes a solid
+   object with edges you can take hold of, and everything else recedes: no
+   hatch, because on this screen empty already reads as closed, and a second
+   mark for the same fact would be one mark too many.
+
+   The sessions stay drawn, dimmed, because they are the consequence. This is
+   the whole reason the desk version needs no dialog: the phone has to LIST who
+   a change strands, since its sheet covers the diary. Here they are already on
+   screen, so the list is a picture and the confirmation is the ordinary Save. */
+/* No text in the band. It collided — a window starting at 06:00 wants its
+   label exactly where a 06:00 session puts its own — and it was redundant
+   anyway: the page is one pixel per minute against a labelled axis, so a band
+   whose edges align to that axis has already said where it starts. The times
+   are in the day head, where there is room, and in the accessible name. */
+.wb{position:absolute;left:3px;right:3px;border-radius:var(--tx-r1);
+  background:var(--tx-accent-soft);border:1px solid var(--tx-accent-line);
+  font:inherit;width:auto;cursor:ns-resize;padding:0}
+/* the grab edges. Two of them, because a window has two ends and dragging the
+   middle would be a move — which this screen deliberately does not offer, since
+   "my day shifts an hour later" is two edits and one of them is usually wrong.
+   6px tall and drawn, so the affordance is visible before the pointer is on it;
+   the keyboard route is in §12 and is not optional — SC 2.5.7 again. */
+.wb__e{position:absolute;left:0;right:0;height:6px;cursor:ns-resize}
+.wb__e::after{content:'';position:absolute;left:50%;transform:translateX(-50%);
+  width:26px;height:2px;border-radius:1px;background:var(--tx-accent)}
+.wb__e--t{top:0}
+.wb__e--t::after{top:2px}
+.wb__e--b{bottom:0}
+.wb__e--b::after{bottom:2px}
+.wb:focus-visible{outline:2px solid var(--tx-focus);outline-offset:1px}
+/* Sessions sit above the bands on this view — scoped to it, because nowhere
+   else has bands to be above. Note that this alone did NOT fix what it was
+   added for: a window edge at 17:30 was drawing its lime line through the name
+   of a session spanning 17:00—18:00, and stacking order is not the reason. The
+   `.ev` tints are semi-transparent, so the edge was showing THROUGH the block,
+   not over it. See `.ev--out` below for the actual fix. */
+.cw--hrs .ev{z-index:2}
+/* a window being edited, and the days it is about to replace. The same
+   treatment for both, because "Also apply to Thursday" means Thursday is
+   getting exactly this, and a different tint would imply a different value.
+
+   FIRST ATTEMPT, AND IT WAS THE ONE RULE THIS SYSTEM HAS: it filled with
+   --tx-accent. A solid lime band four hours tall has the day's sessions inside
+   it, and lime is a FILL — the sessions became dark-on-lime mush and a stranded
+   session's danger ring disappeared into it. Selection is carried by the EDGE
+   instead: 2px of accent, which is a graphical object at its own contrast
+   floor, plus the column tint behind it and the tinted head above it. Three
+   signals, none of them spending a background a session has to be read on. */
+.wb--sel{border:2px solid var(--tx-accent)}
+.wb--sel .wb__e::after{height:3px;width:34px;background:var(--tx-accent)}
+
+/* a column in the edit. Tinted at the column, not the band, so the day heads
+   and the empty hours are in the selection too — the chips say five days and
+   the grid has to agree with them. */
+.cw__seg--on{background:var(--tx-accent-soft)}
+.cw__seg--on .wb{background:transparent}
+.cal__hd--on{background:var(--tx-accent-soft);
+  box-shadow:inset 0 2px 0 var(--tx-accent)}
+
+/* a session the edit puts outside the hours. Not `.ev--noshow`: that is a
+   recorded outcome and this is a pending consequence, so it carries the ring
+   the clash uses plus the danger ground, and the whole block dims to say it is
+   context rather than something to click. */
+/* OPAQUE, deliberately, and it is the only block in the set that is. Every
+   other `.ev` tint is a translucent wash, which is right when what is behind it
+   is an empty track — and wrong here, because what is behind it is a window
+   edge whose 2px lime line was landing across the client's name and reading as
+   a strikethrough. A strikethrough means cancelled. Two stacked gradients
+   composite the danger wash onto the surface, so the result is opaque in both
+   themes without inventing a token for it. */
+.ev--out{background:linear-gradient(var(--tx-danger-soft),var(--tx-danger-soft)),
+  linear-gradient(var(--tx-surface),var(--tx-surface));
+  border-left-color:var(--tx-danger);box-shadow:inset 0 0 0 1px var(--tx-danger)}
+
+/* the two strips: layer two, and the consequence. Both are `.cw__band` — a
+   full-width row inside the grid — because both are statements about the whole
+   week rather than about a day. */
+/* both strips grow rather than clip: a fixed --cw-band height with centred
+   flex content silently hides a second line, and these say things that matter. */
+.cw__band--warn,.cw__band--note{height:auto;min-height:var(--cw-band);
+  padding:7px 14px;align-items:center}
+.cw__band--warn{background:var(--tx-danger-soft);color:var(--tx-ink-2);
+  cursor:default;border-color:var(--tx-danger)}
+.cw__band--warn svg{color:var(--tx-danger)}
+.cw__band--warn strong{color:var(--tx-danger);font-weight:700}
+.cw__band--note{cursor:default}
+.cw__band--note em{text-transform:none;letter-spacing:.01em;font-size:11px}
+
+/* ═══════════════════════════════════════════ 09 · TODAY, AS A DAY ════════
+   The Today screen's own components. Three of them; the fourth is a modifier
+   on a class that already existed and had never been used here.
+
+   The audit's open item read: ".ev now ships as a <button> in a positioned
+   track. webapp-c-domain.html still documents it as a gridcell inside a 48px
+   hour cell, and says it is used in schedule, today — the Today screen has
+   never drawn one." It draws 5 now, and the modifier below is why one class
+   can serve both orientations. */
+
+/* ── the day ribbon ──────────────────────────────────────────────────────
+   The week grid's identity, turned ninety degrees: ONE MINUTE IS ONE PIXEL,
+   so a block's `left` is its start minute minus the ribbon's and its `width`
+   is its duration. 06:00 to 20:30 is 870 minutes and therefore 870px, which
+   fits the 1136px content column at 1:1 with room for the day's footing —
+   the whole reason this can be a ribbon rather than a chart.
+
+   It does NOT fold the six and a half hours between the two shifts. The week
+   grid folds that span to a 30px seam because across seven days it holds
+   nothing; on ONE day it is the shape of the day, and a day that reads as
+   continuous when it is split in two is the only thing this component could
+   get seriously wrong. */
+.dr{position:relative;height:var(--dr-h);border:1px solid var(--tx-line);
+  border-radius:var(--tx-r2);background:var(--tx-surface-2);overflow:hidden}
+:root{--dr-h:52px}
+/* a working window is the ground; everything else is hatched. Same rule and
+   same hatch as the week's .cw__off, so "outside your hours" looks identical
+   on both screens. */
+.dr__win{position:absolute;top:0;bottom:0;background:var(--tx-surface)}
+.dr__off{position:absolute;top:0;bottom:0;right:auto;pointer-events:none;
+  background:repeating-linear-gradient(45deg,transparent 0 6px,var(--w-grid) 6px 7px)}
+.dr__l{position:absolute;top:0;bottom:0;width:0;border-left:1px solid var(--tx-line)}
+.dr__l--h{border-left-color:var(--tx-line-strong)}
+/* the hole gets one label, centred in it, because 390px of hatch with nothing
+   written on it is a rendering error until it says what it is. */
+.dr__hole{position:absolute;top:50%;transform:translate(-50%,-50%);
+  font-size:11.5px;color:var(--tx-ink-3);white-space:nowrap;pointer-events:none;
+  background:var(--tx-surface-2);padding:2px 8px;border-radius:var(--tx-r1)}
+.dr__hole b{font-family:var(--tx-mono);font-weight:500;color:var(--tx-ink-2);
+  font-variant-numeric:tabular-nums}
+
+/* now. Identical reasoning to .cw__now — the line is --tx-ink because red is
+   the clash and lime is a fill, so the accent appears as the dot. */
+.dr__now{position:absolute;top:0;bottom:0;width:0;z-index:6;
+  border-left:1px solid var(--tx-ink);pointer-events:none}
+.dr__now i{position:absolute;left:-4px;top:-1px;width:8px;height:8px;
+  border-radius:50%;background:var(--tx-accent)}
+/* MEASURED BUG, KEPT AS A COMMENT. This chip used to live inside the track at
+   `top:-1px`, and at 09:12 it covered the whole of Divya R's 30px block — the
+   one session the frame exists to show. The week grid gets away with the same
+   trick because its blocks are 60px WIDE and the label sits in the last 40px
+   of the row; a ribbon's blocks are 30px wide and there is nowhere on them to
+   put a label. So the chip lives on the ruler, under the line, where nothing
+   can be behind it. */
+.dr__nt{position:absolute;top:-2px;transform:translateX(-50%);z-index:7;
+  background:var(--tx-ink);color:var(--tx-canvas);font-family:var(--tx-mono);
+  font-size:10px;font-weight:600;padding:1px 5px;border-radius:3px;
+  font-variant-numeric:tabular-nums}
+
+/* the ruler, outside the track so a tick label can never sit on a block */
+.dr__ax{position:relative;height:12px;margin-top:4px}
+.dr__t{position:absolute;top:0;transform:translateX(-50%);font-family:var(--tx-mono);
+  font-size:10px;color:var(--tx-ink-3);font-variant-numeric:tabular-nums}
+
+/* ── .ev, laid on its side ───────────────────────────────────────────────
+   `right:auto` is explicit rather than left to the over-constraint rule: a
+   block whose width comes from its duration must not depend on which of
+   `right` and `width` a browser decides to drop.
+
+   A 30-minute session is 30px wide, which holds no text at all — so the
+   ribbon carries the avatar and nothing else, and the names are in the table
+   under it. The avatar is 24px, which is what makes 30px the floor: the
+   shortest session this product books is exactly wide enough to be a person
+   rather than a bar. */
+.ev--h{top:5px;bottom:5px;right:auto;height:auto;padding:0;
+  display:flex;align-items:center;justify-content:center;overflow:visible}
+.ev--h .av{box-shadow:0 0 0 2px var(--tx-surface)}
+.gapb--h{top:5px;bottom:5px;right:auto;height:auto;
+  display:flex;flex-direction:column;justify-content:center;padding:0 7px}
+
+/* ── the hero ────────────────────────────────────────────────────────────
+   `Hero.tsx`: "Four states, one slot ... The 62px display figure is the same
+   in every state. It is the only element on the screen readable at arm's
+   length on a gym floor, which is the whole reason it is that size."
+
+   44px here, not 62. The reason for 62 is reading distance on a gym floor and
+   a desk does not have it; the reason for a display figure at all is that the
+   trainer walks past this screen, and that survives the move. Measured against
+   the 27px stat value it is still unmistakably the largest thing on the page. */
+.hro{display:flex;flex-direction:column;gap:2px;padding:13px 16px 14px}
+.hro__k{display:flex;align-items:center;gap:7px;font-family:var(--tx-mono);
+  font-size:10.5px;font-weight:500;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--tx-ink-3)}
+.hro__k--live{color:var(--tx-accent-text)}
+.hro__k i{width:7px;height:7px;border-radius:50%;background:var(--tx-accent);flex:0 0 auto}
+.hro__c{font-family:var(--tx-brand);font-weight:800;font-size:36px;letter-spacing:-.035em;
+  line-height:1.02;margin-top:6px;color:var(--tx-ink);font-variant-numeric:tabular-nums;
+  display:flex;align-items:baseline;gap:7px}
+.hro__c em{font-style:normal;font-family:var(--tx-font);font-size:15px;font-weight:600;
+  color:var(--tx-ink-3);letter-spacing:0}
+.hro__n{font-size:16px;font-weight:700;color:var(--tx-ink);margin-top:5px}
+.hro__d{font-size:12.5px;color:var(--tx-ink-3);margin-top:2px}
+.hro__a{display:flex;gap:8px;margin-top:11px}
+/* the one line that turns a countdown into a decision. Not a tag and not a
+   tooltip: it is the sentence the trainer acts on, so it gets a ruled band. */
+.hro__w{display:flex;align-items:center;gap:8px;margin-top:11px;padding:8px 10px;
+  border-radius:var(--tx-r2);background:var(--tx-surface-2);
+  border:1px solid var(--tx-line);font-size:12.5px;color:var(--tx-ink-2);line-height:1.45}
+.hro__w b{color:var(--tx-ink);font-weight:600}
+.hro__w svg{flex:0 0 auto;color:var(--tx-ink-3)}
+.hro__w--acc{background:var(--tx-accent-soft);border-color:var(--tx-accent-line)}
+.hro__w--acc svg{color:var(--tx-accent-text)}
+.hro__w--warn{background:var(--tx-warn-soft);border-color:var(--tx-warn)}
+.hro__w--warn svg{color:var(--tx-warn)}
+
+/* THE COMPONENT THAT WAS NOT BUILT. A `.mstrip` lived here — five month
+   figures on one ruled row across the bottom of the screen. It was deleted
+   before it shipped: the month card in the third column is the same shape as
+   its two neighbours and lands in the same reading position, and a bespoke
+   component for one instance is how a library grows a class nothing else can
+   reuse. The argument it was built to win — money is present, not dominant —
+   is won by POSITION, which costs no CSS. */
+
+/* ── severity on a queue row ─────────────────────────────────────────────
+   `AttentionItem.severity` is 'alert' | 'critical'. Two levels, so two marks
+   and not two colours: critical takes a 2px danger edge on the row, alert
+   takes nothing. A tone on every row is a tone on no row. */
+.tbl tbody tr.crit td:first-child{box-shadow:inset 2px 0 0 var(--tx-danger)}
+/* the weight, shown only in the audit's bench — never on the screen. A trainer
+   does not need to see 2011 to believe Farhan is first. */
+.wt{font-family:var(--tx-mono);font-size:10.5px;color:var(--tx-ink-3);
+  font-variant-numeric:tabular-nums}
+
+/* ── the ten seconds a message can be taken back in ──────────────────────
+   The set's rule, from H03 of the heuristic audit: a destructive action is
+   "reversible for ten seconds IN PLACE, IN THE ROW THAT CHANGED". The
+   schedule file spends that rule on a floating chip (`.cw__cur--undo`)
+   because a 60px session block cannot hold a two-line message and has no
+   row to put one in. A queue row can, so here the rule is taken literally
+   and the row itself becomes the receipt — no chip, no toast, no corner of
+   the screen the eye has to find.
+
+   AND THE REASON THIS EXISTS AT ALL: the phone's `actOn` never sends. Its
+   comment says "§ 04 is explicit that none of them ever sends anything
+   silently" — tapping the verb NAVIGATES to the client. The web commits in
+   place instead, because a queue whose six rows each cost a round trip is a
+   menu rather than a queue, and the ten seconds are what that promotion
+   costs. This component is the price of a decision, not a patch on an
+   oversight.
+
+   And the hold attaches to the VERB, not to the row. `Remind` and `Nudge`
+   send a WhatsApp; `Renew` is a local write against a package and tells
+   nobody. Four of the six rows get ten seconds and two are instant, which is
+   the honest reading of `AttentionItem.action` rather than a blanket delay
+   that would make renewing a pack feel broken. */
+.tbl tbody tr.held td{background:var(--tx-accent-soft)}
+.tbl tbody tr.held:hover td{background:var(--tx-accent-soft)}
+.tbl tbody tr.held .acc{color:var(--tx-accent-text);font-weight:600}
+/* the stacked control: the verb that takes it back, and the edge that says
+   how long is left. 98px, the same width the action cell has at rest, so the
+   table does not reflow when a row enters the hold. */
+.hold{display:flex;flex-direction:column;align-items:stretch;gap:5px}
+.hold__b{background:none;border:1px solid var(--tx-accent-line);
+  border-radius:var(--tx-r1);font:inherit;font-size:12px;font-weight:700;
+  letter-spacing:.02em;color:var(--tx-accent-text);cursor:pointer;
+  height:26px;padding:0 8px}
+.hold__b:hover{background:var(--tx-accent-soft);border-color:var(--tx-accent)}
+.hold__b:focus-visible{outline:2px solid var(--tx-focus);outline-offset:1px}
+/* the countdown. Same component as the chip's, and the same argument for it —
+   "8s without a moving edge is a fact you have to keep re-reading" — with one
+   token changed: `.cw__bar`'s track is a white alpha because it sits on the
+   dark chip, and on a table row that track has to be a token or it disappears
+   in the light theme. */
+/* MEASURED BUG, KEPT AS A COMMENT. First attempt: 2px tall on a
+   --tx-surface-3 track. On a row already washed with --tx-accent-soft that
+   track is within a few points of the row itself, so only the FILLED 70% was
+   visible — and a lime line of varying length under a word reads as a text
+   underline, not as a countdown. A bar has to show the part that is left as
+   well as the part that is gone.
+
+   3px, and the track is --tx-ink-3 — not the obvious choice, the measured one.
+   --tx-line-strong, the token a track would normally take, sits at 1.06:1
+   against a row washed with --tx-accent-soft in the dark theme: separable by
+   hue, not by luminance, which is not separable. --tx-ink-3 measures 4.6:1
+   dark and 5.5:1 light against that row, so the bar reads as an object of a
+   known length rather than as a lime line of arbitrary extent.
+
+   ONE CONTRAST HERE DOES NOT CLEAR ITS FLOOR, AND IT IS DELIBERATE. The lime
+   fill against that ink-3 track measures 2.39:1 in the dark theme, under the
+   3:1 in WCAG 1.4.11 for a graphical object. It is acceptable only because
+   the bar is REDUNDANT: the same row states the number — "Farhan is told in
+   7s" — so the countdown is never carried by the bar alone, which is what
+   1.4.11 is about. If that number is ever taken out of the row, this bar needs
+   a darker track and a re-measure, and the two changes go together. */
+.cw__bar--row{height:3px;background:var(--tx-ink-3);
+  border-radius:var(--tx-rfull);overflow:hidden}
+.cw__bar--row i{height:3px;border-radius:var(--tx-rfull)}
+
+/* ═══════════════════════════════════════ 10 · GETTING IN, AND SETTING UP ══
+   Three components. One of them replaces a thing the previous version of the
+   auth page drew that the mobile spec explicitly forbids. */
+
+/* ── the code field ──────────────────────────────────────────────────────
+   ONE REAL INPUT UNDER SIX SLOTS — NEVER SIX INPUTS. That is the mobile
+   behaviour spec's own wording, and the page this replaces drew six separate
+   inputs and justified them with "a desk browser will happily autofill a
+   six-digit code from a paired phone and a single field defeats that", which
+   is backwards: `autocomplete="one-time-code"` targets ONE field. Six inputs
+   are what breaks it — along with paste, with backspace across a boundary,
+   and with a screen reader, which announces six unlabelled boxes instead of
+   one labelled field.
+
+   So the input is one element, transparent, spanning the row; the slots are
+   `aria-hidden` decoration drawn behind it. The caret is the slot with the
+   focus ring, not a real caret — a text cursor in a 52px box reads as a
+   cursor in the wrong place. */
+.otp{position:relative;display:flex;gap:9px}
+.otp__in{position:absolute;inset:0;width:100%;opacity:0;font:inherit;
+  letter-spacing:2em;padding-left:1em;background:none;border:0;color:transparent;
+  caret-color:transparent}
+.otp__s{width:52px;height:58px;border-radius:var(--tx-r2);flex:0 0 auto;
+  background:var(--tx-field);border:1px solid var(--tx-field-line);
+  display:grid;place-items:center;font-family:var(--tx-mono);font-size:23px;
+  font-weight:500;color:var(--tx-ink);font-variant-numeric:tabular-nums}
+.otp__s--on{border-color:var(--tx-field-line-hover)}
+/* where the next digit lands. A focus ring on the SLOT, because the input it
+   belongs to is invisible and a ring on nothing is a ring nobody sees. */
+.otp__s--cur{border-color:var(--tx-focus);box-shadow:0 0 0 3px var(--tx-focus-halo)}
+.otp__s--err{border-color:var(--tx-danger);background:var(--tx-danger-soft)}
+.otp__s--ok{border-color:var(--tx-accent-line);background:var(--tx-accent-soft)}
+
+/* ── the message slot ────────────────────────────────────────────────────
+   ALWAYS PRESENT, so nothing below it moves when a code is refused — the
+   mobile spec's accessibility note asks for exactly this ("errors sit in an
+   always-present aria-live='polite' slot"), and it is also the fix for the
+   layout jump that a message appearing between the field and the button
+   causes. Four tones, and the difference between two of them is the whole
+   of §05: a wrong code is the trainer's mistake and is red; an EXPIRED code
+   is the clock's and is amber, because styling a non-error as an error is
+   NN/g's third hostile pattern. */
+.msg{min-height:38px;display:flex;align-items:flex-start;gap:8px;
+  font-size:12.5px;line-height:1.5;color:var(--tx-ink-3);padding-top:2px}
+.msg svg{flex:0 0 auto;margin-top:1px}
+.msg b{font-weight:600}
+.msg--err{color:var(--tx-danger)}
+.msg--err b{color:var(--tx-danger)}
+.msg--warn{color:var(--tx-warn)}
+.msg--warn b{color:var(--tx-warn)}
+.msg--ok{color:var(--tx-accent-text)}
+.msg--ok b{color:var(--tx-accent-text)}
+
+/* ── the trust line ──────────────────────────────────────────────────────
+   Not decoration. OTP-relay fraud over phone calls is common in India, and
+   the mobile spec's "never do this" row is about this sentence: the product
+   should say plainly that it will never ask for the code. It gets a rule and
+   a lock rather than a caption, because a sentence in --tx-ink-3 under a
+   button is a sentence nobody reads. */
+.trust{display:flex;gap:10px;align-items:flex-start;padding:11px 13px;
+  border-radius:var(--tx-r2);background:var(--tx-surface-2);
+  border:1px solid var(--tx-line);font-size:12px;line-height:1.55;
+  color:var(--tx-ink-3)}
+.trust svg{flex:0 0 auto;color:var(--tx-ink-3);margin-top:1px}
+.trust b{color:var(--tx-ink-2);font-weight:600}
+
+/* ── the setup page ──────────────────────────────────────────────────────
+   Not the auth split. The auth split is an argument beside a form; this is a
+   RAIL beside a form, and the rail is the progress indicator — which is why
+   there is no bar as well. The IA committed to "all six steps visible in a
+   left rail"; there are eight, and eight rows at 40px is 320px, which fits
+   with the answers shown. */
+.stp{display:grid;grid-template-columns:332px minmax(0,1fr);height:100%}
+.stp__l{padding:30px 26px;border-right:1px solid var(--tx-line);
+  background:var(--tx-canvas);display:flex;flex-direction:column;min-height:0}
+.stp__r{padding:38px 52px 30px;background:var(--tx-surface);overflow-y:auto;
+  display:flex;flex-direction:column}
+.stp__hd{font-family:var(--tx-brand);font-weight:800;font-size:25px;
+  letter-spacing:-.03em;line-height:1.2;max-width:26ch;text-wrap:balance}
+.stp__sub{font-size:13.5px;color:var(--tx-ink-3);margin-top:9px;max-width:62ch;
+  line-height:1.6}
+.stp__ft{margin-top:auto;padding-top:26px;display:flex;align-items:center;gap:10px}
+.stp__ft .sp{flex:1}
+
+/* the rail's rows carry their ANSWER once given, which is what makes the rail
+   a record rather than a progress bar. .wiz already ships the numbered
+   states; this is the third line. */
+.wiz__a{display:block;font-size:11.5px;color:var(--tx-accent-text);
+  margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* (.wiz__i--now .wiz__t is already set where .wiz is defined — not repeated.) */
+.wiz__opt{font-family:var(--tx-mono);font-size:9.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--tx-ink-3);margin-left:auto;
+  flex:0 0 auto;padding-top:3px}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   11 · THE ROSTER, AS A TABLE
+   The phone reads one client at a time; a desk compares rows. So the roster is
+   a real table — NN/g's four data-table tasks in order: find, compare, view a
+   row, act on records. Everything here serves one of the four.
+
+   The severity spine is the whole reason this is not a generic table. `.crit`
+   already existed for the Today queue (2px inset danger on the first cell);
+   roster.ts has TWO severities and the second had no class, so an `alert` row
+   — five of the nine on this screen — rendered with no spine at all.
+   ────────────────────────────────────────────────────────────────────────── */
+.tbl tbody tr.alert td:first-child{box-shadow:inset 2px 0 0 var(--tx-warn)}
+/* Both spines survive selection and hover, because the row's state is not a
+   function of the pointer. Measured: the warn stroke on --w-selected is
+   3.9:1 dark / 4.4:1 light, over 1.4.11's 3:1 for a non-text indicator. */
+.tbl tbody tr.alert[aria-selected="true"] td:first-child,
+.tbl tbody tr.crit[aria-selected="true"] td:first-child{box-shadow:inset 2px 0 0 currentColor}
+.tbl tbody tr.alert[aria-selected="true"] td:first-child{color:var(--tx-warn)}
+.tbl tbody tr.crit[aria-selected="true"] td:first-child{color:var(--tx-danger)}
+
+/* The roster's own row height. 52px, not --w-row-lg's 56: the name cell holds
+   two lines (name, then the number a trainer dials) at 1.35 and 1.4, which is
+   18 + 15 + 2 = 35px of text, and 52 leaves 8 above and 9 below. Measured on
+   the rendered frame at 1440x900, sticky head at 36 and two sticky group
+   headers at 30: 9 rows are fully visible with the attention strip up and 11
+   without it. Which is why §04 and §14 say 9, not the old page's 12 — that
+   number needed a row height no two-line cell can have. */
+.rst{--rst-row:52px;width:100%;border-collapse:collapse}
+.rst tbody td{height:var(--rst-row)}
+.rst .who2{display:flex;align-items:center;gap:10px;min-width:0}
+.rst .who2 span{display:flex;flex-direction:column;min-width:0;line-height:1.2}
+.rst .who2 b{font-weight:600;color:var(--tx-ink);font-size:13.5px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rst .who2 i{font-style:normal;font-family:var(--tx-mono);font-size:11px;
+  color:var(--tx-ink-3);margin-top:2px}
+/* The attention cell. A glyph, then the app's own line verbatim — the line is
+   the column, so it is allowed to wrap where nothing else in the table is. */
+.rst .attn{display:flex;align-items:center;gap:9px;min-width:0}
+.rst .attn svg{flex:0 0 auto}
+.rst .attn u{text-decoration:none;color:var(--tx-ink);font-weight:500;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rst tr.crit .attn svg{color:var(--tx-danger)}
+.rst tr.alert .attn svg{color:var(--tx-warn)}
+.rst tr.crit .attn u{color:var(--tx-danger)}
+/* A row with nothing wrong says what it is doing, in the quiet ink. No glyph:
+   an icon per row would make "fine" look like a fourth state. */
+.rst .attn--calm u{color:var(--tx-ink-3);font-weight:400}
+.rst .act{width:118px;text-align:right;padding-right:6px}
+.rst .kb{width:40px;padding:0 8px 0 0;text-align:right}
+/* The group header, as a table row. `<th colspan>` rather than a floating
+   div, so it scrolls with the rows it names and the sticky head stays above. */
+.rst tbody tr.grph th{position:sticky;top:36px;z-index:1;
+  text-align:left;padding:0 12px;height:30px;background:var(--tx-surface-2);
+  border-top:1px solid var(--tx-line);border-bottom:1px solid var(--tx-line);
+  font-family:var(--tx-mono);font-size:10px;font-weight:500;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--tx-ink-3)}
+.rst tbody tr.grph th b{color:var(--tx-warn);font-weight:500}
+.rst tbody tr.grph th em{font-style:normal;color:var(--tx-ink-off);
+  letter-spacing:.06em;text-transform:none;font-size:10.5px;margin-left:8px}
+
+/* The three-figure strip above the table, and the one word on it that is not
+   what a trainer will read it as. See §03. */
+.strip{display:flex;gap:0;border:1px solid var(--tx-line);border-radius:var(--tx-r2);
+  overflow:hidden;background:var(--tx-surface)}
+.strip>div{flex:1;padding:9px 14px;border-left:1px solid var(--tx-line)}
+.strip>div:first-child{border-left:0}
+.strip b{display:block;font-family:var(--tx-brand);font-weight:800;font-size:19px;
+  letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+.strip i{font-style:normal;display:block;font-family:var(--tx-mono);font-size:10px;
+  letter-spacing:.11em;text-transform:uppercase;color:var(--tx-ink-3);margin-top:4px}
+.strip .warn b{color:var(--tx-warn)}
+
+/* ── the adherence strip, with the state `boolean[]` cannot carry ────────── */
+.dots{display:flex;gap:4px;align-items:flex-end}
+.dots i{width:16px;height:16px;border-radius:var(--tx-r1);display:block;
+  background:var(--tx-surface-3)}
+.dots i.on{background:var(--tx-ok)}
+.dots i.miss{background:var(--tx-danger-soft);
+  box-shadow:inset 0 0 0 1.5px var(--tx-danger)}
+/* A rest day is an outline and no fill: the plan working, not a gap in it.
+   `week: boolean[]` has one value for this and for a miss.
+   --tx-line-strong measured 1.4:1 dark / 1.65:1 light against the card, under
+   1.4.11's 3:1 for a non-text indicator that carries meaning — and this one
+   carries the whole finding. --tx-ink-3 is 5.6:1 / 5.9:1. Ring, not fill, so it
+   still reads as lighter than the kept dot beside it. */
+.dots i.rest{background:transparent;box-shadow:inset 0 0 0 1px var(--tx-ink-3)}
+.dots u{text-decoration:none;font-family:var(--tx-mono);font-size:10px;
+  color:var(--tx-ink-3);margin-left:6px;align-self:center}
+
+/* ── the metric chart. Bars, not a line: seven readings six weeks apart are
+      not a continuous series, and joining them draws a slope nobody measured. */
+.chart{position:relative;height:132px;border:1px solid var(--tx-line);
+  border-radius:var(--tx-r2);background:var(--tx-surface);padding:10px 12px 22px}
+.chart__g{position:absolute;left:12px;right:12px;height:1px;background:var(--tx-line)}
+.chart__y{position:absolute;left:12px;font-family:var(--tx-mono);font-size:9.5px;
+  color:var(--tx-ink-off);transform:translateY(-50%);background:var(--tx-surface);
+  padding-right:5px}
+/* Solid fills, which is what `.meter i` already does with the same token — and
+   the value is printed above every bar, so the bar reinforces a number rather
+   than being the only encoding of it. The outlined version measured 2.6:1 dark
+   and 1.1:1 light against the card: no perceptible edge at all in light. */
+.chart__b{position:absolute;bottom:22px;width:26px;border-radius:2px 2px 0 0;
+  background:var(--tx-accent)}
+.chart__b--bad{background:var(--tx-danger)}
+.chart__b--bad b{color:var(--tx-danger);font-weight:700}
+.chart__b b{position:absolute;left:50%;transform:translateX(-50%);bottom:100%;
+  font-family:var(--tx-mono);font-size:9.5px;color:var(--tx-ink-2);
+  margin-bottom:3px;white-space:nowrap;font-weight:500}
+.chart__x{position:absolute;bottom:4px;font-family:var(--tx-mono);font-size:9px;
+  color:var(--tx-ink-off);transform:translateX(-50%);white-space:nowrap}
+
+/* ── the intake step bar. Four, and the record is written on the second. ─── */
+.stbar{display:flex;align-items:center;gap:0;margin-top:14px}
+.stbar>div{display:flex;align-items:center;gap:8px;padding-right:14px}
+.stbar>div+div{padding-left:14px;border-left:1px solid var(--tx-line)}
+.stbar em{font-style:normal;width:20px;height:20px;border-radius:var(--tx-rfull);
+  display:grid;place-items:center;flex:0 0 auto;
+  background:var(--tx-surface-3);color:var(--tx-ink-3);
+  font-family:var(--tx-mono);font-size:10px;font-weight:500}
+.stbar .on em{background:var(--tx-accent);color:var(--tx-accent-ink)}
+.stbar .done em{background:var(--tx-ok-soft);color:var(--tx-ok)}
+.stbar span{font-size:12.5px;color:var(--tx-ink-3);white-space:nowrap}
+.stbar .on span{color:var(--tx-ink);font-weight:600}
+.stbar .opt{font-family:var(--tx-mono);font-size:9.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--tx-ink-off)}
+
+/* ── the week picker's slot chips. A held hour is not offered: two clients on
+      one hour every week is a mistake, not a choice, so unlike the diary's
+      warn-only clash this one blocks. The held chip is drawn, disabled, and
+      says whose it is — an hour that vanishes teaches nothing. */
+.slots{display:flex;gap:6px;flex-wrap:wrap}
+.slot{display:inline-flex;flex-direction:column;align-items:flex-start;gap:1px;
+  min-height:38px;padding:5px 10px;border-radius:var(--tx-r2);
+  border:1px solid var(--tx-line);background:var(--tx-surface-2);
+  font-family:var(--tx-mono);font-size:12px;color:var(--tx-ink-2);cursor:pointer}
+.slot:hover{border-color:var(--tx-line-strong);color:var(--tx-ink)}
+.slot small{font-family:var(--tx-font);font-size:9.5px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--tx-ink-off)}
+.slot--on{background:var(--tx-accent-soft);border-color:var(--tx-accent-line);
+  color:var(--tx-accent-text)}
+/* Not dimmed. WCAG exempts an inactive control from 1.4.3, but the NAME on this
+   chip is the reason it is drawn at all — at .55 alpha it measured 2.3:1 light /
+   2.6:1 dark, i.e. unreadable, which defeats the point of not hiding the hour.
+   Dashed border and no fill carry "not available"; the text stays legible. */
+.slot--held{cursor:not-allowed;border-style:dashed;background:transparent;
+  color:var(--tx-ink-3)}
+.slot--held small{color:var(--tx-ink-3)}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   12 · THE WORKOUT CONSOLE
+   The app's log is one thumb, standing up, mid-set. The desk does the other
+   half: catching up a session logged on paper, correcting a set, and reading
+   the twelve weeks the phone has no room for.
+
+   Additive on `.sets`, which three files already use — the Previous column, the
+   gold set number and the note row are new selectors rather than edits, so
+   webapp-components.html and webapp-c-domain.html render exactly as before.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* The Previous column. §09: it never collapses, truncates or hides — "it is the
+   entire advantage over the notebook this app replaces". So it is a real column
+   with its own head, not placeholder text inside the load field: a placeholder
+   disappears the moment you type, which is exactly when you want it. */
+.sets td.prev,.sets th.prev{font-family:var(--tx-mono);font-size:12px;
+  color:var(--tx-ink-3);white-space:nowrap;padding-left:10px}
+/* The inputs are right-aligned, so their headers are too — a left-aligned head
+   over a right-aligned column is two columns as far as the eye is concerned. */
+.sets th.num{text-align:right;padding-right:16px}
+.sets td.prev{border-left:1px solid var(--tx-line)}
+.sets th.prev{border-left:1px solid var(--tx-line)}
+.sets td.prev em{font-style:normal;color:var(--tx-ink-off)}
+/* An empty slot shows what she lifted last time in the input itself, at the
+   quiet ink — a value the log has not claimed. One press accepts it. */
+.sets tr[data-state="empty"] .ctl{color:var(--tx-ink-off)}
+.sets tr[data-state="empty"] .ctl.said{border-style:dashed}
+
+/* The set number carries the record, because the record belongs to a set and
+   not to a day. Gold on the number, and nowhere else on the row. */
+.sets td.n{font-family:var(--tx-mono);font-size:12px;color:var(--tx-ink-3);
+  width:44px;padding-left:0}
+.sets tr.pr td.n{color:var(--tx-pr);font-weight:600}
+.sets tr.pr td.n::after{content:' ●';font-size:8px;vertical-align:2px}
+/* Written here and not yet on the server: an amber ring, and nothing else.
+   `LogSetRow.queued` is the only thing sync gets to say about a set. */
+.sets tr.queued .ctl{border-color:var(--tx-warn)}
+/* A note lives IN the table, two lines under its row — TrueCoach's per-set
+   comment is the best note model in the category and it puts it in an inbox.
+   This is read next week with the same set under your thumb. */
+.sets tr.note td{padding-top:0}
+.sets tr.note p{font-size:12px;line-height:1.5;color:var(--tx-ink-2);
+  border-left:2px solid var(--tx-line-strong);padding:2px 0 4px 9px;margin:0}
+/* The tick. 32px here rather than the app's 56: the phone's number exists
+   because the thumb is sweaty and nobody is looking at the screen, and neither
+   is true of a mouse on a desk. --w-tap is the pointer-only token. */
+.sets td.tick{width:52px;text-align:right;padding-right:0}
+.sets .tk{width:var(--w-tap);height:var(--w-tap);border-radius:var(--tx-r2);
+  border:1px solid var(--tx-field-line);background:var(--tx-field);
+  display:inline-grid;place-items:center;color:var(--tx-ink-3);cursor:pointer}
+.sets .tk:hover{border-color:var(--tx-line-strong);color:var(--tx-ink)}
+.sets .tk--on{background:var(--tx-ok-soft);border-color:var(--tx-ok);
+  color:var(--tx-ok)}
+/* A completed exercise never fades inside a running session (§09): a done
+   session in the diary is history and dims, a done exercise mid-session is what
+   you scroll back to check. So there is no dimmed state here at all. */
+
+/* A day header inside the set table, for the read-only history. Its own rule
+   rather than borrowing the roster's `.rst tbody tr.grph`, because that one also
+   sets --rst-row on every cell and turned a 24px set row into a 52px one. */
+.sets tbody tr.grph th{position:sticky;top:0;z-index:1;text-align:left;
+  padding:0 12px 0 0;height:30px;background:var(--tx-surface-2);
+  border-top:1px solid var(--tx-line);border-bottom:1px solid var(--tx-line);
+  font-family:var(--tx-mono);font-size:10px;font-weight:500;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--tx-ink-3);padding-left:0}
+.sets tbody tr.grph th em{font-style:normal;margin-left:10px;
+  letter-spacing:normal;text-transform:none}
+
+/* ── the exercise list, left of the grid ─────────────────────────────────── */
+.exl{border:1px solid var(--tx-line);border-radius:var(--tx-r2);overflow:hidden;
+  background:var(--tx-surface)}
+.exr{display:flex;align-items:center;gap:11px;padding:10px 12px;
+  border-bottom:1px solid var(--tx-line);cursor:pointer;position:relative;
+  min-height:var(--w-row-lg)}
+.exr:last-child{border-bottom:0}
+.exr:hover{background:var(--w-hover)}
+.exr[aria-current="true"]{background:var(--w-selected)}
+.exr[aria-current="true"]::before{content:'';position:absolute;left:0;top:0;
+  bottom:0;width:2px;background:var(--tx-accent)}
+.exr__m{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.exr__t{font-size:13.5px;font-weight:600;color:var(--tx-ink);white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.exr__s{font-size:11.5px;font-family:var(--tx-mono);color:var(--tx-ink-3)}
+.exr__n{font-family:var(--tx-mono);font-size:11.5px;color:var(--tx-ink-3);
+  flex:0 0 auto;text-align:right}
+/* Started, and every planned slot ticked. The ok spine, same 2px the roster
+   uses for its severities — one vocabulary for "this row has a state". */
+.exr--done::after{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;
+  background:var(--tx-ok)}
+.exr--part::after{content:'';position:absolute;left:0;top:0;bottom:0;width:2px;
+  background:var(--tx-warn)}
+
+/* ── the verdict bench. Four outcomes from one session. ─────────────────── */
+.vrd{display:grid;gap:1px;background:var(--tx-line);border:1px solid var(--tx-line);
+  border-radius:var(--tx-r2);overflow:hidden;
+  grid-template-columns:repeat(4,minmax(0,1fr))}
+.vrd__c{background:var(--tx-surface);padding:13px 14px;display:flex;
+  flex-direction:column;gap:6px;min-height:150px}
+.vrd__k{font-family:var(--tx-mono);font-size:9.5px;font-weight:500;
+  letter-spacing:.12em;text-transform:uppercase}
+.vrd__v{font-family:var(--tx-brand);font-weight:800;font-size:22px;
+  letter-spacing:-.02em;line-height:1.05;font-variant-numeric:tabular-nums}
+.vrd__b{font-size:12px;line-height:1.5;color:var(--tx-ink-3);margin-top:auto}
+.vrd__c--gold{background:var(--tx-pr-soft)}
+.vrd__c--gold .vrd__k{color:var(--tx-pr)}
+.vrd__c--gold .vrd__v{color:var(--tx-ink)}
+.vrd__c--gold .vrd__b{color:var(--tx-ink-2)}
+
+/* ── volume bars. From zero, because volume is a sum. §09 forbids a bar chart
+      of anything that is not one, and forbids a non-zero baseline outright. */
+.vb{display:flex;align-items:flex-end;gap:6px;height:96px;
+  border-bottom:1px solid var(--tx-line-strong);padding-bottom:0}
+.vb i{flex:1;border-radius:2px 2px 0 0;background:var(--tx-surface-3);
+  display:block;min-height:2px}
+.vb i.on{background:var(--tx-accent)}
+.vbx{display:flex;gap:6px;margin-top:6px}
+.vbx span{flex:1;text-align:center;font-family:var(--tx-mono);font-size:9.5px;
+  color:var(--tx-ink-off)}
+
+/* ── the top set, written out. Never a chart: from a zero baseline a 2.5 kg
+      week is two pixels, and from a 50 kg baseline it is everything. */
+.seq{font-family:var(--tx-mono);font-size:19px;font-weight:500;
+  color:var(--tx-ink);letter-spacing:-.01em;line-height:1.45}
+.seq b{color:var(--tx-pr);font-weight:600}
+
+/* ── a swap scope, with its blast radius on its own row, before the tap ─── */
+.scp{display:flex;align-items:flex-start;gap:11px;padding:12px;
+  border:1px solid var(--tx-line);border-radius:var(--tx-r2);
+  background:var(--tx-surface);cursor:pointer;text-align:left;width:100%;
+  font:inherit;color:inherit}
+.scp:hover{border-color:var(--tx-line-strong)}
+.scp--on{border-color:var(--tx-accent-line);background:var(--tx-accent-soft)}
+.scp--wide{border-color:var(--tx-warn);background:var(--tx-warn-soft)}
+.scp__m{flex:1;min-width:0}
+.scp__t{font-size:13.5px;font-weight:600;color:var(--tx-ink)}
+.scp__b{font-size:12.5px;line-height:1.55;color:var(--tx-ink-3);margin-top:3px}
+.scp__n{flex:0 0 auto;font-family:var(--tx-mono);font-size:11px;
+  padding:2px 7px;border-radius:var(--tx-r1);background:var(--tx-surface-3);
+  color:var(--tx-ink-2);white-space:nowrap}
+.scp--wide .scp__n{background:var(--tx-warn-soft);color:var(--tx-warn);
+  box-shadow:inset 0 0 0 1px var(--tx-warn)}
+
+/* ── the rest clock. Per exercise, not global: 90 s after a bench set and 20
+      after a curl is one trainer, not two preferences. Straight from Strong. */
+.rst2{display:flex;align-items:center;gap:10px;padding:9px 12px;
+  border:1px solid var(--tx-accent-line);border-radius:var(--tx-r2);
+  background:var(--tx-accent-soft)}
+.rst2 b{font-family:var(--tx-mono);font-size:17px;font-weight:600;
+  color:var(--tx-accent-text);font-variant-numeric:tabular-nums}
+.rst2 span{font-size:12.5px;color:var(--tx-ink-2)}
+/* The exercise name inside the sentence. Not <b>, which is the clock. */
+.rst2 span u{text-decoration:none;font-weight:600;color:var(--tx-ink)}

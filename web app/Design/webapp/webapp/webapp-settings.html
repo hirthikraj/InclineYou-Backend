@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>X REP · Web app — Settings & sync</title>
+<meta name="description" content="Settings, and the sync queue in full. X REP web application.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/webapp.css">
+</head>
+<body>
+<div class="page doc">
+
+<div class="doc__top">
+  <span class="doc__id">X REP</span>
+  <span class="doc__t">Web app</span>
+  <nav class="doc__nav" aria-label="Design files"><a href="webapp-information-architecture.html">IA</a><a href="webapp-design-system.html">DS</a><a href="webapp-components.html">LIBRARY</a><a href="webapp-competitors.html">MARKET</a><a href="webapp-glass.html">GLASS</a><a href="webapp-heuristics.html">UX AUDIT</a><a href="webapp-rail.html">RAIL</a><a href="webapp-auth.html">AUTH</a><a href="webapp-dashboard.html">TODAY</a><a href="webapp-clients.html">CLIENTS</a><a href="webapp-programs.html">PROGRAMS</a><a href="webapp-schedule.html">SCHEDULE</a><a href="webapp-workout.html">WORKOUT</a><a href="webapp-money.html">MONEY</a><a href="webapp-reports.html">REPORTS</a><a href="webapp-settings.html" aria-current="page">SETTINGS</a><a href="webapp-client-portal.html">PORTAL</a></nav>
+  <div class="zoomer">
+    <button type="button" data-glass-toggle aria-pressed="true">Glass</button>
+    <button type="button" data-theme-toggle>Light</button>
+    <button type="button" data-z="0.5">50</button>
+    <button type="button" data-z="0.62">62</button>
+    <button type="button" data-z="0.72">72</button>
+    <button type="button" data-z="0.85">85</button>
+    <button type="button" data-z="1">1:1</button>
+  </div>
+</div>
+
+<h1>Settings &amp; the sync queue</h1>
+<p class="doc__lede">Two screens the app spreads over eight. Settings is a form, and forms are
+what a desk is for. The sync queue is the one place the product&rsquo;s offline-first architecture
+becomes visible — and on the web it gets a full screen rather than a drawer item, because a
+trainer at a desk is exactly the person who needs to check that yesterday landed.</p>
+<div class="doc__meta"><span><b>Frames</b> <span data-frame-count>2</span></span>
+  <span><b>From</b> drawer · 2a 2b 5a 5b 5c 5d 5e 8a 8b 8c</span>
+  <span><b>Patterns</b> tabbed form · queue rows · ordered retry</span></div>
+<div class="fx" data-frame-index></div>
+<!-- BEGIN:online-only-notice -->
+<div style="border:1px solid var(--tx-danger);background:var(--tx-danger-soft);
+  border-radius:var(--tx-r3);padding:16px 18px;margin:22px 0">
+<p style="font-family:var(--tx-brand);font-weight:800;font-size:15px;color:var(--tx-ink);
+  letter-spacing:-.01em">SUPERSEDED &middot; 23 Aug 2026 &mdash; the web app is ONLINE-ONLY</p>
+<p style="margin-top:9px;font-size:13px;line-height:1.62;color:var(--tx-ink-2)">This page was
+written offline-first. That decision has been <b>reversed for the web</b>: the web app writes
+every response <b>straight to the server</b> &mdash; no browser storage, no write queue, no sync.
+Offline-first remains the architecture of the phone (<code>app/</code>) and of nothing else.
+<br><br>So wherever this page draws or argues for an <b>offline banner</b>, a
+<b>synced / queued pill</b>, a <b>&ldquo;held on this device&rdquo; count</b>, or the
+<b>sync-queue screen</b>, that chrome is <b>not built on the web</b>. The reasoning around it is
+kept, because the rest of each finding depends on it &mdash; only the offline half is void.
+<br><br>Authority: <code>CLAUDE.md</code> at the repo root, and
+<code>web&nbsp;app/web/AGENTS.md</code>. Do not re-derive the offline behaviour from this page.</p>
+</div>
+<!-- END:online-only-notice -->
+
+
+<div class="units">
+
+<section class="unit " id="f-1a">
+  <div class="unit__label">
+    <span class="unit__id">1a</span>
+    <span class="unit__name">Settings · profile, money, reminders</span>
+    <span class="unit__from">from <b>drawer · 2a 5a–5e</b></span>
+  </div>
+  <div class="viewport">
+    <div class="viewport__in">
+      <div class="browser__bar">
+        <span class="browser__dots"><i></i><i></i><i></i></span>
+        <span class="browser__url">app.xrep.in<b>/settings/profile</b></span>
+      </div>
+      <div class="app " data-theme="dark"><nav class="rail" aria-label="Sections">
+  <div class="rail__top"><span class="rail__mark"><svg width="17" height="17" viewBox="0 0 100 100" fill="none" aria-hidden="true"><rect x="4" y="16" width="92" height="8" rx="3" fill="#0A0B0D"/><rect x="4" y="13" width="7" height="14" fill="#0A0B0D"/><rect x="89" y="13" width="7" height="14" fill="#0A0B0D"/><rect x="16" y="7" width="10" height="26" fill="#0A0B0D"/><rect x="74" y="7" width="10" height="26" fill="#0A0B0D"/><path d="M28 93 C28 60 72 60 72 93" stroke="#0A0B0D" stroke-width="11"/><circle cx="50" cy="35" r="9" fill="#0A0B0D"/><g stroke="#0A0B0D" stroke-width="11"><path d="M50 43 L50 64"/><path d="M33 22 C34 56 66 56 67 22"/></g></svg></span>
+    <span class="rail__word">X&nbsp;REP</span></div>
+  <div class="rail__body"><div class="rail__group"><p class="rail__gk">WORK</p><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/></svg><span>Today</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Schedule</span><span class="rail__n">5</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M16.5 5.6a3.2 3.2 0 0 1 0 5.8"/><path d="M18 13.6c2.1.7 3.5 2.5 3.5 5"/></svg><span>Clients</span><span class="rail__n">22</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6M7 7.5v9M17 7.5v9M20 9v6M7 12h10"/></svg><span>Sessions</span></div></div><div class="rail__group"><p class="rail__gk">BUILD</p><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>Programs</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="7" r="1.2"/><circle cx="15" cy="7" r="1.2"/><circle cx="9" cy="12" r="1.2"/><circle cx="15" cy="12" r="1.2"/><circle cx="9" cy="17" r="1.2"/><circle cx="15" cy="17" r="1.2"/></svg><span>Exercises</span></div></div><div class="rail__group"><p class="rail__gk">BUSINESS</p><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10M7 8.5h10M15.5 4c0 4-3.4 4.5-6 4.5h-.5l7 11.5"/></svg><span>Money</span><span class="rail__n rail__n--alert">3</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V4M4 20h16"/><rect x="7.5" y="12" width="3" height="5"/><rect x="12.5" y="8.5" width="3" height="8.5"/><rect x="17" y="6" width="3" height="11"/></svg><span>Reports</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 4 1.5 5.5 1.5 5.5H5S6.5 14 6.5 10Z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg><span>Nudges</span><span class="rail__n rail__n--acc">8</span></div></div><div class="rail__group"><p class="rail__gk">SYSTEM</p><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 0 1-13.7 5.6M4 12a8 8 0 0 1 13.7-5.6"/><path d="M17.5 3v3.6h-3.6M6.5 21v-3.6h3.6"/></svg><span>Sync queue</span><span class="rail__n">6</span></div><div class="rail__i" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.8v2.6M12 18.6v2.6M4.5 12H2M22 12h-2.5M6.2 6.2 4.4 4.4M19.6 19.6l-1.8-1.8M17.8 6.2l1.8-1.8M4.4 19.6l1.8-1.8"/></svg><span>Settings</span></div></div></div>
+  <div class="rail__foot"><div class="roleswap">
+    <span class="av av--sm" style="background:var(--tx-av-4)">AR</span>
+    <span style="flex:1;min-width:0">Anbu R · Trainer</span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+  </div></div>
+</nav><header class="top">
+  <nav class="crumbs" aria-label="Breadcrumb"><a>Settings</a><i><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></i><b>Profile & business</b></nav><div class="omni"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg><span>Search clients, sessions, exercises…</span><kbd>⌘K</kbd></div>
+  <div class="top__acts"><span class="sync"><i></i>Synced</span>
+    <button class="btn btn--icon btn--ghost" type="button" aria-label="Notifications"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 4 1.5 5.5 1.5 5.5H5S6.5 14 6.5 10Z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg></button>
+  </div></header><main class="main"><div class="ph"><div class="ph__row"><div><p class="ph__t">Settings</p><p class="ph__sub">Profile, money, reminders, roles and data</p></div><div class="ph__acts"><button class="btn btn--secondary" type="button">Discard</button><button class="btn btn--primary" type="button">Save changes</button></div></div><div class="ph__tabs" role="tablist"><button class="tab" type="button" role="tab" aria-selected="true" tabindex="0">Profile</button><button class="tab" type="button" role="tab" aria-selected="false" tabindex="-1">Money</button><button class="tab" type="button" role="tab" aria-selected="false" tabindex="-1">Reminders</button><button class="tab" type="button" role="tab" aria-selected="false" tabindex="-1">Roles</button><button class="tab" type="button" role="tab" aria-selected="false" tabindex="-1">Data & export</button><button class="tab" type="button" role="tab" aria-selected="false" tabindex="-1">About</button></div></div>
+<div class="body">
+  <div class="grid2" style="grid-template-columns:minmax(0,1fr) 300px;align-items:start">
+    <div class="col gap4">
+      <div class="card"><div class="card__hd"><span class="card__t">You</span></div>
+        <div class="card__b">
+          <div class="row gap4" style="align-items:flex-start">
+            <span class="av av--xl" style="background:var(--tx-av-4)">AR</span>
+            <div style="flex:1" class="col gap3">
+              <div class="fld"><label class="fld__l" for="sn">Name clients see</label>
+                <input class="ctl" id="sn" value="Anbu R"></div>
+              <div class="fld"><label class="fld__l" for="sb">Business name (optional)</label>
+                <input class="ctl" id="sb" value="" placeholder="Appears on receipts">
+                <span class="fld__h">Leave it empty and receipts use your name.</span></div>
+            </div></div></div></div>
+
+      <div class="card"><div class="card__hd"><span class="card__t">Getting paid</span>
+        <span class="tag tag--acc">We never hold it</span></div>
+        <div class="card__b">
+          <div class="fld"><label class="fld__l" for="su">Your UPI ID</label>
+            <input class="ctl mono" id="su" value="anbu.r@okhdfcbank">
+            <span class="fld__h">Payment links open the client&rsquo;s UPI app pointed at this
+              address. The money goes from them to your bank and never passes through X REP.</span></div>
+          <div class="kv mt4"><span class="kv__k">Default gym share · floor</span>
+            <span class="kv__v">46%</span></div>
+          <div class="kv"><span class="kv__k">Default gym share · remote</span>
+            <span class="kv__v">0%</span></div>
+          <div class="kv"><span class="kv__k">Default session fee</span><span class="kv__v">₹800</span></div>
+        </div></div>
+
+      <div class="card"><div class="card__hd"><span class="card__t">Reminders</span></div>
+        <div class="card__b">
+          <div class="kv"><span class="kv__k">Session reminder to clients</span>
+            <span class="kv__v"><span class="switch" role="switch" aria-checked="true"></span></span></div>
+          <div class="kv"><span class="kv__k">Weekly report · Sundays 20:00</span>
+            <span class="kv__v"><span class="switch" role="switch" aria-checked="true"></span></span></div>
+          <div class="kv"><span class="kv__k">Payment due nudge</span>
+            <span class="kv__v"><span class="switch" role="switch" aria-checked="true"></span></span></div>
+          <div class="kv"><span class="kv__k">Ask me before every send</span>
+            <span class="kv__v"><span class="switch" role="switch" aria-checked="true"></span></span></div>
+          <p class="small mt3">Nothing goes out in your name without you seeing it, unless you
+            turn the last one off.</p>
+        </div></div>
+    </div>
+
+    <div class="col gap4">
+      <div class="card"><div class="card__hd"><span class="card__t">Your data</span></div>
+        <div class="card__b">
+          <p class="small">Everything is exportable, and everything is deletable. Both are
+            buttons, not an email request.</p>
+          <button class="btn btn--secondary mt3" type="button" style="width:100%">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 19.5h15"/></svg>Export everything · CSV</button>
+          <button class="btn btn--secondary mt2" type="button" style="width:100%">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5h7l5 5V20.5H6z"/><path d="M13 3.5v5h5"/></svg>Receipt book · PDF</button>
+          <button class="btn btn--ghost mt2" type="button" style="width:100%;color:var(--tx-danger)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 7h15M9 7V4.5h6V7M6.5 7l1 13h9l1-13"/></svg>Delete my account</button>
+        </div></div>
+      <div class="card"><div class="card__hd"><span class="card__t">This device</span></div>
+        <div class="card__b">
+          <div class="kv"><span class="kv__k">Storage used</span><span class="kv__v">4.2 MB</span></div>
+          <div class="kv"><span class="kv__k">Last full sync</span><span class="kv__v">07:14</span></div>
+          <div class="kv"><span class="kv__k">Queued</span><span class="kv__v warn">6 items</span></div>
+          <button class="btn btn--secondary mt3" type="button" style="width:100%">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 0 1-13.7 5.6M4 12a8 8 0 0 1 13.7-5.6"/><path d="M17.5 3v3.6h-3.6M6.5 21v-3.6h3.6"/></svg>Sync now</button>
+        </div></div>
+    </div>
+  </div>
+</div></main></div>
+    </div>
+  </div>
+  <p class="unit__note">Six tabs, two columns, and one promise made visible: <b>&ldquo;Ask me before every send&rdquo; is a switch, defaulted on</b>. The data card puts export and delete next to each other, both as buttons, because the product claims your data is yours and a claim you have to email someone about is not one.</p>
+</section>
+
+
+<section class="unit " id="f-2a">
+  <div class="unit__label">
+    <span class="unit__id">2a</span>
+    <span class="unit__name">Sync queue · six waiting, one held</span>
+    <span class="unit__from">from <b>drawer · 8a 8b 8c</b></span>
+  </div>
+  <div class="viewport">
+    <div class="viewport__in">
+      <div class="browser__bar">
+        <span class="browser__dots"><i></i><i></i><i></i></span>
+        <span class="browser__url">app.xrep.in<b>/sync</b></span>
+      </div>
+      <div class="app " data-theme="dark"><nav class="rail" aria-label="Sections">
+  <div class="rail__top"><span class="rail__mark"><svg width="17" height="17" viewBox="0 0 100 100" fill="none" aria-hidden="true"><rect x="4" y="16" width="92" height="8" rx="3" fill="#0A0B0D"/><rect x="4" y="13" width="7" height="14" fill="#0A0B0D"/><rect x="89" y="13" width="7" height="14" fill="#0A0B0D"/><rect x="16" y="7" width="10" height="26" fill="#0A0B0D"/><rect x="74" y="7" width="10" height="26" fill="#0A0B0D"/><path d="M28 93 C28 60 72 60 72 93" stroke="#0A0B0D" stroke-width="11"/><circle cx="50" cy="35" r="9" fill="#0A0B0D"/><g stroke="#0A0B0D" stroke-width="11"><path d="M50 43 L50 64"/><path d="M33 22 C34 56 66 56 67 22"/></g></svg></span>
+    <span class="rail__word">X&nbsp;REP</span></div>
+  <div class="rail__body"><div class="rail__group"><p class="rail__gk">WORK</p><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/></svg><span>Today</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Schedule</span><span class="rail__n">5</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M16.5 5.6a3.2 3.2 0 0 1 0 5.8"/><path d="M18 13.6c2.1.7 3.5 2.5 3.5 5"/></svg><span>Clients</span><span class="rail__n">22</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6M7 7.5v9M17 7.5v9M20 9v6M7 12h10"/></svg><span>Sessions</span></div></div><div class="rail__group"><p class="rail__gk">BUILD</p><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>Programs</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="7" r="1.2"/><circle cx="15" cy="7" r="1.2"/><circle cx="9" cy="12" r="1.2"/><circle cx="15" cy="12" r="1.2"/><circle cx="9" cy="17" r="1.2"/><circle cx="15" cy="17" r="1.2"/></svg><span>Exercises</span></div></div><div class="rail__group"><p class="rail__gk">BUSINESS</p><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10M7 8.5h10M15.5 4c0 4-3.4 4.5-6 4.5h-.5l7 11.5"/></svg><span>Money</span><span class="rail__n rail__n--alert">3</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V4M4 20h16"/><rect x="7.5" y="12" width="3" height="5"/><rect x="12.5" y="8.5" width="3" height="8.5"/><rect x="17" y="6" width="3" height="11"/></svg><span>Reports</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 4 1.5 5.5 1.5 5.5H5S6.5 14 6.5 10Z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg><span>Nudges</span><span class="rail__n rail__n--acc">8</span></div></div><div class="rail__group"><p class="rail__gk">SYSTEM</p><div class="rail__i" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 0 1-13.7 5.6M4 12a8 8 0 0 1 13.7-5.6"/><path d="M17.5 3v3.6h-3.6M6.5 21v-3.6h3.6"/></svg><span>Sync queue</span><span class="rail__n">6</span></div><div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.8v2.6M12 18.6v2.6M4.5 12H2M22 12h-2.5M6.2 6.2 4.4 4.4M19.6 19.6l-1.8-1.8M17.8 6.2l1.8-1.8M4.4 19.6l1.8-1.8"/></svg><span>Settings</span></div></div></div>
+  <div class="rail__foot"><div class="roleswap">
+    <span class="av av--sm" style="background:var(--tx-av-4)">AR</span>
+    <span style="flex:1;min-width:0">Anbu R · Trainer</span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+  </div></div>
+</nav><header class="top">
+  <nav class="crumbs" aria-label="Breadcrumb"><b>Sync queue</b></nav><div class="omni"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg><span>Search clients, sessions, exercises…</span><kbd>⌘K</kbd></div>
+  <div class="top__acts"><span class="sync sync--queued"><i></i>6 queued</span>
+    <button class="btn btn--icon btn--ghost" type="button" aria-label="Notifications"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 4 1.5 5.5 1.5 5.5H5S6.5 14 6.5 10Z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg></button>
+  </div></header><main class="main"><div class="ph"><div class="ph__row"><div><p class="ph__t">Sync queue</p><p class="ph__sub">6 waiting · 1 held · nothing lost</p></div><div class="ph__acts"><button class="btn btn--secondary" type="button">Retry all</button><button class="btn btn--primary" type="button"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 0 1-13.7 5.6M4 12a8 8 0 0 1 13.7-5.6"/><path d="M17.5 3v3.6h-3.6M6.5 21v-3.6h3.6"/></svg>Sync now</button></div></div></div>
+<div class="body">
+  <div class="card" style="border-color:var(--tx-warn);background:var(--tx-warn-soft)">
+    <div class="card__b" style="display:flex;gap:14px;align-items:flex-start">
+      <span class="warn"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 21 19.5H3z"/><path d="M12 10v4.2M12 16.6v.1"/></svg></span>
+      <div style="flex:1"><p class="h5" style="color:var(--tx-warn)">Six entries are on this
+        device and not yet on the server</p>
+        <p class="small mt2" style="max-width:76ch">This is normal and it is the architecture:
+          everything writes locally first. The list below is <b>every</b> pending item with the
+          reason it is pending — a queue you cannot inspect is a queue you cannot trust.</p></div>
+    </div></div>
+
+  <div class="card mt4"><div class="card__hd"><span class="card__t">Waiting</span>
+    <span class="rail__n">6</span></div>
+    <div class="card__b card__b--flush">
+      <div class="q"><span class="q__ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6M7 7.5v9M17 7.5v9M20 9v6M7 12h10"/></svg></span>
+        <span class="q__m"><span class="q__t">Push A · Meera K · 12 sets</span>
+          <span class="q__s">Created 06:52 · retry in 40s · attempt 3</span></span>
+        <button class="btn btn--sm btn--ghost" type="button">Retry</button></div>
+      <div class="q"><span class="q__ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6M7 7.5v9M17 7.5v9M20 9v6M7 12h10"/></svg></span>
+        <span class="q__m"><span class="q__t">Legs B · Arjun S · 9 sets</span>
+          <span class="q__s">Created 08:14 · waiting for the one above</span></span>
+        <button class="btn btn--sm btn--ghost" type="button">Retry</button></div>
+      <div class="q"><span class="q__ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10M7 8.5h10M15.5 4c0 4-3.4 4.5-6 4.5h-.5l7 11.5"/></svg></span>
+        <span class="q__m"><span class="q__t">₹4,500 cash · Karthik R</span>
+          <span class="q__s">Created 08:02 · retry in 40s</span></span>
+        <button class="btn btn--sm btn--ghost" type="button">Retry</button></div>
+      <div class="q"><span class="q__ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 9.5 17 19 7"/></svg></span>
+        <span class="q__m"><span class="q__t">Session marked done · Divya R</span>
+          <span class="q__s">Created 09:44</span></span>
+        <button class="btn btn--sm btn--ghost" type="button">Retry</button></div>
+      <div class="q"><span class="q__ic"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.4"/><path d="M12 9v6M8 11l4-1.5 4 1.5M9 21l3-6 3 6"/></svg></span>
+        <span class="q__m"><span class="q__t">Weight 60.8 kg · Meera K</span>
+          <span class="q__s">Created 07:01</span></span>
+        <button class="btn btn--sm btn--ghost" type="button">Retry</button></div>
+      <div class="q"><span class="q__ic q__ic--err"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11.6a8 8 0 0 1-11.9 7L4 20l1.5-4A8 8 0 1 1 20 11.6Z"/></svg></span>
+        <span class="q__m"><span class="q__t">Nudge to Farhan Q · payment due</span>
+          <span class="q__s">Held — a WhatsApp send needs a connection. It will go
+            automatically, or you can cancel it.</span></span>
+        <button class="btn btn--sm btn--secondary" type="button">Cancel</button></div>
+    </div></div>
+
+  <div class="grid2 mt4">
+    <div class="card"><div class="card__hd"><span class="card__t">Order matters</span></div>
+      <div class="card__b"><p class="small">The queue is <b>ordered, not parallel</b>. Arjun&rsquo;s
+        sets wait for Meera&rsquo;s because a later edit must never land before the thing it edits.
+        This is why one stuck item shows a second as &ldquo;waiting&rdquo; rather than failing it.</p></div></div>
+    <div class="card"><div class="card__hd"><span class="card__t">Synced today</span>
+      <span class="tag tag--ok">31</span></div>
+      <div class="card__b card__b--flush">
+        <div class="q"><span class="q__ic q__ic--ok"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 9.5 17 19 7"/></svg></span>
+          <span class="q__m"><span class="q__t">Push A · Priya N · 11 sets</span>
+            <span class="q__s">Synced 07:14 · created offline 06:20</span></span></div>
+        <div class="q"><span class="q__ic q__ic--ok"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 9.5 17 19 7"/></svg></span>
+          <span class="q__m"><span class="q__t">₹8,000 UPI · Meera K</span>
+            <span class="q__s">Synced 07:14</span></span></div>
+      </div></div>
+  </div>
+</div></main></div>
+    </div>
+  </div>
+  <p class="unit__note">Every pending item with the reason it is pending. <b>The queue is ordered, not parallel</b>, and the interface says so — otherwise &ldquo;waiting for the one above&rdquo; looks like a second failure. The held WhatsApp nudge is separated from the retryable items, because &ldquo;this cannot work offline&rdquo; and &ldquo;this has not worked yet&rdquo; are different facts.</p>
+</section>
+</div>
+
+<h2 class="sec"><span class="n">01</span>What changed from the phone</h2>
+<table class="dt"><thead><tr><th>On the phone</th><th>On the web</th><th>Because</th></tr></thead>
+<tbody>
+  <tr><th>Five settings screens</th><td>One screen, six tabs</td>
+    <td>Settings is a form; a desk shows a form.</td></tr>
+  <tr><th>Sync queue is a drawer item</th><td>A rail destination with a count</td>
+    <td>The person most likely to check the queue is the one at a desk.</td></tr>
+  <tr><th>Retry is per item</th><td>Per item and &ldquo;retry all&rdquo;</td>
+    <td>Six stuck items after a bad morning is one action, not six.</td></tr>
+</tbody></table>
+
+<hr class="rule" style="margin-top:84px">
+<p class="small" style="max-width:var(--w-measure)">
+  X REP · web application · v1.0 · every frame drawn at 1440×900 and scaled to fit.
+  Colour, spacing and radius tokens are copied verbatim from
+  <code>trainx-design-system.html</code> v1.2 — if a value differs there, it is a
+  bug here. Press <kbd>+</kbd> / <kbd>−</kbd> to change the zoom.
+</p>
+
+</div>
+<script src="assets/webapp.js"></script>
+</body>
+</html>

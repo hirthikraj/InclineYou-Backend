@@ -1,0 +1,89 @@
+'use client';
+
+import { useState, useTransition } from 'react';
+
+import { MessageSlot } from '@/components/auth/MessageSlot';
+import { ExperiencePicker } from '@/components/profile/ExperiencePicker';
+import { SaveRow } from '@/components/settings/IdentityForm';
+import type { Message } from '@/lib/auth/copy';
+import { saveExperienceBand } from '@/lib/profile/actions';
+import type { Identity } from '@/lib/profile/api';
+
+/**
+ * EXPERIENCE — the profile's third tab, and the shortest one on the screen.
+ *
+ * Five chips and a button. It could have been a row on the Identity tab and it
+ * is not, for the reason `lib/profile/tabs.ts` gives: a tab is a destination,
+ * and a destination for one control is cheaper than a scrolling page whose
+ * seventh section nobody ever sees. It also keeps the save honest — this tab
+ * PATCHes `experienceBand` and nothing else, so changing it can never write back
+ * a stale bio the trainer edited on another device.
+ *
+ * **Nothing here is stored as a number**, which is the whole point of the band
+ * and matters more on this screen than in setup: setup is answered once, and a
+ * profile sits for years. "3–5 years" is still true next August without anybody
+ * opening this tab; "4" is wrong by then, and quietly.
+ */
+export function ExperiencePanel({ initial }: { initial: Identity }) {
+  const [saved, setSaved] = useState(initial.experienceBand);
+  const [picked, setPicked] = useState(initial.experienceBand);
+  const [message, setMessage] = useState<Message | null>(null);
+  const [pending, start] = useTransition();
+
+  const dirty = picked !== saved;
+
+  function submit() {
+    if (!picked) {
+      setMessage({
+        tone: 'err',
+        icon: 'warn',
+        lead: 'Pick a band first.',
+        rest: 'Any of the five — it is stored as a band, not a number, so nothing here needs to be exact.',
+      });
+      return;
+    }
+    setMessage(null);
+    start(async () => {
+      const result = await saveExperienceBand(picked);
+      if (!result.ok) {
+        setMessage({ tone: 'err', icon: 'warn', lead: result.message });
+        return;
+      }
+      setSaved(result.identity.experienceBand);
+      setPicked(result.identity.experienceBand);
+      setMessage({
+        tone: 'ok',
+        icon: 'check',
+        lead: 'Saved.',
+        rest: 'Clients see this beside what you coach.',
+      });
+    });
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        submit();
+      }}
+    >
+      <h2 className="card__t">How long you’ve been coaching</h2>
+      <p className="small" style={{ marginTop: 3, maxWidth: 560 }}>
+        A band, not a number — so it stays true next year without you coming back here to edit it.
+      </p>
+
+      <ExperiencePicker
+        value={picked || null}
+        disabled={pending}
+        onChange={(id) => {
+          setPicked(id);
+          if (message) setMessage(null);
+        }}
+      />
+
+      <MessageSlot message={message} />
+
+      <SaveRow pending={pending} dirty={dirty} note="Shown on your profile, under your name." />
+    </form>
+  );
+}

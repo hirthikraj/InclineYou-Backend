@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>X REP · Web app — Client portal</title>
+<meta name="description" content="The client role on the web. X REP web application.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/webapp.css">
+</head>
+<body>
+<div class="page doc">
+
+<div class="doc__top">
+  <span class="doc__id">X REP</span>
+  <span class="doc__t">Web app</span>
+  <nav class="doc__nav" aria-label="Design files"><a href="webapp-information-architecture.html">IA</a><a href="webapp-design-system.html">DS</a><a href="webapp-components.html">LIBRARY</a><a href="webapp-competitors.html">MARKET</a><a href="webapp-glass.html">GLASS</a><a href="webapp-heuristics.html">UX AUDIT</a><a href="webapp-rail.html">RAIL</a><a href="webapp-auth.html">AUTH</a><a href="webapp-dashboard.html">TODAY</a><a href="webapp-clients.html">CLIENTS</a><a href="webapp-programs.html">PROGRAMS</a><a href="webapp-schedule.html">SCHEDULE</a><a href="webapp-workout.html">WORKOUT</a><a href="webapp-money.html">MONEY</a><a href="webapp-reports.html">REPORTS</a><a href="webapp-settings.html">SETTINGS</a><a href="webapp-client-portal.html" aria-current="page">PORTAL</a></nav>
+  <div class="zoomer">
+    <button type="button" data-glass-toggle aria-pressed="true">Glass</button>
+    <button type="button" data-theme-toggle>Light</button>
+    <button type="button" data-z="0.5">50</button>
+    <button type="button" data-z="0.62">62</button>
+    <button type="button" data-z="0.72">72</button>
+    <button type="button" data-z="0.85">85</button>
+    <button type="button" data-z="1">1:1</button>
+  </div>
+</div>
+
+<h1>Client portal — the same product, four destinations</h1>
+<p class="doc__lede">The client role has eleven screens on the phone and needs four on the web:
+today, progress, sessions, payments. It is deliberately the calmest thing in the system — a
+client opens it to answer one question, and every extra control is a way to fail them.</p>
+<div class="doc__meta"><span><b>Frames</b> <span data-frame-count>1</span></span>
+  <span><b>From</b> client · 1a 1b 1c 3a 3b 4a 4b 5a 5b 5c</span>
+  <span><b>Patterns</b> narrow canvas · four-item rail · read-mostly</span></div>
+<div class="fx" data-frame-index></div>
+
+<div class="why"><p class="why__k">The restraint is the design</p>
+  <p>A client&rsquo;s web app could show everything the trainer sees. It shows four things.
+  Their sessions left, whether they showed up, what they owe, and what they are lifting today —
+  because those are the four questions they actually open it to answer, and the product promise
+  is that they are never sold anything here.</p></div>
+
+<div class="units">
+
+<section class="unit " id="f-1a">
+  <div class="unit__label">
+    <span class="unit__id">1a</span>
+    <span class="unit__name">Client · today</span>
+    <span class="unit__from">from <b>client · 1a 1b 3a 5a</b></span>
+  </div>
+  <div class="viewport">
+    <div class="viewport__in">
+      <div class="browser__bar">
+        <span class="browser__dots"><i></i><i></i><i></i></span>
+        <span class="browser__url">app.xrep.in<b>/me/today</b></span>
+      </div>
+      <div class="app " data-theme="dark"><nav class="rail" aria-label="Sections">
+  <div class="rail__top"><span class="rail__mark"><svg width="17" height="17" viewBox="0 0 100 100" fill="none" aria-hidden="true"><rect x="4" y="16" width="92" height="8" rx="3" fill="#0A0B0D"/><rect x="4" y="13" width="7" height="14" fill="#0A0B0D"/><rect x="89" y="13" width="7" height="14" fill="#0A0B0D"/><rect x="16" y="7" width="10" height="26" fill="#0A0B0D"/><rect x="74" y="7" width="10" height="26" fill="#0A0B0D"/><path d="M28 93 C28 60 72 60 72 93" stroke="#0A0B0D" stroke-width="11"/><circle cx="50" cy="35" r="9" fill="#0A0B0D"/><g stroke="#0A0B0D" stroke-width="11"><path d="M50 43 L50 64"/><path d="M33 22 C34 56 66 56 67 22"/></g></svg></span>
+    <span class="rail__word">X&nbsp;REP</span></div>
+  <div class="rail__body">
+    <div class="rail__group">
+      <div class="rail__i" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20h13V9.5"/></svg><span>Today</span></div>
+      <div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20V4M4 20h16"/><rect x="7.5" y="12" width="3" height="5"/><rect x="12.5" y="8.5" width="3" height="8.5"/><rect x="17" y="6" width="3" height="11"/></svg><span>My progress</span></div>
+      <div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Sessions</span><span class="rail__n">12</span></div>
+      <div class="rail__i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4h10M7 8.5h10M15.5 4c0 4-3.4 4.5-6 4.5h-.5l7 11.5"/></svg><span>Payments</span>
+        <span class="rail__n rail__n--alert">1</span></div>
+    </div></div>
+  <div class="rail__foot"><div class="roleswap">
+    <span class="av av--sm" style="background:var(--tx-av-3)">MK</span><span style="flex:1;min-width:0">Meera K</span><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></div></div>
+</nav><header class="top">
+  <nav class="crumbs" aria-label="Breadcrumb"><b>Today</b></nav>
+  <div class="top__acts"><span class="sync"><i></i>Synced</span>
+    <button class="btn btn--icon btn--ghost" type="button" aria-label="Notifications"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6.5 10a5.5 5.5 0 0 1 11 0c0 4 1.5 5.5 1.5 5.5H5S6.5 14 6.5 10Z"/><path d="M10 19a2.2 2.2 0 0 0 4 0"/></svg></button>
+  </div></header><main class="main"><div class="ph"><div class="ph__row"><div><p class="ph__t">Tuesday, 6:00 with Anbu</p><p class="ph__sub">Push A · Anytime Fitness, Adyar</p></div><div class="ph__acts"><button class="btn btn--secondary" type="button">Ask to reschedule</button></div></div></div>
+<div class="body"><div class="portal">
+  <div class="stats stats--3">
+    <div class="stat stat--acc"><p class="stat__k">Sessions left</p><p class="stat__v">8<span
+      style="font-size:15px;color:var(--tx-ink-3)"> of 12</span></p>
+      <p class="stat__d">Package runs to <b>6 Oct</b></p></div>
+    <div class="stat"><p class="stat__k">You showed up</p><p class="stat__v">22<span
+      style="font-size:15px;color:var(--tx-ink-3)"> of 24</span></p>
+      <p class="stat__d">Best stretch since June</p></div>
+    <div class="stat"><p class="stat__k">Owed</p><p class="stat__v">₹0</p>
+      <p class="stat__d">Paid 2 Aug · thank you</p></div>
+  </div>
+
+  <div class="card mt4"><div class="card__hd"><span class="card__t">Today · Push A</span>
+    <span class="tag tag--floor">Floor</span></div>
+    <div class="card__b card__b--flush">
+      <table class="tbl"><thead><tr><th>Exercise</th><th class="num">Planned</th>
+        <th class="num">Last time</th></tr></thead><tbody>
+        <tr><td class="strong">Bench press</td><td class="num">3 × 8 @ 62.5 kg</td>
+          <td class="num ink3">65 kg × 6</td></tr>
+        <tr><td class="strong">Incline DB press</td><td class="num">3 × 10 @ 22.5 kg</td>
+          <td class="num ink3">22.5 kg × 10</td></tr>
+        <tr><td class="strong">Cable fly</td><td class="num">3 × 12 @ 15 kg</td>
+          <td class="num ink3">15 kg × 12</td></tr>
+        <tr><td class="strong">Triceps rope</td><td class="num">3 × 14 @ 25 kg</td>
+          <td class="num ink3">25 kg × 14</td></tr>
+      </tbody></table></div></div>
+
+  <div class="grid2 mt4">
+    <div class="card"><div class="card__hd"><span class="card__t">Bench press · twelve weeks</span>
+      <span class="tag tag--pr">New best</span></div>
+      <div class="card__b">
+        <svg viewBox="0 0 320 130" width="100%" height="130" role="img"
+             aria-label="Top set rising from 45 kg to 65 kg">
+          <g stroke="var(--tx-line)"><line x1="0" y1="30" x2="320" y2="30"/>
+            <line x1="0" y1="70" x2="320" y2="70"/><line x1="0" y1="110" x2="320" y2="110"/></g>
+          <polyline fill="none" stroke="var(--tx-accent)" stroke-width="2.5"
+            points="10,102 38,98 66,88 94,86 122,76 150,72 178,64 206,60 234,50 262,44 290,36 312,26"/>
+          <circle cx="312" cy="26" r="4" fill="var(--tx-accent)"/></svg>
+        <p class="small mt2">45 kg in May, 65 kg today. That is the whole story.</p></div></div>
+    <div class="card"><div class="card__hd"><span class="card__t">From Anbu</span></div>
+      <div class="card__b">
+        <p style="font-size:14px;color:var(--tx-ink)">&ldquo;Legs on Friday were sharp. Keep the
+          same weight next week and we will add a rep instead.&rdquo;</p>
+        <p class="small mt3">Sent with your weekly report, Sunday 20:00</p>
+        <button class="btn btn--secondary mt3" type="button" style="width:100%">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5h7l5 5V20.5H6z"/><path d="M13 3.5v5h5"/></svg>See last week&rsquo;s report</button></div></div>
+  </div>
+
+  <div class="card mt4" style="border-color:var(--tx-line)"><div class="card__b">
+    <p class="small">Your app is free, forever. There is nothing to upgrade to, no adverts, and
+      X REP will never message you about anything except your training with Anbu.</p></div></div>
+</div></div></main></div>
+    </div>
+  </div>
+  <p class="unit__note">Three figures, today&rsquo;s plan with last time&rsquo;s numbers beside it, the twelve-week trend, and one line from their trainer. <b>The content is capped at 920px</b> even on a 1440 window — a client reading four facts does not want them spread across a metre of screen. The last card restates the promise in the interface where it is easiest to doubt.</p>
+</section>
+</div>
+
+<h2 class="sec"><span class="n">01</span>What changed from the phone</h2>
+<table class="dt"><thead><tr><th>On the phone</th><th>On the web</th><th>Because</th></tr></thead>
+<tbody>
+  <tr><th>Four bottom tabs</th><td>Four rail items</td>
+    <td>Same four. The client role never needed a drawer.</td></tr>
+  <tr><th>Full-width content</th><td>Capped at 920px</td>
+    <td>Four facts do not improve by being wider.</td></tr>
+  <tr><th>Plan and history on separate screens</th><td>Side by side</td>
+    <td>&ldquo;What am I lifting&rdquo; and &ldquo;what did I lift&rdquo; are one question.</td></tr>
+</tbody></table>
+
+<hr class="rule" style="margin-top:84px">
+<p class="small" style="max-width:var(--w-measure)">
+  X REP · web application · v1.0 · every frame drawn at 1440×900 and scaled to fit.
+  Colour, spacing and radius tokens are copied verbatim from
+  <code>trainx-design-system.html</code> v1.2 — if a value differs there, it is a
+  bug here. Press <kbd>+</kbd> / <kbd>−</kbd> to change the zoom.
+</p>
+
+</div>
+<script src="assets/webapp.js"></script>
+</body>
+</html>
