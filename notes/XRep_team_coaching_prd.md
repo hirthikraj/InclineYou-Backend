@@ -244,12 +244,13 @@ change and not a migration.
 
 The admin enters a phone number. `TeamPhoneGuard` — a sibling of
 `ClientPhoneGuard`, written in the same shape and for the same reason — answers
-one of four ways:
+one of three ways (23 Aug 2026: a number on somebody's roster as a client is no
+longer refused — trainer/client duality is allowed, and that number accepts the
+same way anyone without a trainer account does, by claiming one first):
 
 | Verdict | `code` | Status | Why |
 | --- | --- | --- | --- |
-| Available | — | — | |
-| The number is on a roster as a client | `PHONE_IS_CLIENT` | 409 | `app_user.role` is exclusive; a client cannot also coach |
+| Available | — | — | includes a number that is already somebody's client |
 | Already an active member of some team | `PHONE_ALREADY_IN_TEAM` | 409 | §1.2 |
 | It is the caller's own number | `PHONE_IS_SELF` | 422 | |
 
