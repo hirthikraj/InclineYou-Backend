@@ -53,3 +53,14 @@ out/
 # ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── Editor / tool droppings ───────────────────────────────────────────────────
+# The design sets are hand-edited HTML+CSS with a generator beside them, so they
+# accumulate .bak copies and __pycache__; none of it is the source of truth.
+*.bak
+*.bak[0-9]*
+*.bak-*
+__pycache__/
+*.pyc
+# macOS zip artefacts from the design hand-offs.
+__MACOSX/
