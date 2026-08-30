@@ -21,6 +21,7 @@
  * fastest way to make two screens disagree is to give them two calculators.
  */
 
+import type { StreakDay } from '../design';
 import { DAY_MS, dayStamp, relativePast, rupees, startOfDay } from '../home/time';
 import { readMode, type DeliveryMode } from '../home/mode';
 import {
@@ -242,8 +243,8 @@ export interface OverviewView {
   sessionsLeft: string;
   sessionsSuffix: string;
   rows: OverviewRow[];
-  /** Seven booleans for the adherence strip, oldest first. Rest days excluded. */
-  week: boolean[];
+  /** Seven states for the adherence strip, oldest first. */
+  week: StreakDay[];
 }
 
 export function buildOverview(input: FileInput, now: number): OverviewView | null {
@@ -371,9 +372,9 @@ export function buildOverview(input: FileInput, now: number): OverviewView | nul
  * not a miss — it is the plan working — so it is absent from both halves of the
  * fraction rather than sitting in the denominator as a failure.
  */
-function last7(input: FileInput, now: number): { kept: number; planned: number; week: boolean[] } {
+function last7(input: FileInput, now: number): { kept: number; planned: number; week: StreakDay[] } {
   const from = startOfDay(now) - 6 * DAY_MS;
-  const week: boolean[] = [];
+  const week: StreakDay[] = [];
   let kept = 0;
   let planned = 0;
 
@@ -389,8 +390,10 @@ function last7(input: FileInput, now: number): { kept: number; planned: number; 
     if (counted.length) {
       planned += 1;
       if (done) kept += 1;
+      week.push(done ? 'done' : 'miss');
+    } else {
+      week.push('rest');
     }
-    week.push(done);
   }
 
   return { kept, planned, week };
@@ -742,6 +745,8 @@ export interface PackageView {
   cutDetail: string | null;
   perSession: number | null;
   renewLabel: string | null;
+  /** Tone for the sessions-remaining figure and bar. */
+  tone: 'ok' | 'warn' | 'danger';
 }
 
 export function buildPackage(input: FileInput, now: number): PackageView | null {
@@ -805,6 +810,7 @@ export function buildPackage(input: FileInput, now: number): PackageView | null 
         : null,
     perSession,
     renewLabel: total ? `Renew · ${total} for ${rupees(pack.amount)}` : null,
+    tone: left <= 0 ? 'danger' : left <= 2 ? 'warn' : 'ok',
   };
 }
 
@@ -827,11 +833,27 @@ export interface MetricRow {
   replaced: boolean;
 }
 
+/**
+ * One point on the sparkline.
+ *
+ * `replaced` is the same flag `MetricRow` carries, and it is here because the
+ * chart needs it too. It used to be a bare `number[]`: a correction on the same
+ * day leaves two readings, the list marked one of them `replaced`, and the
+ * chart drew it as an ordinary point — so a fat-fingered 68.0 against a real
+ * 61.0 became a 7 kg spike, and the honest readings got squeezed into a third
+ * of the plot. Append-only is the right rule and dropping the point is the edit
+ * it exists to forbid, so the flag travels with the value instead.
+ */
+export interface SparkPoint {
+  value: number;
+  replaced: boolean;
+}
+
 export interface MetricsView {
   /** The two current figures. Both stay put when the segment changes. */
   current: { key: MetricKind; label: string; value: string; unit: string; delta: string }[];
   /** Oldest → newest, for the sparkline. Empty when there is nothing to draw. */
-  spark: number[];
+  spark: SparkPoint[];
   sentence: string | null;
   rows: MetricRow[];
   count: number;
@@ -856,15 +878,30 @@ export function buildMetrics(input: FileInput, kind: MetricKind): MetricsView {
   const series = seriesOf(input, kind);
   const unit = METRIC_KINDS.find((k) => k.key === kind)?.unit ?? '';
 
+  /**
+   * Which readings a later one on the same day supersedes. Computed once, so
+   * the list and the chart cannot disagree about it — the whole reason the
+   * chart was drawing a number the list called a mistake.
+   */
+  const superseded = new Set(
+    series
+      .filter((m, i) => {
+        const next = series[i + 1];
+        return next !== undefined && sameDay(ms(next.recordedAt), ms(m.recordedAt));
+      })
+      .map((m) => m.id),
+  );
+
   // Newest first for the list; the sparkline reads the other way.
   const rows: MetricRow[] = [];
   const desc = [...series].reverse();
   desc.forEach((m, i) => {
     const older = desc[i + 1] ?? null;
-    const newer = desc[i - 1] ?? null;
     // Two readings of the same kind on the same day: the later one is a
     // correction, and both rows say so. Neither is removed — that is the point.
-    const sameDayNewer = newer && sameDay(ms(newer.recordedAt), ms(m.recordedAt));
+    // Read off `superseded` rather than recomputed here, so the chart and this
+    // list are looking at one answer.
+    const sameDayNewer = superseded.has(m.id);
     const sameDayOlder = older && sameDay(ms(older.recordedAt), ms(m.recordedAt));
     rows.push({
       id: m.id,
@@ -891,7 +928,7 @@ export function buildMetrics(input: FileInput, kind: MetricKind): MetricsView {
 
   return {
     current,
-    spark: series.map((m) => m.value),
+    spark: series.map((m) => ({ value: m.value, replaced: superseded.has(m.id) })),
     sentence:
       first && latest && series.length > 1
         ? `${trim(first.value)} ${unit} on ${dayStamp(ms(first.recordedAt))} → ${trim(latest.value)} ${unit} today.`

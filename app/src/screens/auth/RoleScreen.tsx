@@ -1,21 +1,32 @@
 /**
  * Screen 01 · § 05 — Whose book to open.
  *
- * Shown to one person only: a client who is training with more than one trainer
- * right now. Everybody else resolves silently and goes straight through, which
- * is the rule the design states twice and the reason this file is short.
+ * Shown to one person only, at sign-in: a client who is training with more
+ * than one trainer right now. Everybody else resolves silently and goes
+ * straight through, which is the rule the design states twice and the
+ * reason this file is short.
  *
- * ── What used to be here ──────────────────────────────────────────────────────
+ * ── What used to be here, and is back a different way ─────────────────────────
  *
- * This screen also used to resolve "you coach clients here AND you train here",
- * for the trainer who is also somebody's client. That case no longer exists:
- * from V18 `app_user.role` is a single exclusive value per number, the roster-add
- * path refuses a phone that already owns a trainer account, and sign-in returns
- * one identity. The coaching card and its roster count went with it.
+ * This screen also used to resolve "you coach clients here AND you train
+ * here", for the trainer who is also somebody's client. V18 removed that case
+ * outright (`app_user.role` exclusive, the roster-add path refusing a phone
+ * that already owned a trainer account) and this screen's job narrowed to
+ * only the multi-trainer-client picker below.
  *
- * Multi-trainer clients are a different thing and are NOT affected — one person
- * can still be on two rosters, which is two client rows and one human being, and
- * choosing between them is what this screen is now entirely for.
+ * Trainer↔client duality is allowed again (23 Aug 2026), but it does NOT come
+ * back through this screen: sign-in still opens straight into the trainer's
+ * home role with no picker (see `OtpScreen`, `roleOf`), and a live membership
+ * elsewhere surfaces as a drawer entry — "Switch to <trainer>'s client view"
+ * — that calls `useAuth().switchIdentity('client', …)` at runtime rather than
+ * at sign-in. That is a deliberate difference from the multi-trainer-client
+ * case below: this screen exists because two client memberships are
+ * genuinely ambiguous about which one to open, while a trainer's own account
+ * is not ambiguous — it is simply the default, with the other mode one tap
+ * away whenever they want it.
+ *
+ * Multi-trainer clients are the case this screen is still entirely for — one
+ * person can be on two rosters, which is two client rows and one human being.
  *
  * Each card still carries proof of which is which — the trainer's name, their
  * gym, whether that roster is paused — because a picker with two bare labels

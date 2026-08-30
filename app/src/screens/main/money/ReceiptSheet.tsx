@@ -39,6 +39,13 @@ export interface ReceiptDetails {
   amount: number;
   gymShare: number;
   at: number;
+  /**
+   * Whether Undo is still on the table. Undo here is a real delete, and §06
+   * allows it for 24 hours — so a receipt reopened from an old ledger line
+   * arrives with this false and gets a way out rather than a way to erase the
+   * entry. Undefined means "just recorded", which is where this sheet was born.
+   */
+  undoable?: boolean;
 }
 
 export default function ReceiptSheet({
@@ -130,7 +137,14 @@ export default function ReceiptSheet({
             onPress={() => void send()}
           />
         )}
-        <Button label="Undo" variant="ghost" block onPress={onUndo} />
+        {receipt.undoable === false ? (
+          // Never leave the sheet with no action at all: a gym-counter receipt
+          // past its undo window would otherwise be a page whose only way out
+          // is a tap on the scrim.
+          gymCollected ? <Button label="Done" variant="ghost" block onPress={onClose} /> : null
+        ) : (
+          <Button label="Undo" variant="ghost" block onPress={onUndo} />
+        )}
       </View>
 
       <Callout icon={IconAlert} style={styles.legal}>

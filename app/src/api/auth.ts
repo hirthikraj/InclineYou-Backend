@@ -205,6 +205,34 @@ export function claimTrainerAccount(pendingToken: string) {
   });
 }
 
+/* ----------------------------------------------------------- mode switch
+ * A phone can hold a trainer account AND a live membership on somebody
+ * else's roster at the same time — trainer/client duality, unblocked
+ * 23 Aug 2026. These mint a fresh token of the OTHER kind for the currently
+ * signed-in token, whichever kind that is; the interceptor already attaches
+ * the caller's current token, so unlike the three functions above there is
+ * nothing to pass explicitly.
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Switch into trainer mode. 404s if this number owns no trainer account —
+ * see `AuthContext#switchIdentity`, which is what actually stores the token
+ * this returns.
+ */
+export function switchToTrainerMode() {
+  return api.post<AuthResponse>('/v1/auth/mode/trainer');
+}
+
+/**
+ * Switch into client mode. No body: a client token is bound to the phone,
+ * not to one relationship, so the response's `clientOf` carries every LIVE
+ * roster this number is on — same as any client sign-in. 404s if there is no
+ * live membership anywhere for this number.
+ */
+export function switchToClientMode() {
+  return api.post<AuthResponse>('/v1/auth/mode/client');
+}
+
 /* ------------------------------------------------- answering a membership
  * All three carry the invited token explicitly rather than leaning on the
  * interceptor, for the same reason `claimTrainerAccount` does: the token is

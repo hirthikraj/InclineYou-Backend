@@ -45,6 +45,163 @@ export const ACTIVITY_DAYS = 7;
 /** A session stays "next" for this long after its start time before it's simply late. */
 const NEXT_GRACE_MS = 90 * 60_000;
 
+/* ------------------------------------------------------- the attention model
+ * One table, read by two screens.
+ *
+ * This screen and the roster (`clients/roster.ts`) both answer "who needs the
+ * trainer", and for a while they answered it differently: three kinds here
+ * against six there, two weight scales, two strings for an empty pack, and two
+ * rules about whether money that is not yet late counts at all. Same trainer,
+ * same morning, two lists — and the same 2px severity bar on both, which is
+ * what made the disagreement invisible.
+ *
+ * The division of labour now: **this file owns the model, both files own their
+ * own selection.** A screen may legitimately not care about a band — Today has
+ * no use for a stale invite, because an invite is not a thing that happens
+ * today — but no screen may re-rank or re-word a band it does show.
+ *
+ * BANDS, not raw weights. A band is worth 1000 and the magnitude inside it is
+ * clamped to 0…999, so an amount can order items within a band and can never
+ * lift one out of it. That is the bug this replaces: the roster weighed overdue
+ * money at `4000 + the rupees owed`, so any client owing more than ₹1,000
+ * outranked the band the file's own comment called "ranked ABOVE money, and
+ * deliberately".
+ * -------------------------------------------------------------------------- */
+
+/**
+ * Every band, most urgent first. The order IS the design, so it is one list
+ * rather than eight numbers scattered across two files.
+ *
+ *   unavailable   the phone number belongs to a trainer account, so no invite
+ *                 can ever reach it. First because it is the only item that is
+ *                 a mistake made seconds ago and fixable in seconds; every
+ *                 other one became true over time and will still be true
+ *                 tomorrow.
+ *   setup         added, never onboarded. Nothing else about them can work:
+ *                 the diary has no slot to suggest and the deck has no day to
+ *                 build.
+ *   overdue-late  money past OVERDUE_DAYS. A problem, not a reminder.
+ *   pack-empty    they turn up and there is nothing to draw down. Critical for
+ *                 the same reason as late money: it stops the work.
+ *   quiet         a live plan and nothing logged for QUIET_DAYS. A relationship
+ *                 going cold, which is slower than either of the two above.
+ *   pack-ending   one or two sessions left. Worth selling before it bites.
+ *   due-soon      money owed and not yet late. Worth seeing, not worth chasing.
+ *   invite-stale  they have not installed the app. Nothing is broken: a client
+ *                 is fully usable without an invite, which is why this is last.
+ */
+export const ATTENTION_BANDS = [
+  'unavailable',
+  'setup',
+  'overdue-late',
+  'pack-empty',
+  'quiet',
+  'pack-ending',
+  'due-soon',
+  'invite-stale',
+  /*
+   * A workout log nobody closed.
+   *
+   * LAST, because it is the only band where nothing is at risk: the trainer
+   * finished a session and left its log open, which costs nothing until it is
+   * never fixed.
+   *
+   * ── PRESENT HERE, AND THIS SCREEN DOES NOT RAISE IT ──────────────────────
+   *
+   * The band lives in the model on both halves because the model is ONE TABLE —
+   * "a screen may decline to show a band, and no screen may re-rank or re-word
+   * one it does show". The web's Today raises it (`staleOpenLogs` in
+   * `web app/web/lib/today/deck.ts`); home does not, and that is the declining
+   * half of that rule rather than an omission. `ATTENTION_VISIBLE` is 3 here, so
+   * the least urgent band on the ladder would almost never reach the screen, and
+   * closing a log wants the desk it was left open on.
+   *
+   * APPENDED, never inserted. `BAND_VALUE` is `length - i`, so a band added at
+   * the end shifts every value up by exactly one and leaves the relative order
+   * untouched.
+   */
+  'log-open',
+] as const;
+
+export type AttentionBand = (typeof ATTENTION_BANDS)[number];
+
+/** Bigger is more urgent, so the list is read from the bottom up. */
+const BAND_VALUE: Record<AttentionBand, number> = ATTENTION_BANDS.reduce(
+  (acc, band, i) => {
+    acc[band] = ATTENTION_BANDS.length - i;
+    return acc;
+  },
+  {} as Record<AttentionBand, number>,
+);
+
+/** Which bands are red rather than amber: the two that stop the work. */
+const CRITICAL_BANDS = new Set<AttentionBand>(['overdue-late', 'pack-empty']);
+
+export function attentionSeverity(band: AttentionBand): 'alert' | 'critical' {
+  return CRITICAL_BANDS.has(band) ? 'critical' : 'alert';
+}
+
+/**
+ * The sort key. `magnitude` orders items inside a band and is clamped, so it
+ * cannot reach the band above — pass rupees through `moneyMagnitude` first.
+ */
+export function attentionWeight(band: AttentionBand, magnitude = 0): number {
+  const inside = Math.max(0, Math.min(999, Math.round(magnitude)));
+  return BAND_VALUE[band] * 1000 + inside;
+}
+
+/**
+ * Rupees, as something that fits in a band. Hundreds, so ₹99,900 is the first
+ * amount that saturates — above that two debts tie and the name breaks it,
+ * which is the right failure: at a lakh owed the order stops being the point.
+ */
+export function moneyMagnitude(rupeesOwed: number): number {
+  return rupeesOwed / 100;
+}
+
+/* One phrasing per fact. Both screens call these rather than writing their own,
+ * because "Pack is empty" here and "Pack finished" there described the same
+ * package and gave a trainer no way to know it. */
+
+export function moneyLine(total: number, days: number, late: boolean): string {
+  return `${rupees(total)} ${late ? 'overdue' : 'due'} · ${days} day${days === 1 ? '' : 's'}`;
+}
+
+export function packLine(remaining: number): string {
+  return remaining <= 0
+    ? 'Pack is empty'
+    : `Pack ends in ${remaining} session${remaining === 1 ? '' : 's'}`;
+}
+
+export function quietLine(days: number): string {
+  return `No workout logged in ${days} days`;
+}
+
+/**
+ * `Log still open · finished today` · `2 logs still open · oldest 9 days ago`.
+ *
+ * Home does not raise `log-open` (see the band's note), but the PHRASING lives
+ * here anyway, for the reason this whole block exists: "Pack is empty" here and
+ * "Pack finished" there described the same package and gave a trainer no way to
+ * know it. The day home starts raising the row, it must not invent a second
+ * sentence for it.
+ */
+export function logLine(count: number, days: number): string {
+  const age = days <= 0 ? 'finished today' : `${days} day${days === 1 ? '' : 's'} ago`;
+  return count === 1 ? `Log still open · ${age}` : `${count} logs still open · oldest ${age}`;
+}
+
+/** The band money sits in, given how old the oldest unpaid invoice is. */
+export function moneyBand(days: number, flaggedOverdue: boolean): AttentionBand {
+  return flaggedOverdue || days >= OVERDUE_DAYS ? 'overdue-late' : 'due-soon';
+}
+
+/** The band a pack sits in, or null when it has enough left to be nobody's problem. */
+export function packBand(remaining: number): AttentionBand | null {
+  if (remaining <= 0) return 'pack-empty';
+  return remaining <= PACK_ENDING ? 'pack-ending' : null;
+}
+
 const DONE_SESSION = new Set(['done', 'completed']);
 const DEAD_SESSION = new Set(['cancelled', 'canceled', 'no_show']);
 const DUE_PAYMENT = new Set(['pending', 'due', 'unpaid', 'overdue']);
@@ -158,7 +315,7 @@ export interface DeckSession {
   done: boolean;
 }
 
-export type AttentionKind = 'overdue' | 'quiet' | 'pack';
+export type AttentionKind = 'overdue' | 'quiet' | 'pack' | 'log';
 
 export interface AttentionItem {
   key: string;
@@ -347,16 +504,20 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
     const client = byId.get(clientId);
     if (!client) continue;
     const days = Math.max(0, daysBetween(due.oldest, now));
-    const critical = due.overdue || days >= OVERDUE_DAYS;
+    // Two bands, not a boolean: money owed is always worth seeing, and past
+    // OVERDUE_DAYS it stops being a reminder. The roster used to withhold the
+    // row entirely under seven days, which is how the same ₹9,000 could be an
+    // item here and not one there.
+    const band = moneyBand(days, due.overdue);
     items.push({
       key: `overdue:${clientId}`,
       kind: 'overdue',
       clientId,
       clientName: client.name?.trim() || 'Client',
-      line: `${rupees(due.total)} ${critical ? 'overdue' : 'due'} · ${days} day${days === 1 ? '' : 's'}`,
-      severity: critical ? 'critical' : 'alert',
+      line: moneyLine(due.total, days, band === 'overdue-late'),
+      severity: attentionSeverity(band),
       action: 'Remind',
-      weight: (critical ? 2000 : 1000) + days,
+      weight: attentionWeight(band, moneyMagnitude(due.total)),
       at: due.oldest,
     });
   }
@@ -385,10 +546,10 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
       kind: 'quiet',
       clientId: client.id,
       clientName: client.name?.trim() || 'Client',
-      line: `No workout logged in ${days} days`,
-      severity: 'alert',
+      line: quietLine(days),
+      severity: attentionSeverity('quiet'),
       action: 'Nudge',
-      weight: 900 + days,
+      weight: attentionWeight('quiet', days),
       // Dated from the moment they crossed the line, not from today, so the
       // notification centre doesn't re-announce it every morning.
       at: last + QUIET_DAYS * DAY_MS,
@@ -406,21 +567,21 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
     }
   }
   for (const [clientId, { remaining, at }] of fewest) {
-    if (remaining > PACK_ENDING) continue;
+    const band = packBand(remaining);
+    if (!band) continue;
     const client = byId.get(clientId);
     if (!client) continue;
-    const empty = remaining <= 0;
     items.push({
       key: `pack:${clientId}`,
       kind: 'pack',
       clientId,
       clientName: client.name?.trim() || 'Client',
-      line: empty
-        ? 'Pack is empty'
-        : `Pack ends in ${remaining} session${remaining === 1 ? '' : 's'}`,
-      severity: empty ? 'critical' : 'alert',
+      line: packLine(remaining),
+      severity: attentionSeverity(band),
       action: 'Renew',
-      weight: (empty ? 1900 : 800) + (PACK_ENDING - remaining),
+      // Fewer left is more urgent, inside whichever of the two pack bands it
+      // landed in.
+      weight: attentionWeight(band, PACK_ENDING - remaining),
       at,
     });
   }

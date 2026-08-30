@@ -12,7 +12,7 @@
  */
 
 import React, { useMemo, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useIsFocused, useNavigation, useRoute, type RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -37,6 +37,7 @@ import {
   Button,
   Callout,
   Empty,
+  Figures,
   GroupHead,
   IconBack,
   IconButton,
@@ -48,7 +49,6 @@ import {
   Toast,
   colors,
   space,
-  tnum,
 } from '../../../design';
 import RecordSheet, { type RecordResult } from './RecordSheet';
 import ReceiptSheet, { type ReceiptDetails } from './ReceiptSheet';
@@ -162,6 +162,34 @@ export default function BookScreen() {
     }
   };
 
+  /** The payment behind a ledger line, as the receipt it was issued with. */
+  const receiptFor = (entry: LedgerEntry): ReceiptDetails | null => {
+    const payment = input.payments.find((p) => p.id === entry.id);
+    if (!payment) return null;
+    const pkg = input.packages.find((p) => p.id === payment.packageId);
+    return {
+      paymentId: payment.id,
+      receiptNo: payment.receiptNo ?? '—',
+      clientName: book?.name ?? entry.title,
+      phone: book?.phone ?? null,
+      forWhat: pkg?.sessionsTotal ? `${pkg.sessionsTotal}-session pack` : 'Training',
+      method: payment.method,
+      upiReference: payment.upiReference ?? null,
+      amount: payment.amount,
+      gymShare: payment.gymShareAmount ?? 0,
+      at: entry.at,
+      // Undo is a real delete and §06 allows it for 24 hours. An old line
+      // opens as a receipt to send, not as a payment to erase.
+      undoable: entry.undoable === true,
+    };
+  };
+
+  const openEntry = (entry: LedgerEntry) => {
+    const details = receiptFor(entry);
+    if (details) setReceipt(details);
+    else if (entry.kind === 'debt') setNotice('That line is a pack sold, not a payment received.');
+  };
+
   const onMenu = async (key: EntryMenuKey, entry: LedgerEntry) => {
     setMenu(null);
     if (key === 'undo' || key === 'delete') {
@@ -183,7 +211,13 @@ export default function BookScreen() {
       );
       return;
     }
-    if (key === 'receipt') setNotice('Open the entry to send its receipt.');
+    // Was "Open the entry to send its receipt" — advice about a gesture that
+    // did nothing. It opens the receipt.
+    if (key === 'receipt') {
+      const details = receiptFor(entry);
+      if (details) setReceipt(details);
+      else setNotice('That entry has no receipt to send.');
+    }
     if (key === 'edit') setNotice('Editing an entry is coming — undo and re-record for now.');
   };
 
@@ -208,47 +242,52 @@ export default function BookScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>
-        <View style={styles.headline}>
-          <View style={styles.figures}>
-            <View>
-              <Text style={styles.figLabel}>{book.owed > 0 ? 'They owe' : 'Balance'}</Text>
-              <Text style={[styles.figValue, book.owed > 0 && styles.figWarn]}>
-                {book.owed > 0 ? rupees(book.owed) : 'Clear'}
-              </Text>
-            </View>
-            {/* A monthly client has no session count, and a lone em-dash under
-                "sessions left" reads as a bug rather than as "not applicable". */}
-            {book.sessionsLeft != null ? (
-              <View style={styles.right}>
-                <Text style={styles.figLabel}>Sessions left</Text>
-                <Text style={styles.figValueSmall}>
-                  {book.sessionsLeft}
-                  {book.sessionsTotal ? (
-                    <Text style={styles.figTotal}>{`/${book.sessionsTotal}`}</Text>
-                  ) : null}
-                </Text>
-              </View>
-            ) : monthly ? (
-              <View style={styles.right}>
-                <Text style={styles.figLabel}>Pack</Text>
-                <Text style={styles.figValueSmall}>Monthly</Text>
-              </View>
-            ) : null}
-          </View>
+        {/* `Figures`, not a private copy of it. § 09 asks for the same pair with
+            the same numbers as the top of the money screen, and the component
+            carries `labels`, `tones`, `owedSuffix` and `bar={false}` for this
+            exact caller — the redrawn version here had drifted into its own
+            metrics and could not stack under large text.
 
-          <View style={styles.actions}>
-            <Button label="Record payment" style={styles.grow} onPress={() => setRecording(true)} />
-            {owedRow ? (
-              // No icon and a tighter basis: "Record payment" is a 14-character
-              // uppercase label and it truncates if this side takes any more.
-              <Button
-                label="Remind"
-                variant="ghost"
-                style={styles.remind}
-                onPress={() => setRemind(owedRow)}
-              />
-            ) : null}
-          </View>
+            The right-hand figure always says something now. A client with no
+            pack used to get a blank half-card, which reads as a rendering bug
+            rather than as "nothing sold yet". */}
+        <Figures
+          style={styles.headline}
+          bar={false}
+          collectedPart={0}
+          owedPart={0}
+          labels={[
+            book.owed > 0 ? 'They owe' : 'Balance',
+            book.sessionsLeft != null ? 'Sessions left' : 'Pack',
+          ]}
+          tones={[book.owed > 0 ? 'warn' : 'ok', 'plain']}
+          collected={book.owed > 0 ? rupees(book.owed) : 'Clear'}
+          owed={
+            book.sessionsLeft != null
+              ? String(book.sessionsLeft)
+              : monthly
+                ? 'Monthly'
+                : 'None yet'
+          }
+          owedSuffix={
+            book.sessionsLeft != null && book.sessionsTotal
+              ? `/${book.sessionsTotal}`
+              : undefined
+          }
+        />
+
+        <View style={styles.actions}>
+          <Button label="Record payment" style={styles.grow} onPress={() => setRecording(true)} />
+          {owedRow ? (
+            // No icon and a tighter basis: "Record payment" is a 14-character
+            // uppercase label and it truncates if this side takes any more.
+            <Button
+              label="Remind"
+              variant="ghost"
+              style={styles.remind}
+              onPress={() => setRemind(owedRow)}
+            />
+          ) : null}
         </View>
 
         <GroupHead label="The book" style={styles.head} />
@@ -278,6 +317,10 @@ export default function BookScreen() {
                   amount={signed(row.entry.amount, row.entry.direction)}
                   note={row.entry.note}
                   settled={row.entry.settled}
+                  // §06: an entry opens its receipt. Every row in this book was
+                  // tap-inert — only long-press did anything — so the ordinary
+                  // gesture on the ordinary target was silently nothing.
+                  onPress={() => openEntry(row.entry)}
                   onLongPress={
                     row.entry.kind === 'payment' ? () => setMenu(row.entry) : undefined
                   }
@@ -341,7 +384,12 @@ export default function BookScreen() {
       <EntryMenu entry={menu} onPick={(key, entry) => void onMenu(key, entry)} onClose={() => setMenu(null)} />
 
       {notice ? (
-        <Toast style={styles.toast} action={{ label: 'Dismiss', onPress: () => setNotice(null) }}>
+        <Toast
+          style={styles.toast}
+          duration={4200}
+          onDismiss={() => setNotice(null)}
+          action={{ label: 'Dismiss', onPress: () => setNotice(null) }}
+        >
           {notice}
         </Toast>
       ) : null}
@@ -355,34 +403,13 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: space.inset, paddingBottom: space.s10 },
   empty: { marginTop: space.s7 },
 
-  headline: {
-    marginTop: space.s3,
-    padding: space.cardPad,
-    borderRadius: 12,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  figures: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' },
-  right: { alignItems: 'flex-end' },
-  figLabel: {
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    color: colors.ink3,
-    marginBottom: 7,
-  },
-  figValue: { fontSize: 29, fontWeight: '800', letterSpacing: -1.02, color: colors.ink, ...tnum },
-  figWarn: { color: colors.warn },
-  figValueSmall: { fontSize: 23, fontWeight: '800', letterSpacing: -0.8, color: colors.ink, ...tnum },
-  figTotal: { fontSize: 14, fontWeight: '700', color: colors.ink3 },
-  actions: { flexDirection: 'row', gap: space.s2, marginTop: space.s4 },
+  headline: { marginTop: space.s3 },
+  actions: { flexDirection: 'row', gap: space.s2, marginTop: space.s3 },
   grow: { flex: 1 },
   remind: { flexGrow: 0, flexShrink: 0, flexBasis: 100 },
 
   head: { marginHorizontal: -space.inset, marginTop: space.s4 },
   writeOff: { marginTop: space.s4 },
   note: { marginTop: space.s4 },
-  toast: { marginHorizontal: space.inset, marginBottom: space.s3 },
+  toast: { position: 'absolute', left: space.inset, right: space.inset, bottom: space.s3 },
 });

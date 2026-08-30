@@ -22,6 +22,12 @@
  * that leads to "not built yet" is the app admitting it is unfinished before
  * the trainer has reached anything they came for.
  *
+ * A DIFFERENT mode switch is not behind a flag: "Training with" (23 Aug 2026),
+ * one row per LIVE membership this same number holds on somebody ELSE's
+ * roster — trainer/client duality, not self-training. It is a body section
+ * rather than a header row because there can be more than one, the same
+ * reason `RoleScreen` is a list of cards and not a toggle.
+ *
  * ── Badges ────────────────────────────────────────────────────────────────
  *
  * Only where a number drives an action. Nudges carries how many drafts are
@@ -47,10 +53,12 @@ import type PaymentModel from '../../../db/models/Payment';
 import type NudgeLogModel from '../../../db/models/NudgeLog';
 import { buildWaiting, type NudgeInput } from '../../../nudges/rules';
 import { loadDraft } from '../../../setup/draft';
+import { isPaused } from '../../../api/auth';
 import { SELF_TRAINING_ENABLED } from '../../../settings/prefs';
 import { TEAM_ENABLED } from '../../../team/team';
 import { useTeamInvitations } from '../../../team/useTeamInvitations';
 import { usePrefs } from '../../../settings/usePrefs';
+import { useAuth } from '../../../store/AuthContext';
 import {
   Avatar,
   Drawer,
@@ -126,6 +134,8 @@ export default function AppDrawer({
   const [name, setName] = useState('');
   const [counts, setCounts] = useState<DrawerCounts>(NO_COUNTS);
   const { prefs } = usePrefs();
+  const { memberships, switchIdentity } = useAuth();
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
 
   /**
    * Both effects wait for the opening animation to finish.
@@ -253,6 +263,30 @@ export default function AppDrawer({
       <DrawerLabel>App</DrawerLabel>
       <DrawerItem icon={IconSettings} label="Settings" onPress={go('settings')} />
       <DrawerItem icon={IconShield} label="Help" onPress={go('help')} />
+
+      {/* Trainer/client duality, not self-training — see the note at the top.
+          Paused rosters are left off this list the same way `RoleScreen`
+          leaves them off its preselection: reachable, just not surfaced here. */}
+      {memberships.some((m) => !isPaused(m)) ? (
+        <>
+          <DrawerLabel>Training with</DrawerLabel>
+          {memberships
+            .filter((m) => !isPaused(m))
+            .map((m) => (
+              <DrawerItem
+                key={m.clientId}
+                icon={IconUsers}
+                label={`${m.trainerName}'s client view`}
+                onPress={() => {
+                  if (switchingTo) return;
+                  setSwitchingTo(m.clientId);
+                  onClose();
+                  void switchIdentity('client', m.clientId).finally(() => setSwitchingTo(null));
+                }}
+              />
+            ))}
+        </>
+      ) : null}
     </Drawer>
   );
 }

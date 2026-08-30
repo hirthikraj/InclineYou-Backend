@@ -13,9 +13,28 @@
  */
 
 import React from 'react';
-import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { Bar, Legend } from './Bar';
-import { colors, radius, space, tnum } from './tokens';
+import { colors, maxFontScale, radius, space, tnum } from './tokens';
+
+/**
+ * Past this text scale the pair stops sitting side by side.
+ *
+ * A rupee figure has no spaces in it, so `Text` has nowhere to wrap and a
+ * too-narrow column clips the number rather than growing — the one failure the
+ * scaling rules in `tokens` say must never happen. At 130% "₹1,06,500" at 38px
+ * no longer shares a 390pt row with "₹18,000" at 30px, so above it the two
+ * figures stack and each gets the full width.
+ */
+const STACK_AT = 1.3;
 
 /**
  * Which of the three tones a figure carries. `plain` is the default for
@@ -68,6 +87,9 @@ export default function Figures({
   onOwed,
   style,
 }: FiguresProps) {
+  const { fontScale } = useWindowDimensions();
+  const stacked = fontScale > STACK_AT;
+
   const clear = owedPart <= 0;
   // Zero owed is not a warning. Amber on ₹0 would be an alarm about nothing,
   // which is how a screen teaches people to ignore amber.
@@ -83,15 +105,21 @@ export default function Figures({
 
   return (
     <View style={[styles.card, style]}>
-      <View style={styles.row}>
+      <View style={[styles.row, stacked && styles.rowStacked]}>
         <Pressable
           onPress={onCollected}
           disabled={!onCollected}
           accessibilityRole={onCollected ? 'button' : undefined}
           accessibilityLabel={`${labels[0]} ${collected}`}
-          style={({ pressed }) => [styles.fig, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.fig,
+            stacked && styles.figStacked,
+            pressed && styles.pressed,
+          ]}
         >
-          <Text style={styles.label}>{labels[0]}</Text>
+          <Text style={styles.label} maxFontSizeMultiplier={maxFontScale.micro}>
+            {labels[0]}
+          </Text>
           <Text style={[styles.value, toneStyle(leftTone)]}>{collected}</Text>
         </Pressable>
 
@@ -100,9 +128,21 @@ export default function Figures({
           disabled={!onOwed}
           accessibilityRole={onOwed ? 'button' : undefined}
           accessibilityLabel={`${labels[1]} ${owed}`}
-          style={({ pressed }) => [styles.fig, styles.figRight, pressed && styles.pressed]}
+          style={({ pressed }) => [
+            styles.fig,
+            // Stacked, the right-hand figure is no longer on the right — it is
+            // the second row, and ragging it to the far edge would leave the
+            // two amounts on opposite sides of the card with nothing between.
+            stacked ? styles.figStacked : styles.figRight,
+            pressed && styles.pressed,
+          ]}
         >
-          <Text style={[styles.label, styles.labelRight]}>{labels[1]}</Text>
+          <Text
+            style={[styles.label, !stacked && styles.labelRight]}
+            maxFontSizeMultiplier={maxFontScale.micro}
+          >
+            {labels[1]}
+          </Text>
           <Text style={[styles.value, styles.valueSmall, toneStyle(rightTone)]}>
             {owed}
             {owedSuffix ? <Text style={styles.suffix}>{owedSuffix}</Text> : null}
@@ -146,7 +186,9 @@ const styles = StyleSheet.create({
     padding: space.cardPad,
   },
   row: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: space.s4 },
+  rowStacked: { flexDirection: 'column', alignItems: 'stretch', gap: space.s5 },
   fig: { minWidth: 0, flexShrink: 1 },
+  figStacked: { flexShrink: 0, width: '100%' },
   figRight: { alignItems: 'flex-end' },
   pressed: { opacity: 0.6 },
   label: {

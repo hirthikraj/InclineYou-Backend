@@ -4,7 +4,7 @@
  * April to March: the Indian financial year, because the GST line is annual
  * and the CA works to that calendar.
  *
- * No opacity dimming. The legend says lime is collected and amber is owed, so
+ * No opacity dimming. The legend says green is collected and amber is owed, so
  * every bar has to be one of those two — a dimmed bar reads as a third
  * category the legend never explains. The current month is marked on its LABEL
  * instead. A month with nothing in it keeps a 2px baseline tick, so the axis
@@ -82,7 +82,11 @@ const styles = StyleSheet.create({
   stack: { width: '100%', justifyContent: 'flex-end' },
   collected: {
     width: '100%',
-    backgroundColor: colors.accent,
+    // `ok`, not `accent`. The same "Collected" is green in the month's split bar
+    // and in the ledger, and lime is the tappable colour everywhere else — a
+    // chart segment painted in it reads as a control. It is also 1.5:1 on the
+    // light canvas, under the 3:1 a non-text graphic has to clear.
+    backgroundColor: colors.ok,
     borderTopLeftRadius: radius.r1,
     borderTopRightRadius: radius.r1,
   },

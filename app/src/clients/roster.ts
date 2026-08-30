@@ -2,10 +2,19 @@
  * The roster — everything screen 04 shows, derived from local tables.
  *
  * Pure, like `home/deck`: `now` and the rows come in as arguments, nothing here
- * reads the database or the clock. The thresholds are imported from the deck
- * rather than restated, because the whole point of the severity spine being the
- * same 2px bar on both screens is that "needs attention" means one thing in
- * this app, not two.
+ * reads the database or the clock. **The whole attention model is imported from
+ * the deck** — the bands, their order, the weights, the severities and the
+ * strings — because the point of the severity spine being the same 2px bar on
+ * both screens is that "needs attention" means one thing in this app, not two.
+ *
+ * For a while only the *thresholds* were imported and this file restated
+ * everything else, which made that sentence false in four ways at once: three
+ * kinds against six, two weight scales, two strings for one empty pack, and two
+ * answers to whether money under seven days old counts at all. On one morning's
+ * data the two screens named eleven clients between them and agreed about four.
+ * What this file still owns is *selection*: `setup`, `invite-stale` and
+ * `unavailable` are roster-only bands, because none of them is a thing that
+ * happens today.
  *
  * The finding this file exists to encode: every platform in the teardown puts
  * money on another screen, and for a trainer selling ten-session packs for cash
@@ -13,9 +22,21 @@
  * alphabetical — it is who needs chasing, and A–Z is one tap away.
  */
 
-import { OVERDUE_DAYS, PACK_ENDING, QUIET_DAYS } from '../home/deck';
+import {
+  PACK_ENDING,
+  QUIET_DAYS,
+  attentionSeverity,
+  attentionWeight,
+  moneyBand,
+  moneyLine,
+  moneyMagnitude,
+  packBand,
+  packLine,
+  quietLine,
+  type AttentionBand,
+} from '../home/deck';
 import { readMode, type DeliveryMode } from '../home/mode';
-import { DAY_MS, daysBetween, rupees, startOfDay } from '../home/time';
+import { DAY_MS, daysBetween, startOfDay } from '../home/time';
 import { onboardingStep } from './schedule';
 
 /**
@@ -382,12 +403,17 @@ function row(
   /**
    * The number belongs to a trainer account, so no invite can ever reach it.
    *
-   * Ranked ABOVE money, which nothing else here is, and deliberately: every
-   * other attention item is a thing that became true over time and will still be
-   * true tomorrow, whereas this one is a typo the trainer made seconds ago and
-   * can fix in seconds. Ranking it below an overdue payment would bury the one
-   * item on the roster that is actually a data-entry mistake — and the trainer
-   * would go on believing they had invited somebody they had not.
+   * The first band, above money, and deliberately: every other attention item is
+   * a thing that became true over time and will still be true tomorrow, whereas
+   * this one is a typo the trainer made seconds ago and can fix in seconds.
+   * Ranking it below an overdue payment would bury the one item on the roster
+   * that is actually a data-entry mistake — and the trainer would go on
+   * believing they had invited somebody they had not.
+   *
+   * This used to say the same thing and not be true. The weights were raw, and
+   * overdue money weighed `4000 + the rupees owed`, so any debt over ₹1,000
+   * outranked it. Bands fixed that: a magnitude is clamped inside its band and
+   * cannot reach the one above.
    *
    * The client themselves is untouched by this: they can be scheduled, logged
    * and billed exactly like anyone else. Only app access is impossible.
@@ -397,8 +423,8 @@ function row(
   /**
    * A client added but never onboarded: no week picked, or no plan on it, and
    * nothing ever logged. They are not in the routine yet — the diary has no
-   * usual slot to suggest and the deck has nothing to build a day from — so
-   * this outranks money: an un-set-up client can't generate money to chase.
+   * usual slot to suggest and the deck has nothing to build a day from — so its
+   * band sits above money: an un-set-up client can't generate money to chase.
    * Derived from the data rather than a flag, so finishing the steps anywhere
    * (this verb, the add flow, the client file) clears it identically.
    */
@@ -411,46 +437,110 @@ function row(
         })
       : null;
 
+  /**
+   * Every band this client is in, and the most urgent one wins.
+   *
+   * A list rather than an if/elif chain, because the chain had to be kept in
+   * the same order as the band table by hand and there was nothing to catch it
+   * drifting. Now the order lives in one place — `ATTENTION_BANDS` in the deck
+   * — and this file only says which bands apply.
+   *
+   * Still exactly one row per client: "a row that says three things says none
+   * of them", and the verb has to be unambiguous for the swipe to work. What
+   * changed is that the one it keeps is now provably the most urgent.
+   */
+  const candidates: {
+    band: AttentionBand;
+    kind: AttentionKind;
+    action: string;
+    magnitude: number;
+    line: string;
+  }[] = [];
+
   if (unavailable) {
-    attention = { kind: 'unavailable', action: 'Fix number', weight: 5000 };
-    severity = 'alert';
-    line = 'That number is a trainer account — they can’t be invited';
-  } else if (setupStep) {
-    attention = { kind: 'setup', action: 'Set up', weight: 4500 };
-    severity = 'alert';
-    line =
-      setupStep === 'schedule'
-        ? 'Not in your week yet — pick their training days'
-        : 'Week picked, no plan on it yet';
+    candidates.push({
+      band: 'unavailable',
+      kind: 'unavailable',
+      action: 'Fix number',
+      magnitude: 0,
+      line: 'That number is a trainer account — they can’t be invited',
+    });
+  }
+  if (setupStep) {
+    candidates.push({
+      band: 'setup',
+      kind: 'setup',
+      action: 'Set up',
+      magnitude: 0,
+      line:
+        setupStep === 'schedule'
+          ? 'Not in your week yet — pick their training days'
+          : 'Week picked, no plan on it yet',
+    });
+  }
+  // Paused is a state, not a job: a paused client is not being chased for
+  // anything, so nothing below is collected for them. The debt does not go
+  // away — § 14, "neither pausing nor archiving clears a debt" — it is just not
+  // this screen's business until they are resumed, and the segment says so.
+  if (status !== 'paused') {
+    if (owed > 0) {
+      // Any money owed is an item. Which band it lands in is what
+      // OVERDUE_DAYS decides, and that is the same call the deck makes.
+      const band = moneyBand(owedDays, false);
+      candidates.push({
+        band,
+        kind: 'overdue',
+        action: 'Remind',
+        magnitude: moneyMagnitude(owed),
+        line: moneyLine(owed, owedDays, band === 'overdue-late'),
+      });
+    }
+    if (quietDays !== null && quietDays >= QUIET_DAYS) {
+      candidates.push({
+        band: 'quiet',
+        kind: 'quiet',
+        action: 'Nudge',
+        magnitude: quietDays,
+        line: quietLine(quietDays),
+      });
+    }
+    if (sessionsLeft !== null) {
+      const band = packBand(sessionsLeft);
+      if (band) {
+        candidates.push({
+          band,
+          kind: 'pack',
+          action: 'Renew',
+          magnitude: PACK_ENDING - sessionsLeft,
+          line: packLine(sessionsLeft),
+        });
+      }
+    }
+    if (status === 'invited' && inviteDays >= INVITE_STALE_DAYS) {
+      candidates.push({
+        band: 'invite-stale',
+        kind: 'invite',
+        action: 'Resend',
+        magnitude: inviteDays,
+        line: `Invited ${inviteDays} days ago · not set up`,
+      });
+    }
+  }
+
+  const top = candidates
+    .map((c) => ({ ...c, weight: attentionWeight(c.band, c.magnitude) }))
+    .sort((a, b) => b.weight - a.weight)[0];
+
+  if (top) {
+    attention = { kind: top.kind, action: top.action, weight: top.weight };
+    severity = attentionSeverity(top.band);
+    line = top.line;
   } else if (status === 'paused') {
     const pausedAt = metaTime(client, 'pausedAt') ?? ms(client.updatedAt);
     const tail = sessionsLeft === null ? 'no pack' : `${sessionsLeft} sessions left`;
     line = `Paused ${shortDate(pausedAt)} · ${tail}`;
-  } else if (owed > 0 && owedDays >= OVERDUE_DAYS) {
-    attention = { kind: 'overdue', action: 'Remind', weight: 4000 + owed };
-    severity = 'critical';
-    line = `${rupees(owed)} overdue · ${owedDays} days`;
-  } else if (quietDays !== null && quietDays >= QUIET_DAYS) {
-    attention = { kind: 'quiet', action: 'Nudge', weight: 3000 + quietDays };
-    severity = 'alert';
-    line = `No workout logged in ${quietDays} days`;
-  } else if (sessionsLeft !== null && sessionsLeft <= PACK_ENDING) {
-    attention = { kind: 'pack', action: 'Renew', weight: 2000 - sessionsLeft };
-    severity = 'alert';
-    line =
-      sessionsLeft <= 0
-        ? 'Pack finished'
-        : `Pack ends in ${sessionsLeft} session${sessionsLeft === 1 ? '' : 's'}`;
-  } else if (status === 'invited' && inviteDays >= INVITE_STALE_DAYS) {
-    attention = { kind: 'invite', action: 'Resend', weight: 1000 + inviteDays };
-    severity = 'alert';
-    line = `Invited ${inviteDays} days ago · not set up`;
   } else if (status === 'invited') {
     line = `Invited ${inviteDays === 0 ? 'today' : `${inviteDays} days ago`}`;
-  } else if (owed > 0) {
-    // Owed but not yet overdue: still the most useful thing to know, and still
-    // not an alert.
-    line = `${rupees(owed)} due`;
   }
 
   if (!line) {

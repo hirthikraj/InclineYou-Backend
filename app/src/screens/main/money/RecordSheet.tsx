@@ -193,6 +193,14 @@ export default function RecordSheet({
         <Text style={styles.partWho}>
           {client?.name ?? 'Someone'} · {rupees(owed)} owed
         </Text>
+
+        {/* The way back. Tapping Part swapped the whole sheet for this one and
+            took the Full/Part switch with it, so the only exit from a mistyped
+            part payment was closing the sheet and starting again. */}
+        <Seg style={styles.partModes}>
+          <Chip label="Full" selected={false} onPress={() => setPart(false)} />
+          <Chip label="Part" selected onPress={() => setPart(true)} />
+        </Seg>
         <View style={styles.partAmount}>
           <Amount value={grouped(typed)} size={34} />
         </View>
@@ -385,6 +393,7 @@ const styles = StyleSheet.create({
   cta: { marginTop: 18 },
 
   partWho: { fontSize: 13.5, color: colors.ink3, textAlign: 'center' },
+  partModes: { justifyContent: 'center', marginTop: space.s3 },
   partAmount: { alignItems: 'center', marginTop: 10, marginBottom: 2 },
   partLeft: { fontSize: 12.5, textAlign: 'center', color: colors.warn, fontWeight: '600' },
   partYours: { fontSize: 12.5, textAlign: 'center', color: colors.ink3, marginTop: 2 },

@@ -27,6 +27,7 @@ import {
   Row,
   Sheet,
   colors,
+  light,
   radius,
   space,
   tnum,
@@ -51,6 +52,10 @@ export default function UpiSheet({
 
   const link = upiUri(gym, row.amount, `Training · ${row.packLabel}`);
   const first = row.name.split(' ')[0];
+  // No UPI ID means there is nothing to send and nothing to open. Both rows
+  // stayed tappable and returned early in silence, which reads as a broken
+  // sheet rather than as a missing setting.
+  const payable = link != null;
 
   const sendLink = async () => {
     if (!link) return;
@@ -95,20 +100,30 @@ export default function UpiSheet({
           grouped
           minHeight={54}
           title="Send the payment link"
-          subtitle="Opens their chat with the amount filled in"
-          leading={<IconShare size={19} color={colors.ink2} />}
-          trailing={<IconChevron size={18} color={colors.ink3} />}
-          onPress={() => void sendLink()}
+          subtitle={
+            payable
+              ? "Opens their chat with the amount filled in"
+              : 'Needs your UPI ID — add it in your profile'
+          }
+          leading={<IconShare size={19} color={payable ? colors.ink2 : colors.inkOff} />}
+          trailing={payable ? <IconChevron size={18} color={colors.ink3} /> : undefined}
+          onPress={payable ? () => void sendLink() : undefined}
         />
         <Row
           grouped
           minHeight={54}
           title="Open it on this phone"
-          subtitle="If they're paying from your phone"
-          leading={<IconRupee size={19} color={colors.ink2} />}
-          trailing={<IconChevron size={18} color={colors.ink3} />}
-          onPress={() => void openHere()}
+          subtitle={
+            payable
+              ? "If they're paying from your phone"
+              : 'Needs your UPI ID — add it in your profile'
+          }
+          leading={<IconRupee size={19} color={payable ? colors.ink2 : colors.inkOff} />}
+          trailing={payable ? <IconChevron size={18} color={colors.ink3} /> : undefined}
+          onPress={payable ? () => void openHere() : undefined}
         />
+        {/* Always live. Money can arrive by any route — this sheet not being
+            able to raise a link has nothing to do with whether they paid. */}
         <Row
           grouped
           minHeight={54}
@@ -131,31 +146,42 @@ export default function UpiSheet({
 
 const styles = StyleSheet.create({
   sub: { fontSize: 13.5, color: colors.ink3, marginBottom: space.s4 },
+  /* The plate is held up and read across a gym floor, so it stays light in
+     both themes. That is a reason to reach for the LIGHT palette, not a reason
+     to hard-code hex — `light.*` is what the system calls these exact inks, and
+     it keeps the plate reskinning with everything else. */
   plate: {
     alignItems: 'center',
     gap: 4,
     paddingVertical: space.s6,
     paddingHorizontal: space.s5,
     borderRadius: radius.r3,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: light.surface,
   },
   plateLabel: {
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 1.4,
     textTransform: 'uppercase',
-    color: '#6B7280',
+    color: light.ink3,
   },
   vpa: {
     fontSize: 22,
     fontWeight: '700',
     letterSpacing: 0.2,
-    color: '#10131A',
+    color: light.ink,
     textAlign: 'center',
     marginTop: 2,
   },
-  amount: { fontSize: 30, fontWeight: '800', letterSpacing: -1.05, color: '#10131A', marginTop: 6, ...tnum },
-  plateName: { fontSize: 12.5, color: '#3A3F47', marginTop: 2 },
+  amount: {
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: -1.05,
+    color: light.ink,
+    marginTop: 6,
+    ...tnum,
+  },
+  plateName: { fontSize: 12.5, color: light.ink2, marginTop: 2 },
   actions: { marginTop: space.s4 },
   notice: { fontSize: 12.5, color: colors.warn, marginTop: space.s2 },
   note: { marginTop: space.s3 },

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import * as SecureStore from 'expo-secure-store';
 import { TOKEN_KEY } from '../api/client';
-import type { Membership } from '../api/auth';
+import { isPaused, switchToClientMode, switchToTrainerMode, type Membership } from '../api/auth';
 import { resetLocalDatabase, setSyncScope, syncDatabase } from '../db/sync';
 import { seedDefaultWorkingHours } from '../db/diary';
 import { hydratePrefs, resetPrefs } from '../settings/prefs';
@@ -80,6 +80,18 @@ interface AuthContextValue extends AuthState {
    * ignored coming out of it — the trainer lens has no client.
    */
   switchLens: (lens: Lens, clientId?: string) => Promise<void>;
+  /**
+   * Cross the trainer↔client boundary — for a phone that holds BOTH a
+   * trainer account and a live membership elsewhere. Unlike `switchLens`,
+   * this mints a fresh token: a trainer token (subject = trainer UUID) and a
+   * client token (subject = phone) are structurally different, so no single
+   * token already covers both sides the way it does for two client
+   * memberships. `clientId` picks which roster to land on when there is more
+   * than one live one; omitted, the same live-then-first fallback `signIn`
+   * uses picks for you. Throws if the switch is refused (404 — this number
+   * does not actually hold the identity being switched to).
+   */
+  switchIdentity: (identity: Lens, clientId?: string) => Promise<void>;
   signOut: () => Promise<void>;
   /** One-shot: read and cleared by whoever acts on it. */
   landing: Landing | null;
@@ -224,6 +236,62 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }));
   };
 
+  /**
+   * Crossing the trainer↔client boundary. Unlike `switchLens`, this talks to
+   * the server — `POST /v1/auth/mode/trainer` or `/mode/client` — because it
+   * needs a token of the other kind, not just a different local pointer. The
+   * queue is flushed first for the same reason `switchLens` flushes it: sets
+   * or profile edits queued under the old scope must not be sent under the
+   * new one.
+   */
+  const switchIdentity = async (identity: Lens, clientId?: string) => {
+    await syncDatabase('identity-switch');
+
+    const res = identity === 'trainer' ? await switchToTrainerMode() : await switchToClientMode();
+    const body = res.data;
+    if (!body.token) return;
+
+    await SecureStore.setItemAsync(TOKEN_KEY, body.token);
+    await SecureStore.setItemAsync(LENS_KEY, identity);
+
+    if (identity === 'trainer') {
+      if (body.trainerId) await SecureStore.setItemAsync(TRAINER_ID_KEY, body.trainerId);
+      await SecureStore.deleteItemAsync(CLIENT_ID_KEY);
+      const memberships = body.clientOf ?? [];
+      await SecureStore.setItemAsync(MEMBERSHIPS_KEY, JSON.stringify(memberships));
+
+      setSyncScope(null);
+      setState((current) => ({
+        ...current,
+        token: body.token as string,
+        trainerId: body.trainerId ?? current.trainerId,
+        lens: 'trainer',
+        clientId: null,
+        memberships,
+      }));
+      return;
+    }
+
+    const memberships = body.clientOf ?? [];
+    // Prefer a live roster, same fallback `signIn` uses for a plain client
+    // sign-in — a paused one only opens when it is the only thing there is.
+    const live = memberships.filter((m) => !isPaused(m));
+    const target = clientId ?? (live[0] ?? memberships[0])?.clientId ?? null;
+
+    if (target) await SecureStore.setItemAsync(CLIENT_ID_KEY, target);
+    else await SecureStore.deleteItemAsync(CLIENT_ID_KEY);
+    await SecureStore.setItemAsync(MEMBERSHIPS_KEY, JSON.stringify(memberships));
+
+    setSyncScope(target ? { clientId: target } : null);
+    setState((current) => ({
+      ...current,
+      token: body.token as string,
+      lens: 'client',
+      clientId: target,
+      memberships,
+    }));
+  };
+
   const signOut = async () => {
     // Flush anything queued while the token is still valid.
     await syncDatabase('sign-out');
@@ -267,6 +335,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signIn,
         completeSetup,
         switchLens,
+        switchIdentity,
         signOut,
         landing,
         clearLanding: () => setLanding(null),

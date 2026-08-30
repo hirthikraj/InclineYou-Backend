@@ -378,16 +378,26 @@ export default function OtpScreen({ navigation, route }: Props) {
           <Text style={styles.lockCount}>{clock(lockLeft)}</Text>
         </View>
         <AuthFoot>
-          <WhatsAppButton
-            label="Message support on WhatsApp"
-            disabled={!SUPPORT_WHATSAPP_NUMBER}
-            onPress={() => {
-              void openWhatsApp(SUPPORT_WHATSAPP_NUMBER, `Locked out of XRep · +91 ${phone}`);
-            }}
-          />
+          {/* Never a disabled control here. `SUPPORT_WHATSAPP_NUMBER` reads an
+              env var that defaults to '', so a deploy that forgets it used to
+              render a dead button on the one screen a locked-out trainer
+              reaches — and a fallback that silently switches itself off is
+              indistinguishable from a product that never had one. When the
+              number is absent the row is not drawn at all and the sentence
+              underneath carries the recovery that is always true instead: the
+              lock is on this number, and the wait is the way out. */}
+          {SUPPORT_WHATSAPP_NUMBER ? (
+            <WhatsAppButton
+              label="Message support on WhatsApp"
+              onPress={() => {
+                void openWhatsApp(SUPPORT_WHATSAPP_NUMBER, `Locked out of XRep · +91 ${phone}`);
+              }}
+            />
+          ) : null}
           <Legal>
-            Nothing has been lost. Your clients, sessions and payments are exactly where you left
-            them.
+            The lock is on this number, not on your account — it lifts by itself, and signing in on
+            another device is not affected. Nothing has been lost either: your clients, sessions and
+            payments are exactly where you left them.
           </Legal>
         </AuthFoot>
       </AuthScreen>

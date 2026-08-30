@@ -56,6 +56,10 @@ export default function OwedScreen() {
   const [remind, setRemind] = useState<ChaseRow | null>(null);
   const [upi, setUpi] = useState<ChaseRow | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** Who is still to be reminded in a "remind everyone" walk, in order. */
+  const [queue, setQueue] = useState<ChaseRow[]>([]);
+  /** How many chats this walk has actually opened. */
+  const [done, setDone] = useState(0);
 
   const rows = useMemo(() => buildChase(input, now), [input, now]);
 
@@ -66,25 +70,60 @@ export default function OwedScreen() {
 
   const sent = (row: ChaseRow) => {
     if (trainerId) void logReminder(trainerId, row.clientId);
+    const count = done + 1;
+    setDone(count);
+
+    // The walk continues into the next chat. The queue is the whole mechanism:
+    // firing three WhatsApp intents at once loses two of them to the OS, so the
+    // next one only leaves once this one has actually gone.
+    const [next, ...rest] = queue;
+    if (next) {
+      setQueue(rest);
+      setRemind(next);
+      return;
+    }
+
     setRemind(null);
-    setNotice(`Reminded ${row.name.split(' ')[0]}.`);
+    setNotice(count > 1 ? `Reminded ${count} clients.` : `Reminded ${row.name.split(' ')[0]}.`);
+    setDone(0);
+  };
+
+  /** Leaving the sheet ends the walk — and says what it managed. */
+  const stop = () => {
+    setRemind(null);
+    setQueue([]);
+    if (done > 0) {
+      setNotice(
+        queue.length > 0
+          ? `Reminded ${done} of ${done + queue.length + 1}. The rest are still on the list.`
+          : `Reminded ${done} client${done === 1 ? '' : 's'}.`,
+      );
+    }
+    setDone(0);
   };
 
   /**
    * One chat at a time. The list is walked by opening the first, and the sheet
-   * that follows carries the next — anything that fires three intents at once
-   * loses two of them to the OS.
+   * that follows carries the next.
+   *
+   * It used to open exactly one chat and stop, under a button that said "Remind
+   * all 3" — a promise the screen could not keep.
    */
   const remindAll = () => {
-    const first = rows.find((r) => r.phone);
-    if (!first) {
+    const all = rows.filter((r) => r.phone);
+    if (all.length === 0) {
       setNotice('None of them have a phone number saved.');
       return;
     }
-    setRemind(first);
+    setQueue(all.slice(1));
+    setDone(0);
+    setRemind(all[0]);
   };
 
   const reachable = rows.filter((r) => r.phone).length;
+  /** `[which chat, how many]`, only while a walk is actually running. */
+  const walk: [number, number] | undefined =
+    queue.length > 0 || done > 0 ? [done + 1, done + queue.length + 1] : undefined;
 
   return (
     <SafeAreaView edges={['top']} style={styles.safe}>
@@ -106,7 +145,10 @@ export default function OwedScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>
-        {rows.length === 0 && ready ? (
+        {/* Nothing at all until the tables have been read. The alternative was
+            a tally of ₹0 across 0 clients under an empty list — a screen that
+            says "everything is collected" for a frame, every time it opens. */}
+        {!ready ? null : rows.length === 0 ? (
           <Empty
             icon={IconWallet}
             title="Everything clear"
@@ -175,12 +217,15 @@ export default function OwedScreen() {
         visible={remind !== null}
         row={remind}
         gym={input.gym}
+        progress={walk}
         onSent={sent}
         onShowUpi={(row) => {
           setRemind(null);
+          setQueue([]);
+          setDone(0);
           setUpi(row);
         }}
-        onClose={() => setRemind(null)}
+        onClose={stop}
       />
       <UpiSheet
         visible={upi !== null}
@@ -194,7 +239,12 @@ export default function OwedScreen() {
       />
 
       {notice ? (
-        <Toast style={styles.toast} action={{ label: 'Dismiss', onPress: () => setNotice(null) }}>
+        <Toast
+          style={styles.toast}
+          duration={4200}
+          onDismiss={() => setNotice(null)}
+          action={{ label: 'Dismiss', onPress: () => setNotice(null) }}
+        >
           {notice}
         </Toast>
       ) : null}
@@ -210,5 +260,7 @@ const styles = StyleSheet.create({
   empty: { marginTop: space.s7 },
   all: { marginTop: space.s4 },
   note: { marginTop: space.s3 },
-  toast: { marginHorizontal: space.inset, marginBottom: space.s3 },
+  // Absolute: parked in the flex column it shortened the list underneath it
+  // the moment a reminder went out.
+  toast: { position: 'absolute', left: space.inset, right: space.inset, bottom: space.s3 },
 });

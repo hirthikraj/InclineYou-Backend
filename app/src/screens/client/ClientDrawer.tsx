@@ -10,7 +10,7 @@
  * switch changes the tab bar and the home composition and nothing else.
  */
 
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import Constants from 'expo-constants';
 
@@ -42,8 +42,9 @@ export default function ClientDrawer({
   onClose: () => void;
   onNavigate: (key: ClientDrawerKey) => void;
 }) {
-  const { clientId, trainerId, switchLens } = useAuth();
+  const { clientId, trainerId, switchIdentity } = useAuth();
   const { input } = useClient(visible ? clientId : null);
+  const [switching, setSwitching] = useState(false);
 
   const me = input.me;
   const coach = input.coach;
@@ -92,7 +93,9 @@ export default function ClientDrawer({
       <DrawerItem icon={IconShield} label="Help" onPress={() => go('help')} />
 
       {/* Only for somebody who is both. A trainer who also trains with a coach
-          flips a lens here; they do not sign into a second product. */}
+          crosses back here — a fresh trainer token, not a local flip, since a
+          client token has no trainer authority on the server; see
+          `AuthContext#switchIdentity`. */}
       {trainerId ? (
         <>
           <DrawerLabel>Coaching</DrawerLabel>
@@ -100,8 +103,12 @@ export default function ClientDrawer({
             icon={IconUsers}
             label="Switch to coaching"
             onPress={() => {
-              onClose();
-              void switchLens('trainer');
+              if (switching) return;
+              setSwitching(true);
+              void switchIdentity('trainer').finally(() => {
+                setSwitching(false);
+                onClose();
+              });
             }}
           />
         </>

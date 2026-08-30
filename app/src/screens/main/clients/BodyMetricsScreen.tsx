@@ -63,9 +63,20 @@ export default function BodyMetricsScreen() {
 
   if (!head) return null;
 
-  const peak = view.spark.length ? Math.max(...view.spark) : 0;
-  const floor = view.spark.length ? Math.min(...view.spark) : 0;
+  /**
+   * The scale is set by the readings that still stand.
+   *
+   * A superseded reading is a typo somebody corrected minutes later, and
+   * letting it set the range compresses every real reading into a corner of the
+   * plot. It is still drawn — append-only means nothing is hidden — but as a
+   * marker at the baseline rather than as a bar, because a bar asserts a value
+   * and this one has already been withdrawn.
+   */
+  const standing = view.spark.filter((p) => !p.replaced).map((p) => p.value);
+  const peak = standing.length ? Math.max(...standing) : 0;
+  const floor = standing.length ? Math.min(...standing) : 0;
   const span = peak - floor;
+  const corrections = view.spark.filter((p) => p.replaced).length;
 
   return (
     <SafeAreaView edges={['top']} style={styles.safe}>
@@ -106,21 +117,34 @@ export default function BodyMetricsScreen() {
         {view.spark.length > 1 ? (
           <>
             <View style={styles.spark}>
-              {view.spark.map((value, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.bar,
-                    // Scaled to the range these readings cover, not from zero:
-                    // from zero a weight series is eight identical bars.
-                    { height: span > 0 ? 6 + ((value - floor) / span) * 34 : 20 },
-                  ]}
-                />
-              ))}
+              {view.spark.map((point, i) =>
+                point.replaced ? (
+                  <View key={i} style={styles.barReplaced} />
+                ) : (
+                  <View
+                    key={i}
+                    style={[
+                      styles.bar,
+                      // Scaled to the range these readings cover, not from zero:
+                      // from zero a weight series is eight identical bars.
+                      { height: span > 0 ? 6 + ((point.value - floor) / span) * 34 : 20 },
+                    ]}
+                  />
+                ),
+              )}
             </View>
             <Text style={styles.caption}>
               {view.sentence} Bars are scaled to the range those readings cover, not from zero — from
               zero these are identical bars.
+              {corrections > 0
+                ? ` ${corrections} reading${corrections === 1 ? '' : 's'} ${
+                    corrections === 1 ? 'was' : 'were'
+                  } corrected the same day and ${
+                    corrections === 1 ? 'is' : 'are'
+                  } marked, not plotted — the row below still shows ${
+                    corrections === 1 ? 'it' : 'them'
+                  }.`
+                : ''}
             </Text>
           </>
         ) : null}
@@ -193,6 +217,9 @@ const styles = StyleSheet.create({
 
   spark: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 40, marginTop: space.s4 },
   bar: { flex: 1, borderRadius: 2, backgroundColor: colors.accent, minHeight: 3 },
+  // A withdrawn reading: present, dated, and asserting no value. Danger,
+  // because it is the one mark on this chart that is not a measurement.
+  barReplaced: { flex: 1, borderRadius: 2, backgroundColor: colors.danger, height: 3 },
   caption: { fontSize: 12.5, lineHeight: 18, color: colors.ink3, marginTop: space.s3 },
 
   note: { marginTop: space.s4 },

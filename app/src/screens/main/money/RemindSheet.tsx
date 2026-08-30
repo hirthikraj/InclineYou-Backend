@@ -31,6 +31,7 @@ import {
   space,
 } from '../../../design';
 import {
+  dueLabel,
   reminderText,
   rupees,
   upiUri,
@@ -44,6 +45,7 @@ export default function RemindSheet({
   visible,
   row,
   gym,
+  progress,
   onSent,
   onShowUpi,
   onClose,
@@ -51,6 +53,14 @@ export default function RemindSheet({
   visible: boolean;
   row: ChaseRow | null;
   gym: GymProfile;
+  /**
+   * Where this chat sits in a "remind everyone" walk — `[2, 3]`.
+   *
+   * Without it the run is three sheets that look identical arriving in a row,
+   * and there is no way to tell a queue that is progressing from one that is
+   * stuck. Omitted for a single reminder, which has no position to state.
+   */
+  progress?: [number, number];
   /** Fired when WhatsApp is actually opened, so "reminded twice" stays true. */
   onSent: (row: ChaseRow) => void;
   onShowUpi: (row: ChaseRow) => void;
@@ -102,9 +112,14 @@ export default function RemindSheet({
 
   return (
     <Sheet visible={visible} onClose={onClose}>
+      {progress ? (
+        <Text style={styles.progress}>{`Chat ${progress[0]} of ${progress[1]}`}</Text>
+      ) : null}
       <Row
         title={`Remind ${row.name.split(' ')[0]}`}
-        subtitle={`${rupees(row.amount)} · ${row.late > 0 ? `${row.late} days late` : 'due today'}`}
+        // `dueLabel` gets the singular right and does not call a pack due next
+        // week "due today" — the sentence sitting above a message about money.
+        subtitle={`${rupees(row.amount)} · ${dueLabel(row.dueAt, Date.now())}`}
         leading={<Avatar name={row.name} size="lg" />}
         style={styles.who}
       />
@@ -147,12 +162,16 @@ export default function RemindSheet({
         to mark it received when it lands.
       </Callout>
 
-      {failed ? (
+      {/* The reason a disabled button is disabled, before it is pressed rather
+          than after. Without this the CTA is simply dead and the trainer has no
+          way to learn that the fix is a phone number on the client. */}
+      {!row.phone ? (
         <Text style={styles.failed}>
-          {row.phone
-            ? "Couldn't open WhatsApp. Check it's installed."
-            : 'No phone number saved for this client.'}
+          No phone number saved for {row.name.split(' ')[0]}, so there is no chat to open. Add one
+          on their file and this works.
         </Text>
+      ) : failed ? (
+        <Text style={styles.failed}>Couldn&apos;t open WhatsApp. Check it&apos;s installed.</Text>
       ) : null}
 
       <Button
@@ -169,6 +188,14 @@ export default function RemindSheet({
 }
 
 const styles = StyleSheet.create({
+  progress: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    color: colors.accentText,
+    marginBottom: space.s2,
+  },
   who: { marginBottom: space.s3 },
   tones: { marginTop: space.s3 },
   qr: { marginTop: space.s3 },

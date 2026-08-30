@@ -309,7 +309,7 @@ export default function ClientFileScreen() {
                   detail={row.detail}
                   leading={
                     row.key === 'adherence' ? (
-                      <Streak days={overview.week.map((on) => (on ? 'done' : 'unknown'))} />
+                      <Streak days={overview.week} />
                     ) : undefined
                   }
                   onPress={row.link ? () => follow(row.link, row.targetId) : undefined}
@@ -511,7 +511,7 @@ export default function ClientFileScreen() {
                 <View style={styles.packRow}>
                   <View>
                     <Text style={styles.packLabel}>Sessions left</Text>
-                    <Text style={styles.packValue}>
+                    <Text style={[styles.packValue, { color: pack.tone === 'danger' ? colors.danger : pack.tone === 'warn' ? colors.warn : colors.ok }]}>
                       {pack.left}
                       <Text style={styles.packOf}>{pack.leftSuffix}</Text>
                     </Text>
@@ -524,14 +524,14 @@ export default function ClientFileScreen() {
 
                 <Bar
                   segments={[
-                    { key: 'left', fraction: pack.part, color: colors.accent },
+                    { key: 'left', fraction: pack.part, color: pack.tone === 'danger' ? colors.danger : pack.tone === 'warn' ? colors.warn : colors.ok },
                     { key: 'used', fraction: 1 - pack.part, color: colors.surface3 },
                   ]}
                   style={styles.packBar}
                 />
                 <Legend
                   entries={[
-                    { key: 'left', label: pack.legend.left, color: colors.accent },
+                    { key: 'left', label: pack.legend.left, color: pack.tone === 'danger' ? colors.danger : pack.tone === 'warn' ? colors.warn : colors.ok },
                     { key: 'used', label: pack.legend.used, color: colors.surface3 },
                   ]}
                 />
@@ -643,7 +643,7 @@ const styles = StyleSheet.create({
     marginBottom: 7,
   },
   packValue: { fontSize: 29, fontWeight: '800', letterSpacing: -1.02, color: colors.ink, ...tnum },
-  packSmall: { fontSize: 19, letterSpacing: -0.5 },
+  packSmall: { fontSize: 23, letterSpacing: -0.8 },
   packOf: { fontSize: 15, fontWeight: '700', color: colors.ink3, letterSpacing: 0 },
   packBar: { marginTop: space.s4 },
 

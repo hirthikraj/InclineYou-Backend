@@ -27,7 +27,7 @@ import {
   space,
   type KeypadKey,
 } from '../../../design';
-import { rupees, type ChaseRow } from '../../../money/money';
+import { dueLabel, rupees, type ChaseRow } from '../../../money/money';
 
 export type WriteOffChoice =
   | { kind: 'keep' }
@@ -74,7 +74,7 @@ export default function WriteOffSheet({
   return (
     <Sheet visible={visible} onClose={onClose} title={`${first}'s ${rupees(row.amount)}`}>
       <Text style={styles.sub}>
-        {row.late > 0 ? `${row.late} days late` : 'due today'} ·{' '}
+        {dueLabel(row.dueAt, Date.now())} ·{' '}
         {row.reminders === 0
           ? 'not reminded'
           : `reminded ${row.reminders === 1 ? 'once' : `${row.reminders} times`}`}

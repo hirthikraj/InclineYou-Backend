@@ -15,7 +15,7 @@
  * transform rather than a margin: the lift must not reflow the screen behind it.
  */
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { colors, radius, space } from './tokens';
 import useKeyboardHeight from './useKeyboardHeight';
@@ -26,11 +26,40 @@ export interface ToastProps {
   icon?: React.ComponentType<IconProps>;
   /** Optional trailing action — uppercase accent lettering, e.g. UNDO. */
   action?: { label: string; onPress: () => void };
+  /**
+   * Milliseconds before it takes itself away, via `onDismiss`.
+   *
+   * Opt-in, because a toast that explains a *refusal* should sit there until it
+   * has been read — that is the job this component was built for. A toast that
+   * confirms something the trainer just did is the opposite: it is old news the
+   * moment they look at it, and leaving it parked over the bottom of a ledger
+   * makes them tap to clear their own screen.
+   */
+  duration?: number;
+  /** Required by `duration`; also fires when the timer is what dismissed it. */
+  onDismiss?: () => void;
   style?: StyleProp<ViewStyle>;
 }
 
-export default function Toast({ children, icon: Icon, action, style }: ToastProps) {
+export default function Toast({
+  children,
+  icon: Icon,
+  action,
+  duration,
+  onDismiss,
+  style,
+}: ToastProps) {
   const keyboard = useKeyboardHeight();
+
+  useEffect(() => {
+    if (!duration || !onDismiss) return;
+    const timer = setTimeout(onDismiss, duration);
+    return () => clearTimeout(timer);
+    // `children` is in the list on purpose: a second notice arriving while the
+    // first is still up has to restart the clock, or it inherits the remainder
+    // of a timer it never started and vanishes almost immediately.
+  }, [duration, onDismiss, children]);
+
   return (
     <View
       style={[styles.toast, style, keyboard > 0 && { transform: [{ translateY: -keyboard }] }]}

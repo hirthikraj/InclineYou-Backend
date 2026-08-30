@@ -142,7 +142,10 @@ export default function PacksScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.body}>
-        {view.selling.length === 0 && ready ? (
+        {/* Nothing until the tables are read: the else-branch renders
+            "What you sell · 0" over an empty list, which is a price list
+            that briefly claims to be empty every time the screen opens. */}
+        {!ready ? null : view.selling.length === 0 ? (
           <Empty
             icon={IconWallet}
             title="No price list yet"
@@ -314,7 +317,12 @@ export default function PacksScreen() {
       />
 
       {notice ? (
-        <Toast style={styles.toast} action={{ label: 'Dismiss', onPress: () => setNotice(null) }}>
+        <Toast
+          style={styles.toast}
+          duration={4200}
+          onDismiss={() => setNotice(null)}
+          action={{ label: 'Dismiss', onPress: () => setNotice(null) }}
+        >
           {notice}
         </Toast>
       ) : null}
@@ -331,5 +339,6 @@ const styles = StyleSheet.create({
   gymBlank: { marginTop: space.s2 },
   gymAdd: { marginTop: space.s3 },
   note: { marginTop: space.s5 },
-  toast: { marginHorizontal: space.inset, marginBottom: space.s3 },
+  // Absolute, so a confirmation never shortens the list it lands over.
+  toast: { position: 'absolute', left: space.inset, right: space.inset, bottom: space.s3 },
 });

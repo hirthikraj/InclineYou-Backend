@@ -194,7 +194,12 @@ export default function GymShareScreen() {
         </ScrollView>
 
         {notice ? (
-          <Toast style={styles.toast} action={{ label: 'Dismiss', onPress: () => setNotice(null) }}>
+          <Toast
+            style={styles.toast}
+            duration={4200}
+            onDismiss={() => setNotice(null)}
+            action={{ label: 'Dismiss', onPress: () => setNotice(null) }}
+          >
             {notice}
           </Toast>
         ) : null}
@@ -335,7 +340,12 @@ export default function GymShareScreen() {
       </ScrollView>
 
       {notice ? (
-        <Toast style={styles.toast} action={{ label: 'Dismiss', onPress: () => setNotice(null) }}>
+        <Toast
+          style={styles.toast}
+          duration={4200}
+          onDismiss={() => setNotice(null)}
+          action={{ label: 'Dismiss', onPress: () => setNotice(null) }}
+        >
           {notice}
         </Toast>
       ) : null}
@@ -380,5 +390,6 @@ const styles = StyleSheet.create({
   blank: { fontSize: 13, color: colors.ink3, paddingVertical: space.s3 },
   record: { marginTop: space.s3 },
   note: { marginTop: space.s4 },
-  toast: { marginHorizontal: space.inset, marginBottom: space.s3 },
+  // Absolute, so a confirmation never shortens the list it lands over.
+  toast: { position: 'absolute', left: space.inset, right: space.inset, bottom: space.s3 },
 });
