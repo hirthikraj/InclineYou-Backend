@@ -5,6 +5,10 @@ import com.xrep.xrep_backend.auth.OtpExpiredException;
 import com.xrep.xrep_backend.auth.OtpLockedException;
 import com.xrep.xrep_backend.auth.OtpThrottledException;
 import com.xrep.xrep_backend.client.PhoneUnavailableException;
+import com.xrep.xrep_backend.nudge.NudgeRuleException;
+import com.xrep.xrep_backend.payment.PackRuleException;
+import com.xrep.xrep_backend.trainer.AccountRuleException;
+import com.xrep.xrep_backend.payment.PackageRuleException;
 import com.xrep.xrep_backend.team.TeamRuleException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -18,7 +22,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidOtpException.class)
     ProblemDetail handleInvalidOtp(InvalidOtpException ex) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage());
         pd.setProperty("code", "OTP_WRONG");
         pd.setProperty("attemptsLeft", ex.getAttemptsLeft());
         return pd;
@@ -95,6 +99,73 @@ public class GlobalExceptionHandler {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
         pd.setProperty("code", ex.getCode());
         if (ex.getSeatLimit() != null) pd.setProperty("seatLimit", ex.getSeatLimit());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
+
+    /**
+     * A price-list rule said no. Same shape as the team handler above and for the
+     * same reason: the `code` is what a screen branches on, and `detail` is a
+     * sentence written for the trainer rather than for the log.
+     */
+    @ExceptionHandler(PackRuleException.class)
+    ResponseEntity<ProblemDetail> handlePackRule(PackRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
+
+    /**
+     * An account rule said no — the number is taken, the proof timed out, the
+     * typed confirmation does not match.
+     *
+     * <p>Its own handler for the reason the two below it have their own: Spring
+     * dispatches on the exception type. The shape is identical on purpose —
+     * `code` to branch on, `detail` written for the trainer to read — and on
+     * this screen the `detail` matters more than anywhere else in the product,
+     * because every refusal here names something the trainer must act on and
+     * cannot guess. See {@code AccountRuleException}.
+     */
+    @ExceptionHandler(AccountRuleException.class)
+    ResponseEntity<ProblemDetail> handleAccountRule(AccountRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
+
+    /**
+     * A rule about a SOLD package said no — pausing one that is already paused,
+     * extending one that closed in March.
+     *
+     * <p>Its own handler rather than a second `@ExceptionHandler` value on the
+     * one above, because the two exceptions are different types and Spring
+     * dispatches on the type. The shape is identical on purpose: `code` is what
+     * the screen branches on, `detail` is a sentence written for the trainer.
+     *
+     * <p>Unlike the price list's, most of these are 409 — see
+     * {@link PackageRuleException} for why a state conflict and a malformed body
+     * must not arrive as the same status.
+     */
+    @ExceptionHandler(PackageRuleException.class)
+    ResponseEntity<ProblemDetail> handlePackageRule(PackageRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
+
+    /**
+     * A nudge rule said no — an unknown template, an empty body, a client with
+     * no number on file.
+     *
+     * <p>Same shape as the two above. The one worth knowing about is
+     * {@code NUDGE_NO_PHONE}: it is a 422 rather than a 400 because the request
+     * is perfectly well-formed and asks for something that cannot exist, and the
+     * screen turns it into "Meera has no number on file" beside a link to her
+     * file rather than into "that did not go through".
+     */
+    @ExceptionHandler(NudgeRuleException.class)
+    ResponseEntity<ProblemDetail> handleNudgeRule(NudgeRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+        pd.setProperty("code", ex.getCode());
         return ResponseEntity.status(ex.getStatus()).body(pd);
     }
 

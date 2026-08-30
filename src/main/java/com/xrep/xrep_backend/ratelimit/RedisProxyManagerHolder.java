@@ -2,7 +2,7 @@ package com.xrep.xrep_backend.ratelimit;
 
 import io.github.bucket4j.distributed.ExpirationAfterWriteStrategy;
 import io.github.bucket4j.distributed.proxy.ProxyManager;
-import io.github.bucket4j.redis.lettuce.cas.LettuceBasedProxyManager;
+import io.github.bucket4j.redis.lettuce.Bucket4jLettuce;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.codec.ByteArrayCodec;
 import io.lettuce.core.codec.RedisCodec;
@@ -89,14 +89,9 @@ public class RedisProxyManagerHolder {
             try {
                 RedisCodec<String, byte[]> codec =
                         RedisCodec.of(StringCodec.UTF8, ByteArrayCodec.INSTANCE);
-                manager = LettuceBasedProxyManager
-                        .builderFor(client.connect(codec))
-                        // Bounds the keyspace: a limiter keyed by caller identity
-                        // grows forever otherwise, which is how a rate limiter
-                        // becomes the outage. The in-memory one sweeps for the
-                        // same reason; here Redis does it.
-                        .withExpirationStrategy(ExpirationAfterWriteStrategy
-                                .basedOnTimeForRefillingBucketUpToMax(Duration.ofHours(1)))
+                manager = Bucket4jLettuce
+                        .casBasedBuilder(client.connect(codec))
+                        .expirationAfterWrite(ExpirationAfterWriteStrategy.basedOnTimeForRefillingBucketUpToMax(Duration.ofHours(1)))
                         .build();
                 log.info("rate limiting is using Redis");
                 return manager;

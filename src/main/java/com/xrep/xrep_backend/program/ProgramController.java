@@ -73,6 +73,18 @@ public class ProgramController {
         programService.removeExercise(id, exId, trainerId());
     }
 
+    /**
+     * Push the template's current blueprint onto this client's copy.
+     *
+     * Explicit, one program at a time, and never automatic — a copy is a copy,
+     * which is the reason `template` and `program` are two tables. See
+     * {@link ProgramService#resync} for what it does and does not touch.
+     */
+    @PostMapping("/{id}/resync")
+    public ProgramService.ResyncResult resync(@PathVariable UUID id) {
+        return programService.resync(id, trainerId());
+    }
+
     private UUID trainerId() {
         return UUID.fromString(
                 SecurityContextHolder.getContext().getAuthentication().getName());

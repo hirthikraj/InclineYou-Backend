@@ -51,6 +51,7 @@ public class SecurityConfig {
                 .securityContext(ctx -> ctx.securityContextRepository(securityContextRepository()))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/v1/auth/trainer").authenticated()
+                        .requestMatchers("/v1/auth/mode/**").authenticated()
                         .requestMatchers("/v1/auth/membership/**").hasRole("INVITED")
                         .requestMatchers("/v1/auth/**", "/health").permitAll()
                         .requestMatchers("/v1/client/**").hasRole("CLIENT")

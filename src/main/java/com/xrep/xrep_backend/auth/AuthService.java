@@ -25,13 +25,17 @@ import java.util.UUID;
  * Sign-in, and the one question it exists to answer: which half of the product
  * is this person, and is there anything they have to answer before they get in.
  *
- * ── One number, one role ──────────────────────────────────────────────────────
+ * ── One number, possibly two roles ────────────────────────────────────────────
  *
- * Role used to be inferred from where a row happened to exist — a phone in
- * `trainer` meant a trainer, a phone in `client` meant somebody's client, a
- * phone in both meant the app had to ask. It is now stated, in `app_user`, and
- * it is exclusive: the roster-add path refuses a number that already owns a
- * trainer account, so this method never has to resolve a person who is both.
+ * `app_user.role` is the *home* role — which half sign-in opens into by
+ * default — not an exclusivity lock. A phone can own a trainer account and
+ * also be a live client on somebody else's roster at the same time;
+ * {@link #trainerView} surfaces that second half as `clientOf` so the app can
+ * offer a switch, and `POST /v1/auth/mode/trainer` / `mode/client` mint the
+ * other role's token on demand without a fresh sign-in. `ClientPhoneGuard`
+ * still refuses one specific combination — a trainer's own number on their
+ * own roster — because that is the separate, unresolved "self-training"
+ * question, not this one.
  *
  * ── One round trip ────────────────────────────────────────────────────────────
  *
@@ -114,24 +118,18 @@ public class AuthService {
 
         List<Identity> rows = appUserRepo.findIdentityByPhone(phone);
 
-        // No identity at all. The number is real — they just proved it — and it
-        // is on nobody's roster: screen 7a, two exits, no dead end. Deliberately
-        // NOT a trainer account minted on the spot, because the likeliest first
-        // launch in this product is a CLIENT typing their number before their
-        // trainer has added them.
         if (rows.isEmpty()) {
             return pending(phone);
         }
 
-        Identity head = rows.get(0);
+        Identity head = rows.getFirst();
         String role = head.getRole();
 
         if (AppUser.ROLE_TRAINER.equals(role)) {
-            return trainerView(head);
+            return trainerView(head, rows);
         }
 
         if (AppUser.ROLE_GYM_ADMIN.equals(role)) {
-            // Reserved and not built. An honest "not yet" beats routing them into a trainer's Deck, which is not their data.
             return new AuthResponse(null, null, false, false,
                     VIEW_GYM_ADMIN, null, List.of(), null, null);
         }
@@ -141,12 +139,31 @@ public class AuthService {
 
     /* ------------------------------------------------------------- trainer */
 
-    private AuthResponse trainerView(Identity head) {
-        // A `role = 'trainer'` user whose trainer row is soft-deleted. Not a
-        // crash and not a trainer: send them to 7a, where claiming restores it.
+    /**
+     * A trainer's own sign-in — plus, now, any LIVE membership this same
+     * phone holds on somebody else's roster. {@code rows} already carries
+     * both halves in one shot ({@link AppUserRepository#findIdentityByPhone}
+     * LEFT JOINs `client` by phone unconditionally), so no second query is
+     * needed to discover them.
+     *
+     * Deliberately scoped to live (accepted/paused) memberships only — an
+     * outstanding invite or an unacknowledged removal on this number does
+     * NOT interrupt a trainer's sign-in the way it would a pure client's; the
+     * trainer role wins the destination, and those edge cases are left for a
+     * later pass. A trainer's own number can never appear in its own
+     * `clientOf`: {@code ClientPhoneGuard} refuses that combination before a
+     * row can ever be written.
+     */
+    private AuthResponse trainerView(Identity head, List<Identity> rows) {
         if (head.getTrainerId() == null) {
             return pending(phoneOf(head));
         }
+
+        List<Membership> clientOf = rows.stream()
+                .filter(r -> r.getClientId() != null)
+                .filter(AuthService::isLive)
+                .map(AuthService::toMembership)
+                .toList();
 
         return new AuthResponse(
                 jwtService.generate(head.getTrainerId(), phoneOf(head)),
@@ -155,7 +172,7 @@ public class AuthService {
                 head.getSetupCompletedAt() != null,
                 VIEW_TRAINER,
                 displayName(head.getTrainerOwnName(), phoneOf(head)),
-                List.of(),
+                clientOf,
                 null,
                 null);
     }
@@ -253,39 +270,27 @@ public class AuthService {
      * signing in. Idempotent: a second tap, or a retry after a dropped response,
      * returns the account that already exists.
      *
-     * Now also writes the identity. The `app_user` row is what makes the role
-     * exclusive from here on — once it says trainer, no trainer can add this
-     * number to a roster.
+     * A phone that is already somebody's client can claim a trainer account
+     * too — trainer↔client duality is allowed — and claiming is what makes
+     * trainer the *home* role from here on: the existing {@code app_user} row
+     * is updated to {@code role = 'trainer'} rather than refused. Their client
+     * memberships are untouched and stay reachable via
+     * {@code POST /v1/auth/mode/client}.
      */
     @Transactional
     public AuthResponse claimTrainer(String phone) {
-        // The token's subject. A pending token carries the phone; a trainer
-        // token carries a trainer id, and one of those arriving here means
-        // somebody already has an account — not a number to open one for.
+        // Pending token brings phone alone and Trainer token brings trainer Id. If phone is null means someone already logged in as trainer with this phone.
         if (phone == null || !phone.matches(AuthController.PHONE_PATTERN)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
                     "This sign-in already has a trainer account.");
         }
 
-        // A number already known as somebody's client cannot become a trainer
-        // without a decision about their memberships that nobody has made. The
-        // roster-add path guards the mirror image of this.
         Optional<AppUser> existing = appUserRepo.findByPhoneAndDeletedAtIsNull(phone);
-        if (existing.isPresent() && !AppUser.ROLE_TRAINER.equals(existing.get().getRole())) {
-            throw new ResponseStatusException(HttpStatus.CONFLICT,
-                    "This number is already on a trainer's roster as a client.");
-        }
 
         Trainer trainer = trainerRepo.findByPhoneAndDeletedAtIsNull(phone)
                 .orElseGet(() -> {
                     Trainer t = new Trainer();
                     t.setPhone(phone);
-                    // `name` is NOT NULL and sign-in has given us a phone number
-                    // and nothing else, so the number stands in until trainer
-                    // setup writes a real one. Not cosmetic: without it the
-                    // insert fails its not-null constraint and NOBODY can open a
-                    // trainer account. `displayName` below is what stops the
-                    // placeholder ever being greeted as if it were a name.
                     t.setName(phone);
                     return trainerRepo.save(t);
                 });
@@ -295,6 +300,10 @@ public class AuthService {
             user.setPhone(phone);
             user.setRole(AppUser.ROLE_TRAINER);
             user.setPrivacyAcceptedAt(Instant.now());
+            appUserRepo.save(user);
+        } else if (!AppUser.ROLE_TRAINER.equals(existing.get().getRole())) {
+            AppUser user = existing.get();
+            user.setRole(AppUser.ROLE_TRAINER);
             appUserRepo.save(user);
         }
 
@@ -331,7 +340,6 @@ public class AuthService {
             }
         });
 
-        // Re-resolve rather than hand-building the response: they may be on two rosters, and the client lens opens on all of them.
         return clientView(phone, appUserRepo.findIdentityByPhone(phone));
     }
 
@@ -365,6 +373,8 @@ public class AuthService {
      * local wipe happens on the phone; nothing here deletes anything, because
      * the trainer's books point at this row.
      */
+
+    // Need to check the importance of this method and why this is created.
     @Transactional
     public AuthResponse acknowledgeRemoval(String phone, UUID clientId) {
         Client membership = ownedMembership(phone, clientId);
@@ -376,6 +386,58 @@ public class AuthService {
         }
 
         return clientView(phone, appUserRepo.findIdentityByPhone(phone));
+    }
+
+    /* -------------------------------------------------------- mode switch */
+
+    /**
+     * The signed-in number, however the presented token spells it — a
+     * trainer token's subject is a trainer UUID, every other role's subject
+     * already IS the phone. {@link AuthController} reads the token's role
+     * off {@code SecurityContextHolder} and passes it here rather than this
+     * class reaching into the security context itself.
+     */
+    public String resolveCallerPhone(String subject, boolean isTrainerToken) {
+        if (!isTrainerToken) return subject;
+        return trainerRepo.findById(UUID.fromString(subject))
+                .map(Trainer::getPhone)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found."));
+    }
+
+    /**
+     * "Switch to trainer mode" — for a phone that is signed in as somebody's
+     * client (or mid-invite) and also owns a trainer account. Mints a fresh
+     * trainer token; the caller's existing client token is simply left to
+     * expire, the same way any other token does.
+     */
+    @Transactional(readOnly = true)
+    public AuthResponse switchToTrainer(String phone) {
+        List<Identity> rows = appUserRepo.findIdentityByPhone(phone);
+        Identity head = rows.stream()
+                .filter(r -> r.getTrainerId() != null)
+                .findFirst()
+                .orElseThrow(() -> new ResponseStatusException(
+                        HttpStatus.NOT_FOUND, "No trainer account on this number."));
+        return trainerView(head, rows);
+    }
+
+    /**
+     * "Switch to client mode" — for a trainer whose own phone also holds a
+     * LIVE membership on somebody else's roster. No membership id to pick:
+     * a client token is bound to the phone, not to one relationship (see
+     * {@link JwtService#generateClient}), so the response carries every live
+     * roster this number is on, same as any other client sign-in — the app's
+     * existing multi-roster picker is what disambiguates from there.
+     */
+    @Transactional(readOnly = true)
+    public AuthResponse switchToClient(String phone) {
+        List<Identity> rows = appUserRepo.findIdentityByPhone(phone);
+        boolean hasLiveMembership = rows.stream().anyMatch(AuthService::isLive);
+        if (!hasLiveMembership) {
+            throw new ResponseStatusException(
+                    HttpStatus.NOT_FOUND, "No active client membership on this number.");
+        }
+        return clientView(phone, rows);
     }
 
     /**

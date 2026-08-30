@@ -70,14 +70,11 @@ public class RedisOtpStore implements OtpStore {
     @Override
     public void saveCode(String phone, String hash, Instant expiresAt) {
         String key = codeKey(phone);
-        // Replace wholesale: a resend supersedes the previous code, and leaving the old attempt count behind would carry one code's guesses onto the next (AUTH-27/28).
         redis.delete(key);
         redis.opsForHash().putAll(key, Map.of(
                 HASH, hash,
                 EXPIRES, Long.toString(expiresAt.toEpochMilli()),
                 ATTEMPTS, "0"));
-
-        // The TTL is the expiry. Nothing has to notice the code has died — it is simply not there, which `activeCode` reads as "send a new one".
         redis.expireAt(key, expiresAt);
     }
 
@@ -105,8 +102,6 @@ public class RedisOtpStore implements OtpStore {
 
     @Override
     public void consume(String phone) {
-        // Deleted rather than flagged. A code that is gone cannot be replayed,
-        // and there is no second state to get wrong (AUTH-29).
         redis.delete(codeKey(phone));
     }
 
@@ -115,8 +110,6 @@ public class RedisOtpStore implements OtpStore {
         Duration ttl = Duration.between(Instant.now(), until);
         if (ttl.isNegative() || ttl.isZero()) return;
         redis.opsForValue().set(lockKey(phone), Long.toString(until.toEpochMilli()), ttl);
-        // The live code goes with the lock. Three wrong guesses means this code
-        // is finished; the way back is a new one, which is what the screen says.
         redis.delete(codeKey(phone));
     }
 
@@ -132,9 +125,6 @@ public class RedisOtpStore implements OtpStore {
     public void recordSend(String phone, Instant at) {
         String key = sendsKey(phone);
         double score = at.toEpochMilli();
-        // The member must be unique or two sends in the same millisecond collapse
-        // into one ZSET entry and the ceiling silently counts short — which is a
-        // rate limit that undercounts exactly when it is being hammered.
         redis.opsForZSet().add(key, at.toEpochMilli() + ":" + java.util.UUID.randomUUID(), score);
         trim(key, at.minus(SENDS_RETENTION));
         redis.expire(key, SENDS_RETENTION);

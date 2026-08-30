@@ -29,12 +29,18 @@ public class ClientSyncController {
 
     private final ClientSyncService clientSync;
 
+    /**
+     * {@code libraryPulledAt} is the shared exercise library's own cursor, the
+     * same second cursor {@code /v1/sync/pull} takes and for the same reason —
+     * see the note there. Optional; absent is the pre-existing behaviour.
+     */
     @GetMapping("/pull")
     public ResponseEntity<SyncService.PullResponse> pull(
             @RequestParam UUID clientId,
-            @RequestParam(required = false) Long lastPulledAt) {
+            @RequestParam(required = false) Long lastPulledAt,
+            @RequestParam(required = false) Long libraryPulledAt) {
         var scope = clientSync.resolve(currentPhone(), clientId);
-        return ResponseEntity.ok(clientSync.pull(scope, lastPulledAt));
+        return ResponseEntity.ok(clientSync.pull(scope, lastPulledAt, libraryPulledAt));
     }
 
     @PostMapping("/push")

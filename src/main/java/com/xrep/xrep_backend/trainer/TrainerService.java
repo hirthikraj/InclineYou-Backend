@@ -30,22 +30,53 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class TrainerService {
 
-    /**
-     * Guards against abuse, NOT the product rule. The app caps specialities at
-     * five; if that cap moves to six, a phone that can't be force-updated must
-     * not start failing against a server that still says five. So the server
-     * limit sits well above the UI's and only exists to stop someone posting a
-     * thousand entries.
-     */
+
     private static final int MAX_LIST = 25;
     private static final int MAX_ITEM_LENGTH = 80;
 
-    private final TrainerRepository repo;
+    /**
+     * The identity caps — V33. Held here rather than in the column, so raising
+     * one is a line of Java and not a migration under the additive-only law.
+     *
+     * 80 characters is one line beside an avatar at every width the two halves
+     * draw ("Strength & fat-loss coach · Indiranagar" is 39). 1200 comfortably
+     * fits the 200 words the bio asks for, at the ~6 characters a word runs to.
+     */
+    private static final int MAX_HEADLINE = 80;
+    private static final int MAX_BIO = 1200;
 
     /**
-     * `setupComplete` is derived rather than stored as a boolean so there is
-     * exactly one source of truth, and so we know WHEN it happened.
+     * `map_link` — V34. Refused rather than truncated, for the same reason as
+     * the two above and one more: a URL cut at its 500th character is not a
+     * shortened link, it is a broken one, and 200 OK on a link that no longer
+     * opens is the worst of the three outcomes.
+     *
+     * 500 is generous on purpose. A Google Maps share URL with a place id and a
+     * plus code runs to about 200; the long form with coordinates and a
+     * `data=` blob is longer still, and cutting one is exactly what must not
+     * happen.
      */
+    private static final int MAX_MAP_LINK = 500;
+
+    /**
+     * The social links — V35. The same 500 as the map link, and for the same
+     * reason: what arrives here is a PASTE, share token and all, and it is only
+     * after {@link SocialLink} has reduced it that the stored string is short.
+     * Refusing rather than truncating matters more here than anywhere, because
+     * a canonicaliser handed a cut URL does not fail — it reads the shortened
+     * handle as a real one and stores a link to somebody else's account.
+     */
+    private static final int MAX_SOCIAL_LINK = 500;
+
+    /** RFC 5321's ceiling on an address. V36 — refused over, never truncated. */
+    private static final int MAX_EMAIL = 254;
+
+    private static final String PREFS_KEY = "prefs";
+    private static final int MAX_PREFS = 60;
+
+
+    private final TrainerRepository repo;
+
     public record TrainerResponse(
             String id,
             String phone,
@@ -57,28 +88,51 @@ public class TrainerService {
             List<String> languages,
             boolean setupComplete,
             Instant setupCompletedAt,
-            /* Screen 02 · what you sell. 'independent' | 'gym' | 'both' — the
-               onboarding answer, a defaults hint. Null means never asked. */
             String workMode,
-            /* Screen 06 · money. Null gym name means no gym, which is not the
-               same as a 0% cut — one hides the "your share" line entirely, the
-               other claims an arrangement that keeps all of it. */
             String gymName,
             BigDecimal gymSharePercent,
-            /* Screens 07–16 · settings. An open map rather than a column per
-               switch — see `prefs` below. */
-            Map<String, Object> preferences
+            Map<String, Object> preferences,
+            /* ---- identity (V33). Null means never answered. ---- */
+            String headline,
+            String bio,
+            /** Canonical watch URL. */
+            String introVideoUrl,
+            /**
+             * The 11-character id out of {@code introVideoUrl}, derived not
+             * stored. It is on the wire so a card that wants a thumbnail or an
+             * `<iframe>` does not re-implement the parse in TypeScript — which
+             * is the same argument that put `label` and `variables` on the
+             * nudge-template wire rather than in a copy on each half.
+             */
+            String introVideoId,
+            /* ---- where and how (V34). Null / empty means never answered. ---- */
+            /** Verbatim, as pasted. Not canonicalised — see V34. */
+            String mapLink,
+            List<String> trainingModes,
+            List<String> serviceAreas,
+            /* ---- where to look (V35). Null means never answered. ---- */
+            /** Canonical profile URL. */
+            String instagramUrl,
+            /** Canonical CHANNEL URL — not a video. */
+            String youtubeUrl,
+            /**
+             * {@code @handle} out of whichever of the two is set, derived not
+             * stored — on the wire for the same reason {@code introVideoId} is,
+             * so a card that wants to render the handle rather than the URL does
+             * not re-implement the parse. Null for a {@code /channel/UC…} URL,
+             * which genuinely has no handle to show.
+             */
+            String instagramHandle,
+            String youtubeHandle,
+            /* ---- the account (V36). Null means never answered. ---- */
+            /**
+             * A contact address, not a login. Appended LAST, like every field
+             * before it, because a response field's position is part of the
+             * additive contract every older build reads by name.
+             */
+            String email
     ) {}
 
-    /**
-     * @param completeSetup true stamps the profile as finished. It never
-     *                      un-stamps: setup happens once, and a later Settings
-     *                      edit that happened to send `false` must not push the
-     *                      trainer back into onboarding.
-     * @param preferences   merged key by key, not replaced. Settings sends one
-     *                      switch at a time and must not blank the other eight;
-     *                      a key set to null is a deletion.
-     */
     public record UpdateRequest(
             String name,
             String upiVpa,
@@ -90,28 +144,30 @@ public class TrainerService {
             String workMode,
             String gymName,
             BigDecimal gymSharePercent,
-            Map<String, Object> preferences
+            Map<String, Object> preferences,
+            /* ---- identity (V33). Null leaves alone; "" clears. ---- */
+            String headline,
+            String bio,
+            /** Any YouTube shape; stored canonical. "" clears. */
+            String introVideoUrl,
+            /* ---- where and how (V34). Null leaves alone; "" / [] clears. ---- */
+            String mapLink,
+            List<String> trainingModes,
+            List<String> serviceAreas,
+            /* ---- where to look (V35). Null leaves alone; "" clears. ---- */
+            /** A profile URL or a bare {@code @handle}; stored canonical. */
+            String instagramUrl,
+            /** A channel URL or a bare {@code @handle}; stored canonical. */
+            String youtubeUrl,
+            /* ---- the account (V36). Null leaves alone; "" clears. ---- */
+            /**
+             * A contact address. Checked for shape only — there is nothing in
+             * this backend that could send to it and therefore nothing that
+             * could verify it, and a screen that claimed otherwise would be
+             * making a promise the product cannot keep.
+             */
+            String email
     ) {}
-
-    /**
-     * Where the settings switches live: `trainer.metadata.prefs`.
-     *
-     * Not a column each. There are nine notification switches, a chase window, a
-     * default reminder tone and a QR toggle, all of them small, all of them
-     * additive, and every one of them would otherwise be a migration — which is
-     * exactly what V8 added the metadata bag to avoid. The phone is the source
-     * of truth for its own UI and writes these through opportunistically; the
-     * server needs them because push decisions are made server-side, and a
-     * notification switch that only exists on the device it was flipped on is a
-     * switch that does nothing.
-     *
-     * Untyped on purpose. A newer app storing a preference this build has never
-     * heard of must round-trip it rather than get a 400.
-     */
-    private static final String PREFS_KEY = "prefs";
-
-    /** Enough for every switch the design defines, several times over. */
-    private static final int MAX_PREFS = 60;
 
     public TrainerResponse get(UUID trainerId) {
         return toResponse(load(trainerId));
@@ -124,26 +180,14 @@ public class TrainerService {
         if (req.name() != null && !req.name().isBlank()) t.setName(trim(req.name(), 100));
         if (req.upiVpa() != null) t.setUpiVpa(req.upiVpa().isBlank() ? null : trim(req.upiVpa(), 100));
         if (req.experienceBand() != null) {
-            // Deliberately not checked against a fixed set. A newer app sending
-            // a band this build has never heard of must not get a 400 — the
-            // value is only ever displayed and filtered on, so an unknown one
-            // degrades gracefully instead of losing the trainer's answer.
             t.setExperienceBand(req.experienceBand().isBlank() ? null : trim(req.experienceBand(), 20));
         }
         if (req.specialities() != null) t.setSpecialities(clean(req.specialities(), "specialities"));
         if (req.certifications() != null) t.setCertifications(clean(req.certifications(), "certifications"));
         if (req.languages() != null) t.setLanguages(clean(req.languages(), "languages"));
-
         if (req.workMode() != null) {
-            // Same contract as experienceBand: not checked against a fixed set,
-            // so a newer app's mode this build has never heard of is kept, not
-            // bounced with a 400. It is a display-and-defaults hint only.
-            t.setWorkMode(req.workMode().isBlank() ? null : trim(req.workMode(), 20));
+            t.setWorkMode(req.workMode().isBlank() ? null : parseWorkMode(req.workMode()));
         }
-
-        // An empty gym name is a real instruction — the trainer left the gym —
-        // and it clears the percentage with it, so the app can never show a
-        // share of nothing.
         if (req.gymName() != null) {
             if (req.gymName().isBlank()) {
                 t.setGymName(null);
@@ -160,13 +204,33 @@ public class TrainerService {
             }
             t.setGymSharePercent(pct);
         }
-
+        if (req.headline() != null) {
+            t.setHeadline(req.headline().isBlank() ? null : bounded(req.headline(), MAX_HEADLINE, "headline"));
+        }
+        if (req.bio() != null) {
+            t.setBio(req.bio().isBlank() ? null : bounded(req.bio(), MAX_BIO, "bio"));
+        }
+        if (req.introVideoUrl() != null) {
+            t.setIntroVideoUrl(req.introVideoUrl().isBlank() ? null : canonicalVideo(req.introVideoUrl()));
+        }
+        if (req.mapLink() != null) {
+            t.setMapLink(req.mapLink().isBlank() ? null : mapLink(req.mapLink()));
+        }
+        if (req.instagramUrl() != null) {
+            t.setInstagramUrl(req.instagramUrl().isBlank() ? null : instagram(req.instagramUrl()));
+        }
+        if (req.youtubeUrl() != null) {
+            t.setYoutubeUrl(req.youtubeUrl().isBlank() ? null : youtubeChannel(req.youtubeUrl()));
+        }
+        if (req.email() != null) {
+            t.setEmail(req.email().isBlank() ? null : email(req.email()));
+        }
+        if (req.trainingModes() != null) t.setTrainingModes(clean(req.trainingModes(), "trainingModes"));
+        if (req.serviceAreas() != null) t.setServiceAreas(clean(req.serviceAreas(), "serviceAreas"));
         if (req.preferences() != null) mergePrefs(t, req.preferences());
-
         if (Boolean.TRUE.equals(req.completeSetup()) && t.getSetupCompletedAt() == null) {
             t.setSetupCompletedAt(Instant.now());
         }
-
         return toResponse(repo.save(t));
     }
 
@@ -191,14 +255,6 @@ public class TrainerService {
         return out;
     }
 
-    /**
-     * Merges one patch of preferences into the bag.
-     *
-     * A whole-map replace would be wrong: the Notifications screen flips one
-     * switch and sends one key, and replacing would silently turn the other
-     * eight back to their defaults. A null value is the one way to remove a key,
-     * which is how a trainer goes back to "follow the phone".
-     */
     @SuppressWarnings("unchecked")
     private void mergePrefs(Trainer t, Map<String, Object> patch) {
         var metadata = t.getMetadata();
@@ -224,15 +280,108 @@ public class TrainerService {
         }
 
         metadata.put(PREFS_KEY, prefs);
-        // Hibernate compares JSON columns by reference for dirty checking, so a
-        // mutated-in-place map can be saved without ever being written. A fresh
-        // instance is what guarantees the UPDATE happens.
         t.setMetadata(new HashMap<>(metadata));
     }
 
     private String trim(String value, int max) {
         String trimmed = value.trim();
         return trimmed.length() > max ? trimmed.substring(0, max) : trimmed;
+    }
+
+    /**
+     * Like {@link #trim} but it REFUSES instead of truncating, and the
+     * difference is deliberate.
+     *
+     * Everywhere above, an over-long value is silently cut: a 130-character name
+     * or UPI id is a paste accident, and the tail carries nothing. A bio is
+     * prose somebody wrote, and quietly dropping its last sentence — while
+     * answering 200 OK and echoing back a profile that looks saved — is the
+     * worst of the three possible outcomes. Both halves cap the field in the UI
+     * anyway, so anything arriving here over the limit did not come from a
+     * screen and deserves to be told.
+     */
+    private String bounded(String value, int max, String field) {
+        String trimmed = value.trim();
+        if (trimmed.length() > max) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, field + ": at most " + max + " characters");
+        }
+        return trimmed;
+    }
+
+    private String canonicalVideo(String raw) {
+        try {
+            return YouTubeLink.canonicalise(raw);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "introVideoUrl: must be a YouTube link");
+        }
+    }
+
+    /**
+     * A map link, checked for being a link and nothing else.
+     *
+     * There is no `MapLink.java` beside {@link YouTubeLink} and there should not
+     * be one. A YouTube URL has a single canonical form and one field that
+     * matters, so reducing it is a service. A maps URL does not: the share sheet
+     * emits a short `maps.app.goo.gl` redirect, the desktop bar emits a long
+     * `/maps/place/...@lat,lng,z/data=` string, Apple and OpenStreetMap emit
+     * neither, and a parser that "normalised" any of those would eventually
+     * break a link that worked. So the only thing refused here is a value that
+     * is not a URL at all — a typed address, a phone number, a sentence — which
+     * is the one failure a trainer would not otherwise discover until a client
+     * tapped it.
+     */
+    private String mapLink(String raw) {
+        String url = bounded(raw, MAX_MAP_LINK, "mapLink");
+        String lower = url.toLowerCase();
+        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "mapLink: must be a link starting http:// or https://");
+        }
+        return url;
+    }
+
+    private String instagram(String raw) {
+        String value = bounded(raw, MAX_SOCIAL_LINK, "instagramUrl");
+        try {
+            return SocialLink.instagram(value);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "instagramUrl: must be an Instagram profile — instagram.com/yourname, or @yourname");
+        }
+    }
+
+    /**
+     * A channel, and the refusal names the likely mistake.
+     *
+     * A trainer who pastes a watch URL here has pasted it one field too far
+     * down — {@code introVideoUrl} wants exactly that string — and a generic
+     * "not a YouTube channel" would leave them re-pasting the same link. This
+     * is the same argument as reading the server's {@code detail} on the web:
+     * the refusal a person can act on is the one that says what they did.
+     */
+    private String youtubeChannel(String raw) {
+        String value = bounded(raw, MAX_SOCIAL_LINK, "youtubeUrl");
+        try {
+            return SocialLink.youtube(value);
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    SocialLink.isVideo(value)
+                            ? "youtubeUrl: that is a video, not a channel — the intro video field takes it"
+                            : "youtubeUrl: must be a YouTube channel — youtube.com/@yourname");
+        }
+    }
+
+    private WorkMode parseWorkMode(String value) {
+        try {
+            return WorkMode.fromValue(trim(value, 20));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST, "workMode: must be one of independent, gym, both");
+        }
     }
 
     private TrainerResponse toResponse(Trainer t) {
@@ -247,10 +396,22 @@ public class TrainerService {
                 orEmpty(t.getLanguages()),
                 t.getSetupCompletedAt() != null,
                 t.getSetupCompletedAt(),
-                t.getWorkMode(),
+                t.getWorkMode() == null ? null : t.getWorkMode().value(),
                 t.getGymName(),
                 t.getGymSharePercent(),
-                prefsOf(t)
+                prefsOf(t),
+                t.getHeadline(),
+                t.getBio(),
+                t.getIntroVideoUrl(),
+                YouTubeLink.idOf(t.getIntroVideoUrl()),
+                t.getMapLink(),
+                orEmpty(t.getTrainingModes()),
+                orEmpty(t.getServiceAreas()),
+                t.getInstagramUrl(),
+                t.getYoutubeUrl(),
+                SocialLink.handleOf(t.getInstagramUrl()),
+                SocialLink.handleOf(t.getYoutubeUrl()),
+                t.getEmail()
         );
     }
 
@@ -262,7 +423,46 @@ public class TrainerService {
         return (prefs instanceof Map<?, ?> m) ? (Map<String, Object>) m : Map.of();
     }
 
-    /** Rows written before V8 read back as null, not as an empty array. */
+    /**
+     * An address, checked for shape and nothing else.
+     *
+     * <p>Three rules, and the restraint is the point: one {@code @}, something
+     * on each side of it, and a dot in the domain. There is no attempt at RFC
+     * 5322 — a regex that tries costs several hundred characters, still gets
+     * quoted local parts wrong, and rejects addresses that work. **The only
+     * check that ever settles an address is sending to it**, and this backend
+     * cannot send, so the honest ceiling on what we may claim is "that is not
+     * an address at all".
+     *
+     * <p>Refused over the cap rather than truncated, like {@code headline} and
+     * {@code bio} and unlike every other string on this endpoint: half an
+     * address is not a shorter address, it is a wrong one, and a silent
+     * truncation would store a plausible-looking string that reaches nobody.
+     *
+     * <p>Both refusals are {@link AccountRuleException} rather than {@code
+     * ResponseStatusException}, and that is not a style choice — this service
+     * sets no {@code spring.mvc.problemdetails.enabled}, so a {@code
+     * ResponseStatusException} serialises through the servlet error page as
+     * {@code {timestamp, status, error, path}} and the sentence reaches the log
+     * and never the trainer. Measured against a running server: {@code
+     * headline}, {@code bio} and {@code gymSharePercent} all still answer a bare
+     * 400 for exactly that reason.
+     */
+    private String email(String raw) {
+        String value = raw.trim();
+        if (value.length() > MAX_EMAIL) throw AccountRuleException.emailTooLong(MAX_EMAIL);
+        int at = value.indexOf('@');
+        if (at <= 0
+                || at != value.lastIndexOf('@')
+                || at == value.length() - 1
+                || value.indexOf('.', at) < 0
+                || value.endsWith(".")
+                || value.chars().anyMatch(Character::isWhitespace)) {
+            throw AccountRuleException.emailNotAnAddress();
+        }
+        return value;
+    }
+
     private List<String> orEmpty(List<String> value) {
         return value == null ? List.of() : value;
     }

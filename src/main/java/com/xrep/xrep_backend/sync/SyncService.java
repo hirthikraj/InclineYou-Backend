@@ -23,7 +23,15 @@ public class SyncService {
 
     // ── Response types ────────────────────────────────────────────────────────
 
-    public record PullResponse(long timestamp, Map<String, TableChanges> changes) {}
+    /**
+     * {@code libraryTimestamp} is the watermark for the shared exercise library,
+     * to be stored and sent back as {@code libraryPulledAt}. It is a separate
+     * number from {@code timestamp} for the same reason the library has a
+     * separate cursor: the two advance on different things. A build that ignores
+     * it behaves exactly as it did.
+     */
+    public record PullResponse(long timestamp, long libraryTimestamp,
+                               Map<String, TableChanges> changes) {}
 
     public record TableChanges(
             List<Map<String, Object>> created,
@@ -59,9 +67,28 @@ public class SyncService {
 
     @Transactional(readOnly = true)
     public PullResponse pull(UUID trainerId, Long lastPulledAt) {
+        return pull(trainerId, lastPulledAt, null);
+    }
+
+    @Transactional(readOnly = true)
+    public PullResponse pull(UUID trainerId, Long lastPulledAt, Long libraryPulledAt) {
         Timestamp cursor = (lastPulledAt != null && lastPulledAt > 0)
                 ? Timestamp.from(Instant.ofEpochMilli(lastPulledAt))
                 : Timestamp.from(Instant.EPOCH);
+
+        /*
+         * The library's own cursor. A build that does not send one falls back to
+         * the main cursor, which is exactly what it received before this
+         * existed — the referential clause in `fetchExercises` is what keeps
+         * such a device correct, rather than this fallback.
+         *
+         * Deliberately NOT defaulted to the epoch: that would put all 1,324
+         * shared rows in every pull from every older build, turning a missing-row
+         * bug into a megabyte on every sync.
+         */
+        Timestamp libraryCursor = (libraryPulledAt != null && libraryPulledAt > 0)
+                ? Timestamp.from(Instant.ofEpochMilli(libraryPulledAt))
+                : (libraryPulledAt != null ? Timestamp.from(Instant.EPOCH) : cursor);
 
         String tid = trainerId.toString();
         log.debug("sync pull trainer={} cursor={}", tid, cursor);
@@ -69,7 +96,7 @@ public class SyncService {
         var changes = new LinkedHashMap<String, TableChanges>();
         changes.put("clients",              fetchClients(                                  tid, cursor));
         changes.put("body_metrics",         fetchViaClient("body_metric",                  tid, cursor));
-        changes.put("exercises",            fetchExercises(                                tid, cursor));
+        changes.put("exercises",            fetchExercises(                 tid, cursor, libraryCursor));
         changes.put("templates",            fetchDirect("template",          "trainer_id", tid, cursor));
         // V26 Phase 2 · these three MOVE when a client is reassigned, so each one
         // also has to be able to say "this left your scope" — see
@@ -145,7 +172,8 @@ public class SyncService {
         changes.put("teams",                fetchTeams(                                    tid, cursor));
         changes.put("team_members",         fetchTeamMembers(                              tid, cursor));
 
-        return new PullResponse(Instant.now().toEpochMilli(), changes);
+        long now = Instant.now().toEpochMilli();
+        return new PullResponse(now, now, changes);
     }
 
     /* ─── V26 Phase 2 · reassignment and the shape of a device's scope ───────
@@ -344,8 +372,8 @@ public class SyncService {
      * <p>With no team, the subquery is empty and this behaves exactly as it did
      * before V26.
      */
-    private TableChanges fetchExercises(String tid, Timestamp cursor) {
-        var params = Map.of("tid", tid, "cursor", cursor);
+    private TableChanges fetchExercises(String tid, Timestamp cursor, Timestamp libraryCursor) {
+        var params = Map.of("tid", tid, "cursor", cursor, "libraryCursor", libraryCursor);
 
         // Kept as a subquery on :tid rather than a bound list of ids: one
         // parameter, one place for the membership rule to live, and it stays
@@ -365,19 +393,94 @@ public class SyncService {
                               LIMIT 1))
                 """;
 
+        /*
+         * Two cursors, because the two halves of this collection are different
+         * kinds of thing.
+         *
+         * A CUSTOM exercise is the caller's own data (or a teammate's, per the
+         * note above), so `updated_at > :cursor` means what it means everywhere
+         * else in this class: what of yours has changed.
+         *
+         * The SHARED library is nobody's. It changes only when `ExerciseSeeder`
+         * runs, which is roughly never, so a cursor over it answers "has the
+         * library been re-imported since you last synced" — a question whose
+         * answer is almost always no, and never the question the device is
+         * actually asking, which is "do I have it at all". `:libraryCursor` lets
+         * the device ask the second one: zero means "none of it", and it
+         * advances only when the library is applied.
+         *
+         * The third clause is the safety net, and it is what makes a device
+         * correct even when it never asks. If this pull is carrying a plan row,
+         * a log row or a star that NAMES an exercise, it carries the exercise
+         * too. Bounded by what is already being sent — a steady-state pull with
+         * no new plans and no new logs adds nothing — and self-cancelling once
+         * the device holds the library, since the rows are then already there
+         * and re-sending them is an idempotent upsert.
+         *
+         * That clause is also why the seed scripts no longer have to touch
+         * `exercise.updated_at` to make their own logs renderable.
+         */
+        String referencedByThisPull = """
+                    id IN (
+                        SELECT pe.exercise_id
+                          FROM program_exercise pe
+                          JOIN program p ON p.id = pe.program_id
+                         WHERE p.trainer_id = :tid::uuid
+                           AND pe.updated_at > :cursor
+                        UNION
+                        SELECT we.exercise_id
+                          FROM workout_exercise we
+                          JOIN workout_session w ON w.id = we.workout_session_id
+                         WHERE w.trainer_id = :tid::uuid
+                           AND we.updated_at > :cursor
+                        UNION
+                        -- A swap names two exercises and the log draws both:
+                        -- "Dumbbell bench press, was Barbell bench press".
+                        SELECT we.swapped_from_exercise_id
+                          FROM workout_exercise we
+                          JOIN workout_session w ON w.id = we.workout_session_id
+                         WHERE w.trainer_id = :tid::uuid
+                           AND we.swapped_from_exercise_id IS NOT NULL
+                           AND we.updated_at > :cursor
+                        UNION
+                        SELECT sl.exercise_id
+                          FROM set_log sl
+                          JOIN workout_session w ON w.id = sl.workout_session_id
+                         WHERE w.trainer_id = :tid::uuid
+                           AND sl.updated_at > :cursor
+                        UNION
+                        SELECT f.exercise_id
+                          FROM exercise_favourite f
+                         WHERE f.trainer_id = :tid::uuid
+                           AND f.updated_at > :cursor)
+                """;
+
+        String changedForThisCaller = """
+                    (is_custom AND (%s) AND updated_at > :cursor)
+                    OR (NOT is_custom AND updated_at > :libraryCursor)
+                    OR (NOT is_custom AND %s)
+                """.formatted(visibleAuthors, referencedByThisPull);
+
         String aliveSql = """
                 SELECT * FROM exercise
                 WHERE (is_custom = false OR %s)
                   AND deleted_at IS NULL
-                  AND updated_at > :cursor
+                  AND (%s)
                 ORDER BY updated_at ASC
-                """.formatted(visibleAuthors);
+                """.formatted(visibleAuthors, changedForThisCaller);
 
+        /*
+         * Tombstones stay on the caller's own cursor for the custom half and the
+         * library's for the shared half — but never on the referential clause.
+         * A deleted exercise is not "needed" by anything; the rows that named it
+         * keep their id and resolve to a name the device already holds.
+         */
         String deadSql = """
                 SELECT id::text FROM exercise
                 WHERE (is_custom = false OR %s)
                   AND deleted_at IS NOT NULL
-                  AND updated_at > :cursor
+                  AND ((is_custom AND updated_at > :cursor)
+                       OR (NOT is_custom AND updated_at > :libraryCursor))
                 """.formatted(visibleAuthors);
 
         var deleted = new ArrayList<>(queryIds(deadSql, params));
