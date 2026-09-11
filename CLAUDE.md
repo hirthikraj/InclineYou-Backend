@@ -18,6 +18,67 @@ design set is `web app/Design/webapp/webapp/`. The gym admin console and the
 client portal are slated to live in that same project, which is why it is Next
 rather than a static bundle.
 
+## Shipping the web first
+
+`WEB_LAUNCH.md` at this level is the launch book for the web half — the
+eighteen must-do items standing between the current tree and a production
+deployment, seven of them hard blockers, an
+India-first hosting analysis for all three layers with alternates, and the
+security checklist to sign off before release. **Read it before any deployment
+or infrastructure work.** Two of its blockers are worth knowing even if you
+never deploy: the web never sends `X-XRep-Client: web`, so it holds an
+unrevocable JWT rather than the session V41 built for it, and no SMS provider is
+wired, so nothing can sign in off a development machine.
+
+**The client portal ships in v1** (30 Aug 2026) and is **four `NotBuilt` stubs**
+— `/me/today`, `/invite/[clientId]` and the paused/removed walls. Tier 4 of the
+RLS model is built and correct, but a client's entire API surface is
+`/v1/client/sync/{pull,push}`, the protocol written for the offline phone — so
+the online-only web needs **client-scoped REST reads that do not exist yet**, a
+gap `BACKEND_GAPS.md` does not list because it was assessed for the trainer
+half. `WEB_LAUNCH.md` §5.13 is the whole argument, including why the invite
+screen is where consent has to be captured.
+
+`PRICING.md` beside it is the pricing proposal built on that running cost:
+**flat on clients, per seat on trainers** — Free (3 clients) · **Pro ₹499/mo,
+unlimited clients** · **Team ₹499 per trainer** — anchored on *one PT session a
+month*. The two axes get opposite answers from one test: *does charging for this
+give somebody a reason not to record what the product depends on?* **Clients:
+yes** — in-person coaching caps a roster at 16–24 (the 48-session week the seed
+scripts derive), so the axis has no range anyway, and a band boundary is a reason
+to keep client eleven in a notebook. **Trainers: no** — V26's *a team widens
+reads, never moves ownership* means a coach left off a team corrupts nothing;
+the owner simply forgoes the visibility they were buying. `team.seat_limit`
+already exists in `TeamService` (`defaultSeatLimit = 5`), so the meter is built
+and merely unconnected to money. Four rules bind product decisions and not
+merely commercial ones: **never price per client**, **never price on
+collections** (both make an incomplete money book rational), **never sell
+unlimited trainers** (it prices a studio below a solo trainer for the same
+software), and **never gate the money book**, the wedge and the retention hook.
+Settled 30 Aug 2026 on top of that: **one free non-coaching admin seat per
+team** (the test is coaching, not role — a `team_member` with no clients is
+free), **no volume discount to ten seats and a support conversation above ten**,
+a **30-day free trial**, and **GST registration with compliant invoices from the
+first paying customer** — which makes the **₹499 tag inclusive of GST** (decided; nets
+₹422.88) and makes the OIDAR GST on hosting reclaimable. ₹599 inclusive is held
+as headroom for a later cohort — price rises apply to new signups only. AI chat pricing is deliberately
+deferred; gym pricing is out of scope until Ring 2 exists. Nothing is wired —
+there is no billing in the product, and as of 30 Aug 2026 that is tracked as a
+blocker rather than as a later phase: `WEB_LAUNCH.md` §5.16 (MUST-16…18) and the
+runbook's §4b. The split to keep in mind is that **the 30-day trial clock blocks
+the launch and the payment rail does not** — the rail is due on day 31, but a
+trainer signed up against a schema with no trial start has no honest expiry ever,
+and billing tables must carry **no `tenant_id`**, because a seat is a coaching
+trainer and V37 lets one coach in two workspaces. The gateway is **Razorpay**
+(Cashfree as the alternate), picked on UPI-Autopay maturity rather than price —
+**UPI and RuPay debit are 0% MDR by regulation** and cards are ~2%, so
+collection costs ₹0–10 per seat per month and the real number is mandate
+success, not MDR. Integrate behind a `BillingProvider` interface (the
+`AuthTokenIssuer` pattern) and through a **hosted redirect, not the gateway's
+JS SDK** — an embedded `checkout.js` would put a third-party script and frame
+into the CSP on the money screen and break the web's *no browser talks to
+anything but Next* property.
+
 ## The contract between them
 
 `backend/API.md` is the source of truth for the wire format — endpoints, the
@@ -239,6 +300,33 @@ Rules that touch both halves:
   is a section of the profile's *Work & hours* tab. The strip's layout lives in a
   `(sections)` route group precisely so it does not wrap `/settings/profile`,
   which has seven tabs and a layout of its own.
+- **A row belongs to a workspace, and it never moves.** V37–V42 added `tenant`,
+  `tenant_member` and an **immutable** `tenant_id` on 29 tables, plus Postgres
+  row-level security. The point is that `trainer_id` ("who coaches") and
+  `tenant_id` ("whose books") are now **independent**: one person can coach
+  privately *and* at a gym with different clients, and one human can be a client
+  under two arrangements — which is two `client` rows in two workspaces.
+  Consequences that reach past the backend: **`PHONE_ON_ANOTHER_ROSTER` narrowed**
+  to mean "another coach *in this workspace*", so the app's copy for that error is
+  now wrong on the phone; the money book is **always the active workspace alone**,
+  enforced by the database, while the diary spans them all (`X-XRep-View`); and
+  **nothing entered sync**, so no phone build notices — the same shape as V30 and
+  V32–V36. A trainer in two workspaces does pull both onto one phone, mixed, until
+  the app adopts the column. `backend/TENANCY.md` is the whole argument. **The backend's dev runtime now
+connects as the non-owning `xrep_app`, so the policies are live locally**;
+production is one variable behind. The database has **two identities and two
+pairs of environment variables** — `APP_DB_USERNAME` / `APP_DB_PASSWORD` for
+every request, `MIGRATION_DB_USERNAME` / `MIGRATION_DB_PASSWORD` for Flyway, the
+seeds and the test suite, sharing one `DATABASE_URL`. `.env.example` at this
+level is the checklist and is also what `docker compose` reads.
+- **The web signs in with a session, the phone with a JWT.** V41 put both behind
+  one interface (`AuthTokenIssuer`): the phone is offline half the time and needs
+  a self-contained token, the browser is not and needs a revocable one. Send
+  `X-XRep-Client: web` to get a session; absence means mobile, and that default is
+  load-bearing for every build already in the field. Switching workspace costs the
+  web an `UPDATE` and the phone a new token — `POST /v1/tenants/{id}/activate`
+  returns `token: null` when the existing credential still works, and the client
+  must **not** read that as a sign-out.
 - Template days are **ordinal slots**. Weekdays and times are chosen per client at
   apply time into `program.schedule`; the count must match or apply 400s.
 - **A gym is a visibility grant too — designed, not built.**
