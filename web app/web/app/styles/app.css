@@ -4001,6 +4001,15 @@ a.gapb--h{display:flex}
 }
 
 /* ── the load and rep steppers ──────────────────────────────────────────────
+   `nstp` and not `stp`, and the extra letter is load-bearing: §22 already owns
+   `.stp` for the SETUP PLATE — `display:grid; grid-template-columns:332px
+   minmax(0,1fr)` — and this file is read after webapp.css, so a second `.stp`
+   here at the same specificity silently won everywhere. `/setup` came out as a
+   right-aligned flex row of two content-sized children floating in the middle
+   of a black viewport, which is `justify-content:flex-end` + `align-items:
+   center` applied to a rail and a form that expected two grid tracks. The
+   whole `stp__*` family below is renamed with it, for the same reason.
+
    §09 draws the set row as five columns and six inputs, and nothing else: on a
    phone the fields ARE the stepper, because a numeric keypad is one tap away
    and the thumb is already there. A desk has no keypad and a mouse, and the
@@ -4015,28 +4024,28 @@ a.gapb--h{display:flex}
    `.sets td.num` is `text-align:right`, which does nothing to a flex child, so
    the row is right-aligned explicitly and the input keeps the 104px cap the
    design gives it. */
-.stp{display:flex;align-items:center;justify-content:flex-end;gap:5px}
-.sets td.num .stp .ctl{flex:0 1 104px;min-width:0}
-.stp__b{
+.nstp{display:flex;align-items:center;justify-content:flex-end;gap:5px}
+.sets td.num .nstp .ctl{flex:0 1 104px;min-width:0}
+.nstp__b{
   flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;
   width:24px;height:24px;padding:0;border-radius:var(--tx-r1);
   border:1px solid var(--tx-line);background:var(--tx-surface-2);
   color:var(--tx-ink-3);cursor:pointer;
 }
-.stp__b:hover{
+.nstp__b:hover{
   border-color:var(--tx-line-strong);background:var(--tx-surface-3);
   color:var(--tx-ink);
 }
-.stp__b:active{background:var(--tx-surface-3)}
-.stp__b:focus-visible{outline:2px solid var(--tx-focus);outline-offset:1px}
+.nstp__b:active{background:var(--tx-surface-3)}
+.nstp__b:focus-visible{outline:2px solid var(--tx-focus);outline-offset:1px}
 /* A logged row's `.ctl` goes transparent and borderless — §12's way of saying
    the number is history now rather than a field. The steppers follow it, and
    come back on hover with the row, so a done set can still be nudged without
    the row looking like it is asking to be. */
-.sets tr[data-state="done"] .stp__b{
+.sets tr[data-state="done"] .nstp__b{
   border-color:transparent;background:transparent;color:var(--tx-ink-off);
 }
-.sets tr[data-state="done"] .stp__b:hover{
+.sets tr[data-state="done"] .nstp__b:hover{
   border-color:var(--tx-line);background:var(--tx-surface-2);color:var(--tx-ink-2);
 }
 /* Below this the six columns are already scrolling inside the card, so the
@@ -4044,8 +4053,8 @@ a.gapb--h{display:flex}
    44px touch target a screen this narrow implies anyway, and the field takes
    the width back. */
 @media (max-width:560px){
-  .stp__b{display:none}
-  .sets td.num .stp .ctl{flex:1 1 auto}
+  .nstp__b{display:none}
+  .sets td.num .nstp .ctl{flex:1 1 auto}
 }
 
 /* The accelerator bar is a desk affordance and it says so. On a touch screen

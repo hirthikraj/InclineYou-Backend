@@ -338,7 +338,7 @@ export function SetGrid({
                   </td>
                   <td className="num">
                     {weights ? (
-                      <div className="stp">
+                      <div className="nstp">
                         <Step
                           label={`Load down ${LOAD_STEP} kg, set ${row.number}`}
                           sign="minus"
@@ -377,7 +377,7 @@ export function SetGrid({
                     )}
                   </td>
                   <td className="num">
-                    <div className="stp">
+                    <div className="nstp">
                       <Step
                         label={`One rep fewer, set ${row.number}`}
                         sign="minus"
@@ -631,7 +631,7 @@ function Step({
 }) {
   return (
     <button
-      className="stp__b"
+      className="nstp__b"
       type="button"
       tabIndex={-1}
       onClick={onPress}
