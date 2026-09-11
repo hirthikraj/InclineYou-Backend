@@ -56,6 +56,8 @@ class AuthServiceTest {
     @Mock ClientRepository clientRepo;
     @Mock OtpService otpService;
     @Mock JwtService jwtService;
+    @Mock AuthTokenService tokens;
+    @Mock com.xrep.xrep_backend.tenant.TenantScope tenantScope;
 
     @InjectMocks AuthService auth;
 
@@ -341,11 +343,22 @@ class AuthServiceTest {
         when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of(rows));
     }
 
+    /**
+     * Minting now goes through {@link AuthTokenService}, which picks a JWT for
+     * the phone and a server-side session for the web. This service no longer
+     * knows or cares which, so the stub answers by ROLE — which is the only
+     * thing these tests were ever really asserting about a token.
+     */
     private void stubTokens() {
-        when(jwtService.generate(any(), anyString())).thenReturn("trainer-token");
-        when(jwtService.generateClient(anyString())).thenReturn("client-token");
-        when(jwtService.generatePending(anyString())).thenReturn("pending-token");
-        when(jwtService.generateInvited(anyString())).thenReturn("invited-token");
+        when(tokens.issueForCurrentRequest(any(AuthPrincipal.class))).thenAnswer(inv -> {
+            AuthPrincipal p = inv.getArgument(0);
+            return new IssuedToken(switch (p.role()) {
+                case JwtService.ROLE_CLIENT  -> "client-token";
+                case JwtService.ROLE_PENDING -> "pending-token";
+                case JwtService.ROLE_INVITED -> "invited-token";
+                default -> "trainer-token";
+            }, "jwt", null);
+        });
     }
 
     /** A row with a trainer identity and no membership. */

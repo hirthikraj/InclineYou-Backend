@@ -115,19 +115,63 @@ public class JwtService {
     }
 
     private String build(String subject, String phone, String role) {
-        return build(subject, phone, role, (long) props.getJwt().getExpiryMinutes() * 60 * 1000);
+        return build(subject, phone, role, null,
+                (long) props.getJwt().getExpiryMinutes() * 60 * 1000);
     }
 
     private String build(String subject, String phone, String role, long expiryMs) {
+        return build(subject, phone, role, null, expiryMs);
+    }
+
+    /**
+     * The one the token issuer calls, workspace included.
+     *
+     * <p>Public because {@link JwtTokenIssuer} is the adapter that owns minting
+     * now; this class stays the thing that knows how a claim set is spelled.
+     */
+    public String build(String subject, String phone, String role, UUID tenantId) {
+        return build(subject, phone, role, tenantId,
+                (long) props.getJwt().getExpiryMinutes() * 60 * 1000);
+    }
+
+    private String build(String subject, String phone, String role, UUID tenantId, long expiryMs) {
         long now = System.currentTimeMillis();
-        return Jwts.builder()
+        var builder = Jwts.builder()
                 .subject(subject)
                 .claim("phone", phone)
-                .claim("role", role)
+                .claim("role", role);
+        // Absent rather than null when there is no workspace. A `pending`
+        // token has proved a number and belongs nowhere, and a null claim in the
+        // payload would be a promise that it might later mean something.
+        if (tenantId != null) builder.claim(TENANT_CLAIM, tenantId.toString());
+        return builder
                 .issuedAt(new Date(now))
                 .expiration(new Date(now + expiryMs))
                 .signWith(signingKey())
                 .compact();
+    }
+
+    /** The active workspace claim. Short, because it is on every request. */
+    public static final String TENANT_CLAIM = "tid";
+
+    /**
+     * The workspace this token is standing in, or null.
+     *
+     * <p><b>Null is not an error and must never be treated as one.</b> Tokens
+     * live seven days, so on the deploy that introduces tenancy every trainer in
+     * the field is holding one minted before this claim existed. Rejecting those
+     * would sign out the entire user base at once; {@code TenantScope} resolves
+     * the absence to the trainer's home workspace instead, which is where all
+     * their data already is.
+     */
+    public UUID extractTenantId(Claims claims) {
+        Object raw = claims.get(TENANT_CLAIM);
+        if (raw == null) return null;
+        try {
+            return UUID.fromString(raw.toString());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /**

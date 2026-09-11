@@ -1,5 +1,6 @@
 package com.xrep.xrep_backend.client;
 
+import com.xrep.xrep_backend.tenant.CurrentScope;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -65,7 +66,20 @@ public class ClientPhoneGuard {
     /** The number is the caller's own. Recovery: a different number. */
     public static final String CODE_TRAINER = "PHONE_IS_TRAINER";
 
-    /** The number is on another trainer's roster. Recovery: they leave it. */
+    /**
+     * The number is on another coach's roster IN THIS WORKSPACE.
+     *
+     * <p>The code is unchanged and stays in the catalogue, but its meaning
+     * narrowed with tenancy: it used to mean "anywhere in the product", and it
+     * now means "here". One person can be a client of a trainer's private
+     * practice and, separately, a client at a gym — two arrangements, two
+     * workspaces, two client rows. What is still refused is two coaches in the
+     * SAME workspace both claiming them, because that is one gym billing one
+     * member twice.
+     *
+     * <p>Recovery: the other coach in this workspace releases them, or an admin
+     * reassigns.
+     */
     public static final String CODE_OTHER_ROSTER = "PHONE_ON_ANOTHER_ROSTER";
 
     /** The number is on the caller's own roster. Recovery: edit that client. */
@@ -76,8 +90,9 @@ public class ClientPhoneGuard {
             + "Use a different number, or edit your own trainer profile instead.";
 
     private static final String MSG_OTHER_ROSTER =
-            "This number is already on another trainer's roster. Someone can only be one "
-            + "trainer's client at a time — they need to be removed there before you can add them.";
+            "This number is already with another coach in this workspace. One person belongs "
+            + "to one coach here — ask an admin to reassign them, or add them from a different "
+            + "workspace.";
 
     private static final String MSG_OWN_ROSTER =
             "This number is already on your roster — it's saved for %s. One number can only "
@@ -106,6 +121,12 @@ public class ClientPhoneGuard {
                         SELECT 1 FROM client
                         WHERE phone = :phone
                           AND trainer_id <> :tid::uuid
+                          -- Scoped to ONE workspace, which is the change tenancy
+                          -- made. The old query had no tenant predicate and
+                          -- therefore refused a number that was on any roster in
+                          -- the product; that made "a client can train under two
+                          -- arrangements" impossible to express.
+                          AND (:tenantId::uuid IS NULL OR tenant_id = :tenantId::uuid)
                           AND deleted_at IS NULL
                           AND status <> 'archived'
                           AND membership_status NOT IN ('removed', 'declined', 'unavailable')
@@ -114,13 +135,14 @@ public class ClientPhoneGuard {
                         SELECT name FROM client
                         WHERE phone = :phone
                           AND trainer_id = :tid::uuid
+                          AND (:tenantId::uuid IS NULL OR tenant_id = :tenantId::uuid)
                           AND deleted_at IS NULL
                           AND status <> 'archived'
                           AND membership_status NOT IN ('removed', 'declined', 'unavailable')
                         ORDER BY created_at
                         LIMIT 1
                     ) AS own_client_name
-                """, Map.of("phone", phone, "tid", trainerId));
+                """, params(phone, trainerId, activeTenantId()));
 
         if (Boolean.TRUE.equals(row.get("is_self"))) {
             return new Verdict(false, CODE_TRAINER, MSG_TRAINER);
@@ -133,6 +155,34 @@ public class ClientPhoneGuard {
             return new Verdict(false, CODE_OTHER_ROSTER, MSG_OTHER_ROSTER);
         }
         return Verdict.ok();
+    }
+
+    /**
+     * The workspace the caller is standing in.
+     *
+     * <p>Read from {@link CurrentScope} rather than passed in, because every one
+     * of this guard's callers already has it on the request, and threading it
+     * through would change four signatures for a value that is ambient by
+     * construction.
+     *
+     * <p>Null when there is no scope — a background job, or a test that has not
+     * set one — and the query treats null as "no workspace predicate", which is
+     * EXACTLY the behaviour this guard had before tenancy. Failing back to the
+     * old rule is the only safe direction: the old rule was stricter.
+     */
+    private static String activeTenantId() {
+        var scope = CurrentScope.get();
+        return scope == null || scope.activeTenantId() == null
+                ? null : scope.activeTenantId().toString();
+    }
+
+    /** {@code Map.of} refuses nulls, and a null tenant is a meaningful value here. */
+    private static Map<String, Object> params(String phone, String trainerId, String tenantId) {
+        var p = new java.util.HashMap<String, Object>();
+        p.put("phone", phone);
+        p.put("tid", trainerId);
+        p.put("tenantId", tenantId);
+        return p;
     }
 
     /** The same check, for callers that answer a request rather than a push. */

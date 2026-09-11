@@ -6,9 +6,19 @@ and has its own `CLAUDE.md`.
 
 ## Read these first
 
+- `TENANCY.md` — the two ownership axes, the four RLS tiers, and the two token
+  issuers. **Read it before any schema or query work**; it is the shortest path
+  to not getting `tenant_id` wrong.
+- `IDENTITY.md` — **PLANNED, not built.** Separating *who a person is* from *how
+  they proved it*: `person` + `person_credential`, V43–V46, and the four things
+  we owe because we built our own auth (key rotation, refresh tokens, OTP
+  toll-fraud controls, social sign-in). Read it before touching `auth/`, the
+  phone columns, or the three RLS policies that match on `app_phone()` — a
+  recycled Indian number currently has no correct outcome, and that file says
+  why.
 - `API.md` — the complete endpoint reference, the authorization table, the rate-limit
   tiers, and the error `code` catalogue. **Keep it in sync with any endpoint change.**
-- `SCHEMA.md` — the same thing for the database: all 28 tables, every column with
+- `SCHEMA.md` — the same thing for the database: all 34 tables, every column with
   the migration that added it, all 53 foreign keys, the uniqueness and check
   constraints, the index inventory, and the table→sync-collection mapping.
   **Keep it in sync with any migration.**
@@ -25,6 +35,7 @@ docker compose -f ../docker-compose.yml up -d   # Postgres 16 + Redis 7
 ./mvnw spring-boot:run                          # run on :8080
 ./mvnw test                                     # full test suite
 ./mvnw test -Dtest=OtpServiceTest               # one class
+./mvnw test -Dtest=TenantIsolationTest          # the RLS walls, as `xrep_app`
 ./scripts/seed-sample-month.sh <phone>          # 6 clients, one month — the small seed
 ./scripts/seed-full-demo.sh <phone>             # 44 clients, every feature — the big seed
 ./scripts/seed-realistic-20.sh <phone>          # 20 clients, a plausible week — the realistic seed
@@ -99,9 +110,62 @@ uses; do not "upgrade" a JDBC service to JPA.
 
 `ddl-auto: validate` — Flyway owns the schema, Hibernate only checks it.
 
+### Two ownership axes, and they are independent
+
+Since **V37–V42** every row carries `tenant_id` as well as `trainer_id`, and they
+answer different questions:
+
+- **`trainer_id` — who coaches.** Unchanged, still `NOT NULL`, still what all 383
+  existing queries filter on.
+- **`tenant_id` — whose books.** Which workspace the row is in. **Immutable**:
+  stamped at insert by `stamp_tenant_id` and refused any change by
+  `freeze_tenant_id` (both V39).
+
+They used to be one fact. They came apart when one trainer had to coach privately
+*and* at a gym with different clients — the same `trainer_id` now writes into two
+workspaces, and which one is decided at creation.
+
+Because a row never moves, joining a gym costs no bulk `UPDATE`, leaving one
+cascades into nothing, and a coach's private practice was never in the gym's
+scope to begin with.
+
+Three consequences for anything you write:
+
+- **Don't add `AND tenant_id = …` to queries.** RLS adds it, and a `BEFORE INSERT`
+  trigger stamps writes — which is why V37–V42 changed 383 statements to zero.
+  Keep the `trainer_id` filters; RLS is the backstop, not the replacement.
+- **A new table joins one of the four policy tiers**, or gets added to the
+  not-policied list in `SCHEMA.md` with a reason. Silence is an oversight.
+- **`tenant_member` IS the planned `user_role`.** Do not build a second one.
+
+- **Development runs behind the policies; the test suite does not.**
+  `application.yml` connects the pool as `xrep_app` (non-owning, so RLS applies)
+  and gives Flyway its own owner credentials. `src/test/resources/
+  application.properties` pins the suite back to `xrep`, because a
+  `@Transactional` test holds one connection borrowed before any request exists
+  and an unlabelled connection is correctly worth nothing under RLS.
+  `TenantIsolationTest` is where the walls are actually asserted — it opens its
+  own `xrep_app` connections. If you add a code path that creates a workspace,
+  test it there or it is untested.
+- **Two roles, two pairs of environment variables.** `APP_DB_USERNAME` /
+  `APP_DB_PASSWORD` are the request path (`xrep_app`); `MIGRATION_DB_USERNAME` /
+  `MIGRATION_DB_PASSWORD` are Flyway, the seeds and the suite (`xrep`).
+  `DATABASE_URL` is shared. **Nothing that serves a request may use the second
+  pair** — an owner connection has every policy switched off and no log says so,
+  which is why `DatabaseIdentityCheck` asks `row_security_active('client')` at
+  boot and warns. `APP_DB_PASSWORD` is deliberately also V42's `appRolePassword`
+  placeholder: one secret, one name — and because a versioned migration runs
+  once, `afterMigrate__sync_app_role_password.sql` re-applies it on every
+  startup so rotating the variable actually rotates the role. `.env.example` at
+  the repo root is the checklist.
+
+Read `TENANCY.md` before touching any of it — its *What running the app behind
+the wall found* section is the list of things that broke the first time, and
+three of them were the same shape.
+
 ### Schema evolution is additive-only
 
-Migrations live in `src/main/resources/db/migration` (`V1`…`V35`). **Never edit a
+Migrations live in `src/main/resources/db/migration` (`V1`…`V42`). **Never edit a
 migration that has run** — append a new `V{n}__name.sql`. Never drop or repurpose
 a column, and never remove or rename a response field: old app builds on
 trainers' phones must keep working. The client's WatermelonDB migrations in
@@ -203,10 +267,22 @@ repairs against — see `sync/SyncService.java` and `sync/SyncRows.java`.
 
 ## Security
 
+- **Auth is one interface with two issuers** (`AuthTokenIssuer`, V41). The phone
+  gets a self-contained **JWT** because it is offline half the time; the web gets
+  an opaque, revocable **session** (`X-XRep-Client: web`), because a token that
+  leaks from a browser is one somebody else is holding and "wait seven days" is
+  not an incident response. `AuthTokenService` picks; nothing below it can tell
+  which answered. Sessions store a SHA-256 of the token, never the token.
 - **Auth** is phone + OTP → JWT (7-day expiry, `app.jwt.*`). Roles:
   `ROLE_TRAINER`, `ROLE_CLIENT`, `ROLE_INVITED`. Path rules live in
   `config/SecurityConfig.java`, first match wins — see the table in `API.md`.
-  ⚠️ **One phone = one role is being reversed** (V18 decided it; V28 undoes it —
+  ✅ **One phone = one role is reversed** (V18 started it; **V37 finished it** —
+  `tenant_member` is the many-to-many, one person and N workspaces). The
+  paragraph below is kept for the history and for the JWT-subject argument, which
+  still holds: the subject is a trainer UUID for trainers and a phone for
+  everyone else, and the **workspace** rides as a separate `tid` claim rather than
+  being folded into the subject. Old text follows.
+  ⚠️ ~~One phone = one role is being reversed~~ (V18 decided it; V28 undoes it —
   a trainer can be a gym's coach, an independent coach, and somebody's client at
   once). `app_user.role` narrows to *the role the app opens in* and authority
   moves to a new `user_role (role, scope_type, scope_id)` table. The expensive
@@ -227,6 +303,15 @@ repairs against — see `sync/SyncService.java` and `sync/SyncRows.java`.
   by token subject or remote IP on `/v1/auth/**`. Four tiers — `AUTH`, `SYNC`,
   `MESSAGING` (10/min, each call spends a real WhatsApp message), `STANDARD`.
   Bucket4j counts in Redis, falling back to in-process buckets.
+  **Off by default in development, on everywhere else.** `./mvnw spring-boot:run`
+  activates the `dev` profile (declared on `spring-boot-maven-plugin`), whose
+  only content is `app.rate-limit.enabled: ${RATE_LIMIT_ENABLED:false}`; a
+  packaged jar, Railway and CI run with no profile and keep the ceiling. The
+  reason is the key, not the numbers: everything unsigned-in on a laptop is
+  `ip:127.0.0.1`, so Expo, the Next dev server and a curl loop share one
+  120/60s `STANDARD` bucket and a hot reload spends it. `RATE_LIMIT_ENABLED`
+  still overrides in both directions — set it to `true` to exercise the limiter
+  locally — and the filter logs its state at boot, warning when it is off.
 - Every new endpoint needs a tier decision. Anything that sends a message goes in
   `MESSAGING`.
 
@@ -251,10 +336,14 @@ and to the table in `API.md` — the app cannot branch on prose.
 
 ## Config
 
-Everything is env-overridable in `application.yml` under `app.*`. Notable kill
-switches: `REDIS_ENABLED`, `RATE_LIMIT_ENABLED`, `SEED_EXERCISES`,
-`FCM_CREDENTIALS` (blank disables push), `FORWARD_HEADERS` (`framework` behind
-Railway's proxy, or every trainer shares one rate-limit bucket).
+Everything is env-overridable in `application.yml` under `app.*`, and
+`.env.example` at the repo root lists every variable with its default —
+`docker compose` reads that same file, Spring Boot does not (`set -a; source
+.env; set +a`). Notable kill switches: `REDIS_ENABLED`, `RATE_LIMIT_ENABLED`,
+`SEED_EXERCISES`, `FCM_CREDENTIALS` (blank disables push), `FORWARD_HEADERS`
+(`framework` behind Railway's proxy, or every trainer shares one rate-limit
+bucket). The database's two identities are `APP_DB_*` and `MIGRATION_DB_*` —
+see *Two ownership axes* above.
 
 The exercise library is **text-only**. The upstream thumbnails and demo GIFs are
 © Gym visual and need a licence we don't hold; V22 dropped the media columns.

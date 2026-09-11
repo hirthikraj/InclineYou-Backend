@@ -1,6 +1,7 @@
 package com.xrep.xrep_backend.ratelimit;
 
 import com.xrep.xrep_backend.config.AppProperties;
+import jakarta.annotation.PostConstruct;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -56,6 +57,29 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private final Bucket4jLimiter limiter;
     private final AppProperties props;
+
+    /**
+     * Say it out loud at boot. An absent ceiling looks exactly like a ceiling
+     * nobody has reached yet, and the one way that becomes an incident is a
+     * deployment that carries a laptop's default into production — so the
+     * disabled case warns, with the variable that turns it back on named in the
+     * line, the same way {@code DatabaseIdentityCheck} warns about an owner
+     * connection.
+     */
+    @PostConstruct
+    void announce() {
+        if (props.getRateLimit().isEnabled()) {
+            log.info("rate limiting ON — standard {}/{}s, auth {}/{}s, sync {}/{}s, messaging {}/{}s",
+                    props.getRateLimit().getStandard().getLimit(), props.getRateLimit().getStandard().getWindowSeconds(),
+                    props.getRateLimit().getAuth().getLimit(), props.getRateLimit().getAuth().getWindowSeconds(),
+                    props.getRateLimit().getSync().getLimit(), props.getRateLimit().getSync().getWindowSeconds(),
+                    props.getRateLimit().getMessaging().getLimit(), props.getRateLimit().getMessaging().getWindowSeconds());
+        } else {
+            log.warn("rate limiting OFF — every tier is unlimited. "
+                    + "This is the `dev` profile default; set RATE_LIMIT_ENABLED=true to restore it. "
+                    + "Nothing but the per-number OTP throttle stands in front of /v1/auth/**.");
+        }
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,

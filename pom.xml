@@ -144,6 +144,17 @@
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>
 				<configuration>
+					<!--
+					  `./mvnw spring-boot:run` IS development, and nothing else is:
+					  a packaged jar started with `java -jar` runs with no profile,
+					  and the test suite pins its own properties. So this is the one
+					  honest place to say "these defaults are for a laptop" — today
+					  that means the rate limiter is off (application.yml, the `dev`
+					  document at the bottom). RATE_LIMIT_ENABLED still overrides it.
+					-->
+					<profiles>
+						<profile>dev</profile>
+					</profiles>
 					<excludes>
 						<exclude>
 							<groupId>org.projectlombok</groupId>

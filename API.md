@@ -23,6 +23,8 @@ and indexes — see [`SCHEMA.md`](SCHEMA.md).
 | --- | --- | --- | --- |
 | [Health](#health) | `/health` | 1 | Reviewed
 | [Auth & membership](#auth--membership) | `/v1/auth` | 8 | Reviewed
+| [Sessions (web sign-in)](#sessions-web-sign-in) | `/v1/auth/session` | 3 | V41
+| [Workspaces](#workspaces) | `/v1/tenants` | 8 | V37–V42
 | [Trainer profile](#trainer-profile) | `/v1/trainers` | 2 | Reviewed
 | [The account](#the-account) | `/v1/trainers/me/phone`, `/v1/trainers/me` | 5 | V36
 | [Working hours](#working-hours) | `/v1/working-hours` | 1 |
@@ -43,7 +45,7 @@ and indexes — see [`SCHEMA.md`](SCHEMA.md).
 | [Trainer sync](#trainer-sync) | `/v1/sync` | 2 |
 | [Client sync](#client-sync) | `/v1/client/sync` | 2 |
 
-**Total: 118 endpoints.**
+**Total: 129 endpoints.**
 
 ---
 
@@ -88,6 +90,15 @@ Refusals return `429` with an RFC-7807 body carrying `"code": "RATE_LIMITED"`
 and `retryAfterSeconds`. Counting is in Redis via Bucket4j, falling back to
 in-process buckets when Redis is down.
 
+`RATE_LIMIT_ENABLED` turns the whole filter off, and **it is off by default in
+development**: `./mvnw spring-boot:run` activates the `dev` profile, which
+defaults the flag to `false`. Everything else — a packaged jar, Railway, CI —
+runs with no profile and therefore with the limiter on. The reason is the
+keying: an unauthenticated local caller is `ip:127.0.0.1`, so Expo, the web dev
+server and any curl loop share one `STANDARD` bucket and a hot reload spends it,
+which shows up as `429`s indistinguishable from a bug in the screen being
+worked on. The filter logs its state at boot, and warns when it is off.
+
 ## Error shape
 
 Errors are RFC-7807 `ProblemDetail` documents with an extra `code` field the app
@@ -100,7 +111,7 @@ branches on (`exception/GlobalExceptionHandler.java`):
 | `OTP_LOCKED` | 429 | Too many wrong codes — number locked, carries a countdown. |
 | `OTP_THROTTLED` | 429 | Codes requested too fast — carries the real wait. |
 | `PHONE_IS_TRAINER` | 409 | That's the caller's own number — trainer/client duality is allowed for everyone else's. |
-| `PHONE_ON_ANOTHER_ROSTER` | 409 | That number is another trainer's client. |
+| `PHONE_ON_ANOTHER_ROSTER` | 409 | That number is another coach's client **in this workspace**. Narrowed by V38: it used to mean "anywhere in the product", which made it impossible for one person to be a client of a private trainer and, separately, a client at a gym. |
 | `RATE_LIMITED` | 429 | Tier budget exhausted. |
 | `PHONE_ON_YOUR_ROSTER` | 409 | That number is already on the caller's own roster. |
 | `PHONE_ALREADY_IN_TEAM` | 409 | That number is already in a coaching team. |
@@ -122,6 +133,13 @@ branches on (`exception/GlobalExceptionHandler.java`):
 | `CANNOT_DEMOTE_OWNER` | 422 | The owner's role is changed by transferring, not editing. |
 | `TEAM_ROLE_INVALID` | 422 | A member can be made `admin` or `coach`, nothing else. |
 | `TEAM_READ_ONLY` | — | Sync-push rejection reason, not an HTTP status. |
+| `NO_WORKSPACE` | 422 | The caller belongs to no workspace yet. |
+| `NOT_A_MEMBER` | 404 | That workspace, or that row in it, is not the caller's — the *404, not 403* rule, one rung up. |
+| `NOT_TENANT_ADMIN` | 403 | The action needs `owner`, `admin` or `gym_admin` **in that workspace**. |
+| `SWITCHING_DISABLED` | 422 | `app.tenant.switching-enabled=false`. |
+| `CANNOT_LEAVE_OWN` | 422 | You cannot leave your own practice. |
+| `PHONE_IN_THIS_WORKSPACE` | 409 | Another coach in this workspace already has that number. |
+| `NOT_A_COACH_HERE` | 422 | The receiving trainer does not coach in this workspace. |
 
 The three team `403`s look like they contradict the *404, not 403* rule below, and
 do not. That rule is about **cross-trainer** access, and it still holds: anything
@@ -231,6 +249,178 @@ bound to the phone, not to one relationship, so the response carries every
 live roster this number is on, same as any other client sign-in; the app's
 existing multi-roster picker disambiguates from there. 404s if there is no
 live membership anywhere for this number.
+
+---
+
+## Sessions (web sign-in)
+
+**Two kinds of credential, one interface.** `AuthTokenService` picks; nothing
+below it can tell which answered.
+
+| | Phone | Web |
+| --- | --- | --- |
+| Credential | a signed **JWT**, 7 days | an opaque **session token**, 72 hours |
+| Chosen by | no header, or anything but `web` | `X-XRep-Client: web` |
+| Works offline | yes — that is the whole reason | no, and does not need to |
+| Revocable | **no**; it expires on its own clock | **yes**, immediately |
+| Switching workspace | a new token, because the workspace is a signed claim | an `UPDATE`; the browser keeps the token it has |
+| Shape | three dot-separated segments | begins `xs_` |
+
+A session token may travel as `Authorization: Bearer xs_…` **or** in an
+`xrep_session` cookie — the cookie so that browser JavaScript never has to hold
+it. The row stores a **SHA-256 of the token**, never the token: a database dump
+must not be a set of live credentials. SHA-256 rather than bcrypt because this is
+256 bits of `SecureRandom` with no structure to guess, so it wants a fast one-way
+function, not a KDF on the hot path of every request.
+
+`POST /v1/auth/otp/verify` is unchanged except that the response now carries
+`tokenKind` — `jwt` or `session`. Nothing on the server branches on it; the web
+needs to know it holds something revocable and the phone needs to know it holds
+something that works with no signal.
+
+### `GET /v1/auth/session`
+
+Every live session for this caller. Empty for a JWT caller, and honestly so —
+a JWT is stored nowhere and cannot be listed.
+
+```json
+[{ "id": "…", "userAgent": "Mozilla/5.0 …", "issuedAt": 1756500000000,
+   "lastSeenAt": 1756512000000, "expiresAt": 1756758000000, "current": true }]
+```
+
+### `DELETE /v1/auth/session` → `200`
+
+Sign out here. `{ "tokenKind": "session", "revoked": true }` — `revoked` is
+**false** for a JWT, which the client should still discard locally. A button that
+appears to work is worse than one that says what it did.
+
+### `DELETE /v1/auth/session/all` → `200`
+
+`{ "sessionsEnded": 3 }`. Every browser, now.
+
+---
+
+## Workspaces
+
+**One person belongs to several workspaces.** A trainer coaches privately *and*
+at a gym with different clients; one human can be a client under two separate
+arrangements. `tenant` is the workspace, `tenant_member` is the many-to-many, and
+every row in the product carries an **immutable** `tenant_id` stamped where it
+was created.
+
+Two things follow that the client has to understand:
+
+- **`X-XRep-View: focused`** narrows reads to the active workspace. Absent or
+  `combined` (the default) spans every workspace the caller belongs to, which is
+  what puts a 07:00 private client and an 18:00 gym client on one Today screen.
+- **The money book ignores that header entirely.** Packages, payments, packs and
+  settlements are always the active workspace alone, enforced by the database
+  (tier 2 in `V42__row_level_security.sql`), so a total is never a mix of two
+  businesses.
+
+### `GET /v1/tenants`
+
+The switcher. Home first, then by name.
+
+```json
+[{ "id": "…", "type": "solo", "name": "Priya's practice", "role": "owner",
+   "home": true, "active": true, "administers": true,
+   "revenueSharePercent": null, "assignmentMarginPercent": null }]
+```
+
+`type` is `solo` · `team` · `gym`. `revenueSharePercent` **null means 100%**,
+which is the only correct answer for a solo workspace.
+
+### `POST /v1/tenants/{id}/activate`
+
+Stand somewhere else. Body `{ "remember": true }` also makes it the workspace the
+app opens in next time.
+
+```json
+{ "tenantId": "…", "token": null, "tokenKind": "session" }
+```
+
+**`token` is null when the existing credential still works** — the web case,
+because moving a session is an `UPDATE`. The client must not read null as a
+sign-out. A JWT caller gets a fresh token here and should replace the one it has.
+
+`404 NOT_A_MEMBER` for a workspace that is not one of the caller's — deliberately
+not a 403, per the *404, not 403* rule.
+
+### `GET /v1/tenants/{id}/members`
+
+Everyone who works here, with their `clientCount` **in this workspace** — a coach
+may hold twelve here and four somewhere else, and the second number is none of
+this workspace's business.
+
+### `PATCH /v1/tenants/{id}/members/{memberId}/shares` → `204`
+
+`{ "revenueSharePercent": 70, "assignmentMarginPercent": 5 }`. Owner/admin only.
+**Null means leave it alone**, the same contract `/v1/trainers/me` uses — a PATCH
+naming one percentage cannot blank the other.
+
+Changes apply from now. Every handover already recorded keeps the margin frozen
+onto its `client_assignment` row, for the reason V11 froze `share_percent` onto a
+payment: an admin who renegotiates in March must not restate what they earned in
+January.
+
+### `PATCH /v1/tenants/{id}/members/{memberId}/role` → `204`
+
+`{ "role": "admin" }`. The owner's role is not editable here.
+
+### `GET /v1/tenants/{id}/revenue?from=&to=`
+
+Role decides the shape:
+
+| Role | Sees |
+| --- | --- |
+| `owner` · `admin` · `gym_admin` | the workspace total **and** the split per coach |
+| `coach` | their own line, and **no total** — not a rank, not a share of something |
+
+Everyone also gets `myShare` (their collections × their percentage) and
+`myPlacementMargin` (what their placements earned, at the margin frozen on each
+client, excluding clients they placed with themselves).
+
+**Collected means `paid` OR `confirmed`** — REST writes the first, sync has
+carried the second since V1, and counting one halves a trainer's month.
+
+Note this is a *different* endpoint from `GET /v1/team/revenue`, which stays
+owner-only and totals-only for a V26 team. This one is workspace-shaped and is
+the version a gym uses.
+
+### `GET /v1/tenants/{id}/stale-clients`
+
+Everyone here with no working coach, oldest first, with the outstanding balance —
+because a client who has paid for eight sessions and has nobody to take them is a
+refund waiting to happen.
+
+### `POST /v1/tenants/{id}/members/{trainerId}/unavailable` → `200`
+
+`{ "clientsNeedingACoach": 12 }`. A coach has stopped working here.
+
+**It marks `client.stale_at` and touches nothing else.** `status` is untouched,
+so every `WHERE status = 'active'` read on the server and on every phone in the
+field keeps counting them — a stale client is still an active client; what is
+missing is a coach. V30 made exactly this call for `paused_at`.
+
+Their clients in **other** workspaces are not affected. Those are a different
+tenant and were never in scope, which is the whole reason leaving a gym is cheap.
+
+### `POST /v1/tenants/{id}/clients/{clientId}/assign` → `204`
+
+`{ "toTrainerId": "…", "note": "…", "reason": "trainer_left" }`
+
+Gives a client a coach. **The client keeps everything** — measurements, logged
+sessions, payments and their plan are the same rows before and after. What
+changes hands is the forward-looking work: `client.trainer_id`, the current
+program, and sessions from today onward. Logged workouts and collected payments
+keep their original `trainer_id`, because they record who did the work and who
+took the money.
+
+`tenant_id` does not change and cannot: a handover happens *inside* a workspace,
+and the immutability trigger refuses anything else.
+
+`422 NOT_A_COACH_HERE` if the receiving trainer does not work in this workspace.
 
 ---
 

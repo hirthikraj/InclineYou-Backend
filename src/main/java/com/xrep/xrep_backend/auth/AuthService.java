@@ -61,6 +61,8 @@ public class AuthService {
     private final ClientRepository clientRepo;
     private final OtpService otpService;
     private final JwtService jwtService;
+    private final AuthTokenService tokens;
+    private final com.xrep.xrep_backend.tenant.TenantScope tenantScope;
 
     /** Weeks and dates in this product are Indian, wherever the server is. */
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
@@ -166,7 +168,7 @@ public class AuthService {
                 .toList();
 
         return new AuthResponse(
-                jwtService.generate(head.getTrainerId(), phoneOf(head)),
+                mintTrainer(head.getTrainerId(), phoneOf(head)),
                 head.getTrainerId().toString(),
                 false,
                 head.getSetupCompletedAt() != null,
@@ -197,7 +199,7 @@ public class AuthService {
                     .map(AuthService::toMembership)
                     .toList();
             return new AuthResponse(
-                    jwtService.generateClient(phone),
+                    mint(phone, phone, JwtService.ROLE_CLIENT, null),
                     null, false, true,
                     VIEW_CLIENT, null,
                     all,
@@ -212,7 +214,7 @@ public class AuthService {
                 .toList();
         if (!invites.isEmpty()) {
             return new AuthResponse(
-                    jwtService.generateInvited(phone),
+                    mint(phone, phone, JwtService.ROLE_INVITED, null),
                     null, false, false,
                     VIEW_INVITED, null,
                     invites,
@@ -233,7 +235,7 @@ public class AuthService {
                             ? Instant.EPOCH : m.getRemovedAt()))
                     .orElseThrow();
             return new AuthResponse(
-                    jwtService.generateInvited(phone),
+                    mint(phone, phone, JwtService.ROLE_INVITED, null),
                     null, false, false,
                     VIEW_REMOVED, null,
                     removals.stream().map(AuthService::toMembership).toList(),
@@ -248,7 +250,7 @@ public class AuthService {
         // 4 · Everything answered and gone. Not 7a — this number's role is
         // client, and offering it a coaching workspace is the wrong turn.
         return new AuthResponse(
-                jwtService.generateInvited(phone),
+                mint(phone, phone, JwtService.ROLE_INVITED, null),
                 null, false, false,
                 VIEW_UNATTACHED, null,
                 List.of(), null, null);
@@ -256,7 +258,7 @@ public class AuthService {
 
     private AuthResponse pending(String phone) {
         return new AuthResponse(
-                jwtService.generatePending(phone),
+                mint(phone, phone, JwtService.ROLE_PENDING, null),
                 null, true, false,
                 VIEW_PENDING, null, List.of(), null, null);
     }
@@ -308,7 +310,7 @@ public class AuthService {
         }
 
         return new AuthResponse(
-                jwtService.generate(trainer.getId(), trainer.getPhone()),
+                mintTrainer(trainer.getId(), trainer.getPhone()),
                 trainer.getId().toString(),
                 true,
                 trainer.getSetupCompletedAt() != null,
@@ -533,6 +535,36 @@ public class AuthService {
      * client token — an old build that falls through to its default branch gets
      * a token that cannot open a sync scope rather than one that can.
      */
+
+    /* ------------------------------------------------------- minting tokens */
+
+    /**
+     * Every credential in this service goes out through the issuer interface,
+     * never through {@link JwtService} directly.
+     *
+     * <p>That is the whole point of {@link AuthTokenService}: the phone gets a
+     * self-contained JWT because it is offline half the time, the web gets a
+     * revocable server-side session because a token that leaks from a browser is
+     * a token somebody else is holding — and this file, which is about who
+     * somebody is, does not have to know which.
+     */
+    private String mint(String subject, String phone, String role, java.util.UUID tenantId) {
+        return tokens.issueForCurrentRequest(
+                new AuthPrincipal(subject, phone, role, tenantId, null)).value();
+    }
+
+    /**
+     * A trainer token, standing in their home workspace.
+     *
+     * <p>Home rather than "the one they were in last", because sign-in is the
+     * one moment there is no previous request to ask. The switcher moves them
+     * afterwards, and on the web that costs an UPDATE rather than a new token.
+     */
+    private String mintTrainer(java.util.UUID trainerId, String phone) {
+        return mint(trainerId.toString(), phone, JwtService.ROLE_TRAINER,
+                tenantScope.homeTenantOf(trainerId));
+    }
+
     public record AuthResponse(
             String token,
             String trainerId,
@@ -550,8 +582,35 @@ public class AuthService {
             /** Set only when every LIVE roster is paused — who paused it and when. */
             PausedInfo paused,
             /** Set only on the `removed` role — who removed them and when. */
-            RemovedInfo removed
-    ) {}
+            RemovedInfo removed,
+
+            /**
+             * `jwt` or `session` — which kind of credential {@code token} is.
+             *
+             * <p>The web needs to know it holds something revocable (so "sign
+             * out" can mean it) and the phone needs to know it holds something
+             * that works with no signal. Nothing on the server branches on it.
+             *
+             * <p>Derived from the token rather than passed in, so the eight
+             * places that build this response did not have to learn about
+             * issuers to keep working.
+             */
+            String tokenKind
+    ) {
+        /** The nine-argument form every mint site already used. */
+        public AuthResponse(String token, String trainerId, boolean isNewUser,
+                            boolean setupComplete, String role, String trainerName,
+                            List<Membership> clientOf, PausedInfo paused, RemovedInfo removed) {
+            this(token, trainerId, isNewUser, setupComplete, role, trainerName,
+                 clientOf, paused, removed, kindOf(token));
+        }
+
+        private static String kindOf(String token) {
+            if (token == null) return null;
+            return token.startsWith(SessionTokenIssuer.PREFIX)
+                    ? SessionTokenIssuer.KIND : JwtTokenIssuer.KIND;
+        }
+    }
 
     /**
      * One roster this number is on. `clientId` is what the client endpoints are
