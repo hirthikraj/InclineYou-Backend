@@ -31,7 +31,7 @@ and has its own `CLAUDE.md`.
 ## Commands
 
 ```bash
-docker compose -f ../docker-compose.yml up -d   # Postgres 16 + Redis 7
+docker compose up -d                            # Postgres 16 + Redis 7
 ./mvnw spring-boot:run                          # run on :8080
 ./mvnw test                                     # full test suite
 ./mvnw test -Dtest=OtpServiceTest               # one class

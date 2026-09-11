@@ -31,3 +31,11 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Environment ###
+# `.env.example` is the committed template; the real thing never is. In the
+# monorepo this rule lived in the root .gitignore, one level above this file —
+# it has to be restated here because this repository's root IS the backend.
+.env
+.env.local
+.env.*.local

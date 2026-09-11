@@ -1,0 +1,49 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: xrep-postgres
+    environment:
+      # The OWNER, and only the owner. `xrep_app` — the non-owning login the API
+      # actually serves requests with — is created by V42 when Flyway runs, so it
+      # gets its password from APP_DB_PASSWORD and never exists in this file.
+      #
+      # These take effect on a FRESH volume only: initdb runs once, so changing a
+      # password here after the first `up` changes nothing. `docker compose down
+      # -v` if you need it to.
+      POSTGRES_DB: ${POSTGRES_DB:-xrepdb}
+      POSTGRES_USER: ${POSTGRES_USER:-xrep}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-xrep_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-xrep} -d ${POSTGRES_DB:-xrepdb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: xrep-redis
+    # `--appendonly yes` is not a preference.
+    #
+    # The OTP lock and the daily send ceiling are abuse controls, and V17 moved
+    # the lock out of memory precisely so a restart could not clear it — an
+    # in-memory lock made the brute-force ceiling "three attempts per deploy".
+    # A Redis without AOF puts it straight back. `everysec` bounds the worst-case
+    # loss at one second of writes, which for a sign-in lock is nothing.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
+  redis_data:
