@@ -3,15 +3,22 @@ services:
     image: postgres:16-alpine
     container_name: xrep-postgres
     environment:
-      POSTGRES_DB: xrepdb
-      POSTGRES_USER: xrep
-      POSTGRES_PASSWORD: xrep_dev
+      # The OWNER, and only the owner. `xrep_app` — the non-owning login the API
+      # actually serves requests with — is created by V42 when Flyway runs, so it
+      # gets its password from APP_DB_PASSWORD and never exists in this file.
+      #
+      # These take effect on a FRESH volume only: initdb runs once, so changing a
+      # password here after the first `up` changes nothing. `docker compose down
+      # -v` if you need it to.
+      POSTGRES_DB: ${POSTGRES_DB:-xrepdb}
+      POSTGRES_USER: ${POSTGRES_USER:-xrep}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-xrep_dev}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U xrep -d xrepdb"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-xrep} -d ${POSTGRES_DB:-xrepdb}"]
       interval: 10s
       timeout: 5s
       retries: 5

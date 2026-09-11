@@ -56,7 +56,10 @@ SQL="$HERE/seed-realistic-20.sql"
 # By default, talk to the compose database the getting-started guide sets up.
 # Override PSQL to point anywhere else.
 CONTAINER="${POSTGRES_CONTAINER:-xrep-postgres}"
-DB_USER="${POSTGRES_USER:-xrep}"
+# The OWNER, not the app role. A seed inserts across every workspace it builds,
+# and row-level security would filter an `xrep_app` connection down to whichever
+# workspace the connection was labelled with — which, for a script, is none.
+DB_USER="${POSTGRES_USER:-${MIGRATION_DB_USERNAME:-xrep}}"
 DB_NAME="${POSTGRES_DB:-xrepdb}"
 
 if [[ -n "${PSQL:-}" ]]; then

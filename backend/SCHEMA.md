@@ -28,7 +28,8 @@ reach a phone is two migrations in one commit.
 
 | Area | Tables |
 | --- | --- |
-| [Identity & auth](#1-identity--auth) | `app_user`, `otp_request`, `trainer` |
+| [Tenancy](#0-tenancy) | `tenant`, `tenant_member` |
+| [Identity & auth](#1-identity--auth) | `app_user`, `otp_request`, `trainer`, `web_session` |
 | [Roster](#2-roster) | `client`, `body_metric`, `client_note` |
 | [Team coaching](#3-team-coaching) | `team`, `team_member`, `client_assignment`, `team_activity` |
 | [Exercise library](#4-exercise-library) | `exercise`, `exercise_favourite` |
@@ -38,8 +39,17 @@ reach a phone is two migrations in one commit.
 | [Money book](#8-money-book) | `pack`, `package`, `payment`, `gym_settlement` |
 | [Comms & reports](#9-comms--reports) | `nudge_rule`, `nudge_log`, `weekly_report` |
 
-**28 tables** documented below, plus `attention_dismissal` (V28, not yet
-sectioned) and `client_note` (V29) — and Flyway's own `flyway_schema_history`.
+**34 tables**, plus Flyway's own `flyway_schema_history`. Since V37 the schema
+has **two** ownership axes and they are independent:
+
+| | Question | Column |
+| --- | --- | --- |
+| **Who coaches** | which human runs this session, is owed this money | `trainer_id` — unchanged, still `NOT NULL` |
+| **Whose books** | which workspace this row is in, who may read it | `tenant_id` — V37–V39, **immutable** |
+
+They used to be the same fact. They came apart when one trainer had to be able to
+coach privately *and* at a gym with different clients. See
+[Tenancy](#0-tenancy) and [Row-level security](#row-level-security).
 
 Reference sections: [Entity relationships](#entity-relationships) ·
 [Foreign key reference](#foreign-key-reference) ·
@@ -152,6 +162,70 @@ Two things the diagram deliberately cannot show, both real and both load-bearing
 
 ---
 
+## 0. Tenancy
+
+### `tenant` — a workspace  · V37
+
+The unit of isolation, and the unit a customer pays for.
+
+| Column | Type | Null | Default | Since | Note |
+| --- | --- | --- | --- | --- | --- |
+| `id` | UUID | no | `gen_random_uuid()` | V37 | **PK.** This is `tenant_id` on 29 other tables. |
+| `type` | VARCHAR(20) | no | — | V37 | `solo` \| `team` \| `gym`. **All three own rows** — what differs is how many people are in them and what roles exist, which is what lets one mechanism serve a lone trainer, a team and a gym. VARCHAR and never an ENUM, per the schema's convention. |
+| `name` | VARCHAR(160) | no | — | V37 | |
+| `status` | VARCHAR(20) | no | `'active'` | V37 | `active` \| `suspended` \| `closed`. A whole workspace switched off with one column — the first thing `trainer_id` could never do. |
+| `primary_app_user_id` | UUID | yes | — | V37 | **FK → `app_user(id)`.** Who owns and pays. Deliberately **not** the owner of the DATA — that is `tenant_id` on the rows — and nullable, because a gym org can exist before a person is named. |
+| `metadata` | JSONB | no | `'{}'` | V37 | Carries `backfill` provenance for the workspaces V37 created. |
+| `created_at` / `updated_at` / `deleted_at` | TIMESTAMPTZ | | | V37 | |
+
+**A `solo` tenant is created by a trigger with the trainer**
+(`ensure_home_tenant`, V39), and a `team` tenant with the team
+(`ensure_team_tenant`). Both are in the database rather than in a service,
+because there is more than one write path into each table and a rule that lives
+in one of them is a rule the others will break.
+
+### `tenant_member` — who may enter, and as what  · V37
+
+**This table is the multi-tenancy.** One person, N rows. A trainer who coaches
+privately and at a gym has two; a trainer who is also somebody's client has a
+third.
+
+It is also the `user_role (app_user_id, role, scope_type, scope_id, status)` that
+this document scheduled for the gym platform. `tenant_id` replaces
+`(scope_type, scope_id)` outright, because the tenant already carries its type —
+**so this is that table, and a V43+ author must not add a second one.**
+
+| Column | Type | Null | Default | Since | Note |
+| --- | --- | --- | --- | --- | --- |
+| `id` | UUID | no | `gen_random_uuid()` | V37 | **PK** |
+| `tenant_id` | UUID | no | — | V37 | **FK → `tenant(id)`** |
+| `app_user_id` | UUID | no | — | V37 | **FK → `app_user(id)`.** A person, not a trainer — a gym administrator may never coach and has no `trainer` row. |
+| `role` | VARCHAR(20) | no | — | V37 | `owner` \| `admin` \| `coach` \| `gym_admin` \| `gym_staff` \| `client`. The owner is not a fourth kind of admin; it is the admin who cannot be removed. |
+| `status` | VARCHAR(20) | no | `'active'` | V37 | `invited` \| `active` \| `declined` \| `removed` |
+| `is_home` | BOOLEAN | no | `FALSE` | V37 | Which workspace the app opens in. Takes over `app_user.role`'s job, generalised — and `app_user.role` is **not** dropped or repurposed, so old builds keep working. |
+| `revenue_share_percent` | NUMERIC(5,2) | yes | — | V37 | What this member keeps of what they collect here. **NULL = 100%**, the only correct answer for a solo workspace and the only safe one for a team that has not had the conversation. |
+| `assignment_margin_percent` | NUMERIC(5,2) | yes | — | V37 | An admin's cut of revenue from clients **they** placed with somebody else. NULL = none. Frozen per handover onto `client_assignment.actor_margin_percent`. |
+| `created_at` / `updated_at` / `deleted_at` | TIMESTAMPTZ | | | V37 | |
+
+Two partial unique indexes carry rules the application would otherwise have to
+remember: `uq_tenant_member_live (tenant_id, app_user_id, role)` — two roles in
+one workspace is legitimate, a gym owner who also coaches — and
+`uq_tenant_member_home (app_user_id)`, exactly one home per person.
+
+`team_member` is **mirrored** into this table by a trigger (`mirror_team_member`,
+V39) rather than by a line in `TeamService`. Two tables holding one fact is how
+one fact becomes two.
+
+### Three percentages, and they are not the same number
+
+| Column | Means | Authority? |
+| --- | --- | --- |
+| `trainer.gym_share_percent` (V11) | what a gym that is **not** on XRep keeps of a floor session | no — a hint, and V23 says in bold it must never gate a feature |
+| `client.trainer_split_percent` (V1) | a per-client override of the above | no, same reason |
+| `tenant_member.revenue_share_percent` (V37) | what a coach keeps inside a workspace that **is** on XRep | **yes** — both parties are members of the tenant they agreed it in |
+
+---
+
 ## 1. Identity & auth
 
 ### `app_user` — one identity per phone number  · V18
@@ -230,6 +304,51 @@ fallback store; Redis is the primary (`app.redis.enabled`).
 - **Indexes:** `idx_trainer_languages` — GIN over `languages`, answers `languages @> '["ta"]'` · `idx_trainer_training_modes` — GIN over `training_modes`, answers `training_modes @> '["online"]'`
 - **Referenced by 19 tables.** See [Fan-in](#fan-in-what-points-at-the-hub-tables).
 - Not in sync (the trainer reads themselves through `/v1/trainers/me`).
+
+---
+
+### `web_session` — the web credential  · V41
+
+The phone and the browser want opposite things from a credential, so they get
+different ones behind one interface (`AuthTokenIssuer`).
+
+The phone is offline half the time and cannot ask a server whether it is still
+signed in, so a self-contained JWT is right for it — and its one real cost, that
+you cannot revoke it before it expires, is acceptable on a device the trainer is
+holding. The browser is never meaningfully offline and has the opposite risk: a
+token that leaks from a browser is a token somebody else's machine is holding,
+and "wait seven days" is not an incident response.
+
+| Column | Type | Null | Default | Since | Note |
+| --- | --- | --- | --- | --- | --- |
+| `id` | UUID | no | `gen_random_uuid()` | V41 | **PK** |
+| `token_hash` | VARCHAR(64) | no | — | V41 | **UNIQUE.** Hex SHA-256 of the opaque token, never the token — the same discipline as `otp_request.otp_hash`. SHA-256 and **not** bcrypt: this is 256 bits of `SecureRandom` with no structure to guess, so it wants a fast one-way function, not a KDF on the hot path of every authenticated request. |
+| `subject` | VARCHAR(64) | no | — | V41 | What the equivalent JWT would carry — a trainer UUID for a trainer, the phone for every other role — so `getAuthentication().getName()` reads identically whichever issuer minted the credential, and the 46 call sites that read it did not change. |
+| `phone` | VARCHAR(15) | no | — | V41 | |
+| `role` | VARCHAR(20) | no | — | V41 | |
+| `app_user_id` | UUID | yes | — | V41 | **FK → `app_user(id)`** |
+| `tenant_id` | UUID | yes | — | V41 | **FK → `tenant(id)`.** The active workspace. Switching **updates this row** rather than minting a credential, which is the second thing a server-side session buys. Nullable because a `pending` session has proved a number and belongs nowhere. |
+| `issued_at` | TIMESTAMPTZ | no | `NOW()` | V41 | |
+| `last_seen_at` | TIMESTAMPTZ | no | `NOW()` | V41 | Advanced only when it has moved by more than a minute — a write per request would make this the hottest table in the schema for no accuracy anybody reads. |
+| `expires_at` | TIMESTAMPTZ | no | — | V41 | `app.session.expiry-hours`, default 72. Shorter than the JWT's week on purpose: a revocable credential's lifetime is a convenience setting, not a ceiling. |
+| `revoked_at` | TIMESTAMPTZ | yes | — | V41 | A column rather than a DELETE, because "revoked at 14:02" is the first thing anybody wants after a security question. |
+| `user_agent` | VARCHAR(300) | yes | — | V41 | For the "signed in on" list. |
+| `created_ip` | VARCHAR(64) | yes | — | V41 | |
+| `created_at` / `updated_at` | TIMESTAMPTZ | | | V41 | |
+
+Redis caches sessions as a HASH with the session's own TTL, **read-through only**
+— every write goes to Postgres first, and a revoke or a workspace switch EVICTS
+rather than updates. A stale cached session is a credential that outlived its own
+revocation.
+
+`SessionSweeper` deletes rows dead longer than `app.session.purge-after-days`.
+Written because `otp_request` is the cautionary tale: V1 says that table is
+"cleaned up by a scheduled job", no such job was ever written, and it has been
+growing since the first sign-in.
+
+**`web_session` is deliberately outside RLS.** It is read to ESTABLISH the tenant
+context, so a policy on it would have to be satisfied by the very context the
+read is trying to produce.
 
 ---
 
@@ -1175,6 +1294,119 @@ never be queued.
 The client-role pull (`/v1/client/sync/**`) is a narrower slice of the same
 tables, scoped by `client_id`.
 
+## Row-level security
+
+**Since V42 the database enforces isolation itself.** Before it, every wall was a
+hand-written `AND trainer_id = :tid` — 383 statements across 27 services — and
+one forgotten predicate was a cross-customer disclosure that no test, review or
+type would catch.
+
+The application filters **stay**. This is the backstop, not the replacement: a
+forgotten filter now returns empty instead of somebody else's rows, which
+surfaces as the 404 this schema already documents for a wrong id.
+
+### Two roles, and the difference IS the isolation
+
+| Role | Used by | Policies |
+| --- | --- | --- |
+| `xrep` | Flyway, the three seed scripts, DBA | owner — **bypasses** |
+| `xrep_app` | the runtime pool, and `TenantIsolationTest` | **apply** |
+
+**There is no `FORCE ROW LEVEL SECURITY`, deliberately.** It would apply to the
+owner, and the owner is Flyway — every future migration backfilling a column
+across all tenants, and all three seeds, would silently see nothing and quietly
+do nothing. That is the worst available failure, because it succeeds.
+
+### Six session settings, written on connection borrow
+
+`TenantAwareDataSource` writes all six on **every** `getConnection()`, which is
+what makes a leaked value harmless: the next borrower overwrites them before its
+first statement. Not `SET LOCAL` in a transaction — ten classes here use
+`NamedParameterJdbcTemplate` with no `@Transactional`, and `SET LOCAL` outside a
+transaction is a no-op with a warning, which under fail-closed means those
+endpoints quietly return nothing.
+
+| Setting | Helper | Is |
+| --- | --- | --- |
+| `app.actor` | `app_actor()` | `staff` or `client`. Set explicitly, never inferred — a policy that guesses the actor guesses wrong once. |
+| `app.phone` | `app_phone()` | the proved number. Solves a chicken-and-egg: `app.tenant_ids` is computed by reading `tenant_member`, which is itself tier 1. Two SELECT-only bootstrap policies key on this. |
+| `app.tenant_id` | `app_tenant_id()` | the **active** workspace — where writes land, how far money reads |
+| `app.tenant_ids` | `app_tenant_ids()` | the **read** scope — every workspace this person is in |
+| `app.trainer_id` | `app_trainer_id()` | the JWT subject |
+| `app.client_ids` | `app_client_ids()` | a client's own rows, **plural** across rosters |
+
+Every helper uses two-argument `current_setting(…, true)`, so unset is SQL NULL,
+every predicate is unknown, and the query returns **zero rows**. A context that
+failed to be set must starve a query, never widen one.
+
+### Four tiers
+
+| Tier | `USING` | Tables |
+| --- | --- | --- |
+| **1 — my workspaces** | `app_actor() = 'staff' AND tenant_id = ANY (app_tenant_ids())` | the 23 coaching tables |
+| **2 — active only** | `app_actor() = 'staff' AND tenant_id = app_tenant_id()` | `pack`, `package`, `package_adjustment`, `payment`, `gym_settlement`, `client_note` |
+| **3 — catalogue** | `tenant_id IS NULL OR tenant_id = ANY (app_tenant_ids())` | `exercise` |
+| **4 — client lens** | `app_actor() = 'client' AND client_id = ANY (app_client_ids())` | the 12 tables `/v1/client/sync/**` reads |
+
+Tier 1's `WITH CHECK` is the **singular** `app_tenant_id()`: read across your
+workspaces, write only where you are standing.
+
+**Tier 2 is deliberately not keyed on `trainer_id`.** In a gym the collector of
+record is the gym, so its administrators must read payments whose `trainer_id` is
+a coach — a `trainer_id` predicate would block exactly the person who banked the
+money. The database's rule is *money belongs to one workspace and you must be
+standing in it*; who inside a workspace may see whose is enforced in
+`TenantRevenueService`, in one place.
+
+Four of the tier-4 policies are `EXISTS` subqueries because the table has no
+`client_id` (`set_log`, `workout_exercise`, `program_exercise`, `template`). That
+cost is paid **only** on client-role requests, which read one person's own
+history; the trainer-side hot paths use tier 1, an index lookup on `tenant_id`.
+Giving `set_log` a `client_id` to flatten this would denormalise a hot table for
+the benefit of the cold path.
+
+### What is deliberately not policied
+
+`app_user` (a person, not a workspace — the whole requirement is that one person
+spans tenants), `trainer` (an identity and a client-facing profile; V33–V35 built
+it for an audience wider than any one tenant), `otp_request` (pre-authentication
+by definition) and `web_session` (read to establish the context).
+
+**Any new table that is not in one of the four tiers must be added to that list
+with its reason, or it is an oversight.**
+
+### `tenant_id` is immutable, and a trigger says so
+
+`freeze_tenant_id` (V39) refuses any `UPDATE` that changes it. That is not
+belt-and-braces — it is the property everything else rests on. Because a row is
+stamped where it was created and never moves, joining a gym costs no bulk
+`UPDATE`, leaving one cascades into nothing, and "who could ever have read this
+row" has one answer for the life of the row.
+
+`stamp_tenant_id` (V39) fills the column on insert in three steps: the statement
+said so → the request is standing somewhere → **inherit from the parent**
+(`client_id`, then `program_id`, `workout_session_id`, `package_id`, `team_id`,
+`trainer_id`). Step three is not a convenience: *a child row belongs where its
+parent does* is a real invariant, and it is what lets the four tables with no
+owner column never acquire an inconsistent one — and what lets seeds, migrations
+and background jobs write correct rows without each remembering a session
+variable. `client_id` beats `trainer_id` because a plan, a payment or a session
+belongs where its **client** is coached, and the same coach may be coaching in two
+workspaces at once.
+
+### `tenant_id` does not enter sync
+
+Not in `/v1/sync/pull`, not in `/v1/sync/push`, not in WatermelonDB's schema v19.
+A device holds one trainer's slice because the pull filtered it, and `trainer_id`
+on the phone is already documented below as not being a security boundary.
+**No mobile change was required** — the same shape as V30 and V32–V36.
+
+One consequence worth knowing: a trainer in two workspaces pulls **both** onto one
+phone, because the pull filters by `trainer_id` and that has not changed. Their
+local roster mixes private and gym clients until the app adopts the column.
+
+---
+
 ## Evolution law
 
 Non-negotiable, and it binds both halves of the monorepo in lockstep — the app's
@@ -1202,9 +1434,33 @@ rules.
 
 ---
 
-## Planned: V28+ — the gym platform
+## Planned: V43+ — the gym platform
 
-**Nothing in this section exists yet.** It is here because the schema above is
+> **Renumbered and partly superseded, 30 Aug 2026.** This section was written as
+> V28–V31 and the numbers were taken twice over — first by V28–V36, then by the
+> tenancy work in **V37–V42**. Read it as V43+.
+>
+> **Its V28 `user_role` table is done and must not be built again.** It shipped
+> as [`tenant_member`](#tenant_member--who-may-enter-and-as-what), with
+> `tenant_id` replacing `(scope_type, scope_id)` because the tenant already
+> carries its type.
+>
+> Two more of its assumptions moved:
+>
+> * **"No existing table gains an ownership column" no longer holds** — 29 of
+>   them gained `tenant_id` in V37–V39. The spirit survives exactly: `trainer_id`
+>   still means what it always meant, and `tenant_id` is a *second, independent*
+>   axis rather than a replacement for it.
+> * **`client.gym_id` as the money wall is superseded by `tenant_id` + tier 2.**
+>   A gym's clients are rows in the gym's workspace; a trainer's private clients
+>   are rows in theirs. The wall is now a database policy rather than a predicate
+>   40 queries have to remember — which is what that section asked for.
+>
+> Everything below about `gym`, `gym_member`, `trainer_payout`, memberships,
+> check-in and classes stands, with `gym_id` reading as "which gym org" rather
+> than "which wall".
+
+**The rest of this section is unbuilt.** It is here because the schema above is
 what a V28 author will read, and four of the decisions below are things they
 would otherwise get wrong. The full argument is
 `agent/XRep_gym_platform_prd.md`; this is the schema-shaped summary.

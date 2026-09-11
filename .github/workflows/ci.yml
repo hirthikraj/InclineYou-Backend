@@ -44,8 +44,26 @@ jobs:
         run: ./mvnw -B verify
         env:
           DATABASE_URL: jdbc:postgresql://localhost:5432/xrepdb
-          DATABASE_USERNAME: xrep
-          DATABASE_PASSWORD: xrep_dev
+          # Flyway and the suite connect as the schema OWNER, which BYPASSES
+          # row-level security — that is by design (V42 deliberately does not use
+          # FORCE ROW LEVEL SECURITY, or every migration that backfills across
+          # tenants would silently do nothing).
+          #
+          # `TenantIsolationTest` therefore opens its own connections as
+          # APP_DB_USERNAME, the non-owning runtime login V42 creates. Without
+          # that role every isolation assertion would pass for the wrong reason,
+          # which is the one kind of green worth engineering against.
+          # The OWNER pair. Flyway needs it, and so does the suite — the dev
+          # runtime is behind the policies but the tests cannot be, because a
+          # @Transactional test holds one connection borrowed before any request
+          # exists. TENANCY.md has the argument.
+          MIGRATION_DB_USERNAME: xrep
+          MIGRATION_DB_PASSWORD: xrep_dev
+          # The APP pair. Nothing in CI opens a pool with it — the suite is on
+          # the owner — but V42 sets this password on the role it creates, and
+          # TenantIsolationTest logs in with it to prove the wall.
+          APP_DB_USERNAME: xrep_app
+          APP_DB_PASSWORD: ci_only_app_role_password
           JWT_SECRET: ci-only-secret-not-used-anywhere-real-32chars
 
   app:

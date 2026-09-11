@@ -10,6 +10,7 @@ import com.xrep.xrep_backend.payment.PackRuleException;
 import com.xrep.xrep_backend.trainer.AccountRuleException;
 import com.xrep.xrep_backend.payment.PackageRuleException;
 import com.xrep.xrep_backend.team.TeamRuleException;
+import com.xrep.xrep_backend.tenant.TenantRuleException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -99,6 +100,24 @@ public class GlobalExceptionHandler {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
         pd.setProperty("code", ex.getCode());
         if (ex.getSeatLimit() != null) pd.setProperty("seatLimit", ex.getSeatLimit());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
+
+    /**
+     * A workspace rule said no.
+     *
+     * <p>Same shape as the team handler above, and the statuses mean the same
+     * things: 403 when the caller's role in this workspace is not enough, 404
+     * when the workspace is not one of theirs — the ownership-is-a-query-filter
+     * convention, so a wrong id is indistinguishable from somebody else's — 409
+     * for a roster collision, and 422 for a well-formed request asking for
+     * something that cannot exist.
+     */
+    @ExceptionHandler(TenantRuleException.class)
+    ResponseEntity<ProblemDetail> handleTenantRule(TenantRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(
+                org.springframework.http.HttpStatus.valueOf(ex.getStatus()), ex.getMessage());
+        pd.setProperty("code", ex.getCode());
         return ResponseEntity.status(ex.getStatus()).body(pd);
     }
 

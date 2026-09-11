@@ -19,6 +19,102 @@ public class AppProperties {
     private RateLimit rateLimit = new RateLimit();
     private Redis redis = new Redis();
     private Team team = new Team();
+    private Session session = new Session();
+    private Tenant tenant = new Tenant();
+    private Database database = new Database();
+    private Security security = new Security();
+
+    /**
+     * Transport security — the parts of it that are ours rather than the
+     * proxy's.
+     *
+     * <p>TLS itself is terminated upstream (Railway, or whatever fronts the
+     * container), so nothing here mints a certificate. What is left is the two
+     * things a terminating proxy cannot do on our behalf: tell the browser never
+     * to try plaintext again, and refuse a plaintext request if one arrives
+     * anyway.
+     */
+    @Getter
+    @Setter
+    public static class Security {
+
+        /**
+         * Refuse any request that did not arrive over HTTPS.
+         *
+         * <p>Off by default because development is plain HTTP on localhost and
+         * a default of {@code true} would make the first {@code
+         * ./mvnw spring-boot:run} redirect-loop into nothing.
+         *
+         * <p><b>Depends on {@code server.forward-headers-strategy}.</b> Behind a
+         * proxy that terminates TLS, every request reaches the container as
+         * HTTP; only {@code X-Forwarded-Proto} says otherwise. Turn this on
+         * without {@code FORWARD_HEADERS=framework} and every request is
+         * redirected to a URL that redirects back — so the deployment checklist
+         * lists them together.
+         */
+        private boolean requireHttps = false;
+
+        /**
+         * {@code Strict-Transport-Security} max-age, in days. One year is the
+         * value preload lists require; a short one is nearly useless, because
+         * the header only protects a visitor who has already been here once.
+         *
+         * <p>Spring Security only emits it on a request it considers secure,
+         * which is the correct behaviour and the reason this is safe to leave on
+         * in development: localhost never sees it.
+         */
+        private int hstsMaxAgeDays = 365;
+    }
+
+    /**
+     * The runtime database login — the one row-level security applies to.
+     *
+     * <p>Not where the application connects from: that is
+     * {@code spring.datasource.username}. This is what the isolation tests use
+     * to prove the policies work, and what the deployment runbook points at
+     * when the cutover happens. A table OWNER bypasses its own policies, so a
+     * test connecting as the owner would pass for the wrong reason.
+     */
+    @Getter
+    @Setter
+    public static class Database {
+        private String appRole = "xrep_app";
+        private String appRolePassword = "xrep_app_dev";
+    }
+
+    /**
+     * Server-side sessions — the web half of the credential story.
+     *
+     * <p>Shorter than the JWT's seven days on purpose. A browser session is
+     * revocable, so its lifetime is a convenience setting rather than a security
+     * ceiling; the phone's week exists because an offline device cannot renew.
+     */
+    @Getter
+    @Setter
+    public static class Session {
+        private int expiryHours = 72;
+
+        /** How long a dead session is kept before the sweeper deletes it. */
+        private int purgeAfterDays = 30;
+
+        /** Off and the sweeper never runs — for a read-only replica or a test. */
+        private boolean sweepEnabled = true;
+    }
+
+    @Getter
+    @Setter
+    public static class Tenant {
+        /**
+         * The kill switch for the workspace switcher, NOT for isolation.
+         *
+         * <p>Off, and every caller resolves to their home workspace and cannot
+         * move — which is exactly the behaviour before tenancy existed. It does
+         * not and must not disable row-level security: that lives in the
+         * database and in which role the pool connects as.
+         */
+        private boolean switchingEnabled = true;
+    }
+
 
     /**
      * Whether Redis is used at all.
@@ -70,6 +166,27 @@ public class AppProperties {
     public static class Otp {
         private int expiryMinutes;
         private boolean smsEnabled;
+
+        /**
+         * Write the generated code to the application log.
+         *
+         * <p>Split out of {@link #smsEnabled} deliberately. They used to be one
+         * fact — no SMS provider meant print the code — and that made the log
+         * sink an undeclared consequence of a delivery setting. It is its own
+         * decision now, because it has its own blast radius: logs are shipped to
+         * an aggregator, retained for weeks, and readable by more people than
+         * the database is. A code in a log is a credential at rest in the one
+         * place nobody thinks of as storage.
+         *
+         * <p>Left {@code true} by default so a fresh clone can sign in. It is not
+         * defended by that default, though — {@link
+         * com.xrep.xrep_backend.config.TransportSecurityCheck} refuses to start
+         * when this is on and the database connection is encrypted, because
+         * those two facts together describe a real deployment printing OTPs to
+         * a log.
+         */
+        private boolean devCodesInLog = true;
+
         /** Maximum wrong attempts before the phone is locked. */
         private int maxAttempts = 3;
 
