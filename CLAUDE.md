@@ -1,6 +1,6 @@
-# XRep — monorepo notes
+# InclineYou — monorepo notes
 
-XRep is a trainer-first coaching app for independent personal trainers in India:
+InclineYou is a trainer-first coaching app for independent personal trainers in India:
 a roster, workout programs, a session diary, and a cash/UPI money book that works
 with no signal on a gym floor.
 
@@ -26,7 +26,7 @@ deployment, seven of them hard blockers, an
 India-first hosting analysis for all three layers with alternates, and the
 security checklist to sign off before release. **Read it before any deployment
 or infrastructure work.** Two of its blockers are worth knowing even if you
-never deploy: the web never sends `X-XRep-Client: web`, so it holds an
+never deploy: the web never sends `X-InclineYou-Client: web`, so it holds an
 unrevocable JWT rather than the session V41 built for it, and no SMS provider is
 wired, so nothing can sign in off a development machine.
 
@@ -85,12 +85,25 @@ anything but Next* property.
 authorization table, rate-limit tiers, and the error `code` catalogue the app
 branches on. Change an endpoint, change that file in the same commit.
 
-**Schema evolution is additive-only, on both sides, in lockstep.** The backend's
-Flyway migrations (`backend/src/main/resources/db/migration`, V1…V30) and the
-app's WatermelonDB migrations (`app/src/db/migrations.ts`, schema v19) follow the
-same law: append a new version, never edit one that has run, never drop or
-repurpose a column, never remove a response field. Trainers' phones carry data we
-cannot refetch, and old builds must keep working.
+**Both sides were flattened to a baseline on 11 Sep 2026, and the law resumes
+from there.** The rename to InclineYou changed the database name, the two
+database roles and the phone's WatermelonDB name, so no database and no device
+anywhere had a schema to carry forward — which made it the one safe moment to
+collapse the history. The backend's forty-two Flyway migrations are now a single
+`V1__init_schema.sql`, verified to produce a schema byte-identical to what the
+forty-two produced; the app's eighteen WatermelonDB steps are now schema v1 with
+an empty migrations list. Both sets of old files are in git history, and the
+V-numbers quoted throughout these notes (V26, V30, V33 …) are **historical
+labels for decisions, not files on disk** — they still name the argument, they
+no longer name a migration you can open. The next backend migration is `V2`.
+
+**From the baseline, schema evolution is additive-only, on both sides, in
+lockstep.** The backend's Flyway migrations
+(`backend/src/main/resources/db/migration`) and the app's WatermelonDB
+migrations (`app/src/db/migrations.ts`) follow the same law: append a new
+version, never edit one that has run, never drop or repurpose a column, never
+remove a response field. Trainers' phones carry data we cannot refetch, and old
+builds must keep working.
 
 **Offline-first is the architecture, not a feature — on the phone.** `app/`
 writes to local SQLite and reconciles through `/v1/sync/pull` + `/v1/sync/push`.
@@ -116,7 +129,7 @@ Rules that touch both halves:
   unlicensed for us; V22 dropped the media columns on 17 Aug 2026. Every "free"
   GIF dataset is the same artwork re-uploaded.
 - **A team widens reads; it never moves ownership.** V26 added team coaching
-  (`backend/agent/XRep_team_coaching_prd.md`). No table gained a `team_id`, no
+  (`backend/agent/InclineYou_team_coaching_prd.md`). No table gained a `team_id`, no
   existing endpoint changed what it returns, and only `team` + `team_member` enter
   sync — teammates' clients are online-only REST, and no role ever sees a
   teammate's money book — except an owner-only, totals-only revenue roll-up, whose
@@ -309,11 +322,11 @@ Rules that touch both halves:
   Consequences that reach past the backend: **`PHONE_ON_ANOTHER_ROSTER` narrowed**
   to mean "another coach *in this workspace*", so the app's copy for that error is
   now wrong on the phone; the money book is **always the active workspace alone**,
-  enforced by the database, while the diary spans them all (`X-XRep-View`); and
+  enforced by the database, while the diary spans them all (`X-InclineYou-View`); and
   **nothing entered sync**, so no phone build notices — the same shape as V30 and
   V32–V36. A trainer in two workspaces does pull both onto one phone, mixed, until
   the app adopts the column. `backend/TENANCY.md` is the whole argument. **The backend's dev runtime now
-connects as the non-owning `xrep_app`, so the policies are live locally**;
+connects as the non-owning `inclineyou_app`, so the policies are live locally**;
 production is one variable behind. The database has **two identities and two
 pairs of environment variables** — `APP_DB_USERNAME` / `APP_DB_PASSWORD` for
 every request, `MIGRATION_DB_USERNAME` / `MIGRATION_DB_PASSWORD` for Flyway, the
@@ -322,7 +335,7 @@ level is the checklist and is also what `docker compose` reads.
 - **The web signs in with a session, the phone with a JWT.** V41 put both behind
   one interface (`AuthTokenIssuer`): the phone is offline half the time and needs
   a self-contained token, the browser is not and needs a revocable one. Send
-  `X-XRep-Client: web` to get a session; absence means mobile, and that default is
+  `X-InclineYou-Client: web` to get a session; absence means mobile, and that default is
   load-bearing for every build already in the field. Switching workspace costs the
   web an `UPDATE` and the phone a new token — `POST /v1/tenants/{id}/activate`
   returns `token: null` when the existing credential still works, and the client
@@ -330,12 +343,12 @@ level is the checklist and is also what `docker compose` reads.
 - Template days are **ordinal slots**. Weekdays and times are chosen per client at
   apply time into `program.schedule`; the count must match or apply 400s.
 - **A gym is a visibility grant too — designed, not built.**
-  `notes/XRep_gym_platform_prd.md` (Ring 2 of the growth roadmap) extends the team
+  `notes/InclineYou_gym_platform_prd.md` (Ring 2 of the growth roadmap) extends the team
   law one rung up: a gym never owns a client, `client.trainer_id` stays `NOT NULL`,
   and `client.gym_id` is provenance and the money wall — inside it the gym sees
   everything because it *collected* it, outside it the gym sees nothing, not even a
   count. **Two states, and today's is the majority one:** if the gym is not on
-  XRep the trainer manages the whole arrangement themselves (`trainer.gym_name` as
+  InclineYou the trainer manages the whole arrangement themselves (`trainer.gym_name` as
   free text, `gym_share_percent`, `payment_mode`, the self-computed
   `gym_settlement`) and **none of that is being deprecated**; only when a trainer
   accepts a gym-org invite does the gym start authoring the commercial facts for
@@ -344,11 +357,10 @@ level is the checklist and is also what `docker compose` reads.
   not "independent": it covers clients at gyms that never signed up. Two things a change made today must respect: **`app_user.role` stops being
   the authority** (that PRD's first migration re-reads it as the *home* role and
   moves authority to a new `user_role` table, reversing the "one phone = one role"
-  decision of V18 — it is written up as V28 and **everything through V35 is
-  taken**, by `attention_dismissal`, `client_note`, `package_lifecycle`,
-  `program_authoring`, `nudge_templates`, `trainer_identity`,
-  `trainer_place_and_modes` and `trainer_social_links`, so read its whole
-  sequence eight numbers higher),
+  decision of V18 — it is written up as V28, and since the forty-two migrations
+  were flattened into one baseline its numbers are a **dependency order, not
+  file names**: the next free number is `V2`, and `IDENTITY.md`'s plan wants the
+  same range, so whichever lands first takes it and the other gets renumbered),
   and
   **a gym-sent reminder has to be a `nudge_log` row**, because the
   once-per-client-per-7-days cap is computed on the phone from that table
@@ -390,7 +402,7 @@ places**, and as of
 - `backend/agent/` and `app/agent/` — untracked working copies
 
 **Edit one, copy to the other two, and make sure `notes/` is among them** — it is
-the only copy git protects. The drift that existed before (`XRep_core_data_model.md`
+the only copy git protects. The drift that existed before (`InclineYou_core_data_model.md`
 was a version behind in `notes/`, missing the V24/V25 notes on `program.schedule`,
 `duration_seconds`, and ordinal day slots) is resolved; keep it that way.
 
@@ -398,7 +410,7 @@ Each location also carries extras the others lack:
 
 - `notes/` only — `core_data_model_erd.html`, `interaction-map/gen_flow.py` (the
   script that renders the flow diagrams), `PushMore_waitlist_copy.html`
-- `notes/design system/` and `app/agent/design system/` — `xrepdesignsystem.html`,
+- `notes/design system/` and `app/agent/design system/` — `inclineyoudesignsystem.html`,
   the source of truth for `app/src/design/tokens.ts`, plus the 11 screen designs
   the interaction map's frame numbers refer to. Now tracked via `notes/`.
 

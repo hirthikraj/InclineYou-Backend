@@ -25,7 +25,7 @@ import { SETUP_STEPS, isSetupStep, type SetupStep } from './steps';
  * Being asked once more about a skipped OPTIONAL step is the cheap side of that
  * trade — the expensive side would be a permanent server record of a decline.
  */
-const SKIPPED_COOKIE = 'xrep_setup_skipped';
+const SKIPPED_COOKIE = 'inclineyou_setup_skipped';
 
 /**
  * Long enough to outlast a flow somebody walks away from and comes back to

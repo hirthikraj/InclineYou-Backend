@@ -151,7 +151,7 @@ export const ACCOUNT: Destination[] = [
     // `/settings` stopped being an index of other screens when it became a tab
     // strip of its own — Account first, then the nudge wording. See
     // `lib/settings/tabs.ts`.
-    purpose: 'Your number, your email, and the wording XRep sends',
+    purpose: 'Your number, your email, and the wording InclineYou sends',
   },
   {
     key: 'team', icon: <Team size={17} />, label: 'Team', href: '/team', accel: '',

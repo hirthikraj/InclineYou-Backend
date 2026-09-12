@@ -41,7 +41,7 @@ import { getToken } from '@/lib/auth/session';
  * even though the read is whole.
  */
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
 
 export class ProfileApiError extends Error {
@@ -50,7 +50,7 @@ export class ProfileApiError extends Error {
     /** The server's own sentence, where it wrote one. */
     readonly detail: string | null = null,
   ) {
-    super(`xrep api ${status ?? 'unreachable'}`);
+    super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'ProfileApiError';
   }
 }
@@ -106,7 +106,7 @@ export interface Identity {
    * it as another profile fact.
    */
   workMode: string;
-  /** Free text, and free text on purpose: most gyms in India are not on XRep. */
+  /** Free text, and free text on purpose: most gyms in India are not on InclineYou. */
   gymName: string;
   /** Verbatim, as pasted. The server does not canonicalise it — see V34. */
   mapLink: string;

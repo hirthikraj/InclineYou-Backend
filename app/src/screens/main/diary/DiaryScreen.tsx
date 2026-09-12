@@ -1,7 +1,7 @@
 /**
  * Screen 05 · Diary · FR-2.
  *
- * `agent/design system/screens/xrepdiary.html`.
+ * `agent/design system/screens/inclineyoudiary.html`.
  *
  * Eight platforms were torn down and every one of them ships a time grid. A
  * time grid is the wrong shape for this job: a personal trainer works a split

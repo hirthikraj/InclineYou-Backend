@@ -1,7 +1,7 @@
 /**
  * Screen 02 · Trainer setup · Step 1 of 6 · Your name.
  *
- * `agent/design system/screens/xreptrainersetup.html` § 02 — 2a default,
+ * `agent/design system/screens/inclineyoutrainersetup.html` § 02 — 2a default,
  * 2b empty.
  *
  * The only mandatory answer in the whole flow, and the only hard validation.

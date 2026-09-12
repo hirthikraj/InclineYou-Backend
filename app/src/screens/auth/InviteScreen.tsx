@@ -57,7 +57,7 @@ import {
   space,
 } from '../../design';
 
-const PRIVACY_URL = 'https://xrep.app/privacy';
+const PRIVACY_URL = 'https://inclineyou.app/privacy';
 
 type Props = {
   navigation: NativeStackNavigationProp<AuthStackParamList, 'Invite'>;

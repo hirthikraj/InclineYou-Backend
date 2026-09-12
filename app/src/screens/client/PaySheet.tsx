@@ -152,7 +152,7 @@ export default function PaySheet({
 
           <Callout style={styles.note}>
             This goes straight to {coachFirst}&apos;s bank.{' '}
-            <CalloutStrong>XRep never holds it and can&apos;t confirm it</CalloutStrong> — they
+            <CalloutStrong>InclineYou never holds it and can&apos;t confirm it</CalloutStrong> — they
             mark it received when it lands, and your receipt comes from them.
           </Callout>
         </>

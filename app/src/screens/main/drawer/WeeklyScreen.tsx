@@ -111,7 +111,7 @@ export default function WeeklyScreen() {
             <Empty
               icon={IconChart}
               title="No reports yet"
-              body="XRep writes one for every client on Sunday night, from the sessions you logged that week. The first one lands after your first full week."
+              body="InclineYou writes one for every client on Sunday night, from the sessions you logged that week. The first one lands after your first full week."
               style={styles.empty}
             />
           ) : (
@@ -144,7 +144,7 @@ export default function WeeklyScreen() {
                   and a trainer who is not told that reads it as a fault. */}
               {view.queued.length ? (
                 <Callout icon={IconMessage} style={styles.note}>
-                  <CalloutStrong>Queued means written, not delivered.</CalloutStrong> XRep does not
+                  <CalloutStrong>Queued means written, not delivered.</CalloutStrong> InclineYou does not
                   send WhatsApp messages on your behalf yet — open a report and send it from your
                   own WhatsApp, which is where your client expects it from anyway.
                 </Callout>

@@ -1,7 +1,7 @@
 /**
  * Screen 04 · Clients.
  *
- * `agent/design system/screens/xrepclients.html`.
+ * `agent/design system/screens/inclineyouclients.html`.
  *
  * The teardown of nine coaching platforms produced one agreement and one blind
  * spot. They all compute who needs attention rather than asking the trainer to
@@ -260,7 +260,7 @@ export default function ClientsScreen() {
         navigation.navigate('PackageList', { clientId: row.id, clientName: row.name });
         return;
       case 'invite':
-        void whatsapp(row, `Hi ${first}, here's your XRep invite again.`);
+        void whatsapp(row, `Hi ${first}, here's your InclineYou invite again.`);
         return;
       // The only attention item whose fix is an edit rather than a message.
       // Straight to the form the number lives on — there is nothing to say to
@@ -604,7 +604,7 @@ export default function ClientsScreen() {
         {failed ? (
           <Empty
             icon={IconCloudOff}
-            title="Couldn't reach XRep"
+            title="Couldn't reach InclineYou"
             body="This phone hasn't finished its first sync, so your roster isn't here yet. Check your connection and try again."
             style={styles.firstRun}
             action={<Button label="Try again" onPress={() => void syncDatabase('retry')} />}

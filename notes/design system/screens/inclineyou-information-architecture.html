@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Train X — Information Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root,[data-theme="dark"]{
+  --bg:#08090B; --pane:#101216; --pane2:#171A20; --line:#1E222A; --line2:#2A2F39;
+  --ink:#F2F4F6; --ink2:#A2A9B4; --ink3:#8B939F;
+  /* There is no --ink4. A fourth ink becomes a text colour by accident, and
+     this page shipped 78 contrast failures the first time for exactly that. */
+  --acc:#C6F24E; --acc-t:#C6F24E; --acc-ink:#0A0B0D; --acc-soft:rgba(198,242,78,.13); --acc-line:rgba(198,242,78,.3);
+  --ok:#3DDC84; --ok-soft:rgba(61,220,132,.13);
+  --warn:#FFB020; --warn-soft:rgba(255,176,32,.13);
+  --todo:#8B939F; --todo-soft:rgba(139,147,159,.12);
+  --client:#3DBFB0; --client-soft:rgba(61,191,176,.11); --client-line:rgba(61,191,176,.34);
+  --brdg:#E0A83A; --brdg-soft:rgba(224,168,58,.09); --brdg-line:rgba(224,168,58,.28);
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+}
+[data-theme="light"]{
+  --bg:#F4F5F3; --pane:#FFFFFF; --pane2:#F7F8F6; --line:#E2E4DF; --line2:#CDD0C9;
+  --ink:#14161A; --ink2:#414750; --ink3:#5A626D;
+  --acc:#C6F24E; --acc-t:#4F6B0A; --acc-ink:#14161A; --acc-soft:#EDF7CF; --acc-line:#C9DE8E;
+  --ok:#0E7034; --ok-soft:#E4F4EA;
+  --warn:#8A5A12; --warn-soft:#FBF0DC;
+  --todo:#5A626D; --todo-soft:#EAECE8;
+  --client:#0F6E63; --client-soft:#E2F1EF; --client-line:#A9D3CD;
+  --brdg:#7A5410; --brdg-soft:#FBF3E2; --brdg-line:#DFC48A;
+}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1780px;margin:0 auto;padding:44px 30px 90px}
+/* the theme control is fixed, so the first row reserves its lane */
+
+
+/* In the flow, not fixed. A floating control over a full-width table and a
+   grid of cards will always end up on top of something — it clipped the last
+   file card the first time. Repeated in the footer instead. */
+.themeswitch{display:inline-flex;gap:4px;padding:4px;border-radius:10px;background:var(--pane);
+  box-shadow:inset 0 0 0 1px var(--line)}
+.tsrow{display:flex;justify-content:flex-end;margin-bottom:-14px}
+.themeswitch button{padding:7px 14px;border-radius:7px;font-size:12px;font-weight:700;color:var(--ink3);
+  border:0;background:none;cursor:pointer;font-family:inherit}
+.themeswitch button[aria-pressed="true"]{background:var(--acc);color:var(--acc-ink)}
+
+h1{margin:0 0 10px;font-size:clamp(26px,3.4vw,40px);font-weight:800;letter-spacing:-.035em;line-height:1.05}
+.lede{margin:0;max-width:96ch;font-size:15.5px;line-height:1.62;color:var(--ink2)}
+.lede b{color:var(--ink);font-weight:600}
+.eyebrow{font-size:11px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:var(--ink3);
+  display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.eyebrow::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,var(--line2),transparent)}
+
+.score{display:flex;flex-wrap:wrap;gap:10px;margin:26px 0 0}
+.sc{flex:1;min-width:150px;padding:15px 17px;border-radius:13px;background:var(--pane);
+  box-shadow:inset 0 0 0 1px var(--line)}
+.sc b{display:block;font-size:27px;font-weight:800;letter-spacing:-.035em;font-variant-numeric:tabular-nums;line-height:1}
+.sc span{display:block;font-size:10.5px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--ink3);margin-top:8px}
+.sc[data-s="done"] b{color:var(--ok)} .sc[data-s="part"] b{color:var(--warn)}
+.sc[data-s="todo"] b{color:var(--ink3)} .sc[data-s="acc"] b{color:var(--acc-t)}
+
+.rail{margin-top:34px;padding:20px;border-radius:16px;background:var(--pane);
+  box-shadow:inset 0 0 0 1px var(--line);overflow-x:auto}
+.rail__in{display:flex;align-items:stretch;gap:9px;min-width:1180px}
+.anode{flex:1;min-width:0;padding:12px 13px;border-radius:11px;background:var(--pane2);
+  box-shadow:inset 0 0 0 1px var(--line);position:relative}
+.anode b{display:block;font-size:13.5px;font-weight:700;letter-spacing:-.015em;padding-right:20px}
+.anode span{display:block;font-size:11.5px;color:var(--ink3);margin-top:3px;line-height:1.4}
+.anode em{display:block;font-style:normal;font-family:var(--mono);font-size:10px;color:var(--ink3);
+  margin-top:8px;letter-spacing:.02em}
+/* the flow arrow carries meaning, so it is ink and not a rule colour */
+.ar{align-self:center;color:var(--ink3);font-size:17px;flex:0 0 auto}
+
+.roles{display:flex;align-items:baseline;gap:14px;margin:44px 0 14px}
+.roles h2{margin:0;font-size:12px;font-weight:800;letter-spacing:.2em;text-transform:uppercase;color:var(--acc-t)}
+.roles h2[data-r="client"]{color:var(--client)}
+.roles i{flex:1;height:2px;background:var(--acc-line)}
+.roles i[data-r="client"]{background:var(--client-line)}
+.roles small{font-size:11.5px;color:var(--ink3);font-family:var(--mono)}
+
+.board,.boardhead{display:grid;grid-template-columns:minmax(0,1fr) 240px 330px;gap:18px;align-items:end}
+.board{align-items:start}
+.boardhead{margin:44px 0 14px}
+@media (max-width:1360px){.board,.boardhead{grid-template-columns:1fr}}
+
+/* Home / Dashboard is a screen, so it gets a node — the hero one, like the
+   original map's purple box. It spans the trainer column. */
+.hero{display:flex;align-items:center;gap:15px;padding:17px 19px;border-radius:15px;margin-bottom:16px;
+  background:linear-gradient(135deg,var(--acc-soft),transparent 62%),var(--pane);
+  box-shadow:inset 0 0 0 1px var(--acc-line)}
+.hero__tick{flex:0 0 26px;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;
+  background:var(--ok);color:var(--bg);font-size:14px;font-weight:800}
+.hero__b{flex:1;min-width:0}
+.hero__b b{display:block;font-size:17px;font-weight:800;letter-spacing:-.025em}
+.hero__b span{display:block;font-size:12.5px;color:var(--ink2);margin-top:4px}
+.hero__b em{display:block;font-style:normal;font-family:var(--mono);font-size:10px;color:var(--ink3);margin-top:8px}
+.hero__fr{flex:0 0 auto;text-align:right}
+.hero__fr b{display:block;font-family:var(--mono);font-size:11.5px;color:var(--acc-t);letter-spacing:.03em}
+.hero__fr span{display:block;font-size:11px;color:var(--ink3);margin-top:4px}
+.tcol{display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:16px;align-items:start}
+
+.grp{padding:17px;border-radius:15px;background:var(--pane);box-shadow:inset 0 0 0 1px var(--line)}
+.grp__h{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:11px}
+.grp__h h4{margin:0;font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--ink2)}
+.grp__fr{font-family:var(--mono);font-size:10.5px;color:var(--acc-t);letter-spacing:.03em;white-space:nowrap}
+.grp__bar{display:flex;height:4px;border-radius:2px;background:var(--todo-soft);overflow:hidden;margin-bottom:13px}
+.grp__bar i{display:block;height:100%;background:var(--ok)}
+.grp__bar s{display:block;height:100%;background:var(--warn);text-decoration:none}
+.grp__n{display:flex;flex-direction:column;gap:7px}
+.grp__f{display:flex;gap:13px;justify-content:space-between;margin-top:13px;padding-top:11px;border-top:1px solid var(--line);
+  font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.grp__f span[data-s="done"]{color:var(--ok)}
+.grp__f span[data-s="part"]{color:var(--warn)}
+.grp__f span[data-s="todo"]{color:var(--ink3)}
+
+.node{display:flex;align-items:flex-start;gap:11px;padding:11px 12px;border-radius:10px;
+  background:var(--pane2);box-shadow:inset 0 0 0 1px var(--line)}
+.node__tick{flex:0 0 20px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;
+  font-size:11px;font-weight:800;margin-top:1px}
+.node[data-s="done"] .node__tick{background:var(--ok);color:var(--bg)}
+.node[data-s="part"] .node__tick{background:var(--warn);color:var(--bg)}
+.node[data-s="todo"] .node__tick{background:transparent;color:var(--ink3);box-shadow:inset 0 0 0 1.5px var(--ink3)}
+.node[data-s="todo"]{background:transparent;box-shadow:inset 0 0 0 1px var(--line);border-left:2px dashed var(--line2)}
+.node[data-s="done"]{box-shadow:inset 0 0 0 1px var(--line),inset 2px 0 0 var(--ok)}
+.node[data-s="part"]{box-shadow:inset 0 0 0 1px var(--line),inset 2px 0 0 var(--warn)}
+.node__b{flex:1;min-width:0}
+.node__b b{display:block;font-size:13.5px;font-weight:700;letter-spacing:-.015em;line-height:1.3}
+.node__b > span{display:block;font-size:11.5px;color:var(--ink3);margin-top:3px;line-height:1.4}
+.node__w{display:block;font-family:var(--mono);font-size:9.5px;color:var(--ink3);margin-top:7px;
+  letter-spacing:.02em;line-height:1.4}
+.node__fr{flex:0 0 auto;font-family:var(--mono);font-size:9.5px;color:var(--ink3);letter-spacing:.02em;margin-top:2px}
+.node--client{background:var(--client-soft);box-shadow:inset 0 0 0 1px var(--client-line)}
+.node--client[data-s="todo"]{background:var(--client-soft);
+  box-shadow:inset 0 0 0 1px var(--client-line);border-left:2px dashed var(--client-line)}
+.node--client .node__fr{color:var(--client)}
+
+.bridge{padding:17px;border-radius:15px;background:var(--brdg-soft);
+  box-shadow:inset 0 0 0 1px var(--brdg-line)}
+.bridge__h h4{margin:0 0 3px;font-size:11px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--brdg)}
+.bridge__h p{margin:0 0 14px;font-family:var(--mono);font-size:10.5px;color:var(--brdg);opacity:.85}
+.br{padding:11px 0;border-top:1px dashed var(--brdg-line)}
+.br:first-of-type{border-top:0}
+.br b{display:block;font-family:var(--mono);font-size:11px;font-weight:700;color:var(--brdg);letter-spacing:.02em}
+.br span{display:block;font-size:11px;color:var(--ink3);margin-top:4px}
+.br em{display:block;font-style:normal;font-size:10px;color:var(--ink3);margin-top:6px;line-height:1.4}
+.br em s{text-decoration:none;color:var(--brdg)}
+
+.ccol{display:flex;flex-direction:column;gap:8px}
+.ccol .grp{background:transparent;box-shadow:none;padding:0}
+
+.legend{display:flex;flex-wrap:wrap;gap:18px 26px;margin-top:34px;padding:17px 19px;border-radius:14px;
+  background:var(--pane);box-shadow:inset 0 0 0 1px var(--line);font-size:12.5px;color:var(--ink2)}
+.legend div{display:flex;align-items:center;gap:9px}
+.legend s{width:20px;height:20px;border-radius:50%;display:grid;place-items:center;text-decoration:none;
+  font-size:11px;font-weight:800;flex:0 0 20px}
+.legend s[data-s="done"]{background:var(--ok);color:var(--bg)}
+.legend s[data-s="part"]{background:var(--warn);color:var(--bg)}
+.legend s[data-s="todo"]{color:var(--ink3);box-shadow:inset 0 0 0 1.5px var(--ink3)}
+.legend i{width:26px;height:12px;border-radius:3px;display:block;flex:0 0 26px}
+
+.files{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-top:16px}
+.fc{display:block;padding:14px 15px;border-radius:12px;background:var(--pane);text-decoration:none;
+  box-shadow:inset 0 0 0 1px var(--line);transition:box-shadow .15s}
+.fc:hover{box-shadow:inset 0 0 0 1px var(--acc-line)}
+.fc b{display:block;font-size:14px;font-weight:700;color:var(--ink);letter-spacing:-.015em}
+.fc span{display:block;font-size:11.5px;color:var(--ok);font-weight:700;margin-top:4px}
+.fc em{display:block;font-style:normal;font-family:var(--mono);font-size:9.5px;color:var(--ink3);margin-top:7px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+h3.sec{margin:56px 0 6px;font-size:11px;font-weight:800;letter-spacing:.18em;text-transform:uppercase;color:var(--acc-t)}
+h3.sec + p{margin:0 0 20px;max-width:90ch;font-size:14.5px;line-height:1.62;color:var(--ink2)}
+h3.sec + p b{color:var(--ink);font-weight:600}
+
+.tbl{border-radius:15px;overflow:hidden;background:var(--pane);box-shadow:inset 0 0 0 1px var(--line)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:11px 15px;border-bottom:1px solid var(--line);vertical-align:top;line-height:1.5}
+th{font-size:9.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3);background:var(--pane2)}
+tbody tr:last-child td{border-bottom:0}
+td.k{font-weight:600;color:var(--ink);white-space:nowrap}
+td.d{color:var(--ink2)}
+td.st{font-family:var(--mono);font-size:11px;white-space:nowrap;font-weight:700}
+td.st[data-s="done"]{color:var(--ok)} td.st[data-s="part"]{color:var(--warn)} td.st[data-s="todo"]{color:var(--ink3)}
+tr.th2 td{background:var(--pane2);font-size:10px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--acc-t)}
+
+.notes{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:13px;margin-top:20px}
+.note{border-radius:14px;padding:18px;background:var(--pane);box-shadow:inset 0 0 0 1px var(--line)}
+.note h5{margin:0 0 8px;font-size:10.5px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--ink3)}
+.note p{margin:0;font-size:13.2px;line-height:1.6;color:var(--ink2)}
+.note b{color:var(--ink);font-weight:600}
+.note--go{box-shadow:inset 0 0 0 1px var(--acc-line);
+  background:linear-gradient(160deg,var(--acc-soft),transparent 62%),var(--pane)}
+.note--gap{box-shadow:inset 0 0 0 1px var(--warn-soft);
+  background:linear-gradient(160deg,var(--warn-soft),transparent 62%),var(--pane)}
+
+footer{margin-top:70px;padding-top:22px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;
+  gap:14px;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--ink3);letter-spacing:.04em}
+@media print{.themeswitch{display:none}}
+
+
+/* --------------------------------------------------- LIVE HANDOFF REFERENCES
+   Every "covered by" reference is a link into the file and frame that covers it.
+   No underline: at 9.5px mono in a dense grid an underline turns the board into
+   hatching. The affordance is the hover colour, same as the file cards above. */
+a.fref{color:inherit;text-decoration:none;border-bottom:1px solid transparent;
+  transition:color .13s,border-color .13s}
+a.fref:hover,a.fref:focus-visible{color:var(--acc-t);border-bottom-color:var(--acc-line)}
+a.fref:focus-visible{outline:2px solid var(--acc-t);outline-offset:2px;border-radius:2px}
+/* the table column is the one place a link should look like one — it is the
+   thing a developer is scanning for */
+td.d a.fref{border-bottom-color:var(--line2)}
+.node__w a.fref,em a.fref{font-family:inherit}
+</style></head>
+<body>
+<div class="wrap">
+<div class="tsrow"><div class="themeswitch">
+  <button data-set-theme="dark" aria-pressed="true">Dark</button>
+  <button data-set-theme="light" aria-pressed="false">Light</button>
+</div></div>
+
+<div class="eyebrow">Train X · Master information architecture · 11 Aug 2026</div>
+<h1>Every screen, both roles — all of it drawn</h1>
+<p class="lede">
+  The MVP flow map with <b>design status on every node</b>. As of this revision <b>every node is drawn</b> —
+  the trainer role, the client role, and the one large hole that used to be marked here: <b>workout logging</b>,
+  the floor screen and the single most-used surface in the app. Each node names the file and the frames
+  that cover it, so this doubles as the handoff index — <b>and every reference below is clickable</b> — <b>and every reference below is clickable</b> — <b>171 frames across 9 files</b>.
+  The two newest files are <code>inclineyou-workout-log.html</code> and <code>inclineyou-client-role.html</code>.
+</p>
+
+<div class="score">
+  <div class="sc" data-s="done"><b>59</b><span>Screens designed</span></div>
+  <div class="sc" data-s="part"><b>0</b><span>Partly covered</span></div>
+  <div class="sc" data-s="todo"><b>0</b><span>Still to design</span></div>
+  <div class="sc" data-s="acc"><b>171</b><span>Frames drawn</span></div>
+  <div class="sc" data-s="acc"><b>100%</b><span>Of 59 nodes</span></div>
+</div>
+
+<h3 class="sec">00 · Getting in</h3>
+<p>Shared by both roles. A returning trainer never sees this — the app opens straight into local data,
+which is the whole point of FR-8.</p>
+<div class="rail"><div class="rail__in"><div class="anode" data-s="done"><span class="node__tick">✓</span><b>Launch</b><span>app opens</span><em>login · Behaviour</em></div><span class="ar">→</span><div class="anode" data-s="done"><span class="node__tick">✓</span><b>Session on device?</b><span>decision</span><em>login · <a class="fref" href="inclineyou-login-otp.html#f-4b" title="login · frame 4b">4b</a></em></div><span class="ar">→</span><div class="anode" data-s="done"><span class="node__tick">✓</span><b>Phone entry</b><span>mobile number</span><em>login · <a class="fref" href="inclineyou-login-otp.html#f-1a" title="login · frame 1a">1a</a>–<a class="fref" href="inclineyou-login-otp.html#f-1c" title="login · frame 1c">1c</a>, <a class="fref" href="inclineyou-login-otp.html#f-7c" title="login · frame 7c">7c</a></em></div><span class="ar">→</span><div class="anode" data-s="done"><span class="node__tick">✓</span><b>OTP verify</b><span>needs a connection</span><em>login · <a class="fref" href="inclineyou-login-otp.html#f-2a" title="login · frame 2a">2a</a>–<a class="fref" href="inclineyou-login-otp.html#f-2c" title="login · frame 2c">2c</a>, <a class="fref" href="inclineyou-login-otp.html#f-3a" title="login · frame 3a">3a</a>–<a class="fref" href="inclineyou-login-otp.html#f-3c" title="login · frame 3c">3c</a>, <a class="fref" href="inclineyou-login-otp.html#f-8a" title="login · frame 8a">8a</a>–<a class="fref" href="inclineyou-login-otp.html#f-8c" title="login · frame 8c">8c</a></em></div><span class="ar">→</span><div class="anode" data-s="done"><span class="node__tick">✓</span><b>Resolve role</b><span>a person can be both</span><em>login · <a class="fref" href="inclineyou-login-otp.html#f-5a" title="login · frame 5a">5a</a></em></div><span class="ar">→</span><div class="anode" data-s="done"><span class="node__tick">✓</span><b>Trainer setup</b><span>6 steps · not in the original map</span><em>setup · <a class="fref" href="inclineyou-setup.html#f-1a" title="setup · frame 1a">1a</a>–<a class="fref" href="inclineyou-setup.html#f-6b" title="setup · frame 6b">6b</a></em></div></div></div>
+
+<div class="boardhead">
+  <div class="roles" style="margin:0">
+    <h2>Trainer role · primary</h2>
+    <small>52 screens · all drawn</small><i></i>
+  </div>
+  <div></div>
+  <div class="roles" style="margin:0">
+    <h2 data-r="client">Client role</h2>
+    <small>7 screens · all drawn</small><i data-r="client"></i>
+  </div>
+</div>
+
+<div class="board">
+  <div>
+    <div class="hero">
+      <span class="hero__tick">✓</span>
+      <span class="hero__b"><b>Home / Dashboard</b>
+        <span>clients · today · revenue · gym split — the screen every group below hangs off</span>
+        <em>home · <a class="fref" href="inclineyou-home.html#f-1a" title="home · frame 1a">1a</a> <a class="fref" href="inclineyou-home.html#f-1b" title="home · frame 1b">1b</a> <a class="fref" href="inclineyou-home.html#f-1c" title="home · frame 1c">1c</a> <a class="fref" href="inclineyou-home.html#f-2a" title="home · frame 2a">2a</a> <a class="fref" href="inclineyou-home.html#f-2b" title="home · frame 2b">2b</a> <a class="fref" href="inclineyou-home.html#f-2c" title="home · frame 2c">2c</a> <a class="fref" href="inclineyou-home.html#f-2d" title="home · frame 2d">2d</a> <a class="fref" href="inclineyou-home.html#f-3a" title="home · frame 3a">3a</a> <a class="fref" href="inclineyou-home.html#f-3b" title="home · frame 3b">3b</a> <a class="fref" href="inclineyou-home.html#f-3c" title="home · frame 3c">3c</a> <a class="fref" href="inclineyou-home.html#f-3d" title="home · frame 3d">3d</a> <a class="fref" href="inclineyou-home.html#f-3e" title="home · frame 3e">3e</a></em></span>
+      <span class="hero__fr"><b>FR-7</b><span>opens 20× a day</span></span>
+    </div>
+    <div class="tcol"><section class="grp">
+  <header class="grp__h"><h4>CLIENTS &amp; INTAKE</h4><span class="grp__fr">FR-1</span></header>
+  <div class="grp__bar"><i style="width:100%"></i>
+    <s style="width:0%"></s></div>
+  <div class="grp__n"><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Client roster</b><span>search · status chips · filters</span><span class="node__w">clients · <a class="fref" href="inclineyou-clients.html#f-1a" title="clients · frame 1a">1a</a> <a class="fref" href="inclineyou-clients.html#f-1b" title="clients · frame 1b">1b</a> <a class="fref" href="inclineyou-clients.html#f-1c" title="clients · frame 1c">1c</a> <a class="fref" href="inclineyou-clients.html#f-4b" title="clients · frame 4b">4b</a> <a class="fref" href="inclineyou-clients.html#f-4c" title="clients · frame 4c">4c</a> <a class="fref" href="inclineyou-clients.html#f-4d" title="clients · frame 4d">4d</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Add client</b><span>intake · payment mode · split %</span><span class="node__w">clients · <a class="fref" href="inclineyou-clients.html#f-5a" title="clients · frame 5a">5a</a> <a class="fref" href="inclineyou-clients.html#f-5b" title="clients · frame 5b">5b</a> <a class="fref" href="inclineyou-clients.html#f-5c" title="clients · frame 5c">5c</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Client detail</b><span>the whole file, one screen</span><span class="node__w">clients · <a class="fref" href="inclineyou-clients.html#f-6a" title="clients · frame 6a">6a</a> — the shell money <a class="fref" href="inclineyou-money.html#f-4a" title="money · frame 4a">4a</a> lives in</span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Edit client</b><span>pause · reactivate · soft delete</span><span class="node__w">clients · <a class="fref" href="inclineyou-clients.html#f-7a" title="clients · frame 7a">7a</a> <a class="fref" href="inclineyou-clients.html#f-7b" title="clients · frame 7b">7b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Body metrics</b><span>weight, waist — append-only</span><span class="node__w">clients · <a class="fref" href="inclineyou-clients.html#f-8a" title="clients · frame 8a">8a</a> <a class="fref" href="inclineyou-clients.html#f-8b" title="clients · frame 8b">8b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Client tabs</b><span>programs · sessions · package</span><span class="node__w">clients · <a class="fref" href="inclineyou-clients.html#f-6b" title="clients · frame 6b">6b</a> <a class="fref" href="inclineyou-clients.html#f-6c" title="clients · frame 6c">6c</a> <a class="fref" href="inclineyou-clients.html#f-6d" title="clients · frame 6d">6d</a></span></span></div></div>
+  <footer class="grp__f"><span data-s="done">6 designed</span>
+    <span data-s="part">0 partly</span><span data-s="todo">0 to design</span></footer>
+</section><section class="grp">
+  <header class="grp__h"><h4>PLANS &amp; TEMPLATES</h4><span class="grp__fr">FR-3</span></header>
+  <div class="grp__bar"><i style="width:100%"></i>
+    <s style="width:0%"></s></div>
+  <div class="grp__n"><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Template list</b><span>reusable plans this trainer owns</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-3a" title="drawer · frame 3a">3a</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Template builder</b><span>days · sets · reps · load</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-6a" title="drawer · frame 6a">6a</a> <a class="fref" href="inclineyou-drawer-pages.html#f-6c" title="drawer · frame 6c">6c</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Template detail</b><span>review · assign · duplicate</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-3b" title="drawer · frame 3b">3b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Exercise picker</b><span>873 seeded + custom</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-6b" title="drawer · frame 6b">6b</a> is pick mode</span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Program detail</b><span>tweak this client only</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-6d" title="drawer · frame 6d">6d</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Custom exercise</b><span>name · muscle · image · video</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-3e" title="drawer · frame 3e">3e</a></span></span></div></div>
+  <footer class="grp__f"><span data-s="done">6 designed</span>
+    <span data-s="part">0 partly</span><span data-s="todo">0 to design</span></footer>
+</section><section class="grp">
+  <header class="grp__h"><h4>SCHEDULING</h4><span class="grp__fr">FR-2</span></header>
+  <div class="grp__bar"><i style="width:100%"></i>
+    <s style="width:0%"></s></div>
+  <div class="grp__n"><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Calendar</b><span>day · week · month</span><span class="node__w">diary · <a class="fref" href="inclineyou-diary.html#f-1a" title="diary · frame 1a">1a</a> <a class="fref" href="inclineyou-diary.html#f-2a" title="diary · frame 2a">2a</a> <a class="fref" href="inclineyou-diary.html#f-2b" title="diary · frame 2b">2b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Session list</b><span>upcoming &amp; past</span><span class="node__w">diary · <a class="fref" href="inclineyou-diary.html#f-1a" title="diary · frame 1a">1a</a> <a class="fref" href="inclineyou-diary.html#f-1d" title="diary · frame 1d">1d</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Schedule session</b><span>one-off: client, date, time</span><span class="node__w">diary · <a class="fref" href="inclineyou-diary.html#f-3a" title="diary · frame 3a">3a</a> <a class="fref" href="inclineyou-diary.html#f-3c" title="diary · frame 3c">3c</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Weekly slot picker</b><span>recurring slots in bulk</span><span class="node__w">diary · <a class="fref" href="inclineyou-diary.html#f-3b" title="diary · frame 3b">3b</a> <a class="fref" href="inclineyou-diary.html#f-5a" title="diary · frame 5a">5a</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Session detail</b><span>done · no-show · cancel · move</span><span class="node__w">diary · <a class="fref" href="inclineyou-diary.html#f-4a" title="diary · frame 4a">4a</a> <a class="fref" href="inclineyou-diary.html#f-4b" title="diary · frame 4b">4b</a> <a class="fref" href="inclineyou-diary.html#f-4c" title="diary · frame 4c">4c</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Marked done</b><span>pack −1 · notifies client</span><span class="node__w">diary · <a class="fref" href="inclineyou-diary.html#f-7a" title="diary · frame 7a">7a</a> <a class="fref" href="inclineyou-diary.html#f-7b" title="diary · frame 7b">7b</a> <a class="fref" href="inclineyou-diary.html#f-7c" title="diary · frame 7c">7c</a></span></span></div></div>
+  <footer class="grp__f"><span data-s="done">6 designed</span>
+    <span data-s="part">0 partly</span><span data-s="todo">0 to design</span></footer>
+</section><section class="grp">
+  <header class="grp__h"><h4>WORKOUT LOGGING</h4><span class="grp__fr">FR-4 · FR-5</span></header>
+  <div class="grp__bar"><i style="width:100%"></i>
+    <s style="width:0%"></s></div>
+  <div class="grp__n"><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Workout log</b><span>the floor screen · fully offline</span><span class="node__w">workout · <a class="fref" href="inclineyou-workout-log.html#f-1a" title="workout · frame 1a">1a</a> <a class="fref" href="inclineyou-workout-log.html#f-1c" title="workout · frame 1c">1c</a> <a class="fref" href="inclineyou-workout-log.html#f-6a" title="workout · frame 6a">6a</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Prefilled sets</b><span>last session's load &amp; reps</span><span class="node__w">workout · <a class="fref" href="inclineyou-workout-log.html#f-1b" title="workout · frame 1b">1b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Add / edit / delete set</b><span>load · reps · RPE · note</span><span class="node__w">workout · <a class="fref" href="inclineyou-workout-log.html#f-2a" title="workout · frame 2a">2a</a> <a class="fref" href="inclineyou-workout-log.html#f-2b" title="workout · frame 2b">2b</a> <a class="fref" href="inclineyou-workout-log.html#f-2c" title="workout · frame 2c">2c</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Unplanned exercise</b><span>the rack was busy</span><span class="node__w">workout · <a class="fref" href="inclineyou-workout-log.html#f-3a" title="workout · frame 3a">3a</a> <a class="fref" href="inclineyou-workout-log.html#f-3b" title="workout · frame 3b">3b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>PR detected</b><span>computed on read, never stored</span><span class="node__w">workout · <a class="fref" href="inclineyou-workout-log.html#f-4a" title="workout · frame 4a">4a</a> <a class="fref" href="inclineyou-workout-log.html#f-4b" title="workout · frame 4b">4b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Progress &amp; PRs</b><span>volume · top set · bodyweight</span><span class="node__w">workout · <a class="fref" href="inclineyou-workout-log.html#f-5a" title="workout · frame 5a">5a</a> <a class="fref" href="inclineyou-workout-log.html#f-5b" title="workout · frame 5b">5b</a></span></span></div></div>
+  <footer class="grp__f"><span data-s="done">6 designed</span>
+    <span data-s="part">0 partly</span><span data-s="todo">0 to design</span></footer>
+</section><section class="grp">
+  <header class="grp__h"><h4>PACKAGES &amp; PAYMENTS</h4><span class="grp__fr">FR-6</span></header>
+  <div class="grp__bar"><i style="width:100%"></i>
+    <s style="width:0%"></s></div>
+  <div class="grp__n"><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Package editor</b><span>session pack or monthly</span><span class="node__w">money · <a class="fref" href="inclineyou-money.html#f-7a" title="money · frame 7a">7a</a> <a class="fref" href="inclineyou-money.html#f-7b" title="money · frame 7b">7b</a> <a class="fref" href="inclineyou-money.html#f-7c" title="money · frame 7c">7c</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Payment sheet</b><span>branches on payment mode</span><span class="node__w">money · <a class="fref" href="inclineyou-money.html#f-3a" title="money · frame 3a">3a</a> <a class="fref" href="inclineyou-money.html#f-3b" title="money · frame 3b">3b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>UPI intent link</b><span>trainer_collects → own VPA</span><span class="node__w">money · <a class="fref" href="inclineyou-money.html#f-2b" title="money · frame 2b">2b</a> <a class="fref" href="inclineyou-money.html#f-2c" title="money · frame 2c">2c</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Front office</b><span>gym_collects → mark paid</span><span class="node__w">money · <a class="fref" href="inclineyou-money.html#f-3a" title="money · frame 3a">3a</a> <a class="fref" href="inclineyou-money.html#f-5a" title="money · frame 5a">5a</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Marked paid</b><span>either party · optional ref</span><span class="node__w">money · <a class="fref" href="inclineyou-money.html#f-3c" title="money · frame 3c">3c</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Payment history</b><span>append-only ledger</span><span class="node__w">money · <a class="fref" href="inclineyou-money.html#f-1a" title="money · frame 1a">1a</a> <a class="fref" href="inclineyou-money.html#f-1b" title="money · frame 1b">1b</a> <a class="fref" href="inclineyou-money.html#f-4a" title="money · frame 4a">4a</a></span></span></div></div>
+  <footer class="grp__f"><span data-s="done">6 designed</span>
+    <span data-s="part">0 partly</span><span data-s="todo">0 to design</span></footer>
+</section><section class="grp">
+  <header class="grp__h"><h4>REPORTS, NUDGES &amp; SETUP</h4><span class="grp__fr">FR-9 · FR-10</span></header>
+  <div class="grp__bar"><i style="width:100%"></i>
+    <s style="width:0%"></s></div>
+  <div class="grp__n"><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Nudge composer</b><span>4 approved WhatsApp templates</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-4d" title="drawer · frame 4d">4d</a> <a class="fref" href="inclineyou-drawer-pages.html#f-4e" title="drawer · frame 4e">4e</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Delivery state</b><span>queued · sent · failed</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-7c" title="drawer · frame 7c">7c</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Weekly report</b><span>auto-generated per client</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-7a" title="drawer · frame 7a">7a</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Share on demand</b><span>any past week</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-7b" title="drawer · frame 7b">7b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Adherence</b><span>who is drifting, roster-wide</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-4c" title="drawer · frame 4c">4c</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Settings</b><span>name · UPI VPA · push · role</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-5a" title="drawer · frame 5a">5a</a> <a class="fref" href="inclineyou-drawer-pages.html#f-5b" title="drawer · frame 5b">5b</a> <a class="fref" href="inclineyou-drawer-pages.html#f-5c" title="drawer · frame 5c">5c</a> <a class="fref" href="inclineyou-drawer-pages.html#f-5d" title="drawer · frame 5d">5d</a> <a class="fref" href="inclineyou-drawer-pages.html#f-5e" title="drawer · frame 5e">5e</a></span></span></div></div>
+  <footer class="grp__f"><span data-s="done">6 designed</span>
+    <span data-s="part">0 partly</span><span data-s="todo">0 to design</span></footer>
+</section></div>
+  </div>
+
+  <div class="bridge">
+    <div class="bridge__h"><h4>Sync + push bridge</h4><p>FR-8 · eventual, not live</p></div>
+    <div class="br"><b>plan assigned</b><span>push announces it</span><em>Template detail <s>→</s> Today</em></div><div class="br"><b>either role logs</b><span>same screen, syncs</span><em>Workout log <s>→</s> Workout log</em></div><div class="br"><b>same numbers</b><span>shown to both roles</span><em>Progress &amp; PRs <s>→</s> Progress</em></div><div class="br"><b>booked or moved</b><span>push announces it</span><em>Session detail <s>→</s> Sessions</em></div><div class="br"><b>amount due</b><span>paid, either party</span><em>Payment sheet <s>→</s> Payments</em></div><div class="br"><b>weekly report</b><span>auto-sent</span><em>Weekly report <s>→</s> Weekly report</em></div>
+  </div>
+
+  <div class="ccol">
+    <div class="node node--client" data-s="done"><span class="node__tick">✓</span><span class="node__b"><b>Today</b><span>today's plan · next session · anything owed</span><span class="node__w">client · <a class="fref" href="inclineyou-client-role.html#f-1a" title="client · frame 1a">1a</a> <a class="fref" href="inclineyou-client-role.html#f-1b" title="client · frame 1b">1b</a></span></span><span class="node__fr">FR-11.1</span></div><div class="node node--client" data-s="done"><span class="node__tick">✓</span><span class="node__b"><b>Workout log</b><span>log their own sets — offline, same engine</span><span class="node__w">client · <a class="fref" href="inclineyou-client-role.html#f-2a" title="client · frame 2a">2a</a> <a class="fref" href="inclineyou-client-role.html#f-2b" title="client · frame 2b">2b</a></span></span><span class="node__fr">FR-4.3</span></div><div class="node node--client" data-s="done"><span class="node__tick">✓</span><span class="node__b"><b>Progress</b><span>PRs · charts · log a body metric</span><span class="node__w">client · <a class="fref" href="inclineyou-client-role.html#f-3a" title="client · frame 3a">3a</a> <a class="fref" href="inclineyou-client-role.html#f-3b" title="client · frame 3b">3b</a></span></span><span class="node__fr">FR-5.2</span></div><div class="node node--client" data-s="done"><span class="node__tick">✓</span><span class="node__b"><b>Sessions</b><span>upcoming · reschedule notices land here</span><span class="node__w">client · <a class="fref" href="inclineyou-client-role.html#f-4a" title="client · frame 4a">4a</a> <a class="fref" href="inclineyou-client-role.html#f-4b" title="client · frame 4b">4b</a></span></span><span class="node__fr">FR-2.3</span></div><div class="node node--client" data-s="done"><span class="node__tick">✓</span><span class="node__b"><b>Payments</b><span>pay by UPI · mark paid · history</span><span class="node__w">client · <a class="fref" href="inclineyou-client-role.html#f-5a" title="client · frame 5a">5a</a> <a class="fref" href="inclineyou-client-role.html#f-5b" title="client · frame 5b">5b</a> <a class="fref" href="inclineyou-client-role.html#f-5c" title="client · frame 5c">5c</a></span></span><span class="node__fr">FR-11.2</span></div><div class="node node--client" data-s="done"><span class="node__tick">✓</span><span class="node__b"><b>Weekly report</b><span>what the server generated on Sunday</span><span class="node__w">client · <a class="fref" href="inclineyou-client-role.html#f-6a" title="client · frame 6a">6a</a></span></span><span class="node__fr">FR-10.2</span></div><div class="node node--client" data-s="done"><span class="node__tick">✓</span><span class="node__b"><b>No plan assigned yet</b><span>the likeliest first launch</span><span class="node__w">client · <a class="fref" href="inclineyou-client-role.html#f-1c" title="client · frame 1c">1c</a></span></span><span class="node__fr">first run</span></div>
+    <section class="grp" style="margin-top:16px;padding:15px;background:var(--pane);box-shadow:inset 0 0 0 1px var(--line)">
+      <header class="grp__h"><h4>Beyond the original map</h4><span class="grp__fr">new</span></header>
+      <div class="grp__n"><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Navigation drawer</b><span>7 destinations, 3 groups</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-1a" title="drawer · frame 1a">1a</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Profile &amp; business</b><span>the drawer header</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-2a" title="drawer · frame 2a">2a</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Switch to own training</b><span>two books, one login</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-2b" title="drawer · frame 2b">2b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Reports</b><span>sessions · kept clients · no-shows</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-4a" title="drawer · frame 4a">4a</a> <a class="fref" href="inclineyou-drawer-pages.html#f-4b" title="drawer · frame 4b">4b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Gym share</b><span>50% of floor, 0% of remote</span><span class="node__w">money · <a class="fref" href="inclineyou-money.html#f-5a" title="money · frame 5a">5a</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>GST turnover</b><span>the ₹20 lakh line</span><span class="node__w">money · <a class="fref" href="inclineyou-money.html#f-5b" title="money · frame 5b">5b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Write-off</b><span>not a delete</span><span class="node__w">money · <a class="fref" href="inclineyou-money.html#f-6b" title="money · frame 6b">6b</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Export for a CA</b><span>CSV · PDF receipt book</span><span class="node__w">money · <a class="fref" href="inclineyou-money.html#f-6c" title="money · frame 6c">6c</a></span></span></div><div class="node" data-s="done"><span class="node__tick" title="Designed">✓</span><span class="node__b"><b>Sync queue</b><span>what is waiting and why</span><span class="node__w">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-8a" title="drawer · frame 8a">8a</a> <a class="fref" href="inclineyou-drawer-pages.html#f-8b" title="drawer · frame 8b">8b</a> <a class="fref" href="inclineyou-drawer-pages.html#f-8c" title="drawer · frame 8c">8c</a></span></span></div></div>
+    </section>
+  </div>
+</div>
+
+<div class="legend">
+  <div><s data-s="done">✓</s> Designed — a frame exists</div>
+  <div><s data-s="part">◐</s> Partly — none left. Every node has a frame of its own</div>
+  <div><s data-s="todo">○</s> To design — none left</div>
+  <div><i style="background:var(--client-soft);box-shadow:inset 0 0 0 1px var(--client-line)"></i> Client role</div>
+  <div><i style="background:var(--brdg-soft);box-shadow:inset 0 0 0 1px var(--brdg-line)"></i> Crosses devices — sync or push</div>
+</div>
+
+<h3 class="sec">01 · The files</h3>
+<p>Every designed node lives in one of these. They carry a <b>byte-identical inlined stylesheet</b> —
+147KB, 307 <code>tx-</code> classes — so a component fixed in one is fixed in all of them. Note that this is
+a copy, not a link: there is no <code>tx.css</code> file on disk, and keeping the copies identical is a
+build step somebody has to own.</p>
+<div class="files"><a class="fc" href="inclineyou-login-otp.html"><b>Login · OTP</b><span>22 frames</span><em>inclineyou-login-otp.html</em></a><a class="fc" href="inclineyou-setup.html"><b>Trainer setup</b><span>15 frames</span><em>inclineyou-setup.html</em></a><a class="fc" href="inclineyou-home.html"><b>Home</b><span>12 frames</span><em>inclineyou-home.html</em></a><a class="fc" href="inclineyou-clients.html"><b>Clients</b><span>27 frames</span><em>inclineyou-clients.html</em></a><a class="fc" href="inclineyou-diary.html"><b>Diary</b><span>19 frames</span><em>inclineyou-diary.html</em></a><a class="fc" href="inclineyou-money.html"><b>Money</b><span>19 frames</span><em>inclineyou-money.html</em></a><a class="fc" href="inclineyou-drawer-pages.html"><b>Drawer destinations</b><span>28 frames</span><em>inclineyou-drawer-pages.html</em></a><a class="fc" href="inclineyou-workout-log.html"><b>Workout log</b><span>15 frames</span><em>inclineyou-workout-log.html</em></a><a class="fc" href="inclineyou-client-role.html"><b>Client role</b><span>14 frames</span><em>inclineyou-client-role.html</em></a></div>
+
+<h3 class="sec">02 · What was missing, and where it went</h3>
+<p>Every item on the old gap list is now drawn. The order below is the order it was built in — the
+critical path first.</p>
+<div class="notes">
+  <div class="note note--go"><h5>1 · Workout logging · FR-4 · FR-5</h5>
+    <p><b>Six nodes, 15 frames, a new file.</b> The floor screen — held between sets, fully offline, used
+    more than every other screen combined. The set table and rest timer already existed; what was missing
+    was everything around them: the note on a set, the next-set state, the queued tick, RPE, the record
+    moment and the docked action. <b>inclineyou-workout-log.html</b></p></div>
+  <div class="note note--go"><h5>2 · Client role · FR-11</h5>
+    <p><b>Seven nodes, 14 frames, a new file.</b> Four tabs and no centre action, because a client has no
+    equivalent of the trainer's create button. Governed by one rule from the design system —
+    <b>there is no second design system</b>: same tokens, same components, different composition and a
+    warmer voice. Includes the no-plan-assigned first run. <b>inclineyou-client-role.html</b></p></div>
+  <div class="note note--go"><h5>3 · The client file · FR-1</h5>
+    <p><b>Five nodes, 11 frames.</b> Every screen that said &ldquo;tap a client&rdquo; now arrives somewhere:
+    intake, the file shell with its four tabs, edit, pause-versus-archive-versus-remove, and append-only
+    body metrics. Appended to <b>inclineyou-clients.html</b> — 16 frames to 27.</p></div>
+  <div class="note note--go"><h5>4 · Reports out · FR-10</h5>
+    <p>The weekly report as a document, share-on-demand, and nudge delivery state — including the honest
+    part: with WhatsApp as the channel, <b>&ldquo;sent&rdquo; means handed to WhatsApp</b>, not read.
+    In <b>inclineyou-drawer-pages.html</b>.</p></div>
+  <div class="note note--go"><h5>5 · Editors · FR-3 · FR-6</h5>
+    <p>The template builder is now authorable on a phone — a day at a time, not a 12-week program, which
+    stays a desktop job by design. The exercise library gained a pick mode. The pack editor shows its
+    arithmetic while you type it and states what a price change will <b>not</b> touch.</p></div>
+  <div class="note note--go"><h5>6 · Sync queue · FR-8</h5>
+    <p>Every <b>Queued</b> tag in the app now links somewhere. Grouped by kind, oldest first, every row
+    carrying its age and the reason it hasn't gone — and a blocked write offers a resolution rather than a
+    bare Retry, because a conflict must never silently pick a winner.</p></div>
+</div>
+
+<h3 class="sec">03 · The full index</h3>
+<p>Every node, its status, and the frame that covers it. This is the table to hand a developer — and <b>every frame reference is a link</b>: it opens that file and lands on that exact frame, which briefly rings to show you where you arrived.</p>
+<div class="tbl"><table>
+<thead><tr><th>Screen</th><th>What it is</th><th>Status</th><th>Covered by</th></tr></thead>
+<tbody><tr class="th2"><td colspan="4">Auth &amp; onboarding</td></tr><tr><td class="k">Launch</td><td class="d">app opens</td><td class="st" data-s="done">✓ Designed</td><td class="d">login · Behaviour</td></tr><tr><td class="k">Session on device?</td><td class="d">decision</td><td class="st" data-s="done">✓ Designed</td><td class="d">login · <a class="fref" href="inclineyou-login-otp.html#f-4b" title="login · frame 4b">4b</a></td></tr><tr><td class="k">Phone entry</td><td class="d">mobile number</td><td class="st" data-s="done">✓ Designed</td><td class="d">login · <a class="fref" href="inclineyou-login-otp.html#f-1a" title="login · frame 1a">1a</a>–<a class="fref" href="inclineyou-login-otp.html#f-1c" title="login · frame 1c">1c</a>, <a class="fref" href="inclineyou-login-otp.html#f-7c" title="login · frame 7c">7c</a></td></tr><tr><td class="k">OTP verify</td><td class="d">needs a connection</td><td class="st" data-s="done">✓ Designed</td><td class="d">login · <a class="fref" href="inclineyou-login-otp.html#f-2a" title="login · frame 2a">2a</a>–<a class="fref" href="inclineyou-login-otp.html#f-2c" title="login · frame 2c">2c</a>, <a class="fref" href="inclineyou-login-otp.html#f-3a" title="login · frame 3a">3a</a>–<a class="fref" href="inclineyou-login-otp.html#f-3c" title="login · frame 3c">3c</a>, <a class="fref" href="inclineyou-login-otp.html#f-8a" title="login · frame 8a">8a</a>–<a class="fref" href="inclineyou-login-otp.html#f-8c" title="login · frame 8c">8c</a></td></tr><tr><td class="k">Resolve role</td><td class="d">a person can be both</td><td class="st" data-s="done">✓ Designed</td><td class="d">login · <a class="fref" href="inclineyou-login-otp.html#f-5a" title="login · frame 5a">5a</a></td></tr><tr><td class="k">Trainer setup</td><td class="d">6 steps · not in the original map</td><td class="st" data-s="done">✓ Designed</td><td class="d">setup · <a class="fref" href="inclineyou-setup.html#f-1a" title="setup · frame 1a">1a</a>–<a class="fref" href="inclineyou-setup.html#f-6b" title="setup · frame 6b">6b</a></td></tr><tr class="th2"><td colspan="4">CLIENTS &amp; INTAKE · FR-1</td></tr><tr><td class="k">Client roster</td><td class="d">search · status chips · filters</td><td class="st" data-s="done">✓ Designed</td><td class="d">clients · <a class="fref" href="inclineyou-clients.html#f-1a" title="clients · frame 1a">1a</a> <a class="fref" href="inclineyou-clients.html#f-1b" title="clients · frame 1b">1b</a> <a class="fref" href="inclineyou-clients.html#f-1c" title="clients · frame 1c">1c</a> <a class="fref" href="inclineyou-clients.html#f-4b" title="clients · frame 4b">4b</a> <a class="fref" href="inclineyou-clients.html#f-4c" title="clients · frame 4c">4c</a> <a class="fref" href="inclineyou-clients.html#f-4d" title="clients · frame 4d">4d</a></td></tr><tr><td class="k">Add client</td><td class="d">intake · payment mode · split %</td><td class="st" data-s="done">✓ Designed</td><td class="d">clients · <a class="fref" href="inclineyou-clients.html#f-5a" title="clients · frame 5a">5a</a> <a class="fref" href="inclineyou-clients.html#f-5b" title="clients · frame 5b">5b</a> <a class="fref" href="inclineyou-clients.html#f-5c" title="clients · frame 5c">5c</a></td></tr><tr><td class="k">Client detail</td><td class="d">the whole file, one screen</td><td class="st" data-s="done">✓ Designed</td><td class="d">clients · <a class="fref" href="inclineyou-clients.html#f-6a" title="clients · frame 6a">6a</a> — the shell money <a class="fref" href="inclineyou-money.html#f-4a" title="money · frame 4a">4a</a> lives in</td></tr><tr><td class="k">Edit client</td><td class="d">pause · reactivate · soft delete</td><td class="st" data-s="done">✓ Designed</td><td class="d">clients · <a class="fref" href="inclineyou-clients.html#f-7a" title="clients · frame 7a">7a</a> <a class="fref" href="inclineyou-clients.html#f-7b" title="clients · frame 7b">7b</a></td></tr><tr><td class="k">Body metrics</td><td class="d">weight, waist — append-only</td><td class="st" data-s="done">✓ Designed</td><td class="d">clients · <a class="fref" href="inclineyou-clients.html#f-8a" title="clients · frame 8a">8a</a> <a class="fref" href="inclineyou-clients.html#f-8b" title="clients · frame 8b">8b</a></td></tr><tr><td class="k">Client tabs</td><td class="d">programs · sessions · package</td><td class="st" data-s="done">✓ Designed</td><td class="d">clients · <a class="fref" href="inclineyou-clients.html#f-6b" title="clients · frame 6b">6b</a> <a class="fref" href="inclineyou-clients.html#f-6c" title="clients · frame 6c">6c</a> <a class="fref" href="inclineyou-clients.html#f-6d" title="clients · frame 6d">6d</a></td></tr><tr class="th2"><td colspan="4">PLANS &amp; TEMPLATES · FR-3</td></tr><tr><td class="k">Template list</td><td class="d">reusable plans this trainer owns</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-3a" title="drawer · frame 3a">3a</a></td></tr><tr><td class="k">Template builder</td><td class="d">days · sets · reps · load</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-6a" title="drawer · frame 6a">6a</a> <a class="fref" href="inclineyou-drawer-pages.html#f-6c" title="drawer · frame 6c">6c</a></td></tr><tr><td class="k">Template detail</td><td class="d">review · assign · duplicate</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-3b" title="drawer · frame 3b">3b</a></td></tr><tr><td class="k">Exercise picker</td><td class="d">873 seeded + custom</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-6b" title="drawer · frame 6b">6b</a> is pick mode</td></tr><tr><td class="k">Program detail</td><td class="d">tweak this client only</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-6d" title="drawer · frame 6d">6d</a></td></tr><tr><td class="k">Custom exercise</td><td class="d">name · muscle · image · video</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-3e" title="drawer · frame 3e">3e</a></td></tr><tr class="th2"><td colspan="4">SCHEDULING · FR-2</td></tr><tr><td class="k">Calendar</td><td class="d">day · week · month</td><td class="st" data-s="done">✓ Designed</td><td class="d">diary · <a class="fref" href="inclineyou-diary.html#f-1a" title="diary · frame 1a">1a</a> <a class="fref" href="inclineyou-diary.html#f-2a" title="diary · frame 2a">2a</a> <a class="fref" href="inclineyou-diary.html#f-2b" title="diary · frame 2b">2b</a></td></tr><tr><td class="k">Session list</td><td class="d">upcoming &amp; past</td><td class="st" data-s="done">✓ Designed</td><td class="d">diary · <a class="fref" href="inclineyou-diary.html#f-1a" title="diary · frame 1a">1a</a> <a class="fref" href="inclineyou-diary.html#f-1d" title="diary · frame 1d">1d</a></td></tr><tr><td class="k">Schedule session</td><td class="d">one-off: client, date, time</td><td class="st" data-s="done">✓ Designed</td><td class="d">diary · <a class="fref" href="inclineyou-diary.html#f-3a" title="diary · frame 3a">3a</a> <a class="fref" href="inclineyou-diary.html#f-3c" title="diary · frame 3c">3c</a></td></tr><tr><td class="k">Weekly slot picker</td><td class="d">recurring slots in bulk</td><td class="st" data-s="done">✓ Designed</td><td class="d">diary · <a class="fref" href="inclineyou-diary.html#f-3b" title="diary · frame 3b">3b</a> <a class="fref" href="inclineyou-diary.html#f-5a" title="diary · frame 5a">5a</a></td></tr><tr><td class="k">Session detail</td><td class="d">done · no-show · cancel · move</td><td class="st" data-s="done">✓ Designed</td><td class="d">diary · <a class="fref" href="inclineyou-diary.html#f-4a" title="diary · frame 4a">4a</a> <a class="fref" href="inclineyou-diary.html#f-4b" title="diary · frame 4b">4b</a> <a class="fref" href="inclineyou-diary.html#f-4c" title="diary · frame 4c">4c</a></td></tr><tr><td class="k">Marked done</td><td class="d">pack −1 · notifies client</td><td class="st" data-s="done">✓ Designed</td><td class="d">diary · <a class="fref" href="inclineyou-diary.html#f-7a" title="diary · frame 7a">7a</a> <a class="fref" href="inclineyou-diary.html#f-7b" title="diary · frame 7b">7b</a> <a class="fref" href="inclineyou-diary.html#f-7c" title="diary · frame 7c">7c</a></td></tr><tr class="th2"><td colspan="4">WORKOUT LOGGING · FR-4 · FR-5</td></tr><tr><td class="k">Workout log</td><td class="d">the floor screen · fully offline</td><td class="st" data-s="done">✓ Designed</td><td class="d">workout · <a class="fref" href="inclineyou-workout-log.html#f-1a" title="workout · frame 1a">1a</a> <a class="fref" href="inclineyou-workout-log.html#f-1c" title="workout · frame 1c">1c</a> <a class="fref" href="inclineyou-workout-log.html#f-6a" title="workout · frame 6a">6a</a></td></tr><tr><td class="k">Prefilled sets</td><td class="d">last session's load &amp; reps</td><td class="st" data-s="done">✓ Designed</td><td class="d">workout · <a class="fref" href="inclineyou-workout-log.html#f-1b" title="workout · frame 1b">1b</a></td></tr><tr><td class="k">Add / edit / delete set</td><td class="d">load · reps · RPE · note</td><td class="st" data-s="done">✓ Designed</td><td class="d">workout · <a class="fref" href="inclineyou-workout-log.html#f-2a" title="workout · frame 2a">2a</a> <a class="fref" href="inclineyou-workout-log.html#f-2b" title="workout · frame 2b">2b</a> <a class="fref" href="inclineyou-workout-log.html#f-2c" title="workout · frame 2c">2c</a></td></tr><tr><td class="k">Unplanned exercise</td><td class="d">the rack was busy</td><td class="st" data-s="done">✓ Designed</td><td class="d">workout · <a class="fref" href="inclineyou-workout-log.html#f-3a" title="workout · frame 3a">3a</a> <a class="fref" href="inclineyou-workout-log.html#f-3b" title="workout · frame 3b">3b</a></td></tr><tr><td class="k">PR detected</td><td class="d">computed on read, never stored</td><td class="st" data-s="done">✓ Designed</td><td class="d">workout · <a class="fref" href="inclineyou-workout-log.html#f-4a" title="workout · frame 4a">4a</a> <a class="fref" href="inclineyou-workout-log.html#f-4b" title="workout · frame 4b">4b</a></td></tr><tr><td class="k">Progress &amp; PRs</td><td class="d">volume · top set · bodyweight</td><td class="st" data-s="done">✓ Designed</td><td class="d">workout · <a class="fref" href="inclineyou-workout-log.html#f-5a" title="workout · frame 5a">5a</a> <a class="fref" href="inclineyou-workout-log.html#f-5b" title="workout · frame 5b">5b</a></td></tr><tr class="th2"><td colspan="4">PACKAGES &amp; PAYMENTS · FR-6</td></tr><tr><td class="k">Package editor</td><td class="d">session pack or monthly</td><td class="st" data-s="done">✓ Designed</td><td class="d">money · <a class="fref" href="inclineyou-money.html#f-7a" title="money · frame 7a">7a</a> <a class="fref" href="inclineyou-money.html#f-7b" title="money · frame 7b">7b</a> <a class="fref" href="inclineyou-money.html#f-7c" title="money · frame 7c">7c</a></td></tr><tr><td class="k">Payment sheet</td><td class="d">branches on payment mode</td><td class="st" data-s="done">✓ Designed</td><td class="d">money · <a class="fref" href="inclineyou-money.html#f-3a" title="money · frame 3a">3a</a> <a class="fref" href="inclineyou-money.html#f-3b" title="money · frame 3b">3b</a></td></tr><tr><td class="k">UPI intent link</td><td class="d">trainer_collects → own VPA</td><td class="st" data-s="done">✓ Designed</td><td class="d">money · <a class="fref" href="inclineyou-money.html#f-2b" title="money · frame 2b">2b</a> <a class="fref" href="inclineyou-money.html#f-2c" title="money · frame 2c">2c</a></td></tr><tr><td class="k">Front office</td><td class="d">gym_collects → mark paid</td><td class="st" data-s="done">✓ Designed</td><td class="d">money · <a class="fref" href="inclineyou-money.html#f-3a" title="money · frame 3a">3a</a> <a class="fref" href="inclineyou-money.html#f-5a" title="money · frame 5a">5a</a></td></tr><tr><td class="k">Marked paid</td><td class="d">either party · optional ref</td><td class="st" data-s="done">✓ Designed</td><td class="d">money · <a class="fref" href="inclineyou-money.html#f-3c" title="money · frame 3c">3c</a></td></tr><tr><td class="k">Payment history</td><td class="d">append-only ledger</td><td class="st" data-s="done">✓ Designed</td><td class="d">money · <a class="fref" href="inclineyou-money.html#f-1a" title="money · frame 1a">1a</a> <a class="fref" href="inclineyou-money.html#f-1b" title="money · frame 1b">1b</a> <a class="fref" href="inclineyou-money.html#f-4a" title="money · frame 4a">4a</a></td></tr><tr class="th2"><td colspan="4">REPORTS, NUDGES &amp; SETUP · FR-9 · FR-10</td></tr><tr><td class="k">Nudge composer</td><td class="d">4 approved WhatsApp templates</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-4d" title="drawer · frame 4d">4d</a> <a class="fref" href="inclineyou-drawer-pages.html#f-4e" title="drawer · frame 4e">4e</a></td></tr><tr><td class="k">Delivery state</td><td class="d">queued · sent · failed</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-7c" title="drawer · frame 7c">7c</a></td></tr><tr><td class="k">Weekly report</td><td class="d">auto-generated per client</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-7a" title="drawer · frame 7a">7a</a></td></tr><tr><td class="k">Share on demand</td><td class="d">any past week</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-7b" title="drawer · frame 7b">7b</a></td></tr><tr><td class="k">Adherence</td><td class="d">who is drifting, roster-wide</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-4c" title="drawer · frame 4c">4c</a></td></tr><tr><td class="k">Settings</td><td class="d">name · UPI VPA · push · role</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-5a" title="drawer · frame 5a">5a</a> <a class="fref" href="inclineyou-drawer-pages.html#f-5b" title="drawer · frame 5b">5b</a> <a class="fref" href="inclineyou-drawer-pages.html#f-5c" title="drawer · frame 5c">5c</a> <a class="fref" href="inclineyou-drawer-pages.html#f-5d" title="drawer · frame 5d">5d</a> <a class="fref" href="inclineyou-drawer-pages.html#f-5e" title="drawer · frame 5e">5e</a></td></tr><tr class="th2"><td colspan="4">Beyond the original map · new</td></tr><tr><td class="k">Navigation drawer</td><td class="d">7 destinations, 3 groups</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-1a" title="drawer · frame 1a">1a</a></td></tr><tr><td class="k">Profile &amp; business</td><td class="d">the drawer header</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-2a" title="drawer · frame 2a">2a</a></td></tr><tr><td class="k">Switch to own training</td><td class="d">two books, one login</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-2b" title="drawer · frame 2b">2b</a></td></tr><tr><td class="k">Reports</td><td class="d">sessions · kept clients · no-shows</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-4a" title="drawer · frame 4a">4a</a> <a class="fref" href="inclineyou-drawer-pages.html#f-4b" title="drawer · frame 4b">4b</a></td></tr><tr><td class="k">Gym share</td><td class="d">50% of floor, 0% of remote</td><td class="st" data-s="done">✓ Designed</td><td class="d">money · <a class="fref" href="inclineyou-money.html#f-5a" title="money · frame 5a">5a</a></td></tr><tr><td class="k">GST turnover</td><td class="d">the ₹20 lakh line</td><td class="st" data-s="done">✓ Designed</td><td class="d">money · <a class="fref" href="inclineyou-money.html#f-5b" title="money · frame 5b">5b</a></td></tr><tr><td class="k">Write-off</td><td class="d">not a delete</td><td class="st" data-s="done">✓ Designed</td><td class="d">money · <a class="fref" href="inclineyou-money.html#f-6b" title="money · frame 6b">6b</a></td></tr><tr><td class="k">Export for a CA</td><td class="d">CSV · PDF receipt book</td><td class="st" data-s="done">✓ Designed</td><td class="d">money · <a class="fref" href="inclineyou-money.html#f-6c" title="money · frame 6c">6c</a></td></tr><tr><td class="k">Sync queue</td><td class="d">what is waiting and why</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-8a" title="drawer · frame 8a">8a</a> <a class="fref" href="inclineyou-drawer-pages.html#f-8b" title="drawer · frame 8b">8b</a> <a class="fref" href="inclineyou-drawer-pages.html#f-8c" title="drawer · frame 8c">8c</a></td></tr><tr class="th2"><td colspan="4">CLIENT ROLE · FR-11</td></tr><tr><td class="k">Today</td><td class="d">today's plan · next session · anything owed</td><td class="st" data-s="done">✓ Designed</td><td class="d">client · <a class="fref" href="inclineyou-client-role.html#f-1a" title="client · frame 1a">1a</a> <a class="fref" href="inclineyou-client-role.html#f-1b" title="client · frame 1b">1b</a></td></tr><tr><td class="k">Workout log</td><td class="d">log their own sets — offline, same engine</td><td class="st" data-s="done">✓ Designed</td><td class="d">workout · <a class="fref" href="inclineyou-workout-log.html#f-1a" title="workout · frame 1a">1a</a> <a class="fref" href="inclineyou-workout-log.html#f-1c" title="workout · frame 1c">1c</a> <a class="fref" href="inclineyou-workout-log.html#f-6a" title="workout · frame 6a">6a</a></td></tr><tr><td class="k">Progress</td><td class="d">PRs · charts · log a body metric</td><td class="st" data-s="done">✓ Designed</td><td class="d">client · <a class="fref" href="inclineyou-client-role.html#f-3a" title="client · frame 3a">3a</a> <a class="fref" href="inclineyou-client-role.html#f-3b" title="client · frame 3b">3b</a></td></tr><tr><td class="k">Sessions</td><td class="d">upcoming · reschedule notices land here</td><td class="st" data-s="done">✓ Designed</td><td class="d">client · <a class="fref" href="inclineyou-client-role.html#f-4a" title="client · frame 4a">4a</a> <a class="fref" href="inclineyou-client-role.html#f-4b" title="client · frame 4b">4b</a></td></tr><tr><td class="k">Payments</td><td class="d">pay by UPI · mark paid · history</td><td class="st" data-s="done">✓ Designed</td><td class="d">client · <a class="fref" href="inclineyou-client-role.html#f-5a" title="client · frame 5a">5a</a> <a class="fref" href="inclineyou-client-role.html#f-5b" title="client · frame 5b">5b</a> <a class="fref" href="inclineyou-client-role.html#f-5c" title="client · frame 5c">5c</a></td></tr><tr><td class="k">Weekly report</td><td class="d">what the server generated on Sunday</td><td class="st" data-s="done">✓ Designed</td><td class="d">drawer · <a class="fref" href="inclineyou-drawer-pages.html#f-7a" title="drawer · frame 7a">7a</a></td></tr><tr><td class="k">No plan assigned yet</td><td class="d">the likeliest first launch</td><td class="st" data-s="done">✓ Designed</td><td class="d">client · <a class="fref" href="inclineyou-client-role.html#f-1c" title="client · frame 1c">1c</a></td></tr></tbody>
+</table></div>
+
+<footer>
+  <span>TRAIN X · INFORMATION ARCHITECTURE</span>
+  <div class="themeswitch">
+    <button data-set-theme="dark" aria-pressed="true">Dark</button>
+    <button data-set-theme="light" aria-pressed="false">Light</button>
+  </div>
+  <span>59 DESIGNED · 0 PARTLY · 0 TO DESIGN · 171 FRAMES</span>
+  <span>11 AUG 2026</span>
+</footer>
+</div>
+<script>
+document.querySelectorAll('[data-set-theme]').forEach(function(b){
+  b.addEventListener('click',function(){
+    document.documentElement.setAttribute('data-theme',b.dataset.setTheme);
+    document.querySelectorAll('[data-set-theme]').forEach(function(x){
+      x.setAttribute('aria-pressed', x.dataset.setTheme===b.dataset.setTheme ? 'true':'false');
+    });
+  });
+});
+</script>
+</body></html>

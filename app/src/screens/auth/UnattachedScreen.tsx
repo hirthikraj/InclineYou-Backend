@@ -66,7 +66,7 @@ export default function UnattachedScreen({ navigation, route }: Props) {
           <View style={styles.cardText}>
             <Text style={styles.cardTitle}>A trainer adds you</Text>
             <Text style={styles.cardBody}>
-              XRep works from your trainer&apos;s roster, so there is nothing for you to set up.
+              InclineYou works from your trainer&apos;s roster, so there is nothing for you to set up.
               Give them this number and sign in again once they say they&apos;ve added you.
             </Text>
           </View>

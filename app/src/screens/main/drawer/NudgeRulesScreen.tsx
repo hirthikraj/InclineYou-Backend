@@ -5,7 +5,7 @@
  * waiting. Everfit and Trainerize both automate messages on triggers; this takes
  * the triggers and refuses the default.
  *
- * **Every rule defaults to "Ask me first."** XRep drafts the message and queues
+ * **Every rule defaults to "Ask me first."** InclineYou drafts the message and queues
  * it, and nothing leaves the trainer's WhatsApp until they tap send — because one
  * badly timed automated nudge costs a client, and no automation is worth that.
  *
@@ -171,7 +171,7 @@ export default function NudgeRulesScreen() {
               </View>
 
               <Callout icon={IconShield} style={styles.note}>
-                Every rule defaults to <CalloutStrong>Ask me first</CalloutStrong>. XRep will draft
+                Every rule defaults to <CalloutStrong>Ask me first</CalloutStrong>. InclineYou will draft
                 the message and queue it, but nothing leaves your WhatsApp until you tap send —
                 because a badly timed automated nudge costs a client.
               </Callout>
@@ -244,7 +244,7 @@ export default function NudgeRulesScreen() {
                 {/* Stated plainly, because "Sent" implies more than we know. */}
                 <Text style={styles.fine}>
                   This records that the chat was opened with the message in it. WhatsApp never tells
-                  us whether it was sent or read, so XRep does not claim to know.
+                  us whether it was sent or read, so InclineYou does not claim to know.
                 </Text>
               </>
             ) : (

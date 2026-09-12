@@ -87,7 +87,7 @@ export default function UnknownScreen({ navigation, route }: Props) {
 
       <AuthBody>
         <AuthTitle>We don&apos;t know this number yet</AuthTitle>
-        <AuthSub>+91 {format(phone)} isn&apos;t on XRep. Which are you?</AuthSub>
+        <AuthSub>+91 {format(phone)} isn&apos;t on InclineYou. Which are you?</AuthSub>
 
         <View style={styles.options}>
           <Option
@@ -126,7 +126,7 @@ export default function UnknownScreen({ navigation, route }: Props) {
           nothing here can. */}
       <Sheet visible={howOpen} onClose={() => setHowOpen(false)} title="Your trainer adds you">
         <Text style={styles.sheetBody}>
-          XRep works from your trainer&apos;s roster, so they add you with the number you just
+          InclineYou works from your trainer&apos;s roster, so they add you with the number you just
           typed — there is nothing for you to set up.
         </Text>
         <Text style={styles.sheetBody}>

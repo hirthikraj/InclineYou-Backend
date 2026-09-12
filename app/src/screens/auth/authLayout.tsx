@@ -2,7 +2,7 @@
  * Sign-in screen composition — layout only.
  *
  * These are the `.auth*`, `.trust`, `.wa` and `.legal` rules from
- * `agent/design system/screens/xreploginotp.html`. They say where things sit;
+ * `agent/design system/screens/inclineyouloginotp.html`. They say where things sit;
  * how they look still comes from the design system. Phone entry, OTP verify and
  * role resolution all share this shell, so all three stay in register.
  */
@@ -116,7 +116,7 @@ export function AuthFoot({
 }
 
 /**
- * `.brandmark` — the 46px lime tile with the XRep mark knocked out of it.
+ * `.brandmark` — the 46px lime tile with the InclineYou mark knocked out of it.
  * Stands in for a back button on the first screen of the flow.
  *
  * The mark goes alone here, never the lockup: § 35.5 puts the wordmark on the

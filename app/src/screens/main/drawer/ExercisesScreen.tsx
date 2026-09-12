@@ -2,7 +2,7 @@
  * 3c · Exercises.
  *
  * Hevy ships "400+ high-quality exercises" with filters for equipment and muscle
- * plus search. XRep shows 1,324 with the same two filters and one extra chip
+ * plus search. InclineYou shows 1,324 with the same two filters and one extra chip
  * Hevy buries: **Yours**. A custom exercise you built for one client's shoulder is
  * the one you will look for hardest, and burying it in the same alphabetical list
  * as the other 1,323 is the one thing that library gets wrong.

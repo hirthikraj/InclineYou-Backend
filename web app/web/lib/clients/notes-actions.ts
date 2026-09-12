@@ -15,7 +15,7 @@ import {
  * Four verbs, one failure shape, and one thing worth stating before any of them:
  * **a note is free text and the product does not read it.** There is no injury
  * field, no condition field and no PAR-Q flag anywhere on this path, and there
- * must never be one — `XRep_MVP_interaction_map.md` excludes health data outright
+ * must never be one — `InclineYou_MVP_interaction_map.md` excludes health data outright
  * under the DPDP Act 2023, and a field that tells a medical note apart from any
  * other note makes this a health record whatever it is called.
  *

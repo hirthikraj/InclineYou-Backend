@@ -5,7 +5,7 @@ Render the X REP mark to the raster assets Expo needs.
 
 The PNGs in `assets/` are build output, not artwork: this script is the source
 of truth for them, and the source of truth for THIS is section 35 of
-`agent/design system/xrepdesignsystem.html`. If the mark changes there, change
+`agent/design system/inclineyoudesignsystem.html`. If the mark changes there, change
 the constants below and re-run — do not touch the PNGs by hand.
 
 The same geometry is drawn a second time, in SVG, by `src/design/Logo.tsx`.

@@ -131,7 +131,7 @@ export function needsSetup(res: AuthResponse): boolean {
 
 /* ------------------------------------------------------------------ policy
  * The numbers the sign-in screens quote to the user. They mirror
- * `agent/design system/screens/xreploginotp.html` § 06 · Behaviour spec.
+ * `agent/design system/screens/inclineyouloginotp.html` § 06 · Behaviour spec.
  * All of them are ENFORCED on the server — these copies exist only so the UI
  * can say the same thing the backend does.
  * -------------------------------------------------------------------------- */

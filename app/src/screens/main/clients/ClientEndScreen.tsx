@@ -1,7 +1,7 @@
 /**
  * 7b · Pause, or end it.
  *
- * `agent/design system/screens/xrep-clients.html` § 10.
+ * `agent/design system/screens/inclineyou-clients.html` § 10.
  *
  * **Three different things. Two of them you can walk back.** The roster already
  * drew the difference and said what it costs — paused keeps the pack, archived

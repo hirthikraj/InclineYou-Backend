@@ -122,7 +122,7 @@ export function FollowUps({
 
         {entries.length === 0 ? (
           <p className="small" style={{ color: 'var(--tx-ink-3)' }}>
-            Nothing has been sent to {clientName.split(' ')[0]} from XRep yet.
+            Nothing has been sent to {clientName.split(' ')[0]} from InclineYou yet.
           </p>
         ) : (
           <ol className="fup">
@@ -142,7 +142,7 @@ export function FollowUps({
                     <span className="fup__msg">{entry.message}</span>
                   ) : (
                     <span className="fup__msg ink3">
-                      Sent before XRep started keeping the wording.
+                      Sent before InclineYou started keeping the wording.
                     </span>
                   )}
                 </span>

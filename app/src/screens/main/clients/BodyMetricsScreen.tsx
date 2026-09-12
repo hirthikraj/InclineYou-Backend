@@ -1,7 +1,7 @@
 /**
  * 8a · Weight and waist. 8b · Add a measurement.
  *
- * `agent/design system/screens/xrep-clients.html` § 11.
+ * `agent/design system/screens/inclineyou-clients.html` § 11.
  *
  * One decision separates this screen from every competitor's: **a saved
  * measurement cannot be edited or deleted.** Trainerize, TrueCoach, Everfit and

@@ -1,7 +1,7 @@
 /**
  * The answer sets for trainer setup.
  *
- * From `agent/design system/screens/xreptrainersetup.html`. Two things about
+ * From `agent/design system/screens/inclineyoutrainersetup.html`. Two things about
  * the ordering are deliberate and should survive any edit:
  *
  *   · nothing here is alphabetical. Every list is ordered by how often an

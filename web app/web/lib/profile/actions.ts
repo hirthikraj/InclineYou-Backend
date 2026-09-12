@@ -216,7 +216,7 @@ export interface WorkPlaceInput {
  * is the quiet version — keeping a hidden gym name because the fields are no
  * longer on screen, so a client reads a gym the trainer does not work at.
  *
- * The other three are pure profile: nothing in XRep branches on `mapLink`,
+ * The other three are pure profile: nothing in InclineYou branches on `mapLink`,
  * `trainingModes` or `serviceAreas`, exactly like V33's identity block.
  */
 export async function saveWorkPlace(input: WorkPlaceInput): Promise<SaveResult> {

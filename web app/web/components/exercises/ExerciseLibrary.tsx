@@ -71,12 +71,13 @@ function Dropdown({
     ? options.filter(o => o.toLowerCase().includes(filter.toLowerCase()))
     : options;
 
+  /* Opening is what clears the filter, so the CLEAR belongs to the control that
+     opens — see `toggle` below. What is left here is the one part that is a real
+     side effect: moving focus into a field that does not exist until this render
+     is committed. No `setTimeout(0)` either; an effect already runs after commit,
+     so the input is in the DOM by the time this reads the ref. */
   useEffect(() => {
-    if (open) {
-      setFilter('');
-      setCursor(-1);
-      setTimeout(() => filterRef.current?.focus(), 0);
-    }
+    if (open) filterRef.current?.focus();
   }, [open]);
 
   useEffect(() => {
@@ -88,6 +89,18 @@ function Dropdown({
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
   }, []);
+
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    /* A fresh open starts on the whole list with nothing selected. Doing it here
+       rather than in an effect keeps it one render: an effect would paint the
+       previous sitting's filter for a frame before clearing it. */
+    if (next) {
+      setFilter('');
+      setCursor(-1);
+    }
+  }
 
   function pick(v: string) {
     onChange(v === value ? '' : v);
@@ -123,7 +136,7 @@ function Dropdown({
       <button
         id={id}
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={toggle}
         aria-haspopup="listbox"
         aria-expanded={open}
         style={{

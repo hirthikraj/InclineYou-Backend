@@ -1,7 +1,7 @@
 /**
  * 5c · Added.
  *
- * `agent/design system/screens/xrep-clients.html` § 08, frame 5c.
+ * `agent/design system/screens/inclineyou-clients.html` § 08, frame 5c.
  *
  * **No success animation.** A client was added, which is a Tuesday, not an
  * achievement — so the screen spends itself on the three things actually worth
@@ -157,7 +157,7 @@ export default function ClientAddedScreen() {
             onPress={() => {
               const uri = whatsappUri(
                 head.phone,
-                `Hi ${first}, I've added you to XRep. You'll get your sessions and what you owe on your own phone — install it if you like, and nothing changes if you don't.`,
+                `Hi ${first}, I've added you to InclineYou. You'll get your sessions and what you owe on your own phone — install it if you like, and nothing changes if you don't.`,
               );
               if (uri) void Linking.openURL(uri);
             }}

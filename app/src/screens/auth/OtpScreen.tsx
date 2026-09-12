@@ -1,7 +1,7 @@
 /**
  * Screen 01 · Sign in · OTP verify.
  *
- * Built to `agent/design system/screens/xreploginotp.html` §§ 02, 03 and 06.
+ * Built to `agent/design system/screens/inclineyouloginotp.html` §§ 02, 03 and 06.
  * Six states live in here, because auth is judged on what happens when it goes
  * wrong and lumping every failure into "Invalid OTP" strands people who did
  * nothing wrong:
@@ -390,7 +390,7 @@ export default function OtpScreen({ navigation, route }: Props) {
             <WhatsAppButton
               label="Message support on WhatsApp"
               onPress={() => {
-                void openWhatsApp(SUPPORT_WHATSAPP_NUMBER, `Locked out of XRep · +91 ${phone}`);
+                void openWhatsApp(SUPPORT_WHATSAPP_NUMBER, `Locked out of InclineYou · +91 ${phone}`);
               }}
             />
           ) : null}
@@ -493,8 +493,8 @@ export default function OtpScreen({ navigation, route }: Props) {
             {/* Steps aside while the keyboard is up — state 2b. */}
             {keyboardUp ? null : (
               <TrustNote icon={IconShield}>
-                XRep will never ask for this code on a call or over WhatsApp.{' '}
-                <TrustStrong>Nobody from XRep will ever ask you to share it.</TrustStrong>
+                InclineYou will never ask for this code on a call or over WhatsApp.{' '}
+                <TrustStrong>Nobody from InclineYou will ever ask you to share it.</TrustStrong>
               </TrustNote>
             )}
           </>

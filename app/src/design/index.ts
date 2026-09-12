@@ -1,5 +1,5 @@
 /**
- * XRep design system — the only surface screens should import from.
+ * InclineYou design system — the only surface screens should import from.
  *
  * If a screen needs a colour, a size or a component that isn't exported here,
  * the answer is to add it to the system, not to hard-code it in the screen.

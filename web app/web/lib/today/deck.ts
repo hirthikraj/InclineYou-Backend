@@ -709,11 +709,11 @@ export interface DeckSession {
    *
    * The brief for this screen asked the hero to carry "the injury/medical flag if
    * there is one". There is no such field, and its absence is a decision rather
-   * than a gap. `notes/XRep_MVP_interaction_map.md`: "**No medical or
+   * than a gap. `notes/InclineYou_MVP_interaction_map.md`: "**No medical or
    * health-condition fields anywhere** — no injuries, no conditions, no
    * medications … Do not design an 'injuries / health notes' field into intake",
    * and it lists health data under "legally excluded, not deferred" against the
-   * DPDP Act 2023. `XRep_core_data_model.md` says the client note is "free text;
+   * DPDP Act 2023. `InclineYou_core_data_model.md` says the client note is "free text;
    * **no medical fields**".
    *
    * So this is a BOOLEAN about whether text exists, and nothing about what the

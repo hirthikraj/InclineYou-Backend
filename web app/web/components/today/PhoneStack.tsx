@@ -182,7 +182,7 @@ const DEFAULT_FILTERS: Filters = { floor: true, remote: true, done: false };
 /**
  * ── THE STORED CHOICE, AS AN EXTERNAL STORE ──────────────────────────────────
  *
- * The app persists this in `expo-secure-store` under `xrep_today_filters`, and the
+ * The app persists this in `expo-secure-store` under `inclineyou_today_filters`, and the
  * reason is in its comment: a filter that resets on every launch has not been
  * chosen, it has been guessed at. `localStorage` is the same promise on a browser
  * — per-device, which is right for a view preference and wrong for anything the
@@ -206,7 +206,7 @@ const DEFAULT_FILTERS: Filters = { floor: true, remote: true, done: false };
  * lines: a trainer with the day open in two tabs turning *Done* on in one gets it
  * in both, instead of two tabs quietly disagreeing about what the day contains.
  */
-const FILTER_KEY = 'xrep_web_today_filters';
+const FILTER_KEY = 'inclineyou_web_today_filters';
 
 let cached: Filters | null = null;
 const watchers = new Set<() => void>();

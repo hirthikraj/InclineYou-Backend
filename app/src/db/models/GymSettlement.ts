@@ -4,7 +4,7 @@ import { text, field, readonly, date } from '@nozbe/watermelondb/decorators';
 /**
  * The gym's cut for one month, and whether it has been handed over.
  *
- * These are the trainer's own figures, worked out from their own book. XRep
+ * These are the trainer's own figures, worked out from their own book. InclineYou
  * does not talk to any gym's system — if the gym's number differs, this is the
  * one the trainer can show them.
  */

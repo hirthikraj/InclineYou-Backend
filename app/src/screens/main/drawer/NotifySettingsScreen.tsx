@@ -2,7 +2,7 @@
  * 5c · Notifications.
  *
  * Eight switches, grouped by what they are about, each with **when it fires on the
- * row** rather than in a sub-screen. XRep only pings for things that need a
+ * row** rather than in a sub-screen. InclineYou only pings for things that need a
  * decision; everything else waits for the app to be opened, which is why this list
  * is short.
  *
@@ -94,7 +94,7 @@ export default function NotifySettingsScreen() {
 
       <ScrollView contentContainerStyle={styles.body} showsVerticalScrollIndicator={false}>
         <Callout icon={IconBell} style={styles.lead}>
-          XRep only pings you for things that <CalloutStrong>need a decision</CalloutStrong>.
+          InclineYou only pings you for things that <CalloutStrong>need a decision</CalloutStrong>.
           Everything else waits for you to open the app — which is why this list is short.
         </Callout>
 
@@ -130,8 +130,8 @@ export default function NotifySettingsScreen() {
         </Callout>
 
         <Text style={styles.fine}>
-          These are settings for what XRep sends. Your phone&apos;s own notification permission sits
-          above them — if Android is blocking XRep, nothing here will get through.
+          These are settings for what InclineYou sends. Your phone&apos;s own notification permission sits
+          above them — if Android is blocking InclineYou, nothing here will get through.
         </Text>
       </ScrollView>
     </SafeAreaView>

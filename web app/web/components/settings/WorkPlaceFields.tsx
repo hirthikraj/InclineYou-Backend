@@ -172,7 +172,7 @@ export function WorkPlaceFields({
                 onChange={(e) => onChange({ ...value, gymName: e.target.value })}
               />
               {/* Free text, and free text on purpose: most gyms in India are not
-                  on XRep, and a picker of the ones that are would make the
+                  on InclineYou, and a picker of the ones that are would make the
                   majority answer feel like a failure. */}
               <span className="fld__h">Whatever it is called on the board outside.</span>
             </div>

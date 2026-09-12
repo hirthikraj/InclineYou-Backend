@@ -29,7 +29,7 @@ import { AltIcon, ArrowDown, ArrowUp, CopyIcon, DotsIcon, LinkIcon, PlusIcon, Tr
 
 /** Private to this builder, so a column only ever accepts a row from it — a
  *  file, a link or a selection dragged in from elsewhere is not a prescription. */
-const DRAG_MIME = 'application/x-xrep-row';
+const DRAG_MIME = 'application/x-inclineyou-row';
 
 export interface DayColumnProps {
   day: number;

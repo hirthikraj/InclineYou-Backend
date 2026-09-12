@@ -1,7 +1,7 @@
 /**
  * 7a · Edit client.
  *
- * `agent/design system/screens/xrep-clients.html` § 10.
+ * `agent/design system/screens/inclineyou-clients.html` § 10.
  *
  * The boring screen, and it matters most: **a form that silently refuses an edit
  * teaches a trainer that the app is broken.** So four things are editable, three

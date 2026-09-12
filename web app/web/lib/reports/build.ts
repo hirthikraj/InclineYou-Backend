@@ -29,7 +29,7 @@
  * `body_metric` is a measurement — weight, waist, chest — and is exactly what
  * this report is allowed to draw. There is no injury field, no condition field
  * and no PAR-Q flag anywhere near it, and this file must never grow one:
- * `XRep_MVP_interaction_map.md` excludes health data outright under the DPDP Act
+ * `InclineYou_MVP_interaction_map.md` excludes health data outright under the DPDP Act
  * 2023, and a report is the single worst place in the product to leak it,
  * because the whole feature is about the file leaving the building.
  */

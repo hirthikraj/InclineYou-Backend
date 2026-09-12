@@ -39,7 +39,7 @@ export default function PausedScreen({ navigation, route }: Props) {
   const { trainerName, trainerPhone, pausedOn } = route.params;
 
   const message = () => {
-    const text = `Hi ${trainerName}, my XRep access is paused. Could you turn it back on?`;
+    const text = `Hi ${trainerName}, my InclineYou access is paused. Could you turn it back on?`;
     if (trainerPhone) void openWhatsApp(trainerPhone, text);
   };
 

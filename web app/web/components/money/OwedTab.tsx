@@ -44,7 +44,7 @@ interface Props {
  * thing that triggered it, and every step between the row and WhatsApp is a step
  * where the follow-up stops happening.
  *
- * Nothing the panel promised is lost. *XRep never messages on your behalf* is
+ * Nothing the panel promised is lost. *InclineYou never messages on your behalf* is
  * true by construction — the button opens the trainer's own composer — and it is
  * said once, on the template library, rather than re-argued on every press.
  */

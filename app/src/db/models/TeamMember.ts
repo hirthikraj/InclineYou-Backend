@@ -12,7 +12,7 @@ import { text, readonly, date } from '@nozbe/watermelondb/decorators';
  *
  * `trainerId` is nullable, which is the part worth knowing. An invitation can
  * precede the account: a gym owner invites a number that has never heard of
- * XRep, the row is written against `invitedPhone`, and it is bound to a trainer
+ * InclineYou, the row is written against `invitedPhone`, and it is bound to a trainer
  * id the first time that number signs in. For those rows the phone number is the
  * only thing the app knows about the person, and the coach list shows exactly
  * that rather than inventing a placeholder name.

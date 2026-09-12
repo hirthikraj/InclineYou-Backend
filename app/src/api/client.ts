@@ -1,7 +1,7 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
 
-export const TOKEN_KEY = 'xrep_jwt';
+export const TOKEN_KEY = 'inclineyou_jwt';
 
 // Set per environment via .env / EAS build profile. Falls back to the Android
 // emulator's alias for the host machine so a fresh clone works with no config.

@@ -81,7 +81,7 @@ re-rendered in this month's words.
 **Backend:** `nudge_log.message TEXT`, nullable, written on every send and
 returned by both reads. Nullable because every row that already exists has no
 answer and inventing one is worse than an absence the reader can see — the web
-draws *"Sent before XRep started keeping the wording."*
+draws *"Sent before InclineYou started keeping the wording."*
 
 **Additive**, plus two partial indexes: the V1 indexes are on `trainer_id` and
 `client_id` separately, which makes the per-client read a scan of everything that

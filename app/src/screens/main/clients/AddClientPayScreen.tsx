@@ -1,7 +1,7 @@
 /**
  * 5b · How they pay.
  *
- * `agent/design system/screens/xrep-clients.html` § 08, frame 5b.
+ * `agent/design system/screens/inclineyou-clients.html` § 08, frame 5b.
  *
  * The one thing that earns a second screen is money — and how much of it there
  * is to ask about depends on how the trainer works, which they answered once

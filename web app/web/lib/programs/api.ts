@@ -4,7 +4,7 @@ import { cache } from 'react';
 
 import { getToken } from '@/lib/auth/session';
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
 
 export class ProgramsApiError extends Error {
@@ -14,7 +14,7 @@ export class ProgramsApiError extends Error {
      *  anything this half could invent — the rule belongs to the backend. */
     readonly detail?: string,
   ) {
-    super(detail ?? `xrep api ${status ?? 'unreachable'}`);
+    super(detail ?? `inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'ProgramsApiError';
   }
 }

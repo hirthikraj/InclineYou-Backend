@@ -220,7 +220,7 @@ export function pausedLine(trainerName: string, pausedOn: string | null): string
 
 /** The WhatsApp draft behind that line. Never sent silently — it opens a compose. */
 export function pausedDraft(trainerName: string): string {
-  return `Hi ${firstNameOf(trainerName)}, my XRep access is paused. Could you turn it back on?`;
+  return `Hi ${firstNameOf(trainerName)}, my InclineYou access is paused. Could you turn it back on?`;
 }
 
 /** "2026-07-22" → "22 July". Falls back to the raw string on anything unparseable. */

@@ -348,7 +348,7 @@ def frame(fid, name, frm, url, rail_html, note, cls=""):
     <div class="viewport__in">
       <div class="browser__bar">
         <span class="browser__dots"><i></i><i></i><i></i></span>
-        <span class="browser__url">app.xrep.in<b>{url}</b></span>
+        <span class="browser__url">app.inclineyou.in<b>{url}</b></span>
       </div>
       <div class="app{cls}" data-theme="dark">{rail_html}{top()}{BODY}</div>
     </div>
@@ -1054,7 +1054,7 @@ kept, because the rest of each finding depends on it &mdash; only the offline ha
 <p class="small" style="max-width:var(--w-measure)">
   X REP &middot; web application &middot; v1.1 &middot; every frame drawn at 1440&times;900 and scaled
   to fit. Colour, spacing and radius tokens are copied verbatim from
-  <code>xrepdesignsystem.html</code> &mdash; if a value differs there, it is a bug here. Press
+  <code>inclineyoudesignsystem.html</code> &mdash; if a value differs there, it is a bug here. Press
   <kbd>+</kbd> / <kbd>&minus;</kbd> to change the zoom.
   <br><br>Competitor rows trace to primary sources: Everfit&rsquo;s help-centre article
   <i>New interface, navigation and color scheme</i> and their Payment Activity and Library articles;

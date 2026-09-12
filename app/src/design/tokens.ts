@@ -1,7 +1,7 @@
 /**
- * XRep — "Command Deck" design tokens.
+ * InclineYou — "Command Deck" design tokens.
  *
- * Ported verbatim from `agent/design system/xrepdesignsystem.html` (v1.0 · 9 Aug 2026),
+ * Ported verbatim from `agent/design system/inclineyoudesignsystem.html` (v1.0 · 9 Aug 2026),
  * which is the single source of truth. Every value below is a token; no component
  * may hard-code a colour, size or radius. Swap the palette and the app reskins.
  *

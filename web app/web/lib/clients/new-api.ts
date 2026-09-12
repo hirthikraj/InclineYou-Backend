@@ -6,12 +6,12 @@ import { getToken } from '@/lib/auth/session';
 
 export class NewClientApiError extends Error {
   constructor(readonly status: number | null) {
-    super(`xrep api ${status ?? 'unreachable'}`);
+    super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'NewClientApiError';
   }
 }
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
 
 async function get<T>(path: string): Promise<T> {

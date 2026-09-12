@@ -22,13 +22,13 @@
   var STEPS = [0.5, 0.62, 0.72, 0.85, 1];
   function setZoom(z) {
     root.style.setProperty('--z', String(z));
-    try { localStorage.setItem('xrep-web-z', String(z)); } catch (e) {}
+    try { localStorage.setItem('inclineyou-web-z', String(z)); } catch (e) {}
     document.querySelectorAll('[data-z]').forEach(function (b) {
       b.setAttribute('aria-pressed', String(Math.abs(+b.dataset.z - z) < 0.001));
     });
   }
   var saved = null;
-  try { saved = localStorage.getItem('xrep-web-z'); } catch (e) {}
+  try { saved = localStorage.getItem('inclineyou-web-z'); } catch (e) {}
   setZoom(saved ? +saved : 0.72);
 
   document.addEventListener('click', function (e) {
@@ -43,14 +43,14 @@
       document.querySelectorAll('.app,.viewport').forEach(function (el) {
         if (el.hasAttribute('data-theme')) el.setAttribute('data-theme', next);
       });
-      try { localStorage.setItem('xrep-web-theme', next); } catch (e2) {}
+      try { localStorage.setItem('inclineyou-web-theme', next); } catch (e2) {}
       document.querySelectorAll('[data-theme-toggle]').forEach(function (el) {
         el.textContent = next === 'light' ? 'Dark' : 'Light';
       });
     }
   });
   try {
-    var th = localStorage.getItem('xrep-web-theme');
+    var th = localStorage.getItem('inclineyou-web-theme');
     if (th) root.setAttribute('data-theme', th);
   } catch (e) {}
 
@@ -145,7 +145,7 @@
    it can be judged by looking at a ledger with and without it, rather than by
    reading an argument about it. Default ON. */
 (function () {
-  var KEY = 'xrep-glass';
+  var KEY = 'inclineyou-glass';
   var root = document.documentElement;
   var saved = null;
   try { saved = localStorage.getItem(KEY); } catch (e) {}

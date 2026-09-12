@@ -32,7 +32,7 @@
 import * as SecureStore from 'expo-secure-store';
 import { getTrainer, updateTrainer } from '../api/trainer';
 
-const KEY = 'xrep_prefs';
+const KEY = 'inclineyou_prefs';
 
 /** 10pm. Nothing reaches the phone after this, whatever the switches say. */
 export const QUIET_FROM_HOUR = 22;
@@ -112,7 +112,7 @@ export const PLATE_STEPS = [1.25, 2.5, 5] as const;
 /**
  * The defaults, which are opinions.
  *
- * Six notifications on and three off. XRep only pings for things that **need
+ * Six notifications on and three off. InclineYou only pings for things that **need
  * a decision**; everything else waits for the app to be opened, which is why the
  * list is short and why "tomorrow's list" and "client accepted an invite" start
  * off — neither of them needs anything from the trainer at the moment it happens.

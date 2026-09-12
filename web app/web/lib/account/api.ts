@@ -39,7 +39,7 @@ import { getToken } from '@/lib/auth/session';
  * sentence here, because it is the same fact about the same machinery.
  */
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
 
 /** RFC 9457. Spring's ProblemDetail plus the `code` the handlers attach. */
@@ -79,7 +79,7 @@ export type AccountFailure =
 
 export class AccountApiError extends Error {
   constructor(readonly failure: AccountFailure) {
-    super(`xrep account ${failure.kind}`);
+    super(`inclineyou account ${failure.kind}`);
     this.name = 'AccountApiError';
   }
 }

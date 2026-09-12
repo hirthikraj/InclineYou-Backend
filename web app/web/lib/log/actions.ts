@@ -6,7 +6,7 @@ import { getToken } from '@/lib/auth/session';
 import { LogApiError } from './api';
 import type { SwapScope, WriteResult } from './result';
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
 
 /**

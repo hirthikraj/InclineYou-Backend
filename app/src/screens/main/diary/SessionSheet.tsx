@@ -209,7 +209,7 @@ export default function SessionSheet({
         </View>
 
         <Callout icon={IconShield} style={styles.note}>
-          Whatever you pick is <CalloutStrong>undoable for 24 hours</CalloutStrong>. XRep never
+          Whatever you pick is <CalloutStrong>undoable for 24 hours</CalloutStrong>. InclineYou never
           decides this for you.
         </Callout>
 

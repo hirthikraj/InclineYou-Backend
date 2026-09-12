@@ -53,7 +53,7 @@ export type { ScheduleClient, ScheduleSession };
  * and `late` are computed from the schedule alone — see `toSession`.
  */
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 
 /** Same eight seconds, same reason, as `lib/today/api.ts`. A fetch with no
  *  timeout does not fail when a server stops answering — only when it refuses. */
@@ -61,7 +61,7 @@ const TIMEOUT_MS = 8_000;
 
 export class ScheduleApiError extends Error {
   constructor(readonly status: number | null) {
-    super(`xrep api ${status ?? 'unreachable'}`);
+    super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'ScheduleApiError';
   }
 }

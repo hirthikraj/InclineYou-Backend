@@ -41,8 +41,8 @@ import { MAX_EMAIL, MAX_NAME, looksLikeEmail } from './rules';
  * second factor.
  *
  * So it is an httpOnly cookie, ten minutes, matching the ticket's own life:
- * the same job `xrep_pending_phone` does for the number between two sign-in
- * screens and `xrep_wall` does for which refusal a sitting ended at. It expires
+ * the same job `inclineyou_pending_phone` does for the number between two sign-in
+ * screens and `inclineyou_wall` does for which refusal a sitting ended at. It expires
  * on its own, which is the whole reason the backend chose a signed ticket over a
  * row — see `AccountService`.
  *
@@ -62,7 +62,7 @@ import { MAX_EMAIL, MAX_NAME, looksLikeEmail } from './rules';
  */
 
 /** The proof from step 2. Ten minutes, matching `JwtService.PHONE_CHANGE_MINUTES`. */
-const TICKET_COOKIE = 'xrep_phone_change';
+const TICKET_COOKIE = 'inclineyou_phone_change';
 const TICKET_MAX_AGE = 10 * 60;
 
 const SECURE = process.env.NODE_ENV === 'production';
@@ -299,7 +299,7 @@ function sentenceFor(f: AccountFailure): string {
     case 'unproven':
       return EXPIRED_PROOF;
     case 'taken':
-      return 'That number already belongs to an XRep account. If it is yours, sign in with it — an account can’t be moved onto another one.';
+      return 'That number already belongs to an InclineYou account. If it is yours, sign in with it — an account can’t be moved onto another one.';
     case 'refused':
       return f.detail;
     default:

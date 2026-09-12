@@ -1,7 +1,7 @@
 /**
  * 5a · Add a client — two fields.
  *
- * `agent/design system/screens/xrep-clients.html` § 08.
+ * `agent/design system/screens/inclineyou-clients.html` § 08.
  *
  * The roster's empty state already made the promise — **a client needs a name
  * and a phone number** — so the form has to keep it. Everything a competitor

@@ -50,12 +50,12 @@ import {
  * is not a report.
  */
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 12_000;
 
 export class ClientReportApiError extends Error {
   constructor(readonly status: number | null) {
-    super(`xrep api ${status ?? 'unreachable'}`);
+    super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'ClientReportApiError';
   }
 }

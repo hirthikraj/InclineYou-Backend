@@ -1,9 +1,19 @@
-# XRep Backend — Database Schema Reference
+# InclineYou Backend — Database Schema Reference
 
 Every table the Postgres schema holds, what it is for, its primary key, its
 foreign keys, and its indexes. Generated from the Flyway migrations under
-`backend/src/main/resources/db/migration/` (`V1`…`V29`).
+`backend/src/main/resources/db/migration/`, which is now a single consolidated
+`V1__init_schema.sql`.
 
+> **The V-numbers in this file are provenance, not file names.** Forty-two
+> migrations built this schema; on 11 Sep 2026, during the rename to InclineYou,
+> they were flattened into one baseline because the rename changed the database
+> name and both roles and so no instance had to be carried forward. The
+> attributions below — `· V1, V8, V11, V23, V33, V34, V35` — are kept because
+> they say *when and why* a column arrived, which is often the only record of
+> the argument. They no longer name a file; `git log` has those. **The next
+> migration is `V2`.**
+>
 > **Behind by one, and it is recorded rather than quietly true:** `V28`'s
 > `attention_dismissal` predates this note and does not yet have a section here.
 > `V29`'s `client_note` does, below.
@@ -58,7 +68,7 @@ Reference sections: [Entity relationships](#entity-relationships) ·
 [Uniqueness](#uniqueness-constraints) · [Index inventory](#index-inventory) ·
 [Triggers](#triggers) · [Sync surface](#sync-surface) ·
 [Evolution law](#evolution-law) ·
-**[Planned: V28+ — the gym platform](#planned-v28--the-gym-platform)** ·
+**[Planned: the gym platform](#planned-the-gym-platform)** ·
 **[The device mirror — WatermelonDB](#the-device-mirror--watermelondb)**
 
 ---
@@ -220,9 +230,9 @@ one fact becomes two.
 
 | Column | Means | Authority? |
 | --- | --- | --- |
-| `trainer.gym_share_percent` (V11) | what a gym that is **not** on XRep keeps of a floor session | no — a hint, and V23 says in bold it must never gate a feature |
+| `trainer.gym_share_percent` (V11) | what a gym that is **not** on InclineYou keeps of a floor session | no — a hint, and V23 says in bold it must never gate a feature |
 | `client.trainer_split_percent` (V1) | a per-client override of the above | no, same reason |
-| `tenant_member.revenue_share_percent` (V37) | what a coach keeps inside a workspace that **is** on XRep | **yes** — both parties are members of the tenant they agreed it in |
+| `tenant_member.revenue_share_percent` (V37) | what a coach keeps inside a workspace that **is** on InclineYou | **yes** — both parties are members of the tenant they agreed it in |
 
 ---
 
@@ -238,7 +248,7 @@ lives in the role's own table.
 | --- | --- | --- | --- | --- | --- |
 | `id` | UUID | no | `gen_random_uuid()` | V18 | **PK** |
 | `phone` | VARCHAR(15) | no | — | V18 | **UNIQUE.** The login. Unique product-wide, which is what makes `role` single-valued. |
-| `role` | VARCHAR(20) | no | — | V18 | `trainer` \| `client` \| `gym_admin`. **No longer exclusive** — a phone can own a trainer account and also be a live client on somebody else's roster; `role` is just the *home* role, which mode sign-in opens into by default (`auth/AuthService.java`'s `trainerView`/`clientView`, and `POST /v1/auth/mode/trainer` \| `mode/client` to switch). This is a scoped predecessor to the full V28 `user_role` design below — trainer↔client duality only, derived on the fly from `trainer`/`client` by phone, no new table. `gym_admin` is reserved and not yet built. See [Planned: V28+](#planned-v28--the-gym-platform) for the fuller `user_role`/scope-type generalization this does not attempt. |
+| `role` | VARCHAR(20) | no | — | V18 | `trainer` \| `client` \| `gym_admin`. **No longer exclusive** — a phone can own a trainer account and also be a live client on somebody else's roster; `role` is just the *home* role, which mode sign-in opens into by default (`auth/AuthService.java`'s `trainerView`/`clientView`, and `POST /v1/auth/mode/trainer` \| `mode/client` to switch). This is a scoped predecessor to the full V28 `user_role` design below — trainer↔client duality only, derived on the fly from `trainer`/`client` by phone, no new table. `gym_admin` is reserved and not yet built. See [Planned: the gym platform](#planned-the-gym-platform) for the fuller `user_role`/scope-type generalization this does not attempt. |
 | `privacy_accepted_at` | TIMESTAMPTZ | yes | — | V18 | When they accepted the privacy policy. A timestamp, not a boolean: consent is evidence and evidence has a date. |
 | `created_at` | TIMESTAMPTZ | no | `NOW()` | V18 | |
 | `updated_at` | TIMESTAMPTZ | no | `NOW()` | V18 | Trigger-maintained. |
@@ -420,10 +430,10 @@ what a trainer carries in their head about forty people.
 
 > **`client.note` was in the data model doc from the first draft and was never
 > built.** No column in `V1__init_schema.sql`, no endpoint, nothing on the wire.
-> This table is what replaced it, and `XRep_core_data_model.md` §3.2 now says so.
+> This table is what replaced it, and `InclineYou_core_data_model.md` §3.2 now says so.
 
 > **THIS IS NOT A HEALTH RECORD AND MUST NEVER BECOME ONE.**
-> `XRep_MVP_interaction_map.md` excludes health data outright under the DPDP Act
+> `InclineYou_MVP_interaction_map.md` excludes health data outright under the DPDP Act
 > 2023 — "**No medical or health-condition fields anywhere** — no injuries, no
 > conditions, no medications" — and lists it as *legally excluded, not deferred*.
 > `body` is free text and there is no injury column, no condition column and no
@@ -484,7 +494,7 @@ accepting deletes one row and writes another, losing the invitation date.
 | --- | --- | --- | --- | --- | --- |
 | `id` | UUID | no | `gen_random_uuid()` | V26 | **PK** |
 | `team_id` | UUID | no | — | V26 | **FK → `team(id)`** |
-| `trainer_id` | UUID | yes | — | V26 | **FK → `trainer(id)`. Nullable, and that is the point:** an invite can precede the account. A gym owner invites a coach who has never heard of XRep; the row is written against the phone and bound to a trainer id the first time that number signs in. This is what makes the invite an acquisition channel and not just a permission grant. |
+| `trainer_id` | UUID | yes | — | V26 | **FK → `trainer(id)`. Nullable, and that is the point:** an invite can precede the account. A gym owner invites a coach who has never heard of InclineYou; the row is written against the phone and bound to a trainer id the first time that number signs in. This is what makes the invite an acquisition channel and not just a permission grant. |
 | `invited_phone` | VARCHAR(15) | yes | — | V26 | Kept after binding rather than cleared — it is the evidence of who was invited, and a phone on a trainer row can change afterwards. |
 | `role` | VARCHAR(20) | no | — | V26 | `owner` \| `admin` \| `coach`. The owner is not a fourth kind of admin; it is the admin who cannot be removed. |
 | `status` | VARCHAR(20) | no | — | V26 | `invited` \| `active` \| `declined` \| `removed`. |
@@ -888,7 +898,7 @@ to the client's program).
 
 ## 8. Money book
 
-XRep never holds, moves or confirms money. What it keeps is the **book** — a
+InclineYou never holds, moves or confirms money. What it keeps is the **book** — a
 digital bahi khata. Nothing here is a balance, a payout or a settlement account,
 because none of those exist.
 
@@ -982,7 +992,7 @@ settlement has none of those. Overloading one table would have meant making
 `payment.client_id` nullable, which is the kind of quiet retype the schema law
 forbids.
 
-These are the **trainer's** figures, computed from their own book. XRep does not
+These are the **trainer's** figures, computed from their own book. InclineYou does not
 talk to any gym's system, and the Gym share screen says so.
 
 | Column | Type | Null | Default | Since | Notes |
@@ -1309,8 +1319,8 @@ surfaces as the 404 this schema already documents for a wrong id.
 
 | Role | Used by | Policies |
 | --- | --- | --- |
-| `xrep` | Flyway, the three seed scripts, DBA | owner — **bypasses** |
-| `xrep_app` | the runtime pool, and `TenantIsolationTest` | **apply** |
+| `inclineyou` | Flyway, the three seed scripts, DBA | owner — **bypasses** |
+| `inclineyou_app` | the runtime pool, and `TenantIsolationTest` | **apply** |
 
 **There is no `FORCE ROW LEVEL SECURITY`, deliberately.** It would apply to the
 owner, and the owner is Flyway — every future migration backfilling a column
@@ -1434,11 +1444,15 @@ rules.
 
 ---
 
-## Planned: V43+ — the gym platform
+## Planned: the gym platform
 
-> **Renumbered and partly superseded, 30 Aug 2026.** This section was written as
+> **Renumbered twice, then freed, 11 Sep 2026.** This section was written as
 > V28–V31 and the numbers were taken twice over — first by V28–V36, then by the
-> tenancy work in **V37–V42**. Read it as V43+.
+> tenancy work in **V37–V42**. Those forty-two migrations have since been
+> flattened into one `V1__init_schema.sql`, so **the next free number is `V2`**
+> and the numbers below are a dependency order rather than file names. The
+> identity plan in `IDENTITY.md` wants the same range; whichever lands first
+> starts at V2 and the other gets renumbered.
 >
 > **Its V28 `user_role` table is done and must not be built again.** It shipped
 > as [`tenant_member`](#tenant_member--who-may-enter-and-as-what), with
@@ -1461,11 +1475,11 @@ rules.
 > than "which wall".
 
 **The rest of this section is unbuilt.** It is here because the schema above is
-what a V28 author will read, and four of the decisions below are things they
+what the gym-platform author will read, and four of the decisions below are things they
 would otherwise get wrong. The full argument is
-`agent/XRep_gym_platform_prd.md`; this is the schema-shaped summary.
+`agent/InclineYou_gym_platform_prd.md`; this is the schema-shaped summary.
 
-The product direction: XRep becomes a gym's product without stopping being a
+The product direction: InclineYou becomes a gym's product without stopping being a
 trainer's product — the gym is sold *through* the trainers who already use us
 (growth roadmap, Ring 2). One sentence governs the whole extension, and it is the
 same one V26 opens with, one rung up: **a gym is a visibility grant, never a
@@ -1473,7 +1487,7 @@ change of owner.**
 
 ### Two states, and everything above serves the first one
 
-**State A — the gym is not on XRep.** The trainer manages the whole commercial
+**State A — the gym is not on InclineYou.** The trainer manages the whole commercial
 arrangement themselves, and every mechanism for it already exists:
 `trainer.gym_name` (free text, and correct — there is no gym row to point at),
 `trainer.gym_share_percent`, `client.payment_mode`,
@@ -1492,7 +1506,7 @@ never changes hands. Only the commercial half does, and only per client, only on
 the trainer's own nomination (never by matching `gym_name`, which is free text
 typed forty different ways).
 
-### The five invariants a V28+ migration must not break
+### The five invariants a gym-platform migration must not break
 
 1. **`client.trainer_id` stays `NOT NULL`.** A gym with 800 members and 60 PT
    clients keeps the other 740 in `gym_member`, a new gym-owned table. Assigning
@@ -1530,7 +1544,7 @@ typed forty different ways).
   trainer-managed client (`gym_id IS NULL`) the gym sees nothing at all, not
   even a count. **`gym_id IS NULL` does not mean "independent"** — it means the
   trainer is the system of record, which also covers a client at a gym that is
-  not on XRep (that arrangement lives in `client.payment_mode` +
+  not on InclineYou (that arrangement lives in `client.payment_mode` +
   `trainer_split_percent` and is self-managed, exactly as it is today). This does **not** weaken the `/v1/team/**` rule: a team is peers looking
   sideways at each other's books, a gym is the counterparty to the transaction.
 - **The trainer is paid on what was *collected*, not what was sold**, so a
@@ -1801,12 +1815,12 @@ floor with two bars of signal.
 
 - `API.md` — the wire format: endpoints, the authorization table, rate-limit
   tiers, and the error `code` catalogue.
-- `agent/XRep_core_data_model.md` — the product-level data model and the
+- `agent/InclineYou_core_data_model.md` — the product-level data model and the
   reasoning behind the entities.
-- `agent/XRep_team_coaching_prd.md` — the arguments behind V26/V27, including
+- `agent/InclineYou_team_coaching_prd.md` — the arguments behind V26/V27, including
   §5.2 on reassignment tombstones.
-- `agent/XRep_gym_platform_prd.md` — the design for V28+ summarised in
-  [Planned: V28+](#planned-v28--the-gym-platform): multi-role identity, the gym
+- `agent/InclineYou_gym_platform_prd.md` — the design summarised in
+  [Planned: the gym platform](#planned-the-gym-platform): multi-role identity, the gym
   as a visibility grant, and the two settlement directions.
 - `../app/src/db/schema.ts` and `../app/src/db/migrations.ts` — the client-side
   mirror, which moves in lockstep with this one.

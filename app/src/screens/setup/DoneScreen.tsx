@@ -1,7 +1,7 @@
 /**
  * Screen 02 · Trainer setup · After setup.
  *
- * `agent/design system/screens/xreptrainersetup.html` § 06 · 6a.
+ * `agent/design system/screens/inclineyoutrainersetup.html` § 06 · 6a.
  *
  * No confetti. Finishing a form is not an achievement — the celebration is
  * saved for the first booking and the first payout, where the trainer has
@@ -35,7 +35,7 @@ export default function DoneScreen() {
         <DoneMark />
         <Text style={styles.title}>{firstName ? `You're set up, ${firstName}` : "You're set up"}</Text>
         <Text style={styles.body}>
-          Everything else can wait. Add your first client and XRep starts tracking from day one.
+          Everything else can wait. Add your first client and InclineYou starts tracking from day one.
         </Text>
       </View>
 

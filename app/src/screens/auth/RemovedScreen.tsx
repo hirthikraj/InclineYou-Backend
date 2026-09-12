@@ -114,7 +114,7 @@ export default function RemovedScreen({ navigation, route }: Props) {
               onPress={() => {
                 void openWhatsApp(
                   `91${removed.trainerPhone}`,
-                  `Hi ${who}, has my XRep coaching ended?`,
+                  `Hi ${who}, has my InclineYou coaching ended?`,
                 );
               }}
             >

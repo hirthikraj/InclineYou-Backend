@@ -29,7 +29,7 @@ import { TEMPLATE_ORDER } from './types';
  * need the template to send it, because the server renders it.
  */
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
 
 export class NudgeApiError extends Error {
@@ -39,7 +39,7 @@ export class NudgeApiError extends Error {
     readonly detail?: string,
     readonly code?: string,
   ) {
-    super(`xrep api ${status ?? 'unreachable'}`);
+    super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'NudgeApiError';
   }
 }

@@ -14,7 +14,7 @@
  * that goes into WhatsApp — not a description of it — because a preview that is
  * merely representative is how a wrong name reaches a client.
  *
- * ── XRep never sends ──────────────────────────────────────────────────────
+ * ── InclineYou never sends ──────────────────────────────────────────────────────
  *
  * `whatsappUri` opens the conversation with the text in it and the trainer taps
  * send, which is the same refusal every nudge rule makes. The report went out
@@ -136,7 +136,7 @@ export default function WeekReportScreen() {
             title={clientId ? 'No report yet' : 'That report is gone'}
             body={
               clientId
-                ? 'XRep writes one on Sunday night from the sessions you logged that week. The first one lands after their first full week with you.'
+                ? 'InclineYou writes one on Sunday night from the sessions you logged that week. The first one lands after their first full week with you.'
                 : 'It was on this phone and is not any more — most likely the client was removed. Nothing else was affected.'
             }
             style={styles.empty}

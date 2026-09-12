@@ -8,7 +8,7 @@
  *
  * ── Collecting ────────────────────────────────────────────────────────────
  *
- * A UPI deep link, not a payment gateway. XRep never touches the money: the
+ * A UPI deep link, not a payment gateway. InclineYou never touches the money: the
  * link opens the client's own UPI app with the amount filled in, and the
  * trainer marks it received when it lands. That is a locked decision, and it is
  * why "Mark it paid" sits next to the link rather than behind a webhook —
@@ -315,7 +315,7 @@ export default function PackageDetailScreen({ route, navigation }: Props) {
               )}
 
               <Text style={styles.fine}>
-                XRep never handles the money. The link opens their UPI app with the amount filled
+                InclineYou never handles the money. The link opens their UPI app with the amount filled
                 in — you mark it received when it lands.
               </Text>
             </>

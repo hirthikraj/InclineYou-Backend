@@ -20,7 +20,7 @@ import {
 import { EMPTY_DRAFT, loadDraft, saveDraft, type SetupDraft } from './draft';
 
 /** Set when a push failed and the server is still behind the phone. */
-const PENDING_KEY = 'xrep_profile_pending';
+const PENDING_KEY = 'inclineyou_profile_pending';
 
 /**
  * The whole profile in one PATCH.

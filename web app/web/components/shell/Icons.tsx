@@ -158,7 +158,7 @@ export const Plus = ({ size }: IconProps) => <Glyph size={size} d="M12 5v14M5 12
 
 /**
  * Person silhouette with a + in the top-right corner.
- * Matches `#i-useradd` from xrep-clients.html frame 1a — the "Add client"
+ * Matches `#i-useradd` from inclineyou-clients.html frame 1a — the "Add client"
  * button that sits in the app bar on a phone.
  */
 export const UserAdd = ({ size }: IconProps) => (

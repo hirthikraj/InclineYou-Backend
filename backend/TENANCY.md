@@ -1,7 +1,7 @@
 # Tenancy — how a row knows whose it is
 
 **Status: BUILT, and ON in development.** V37–V42, 30 Aug 2026. 251 tests green,
-including eleven that run as `xrep_app` and prove the walls hold. Companion to
+including eleven that run as `inclineyou_app` and prove the walls hold. Companion to
 `SCHEMA.md` and `API.md`; this file carries the *why*, they carry the reference.
 
 A root `tenant` table, a `tenant_id` on every table, and Postgres row-level
@@ -18,7 +18,7 @@ client trains under two tenants.
 | **V39** | `tenant_id` on the four tables that had no owner at all, plus `exercise`; the stamp, freeze, home-tenant and team-mirror triggers |
 | **V40** | revenue shares, the admin placement margin, and `client.stale_at` |
 | **V41** | `web_session` — the web's revocable credential |
-| **V42** | six session settings, four policy tiers, the `xrep_app` runtime role |
+| **V42** | six session settings, four policy tiers, the `inclineyou_app` runtime role |
 
 Java: `tenant/` (scope, service, controller, revenue, handover),
 `config/TenantAwareDataSource`, and an auth interface layer —
@@ -30,21 +30,21 @@ required, the same shape as V30 and V32–V36.
 
 ## The cutover is a configuration change
 
-Every migration is inert until the runtime connects as `xrep_app`. Point
-`APP_DB_USERNAME` at it to turn the policies on; point it at `xrep` to turn them
+Every migration is inert until the runtime connects as `inclineyou_app`. Point
+`APP_DB_USERNAME` at it to turn the policies on; point it at `inclineyou` to turn them
 off. One deploy each way, no migration rollback.
 
 **Development is now on the far side of that switch.** `application.yml`
-defaults the pool to `xrep_app`, and Flyway got credentials of its own because
+defaults the pool to `inclineyou_app`, and Flyway got credentials of its own because
 DDL and backfills are owner work and an owner is exactly who RLS must not apply
-to. Production is still `xrep` until someone changes it there.
+to. Production is still `inclineyou` until someone changes it there.
 
 ### The two identities are two pairs of environment variables
 
 | Variable | Role | Who uses it |
 | --- | --- | --- |
-| `APP_DB_USERNAME` · `APP_DB_PASSWORD` | `xrep_app` | the connection pool — **every request** |
-| `MIGRATION_DB_USERNAME` · `MIGRATION_DB_PASSWORD` | `xrep` | Flyway, the three seed scripts, the test suite |
+| `APP_DB_USERNAME` · `APP_DB_PASSWORD` | `inclineyou_app` | the connection pool — **every request** |
+| `MIGRATION_DB_USERNAME` · `MIGRATION_DB_PASSWORD` | `inclineyou` | Flyway, the three seed scripts, the test suite |
 
 `DATABASE_URL` is shared; only the login differs. `.env.example` at the repo root
 is the checklist, and `docker compose` reads the same file.
@@ -71,7 +71,7 @@ silently wrong:
 did not at first. V42 sets the role's password, but a versioned migration runs
 once — so on every database past its first migrate, changing the variable
 changed the pool's login and nothing else, and the first evidence was
-`password authentication failed for user "xrep_app"` on the next boot.
+`password authentication failed for user "inclineyou_app"` on the next boot.
 `afterMigrate__sync_app_role_password.sql` reconciles it on **every** startup,
 on Flyway's connection, which is the only identity in the system that may
 `ALTER` a role. It is a deliberate no-op when the variable is unset: the
@@ -126,7 +126,7 @@ shape: **a workspace being created is not yet a workspace you are in.**
 
 ### The test suite is still on the owner, and that is a known limit
 
-`src/test/resources/application.properties` pins the suite to `xrep`. 20 of the
+`src/test/resources/application.properties` pins the suite to `inclineyou`. 20 of the
 26 test classes are `@Transactional`, which is what makes them clean up after
 themselves: Spring binds **one** connection per test and rolls it back. That
 connection is borrowed before any request exists, so `TenantAwareDataSource`
@@ -140,7 +140,7 @@ next test finds the previous one's trainer sitting on its phone number. Both
 were tried.
 
 So isolation is proven where it can be proven honestly — `TenantIsolationTest`
-opens its own connections as `xrep_app`, labels them exactly as the filter does,
+opens its own connections as `inclineyou_app`, labels them exactly as the filter does,
 and asserts what is and is not visible. Making all 251 run behind the policies
 needs a way to set the six settings on an already-bound connection. It is real
 work and it has not been done; the live sign-up, client-create and team-create
@@ -159,7 +159,7 @@ below it filter on `client_id` alone.
 
 Two facts make that worse than it sounds:
 
-- The app connects as `xrep`, which is also the **schema owner**. A table owner
+- The app connects as `inclineyou`, which is also the **schema owner**. A table owner
   bypasses its own policies unless the table is `FORCE ROW LEVEL SECURITY`, so
   even if policies existed today they would do nothing.
 - **Three tables carry no ownership column at all** — `set_log`,
@@ -206,7 +206,7 @@ document:
 ### The earlier draft's objection is withdrawn
 
 An earlier version of this document argued a team could not be a data tenant,
-because `agent/XRep_team_coaching_prd.md` §2.4 promises that removing a coach
+because `agent/InclineYou_team_coaching_prd.md` §2.4 promises that removing a coach
 never cascades into client data. **You have said the PRD is an idea and not an
 enforcement, so that argument no longer blocks anything** — and in any case the
 model above dissolves it: nothing cascades on removal, because rows were stamped
@@ -352,8 +352,8 @@ RLS does nothing while the app connects as the table owner.
 
 | Role | Used by | Configured by | RLS |
 | --- | --- | --- | --- |
-| `xrep` | Flyway, the three seed scripts, the test suite, DBA | `MIGRATION_DB_*` | owner — bypasses |
-| `xrep_app` | the runtime connection pool, and `TenantIsolationTest`'s own connections | `APP_DB_*` | **policies apply** |
+| `inclineyou` | Flyway, the three seed scripts, the test suite, DBA | `MIGRATION_DB_*` | owner — bypasses |
+| `inclineyou_app` | the runtime connection pool, and `TenantIsolationTest`'s own connections | `APP_DB_*` | **policies apply** |
 
 Add `ALTER TABLE … FORCE ROW LEVEL SECURITY` as well, so a future migration that
 accidentally reconnects as the owner still gets filtered. Role creation and
@@ -591,10 +591,10 @@ it, and delete its V28 `user_role` in favour of `tenant_member`.
 | **V37** | `tenant`, `tenant_member`; `trainer.home_tenant_id`, `team.tenant_id`; backfill one `solo` tenant per trainer, one `team` tenant per team, and one `tenant_member` row per existing membership | low — additive, no behaviour change |
 | **V38** | `tenant_id` on the 21 trainer-owned tables. Add nullable → backfill → `SET NOT NULL` → FK → index | **the long one.** `payment`, `set_log`, `scheduled_session` are the big tables; batch the backfill |
 | **V39** | `tenant_id` on the join-reached tables and on `exercise`; the stamp-on-insert and refuse-on-update triggers | medium — the backfills are joins |
-| **V40** | `app_tenant_id()` and friends; `ENABLE` / `FORCE ROW LEVEL SECURITY` and the four policy tiers on 29 tables | **cutover.** Inert until the app connects as `xrep_app` |
+| **V40** | `app_tenant_id()` and friends; `ENABLE` / `FORCE ROW LEVEL SECURITY` and the four policy tiers on 29 tables | **cutover.** Inert until the app connects as `inclineyou_app` |
 | **V41** | Retire the superseded single-column `trainer_id` indexes | low, optional |
 
-The app can keep connecting as `xrep` right through V40 — policies exist and do
+The app can keep connecting as `inclineyou` right through V40 — policies exist and do
 nothing — so the cutover is a **connection-string change, revertible in one
 deploy**, not a migration rollback.
 
@@ -619,9 +619,9 @@ deploy**, not a migration rollback.
 container, connecting as the owner. **As things stand every isolation test would
 pass for the wrong reason**, because policies would be inactive. Three changes:
 
-1. Create `xrep_app` in the container — a `POSTGRES_INITDB` script, or a Flyway
+1. Create `inclineyou_app` in the container — a `POSTGRES_INITDB` script, or a Flyway
    `afterMigrate` callback so local and CI stay identical.
-2. Point the test datasource at `xrep_app`, with Flyway keeping the `xrep`
+2. Point the test datasource at `inclineyou_app`, with Flyway keeping the `inclineyou`
    credentials — migrations must still run as the owner.
 3. Add `TenantIsolationTest`, and make it assert the things that would otherwise
    silently regress:
@@ -656,7 +656,7 @@ There is **no Redis in CI**, so this suite must not depend on one — it does no
 | | Answer | Where it lives |
 | --- | --- | --- |
 | **Which workspace does a new client go in?** | A switcher at the top of the app. | `GET /v1/tenants`, `POST /v1/tenants/{id}/activate`, `tenant_member.is_home` |
-| **Combined day or one workspace?** | **Both**, and the trainer chooses. `X-XRep-View: focused` narrows; absent or `combined` spans everything. The money book ignores the header — tier 2 is always the active workspace, so a total is never a mix of two businesses. | `AuthTokenFilter`, tier 1 vs tier 2 in V42 |
+| **Combined day or one workspace?** | **Both**, and the trainer chooses. `X-InclineYou-View: focused` narrows; absent or `combined` spans everything. The money book ignores the header — tier 2 is always the active workspace, so a total is never a mix of two businesses. | `AuthTokenFilter`, tier 1 vs tier 2 in V42 |
 | **Who sees the money inside a gym or team?** | Roles. `owner` / `admin` / `gym_admin` see the workspace total and the per-coach split; a `coach` sees only their own line and no total. A coach's own revenue is their collections × the percentage set on their membership. An admin also earns a margin on clients **they** placed with somebody else. | `TenantRevenueService`, `tenant_member.revenue_share_percent`, `.assignment_margin_percent` |
 | **Two coaches, same person, same gym?** | **No.** Across workspaces yes — that is the requirement. Within one, refused. | `ClientPhoneGuard`, `PHONE_ON_ANOTHER_ROSTER` |
 | **A trainer leaves — what happens to the clients?** | They are marked **stale** and stay in the workspace; an admin assigns a new coach. Progress, programs, measurements and payments are the same rows before and after. | `client.stale_at`, `ClientHandoverService` |

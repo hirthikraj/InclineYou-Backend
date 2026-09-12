@@ -1,7 +1,7 @@
 /**
  * Screen 02 · Trainer setup · Step 3 of 6 · Specialities.
  *
- * `agent/design system/screens/xreptrainersetup.html` § 03 — 3b default,
+ * `agent/design system/screens/inclineyoutrainersetup.html` § 03 — 3b default,
  * 3c cap reached.
  *
  * Multi-select, capped at five, with a live counter. At the cap the unpicked

@@ -15,7 +15,7 @@ import type { AuthResponse, OtpFailure, SendFailure } from './types';
  * JWT it mints is a 7-day bearer token that consequently never has to exist in
  * browser JavaScript.
  */
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 
 /** RFC 9457. Spring's ProblemDetail plus the `code` the handlers attach. */
 interface ProblemDetail {
@@ -34,7 +34,7 @@ interface Refusal {
 /** Thrown for anything that is not a 2xx, so the readers below can classify it. */
 class ApiRefusal extends Error {
   constructor(readonly refusal: Refusal) {
-    super(`xrep api ${refusal.status}`);
+    super(`inclineyou api ${refusal.status}`);
     this.name = 'ApiRefusal';
   }
 }
@@ -42,7 +42,7 @@ class ApiRefusal extends Error {
 /** No response at all — the request never left this server. */
 class ApiUnreachable extends Error {
   constructor(cause: unknown) {
-    super('xrep api unreachable');
+    super('inclineyou api unreachable');
     this.name = 'ApiUnreachable';
     this.cause = cause;
   }

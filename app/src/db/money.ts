@@ -3,7 +3,7 @@
  *
  * Every rule this file enforces comes from §08 of the design:
  *
- *   · XRep never holds, moves or confirms money. Nothing here calls a
+ *   · InclineYou never holds, moves or confirms money. Nothing here calls a
  *     payment provider, because there isn't one. A payment is RECORDED by the
  *     trainer, never auto-detected — we cannot read their bank, and marking a
  *     payment from a parsed SMS would be wrong often enough to destroy trust in
@@ -53,8 +53,8 @@ export const UNDO_WINDOW_MS = 24 * 60 * 60 * 1000;
  * cannot, and a trainer running more than ten phones is not a real scenario.
  * -------------------------------------------------------------------------- */
 
-const BLOCK_KEY = 'xrep_receipt_block';
-const SEQ_KEY = 'xrep_receipt_seq';
+const BLOCK_KEY = 'inclineyou_receipt_block';
+const SEQ_KEY = 'inclineyou_receipt_seq';
 
 let cachedBlock: number | null = null;
 

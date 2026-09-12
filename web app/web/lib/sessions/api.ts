@@ -6,12 +6,12 @@ import { getToken } from '@/lib/auth/session';
 import { programWeek, rowsForDay, type ProgramExerciseWire } from '@/lib/log/plan';
 import type { ClientNoteWire } from '@/lib/clients/client-api';
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
 
 export class SessionsApiError extends Error {
   constructor(readonly status: number | null) {
-    super(`xrep api ${status ?? 'unreachable'}`);
+    super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'SessionsApiError';
   }
 }

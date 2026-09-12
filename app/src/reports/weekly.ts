@@ -397,7 +397,7 @@ function stateLine(state: DeliveryState, delivery: WeeklyDelivery | null): strin
  * The message, in the trainer's voice rather than the app's.
  *
  * Short enough to read in a notification. It leads with what they kept — the
- * same warmth rule the client's own copy keeps — and it never mentions XRep,
+ * same warmth rule the client's own copy keeps — and it never mentions InclineYou,
  * because this is going out of the trainer's WhatsApp and it should read like
  * they wrote it.
  */

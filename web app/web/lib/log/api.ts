@@ -11,12 +11,12 @@ import {
   type LogView, type PickView, type ProgressRange, type ProgressView,
 } from './log';
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
 
 export class LogApiError extends Error {
   constructor(readonly status: number | null) {
-    super(`xrep api ${status ?? 'unreachable'}`);
+    super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'LogApiError';
   }
 }

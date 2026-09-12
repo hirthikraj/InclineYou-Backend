@@ -57,7 +57,7 @@ import { readSkipped } from './skipped';
  * comment exists to prevent.
  * ───────────────────────────────────────────────────────────────────────────
  */
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 
 /** The wire shape of `TrainerService.TrainerResponse`. */
 interface TrainerProfile {

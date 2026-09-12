@@ -54,7 +54,7 @@ export default function ExportSheet({
     const csv = buildCsv(input, scope, anchor);
     await Share.share({
       message: csv,
-      title: `XRep · ${summary.label}`,
+      title: `InclineYou · ${summary.label}`,
     });
     onClose();
   };

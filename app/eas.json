@@ -21,7 +21,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://xrep-staging.up.railway.app"
+        "EXPO_PUBLIC_API_URL": "https://inclineyou-staging.up.railway.app"
       }
     },
     "production": {
@@ -30,7 +30,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://api.xrep.example"
+        "EXPO_PUBLIC_API_URL": "https://api.inclineyou.example"
       }
     }
   },

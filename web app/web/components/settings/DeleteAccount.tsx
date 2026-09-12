@@ -79,7 +79,7 @@ export function DeleteAccount({ phone, clientCount }: { phone: string; clientCou
     return (
       <>
         <p className="small">
-          Everything in XRep is yours, and leaving is a button rather than an email to somebody.
+          Everything in InclineYou is yours, and leaving is a button rather than an email to somebody.
           Deleting closes this account for good: your roster, your programs, your session history
           and your money book all stop being reachable, and{' '}
           <b>the number you sign in with cannot be used to start again.</b>
@@ -142,7 +142,7 @@ export function DeleteAccount({ phone, clientCount }: { phone: string; clientCou
           so that nobody else can be handed a sign-in next to your book.
         </li>
         <li>Nobody is messaged. Your clients are not told, and nothing is sent in your name.</li>
-        <li>We cannot undo this from inside XRep.</li>
+        <li>We cannot undo this from inside InclineYou.</li>
       </ul>
 
       <div className={`fld${message ? ' fld--err' : ''}`} style={{ marginTop: 16, maxWidth: 320 }}>

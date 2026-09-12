@@ -445,7 +445,7 @@ export function paintReportCard(r: ClientReport): HTMLCanvasElement {
 
   /* ── the mark ────────────────────────────────────────────────────────────
      The brief's reason for it, in its own words: a card posted with a small
-     "Tracked on XRep" mark is *"free acquisition from your most credible
+     "Tracked on InclineYou" mark is *"free acquisition from your most credible
      possible source"*. Which is exactly why it is small, at the foot, and never
      over the client's own numbers — a watermark across somebody's progress is an
      advertisement they will crop out or not post at all. */

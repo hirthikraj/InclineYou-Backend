@@ -1,7 +1,7 @@
 /**
  * Screen 01 · Sign in · Phone entry — the front door.
  *
- * Built to `agent/design system/screens/xreploginotp.html` § 01:
+ * Built to `agent/design system/screens/inclineyouloginotp.html` § 01:
  *
  *   1a  default — CTA visible but disabled until 10 digits
  *   1b  filled, keyboard up — the CTA docks above the keyboard
@@ -74,11 +74,11 @@ const PHONE_RE = /^[6-9]\d{9}$/;
 const LEAD_MSG = 'Indian mobile numbers start with 6, 7, 8 or 9.';
 
 /**
- * The domain the OTP SMS is bound to (`@xrep.app #481234`), so these are the
+ * The domain the OTP SMS is bound to (`@inclineyou.app #481234`), so these are the
  * same origin. Point them elsewhere the day legal copy moves.
  */
-const TERMS_URL = 'https://xrep.app/terms';
-const PRIVACY_URL = 'https://xrep.app/privacy';
+const TERMS_URL = 'https://inclineyou.app/terms';
+const PRIVACY_URL = 'https://inclineyou.app/privacy';
 
 export default function PhoneScreen({ navigation }: Props) {
   const [digits, setDigits] = useState('');
@@ -224,7 +224,7 @@ export default function PhoneScreen({ navigation }: Props) {
         {keyboardUp ? null : (
           <TrustNote icon={IconCloudOff}>
             <TrustStrong>This is the only screen that needs internet.</TrustStrong> After you're
-            in, XRep works fully offline and syncs when it can.
+            in, InclineYou works fully offline and syncs when it can.
           </TrustNote>
         )}
       </AuthBody>

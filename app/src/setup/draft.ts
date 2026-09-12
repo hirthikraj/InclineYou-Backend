@@ -16,7 +16,7 @@
 
 import * as SecureStore from 'expo-secure-store';
 
-const DRAFT_KEY = 'xrep_setup_draft';
+const DRAFT_KEY = 'inclineyou_setup_draft';
 
 /** Flow order. The step bar, the timeline and `nextStep` all read this one array. */
 export const SETUP_STEPS = [

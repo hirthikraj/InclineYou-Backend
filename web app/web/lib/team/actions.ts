@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 
 import { getToken } from '@/lib/auth/session';
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 
 async function authedFetch(
   path: string,

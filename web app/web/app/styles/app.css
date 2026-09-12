@@ -2072,7 +2072,7 @@ a.gapb--h{display:flex}
 }
 
 /* ── WEEK PIPS · mobile pip view for the week, ≤900px ─────────────────────
-   Design source: xrepdiary.html frame 2a (.tx-wk, .tx-tally, .tx-legend).
+   Design source: inclineyoudiary.html frame 2a (.tx-wk, .tx-tally, .tx-legend).
    Rendered at all widths; CSS below hides it on desktop and hides the time
    grid wrapper (.sch__tg) on mobile.
 
@@ -2181,7 +2181,7 @@ a.gapb--h{display:flex}
 .wkp__leg s{display:block;width:7px;height:7px;border-radius:2px;text-decoration:none;flex:0 0 7px}
 
 /* ── DAY AGENDA · mobile agenda view for the day, ≤900px ──────────────────
-   Design source: xrepdiary.html frames 1a–1d (.tx-agenda, .tx-row, .tx-gap,
+   Design source: inclineyoudiary.html frames 1a–1d (.tx-agenda, .tx-row, .tx-gap,
    .tx-now, .tx-daystrip). The time grid (wrapped in .sch__tg) is hidden at
    ≤900px in both week and day views; this component takes its place for day.
 
@@ -2230,7 +2230,7 @@ a.gapb--h{display:flex}
   font-variant-numeric:tabular-nums;line-height:1.2;padding-top:14px;
 }
 
-/* Session card — mirrors .tx-row from xrepdiary.html */
+/* Session card — mirrors .tx-row from inclineyoudiary.html */
 .dag__ses{
   display:flex;align-items:center;gap:12px;width:100%;text-align:left;
   min-height:64px;padding:12px;border-radius:var(--tx-r2);
@@ -2349,7 +2349,7 @@ a.gapb--h{display:flex}
    session block, and a session block is sized by its own duration.
 
    IT IS DELIBERATELY LEFT ALONE, and the measurement says it can be. WCAG 2.5.8
-   asks for 24 CSS px in each dimension. The shortest session XRep sells is 30
+   asks for 24 CSS px in each dimension. The shortest session InclineYou sells is 30
    minutes, which at one minute to one pixel is **30px tall**, and the narrowest
    column this stylesheet allows is **112px**. Both exceed the floor, so the
    smallest possible target on the screen passes as drawn — with no padding, no
@@ -2826,7 +2826,7 @@ a.gapb--h{display:flex}
 .sch__hours--mobile{display:none}
 
 /* ── mobile: hide header buttons, oval view-switcher pill ─────────────────
-   Four changes the mobile diary design (xrepdiary.html) calls for:
+   Four changes the mobile diary design (inclineyoudiary.html) calls for:
 
    1 · The New session button stands down under 900px. The + in the tab bar
        already books a session on every screen — a second copy in the header
@@ -2838,7 +2838,7 @@ a.gapb--h{display:flex}
        — it is just no longer competing with the calendar for vertical space.
 
    3 · The view switcher becomes an oval pill exactly matching .tx-segmented
-       in xrepdiary.html (same gap:3, padding:3, radius, lime fill on the
+       in inclineyoudiary.html (same gap:3, padding:3, radius, lime fill on the
        selected button). `.btngroup` uses desktop dividers and a 32px height;
        the pill is the 2026 mobile OS default for three mutually-exclusive
        views. Overrides at 900px so phones and portrait tablets both see it;
@@ -3325,7 +3325,7 @@ a.gapb--h{display:flex}
 /* ═══════════════════════════════════════════════════════════════════════════
    CLIENTS ON A PHONE — roster table becomes a card list.
 
-   xrep-clients.html frame 1a. Under ≤900px the desktop strip/tools/table are
+   inclineyou-clients.html frame 1a. Under ≤900px the desktop strip/tools/table are
    hidden (.rst-desk) and a card list (.rst-phone) shows in their place. The
    page header's text buttons (Export + Add client) are replaced by compact
    icon buttons (.crd-ph-acts) for sort, filter and add.

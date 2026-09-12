@@ -185,7 +185,7 @@ function Card({
  *
  * The brief asked this slot for "the injury/medical flag if there is one". There
  * is no such field and there deliberately never has been:
- * `notes/XRep_MVP_interaction_map.md` forbids "medical or health-condition fields
+ * `notes/InclineYou_MVP_interaction_map.md` forbids "medical or health-condition fields
  * anywhere — no injuries, no conditions, no medications" and lists health data as
  * "legally excluded, not deferred" under the DPDP Act 2023.
  *

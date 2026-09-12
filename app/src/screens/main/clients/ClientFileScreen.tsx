@@ -1,7 +1,7 @@
 /**
  * 6a–6d · The client file.
  *
- * `agent/design system/screens/xrep-clients.html` § 09.
+ * `agent/design system/screens/inclineyou-clients.html` § 09.
  *
  * This is the screen every "tap a client" in the app has been pointing at. One
  * record, four views — **overview, programs, sessions, package** — and the

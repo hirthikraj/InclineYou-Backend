@@ -3,7 +3,7 @@
  *
  * ── Online-only, and it says so rather than pretending ────────────────────
  *
- * The one screen in XRep with a real loading state and a real offline dead end,
+ * The one screen in InclineYou with a real loading state and a real offline dead end,
  * because the data genuinely is not on the phone and must not be: mirroring
  * every coach's roster onto every admin's device multiplies the local database
  * by the size of the team, and an offline copy leaves with the phone when an

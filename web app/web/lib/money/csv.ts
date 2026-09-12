@@ -101,8 +101,8 @@ export function downloadCsv(filename: string, csv: string): void {
   requestAnimationFrame(() => URL.revokeObjectURL(url));
 }
 
-/** `xrep-ledger-aug-2026.csv` — lands in a Downloads folder that has others. */
+/** `inclineyou-ledger-aug-2026.csv` — lands in a Downloads folder that has others. */
 export function csvFilename(kind: string, periodLabel: string): string {
   const slug = periodLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-  return `xrep-${kind}-${slug}.csv`;
+  return `inclineyou-${kind}-${slug}.csv`;
 }

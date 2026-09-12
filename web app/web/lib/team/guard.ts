@@ -32,6 +32,7 @@ export async function requireTeam(): Promise<TeamResult> {
       return {
         ok: true,
         data: {
+          now: Date.now(),
           team: null,
           members: [],
           invitations,
@@ -56,6 +57,7 @@ export async function requireTeam(): Promise<TeamResult> {
     return {
       ok: true,
       data: {
+        now: Date.now(),
         team,
         members,
         invitations,

@@ -83,7 +83,7 @@ export default function ReportsScreen() {
    */
   const share = async () => {
     const lines = [
-      `XRep reports,${view.subtitle}`,
+      `InclineYou reports,${view.subtitle}`,
       '',
       'Metric,Value,Change',
       ...view.metrics.map((m) => `${m.label},${m.value},${m.delta?.text ?? ''}`),

@@ -2,7 +2,7 @@ import 'server-only';
 
 import { getToken } from '@/lib/auth/session';
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 
 /** Fetches the signed-in trainer's display name for the persistent shell.
  *  Returns empty string on any failure — the Rail renders without a name

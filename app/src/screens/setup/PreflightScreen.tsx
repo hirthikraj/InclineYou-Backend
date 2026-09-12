@@ -1,7 +1,7 @@
 /**
  * Screen 02 · Trainer setup · Before anything.
  *
- * `agent/design system/screens/xreptrainersetup.html` § 01:
+ * `agent/design system/screens/inclineyoutrainersetup.html` § 01:
  *   1a  what we'll ask   — a first run, nothing answered yet
  *   1b  resume           — come back to a part-finished flow
  *

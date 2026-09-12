@@ -8,7 +8,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
-# XRep — web app
+# InclineYou — web app
 
 The desktop half. Trainer web app today; the **gym admin console and the client
 portal ship in this same project**, which is why this is Next rather than a
@@ -59,7 +59,7 @@ light it steps to `--tx-accent-text` (`#4F6B0A`).
 ## Talking to the backend
 
 The browser NEVER reaches Spring. `lib/auth/api.ts` is `server-only` and calls
-`XREP_API_URL` from the Next server; screens reach it through server actions.
+`INCLINEYOU_API_URL` from the Next server; screens reach it through server actions.
 Two consequences worth keeping:
 
 - **The backend has no CORS configuration and needs none.** Do not add a
@@ -150,7 +150,7 @@ verified against a hand-made two-roster fixture.
 
 ### Where the chosen roster lives
 
-`xrep_client`, a 7-day httpOnly cookie (`lib/auth/session.ts`). A client token's
+`inclineyou_client`, a 7-day httpOnly cookie (`lib/auth/session.ts`). A client token's
 subject is the PHONE, not a client id — `JwtService` says why — so the token cannot
 say which roster is open, and `/v1/client/sync/pull` takes `clientId` as a
 parameter for the same reason. It is not a permission: the sync controller
@@ -196,7 +196,7 @@ so unlike `/sign-in/new` and `/sign-in/role`, this screen cannot verify itself f
 the token, and guessing is actively harmful: telling somebody who has an invite
 waiting that nobody is coaching them is how they give up instead of accepting.
 
-So `verifyCode` records which wall it sent them to in `xrep_wall` (30 minutes,
+So `verifyCode` records which wall it sent them to in `inclineyou_wall` (30 minutes,
 httpOnly — a fact about a sitting, same argument as `lib/setup/skipped.ts`), and
 the wall pages read it back. No cookie means a stale bookmark, and the answer there
 is a fresh sign-in: one code for a screen that is certainly true beats no code for
@@ -205,7 +205,7 @@ value is derived from `roleOf(session)` rather than from the route string, so it
 a narrowing the compiler checks rather than a lookup that can miss.
 
 `/sign-in/paused`, `/sign-in/removed` and `/invite/[clientId]` are still
-`NotBuilt` — and the first two will reuse `xrep_wall`, which is why it is a
+`NotBuilt` — and the first two will reuse `inclineyou_wall`, which is why it is a
 `WallKind` and not a boolean.
 
 **One pre-existing gap this uncovered:** `destinationFor` routes the legacy
@@ -247,9 +247,9 @@ until now, so the only way out of a session was clearing cookies.
 There is **no server call and nothing to call**: the JWT is a self-contained
 7-day token with no session behind it and no revocation list, so
 `signOut` in `lib/auth/actions.ts` clears the cookie jar and redirects. It clears
-*all five* — `xrep_token`, `xrep_client`, `xrep_wall`, `xrep_pending_phone` and
-`xrep_setup_skipped` — because the next person on a shared gym desktop may be a
-different trainer, and a 24-hour `xrep_setup_skipped` left behind makes *their*
+*all five* — `inclineyou_token`, `inclineyou_client`, `inclineyou_wall`, `inclineyou_pending_phone` and
+`inclineyou_setup_skipped` — because the next person on a shared gym desktop may be a
+different trainer, and a 24-hour `inclineyou_setup_skipped` left behind makes *their*
 onboarding skip steps they never saw.
 
 **The ellipsis is kept, and it now means something else.** §2b explains *Sign
@@ -946,11 +946,11 @@ rather than the achievement.
 ### The medical flag was asked for and is deliberately a note flag instead
 
 Block 1 asked the hero for "the injury/medical flag if there is one".
-`notes/XRep_MVP_interaction_map.md` forbids it in as many words — "**No medical or
+`notes/InclineYou_MVP_interaction_map.md` forbids it in as many words — "**No medical or
 health-condition fields anywhere** — no injuries, no conditions, no medications …
 Do not design an 'injuries / health notes' field into intake" — and lists health
 data under "legally excluded, not deferred" against the DPDP Act 2023.
-`XRep_core_data_model.md` says the client note is "free text; **no medical
+`InclineYou_core_data_model.md` says the client note is "free text; **no medical
 fields**".
 
 What the hero draws instead is a neutral **Has a note** chip: a boolean over
@@ -2120,7 +2120,7 @@ things about it are load-bearing:
   `dragstart` and the first `dragover` land in the same task, so a gate on the
   `dragUid` prop misses that one — found by rendering, where the drop worked and
   the indicator never appeared. `dataTransfer.types` is readable during a drag
-  where `getData` is not, so the private `application/x-xrep-row` type is the
+  where `getData` is not, so the private `application/x-inclineyou-row` type is the
   gate. `dragUid` survives for the payload and the dimming, which are both read
   a frame later.
 - **The row is `draggable` only while the grip is held**, armed on the handle's
@@ -2720,12 +2720,12 @@ always visible, never buried. This is a safety feature as much as a UX one."
 **The safety affordance is built. The health fields are not, and must not be.**
 Four documents forbid them and none of them is a preference:
 
-- `notes/XRep_MVP_interaction_map.md`: "**No medical or health-condition fields
+- `notes/InclineYou_MVP_interaction_map.md`: "**No medical or health-condition fields
   anywhere** — no injuries, no conditions, no medications … Do not design an
   'injuries / health notes' field into intake", filed under *legally excluded, not
   deferred*, against the DPDP Act 2023;
-- `XRep_final_requirements_and_plan.md` NFR-8: "no medical/health-condition data";
-- `XRep_core_data_model.md` §3.2: the client note is "free text; **no medical
+- `InclineYou_final_requirements_and_plan.md` NFR-8: "no medical/health-condition data";
+- `InclineYou_core_data_model.md` §3.2: the client note is "free text; **no medical
   fields**";
 - this file, above: the deck's *Has a note* chip "must never grow a variant that
   means 'medical' — the moment a flag distinguishes a health note from any other
@@ -2746,7 +2746,7 @@ different feature, not a wider version of this one.
 
 ### V29 · `client_note`, because there was no storage at all
 
-`XRep_core_data_model.md` §3.2 has listed `client.note` since the first draft and
+`InclineYou_core_data_model.md` §3.2 has listed `client.note` since the first draft and
 **`V1__init_schema.sql` never created it.** No column, no endpoint, nothing on the
 wire. The doc now says so and points at the table that replaced it.
 
@@ -2768,7 +2768,7 @@ it are load-bearing:
   the strip's *Unpin* send `{pinned:false}` without the text, and the tab's editor
   send `{body}` without the pin, through one route.
 
-Not in sync, per V26's and V28's argument. **`app/agent/XRep_core_data_model.md`
+Not in sync, per V26's and V28's argument. **`app/agent/InclineYou_core_data_model.md`
 was deliberately not updated** — it is under `app/`, which is not edited from this
 half without being asked. `notes/` and `backend/agent/` are in step; that third
 copy is one `cp` behind.
@@ -4193,8 +4193,8 @@ no longer signs in and the new one is not theirs. One extra code against an
 account that cannot be recovered is not a close call.
 
 **The ticket never reaches browser JavaScript.** It is a ten-minute signed JWT,
-`role: phone_change`, and it lives in an httpOnly cookie (`xrep_phone_change`) —
-the same job `xrep_pending_phone` does between two sign-in screens.
+`role: phone_change`, and it lives in an httpOnly cookie (`inclineyou_phone_change`) —
+the same job `inclineyou_pending_phone` does between two sign-in screens.
 `lib/auth/session.ts` opens by saying the JWT is *absent* from browser JS rather
 than merely hard to read, and a second factor that is easier to steal than the
 first is not a second factor. It is also never an `Authorization` header:

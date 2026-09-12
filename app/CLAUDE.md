@@ -1,8 +1,8 @@
-# XRep App — Claude working notes
+# InclineYou App — Claude working notes
 
 @AGENTS.md
 
-Expo / React Native client for XRep, a trainer-first coaching app. This directory
+Expo / React Native client for InclineYou, a trainer-first coaching app. This directory
 is the frontend half of a monorepo; the Spring Boot API lives in `../backend` and
 has its own `CLAUDE.md` (start with `../backend/API.md` for the contract).
 
@@ -82,11 +82,11 @@ after the grant was revoked. So `api/team.ts` is awaited by the screens, and the
 buttons are disabled offline with a banner that says why.
 
 Reads are still local. `teams` and `team_members` are pull-only synced tables
-(schema v19), so the Team screen draws from an observable with no signal like
+(in the schema baseline, v1), so the Team screen draws from an observable with no signal like
 every other screen — an admin on a gym floor can still see who their coaches
 are. What is **not** synced is the rest of the team: teammates' clients, their
 programs, their money. Those are online-only REST, and no role ever sees a
-teammate's money book at all. See `backend/agent/XRep_team_coaching_prd.md`.
+teammate's money book at all. See `backend/agent/InclineYou_team_coaching_prd.md`.
 
 Three things to keep true when touching this:
 
@@ -138,7 +138,7 @@ testable by inspection and re-renderable from observables.
 `src/design/index.ts` is the only surface screens should import from. No screen
 may hard-code a colour, size, radius, or font — if something is missing, **add it
 to the system**, don't inline it. `tokens.ts` is ported verbatim from
-`agent/design system/xrepdesignsystem.html`, which is the source of truth; swap
+`agent/design system/inclineyoudesignsystem.html`, which is the source of truth; swap
 the palette and the app reskins.
 
 Two RN translations baked into the tokens: em letter-spacing is resolved to

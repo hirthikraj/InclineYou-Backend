@@ -1,7 +1,7 @@
 import { appSchema, tableSchema } from '@nozbe/watermelondb';
 
 export const schema = appSchema({
-  version: 19,
+  version: 1,
   tables: [
     tableSchema({
       name: 'clients',
@@ -491,7 +491,7 @@ export const schema = appSchema({
        * and an admin standing on a gym floor with no signal should still be able
        * to see who their coaches are. What is deliberately NOT synced is the
        * rest of the team: teammates' clients, their programs, their money. Those
-       * are online-only REST reads. See `agent/XRep_team_coaching_prd.md` §0.3.
+       * are online-only REST reads. See `agent/InclineYou_team_coaching_prd.md` §0.3.
        */
       name: 'teams',
       columns: [
@@ -513,7 +513,7 @@ export const schema = appSchema({
        * for `client.membership_status`.
        *
        * `trainer_id` is optional because an invite can precede the account: a
-       * gym owner can invite a coach who has never heard of XRep, and the row is
+       * gym owner can invite a coach who has never heard of InclineYou, and the row is
        * written against the phone number until that number signs in. Which is
        * also why `invited_phone` is the only thing we know about some rows.
        *

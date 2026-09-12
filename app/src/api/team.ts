@@ -3,7 +3,7 @@
  *
  * ── Why this breaks the house rule, and only here ─────────────────────────
  *
- * Everything else in XRep writes to SQLite first and reconciles later. That is
+ * Everything else in InclineYou writes to SQLite first and reconciles later. That is
  * the architecture, not a convenience. This module does the opposite: every
  * function here awaits the server, and the screens await these.
  *
@@ -51,7 +51,7 @@ export interface TeamDto {
 export interface TeamMemberDto {
   id: string;
   trainerId: string | null;
-  /** Null for a pending invite to a number with no XRep account yet. */
+  /** Null for a pending invite to a number with no InclineYou account yet. */
   name: string | null;
   phone: string | null;
   role: string;

@@ -13,7 +13,7 @@ import type { AuthResponse, Membership, Role, WallKind } from './types';
  * token any injected script can post elsewhere. It is a 7-day bearer token
  * (`app.jwt.expiry-minutes: 10080`), so the exposure it would carry is a week.
  */
-const TOKEN_COOKIE = 'xrep_token';
+const TOKEN_COOKIE = 'inclineyou_token';
 
 /** app.jwt.expiry-minutes: 10080. The cookie should not outlive the token in it. */
 const TOKEN_MAX_AGE = 7 * 24 * 60 * 60;
@@ -26,7 +26,7 @@ const TOKEN_MAX_AGE = 7 * 24 * 60 * 60;
  * that is deliberate — it is the trainer's own number, they typed it one screen
  * ago, and the verify screen has to print it back to them.
  */
-const PENDING_COOKIE = 'xrep_pending_phone';
+const PENDING_COOKIE = 'inclineyou_pending_phone';
 
 /** Long enough to outlast a 10-minute code and the resend ladder after it. */
 const PENDING_MAX_AGE = 30 * 60;
@@ -45,7 +45,7 @@ const PENDING_MAX_AGE = 30 * 60;
  *
  * On the phone that choice lives in `AuthContext`. The web has no such object
  * that survives a navigation, so it is a cookie — the same role
- * `xrep_pending_phone` plays for the number between two screens.
+ * `inclineyou_pending_phone` plays for the number between two screens.
  *
  * ── AND IT IS NOT A PERMISSION ───────────────────────────────────────────────
  *
@@ -59,17 +59,17 @@ const PENDING_MAX_AGE = 30 * 60;
  * next time", and a choice that expired before the session did would break that
  * promise silently.
  */
-const CLIENT_COOKIE = 'xrep_client';
+const CLIENT_COOKIE = 'inclineyou_client';
 
 /**
  * WHICH WALL a sign-in ended at — see `WallKind` for why the token cannot say.
  *
- * Thirty minutes, matching `xrep_pending_phone`: long enough to read the screen,
+ * Thirty minutes, matching `inclineyou_pending_phone`: long enough to read the screen,
  * follow its one instruction and come back, and short enough that a bookmark
  * opened tomorrow gets a fresh sign-in instead of a sentence about a membership
  * that may have changed since.
  */
-const WALL_COOKIE = 'xrep_wall';
+const WALL_COOKIE = 'inclineyou_wall';
 const WALL_MAX_AGE = 30 * 60;
 
 const SECURE = process.env.NODE_ENV === 'production';

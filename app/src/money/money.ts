@@ -6,7 +6,7 @@
  *
  * The finding this file encodes: **every coaching platform in the teardown
  * builds its money screen as a payment processor** — a Stripe balance, payouts,
- * failed charges. XRep can't and shouldn't. The money arrives as cash on a
+ * failed charges. InclineYou can't and shouldn't. The money arrives as cash on a
  * gym floor, as UPI straight into the trainer's own bank, or at the gym's
  * counter, so a balance is a screen about money that doesn't exist. What this
  * models instead is a bahi khata: two-directional, chronological, with a

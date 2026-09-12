@@ -1,9 +1,9 @@
 spring:
   application:
-    name: xrep-backend
+    name: inclineyou-backend
 
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/xrepdb}
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/inclineyoudb}
     # THE REQUEST PATH. Connects as the NON-OWNING login, so row-level security
     # actually applies to it — Postgres exempts a table's owner from its own
     # policies, so connecting as the owner here would leave all 45 policies inert
@@ -14,10 +14,10 @@ spring:
     # password the migration sets on the role are one secret, and two names for
     # one secret is how a deployment sets one, misses the other, and cannot boot.
     #
-    # Point APP_DB_USERNAME at the owner (`xrep`) to turn isolation off; that is
+    # Point APP_DB_USERNAME at the owner (`inclineyou`) to turn isolation off; that is
     # the whole kill switch, and it needs no migration.
-    username: ${APP_DB_USERNAME:xrep_app}
-    password: ${APP_DB_PASSWORD:xrep_app_dev}
+    username: ${APP_DB_USERNAME:inclineyou_app}
+    password: ${APP_DB_PASSWORD:inclineyou_app_dev}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -41,9 +41,9 @@ spring:
     # is what they have always meant everywhere they are set — an environment
     # that predates the split keeps migrating correctly, and only has to learn
     # the app role's two variables.
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/xrepdb}
-    user: ${MIGRATION_DB_USERNAME:${DATABASE_USERNAME:xrep}}
-    password: ${MIGRATION_DB_PASSWORD:${DATABASE_PASSWORD:xrep_dev}}
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/inclineyoudb}
+    user: ${MIGRATION_DB_USERNAME:${DATABASE_USERNAME:inclineyou}}
+    password: ${MIGRATION_DB_PASSWORD:${DATABASE_PASSWORD:inclineyou_dev}}
     placeholders:
       # V42 creates the runtime login that row-level security actually applies
       # to. Flyway connects as the schema OWNER, which by design bypasses the
@@ -51,7 +51,7 @@ spring:
       # deliberately not used. Set APP_DB_PASSWORD in any real deployment; the
       # default is a localhost-only development value, and it is the same
       # variable the pool above logs in with.
-      appRolePassword: ${APP_DB_PASSWORD:xrep_app_dev}
+      appRolePassword: ${APP_DB_PASSWORD:inclineyou_app_dev}
       # The same value WITHOUT the development default, so the afterMigrate
       # callback can tell "set to the dev password" from "never configured".
       # It reconciles the role's password on every startup and must stay silent
@@ -93,14 +93,14 @@ server:
 
 logging:
   level:
-    com.xrep: DEBUG
+    com.inclineyou: DEBUG
 
 app:
   # The two database identities, and the difference between them IS the
   # isolation: a table owner bypasses its own policies, a non-owner does not.
   #
-  #   APP_DB_USERNAME / APP_DB_PASSWORD              the request path — xrep_app
-  #   MIGRATION_DB_USERNAME / MIGRATION_DB_PASSWORD  Flyway and the seeds — xrep
+  #   APP_DB_USERNAME / APP_DB_PASSWORD              the request path — inclineyou_app
+  #   MIGRATION_DB_USERNAME / MIGRATION_DB_PASSWORD  Flyway and the seeds — inclineyou
   #
   # Nothing but Flyway, the seed scripts and the test suite may use the second
   # pair. Everything a trainer's request touches goes through the first.
@@ -109,8 +109,8 @@ app:
   # `app-role` is the name the isolation tests connect under, and it must be the
   # role the pool actually logs in as or those tests prove nothing.
   database:
-    app-role: ${APP_DB_USERNAME:xrep_app}
-    app-role-password: ${APP_DB_PASSWORD:xrep_app_dev}
+    app-role: ${APP_DB_USERNAME:inclineyou_app}
+    app-role-password: ${APP_DB_PASSWORD:inclineyou_app_dev}
   redis:
     # The kill switch. Off — or unreachable — and everything falls back: OTP
     # state to `otp_request` in Postgres, rate limiting to the in-process

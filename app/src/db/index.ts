@@ -54,7 +54,7 @@ const adapter = new SQLiteAdapter({
   // Required for the sync engine's migrationsEnabledAtVersion, and the thing that
   // lets a future schema change migrate a trainer's phone instead of wiping it.
   migrations,
-  dbName: 'xrep',
+  dbName: 'inclineyou',
   jsi: true,
   onSetUpError: (error) => {
     console.error('WatermelonDB setup error', error);

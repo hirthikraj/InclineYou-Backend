@@ -1,10 +1,10 @@
-# XRep — Web Launch Book
+# InclineYou — Web Launch Book
 
 **Scope: the web app only — trainer half *and* client portal.** `web app/web/`
 (Next.js 16, 62 routes) and the Spring backend behind it, from the current tree to a production deployment
 serving Indian personal trainers. The Expo app is deliberately out of scope —
 nothing here blocks it, nothing here needs it, and `notes/
-XRep_deployment_runbook.md` remains the reference for the day it ships.
+InclineYou_deployment_runbook.md` remains the reference for the day it ships.
 
 **Status: a plan. Nothing in §5 has been done.** §4 is the inventory of what
 already exists and is correct; §5 is the list of what does not; §8 is the
@@ -26,7 +26,7 @@ requires re-deriving anything; it is meant to be picked up cold.
 A Next.js App Router application where **every page renders on the server and no
 browser ever talks to the Spring API.** That is the load-bearing architectural
 fact of this deployment, and it is verified rather than assumed: every module
-touching `XREP_API_URL` carries `import 'server-only'`, and the single client
+touching `INCLINEYOU_API_URL` carries `import 'server-only'`, and the single client
 component that fetches (`components/programs/LibraryPanel.tsx`) calls a
 `'use server'` action rather than the API.
 
@@ -56,7 +56,7 @@ the design set is wrong.
 | --- | --- | --- |
 | Frontend | Next.js 16.3.2, React 19.2.8, TypeScript, 62 routes | Built · not containerised · not in CI |
 | Backend | Spring Boot 4.1, Java 21, 256 tests green | Built · not containerised |
-| Database | Postgres 16, 42 migrations, RLS enforced as `xrep_app` | Built and proven |
+| Database | Postgres 16, 42 migrations, RLS enforced as `inclineyou_app` | Built and proven |
 | Cache | Redis 7, AOF on — OTP state and rate limits | Built, with fallbacks |
 | Auth | Phone + OTP → `httpOnly` cookie | Built · **cannot deliver a code** |
 
@@ -79,7 +79,7 @@ SQL throughout, and phone masking already standard in logs.
 | **MUST-3** | No Dockerfile exists anywhere | ⛔ blocker |
 | **MUST-4** | Web app has no CI at all | ⛔ blocker |
 | **MUST-5** | 9 controllers take request bodies without `@Valid` | 🔶 high |
-| **MUST-6** | Missing `XREP_API_URL` silently becomes localhost (25 files) | 🔶 high |
+| **MUST-6** | Missing `INCLINEYOU_API_URL` silently becomes localhost (25 files) | 🔶 high |
 | **MUST-7** | No security headers — `next.config.ts` is empty | 🔶 high |
 | **MUST-8** | Server Actions have no `allowedOrigins` | 🔶 high |
 | **MUST-9** | `JWT_SECRET` has a published default and cannot be rotated | 🔶 high |
@@ -120,9 +120,9 @@ evidence.
 | | Evidence |
 | --- | --- |
 | ✅ Row-level security on 29 tables, four policy tiers | V37–V42 |
-| ✅ App connects as **non-owning** `xrep_app`, so policies actually apply | `application.yml`, `DataSourceConfig` |
+| ✅ App connects as **non-owning** `inclineyou_app`, so policies actually apply | `application.yml`, `DataSourceConfig` |
 | ✅ Flyway holds separate owner credentials — DDL is owner work | `MIGRATION_DB_*` |
-| ✅ Isolation proven, not assumed — 11 tests opening real `xrep_app` connections | `TenantIsolationTest` |
+| ✅ Isolation proven, not assumed — 11 tests opening real `inclineyou_app` connections | `TenantIsolationTest` |
 | ✅ Boot-time proof that RLS is live, asked of Postgres not inferred | `DatabaseIdentityCheck` → `row_security_active('client')` |
 | ✅ `tenant_id` immutable — stamped on insert, refused on update | `stamp_tenant_id`, `freeze_tenant_id` (V39) |
 | ✅ Ownership is a query filter; a wrong id yields 404, never 403 | `ClientService.findOwned` pattern |
@@ -148,7 +148,7 @@ evidence.
 | ✅ HTTPS-only redirect available behind one flag | `REQUIRE_HTTPS` + `HttpsRedirectFilter` |
 | ✅ Redis TLS available behind one flag | `REDIS_SSL` |
 | ✅ Every variable documented with its failure mode | `.env.example` |
-| ✅ Transport section written into the deployment runbook | `notes/XRep_deployment_runbook.md` §2c |
+| ✅ Transport section written into the deployment runbook | `notes/InclineYou_deployment_runbook.md` §2c |
 
 ### 4.4 Web posture
 
@@ -218,7 +218,7 @@ per carrier; one test on one SIM is not a test.
 ### MUST-2 · Make the web ask for a revocable session ⛔
 
 **What.** V41 built two token issuers — a self-contained JWT for the phone, an
-opaque revocable session for the browser — switched by the `X-XRep-Client: web`
+opaque revocable session for the browser — switched by the `X-InclineYou-Client: web`
 header. **That header appears zero times in `web app/web/`.**
 
 **Why.** The browser therefore holds a JWT, so:
@@ -231,7 +231,7 @@ header. **That header appears zero times in `web app/web/`.**
 - **You have no way to respond to a leaked credential.** That is the incident
   response the session issuer exists to provide.
 
-**The fix.** Send `X-XRep-Client: web` on the sign-in call in `lib/auth/api.ts`.
+**The fix.** Send `X-InclineYou-Client: web` on the sign-in call in `lib/auth/api.ts`.
 Small change; check the whole auth path for anywhere else that mints.
 
 **Verify.** Sign in → sign out → replay the old cookie value. It must 401. Also
@@ -242,7 +242,7 @@ confirm rows now appear in `web_session`.
 ### MUST-3 · Containerise both halves ⛔
 
 **What.** There is **no Dockerfile anywhere in this repository**, despite
-`notes/XRep_deployment_runbook.md` §2 saying "Railway builds the Dockerfile".
+`notes/InclineYou_deployment_runbook.md` §2 saying "Railway builds the Dockerfile".
 
 **The fix.**
 
@@ -302,7 +302,7 @@ have no write path.
 
 ### MUST-6 · Fail fast on a missing API URL 🔶
 
-**What.** `process.env.XREP_API_URL ?? 'http://localhost:8080'` appears in
+**What.** `process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080'` appears in
 **25 files**. A deployment that forgets the variable starts cleanly and sends
 every request nowhere.
 
@@ -415,7 +415,7 @@ roster they are on. `client`, `body_metric`, `program`, `scheduled_session`,
 `workout_session`, `weekly_report`, `package`, `payment` all carry a
 `client_client` policy keyed on `app_client_ids()`, and the four tables with no
 `client_id` are covered by EXISTS subqueries. `SecurityConfig` gates
-`/v1/client/**` behind `hasRole("CLIENT")`. The `xrep_client` cookie is a
+`/v1/client/**` behind `hasRole("CLIENT")`. The `inclineyou_client` cookie is a
 preference and not a permission — `ClientSyncController` re-checks it against
 the token's phone on **every** request. **The backend is ready; the web is not.**
 
@@ -473,7 +473,7 @@ help the trainer coach them — but the moment the portal ships, that person
 becomes a user of your product, holding an account, reading their own record.
 
 Under DPDP this is the question of who is the Data Fiduciary for a client's
-record — the trainer, XRep, or both — and it is a real legal question rather
+record — the trainer, InclineYou, or both — and it is a real legal question rather
 than a drafting one. **Get an answer before launch, not after.**
 
 The product answer is already sitting there, unbuilt: **`/invite/[clientId]` is
@@ -643,7 +643,7 @@ Five constraints that eliminate most of the field before any vendor comparison:
    an app in Bangalore against Supabase in Mumbai — adds ~20–30 ms to *every
    query*, not every page. **Pick a city and put everything in it.**
 3. **The database must allow a non-owning runtime role.** The isolation model is
-   RLS with the app as `xrep_app` and `xrep` owning the tables. A managed
+   RLS with the app as `inclineyou_app` and `inclineyou` owning the tables. A managed
    Postgres that will not let you `CREATE ROLE` and reassign ownership cannot run
    this application safely.
 4. **The database connection must be session-mode, never transaction-pooled.**
@@ -942,8 +942,8 @@ are already built per §4 and only need confirming in the deployed environment.
 ### A · Secrets and configuration
 - [ ] `JWT_SECRET` freshly generated (≥ 32 chars), never in git, in the secret store
 - [ ] `APP_DB_PASSWORD` and `MIGRATION_DB_PASSWORD` distinct and generated
-- [ ] `APP_DB_USERNAME=xrep_app` in production — **not** `xrep`
-- [ ] `XREP_API_URL` set, HTTPS, app refuses to start without it (MUST-6)
+- [ ] `APP_DB_USERNAME=inclineyou_app` in production — **not** `inclineyou`
+- [ ] `INCLINEYOU_API_URL` set, HTTPS, app refuses to start without it (MUST-6)
 - [ ] No `.env` in any image; `git log -p` audited for a committed secret
 - [ ] Rotation procedure written down and rehearsed once
 
@@ -965,10 +965,10 @@ are already built per §4 and only need confirming in the deployed environment.
 - [ ] Session expiry actually expires; `SessionSweeper` running
 - [ ] Enumeration: an unknown number and a known one are indistinguishable in response **and timing**
 - [ ] **Client** sign-out revokes too — same test as MUST-2, run as a client
-- [ ] A client on two rosters switching `xrep_client` reads only the roster they switched to
+- [ ] A client on two rosters switching `inclineyou_client` reads only the roster they switched to
 
 ### D · Authorization and tenant isolation
-- [ ] *(verify)* boot log reads `Database identity: xrep_app — row-level security is ACTIVE`
+- [ ] *(verify)* boot log reads `Database identity: inclineyou_app — row-level security is ACTIVE`
 - [ ] *(verify)* `TenantIsolationTest` green in CI
 - [ ] Manual cross-tenant probe on staging with **two real accounts**: trainer A cannot read B's client by direct id — expect 404, not 403
 - [ ] *(verify)* no `/v1/team/**` response carries `package`, `payment` or `gym_settlement`, except owner-only `GET /v1/team/revenue`
@@ -1040,7 +1040,7 @@ are already built per §4 and only need confirming in the deployed environment.
 - [ ] Consent language at sign-up covering what is stored and why
 - [ ] **Two classes of data subject covered** — the trainer who signed up, and the client whose number a trainer typed in (§5.13)
 - [ ] **Consent captured on the invite screen** (MUST-15), not only in a policy page
-- [ ] **Answered: who is the Data Fiduciary for a client's record** — trainer, XRep, or both. A lawyer's question, needed before launch
+- [ ] **Answered: who is the Data Fiduciary for a client's record** — trainer, InclineYou, or both. A lawyer's question, needed before launch
 - [ ] A client's deletion request has an answer that survives their trainer still needing the books
 - [ ] A named contact for data questions
 
@@ -1072,7 +1072,7 @@ are already built per §4 and only need confirming in the deployed environment.
 - **Staging is a second full environment**, identically configured. Its value is
   not catching bugs; it is catching *configuration* differences, which is where
   every item in §8-B fails.
-- **The two boot lines are the real health check.** `Database identity: xrep_app —
+- **The two boot lines are the real health check.** `Database identity: inclineyou_app —
   RLS ACTIVE` and `Database transport: ENCRYPTED`. If either is wrong, the
   deployment is wrong in a way nothing else will tell you.
 
@@ -1104,6 +1104,6 @@ are already built per §4 and only need confirming in the deployed environment.
    before launch even though the rail itself is not due until day 31.
 8. **Has GST registration started?** It gates gateway KYC, which gates every
    form of collection, and it makes the hosting GST in §6.4a reclaimable.
-9. **Who is the Data Fiduciary for a client's record** — the trainer, XRep, or
+9. **Who is the Data Fiduciary for a client's record** — the trainer, InclineYou, or
    both? A lawyer's question, raised by MUST-15, and worth starting now because
    it gates the copy on a screen that has to be built anyway.

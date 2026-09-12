@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generates the XRep MVP master flow chart (trainer + client) as a standalone SVG."""
+"""Generates the InclineYou MVP master flow chart (trainer + client) as a standalone SVG."""
 
 W, H = 1900, 1600
 
@@ -89,7 +89,7 @@ A('</defs>')
 A(f'<rect width="{W}" height="{H}" fill="{GROUND}"/>')
 
 # ---------------------------------------------------------------- title
-txt(40, 52, "XRep MVP — trainer & client flow", size=25, fill=INK, weight="700")
+txt(40, 52, "InclineYou MVP — trainer & client flow", size=25, fill=INK, weight="700")
 txt(40, 76, "Every screen in the MVP, both roles, and the paths that connect them. FR tags map to the Final Requirements & Delivery Plan v2.0.",
     size=12.5, fill=MUTED)
 
@@ -282,12 +282,16 @@ txt(1592, ly + 4, "client role", size=11, fill=BODY)
 
 txt(40, ly + 46, "16 of 31 screens exist in code today; the rest are greenfield. See the screen inventory for which is which.",
     size=11, fill=MUTED, family=MONO)
-txt(1860, ly + 46, "XRep · MVP interaction map · 9 Aug 2026", size=11, fill=MUTED, anchor="end", family=MONO)
+txt(1860, ly + 46, "InclineYou · MVP interaction map · 9 Aug 2026", size=11, fill=MUTED, anchor="end", family=MONO)
 
 A('</svg>')
 
 import pathlib
-p = pathlib.Path("/home/hirthick/Hirthik/XRep/xRep/notes/interaction-map/trainer-client-flow.svg")
+
+# Beside this script, not an absolute path: the repo directory has been renamed
+# once already (XRep -> InclineYou) and a hardcoded path silently writes the SVG
+# to the old location, or crashes, the next time it moves.
+p = pathlib.Path(__file__).resolve().parent / "trainer-client-flow.svg"
 p.parent.mkdir(parents=True, exist_ok=True)
 p.write_text("\n".join(out))
 print("wrote", p, len("\n".join(out)), "bytes")

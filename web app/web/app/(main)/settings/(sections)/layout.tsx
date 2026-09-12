@@ -49,7 +49,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
           <div className="ph__row">
             <div className="ph__id">
               <h1 className="ph__t">Settings</h1>
-              <p className="ph__sub">Your account, and the words XRep sends in your name.</p>
+              <p className="ph__sub">Your account, and the words InclineYou sends in your name.</p>
             </div>
           </div>
 

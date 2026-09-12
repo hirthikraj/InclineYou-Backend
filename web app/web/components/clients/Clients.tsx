@@ -965,7 +965,7 @@ export function Clients({
                     Add client
                   </button>
                 </div>
-                {/* Mobile: sort · filter · add icon buttons (xrep-clients.html frame 1a) */}
+                {/* Mobile: sort · filter · add icon buttons (inclineyou-clients.html frame 1a) */}
                 <div className="crd-ph-acts">
                   {/* Anchors the dropdown on a phone — the desk chip that
                       normally anchors it is inside the hidden `.rst-desk`. */}
@@ -1205,7 +1205,7 @@ export function Clients({
                 </table>
               </div>
 
-              {/* ── Phone card list (≤900px) — xrep-clients.html frame 1a ── */}
+              {/* ── Phone card list (≤900px) — inclineyou-clients.html frame 1a ── */}
               <div className="rst-phone">
                 <SearchBox
                   value={query}

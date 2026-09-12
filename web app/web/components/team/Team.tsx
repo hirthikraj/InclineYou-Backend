@@ -165,14 +165,14 @@ interface Props {
 
 export function Team(props: Props) {
   if (!props.team) {
-    return <NoTeam invitations={props.invitations} />;
+    return <NoTeam invitations={props.invitations} now={props.now} />;
   }
   return <TeamDashboard {...props} team={props.team} />;
 }
 
 /* ═══════════════════════════════════════════════════ NoTeam ══════ */
 
-function NoTeam({ invitations }: { invitations: InvitationResponse[] }) {
+function NoTeam({ invitations, now }: { invitations: InvitationResponse[]; now: number }) {
   const [showCreate, setShowCreate] = useState(false);
 
   return (
@@ -193,7 +193,7 @@ function NoTeam({ invitations }: { invitations: InvitationResponse[] }) {
             <h2 className="section-label">Pending invitations</h2>
             <div className="stack">
               {invitations.map((inv) => (
-                <InvitationCard key={inv.id} invitation={inv} />
+                <InvitationCard key={inv.id} invitation={inv} now={now} />
               ))}
             </div>
           </section>
@@ -241,7 +241,13 @@ function NoTeam({ invitations }: { invitations: InvitationResponse[] }) {
   );
 }
 
-function InvitationCard({ invitation: inv }: { invitation: InvitationResponse }) {
+function InvitationCard({
+  invitation: inv,
+  now,
+}: {
+  invitation: InvitationResponse;
+  now: number;
+}) {
   const [accepting, startAccept] = useTransition();
   const [declining, startDecline] = useTransition();
   const [error, setError] = useState<string | undefined>();
@@ -259,7 +265,7 @@ function InvitationCard({ invitation: inv }: { invitation: InvitationResponse })
     });
   };
 
-  const daysLeft = Math.max(0, Math.ceil((inv.expiresAt - Date.now()) / 86_400_000));
+  const daysLeft = Math.max(0, Math.ceil((inv.expiresAt - now) / 86_400_000));
 
   return (
     <div className="card inv-card">
@@ -1324,7 +1330,7 @@ function LibraryTab({ templates }: { templates: TeamTemplateRow[] }) {
       <div className="empty">
         <div className="empty__ic"><Dumbbell /></div>
         <p className="empty__t">No shared templates</p>
-        <p className="empty__b">Team members' program templates appear here once they join.</p>
+        <p className="empty__b">Team members’ program templates appear here once they join.</p>
       </div>
     );
   }
@@ -1343,7 +1349,7 @@ function LibraryTab({ templates }: { templates: TeamTemplateRow[] }) {
       </div>
       {err && <p className="form-err" role="alert">{err}</p>}
       {filtered.length === 0 ? (
-        <p className="micro" style={{ color: 'var(--tx-ink-3)' }}>No results for "{search}"</p>
+        <p className="micro" style={{ color: 'var(--tx-ink-3)' }}>No results for “{search}”</p>
       ) : (
         <div className="card">
           <div className="card__b card__b--flush">
@@ -1514,7 +1520,7 @@ function RevenueTab({ team: _team }: { team: TeamResponse }) {
             <div className="stat">
               <div className="stat__k">GYM SHARE</div>
               <div className="stat__v">{toRs(data.teamGymShare)}</div>
-              <div className="stat__d">gym's cut</div>
+              <div className="stat__d">gym’s cut</div>
             </div>
             <div className="stat stat--acc">
               <div className="stat__k">NET</div>

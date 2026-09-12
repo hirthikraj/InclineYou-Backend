@@ -1,7 +1,7 @@
 /**
  * Screen 03 · Home.
  *
- * `agent/design system/screens/xrephome.html`.
+ * `agent/design system/screens/inclineyouhome.html`.
  *
  * Seven modules, in the order a trainer needs them: what's next, where the day
  * stands, who needs chasing, the schedule, the money, and what's happened. The
@@ -81,7 +81,7 @@ import { NextHero, RunningHero, TomorrowHero, ClearHero, FirstRunHero } from './
 import DeckSkeleton from './home/DeckSkeleton';
 
 /** § 04: the Floor / Remote / Done choice persists across launches. */
-const FILTER_KEY = 'xrep_today_filters';
+const FILTER_KEY = 'inclineyou_today_filters';
 
 /**
  * § 06: the profile meter, dismissed.
@@ -91,7 +91,7 @@ const FILTER_KEY = 'xrep_today_filters';
  * because a card that comes back tomorrow hasn't been dismissed — it's been
  * postponed, and nobody asked for that.
  */
-const METER_KEY = 'xrep_meter_hidden';
+const METER_KEY = 'inclineyou_meter_hidden';
 
 type Filters = { floor: boolean; remote: boolean; done: boolean };
 const DEFAULT_FILTERS: Filters = { floor: true, remote: true, done: false };

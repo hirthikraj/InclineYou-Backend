@@ -208,14 +208,14 @@ export function NewClient({ data, now: _now }: { data: NewClientData; now: numbe
     [data.clients],
   );
 
+  /* The effect SCHEDULES and nothing else. Clearing the verdict when the number
+     goes short is state derived from an edit, so it belongs to the edit — see the
+     phone field's `onChange`. Setting it here instead paints the stale verdict for
+     a frame, which on this field reads as the server having answered about a
+     number the trainer has already changed. */
   useEffect(() => {
     if (phoneCheckTimer.current) clearTimeout(phoneCheckTimer.current);
-    const digits = cleanPhone(phone);
-    if (digits.length < 10) {
-      setPhoneCheck('idle');
-      setRosterMatch(null);
-      return;
-    }
+    if (cleanPhone(phone).length < 10) return;
     phoneCheckTimer.current = setTimeout(() => {
       void doPhoneCheck(phone);
     }, 600);
@@ -377,7 +377,18 @@ export function NewClient({ data, now: _now }: { data: NewClientData; now: numbe
                       id="nc-phone"
                       className="ctl"
                       value={displayPhone(phone)}
-                      onChange={e => setPhone(e.target.value)}
+                      onChange={e => {
+                        setPhone(e.target.value);
+                        /* Too short to check is not a verdict — drop whatever the
+                           last complete number answered, in the same render as the
+                           keystroke that invalidated it. `doPhoneCheck` guards the
+                           same length again, because it is also reachable from the
+                           debounce with a number that changed under it. */
+                        if (cleanPhone(e.target.value).length < 10) {
+                          setPhoneCheck('idle');
+                          setRosterMatch(null);
+                        }
+                      }}
                       placeholder="98410 22119"
                       inputMode="numeric"
                       autoComplete="tel"

@@ -29,7 +29,7 @@ import { getToken } from '@/lib/auth/session';
  * where swallowing an error is the right call rather than the lazy one, because
  * the alternative is an error page for a fact nobody asked for.
  */
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 
 export async function countClients(): Promise<number | null> {
   try {

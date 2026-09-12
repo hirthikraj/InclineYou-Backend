@@ -1,6 +1,6 @@
-# XRep Backend — Claude working notes
+# InclineYou Backend — Claude working notes
 
-Spring Boot 4.1 / Java 21 REST API for XRep, a trainer-first coaching app. This
+Spring Boot 4.1 / Java 21 REST API for InclineYou, a trainer-first coaching app. This
 directory is the backend half of a monorepo; the Expo client lives in `../app`
 and has its own `CLAUDE.md`.
 
@@ -10,7 +10,9 @@ and has its own `CLAUDE.md`.
   issuers. **Read it before any schema or query work**; it is the shortest path
   to not getting `tenant_id` wrong.
 - `IDENTITY.md` — **PLANNED, not built.** Separating *who a person is* from *how
-  they proved it*: `person` + `person_credential`, V43–V46, and the four things
+  they proved it*: `person` + `person_credential` in four migrations that must
+  land in a fixed order (labelled V43–V46 there, written before the history was
+  flattened — read them as a sequence, not as file names), and the four things
   we owe because we built our own auth (key rotation, refresh tokens, OTP
   toll-fraud controls, social sign-in). Read it before touching `auth/`, the
   phone columns, or the three RLS policies that match on `app_phone()` — a
@@ -35,7 +37,7 @@ docker compose -f ../docker-compose.yml up -d   # Postgres 16 + Redis 7
 ./mvnw spring-boot:run                          # run on :8080
 ./mvnw test                                     # full test suite
 ./mvnw test -Dtest=OtpServiceTest               # one class
-./mvnw test -Dtest=TenantIsolationTest          # the RLS walls, as `xrep_app`
+./mvnw test -Dtest=TenantIsolationTest          # the RLS walls, as `inclineyou_app`
 ./scripts/seed-sample-month.sh <phone>          # 6 clients, one month — the small seed
 ./scripts/seed-full-demo.sh <phone>             # 44 clients, every feature — the big seed
 ./scripts/seed-realistic-20.sh <phone>          # 20 clients, a plausible week — the realistic seed
@@ -89,7 +91,7 @@ blueprint, so copy from one of the other two.
 
 ## Architecture
 
-`com.xrep.xrep_backend`, one package per feature, each a thin
+`com.inclineyou.inclineyou_backend`, one package per feature, each a thin
 `*Controller` over a `*Service`:
 
 `auth` · `client` · `exercise` · `template` · `program` · `session` ·
@@ -139,17 +141,17 @@ Three consequences for anything you write:
 - **`tenant_member` IS the planned `user_role`.** Do not build a second one.
 
 - **Development runs behind the policies; the test suite does not.**
-  `application.yml` connects the pool as `xrep_app` (non-owning, so RLS applies)
+  `application.yml` connects the pool as `inclineyou_app` (non-owning, so RLS applies)
   and gives Flyway its own owner credentials. `src/test/resources/
-  application.properties` pins the suite back to `xrep`, because a
+  application.properties` pins the suite back to `inclineyou`, because a
   `@Transactional` test holds one connection borrowed before any request exists
   and an unlabelled connection is correctly worth nothing under RLS.
   `TenantIsolationTest` is where the walls are actually asserted — it opens its
-  own `xrep_app` connections. If you add a code path that creates a workspace,
+  own `inclineyou_app` connections. If you add a code path that creates a workspace,
   test it there or it is untested.
 - **Two roles, two pairs of environment variables.** `APP_DB_USERNAME` /
-  `APP_DB_PASSWORD` are the request path (`xrep_app`); `MIGRATION_DB_USERNAME` /
-  `MIGRATION_DB_PASSWORD` are Flyway, the seeds and the suite (`xrep`).
+  `APP_DB_PASSWORD` are the request path (`inclineyou_app`); `MIGRATION_DB_USERNAME` /
+  `MIGRATION_DB_PASSWORD` are Flyway, the seeds and the suite (`inclineyou`).
   `DATABASE_URL` is shared. **Nothing that serves a request may use the second
   pair** — an owner connection has every policy switched off and no log says so,
   which is why `DatabaseIdentityCheck` asks `row_security_active('client')` at
@@ -165,11 +167,26 @@ three of them were the same shape.
 
 ### Schema evolution is additive-only
 
-Migrations live in `src/main/resources/db/migration` (`V1`…`V42`). **Never edit a
-migration that has run** — append a new `V{n}__name.sql`. Never drop or repurpose
-a column, and never remove or rename a response field: old app builds on
-trainers' phones must keep working. The client's WatermelonDB migrations in
-`../app/src/db/migrations.ts` follow the same law and move in lockstep.
+Migrations live in `src/main/resources/db/migration`, and there is exactly one:
+`V1__init_schema.sql`, the **consolidated baseline**. The forty-two migrations
+that built this schema were flattened into it on 11 Sep 2026, during the rename
+to InclineYou — the one safe moment, because the rename changed the database
+name and both database roles, so no instance anywhere had to be carried forward.
+The flattening was verified rather than assumed: a database built from the
+forty-two and a database built from `V1` were dumped and diffed, and the only
+difference in 4,300 lines was `gen_random_uuid()` becoming schema-qualified.
+
+**The V-numbers elsewhere in these notes and all through `SCHEMA.md` are
+historical labels, not files.** `V30 gave the sold package pause/resume` still
+tells you why `paused_at` is a column; it no longer points at a migration you
+can open. `git log` has them. **The next migration is `V2`.**
+
+From here the law is what it always was: **never edit a migration that has
+run** — append a new `V{n}__name.sql`. Never drop or repurpose a column, and
+never remove or rename a response field: old app builds on trainers' phones must
+keep working. The client's WatermelonDB migrations in
+`../app/src/db/migrations.ts` were reset to schema v1 in the same change and
+follow the same law, in lockstep.
 
 ### Ownership is a query filter
 
@@ -187,7 +204,7 @@ trainer-id set from there and nowhere else.** `trainer_id` keeps meaning what it
 always meant, no table gains a `team_id`, and none of the endpoints that predate
 V26 changed what they return — team reads live under `/v1/team/**`. Three rules
 that are decisions and not oversights, all argued in
-`agent/XRep_team_coaching_prd.md`:
+`agent/InclineYou_team_coaching_prd.md`:
 
 - **No role ever sees a teammate's money book.** `package`, `payment` and
   `gym_settlement` must never be returned under a `/v1/team/**` path — with one
@@ -213,7 +230,7 @@ that are decisions and not oversights, all argued in
 
 ### A gym is the next rung — designed, not built
 
-`agent/XRep_gym_platform_prd.md` (Ring 2 of the growth roadmap: sell the gym
+`agent/InclineYou_gym_platform_prd.md` (Ring 2 of the growth roadmap: sell the gym
 owner the layer above trainers who already use us). Nothing below exists yet, but
 it constrains what you may write today.
 
@@ -250,8 +267,8 @@ that is a *narrowing* of the money rule above rather than a hole in it:
   `nudge_log` history, so a reminder stored anywhere else is invisible to it and
   the client gets two WhatsApp messages in one afternoon.
 
-See `SCHEMA.md` → *Planned: V28+* for the migration-by-migration list and the
-five invariants a V28 author must not break.
+See `SCHEMA.md` → *Planned: the gym platform* for the migration-by-migration
+list and the five invariants its author must not break.
 
 ### Soft deletes everywhere
 
@@ -269,7 +286,7 @@ repairs against — see `sync/SyncService.java` and `sync/SyncRows.java`.
 
 - **Auth is one interface with two issuers** (`AuthTokenIssuer`, V41). The phone
   gets a self-contained **JWT** because it is offline half the time; the web gets
-  an opaque, revocable **session** (`X-XRep-Client: web`), because a token that
+  an opaque, revocable **session** (`X-InclineYou-Client: web`), because a token that
   leaks from a browser is one somebody else is holding and "wait seven days" is
   not an incident response. `AuthTokenService` picks; nothing below it can tell
   which answered. Sessions store a SHA-256 of the token, never the token.

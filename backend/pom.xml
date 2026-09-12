@@ -9,11 +9,11 @@
 		<relativePath/>
 	</parent>
 
-	<groupId>com.xrep</groupId>
-	<artifactId>xrep-backend</artifactId>
+	<groupId>com.inclineyou</groupId>
+	<artifactId>inclineyou-backend</artifactId>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>xrep-backend</name>
-	<description>XRep Backend API</description>
+	<name>inclineyou-backend</name>
+	<description>InclineYou Backend API</description>
 
 	<properties>
 		<java.version>21</java.version>

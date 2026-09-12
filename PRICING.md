@@ -1,8 +1,8 @@
-# XRep — Pricing Strategy
+# InclineYou — Pricing Strategy
 
 **Status: a proposal, not a decision.** Nothing here is wired; billing does not
 exist in the product. Companion to `WEB_LAUNCH.md`, which carries the running
-cost this book is built on, and to `notes/XRep_growth_and_evolution_roadmap.md`,
+cost this book is built on, and to `notes/InclineYou_growth_and_evolution_roadmap.md`,
 which already settled several things pricing must not contradict.
 
 **All figures are estimates.** Currency at **₹88 = $1**; infrastructure from
@@ -91,12 +91,12 @@ Four things worth pulling out of that table:
   A UPI Autopay mandate costs ~₹0; the same ₹499 on a card costs ₹9.98. At
   100 paying seats that is the difference between ₹0 and ₹1,000 a month —
   real, but a third of the infrastructure bill, and not worth negotiating
-  over. §8 and `notes/XRep_deployment_runbook.md` §4b carry the gateway
+  over. §8 and `notes/InclineYou_deployment_runbook.md` §4b carry the gateway
   comparison; the recommendation is **Razorpay**, chosen on UPI-Autopay
   maturity rather than on rate.
 
 **Future variable cost, not yet live:** AI business chat. `notes/
-XRep_ai_features_spec.md` §1.6 already names it as "where the bill lives" and
+InclineYou_ai_features_spec.md` §1.6 already names it as "where the bill lives" and
 says it needs real cost engineering at this ARPU. **Do not include AI chat in a
 base tier** — see §6.
 
@@ -175,7 +175,7 @@ week holds roughly **48 sessions**, so at 2–3 sessions per client that is
 **16–24 active clients, and no more.** Not a licensing limit — a limit of hours
 in the day.
 
-Tiering is a way to charge large customers more than small ones. **XRep has no
+Tiering is a way to charge large customers more than small ones. **InclineYou has no
 large customers and cannot have any.** Nearly every trainer lands between 6 and
 20 clients, which means client-count bands add complexity, cliffs and gaming to
 an axis that barely moves. It is machinery for a spread that does not exist.
@@ -188,7 +188,7 @@ eleventh-client case is the whole argument:
 
 What they actually do is not "upgrade":
 
-- **Keep the 11th client out of XRep** — the worst outcome, and the likeliest.
+- **Keep the 11th client out of InclineYou** — the worst outcome, and the likeliest.
   Their payments, sessions and dues live in a notebook again, the money book is
   now incomplete, and the data asset is corrupted.
 - **Archive somebody** to stay under the cap, destroying a live record.
@@ -350,7 +350,7 @@ price-sensitive market it is stronger still.
 
 **Leave: their market is not ours.** These tools serve **online** coaches, where
 one person can carry 50, 100 or 300 clients because there is no room to stand in.
-The client axis has enormous range, so tiering captures real value. XRep serves
+The client axis has enormous range, so tiering captures real value. InclineYou serves
 **in-person** trainers with a 48-session week. Copying a pricing model designed
 for a 300-client ceiling into a 24-client market imports all of the complexity
 and none of the upside.
@@ -397,7 +397,7 @@ asset. A trainer who cannot see what they are owed has no reason to open the app
 to be discussed separately.* It does not ship in v1, so nothing here is blocked
 by it. Two constraints to carry into that discussion, and no more:
 
-- Per `notes/XRep_ai_features_spec.md` §1.6 it is **the only feature with a real
+- Per `notes/InclineYou_ai_features_spec.md` §1.6 it is **the only feature with a real
   marginal cost** — "this is where the bill lives".
 - It is therefore **the one place a per-use ceiling is right**, because unlike a
   client it costs money every time. The `AI` rate-limit tier already exists for
@@ -502,7 +502,7 @@ would have grown with every team signed.
   get one specific answer: *what is charged on a UPI Autopay debit* — nothing,
   or a flat per-debit fee. Razorpay is picked on UPI-Autopay maturity and on
   having a Payment Links product that covers hand-invoicing with no code, not
-  on price. `notes/XRep_deployment_runbook.md` §4b has the comparison, the
+  on price. `notes/InclineYou_deployment_runbook.md` §4b has the comparison, the
   integration shape and the full cost table; `WEB_LAUNCH.md` MUST-17 tracks it.
   This is one of the genuine advantages of billing Indian customers.
 - **Autopay mandates matter more than the price.** Manual monthly renewal at
@@ -532,7 +532,7 @@ a sunk cost. `WEB_LAUNCH.md` §6.4a's launch figure drops from **~₹4,150 to
 **The half that costs money: ₹499 is no longer ₹499 to us.** A decision is
 needed, and it is not cosmetic:
 
-| | Trainer pays | GST | **Net to XRep** |
+| | Trainer pays | GST | **Net to InclineYou** |
 | --- | --- | --- | --- |
 | **₹499 inclusive** | ₹499 | ₹76.12 | **₹422.88** |
 | ₹499 + GST | ₹588.82 | ₹89.82 | ₹499.00 |

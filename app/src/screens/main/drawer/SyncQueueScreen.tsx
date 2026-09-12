@@ -185,7 +185,7 @@ export default function SyncQueueScreen() {
                   onPress={() => void syncDatabase('queue')}
                 />
                 <Text style={styles.fine}>
-                  You do not have to press this. XRep tries again when the app comes back to the
+                  You do not have to press this. InclineYou tries again when the app comes back to the
                   front and the moment the phone finds a connection.
                 </Text>
               </View>

@@ -21,11 +21,11 @@ import { setNotePinned } from '@/lib/clients/notes-actions';
  * they asked for it. It is **not** a health record, and the difference is legal
  * rather than editorial.
  *
- * `notes/XRep_MVP_interaction_map.md` is explicit and files it under *legally
+ * `notes/InclineYou_MVP_interaction_map.md` is explicit and files it under *legally
  * excluded, not deferred*, against the DPDP Act 2023: "**No medical or
  * health-condition fields anywhere** — no injuries, no conditions, no
  * medications … Do not design an 'injuries / health notes' field into intake."
- * NFR-8 says the same, and `XRep_core_data_model.md` §3.2 pins the note itself
+ * NFR-8 says the same, and `InclineYou_core_data_model.md` §3.2 pins the note itself
  * as "free text; **no medical fields**".
  *
  * So there is no injury picker here, no condition list, no PAR-Q checklist and

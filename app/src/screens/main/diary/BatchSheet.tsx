@@ -1,7 +1,7 @@
 /**
  * The batch sheet — who's in, who's missing, capacity, and the whole batch done.
  *
- * `agent/design system/screens/xrepdiary.html` § 05, the tap map: *"Batch row
+ * `agent/design system/screens/inclineyoudiary.html` § 05, the tap map: *"Batch row
  * → Batch sheet — who's in, who's missing, capacity, mark the whole batch
  * done"*.
  *

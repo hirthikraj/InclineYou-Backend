@@ -16,7 +16,7 @@ export default async function Page() {
     );
   }
 
-  const { team, members, invitations, clients, templates, activity } = result.data;
+  const { now, team, members, invitations, clients, templates, activity } = result.data;
 
   return (
     <Team
@@ -26,7 +26,7 @@ export default async function Page() {
       clients={clients}
       templates={templates}
       activity={activity}
-      now={Date.now()}
+      now={now}
     />
   );
 }

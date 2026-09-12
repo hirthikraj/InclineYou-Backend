@@ -3,7 +3,7 @@
  *
  * Everfit and Trainerize both automate messages on triggers. This file takes the
  * triggers and refuses the default: **every rule starts on "Ask me first."**
- * XRep drafts the message and queues it, and nothing leaves the trainer's
+ * InclineYou drafts the message and queues it, and nothing leaves the trainer's
  * WhatsApp until they tap send — because one badly timed automated nudge costs a
  * client, and that is more expensive than any time the automation saves.
  *

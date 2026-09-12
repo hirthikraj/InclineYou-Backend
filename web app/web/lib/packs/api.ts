@@ -46,12 +46,12 @@ import type { LivePackage, PacksData, PacksTrainer, PriceListPack } from './comp
  * ───────────────────────────────────────────────────────────────────────────
  */
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
 
 export class PacksApiError extends Error {
   constructor(readonly status: number | null, readonly detail: string | null = null) {
-    super(`xrep api ${status ?? 'unreachable'}`);
+    super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'PacksApiError';
   }
 }

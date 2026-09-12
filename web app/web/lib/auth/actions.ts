@@ -282,9 +282,9 @@ export async function abandonPending(): Promise<void> {
  *
  * Which makes the cookie jar the whole of it — and every cookie has to go, not
  * just the token. The next person to open this browser may be a different trainer
- * on a shared gym desktop, and `xrep_client` (which roster), `xrep_wall` (which
- * refusal) and `xrep_setup_skipped` (which steps were passed on) are all facts
- * about the sitting that just ended. `xrep_setup_skipped` is the one that would
+ * on a shared gym desktop, and `inclineyou_client` (which roster), `inclineyou_wall` (which
+ * refusal) and `inclineyou_setup_skipped` (which steps were passed on) are all facts
+ * about the sitting that just ended. `inclineyou_setup_skipped` is the one that would
  * bite: a 24-hour cookie left behind makes the NEXT trainer's onboarding skip
  * steps they never saw.
  *

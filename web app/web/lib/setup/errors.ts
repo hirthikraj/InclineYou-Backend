@@ -5,7 +5,7 @@
  * sides of the action boundary: `lib/setup/api.ts` throws it on the server, and
  * `useStepAction` rebuilds it in the browser so `writeMessage` has one shape to
  * branch on rather than two. Leaving it in `api.ts` — which is `server-only`
- * because it holds `XREP_API_URL` and reads the JWT cookie — pulled that whole
+ * because it holds `INCLINEYOU_API_URL` and reads the JWT cookie — pulled that whole
  * module into the client bundle and the build refused, correctly.
  *
  * Nothing here touches the network or the environment. That is the whole reason
@@ -18,7 +18,7 @@ export class SetupApiError extends Error {
     /** The server's own words, when they were short enough to show anyone. */
     readonly detail: string | null,
   ) {
-    super(`xrep api ${status ?? 'unreachable'}`);
+    super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'SetupApiError';
   }
 

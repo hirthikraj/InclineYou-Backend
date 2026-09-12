@@ -16,8 +16,8 @@ import { clearPendingProfile } from '../setup/profileSync';
  * another device — is never dropped back into the flow. Absent means "no
  * setup owed", which is the safe default for everyone else.
  */
-const SETUP_KEY = 'xrep_setup_state';
-const TRAINER_ID_KEY = 'xrep_trainer_id';
+const SETUP_KEY = 'inclineyou_setup_state';
+const TRAINER_ID_KEY = 'inclineyou_trainer_id';
 
 /* --------------------------------------------------------- FR-11 · the lens */
 
@@ -32,9 +32,9 @@ const TRAINER_ID_KEY = 'xrep_trainer_id';
  */
 export type Lens = 'trainer' | 'client';
 
-const LENS_KEY = 'xrep_lens';
+const LENS_KEY = 'inclineyou_lens';
 /** Which client record the client lens is reading. A person can be on two rosters. */
-const CLIENT_ID_KEY = 'xrep_client_id';
+const CLIENT_ID_KEY = 'inclineyou_client_id';
 /**
  * Every roster this number is on, as the server last described it.
  *
@@ -43,7 +43,7 @@ const CLIENT_ID_KEY = 'xrep_client_id';
  * a copy of a server answer, so it is refreshed on every sign-in and never
  * written to.
  */
-const MEMBERSHIPS_KEY = 'xrep_memberships';
+const MEMBERSHIPS_KEY = 'inclineyou_memberships';
 
 export type Landing = 'home' | 'addClient';
 

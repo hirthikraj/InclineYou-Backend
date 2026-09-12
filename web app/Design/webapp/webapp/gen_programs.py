@@ -89,7 +89,7 @@ def frame(fid, name, frm, url, body, note):
     <div class="viewport__in">
       <div class="browser__bar">
         <span class="browser__dots"><i></i><i></i><i></i></span>
-        <span class="browser__url">app.xrep.in<b>{url}</b></span>
+        <span class="browser__url">app.inclineyou.in<b>{url}</b></span>
       </div>
       <div class="app" data-theme="dark">{RAIL}{body}</div>
     </div>
@@ -409,7 +409,7 @@ N1B = '''<p class="unit__note"><b>The same day, across the block.</b> This is th
   <br><br>Only the figure that changed is accented, so the block reads as a progression rather than as
   four columns of similar text. Weeks 1, 2 and 4 were authored; <b>weeks 3 and 5 have nothing of
   their own and repeat week 1</b>, which the column says in words and draws dimmed and dashed rather
-  than leaving blank. That state is XRep&rsquo;s, and no competitor has it — it is what lets an
+  than leaving blank. That state is InclineYou&rsquo;s, and no competitor has it — it is what lets an
   eight-week program exist without the <b>blank twelve-week grid the app deliberately refuses</b>.
   Making a week its own is one action, offered in the column that would change.</p>'''
 
@@ -968,7 +968,7 @@ interface detail. Where a claim could not be traced to a primary source the row 
   <tr><th>A sync toggle that pushes template edits into live plans</th><td>TrueCoach</td>
     <td>The rule this whole category turns on here is that <b>assigning copies</b>. A template edit
       reaching a plan somebody is halfway through is the bug both TrueCoach and Trainerize shipped;
-      TrueCoach at least made it a choice. XRep enforces the copy in
+      TrueCoach at least made it a choice. InclineYou enforces the copy in
       <code>db/training.ts</code> and again on the server, so the screen states it instead of
       offering it.</td></tr>
   <tr><th>Load, tempo, intensity and RPE on a template row</th><td>PT Distinction, Hevy Coach</td>
@@ -1065,7 +1065,7 @@ specific contradictions, each traceable to a file in the app.</p>
 <p class="small" style="max-width:var(--w-measure)">
   X REP · web application · v1.1 · every frame drawn at 1440×900 and scaled to fit.
   Colour, spacing and radius tokens are copied verbatim from
-  <code>xrepdesignsystem.html</code> — if a value differs there, it is a
+  <code>inclineyoudesignsystem.html</code> — if a value differs there, it is a
   bug here. Press <kbd>+</kbd> / <kbd>−</kbd> to change the zoom.
   <br><br>Competitor rows trace to vendor product and help documentation: Everfit&rsquo;s Master
   Planner articles, TrueCoach&rsquo;s workout-builder and programs help pages, the ABC Trainerize

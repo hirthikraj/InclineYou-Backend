@@ -18,13 +18,13 @@ jobs:
       postgres:
         image: postgres:16-alpine
         env:
-          POSTGRES_DB: xrepdb
-          POSTGRES_USER: xrep
-          POSTGRES_PASSWORD: xrep_dev
+          POSTGRES_DB: inclineyoudb
+          POSTGRES_USER: inclineyou
+          POSTGRES_PASSWORD: inclineyou_dev
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U xrep -d xrepdb"
+          --health-cmd "pg_isready -U inclineyou -d inclineyoudb"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
@@ -43,7 +43,7 @@ jobs:
         working-directory: backend
         run: ./mvnw -B verify
         env:
-          DATABASE_URL: jdbc:postgresql://localhost:5432/xrepdb
+          DATABASE_URL: jdbc:postgresql://localhost:5432/inclineyoudb
           # Flyway and the suite connect as the schema OWNER, which BYPASSES
           # row-level security — that is by design (V42 deliberately does not use
           # FORCE ROW LEVEL SECURITY, or every migration that backfills across
@@ -57,12 +57,12 @@ jobs:
           # runtime is behind the policies but the tests cannot be, because a
           # @Transactional test holds one connection borrowed before any request
           # exists. TENANCY.md has the argument.
-          MIGRATION_DB_USERNAME: xrep
-          MIGRATION_DB_PASSWORD: xrep_dev
+          MIGRATION_DB_USERNAME: inclineyou
+          MIGRATION_DB_PASSWORD: inclineyou_dev
           # The APP pair. Nothing in CI opens a pool with it — the suite is on
           # the owner — but V42 sets this password on the role it creates, and
           # TenantIsolationTest logs in with it to prove the wall.
-          APP_DB_USERNAME: xrep_app
+          APP_DB_USERNAME: inclineyou_app
           APP_DB_PASSWORD: ci_only_app_role_password
           JWT_SECRET: ci-only-secret-not-used-anywhere-real-32chars
 

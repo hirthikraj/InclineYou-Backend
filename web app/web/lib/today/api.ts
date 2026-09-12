@@ -87,7 +87,7 @@ import type { RateSource, WorkWindow } from './day';
  * the screen and not nine times it.
  */
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 
 /**
  * How far back `GET /v1/sessions` reaches. See the note in `getToday` for why
@@ -103,7 +103,7 @@ export const SESSION_LOOKBACK_DAYS = 30;
 /** Thrown for anything that is not a 2xx, so the page can tell 401 from 500. */
 export class TodayApiError extends Error {
   constructor(readonly status: number | null) {
-    super(`xrep api ${status ?? 'unreachable'}`);
+    super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'TodayApiError';
   }
 }

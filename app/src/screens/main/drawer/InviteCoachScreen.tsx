@@ -193,7 +193,7 @@ export default function InviteCoachScreen() {
           <FieldMsg tone="error">{error}</FieldMsg>
         ) : (
           <FieldMsg>
-            They don’t need XRep yet. If they’re new, the invitation waits for them to sign in with
+            They don’t need InclineYou yet. If they’re new, the invitation waits for them to sign in with
             this number.
           </FieldMsg>
         )}

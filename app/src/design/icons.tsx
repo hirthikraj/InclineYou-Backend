@@ -1,9 +1,9 @@
 /**
- * XRep iconography.
+ * InclineYou iconography.
  *
  * Outline, 22px on a 24px optical box, 1.8px stroke, round caps and joins —
  * one family across both platforms. The path data is lifted straight from the
- * <defs> sprite in `agent/design system/screens/xreploginotp.html`, so these
+ * <defs> sprite in `agent/design system/screens/inclineyouloginotp.html`, so these
  * are the same glyphs the design file draws.
  */
 

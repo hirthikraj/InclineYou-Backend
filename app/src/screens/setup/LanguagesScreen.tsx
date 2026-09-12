@@ -1,7 +1,7 @@
 /**
  * Screen 02 · Trainer setup · Step 5 of 6 · Languages.
  *
- * `agent/design system/screens/xreptrainersetup.html` § 04 · 4c.
+ * `agent/design system/screens/inclineyoutrainersetup.html` § 04 · 4c.
  *
  * The free differentiator: ZERO of the eight platforms in the teardown ask
  * this. In a market where a client may specifically want a Tamil- or

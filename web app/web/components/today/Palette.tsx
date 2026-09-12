@@ -273,7 +273,6 @@ export function Palette({
     }
   };
 
-  let lastGroup = '';
 
   return (
     <>
@@ -338,8 +337,15 @@ export function Palette({
         */}
         <div className="pal__list" id={LIST_ID} role="listbox" aria-label="Results">
           {rows.map((row, i) => {
-            const header = row.group !== lastGroup ? row.group : null;
-            lastGroup = row.group;
+            /* Asked of the PREVIOUS ROW, not of a `let` carried across the map.
+               A closure that writes to a variable in the component body is a
+               write after render completes — React may re-run this callback
+               without re-running the body, and the second pass then compares
+               against the last group of the FIRST pass and drops every header.
+               Reading `rows[i - 1]` is the same answer with nothing to stale:
+               every `group` is a non-empty literal, so the `i === 0` arm is
+               exactly what the `''` seed used to buy. */
+            const header = i === 0 || row.group !== rows[i - 1].group ? row.group : null;
             return (
               <Fragment key={row.key}>
                 {header && (

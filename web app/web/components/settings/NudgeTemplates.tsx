@@ -52,14 +52,14 @@ export function NudgeTemplates({ initial }: { initial: NudgeTemplate[] }) {
         </div>
         <div className="card__b">
           <p className="small" style={{ lineHeight: 1.7 }}>
-            Nothing here sends on its own. Pressing a nudge button anywhere in XRep opens
+            Nothing here sends on its own. Pressing a nudge button anywhere in InclineYou opens
             <b> your own WhatsApp</b> with the message already typed — you read it, change
             anything you like, and press send. It goes from your number, which is the one
             your clients have saved.
           </p>
           <p className="small" style={{ lineHeight: 1.7, marginTop: 10 }}>
             Two limits are fixed and are not settings: messages are meant for{' '}
-            <b>9am–8pm</b>, and XRep will stop asking you to chase somebody it knows you
+            <b>9am–8pm</b>, and InclineYou will stop asking you to chase somebody it knows you
             messaged in the last <b>7 days</b>. A limit with a text field beside it is not a
             limit.
           </p>

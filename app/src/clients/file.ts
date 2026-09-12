@@ -1,7 +1,7 @@
 /**
  * The client file — four tabs, computed from what is already on the phone.
  *
- * `agent/design system/screens/xrep-clients.html` § 09–11, frames 6a–8b.
+ * `agent/design system/screens/inclineyou-clients.html` § 09–11, frames 6a–8b.
  *
  * Two rules from § 14 decide the shape of everything here:
  *

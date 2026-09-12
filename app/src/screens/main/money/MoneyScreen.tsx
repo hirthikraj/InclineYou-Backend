@@ -1,10 +1,10 @@
 /**
  * Screen 06 · Money · FR-6.
  *
- * `agent/design system/screens/xrepmoney.html`.
+ * `agent/design system/screens/inclineyoumoney.html`.
  *
  * Nine platforms were torn down and every coaching one builds this screen as a
- * payment processor — a Stripe balance, payouts, failed charges. XRep can't
+ * payment processor — a Stripe balance, payouts, failed charges. InclineYou can't
  * and shouldn't: the money arrives as cash in a gym, UPI straight into the
  * trainer's own bank, or at the gym's counter. So this is a **book, not a
  * dashboard**, and the right thing to copy is not Stripe. It's OkCredit — the
@@ -371,7 +371,7 @@ export default function MoneyScreen() {
           <Empty
             icon={IconWallet}
             title="No money in the book yet"
-            body="XRep doesn't take payments. It keeps the book — cash, UPI into your own account, or money the gym collected for you."
+            body="InclineYou doesn't take payments. It keeps the book — cash, UPI into your own account, or money the gym collected for you."
             style={styles.empty}
             action={
               <View style={styles.emptyActions}>
@@ -394,7 +394,7 @@ export default function MoneyScreen() {
           />
           <Callout icon={IconShield} style={styles.note}>
             Your UPI ID goes on reminders so clients can pay you directly.{' '}
-            <CalloutStrong>The money never touches XRep</CalloutStrong>, which also means we
+            <CalloutStrong>The money never touches InclineYou</CalloutStrong>, which also means we
             never hold it, and there's nothing to withdraw.
           </Callout>
         </ScrollView>

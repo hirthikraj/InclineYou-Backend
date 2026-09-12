@@ -94,7 +94,7 @@ export function PaymentForm({ state }: { state: SetupState }) {
         sub={
           valid
             ? 'This is where your clients’ money will go. Check every character.'
-            : 'Your UPI ID. Money goes straight to you — XRep never holds it.'
+            : 'Your UPI ID. Money goes straight to you — InclineYou never holds it.'
         }
       />
 

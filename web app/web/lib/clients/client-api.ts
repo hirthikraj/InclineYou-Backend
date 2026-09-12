@@ -18,12 +18,12 @@ export class ClientDetailApiError extends Error {
     readonly detail: string | null = null,
     readonly code: string | null = null,
   ) {
-    super(`xrep api ${status ?? 'unreachable'}`);
+    super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'ClientDetailApiError';
   }
 }
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 
 async function get<T>(path: string): Promise<T> {
   const token = await getToken();

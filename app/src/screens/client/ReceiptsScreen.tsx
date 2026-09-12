@@ -150,7 +150,7 @@ export default function ReceiptsScreen() {
 
         <Callout style={styles.note}>
           Every receipt here was issued by {first}. If a payment you made is missing,{' '}
-          <CalloutStrong>message them</CalloutStrong> — XRep can&apos;t see either of your bank
+          <CalloutStrong>message them</CalloutStrong> — InclineYou can&apos;t see either of your bank
           accounts.
         </Callout>
       </ScrollView>

@@ -1,7 +1,7 @@
 /**
  * Screen 02 · Trainer setup · Step 2 of 6 · Experience.
  *
- * `agent/design system/screens/xreptrainersetup.html` § 03 · 3a.
+ * `agent/design system/screens/inclineyoutrainersetup.html` § 03 · 3a.
  *
  * Single-select auto-advances after 200ms — long enough that the chip visibly
  * takes the selection, short enough that nobody waits. That is one tap saved on

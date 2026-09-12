@@ -1,8 +1,8 @@
 /**
- * XRep — the mark, the tile, the lockup and the cold-start lift.
+ * InclineYou — the mark, the tile, the lockup and the cold-start lift.
  *
- * Ported from § 35 of `agent/design system/xrepdesignsystem.html` and frames
- * 0a–0c of `agent/design system/screens/xreploginotp.html`. The geometry is
+ * Ported from § 35 of `agent/design system/inclineyoudesignsystem.html` and frames
+ * 0a–0c of `agent/design system/screens/inclineyouloginotp.html`. The geometry is
  * lifted unit for unit off the 100 × 100 box the design file draws on; nothing
  * here is re-proportioned.
  *
@@ -66,7 +66,7 @@ export interface LogoMarkProps {
   acc?: string;
   /**
    * Screen-reader name. Pass `null` when a wrapper already carries it — a tile
-   * that announces "XRep" around a mark that also announces "XRep" is read
+   * that announces "InclineYou" around a mark that also announces "InclineYou" is read
    * twice.
    */
   label?: string | null;
@@ -83,7 +83,7 @@ export function LogoMark({
   size = 64,
   fig = colors.ink,
   acc = colors.accent,
-  label = 'XRep',
+  label = 'InclineYou',
   style,
 }: LogoMarkProps) {
   return (
@@ -133,7 +133,7 @@ export function LogoTile({
     <View
       accessible
       accessibilityRole="image"
-      accessibilityLabel="XRep"
+      accessibilityLabel="InclineYou"
       style={[styles.tile, { width: size, height: size, borderRadius: corner }, style]}
     >
       <LogoMark
@@ -326,7 +326,7 @@ function LiftMark({ size, clock }: { size: number; clock: Animated.Value }) {
     <View
       accessible
       accessibilityRole="image"
-      accessibilityLabel="XRep"
+      accessibilityLabel="InclineYou"
       style={{ width: size, height: size }}
     >
       {/* The CSS blurs this 3px, which React Native has no equivalent for on a
@@ -534,7 +534,7 @@ function versionLine(): string {
     Constants.expoConfig?.android?.versionCode ??
     Constants.expoConfig?.ios?.buildNumber ??
     null;
-  return build ? `XRep ${version} (${build})` : `XRep ${version}`;
+  return build ? `InclineYou ${version} (${build})` : `InclineYou ${version}`;
 }
 
 export interface SplashProps {

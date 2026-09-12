@@ -6,12 +6,12 @@ import { getToken } from '@/lib/auth/session';
 
 export class TeamApiError extends Error {
   constructor(readonly status: number | null) {
-    super(`xrep team api ${status ?? 'unreachable'}`);
+    super(`inclineyou team api ${status ?? 'unreachable'}`);
     this.name = 'TeamApiError';
   }
 }
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
 
 async function get<T>(path: string): Promise<T | null> {
@@ -133,6 +133,11 @@ export interface ActivityRow {
 }
 
 export interface TeamData {
+  /* The request's clock. A page component is subject to React's purity rule, so
+   * `Date.now()` cannot be read in one — the same argument `app/(main)/schedule/
+   * page.tsx` spells out: the clock belongs to the request, and the guard IS the
+   * request. Read here, threaded down as a prop, never re-read below. */
+  now: number;
   team: TeamResponse | null;
   members: MemberResponse[];
   invitations: InvitationResponse[];

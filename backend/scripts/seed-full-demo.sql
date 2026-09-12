@@ -1657,7 +1657,7 @@ WHERE p.id = dp.id AND dp.remaining IS NOT NULL AND p.sessions_total IS NOT NULL
 -- ── What the gym is owed ────────────────────────────────────────────────────
 --
 -- Last month's share handed over on the 1st; this month's still building. Both
--- are the trainer's own figures — XRep never talks to the gym's system, and a
+-- are the trainer's own figures — InclineYou never talks to the gym's system, and a
 -- settlement here is a record of what was agreed, not a transaction.
 --
 -- Written here, at the end, rather than beside the payments it is derived from:

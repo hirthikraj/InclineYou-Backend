@@ -9,7 +9,7 @@ seventeen times. The file this replaces drew two frames and declared six tabs;
 four of those tabs pointed at nothing, which is the failure this generator
 exists to end.
 
-Every frame traces to a state in `notes/design system/screens/xrepmoney.html`,
+Every frame traces to a state in `notes/design system/screens/inclineyoumoney.html`,
 which is the source of truth for what this screen is. Where the two disagree the
 phone file wins — including the one rule it calls non-negotiable: money in is
 green with a down arrow, money out is red with an up arrow.
@@ -129,7 +129,7 @@ def frame(fid, name, frm, url, body, note):
     <div class="viewport__in">
       <div class="browser__bar">
         <span class="browser__dots"><i></i><i></i><i></i></span>
-        <span class="browser__url">app.xrep.in<b>{url}</b></span>
+        <span class="browser__url">app.inclineyou.in<b>{url}</b></span>
       </div>
       <div class="app" data-theme="dark">{RAIL}{body}</div>
     </div>
@@ -1303,7 +1303,7 @@ specific contradictions, each traceable to the phone file or to the stylesheet.<
 <table class="dt"><thead><tr><th>Was</th><th>Now</th><th>Source of truth</th></tr></thead>
 <tbody>
   <tr><th>Four of six tabs pointed at nothing</th><td>All six drawn</td>
-    <td>The tab bar is a promise; <code>xrepmoney.html</code> has a state behind each one</td></tr>
+    <td>The tab bar is a promise; <code>inclineyoumoney.html</code> has a state behind each one</td></tr>
   <tr><th>Every amount in the same neutral ink</th>
     <td><code>.dirn</code> — arrow and colour, in and out</td>
     <td>&ldquo;Money in is green with a down arrow&rdquo; is listed as non-negotiable in the phone
@@ -1352,9 +1352,9 @@ specific contradictions, each traceable to the phone file or to the stylesheet.<
 <p class="small" style="max-width:var(--w-measure)">
   X REP · web application · v1.1 · every frame drawn at 1440&times;900 and scaled to fit.
   Colour, spacing and radius tokens are copied verbatim from
-  <code>xrepdesignsystem.html</code> — if a value differs there, it is a bug here.
+  <code>inclineyoudesignsystem.html</code> — if a value differs there, it is a bug here.
   Press <kbd>+</kbd> / <kbd>&minus;</kbd> to change the zoom.
-  <br><br>States and rules trace to <code>notes/design system/screens/xrepmoney.html</code>
+  <br><br>States and rules trace to <code>notes/design system/screens/inclineyoumoney.html</code>
   (screen 06 · sixteen states · the tap map and the rules table) and to the app itself:
   <code>money/money.ts</code>, <code>db/money.ts</code>,
   <code>screens/main/money/MoneyScreen.tsx</code>, <code>OwedScreen.tsx</code>,

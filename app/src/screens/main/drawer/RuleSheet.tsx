@@ -107,7 +107,7 @@ export default function RuleSheet({ rule, onClose, onSaved }: RuleSheetProps) {
           <Callout style={styles.seg}>
             {rule.kind === 'well_done'
               ? 'This one fires the moment a personal record is logged. There is no threshold to set.'
-              : 'This one fires on the day. XRep does not collect a date of birth yet, so it has nothing to fire on — the switch is here for when it does.'}
+              : 'This one fires on the day. InclineYou does not collect a date of birth yet, so it has nothing to fire on — the switch is here for when it does.'}
           </Callout>
         )}
 

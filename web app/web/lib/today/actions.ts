@@ -65,7 +65,7 @@ import type { ActionResult } from './hold';
  * this pass did not make.
  */
 
-const BASE = process.env.XREP_API_URL ?? 'http://localhost:8080';
+const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 
 async function call<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
   const token = await getToken();
