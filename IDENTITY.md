@@ -202,15 +202,19 @@ reversible** — which is a better reason to do it than any of the three asks.
 
 ## 4. The migrations
 
-Next free number is **V43**. Note the collision to avoid: the gym PRD's sequence
-is written as V28+ and `CLAUDE.md` says to read it eight numbers higher, which
-lands it in this range too. Whoever writes first takes the numbers and the other
-document gets renumbered — say so in the commit.
+**Next free number is `V2`.** The forty-two migrations that built this schema
+were flattened into a single `V1__init_schema.sql` on 11 Sep 2026, during the
+rename to InclineYou — so the whole numbering space above V1 is free again, and
+the V43–V46 labels below are a **dependency order, not absolute file names**.
+Whichever plan lands first starts at V2 and the other gets renumbered; say so in
+the commit. That is the same collision this section always warned about — the
+gym PRD's sequence wants the same range — it is just no longer possible to guess
+which absolute numbers either will get.
 
 | | What | Reversible? |
 | --- | --- | --- |
 | **V43** | `person`, `person_credential`, the two indexes. `app_user.person_id`, nullable. Nothing reads them yet | yes, inert |
-| **V44** | Backfill: one `person` per live `app_user`, one `phone` credential each, `person_id` set. Then `app_user.person_id` → `NOT NULL`. Owner work, runs as `xrep` | yes, data-only |
+| **V44** | Backfill: one `person` per live `app_user`, one `phone` credential each, `person_id` set. Then `app_user.person_id` → `NOT NULL`. Owner work, runs as `inclineyou` | yes, data-only |
 | **V45** | `device_session` (§5). Independent of V43–V44; can land first if M2 is urgent | yes |
 | **V46** | **The cutover.** `app_person_id()` alongside `app_phone()`; the three policies of §2.1 rewritten to use it; a seventh session setting | **no** — see below |
 | **V47** | Drop nothing. `app_phone()` and `app.phone` stay, unused, per the additive law | — |
@@ -234,7 +238,7 @@ LANGUAGE sql STABLE AS
 $$ SELECT NULLIF(current_setting('app.person_id', true), '')::uuid $$;
 
 DROP POLICY IF EXISTS tenant_member_self ON tenant_member;
-CREATE POLICY tenant_member_self ON tenant_member FOR SELECT TO xrep_app
+CREATE POLICY tenant_member_self ON tenant_member FOR SELECT TO inclineyou_app
     USING (app_person_id() IS NOT NULL AND app_user_id IN (
         SELECT au.id FROM app_user au
         WHERE au.person_id = app_person_id() AND au.deleted_at IS NULL));
@@ -418,7 +422,7 @@ required to land any of this, beyond M2's refresh call.
 ### 8.1 Testing
 
 `TenantIsolationTest` is where the walls are asserted, because it opens its own
-`xrep_app` connections while the rest of the suite is pinned to the owner. Two
+`inclineyou_app` connections while the rest of the suite is pinned to the owner. Two
 cases must land there or V46 is untested:
 
 - a request setting `app.person_id` reads exactly its own memberships;

@@ -1,8 +1,8 @@
-# XRep Backend — API Reference
+# InclineYou Backend — API Reference
 
 Every HTTP endpoint the Spring Boot backend exposes, what it is for, and what it
 expects. Generated from the controllers under
-`backend/src/main/java/com/xrep/xrep_backend/`.
+`backend/src/main/java/com/inclineyou/inclineyou_backend/`.
 
 For the storage side of the same contract — tables, columns, keys, constraints
 and indexes — see [`SCHEMA.md`](SCHEMA.md).
@@ -260,14 +260,14 @@ below it can tell which answered.
 | | Phone | Web |
 | --- | --- | --- |
 | Credential | a signed **JWT**, 7 days | an opaque **session token**, 72 hours |
-| Chosen by | no header, or anything but `web` | `X-XRep-Client: web` |
+| Chosen by | no header, or anything but `web` | `X-InclineYou-Client: web` |
 | Works offline | yes — that is the whole reason | no, and does not need to |
 | Revocable | **no**; it expires on its own clock | **yes**, immediately |
 | Switching workspace | a new token, because the workspace is a signed claim | an `UPDATE`; the browser keeps the token it has |
 | Shape | three dot-separated segments | begins `xs_` |
 
 A session token may travel as `Authorization: Bearer xs_…` **or** in an
-`xrep_session` cookie — the cookie so that browser JavaScript never has to hold
+`inclineyou_session` cookie — the cookie so that browser JavaScript never has to hold
 it. The row stores a **SHA-256 of the token**, never the token: a database dump
 must not be a set of live credentials. SHA-256 rather than bcrypt because this is
 256 bits of `SecureRandom` with no structure to guess, so it wants a fast one-way
@@ -310,7 +310,7 @@ was created.
 
 Two things follow that the client has to understand:
 
-- **`X-XRep-View: focused`** narrows reads to the active workspace. Absent or
+- **`X-InclineYou-View: focused`** narrows reads to the active workspace. Absent or
   `combined` (the default) spans every workspace the caller belongs to, which is
   what puts a 07:00 private client and an 18:00 gym client on one Today screen.
 - **The money book ignores that header entirely.** Packages, payments, packs and
@@ -443,7 +443,7 @@ A null `gymName` means *no gym*, which is not the same as a 0% cut — one hides
 the "your share" line entirely, the other claims an arrangement that keeps all
 of it.
 
-**The identity block is the part a CLIENT reads** — nothing in XRep branches on
+**The identity block is the part a CLIENT reads** — nothing in InclineYou branches on
 any of it. `introVideoId` is **derived, not stored**: the 11 characters out of
 `introVideoUrl`, sent so a caller that wants a thumbnail or an `<iframe>` does
 not re-implement the parse. It is ignored on the way up. There is no profile
@@ -605,7 +605,7 @@ Refusals, each with a `code` and a sentence in `detail`:
 | Code | Status | Means |
 | --- | --- | --- |
 | `PHONE_UNCHANGED` | 400 | the new number is the one they are already on |
-| `PHONE_TAKEN` | 409 | somebody already holds it — **it does not say who**, or this endpoint would answer *is this number on XRep* for any number in India |
+| `PHONE_TAKEN` | 409 | somebody already holds it — **it does not say who**, or this endpoint would answer *is this number on InclineYou* for any number in India |
 | `PHONE_CHANGE_UNPROVEN` | 401 | no ticket, a forged one, or one that aged out — go back to step 1 |
 | `OTP_WRONG` · `OTP_EXPIRED` · `OTP_LOCKED` · `OTP_THROTTLED` | as at sign-in | the same three, from the same service |
 
@@ -698,7 +698,7 @@ two write paths is how the two halves drift.
 ## Team coaching
 
 `team/TeamController.java` — a senior trainer running a team of trainers. Full
-design in `agent/XRep_team_coaching_prd.md`. **All three phases are built**:
+design in `agent/InclineYou_team_coaching_prd.md`. **All three phases are built**:
 forming a team, who is in it, the shared exercise pool, team-wide client reads,
 client reassignment, the shared program library, admins editing a teammate's plan
 in place, and the owner's revenue roll-up.
@@ -770,7 +770,7 @@ one-active-owner index permits.
 ### `GET /v1/team/members`
 **Purpose:** the coach list, ordered as a hierarchy (owner, admins, coaches) with
 each coach's live client count. Pending invites appear here too — a pending
-invite to a number with no XRep account has a `phone` and a null `name`, because
+invite to a number with no InclineYou account has a `phone` and a null `name`, because
 the number is all we know about them.
 
 ### `POST /v1/team/invites` → `201` · **`MESSAGING` tier — 10/min**
@@ -1128,9 +1128,9 @@ else is filed in the notes tab. One flag over one kind of thing rather than two
 stores that would drift.
 
 > **This is not a health record and must never become one.**
-> `XRep_MVP_interaction_map.md` excludes health data outright under the DPDP Act
+> `InclineYou_MVP_interaction_map.md` excludes health data outright under the DPDP Act
 > 2023 — "**No medical or health-condition fields anywhere** — no injuries, no
-> conditions, no medications" — and `XRep_core_data_model.md` §3.2 pins the note
+> conditions, no medications" — and `InclineYou_core_data_model.md` §3.2 pins the note
 > as "free text; **no medical fields**". `body` is free text and there is no
 > injury field, no condition field and no PAR-Q flag beside it. Do not add one:
 > the moment a field tells a medical note apart from any other note, the product

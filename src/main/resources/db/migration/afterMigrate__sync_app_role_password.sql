@@ -1,11 +1,11 @@
--- Keeps `xrep_app`'s password in step with APP_DB_PASSWORD.
+-- Keeps `inclineyou_app`'s password in step with APP_DB_PASSWORD.
 --
 -- V42 creates the role and sets its password, but a versioned migration runs
 -- exactly once. On every database that has already migrated, changing
 -- APP_DB_PASSWORD therefore changed nothing at all — the pool would pick up the
 -- new value, the role would keep the old one, and the first evidence was the
 -- app failing to start with `password authentication failed for user
--- "xrep_app"`. Rotating the credential looked like it worked right up until the
+-- "inclineyou_app"`. Rotating the credential looked like it worked right up until the
 -- next deploy.
 --
 -- An `afterMigrate` callback runs on EVERY startup, not only when a migration
@@ -29,16 +29,16 @@ BEGIN
     END IF;
 
     BEGIN
-        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'xrep_app') THEN
-            EXECUTE format('ALTER ROLE xrep_app LOGIN PASSWORD %L', configured);
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'inclineyou_app') THEN
+            EXECUTE format('ALTER ROLE inclineyou_app LOGIN PASSWORD %L', configured);
         ELSE
-            EXECUTE format('CREATE ROLE xrep_app LOGIN PASSWORD %L', configured);
+            EXECUTE format('CREATE ROLE inclineyou_app LOGIN PASSWORD %L', configured);
         END IF;
     EXCEPTION WHEN insufficient_privilege THEN
         -- A managed Postgres may not grant CREATEROLE to the migration user.
         -- Say so rather than failing the boot: the role may well be correct
         -- already, and if it is not, the connection error two seconds from now
         -- is a clearer message than this one would be.
-        RAISE WARNING 'could not set the password on xrep_app — the migration role lacks the privilege; rotate it manually';
+        RAISE WARNING 'could not set the password on inclineyou_app — the migration role lacks the privilege; rotate it manually';
     END;
 END $$;
