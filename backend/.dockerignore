@@ -1,0 +1,8 @@
+target/
+db-archive/
+agent/
+schema.html
+schema.xml
+*.md
+.idea/
+.vscode/

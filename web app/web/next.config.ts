@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: "standalone",
+
   // Phones on the same Wi-Fi reach the dev server by LAN IP, not localhost.
   // Next blocks cross-origin dev asset requests unless the origin is listed.
   //

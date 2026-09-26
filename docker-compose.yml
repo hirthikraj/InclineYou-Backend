@@ -1,22 +1,17 @@
 name: inclineyou
 
 services:
+  # ── Infrastructure ───────────────────────────────────────────────────────────
+
   postgres:
     image: postgres:16-alpine
     container_name: inclineyou-postgres
     environment:
-      # The OWNER, and only the owner. `inclineyou_app` — the non-owning login the API
-      # actually serves requests with — is created by V42 when Flyway runs, so it
-      # gets its password from APP_DB_PASSWORD and never exists in this file.
-      #
-      # These take effect on a FRESH volume only: initdb runs once, so changing a
-      # password here after the first `up` changes nothing. `docker compose down
-      # -v` if you need it to.
       POSTGRES_DB: ${POSTGRES_DB:-inclineyoudb}
       POSTGRES_USER: ${POSTGRES_USER:-inclineyou}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-inclineyou_dev}
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -24,20 +19,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     container_name: inclineyou-redis
-    # `--appendonly yes` is not a preference.
-    #
-    # The OTP lock and the daily send ceiling are abuse controls, and V17 moved
-    # the lock out of memory precisely so a restart could not clear it — an
-    # in-memory lock made the brute-force ceiling "three attempts per deploy".
-    # A Redis without AOF puts it straight back. `everysec` bounds the worst-case
-    # loss at one second of writes, which for a sign-in lock is nothing.
+    # --appendonly yes is a security requirement, not a preference.
+    # The OTP lock is an abuse control; without AOF a restart clears it.
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
     ports:
-      - "6379:6379"
+      - "${REDIS_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -45,6 +36,64 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+
+  # ── Backend (Spring Boot API) ────────────────────────────────────────────────
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: inclineyou-backend
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-inclineyoudb}
+      APP_DB_USERNAME: ${APP_DB_USERNAME:-inclineyou_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:-inclineyou_app_dev}
+      MIGRATION_DB_USERNAME: ${MIGRATION_DB_USERNAME:-inclineyou}
+      MIGRATION_DB_PASSWORD: ${MIGRATION_DB_PASSWORD:-inclineyou_dev}
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_SSL: "false"
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-before-production-32chars}
+      OTP_DEV_CODES_IN_LOG: ${OTP_DEV_CODES_IN_LOG:-false}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      SEED_EXERCISES: ${SEED_EXERCISES:-true}
+      TEAM_ENABLED: ${TEAM_ENABLED:-true}
+      FCM_CREDENTIALS: ${FCM_CREDENTIALS:-}
+      FORWARD_HEADERS: ${FORWARD_HEADERS:-none}
+      REQUIRE_HTTPS: ${REQUIRE_HTTPS:-false}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ── Frontend (Next.js) ──────────────────────────────────────────────────────
+
+  frontend:
+    build:
+      context: ./web app/web
+      dockerfile: Dockerfile
+    container_name: inclineyou-frontend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      INCLINEYOU_API_URL: http://backend:8080
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres_data:
