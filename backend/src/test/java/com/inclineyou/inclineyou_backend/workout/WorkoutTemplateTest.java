@@ -104,9 +104,11 @@ class WorkoutTemplateTest {
                 .andExpect(jsonPath("$.exercises[0].sets[1].effortKind").value("reps"))
                 // Two of the three alternatives had nothing to do instead, and are gone.
                 .andExpect(jsonPath("$.exercises[0].alternatives.length()").value(1))
-                // Rounded, clamped to [0, 2], blank dropped, sorted.
+                // Rounded, clamped to [0, 1] — a divider needs a row to sit in front
+                // of, so with 2 exercises the ceiling is the LAST one (index 1), not
+                // past it — blank dropped, sorted.
                 .andExpect(jsonPath("$.dividers[*].label", contains("Warm-up", "Main", "Finisher")))
-                .andExpect(jsonPath("$.dividers[*].beforeIndex", contains(0, 1, 2)))
+                .andExpect(jsonPath("$.dividers[*].beforeIndex", contains(0, 1, 1)))
                 .andExpect(jsonPath("$.exerciseCount").value(2))
                 .andExpect(jsonPath("$.setCount").value(3));
     }
@@ -138,7 +140,7 @@ class WorkoutTemplateTest {
                 .andExpect(jsonPath("$.name").value("Upper A"))
                 .andExpect(jsonPath("$.notes").value("Keep it snappy"))
                 .andExpect(jsonPath("$.exerciseCount").value(2))
-                .andExpect(jsonPath("$.dividers[0].beforeIndex").value(2));
+                .andExpect(jsonPath("$.dividers[0].beforeIndex").value(1));
 
         mvc.perform(put("/v1/workout-templates/" + id).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"exercises\":[{\"exerciseId\":\"" + row + "\",\"sets\":[{},{}]}]}"))
@@ -160,7 +162,7 @@ class WorkoutTemplateTest {
         mvc.perform(delete("/v1/workout-templates/" + id)).andExpect(status().isNoContent());
         mvc.perform(get("/v1/workout-templates/" + id)).andExpect(status().isNotFound());
         org.junit.jupiter.api.Assertions.assertNotNull(jdbc.queryForObject(
-                "SELECT deleted_at FROM workout_template WHERE id = :id::uuid", Map.of("id", id), Object.class));
+                "SELECT deleted_at FROM workout WHERE id = :id::uuid", Map.of("id", id), Object.class));
     }
 
     private String create(String body) throws Exception {
@@ -174,19 +176,30 @@ class WorkoutTemplateTest {
         var p = new java.util.HashMap<String, Object>();
         p.put("id", id.toString());
         p.put("name", name);
-        p.put("tid", owner == null ? null : owner.toString());
-        p.put("custom", owner != null);
-        jdbc.update("INSERT INTO exercise (id, name, is_custom, trainer_id) VALUES (:id::uuid, :name, :custom, :tid::uuid)", p);
+        if (owner == null) {
+            jdbc.update("INSERT INTO exercise (id, name, origin, source_id) VALUES (:id::uuid, :name, 'inclineyou', :id)", p);
+        } else {
+            p.put("tid", owner.toString());
+            jdbc.update("INSERT INTO exercise (id, name, origin, trainer_id) VALUES (:id::uuid, :name, 'trainer', :tid::uuid)", p);
+        }
         return id;
     }
 
     private UUID trainer(String phone) {
+        String e164 = "+91" + phone;
         jdbc.update("""
-                INSERT INTO trainer (id, phone, name) VALUES (gen_random_uuid(), :phone, :phone)
+                INSERT INTO app_user (id, phone, role) VALUES (gen_random_uuid(), :phone, 'trainer')
                 ON CONFLICT (phone) DO NOTHING
-                """, Map.of("phone", phone));
+                """, Map.of("phone", e164));
+        String appUserId = jdbc.queryForObject(
+                "SELECT id::text FROM app_user WHERE phone = :phone", Map.of("phone", e164), String.class);
+        jdbc.update("""
+                INSERT INTO trainer (id, app_user_id, name) VALUES (gen_random_uuid(), :appUserId::uuid, :phone)
+                ON CONFLICT (app_user_id) DO NOTHING
+                """, Map.of("appUserId", appUserId, "phone", phone));
         return UUID.fromString(jdbc.queryForObject(
-                "SELECT id::text FROM trainer WHERE phone = :phone", Map.of("phone", phone), String.class));
+                "SELECT id::text FROM trainer WHERE app_user_id = :appUserId::uuid",
+                Map.of("appUserId", appUserId), String.class));
     }
 
     private void signedInAs(UUID trainerId) {

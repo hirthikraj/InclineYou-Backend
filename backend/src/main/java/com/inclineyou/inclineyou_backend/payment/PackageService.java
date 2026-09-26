@@ -1043,16 +1043,10 @@ public class PackageService {
         int used = currentTotal - remaining;
         if (wanted < used) throw PackageRuleException.fewerThanDelivered(used);
 
-        jdbc.update("""
-                UPDATE package SET
-                    sessions_total     = :total,
-                    -- The delta, not the total: what has been delivered is a fact
-                    -- about the diary and this write has no business moving it.
-                    sessions_remaining = sessions_remaining + CAST(:delta AS INTEGER),
-                    updated_at         = NOW()
-                WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
-                """, Map.of("id", packageId, "tid", tid, "total", wanted, "delta", delta));
-
+        // `apply_package_adjustment` (the package_adjustment BEFORE INSERT trigger)
+        // is the one writer of sessions_total/sessions_remaining now: it reads the
+        // adjustment's `sessions` delta and applies exactly this formula itself.
+        // Updating `package` here too would apply the delta twice.
         logAdjustment(tid, packageId, "sessions", 0, delta,
                 req.reason(), Instant.now());
         return getPackage(tid, packageId);
@@ -1590,9 +1584,10 @@ public class PackageService {
         p.put("reason", reason == null || reason.isBlank() ? null : reason.trim());
         p.put("at",     Timestamp.from(effectiveAt));
         jdbc.update("""
-                INSERT INTO package_adjustment (id, package_id, trainer_id, kind, days, sessions,
+                INSERT INTO package_adjustment (id, package_id, trainer_id, client_id, kind, days, sessions,
                     reason, effective_at, created_at)
-                VALUES (:id::uuid, :pid::uuid, :tid::uuid, :kind, :days, :sessions, :reason,
+                VALUES (:id::uuid, :pid::uuid, :tid::uuid,
+                    (SELECT client_id FROM package WHERE id = :pid::uuid), :kind, :days, :sessions, :reason,
                     :at, NOW())
                 """, p);
         log.info("package {} trainer={} package={} days={} sessions={}",

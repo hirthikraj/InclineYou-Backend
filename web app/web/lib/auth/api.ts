@@ -120,12 +120,23 @@ function waitSeconds(r: Refusal, fallback: number): number {
 
 /* ─────────────────────────────────────────────────────────────── requests ── */
 
+/**
+ * `AuthController.PHONE_PATTERN` is `^\+91[6-9]\d{9}$` — the backend now stores
+ * and compares every phone in this one shape, not the bare 10 digits an older
+ * build sent. Callers here only ever hold the 10 digits a trainer typed, so the
+ * `+91` is added at the wire boundary rather than carried through state that
+ * also has to render and re-validate the number.
+ */
+function withCountryCode(phone: string): string {
+  return `+91${phone}`;
+}
+
 export async function requestOtp(phone: string): Promise<void> {
-  await post<void>('/v1/auth/otp/request', { phone });
+  await post<void>('/v1/auth/otp/request', { phone: withCountryCode(phone) });
 }
 
 export async function verifyOtp(phone: string, otp: string): Promise<AuthResponse> {
-  return post<AuthResponse>('/v1/auth/otp/verify', { phone, otp });
+  return post<AuthResponse>('/v1/auth/otp/verify', { phone: withCountryCode(phone), otp });
 }
 
 /* ------------------------------------------------------- claiming a trainer

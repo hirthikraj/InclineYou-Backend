@@ -55,11 +55,18 @@ class CertifiedProgramsTest {
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
         jdbc.update("""
-                INSERT INTO trainer (id, phone, name) VALUES (gen_random_uuid(), '9100001101', 'C')
+                INSERT INTO app_user (id, phone, role) VALUES (gen_random_uuid(), '+919100001101', 'trainer')
                 ON CONFLICT (phone) DO NOTHING
                 """, Map.of());
+        String appUserId = jdbc.queryForObject(
+                "SELECT id::text FROM app_user WHERE phone = '+919100001101'", Map.of(), String.class);
+        jdbc.update("""
+                INSERT INTO trainer (id, app_user_id, name) VALUES (gen_random_uuid(), :appUserId::uuid, 'C')
+                ON CONFLICT (app_user_id) DO NOTHING
+                """, Map.of("appUserId", appUserId));
         owner = UUID.fromString(jdbc.queryForObject(
-                "SELECT id::text FROM trainer WHERE phone = '9100001101'", Map.of(), String.class));
+                "SELECT id::text FROM trainer WHERE app_user_id = :appUserId::uuid",
+                Map.of("appUserId", appUserId), String.class));
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(
                         owner.toString(), null, AuthorityUtils.createAuthorityList("ROLE_TRAINER")));

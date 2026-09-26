@@ -39,7 +39,14 @@ public class AppUser {
     @Column(updatable = false, nullable = false)
     private UUID id;
 
-    @Column(nullable = false, unique = true, length = 15)
+    /**
+     * Nullable now — V36's account closure scrubs it on erasure
+     * ({@code app_user_erased}: {@code erased_at IS NULL} iff
+     * {@code phone IS NOT NULL}), and the row itself outlives that. Still
+     * unique whenever it is set ({@code app_user_phone_key}), which is what
+     * makes a deleted account's number stay unavailable.
+     */
+    @Column(length = 16)
     private String phone;
 
     /**
@@ -56,6 +63,10 @@ public class AppUser {
     @Column(name = "privacy_accepted_at")
     private Instant privacyAcceptedAt;
 
+    /** Which version they accepted — paired with {@link #privacyAcceptedAt}. */
+    @Column(name = "privacy_policy_version", length = 20)
+    private String privacyPolicyVersion;
+
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;
 
@@ -64,6 +75,10 @@ public class AppUser {
 
     @Column(name = "deleted_at")
     private Instant deletedAt;
+
+    /** Set once the number is scrubbed for good — see {@link #phone}. */
+    @Column(name = "erased_at")
+    private Instant erasedAt;
 
     @PrePersist
     void onCreate() {

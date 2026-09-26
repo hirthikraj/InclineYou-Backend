@@ -48,7 +48,7 @@ import java.nio.charset.StandardCharsets;
  *
  * Which endpoints cost money is a fact about the endpoints, so the mapping is
  * here rather than in YAML: a nudge and a weekly report each spend a WhatsApp
- * message, sync is chatty by design, and everything else shares one ceiling.
+ * message, and everything else shares one ceiling.
  */
 @Component
 @RequiredArgsConstructor
@@ -69,10 +69,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @PostConstruct
     void announce() {
         if (props.getRateLimit().isEnabled()) {
-            log.info("rate limiting ON — standard {}/{}s, auth {}/{}s, sync {}/{}s, messaging {}/{}s",
+            log.info("rate limiting ON — standard {}/{}s, auth {}/{}s, messaging {}/{}s",
                     props.getRateLimit().getStandard().getLimit(), props.getRateLimit().getStandard().getWindowSeconds(),
                     props.getRateLimit().getAuth().getLimit(), props.getRateLimit().getAuth().getWindowSeconds(),
-                    props.getRateLimit().getSync().getLimit(), props.getRateLimit().getSync().getWindowSeconds(),
                     props.getRateLimit().getMessaging().getLimit(), props.getRateLimit().getMessaging().getWindowSeconds());
         } else {
             log.warn("rate limiting OFF — every tier is unlimited. "
@@ -99,7 +98,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
         AppProperties.Tier limits = switch (tier) {
             case AUTH -> config.getAuth();
-            case SYNC -> config.getSync();
             case MESSAGING -> config.getMessaging();
             case STANDARD -> config.getStandard();
         };
@@ -121,7 +119,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         refuse(request, response, decision.retryAfterSeconds());
     }
 
-    private enum Tier { STANDARD, AUTH, SYNC, MESSAGING }
+    private enum Tier { STANDARD, AUTH, MESSAGING }
 
     /** Null means exempt. */
     private Tier tierFor(HttpServletRequest request) {
@@ -132,15 +130,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if ("/health".equals(path)) return null;
 
         if (path.startsWith("/v1/auth/")) return Tier.AUTH;
-        if (path.startsWith("/v1/sync/") || path.startsWith("/v1/client/sync/")) return Tier.SYNC;
-        // Each of these spends a WhatsApp message on somebody's behalf. The team
-        // invite belongs with them for a second reason as well: it puts a
-        // message in front of somebody who never asked for one, so the 10/min
-        // ceiling is the anti-spam control and not only a cost control.
+        // Each of these spends a WhatsApp message on somebody's behalf, so the
+        // 10/min ceiling is the anti-spam control and not only a cost control.
         if ("POST".equals(request.getMethod())
                 && (path.endsWith("/nudge")
-                    || path.endsWith("/report/weekly")
-                    || path.endsWith("/team/invites"))) {
+                    || path.endsWith("/report/weekly"))) {
             return Tier.MESSAGING;
         }
         return Tier.STANDARD;

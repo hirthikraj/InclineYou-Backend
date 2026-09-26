@@ -53,12 +53,19 @@ class ClientPhysicalTest {
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
         jdbc.update("""
-                INSERT INTO trainer (id, phone, name) VALUES (gen_random_uuid(), '9100000701', 'P')
+                INSERT INTO app_user (id, phone, role) VALUES (gen_random_uuid(), '+919100000701', 'trainer')
                 ON CONFLICT (phone) DO NOTHING
                 """, Map.of());
+        String appUserId = jdbc.queryForObject(
+                "SELECT id::text FROM app_user WHERE phone = '+919100000701'", Map.of(), String.class);
+        jdbc.update("""
+                INSERT INTO trainer (id, app_user_id, name) VALUES (gen_random_uuid(), :appUserId::uuid, 'P')
+                ON CONFLICT (app_user_id) DO NOTHING
+                """, Map.of("appUserId", appUserId));
         me = UUID.fromString(jdbc.queryForObject(
-                "SELECT id::text FROM trainer WHERE phone = '9100000701'", Map.of(), String.class));
-        client = client("Meera", "9100000711");
+                "SELECT id::text FROM trainer WHERE app_user_id = :appUserId::uuid",
+                Map.of("appUserId", appUserId), String.class));
+        client = client("Meera", "+919100000711");
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(
                         me.toString(), null, AuthorityUtils.createAuthorityList("ROLE_TRAINER")));
@@ -107,13 +114,13 @@ class ClientPhysicalTest {
     @Test
     @DisplayName("moving a number onto another client on this roster is a 409 with a code")
     void phoneTakenOnPut() throws Exception {
-        client("Ravi", "9100000712");
-        putClient("{\"name\":\"Meera\",\"phone\":\"9100000712\"}")
+        client("Ravi", "+919100000712");
+        putClient("{\"name\":\"Meera\",\"phone\":\"+919100000712\"}")
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PHONE_ON_YOUR_ROSTER"));
 
         // Re-saving the number the row already holds is not a move.
-        putClient("{\"name\":\"Meera K\",\"phone\":\"9100000711\"}").andExpect(status().isOk());
+        putClient("{\"name\":\"Meera K\",\"phone\":\"+919100000711\"}").andExpect(status().isOk());
     }
 
     private org.springframework.test.web.servlet.ResultActions putClient(String body) throws Exception {
@@ -125,7 +132,8 @@ class ClientPhysicalTest {
     private UUID client(String name, String phone) {
         var id = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO client (id, trainer_id, name, phone) VALUES (:id::uuid, :tid::uuid, :name, :phone)
+                INSERT INTO client (id, trainer_id, name, phone, client_type)
+                VALUES (:id::uuid, :tid::uuid, :name, :phone, 'independent')
                 """, Map.of("id", id.toString(), "tid", me.toString(), "name", name, "phone", phone));
         return id;
     }

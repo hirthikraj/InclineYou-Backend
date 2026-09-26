@@ -48,11 +48,18 @@ class TrainerGenderTest {
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
         jdbc.update("""
-                INSERT INTO trainer (id, phone, name) VALUES (gen_random_uuid(), '9100000601', 'G')
+                INSERT INTO app_user (id, phone, role) VALUES (gen_random_uuid(), '+919100000601', 'trainer')
                 ON CONFLICT (phone) DO NOTHING
                 """, Map.of());
+        String appUserId = jdbc.queryForObject(
+                "SELECT id::text FROM app_user WHERE phone = '+919100000601'", Map.of(), String.class);
+        jdbc.update("""
+                INSERT INTO trainer (id, app_user_id, name) VALUES (gen_random_uuid(), :appUserId::uuid, 'G')
+                ON CONFLICT (app_user_id) DO NOTHING
+                """, Map.of("appUserId", appUserId));
         UUID me = UUID.fromString(jdbc.queryForObject(
-                "SELECT id::text FROM trainer WHERE phone = '9100000601'", Map.of(), String.class));
+                "SELECT id::text FROM trainer WHERE app_user_id = :appUserId::uuid",
+                Map.of("appUserId", appUserId), String.class));
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(
                         me.toString(), null, AuthorityUtils.createAuthorityList("ROLE_TRAINER")));

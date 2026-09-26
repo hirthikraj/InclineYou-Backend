@@ -3,6 +3,7 @@ import 'server-only';
 import { cache } from 'react';
 
 import { getToken } from '@/lib/auth/session';
+import { apiFetch } from '@/lib/http/client';
 import { listRecentNudges } from '@/lib/nudges/api';
 import { COOLDOWN_DAYS, lastContactMap } from '@/lib/nudges/cooldown';
 
@@ -143,25 +144,25 @@ async function get<T>(path: string): Promise<T> {
   // the screen would report a server problem for what is a signed-out browser.
   if (!token) throw new TodayApiError(401);
 
-  let res: Response;
+  let res: Response, text: string;
   try {
-    res = await fetch(`${BASE}${path}`, {
+    ({ res, text } = await apiFetch(`${BASE}${path}`, {
       headers: { authorization: `Bearer ${token}` },
       // The deck is a snapshot of a minute. Nothing here is cacheable, and a
       // cached Today is the one bug a trainer cannot diagnose — the screen would
       // be wrong in a way that looks exactly like being right.
       cache: 'no-store',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+      timeoutMs: TIMEOUT_MS,
+    }));
   } catch {
     // Connection refused, DNS, and a timeout all land here and all mean the same
     // thing to the screen: nothing answered. `TodayApiError(null)` is what
     // `requireToday` reads as `unreachable`.
     throw new TodayApiError(null);
   }
+
   if (!res.ok) throw new TodayApiError(res.status);
 
-  const text = await res.text();
   return (text ? JSON.parse(text) : null) as T;
 }
 

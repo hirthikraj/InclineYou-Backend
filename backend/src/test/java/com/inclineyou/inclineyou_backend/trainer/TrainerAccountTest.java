@@ -122,9 +122,15 @@ class TrainerAccountTest {
         signedInAs(me);
     }
 
-    /** A valid Indian mobile shape — the 9 series — with a per-run, per-test tail. */
+    /**
+     * A valid Indian mobile shape — {@code +91}, the 9 series — with a
+     * per-run, per-test tail. E.164, matching {@code app_user_phone_format}:
+     * everything from {@code AccountController}'s {@code PHONE_PATTERN} down
+     * to the fixture below now speaks that shape, never the bare 10 digits
+     * an older mobile build sent.
+     */
     private static String phoneNumber(int n) {
-        return "9" + String.format("%09d", n % 1_000_000_000);
+        return "+919" + String.format("%09d", n % 1_000_000_000);
     }
 
     @AfterEach
@@ -327,7 +333,8 @@ class TrainerAccountTest {
         // `+91 98410 22119` is the shape `formatPhone` prints one card above the
         // field. A confirmation that refuses the product's own formatting
         // teaches the trainer the product is broken.
-        String asShown = "+91 " + MINE.substring(0, 5) + " " + MINE.substring(5);
+        String bare = MINE.substring(3); // strip the "+91" MINE already carries
+        String asShown = "+91 " + bare.substring(0, 5) + " " + bare.substring(5);
         mvc.perform(delete("/v1/trainers/me")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(Map.of("confirmPhone", asShown))))
@@ -420,28 +427,32 @@ class TrainerAccountTest {
     }
 
     private UUID trainer(String phone) {
-        jdbc.update("""
-                INSERT INTO trainer (id, phone, name) VALUES (gen_random_uuid(), :phone, :phone)
-                ON CONFLICT (phone) DO NOTHING
-                """, Map.of("phone", phone));
-        // The `app_user` row too. V18's backfill wrote one for every trainer that
-        // existed, and every path that creates one since writes one — a fixture
-        // without it would be testing the repair branch rather than the rule.
+        // The `app_user` row first — sign-in identity, and since the 25 Sep
+        // 2026 schema rebuild the one place a trainer's number actually lives.
         jdbc.update("""
                 INSERT INTO app_user (id, phone, role) VALUES (gen_random_uuid(), :phone, 'trainer')
                 ON CONFLICT (phone) DO NOTHING
                 """, Map.of("phone", phone));
-        return UUID.fromString(jdbc.queryForObject(
-                "SELECT id::text FROM trainer WHERE phone = :phone",
+        UUID appUserId = UUID.fromString(jdbc.queryForObject(
+                "SELECT id::text FROM app_user WHERE phone = :phone",
                 Map.of("phone", phone), String.class));
+        jdbc.update("""
+                INSERT INTO trainer (id, app_user_id, name) VALUES (gen_random_uuid(), :appUserId::uuid, :phone)
+                ON CONFLICT (app_user_id) DO NOTHING
+                """, Map.of("appUserId", appUserId.toString(), "phone", phone));
+        return UUID.fromString(jdbc.queryForObject(
+                "SELECT id::text FROM trainer WHERE app_user_id = :appUserId::uuid",
+                Map.of("appUserId", appUserId.toString()), String.class));
     }
 
     private String phoneOfTrainer(UUID id) {
         // `repo.save()` does not flush, and this class is @Transactional, so a
         // raw read can precede the UPDATE that the assertion is about.
         em.flush();
-        return jdbc.queryForObject("SELECT phone FROM trainer WHERE id = :id",
-                Map.of("id", id), String.class);
+        return jdbc.queryForObject("""
+                SELECT au.phone FROM trainer t JOIN app_user au ON au.id = t.app_user_id
+                WHERE t.id = :id
+                """, Map.of("id", id), String.class);
     }
 
     private Object deletedAtOfTrainer(UUID id) {

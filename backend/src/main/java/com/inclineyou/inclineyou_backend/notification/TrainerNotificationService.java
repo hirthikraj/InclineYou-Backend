@@ -84,14 +84,13 @@ public class TrainerNotificationService {
         return feed(trainerId);
     }
 
-    static final List<String> KINDS = List.of("payment", "cancelled", "metric", "team");
+    static final List<String> KINDS = List.of("payment", "cancelled", "metric");
 
     /**
      * Put one row on {@code recipient}'s bell, in the caller's transaction.
      *
-     * @param kind  payment · cancelled · metric · team
-     * @param text  per kind — the method or 'gym'; a day label; "value unit";
-     *              the coach the client moved to
+     * @param kind  payment · cancelled · metric
+     * @param text  per kind — the method or 'gym'; a day label; "value unit"
      */
     public void mint(UUID recipient, String kind, UUID clientId, BigDecimal amount, Instant subjectAt, String text) {
         if (!KINDS.contains(kind)) throw new IllegalArgumentException("unknown trainer notification kind: " + kind);

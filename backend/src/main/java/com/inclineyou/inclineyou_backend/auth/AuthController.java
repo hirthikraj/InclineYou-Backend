@@ -17,8 +17,15 @@ public class AuthController {
 
     private final AuthService authService;
 
-    static final String PHONE_PATTERN = "^[6-9]\\d{9}$";
-    static final String PHONE_MESSAGE = "must be a valid 10-digit Indian mobile number";
+    /**
+     * {@code +91} plus a 10-digit number starting 6–9 — the shape
+     * {@code app_user_phone_format} actually enforces (and the one
+     * {@code api-contract.html}'s {@code PHONE_INVALID} names), not the bare
+     * 10 digits an older mobile build sent. Every phone that reaches this
+     * backend is stored and compared in this one shape from here on.
+     */
+    static final String PHONE_PATTERN = "^\\+91[6-9]\\d{9}$";
+    static final String PHONE_MESSAGE = "must be a valid Indian mobile number, e.g. +919876543210";
 
     static final String OTP_PATTERN = "^\\d{6}$";
     static final String OTP_MESSAGE = "must be a 6-digit code";
@@ -53,11 +60,22 @@ public class AuthController {
         return ResponseEntity.ok(authService.verifyOtp(body.phone(), body.otp()));
     }
 
+    /**
+     * The notice was accepted on the screen that led here — see
+     * api-contract.html#auth-a4. {@code app_user_privacy_pair} requires this
+     * alongside {@code privacyAcceptedAt}, which is why the field is required
+     * rather than optional: a trainer row with one and not the other is a
+     * consent the database cannot represent as either given or not given.
+     */
+    public record ClaimTrainerBody(
+            @NotBlank String privacyPolicyVersion
+    ) {}
+
     //Claiming an app user as "Trainer"
     @PostMapping("/trainer")
-    public ResponseEntity<AuthService.AuthResponse> claimTrainer() {
+    public ResponseEntity<AuthService.AuthResponse> claimTrainer(@Valid @RequestBody ClaimTrainerBody body) {
         var claims = SecurityContextHolder.getContext().getAuthentication();
-        return ResponseEntity.ok(authService.claimTrainer(claims.getName()));
+        return ResponseEntity.ok(authService.claimTrainer(claims.getName(), body.privacyPolicyVersion()));
     }
 
     /** Accept an invite. Also stamps the privacy acceptance the screen carried. */

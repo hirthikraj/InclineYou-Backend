@@ -40,11 +40,11 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
      * declined, a trainer whose row was soft-deleted — and an INNER JOIN would
      * turn them into "unknown number" and offer them a brand-new account.
      *
-     * Ad-hoc entity joins on `phone` rather than on a mapped association,
-     * because there is no FK to map: the same phone is the join key by design,
-     * and adding FKs from `trainer` and `client` to `app_user` would mean
-     * rewriting two live tables to introduce a column the schema law says we
-     * cannot retype later.
+     * Ad-hoc entity joins, because there is no association to map for either:
+     * `client` still only carries a phone, not an `app_user_id`, so that half
+     * joins on the number the way it always did; `trainer` now HAS the FK
+     * (`app_user_id`, since the 25 Sep 2026 schema rebuild), so that half
+     * joins on it rather than on phone.
      *
      * Rows multiply by membership — one person on two trainers' rosters is two
      * rows and one human being. That is still one round trip, and the caller
@@ -71,11 +71,11 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
                    c.removedAt         AS removedAt,
                    c.removedAckAt      AS removedAckAt,
                    ct.name             AS coachName,
-                   ct.gymName          AS coachGymName,
-                   ct.phone            AS coachPhone
+                   ctb.gymName         AS coachGymName,
+                   ctu.phone           AS coachPhone
             FROM AppUser u
             LEFT JOIN Trainer t
-                   ON t.phone = u.phone
+                   ON t.appUserId = u.id
                   AND t.deletedAt IS NULL
             LEFT JOIN Client c
                    ON c.phone = u.phone
@@ -83,6 +83,10 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
             LEFT JOIN Trainer ct
                    ON ct.id = c.trainerId
                   AND ct.deletedAt IS NULL
+            LEFT JOIN TrainerBusiness ctb
+                   ON ctb.trainerId = ct.id
+            LEFT JOIN AppUser ctu
+                   ON ctu.id = ct.appUserId
             WHERE u.phone = :phone
               AND u.deletedAt IS NULL
             ORDER BY c.createdAt ASC

@@ -57,23 +57,32 @@ class PaymentBillingTest {
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
         jdbc.update("""
-                INSERT INTO trainer (id, phone, name) VALUES (gen_random_uuid(), '9100000801', 'B')
+                INSERT INTO app_user (id, phone, role) VALUES (gen_random_uuid(), '+919100000801', 'trainer')
                 ON CONFLICT (phone) DO NOTHING
                 """, Map.of());
+        String appUserId = jdbc.queryForObject(
+                "SELECT id::text FROM app_user WHERE phone = '+919100000801'", Map.of(), String.class);
+        jdbc.update("""
+                INSERT INTO trainer (id, app_user_id, name) VALUES (gen_random_uuid(), :appUserId::uuid, 'B')
+                ON CONFLICT (app_user_id) DO NOTHING
+                """, Map.of("appUserId", appUserId));
         owner = UUID.fromString(jdbc.queryForObject(
-                "SELECT id::text FROM trainer WHERE phone = '9100000801'", Map.of(), String.class));
+                "SELECT id::text FROM trainer WHERE app_user_id = :appUserId::uuid",
+                Map.of("appUserId", appUserId), String.class));
         client = UUID.randomUUID();
-        jdbc.update("INSERT INTO client (id, trainer_id, name) VALUES (:id::uuid, :tid::uuid, 'Meera')",
-                Map.of("id", client.toString(), "tid", owner.toString()));
+        jdbc.update("""
+                INSERT INTO client (id, trainer_id, name, client_type)
+                VALUES (:id::uuid, :tid::uuid, 'Meera', 'independent')
+                """, Map.of("id", client.toString(), "tid", owner.toString()));
         pack = UUID.randomUUID();
         var p = new HashMap<String, Object>();
         p.put("id", pack.toString());
         p.put("tid", owner.toString());
         p.put("cid", client.toString());
         jdbc.update("""
-                INSERT INTO package (id, trainer_id, client_id, type, sessions_total,
-                    sessions_remaining, amount, status)
-                VALUES (:id::uuid, :tid::uuid, :cid::uuid, 'session_pack', 12, 12, 6000, 'active')
+                INSERT INTO package (id, trainer_id, client_id, name, service, sessions_total,
+                    sessions_remaining, amount, currency, status)
+                VALUES (:id::uuid, :tid::uuid, :cid::uuid, 'Session pack', 'floor', 12, 12, 6000, 'INR', 'active')
                 """, p);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(

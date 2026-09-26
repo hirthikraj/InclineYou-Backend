@@ -1,6 +1,7 @@
 package com.inclineyou.inclineyou_backend.auth;
 
 import com.inclineyou.inclineyou_backend.config.AppProperties;
+import com.inclineyou.inclineyou_backend.repository.AppUserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -47,6 +48,7 @@ public class SessionTokenIssuer implements AuthTokenIssuer {
 
     private final SessionStore sessions;
     private final AppProperties props;
+    private final AppUserRepository appUserRepo;
 
     public static final String KIND = "session";
     public static final String PREFIX = "xs_";
@@ -71,10 +73,26 @@ public class SessionTokenIssuer implements AuthTokenIssuer {
         Instant now = Instant.now();
         Instant expires = now.plus(props.getSession().getExpiryHours(), ChronoUnit.HOURS);
 
+        // web_session.app_user_id is NOT NULL — there is no phone column here
+        // to fall back on the way a JWT can. Resolved by phone rather than
+        // threaded through eight AuthService call sites for the same reason
+        // AuthTokenService reads its own header: a storage concern of ONE
+        // issuer, not a shape every caller of `issue` needs to know about.
+        //
+        // KNOWN GAP: a brand-new number (role `pending`, verified but never
+        // claimed) has no app_user row yet, so this resolves to null and
+        // `sessions.save` refuses it — the web cannot yet hold a `pending`
+        // session. Fixing that is a schema question (an `app_user` row with
+        // no committed role, or a nullable `app_user_id`) for whoever builds
+        // out the rest of the sign-in contract, not a issuer-local patch.
+        UUID appUserId = appUserRepo.findByPhoneAndDeletedAtIsNull(p.phone())
+                .map(com.inclineyou.inclineyou_backend.entity.AppUser::getId)
+                .orElse(null);
+
         sessions.save(new SessionStore.Session(
                 UUID.randomUUID(), hash(token),
                 p.subject(), p.phone(), p.role(),
-                null, p.tenantId(),
+                appUserId, p.tenantId(),
                 now, now, expires, null,
                 context == null ? null : context.truncatedUserAgent()));
 

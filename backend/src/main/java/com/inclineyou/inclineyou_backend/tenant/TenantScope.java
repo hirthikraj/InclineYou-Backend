@@ -140,6 +140,12 @@ public class TenantScope {
     public List<Membership> membershipsFor(String phone) {
         if (phone == null || phone.isBlank()) return List.of();
         var out = new ArrayList<Membership>();
+        // `revenue_share_percent` / `assignment_margin_percent` are read as
+        // literal NULLs: they are Ring-2 gym-platform columns (the admin's
+        // per-assignment commission) that never made it into the 25 Sep 2026
+        // rebuild's 41 tables, so `tenant_member` has no such columns yet. Every
+        // membership answers "no split" until that migration lands, rather than
+        // this query failing on every request.
         for (var row : jdbc.queryForList("""
                 SELECT tm.id::text            AS member_id,
                        tm.tenant_id::text     AS tenant_id,
@@ -147,10 +153,10 @@ public class TenantScope {
                        t.type                 AS tenant_type,
                        tm.role                AS role,
                        tm.is_home             AS is_home,
-                       tm.revenue_share_percent      AS revenue_share_percent,
-                       tm.assignment_margin_percent  AS assignment_margin_percent
+                       NULL::numeric          AS revenue_share_percent,
+                       NULL::numeric          AS assignment_margin_percent
                 FROM tenant_member tm
-                JOIN tenant   t  ON t.id = tm.tenant_id AND t.deleted_at IS NULL
+                JOIN tenant   t  ON t.id = tm.tenant_id
                 JOIN app_user au ON au.id = tm.app_user_id
                 WHERE au.phone = :phone
                   AND au.deleted_at IS NULL

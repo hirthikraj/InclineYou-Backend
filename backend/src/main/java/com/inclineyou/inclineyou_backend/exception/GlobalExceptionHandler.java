@@ -5,16 +5,14 @@ import com.inclineyou.inclineyou_backend.auth.OtpExpiredException;
 import com.inclineyou.inclineyou_backend.auth.OtpLockedException;
 import com.inclineyou.inclineyou_backend.auth.OtpThrottledException;
 import com.inclineyou.inclineyou_backend.client.ClientRuleException;
-import com.inclineyou.inclineyou_backend.portal.PortalRuleException;
 import com.inclineyou.inclineyou_backend.program.ProgramRuleException;
 import com.inclineyou.inclineyou_backend.workout.WorkoutRuleException;
 import com.inclineyou.inclineyou_backend.client.PhoneUnavailableException;
 import com.inclineyou.inclineyou_backend.nudge.NudgeRuleException;
 import com.inclineyou.inclineyou_backend.assessment.AssessmentRuleException;
 import com.inclineyou.inclineyou_backend.payment.PackRuleException;
-import com.inclineyou.inclineyou_backend.trainer.AccountRuleException;
+import com.inclineyou.inclineyou_backend.trainer.account.AccountRuleException;
 import com.inclineyou.inclineyou_backend.payment.PackageRuleException;
-import com.inclineyou.inclineyou_backend.team.TeamRuleException;
 import com.inclineyou.inclineyou_backend.tenant.TenantRuleException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -91,24 +89,6 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * Team rules, all fifteen of them, through one handler.
-     *
-     * The exception carries its own status because these failures genuinely
-     * differ: 403 when the caller is in the team but not high enough, 404 when
-     * the thing is outside their team (the standing cross-trainer convention,
-     * unchanged), 409 when the state says no, 410 for a lapsed invitation, and
-     * 422 for a request that is well-formed and asks for something that cannot
-     * exist. `code` is what the app branches on in every case.
-     */
-    @ExceptionHandler(TeamRuleException.class)
-    ResponseEntity<ProblemDetail> handleTeamRule(TeamRuleException ex) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
-        pd.setProperty("code", ex.getCode());
-        if (ex.getSeatLimit() != null) pd.setProperty("seatLimit", ex.getSeatLimit());
-        return ResponseEntity.status(ex.getStatus()).body(pd);
-    }
-
-    /**
      * A workspace rule said no.
      *
      * <p>Same shape as the team handler above, and the statuses mean the same
@@ -161,14 +141,6 @@ public class GlobalExceptionHandler {
      * because every refusal here names something the trainer must act on and
      * cannot guess. See {@code AccountRuleException}.
      */
-    /** A client-portal rule said no. See {@code PortalRuleException}. */
-    @ExceptionHandler(PortalRuleException.class)
-    ResponseEntity<ProblemDetail> handlePortalRule(PortalRuleException ex) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
-        pd.setProperty("code", ex.getCode());
-        return ResponseEntity.status(ex.getStatus()).body(pd);
-    }
-
     /** A saved workout was refused. See {@code WorkoutRuleException}. */
     @ExceptionHandler(WorkoutRuleException.class)
     ResponseEntity<ProblemDetail> handleWorkoutRule(WorkoutRuleException ex) {

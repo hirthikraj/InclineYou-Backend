@@ -212,11 +212,10 @@ public class ClientHandoverService {
 
         jdbc.update("""
                 INSERT INTO client_assignment
-                    (client_id, tenant_id, team_id, from_trainer_id, to_trainer_id,
+                    (client_id, tenant_id, from_trainer_id, to_trainer_id,
                      actor_trainer_id, program_action, note, actor_margin_percent, reason)
                 VALUES
                     (:cid::uuid, :tid::uuid,
-                     (SELECT id FROM team WHERE tenant_id = :tid::uuid AND deleted_at IS NULL LIMIT 1),
                      :from::uuid, :to::uuid,
                      COALESCE((SELECT t.id FROM trainer t
                                JOIN app_user au ON au.phone = t.phone

@@ -280,7 +280,7 @@ public class AuthService {
      * {@code POST /v1/auth/mode/client}.
      */
     @Transactional
-    public AuthResponse claimTrainer(String phone) {
+    public AuthResponse claimTrainer(String phone, String privacyPolicyVersion) {
         // Pending token brings phone alone and Trainer token brings trainer Id. If phone is null means someone already logged in as trainer with this phone.
         if (phone == null || !phone.matches(AuthController.PHONE_PATTERN)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
@@ -289,33 +289,54 @@ public class AuthService {
 
         Optional<AppUser> existing = appUserRepo.findByPhoneAndDeletedAtIsNull(phone);
 
-        Trainer trainer = trainerRepo.findByPhoneAndDeletedAtIsNull(phone)
+        AppUser user;
+        if (existing.isEmpty()) {
+            user = new AppUser();
+            user.setPhone(phone);
+            user.setRole(AppUser.ROLE_TRAINER);
+            // Both together, always — `app_user_privacy_pair` refuses one
+            // without the other, because a row that has accepted "something"
+            // with no version on it is not a consent the product can point to.
+            user.setPrivacyAcceptedAt(Instant.now());
+            user.setPrivacyPolicyVersion(privacyPolicyVersion);
+            user = appUserRepo.save(user);
+        } else {
+            user = existing.get();
+            if (!AppUser.ROLE_TRAINER.equals(user.getRole())) {
+                user.setRole(AppUser.ROLE_TRAINER);
+                user = appUserRepo.save(user);
+            }
+        }
+
+        UUID appUserId = user.getId();
+        Trainer trainer = trainerRepo.findByAppUserIdAndDeletedAtIsNull(appUserId)
                 .orElseGet(() -> {
                     Trainer t = new Trainer();
-                    t.setPhone(phone);
+                    t.setAppUserId(appUserId);
+                    // Same placeholder as the old phone-on-trainer shape: not a
+                    // real name until setup replaces it — displayName() below
+                    // is what keeps it off screen until then.
                     t.setName(phone);
+                    // home_tenant_id is left null on purpose. `ensure_home_tenant`
+                    // (BEFORE INSERT, SECURITY DEFINER) fills it, and the three
+                    // AFTER INSERT triggers behind it — ensure_home_membership,
+                    // ensure_trainer_business, ensure_subscription — provision the
+                    // owner membership, the practice row and the trial in the
+                    // same INSERT. Doing any of that here, as the request-scoped
+                    // `inclineyou_app` role, would hit `tenant`'s row-level
+                    // security head-on: there is no INSERT policy for it at all,
+                    // by design, because nothing outside these triggers is
+                    // supposed to create a workspace.
                     return trainerRepo.save(t);
                 });
 
-        if (existing.isEmpty()) {
-            AppUser user = new AppUser();
-            user.setPhone(phone);
-            user.setRole(AppUser.ROLE_TRAINER);
-            user.setPrivacyAcceptedAt(Instant.now());
-            appUserRepo.save(user);
-        } else if (!AppUser.ROLE_TRAINER.equals(existing.get().getRole())) {
-            AppUser user = existing.get();
-            user.setRole(AppUser.ROLE_TRAINER);
-            appUserRepo.save(user);
-        }
-
         return new AuthResponse(
-                mintTrainer(trainer.getId(), trainer.getPhone()),
+                mintTrainer(trainer.getId(), phone),
                 trainer.getId().toString(),
                 true,
                 trainer.getSetupCompletedAt() != null,
                 VIEW_TRAINER,
-                displayName(trainer.getName(), trainer.getPhone()),
+                displayName(trainer.getName(), phone),
                 List.of(),
                 null,
                 null);
@@ -401,8 +422,10 @@ public class AuthService {
      */
     public String resolveCallerPhone(String subject, boolean isTrainerToken) {
         if (!isTrainerToken) return subject;
-        return trainerRepo.findById(UUID.fromString(subject))
-                .map(Trainer::getPhone)
+        Trainer trainer = trainerRepo.findById(UUID.fromString(subject))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found."));
+        return appUserRepo.findById(trainer.getAppUserId())
+                .map(AppUser::getPhone)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found."));
     }
 

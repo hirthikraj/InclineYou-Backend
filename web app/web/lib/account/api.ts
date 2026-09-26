@@ -221,6 +221,15 @@ export async function patchAccount(patch: { name?: string; email?: string }): Pr
 
 /* ──────────────────────────────────────────────────── changing the number ── */
 
+/**
+ * `AccountController.PHONE_PATTERN` is `^\+91[6-9]\d{9}$` — same shape
+ * `lib/auth/api.ts` adds `+91` for. Callers here only ever hold the 10 digits
+ * a trainer typed, so the prefix is added at this wire boundary.
+ */
+function withCountryCode(phone: string): string {
+  return `+91${phone}`;
+}
+
 /** 1 · a code to the number they are signed in with. */
 export async function challengeCurrentPhone(): Promise<void> {
   await request<void>('/v1/trainers/me/phone/challenge', { method: 'POST' });
@@ -239,7 +248,7 @@ export async function verifyCurrentPhone(otp: string): Promise<string> {
 export async function requestNewPhone(ticket: string, phone: string): Promise<void> {
   await request<void>('/v1/trainers/me/phone/request', {
     method: 'POST',
-    body: JSON.stringify({ ticket, phone }),
+    body: JSON.stringify({ ticket, phone: withCountryCode(phone) }),
   });
 }
 
@@ -258,7 +267,7 @@ export async function confirmNewPhone(
 ): Promise<{ phone: string; token: string }> {
   return request<{ phone: string; token: string }>('/v1/trainers/me/phone/confirm', {
     method: 'POST',
-    body: JSON.stringify({ ticket, phone, otp }),
+    body: JSON.stringify({ ticket, phone: withCountryCode(phone), otp }),
   });
 }
 

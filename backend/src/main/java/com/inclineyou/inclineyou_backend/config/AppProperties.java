@@ -18,7 +18,6 @@ public class AppProperties {
     private Fcm fcm = new Fcm();
     private RateLimit rateLimit = new RateLimit();
     private Redis redis = new Redis();
-    private Team team = new Team();
     private Session session = new Session();
     private Tenant tenant = new Tenant();
     private Database database = new Database();
@@ -127,31 +126,6 @@ public class AppProperties {
     @Setter
     public static class Redis {
         private boolean enabled = true;
-    }
-
-    /**
-     * Team coaching — a senior trainer running a team of trainers.
-     *
-     * See {@code agent/InclineYou_team_coaching_prd.md}. All three values are
-     * env-overridable because all three are guesses that cost nothing to be
-     * wrong about: the seat limit is enforced when an invite is accepted, so
-     * raising it is an env change rather than a migration.
-     */
-    @Getter
-    @Setter
-    public static class Team {
-        /**
-         * The kill switch. Off, and every {@code /v1/team/**} endpoint answers
-         * 404 and no caller's read scope widens — the same shape
-         * {@code BATCHES_ENABLED} takes on the app side.
-         */
-        private boolean enabled = true;
-
-        /** Seats a new team starts with. Null on the team row means unlimited. */
-        private int defaultSeatLimit = 5;
-
-        /** How long an invitation stays answerable. */
-        private int inviteExpiryDays = 14;
     }
 
     @Getter
@@ -271,9 +245,6 @@ public class AppProperties {
          * this path is the per-number OTP throttle in {@link Otp}.
          */
         private Tier auth = new Tier(300, 60);
-
-        /** `/v1/sync/**` and `/v1/client/sync/**` — chatty by design, on reconnect. */
-        private Tier sync = new Tier(60, 60);
 
         /** Anything that spends money per call: a WhatsApp nudge, a weekly report. */
         private Tier messaging = new Tier(10, 60);

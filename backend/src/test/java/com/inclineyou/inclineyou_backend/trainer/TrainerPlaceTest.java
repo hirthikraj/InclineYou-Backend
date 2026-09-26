@@ -39,10 +39,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *       worked. Every shape below has to come back exactly as sent;</li>
  *   <li><b>but it is still refused when it is not a URL.</b> The one failure a
  *       trainer would not otherwise discover until a client tapped it;</li>
- *   <li><b>`training_modes` is not `work_mode`.</b> They are on the same screen
- *       and neither is derivable from the other — a gym trainer who takes home
- *       visits is the case the whole column exists for — so writing one must
- *       never touch the other;</li>
+ *   <li><b>`gym_name` and `training_modes` are two fields</b> that touch only
+ *       through {@code trainer_business_gym_needs_floor} — a gym name needs
+ *       {@code gym_floor} among the modes, and nothing else about one writes
+ *       the other;</li>
  *   <li><b>null leaves alone, [] clears.</b> The rule the entire profile
  *       endpoint rests on, and the one a later refactor collapses into "ignore
  *       blanks".</li>
@@ -64,7 +64,7 @@ class TrainerPlaceTest {
     @BeforeEach
     void setUp() {
         mvc = MockMvcBuilders.webAppContextSetup(context).build();
-        me = trainer("9100000340");
+        me = trainer("+919100000340");
         signedInAs(me);
     }
 
@@ -145,24 +145,24 @@ class TrainerPlaceTest {
     }
 
     @Test
-    @DisplayName("how you coach and how you are paid are two columns, and neither writes the other")
+    @DisplayName("the gym name and the training modes are two fields, and neither writes the other")
     void trainingModesAreNotWorkMode() throws Exception {
-        // The case the column exists for: a gym trainer who also travels.
+        // `trainer_business_gym_needs_floor` is the one place they touch: a
+        // gym name needs `gym_floor` among the modes, checked in the service
+        // so a trainer meets a sentence rather than a raw constraint violation.
         patchMe("""
-                {"workMode":"gym","gymName":"Iron House","gymSharePercent":50}
+                {"gymName":"Iron House","trainingModes":["gym_floor"]}
                 """).andExpect(status().isOk());
 
         patchMe("""
                 {"trainingModes":["gym_floor","home_visit"],"serviceAreas":["Adyar","Besant Nagar"]}
                 """)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.workMode").value("gym"))
-                .andExpect(jsonPath("$.gymName").value("Iron House"))
-                .andExpect(jsonPath("$.gymSharePercent").value(50));
+                .andExpect(jsonPath("$.gymName").value("Iron House"));
 
-        // And back the other way: changing the arrangement leaves the delivery alone.
+        // And back the other way: renaming the gym leaves the delivery alone.
         patchMe("""
-                {"workMode":"both"}
+                {"gymName":"Iron House Gym"}
                 """)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.trainingModes[1]").value("home_visit"))
@@ -170,21 +170,30 @@ class TrainerPlaceTest {
     }
 
     @Test
-    @DisplayName("leaving the gym clears its name and its share together")
-    void clearingTheGymClearsTheShare() throws Exception {
+    @DisplayName("a gym name needs gym_floor among the modes, or it is refused")
+    void gymNameNeedsGymFloor() throws Exception {
         patchMe("""
-                {"workMode":"gym","gymName":"Iron House","gymSharePercent":50}
+                {"gymName":"Iron House"}
+                """).andExpect(status().isBadRequest());
+
+        patchMe("""
+                {"trainingModes":["home_visit"],"gymName":"Iron House"}
+                """).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("leaving the gym clears its name")
+    void clearingTheGymClearsItsName() throws Exception {
+        patchMe("""
+                {"gymName":"Iron House","trainingModes":["gym_floor"]}
                 """).andExpect(status().isOk());
 
-        // The Work & hours tab sends this when a trainer picks "on my own". A
-        // percentage with nobody to take it is not an arrangement — so the two
-        // move together, and the web says so above the button.
+        // The Work & hours tab sends this when a trainer picks "on my own".
         patchMe("""
-                {"workMode":"independent","gymName":"","mapLink":""}
+                {"gymName":"","mapLink":""}
                 """)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.gymName").doesNotExist())
-                .andExpect(jsonPath("$.gymSharePercent").doesNotExist());
+                .andExpect(jsonPath("$.gymName").doesNotExist());
     }
 
     @Test
@@ -214,12 +223,19 @@ class TrainerPlaceTest {
 
     private UUID trainer(String phone) {
         jdbc.update("""
-                INSERT INTO trainer (id, phone, name) VALUES (gen_random_uuid(), :phone, :phone)
+                INSERT INTO app_user (id, phone, role) VALUES (gen_random_uuid(), :phone, 'trainer')
                 ON CONFLICT (phone) DO NOTHING
                 """, Map.of("phone", phone));
+        String appUserId = jdbc.queryForObject(
+                "SELECT id::text FROM app_user WHERE phone = :phone",
+                Map.of("phone", phone), String.class);
+        jdbc.update("""
+                INSERT INTO trainer (id, app_user_id, name) VALUES (gen_random_uuid(), :appUserId::uuid, :phone)
+                ON CONFLICT (app_user_id) DO NOTHING
+                """, Map.of("appUserId", appUserId, "phone", phone));
         return UUID.fromString(jdbc.queryForObject(
-                "SELECT id::text FROM trainer WHERE phone = :phone",
-                Map.of("phone", phone), String.class));
+                "SELECT id::text FROM trainer WHERE app_user_id = :appUserId::uuid",
+                Map.of("appUserId", appUserId), String.class));
     }
 
     private void signedInAs(UUID trainerId) {

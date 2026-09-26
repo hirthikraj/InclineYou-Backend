@@ -97,11 +97,13 @@ public class SecurityConfig {
                         .requestMatchers("/v1/tenants/**").authenticated()
                         .requestMatchers("/v1/auth/membership/**").hasRole("INVITED")
                         .requestMatchers("/v1/auth/**", "/health").permitAll()
-                        .requestMatchers("/v1/client/**").hasRole("CLIENT")
-                        // The client portal's REST surface (module 11). A client is
-                        // never a trainer, so nothing under /v1/me is reachable with
-                        // a trainer token, and the rule below never sees it.
-                        .requestMatchers("/v1/me", "/v1/me/**").hasRole("CLIENT")
+                        // The client portal (module 11, /v1/me/* and /v1/client/**)
+                        // is out of v1 scope (WEB_LAUNCH.md §3) and its controllers
+                        // were removed rather than kept unreachable — so GET /v1/me
+                        // now has exactly one meaning: the trainer shell's own
+                        // session read (api-contract.html §Today, L1), and no path
+                        // needs a ROLE_CLIENT carve-out from the trainer catch-all
+                        // below.
                         .anyRequest().hasRole("TRAINER")
                 )
                 .exceptionHandling(ex -> ex

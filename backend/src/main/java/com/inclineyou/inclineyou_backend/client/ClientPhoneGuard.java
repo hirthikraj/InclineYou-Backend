@@ -114,8 +114,8 @@ public class ClientPhoneGuard {
         var row = jdbc.queryForMap("""
                 SELECT
                     EXISTS(
-                        SELECT 1 FROM trainer
-                        WHERE phone = :phone AND id = :tid::uuid AND deleted_at IS NULL
+                        SELECT 1 FROM trainer t JOIN app_user au ON au.id = t.app_user_id
+                        WHERE au.phone = :phone AND t.id = :tid::uuid AND t.deleted_at IS NULL
                     ) AS is_self,
                     EXISTS(
                         SELECT 1 FROM client

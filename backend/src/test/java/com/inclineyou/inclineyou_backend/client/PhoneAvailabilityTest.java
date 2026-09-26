@@ -48,10 +48,10 @@ class PhoneAvailabilityTest {
 
     private MockMvc mvc;
 
-    private static final String ASKER_PHONE = "9100000010";
-    private static final String TRAINER_PHONE = "9100000011";
-    private static final String FREE_PHONE = "9100000012";
-    private static final String ROSTER_PHONE = "9100000013";
+    private static final String ASKER_PHONE = "+919100000010";
+    private static final String TRAINER_PHONE = "+919100000011";
+    private static final String FREE_PHONE = "+919100000012";
+    private static final String ROSTER_PHONE = "+919100000013";
 
     private UUID asker;
 
@@ -61,10 +61,6 @@ class PhoneAvailabilityTest {
 
         asker = trainer(ASKER_PHONE);
         trainer(TRAINER_PHONE);
-        jdbc.update("""
-                INSERT INTO app_user (phone, role) VALUES (:p, 'trainer')
-                ON CONFLICT (phone) DO NOTHING
-                """, Map.of("p", TRAINER_PHONE));
 
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken(
@@ -118,8 +114,8 @@ class PhoneAvailabilityTest {
     @DisplayName("the asker's own ARCHIVED client frees the number again")
     void ownArchivedClientDoesNotBlock() throws Exception {
         jdbc.update("""
-                INSERT INTO client (id, trainer_id, name, phone, status, membership_status)
-                VALUES (gen_random_uuid(), :tid::uuid, 'Meera', :p, 'archived', 'removed')
+                INSERT INTO client (id, trainer_id, name, phone, status, membership_status, removed_at, client_type)
+                VALUES (gen_random_uuid(), :tid::uuid, 'Meera', :p, 'archived', 'removed', now(), 'independent')
                 """, Map.of("tid", asker.toString(), "p", ROSTER_PHONE));
 
         ask(ROSTER_PHONE)
@@ -143,18 +139,25 @@ class PhoneAvailabilityTest {
 
     private void ownClient(String phone, String name, String membership) {
         jdbc.update("""
-                INSERT INTO client (id, trainer_id, name, phone, membership_status)
-                VALUES (gen_random_uuid(), :tid::uuid, :name, :p, :m)
+                INSERT INTO client (id, trainer_id, name, phone, membership_status, invited_at, accepted_at, client_type)
+                VALUES (gen_random_uuid(), :tid::uuid, :name, :p, :m, now(),
+                        CASE WHEN :m = 'accepted' THEN now() END, 'independent')
                 """, Map.of("tid", asker.toString(), "name", name, "p", phone, "m", membership));
     }
 
     private UUID trainer(String phone) {
         jdbc.update("""
-                INSERT INTO trainer (id, phone, name) VALUES (gen_random_uuid(), :phone, :phone)
+                INSERT INTO app_user (id, phone, role) VALUES (gen_random_uuid(), :phone, 'trainer')
                 ON CONFLICT (phone) DO NOTHING
                 """, Map.of("phone", phone));
+        String appUserId = jdbc.queryForObject(
+                "SELECT id::text FROM app_user WHERE phone = :phone", Map.of("phone", phone), String.class);
+        jdbc.update("""
+                INSERT INTO trainer (id, app_user_id, name) VALUES (gen_random_uuid(), :appUserId::uuid, :phone)
+                ON CONFLICT (app_user_id) DO NOTHING
+                """, Map.of("appUserId", appUserId, "phone", phone));
         return UUID.fromString(jdbc.queryForObject(
-                "SELECT id::text FROM trainer WHERE phone = :phone",
-                Map.of("phone", phone), String.class));
+                "SELECT id::text FROM trainer WHERE app_user_id = :appUserId::uuid",
+                Map.of("appUserId", appUserId), String.class));
     }
 }

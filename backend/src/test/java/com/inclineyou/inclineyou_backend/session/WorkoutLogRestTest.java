@@ -475,8 +475,8 @@ class WorkoutLogRestTest {
     private UUID exercise(UUID trainerId, String name) {
         var id = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO exercise (id, name, is_custom, trainer_id)
-                VALUES (:id::uuid, :name, true, :tid::uuid)
+                INSERT INTO exercise (id, name, origin, trainer_id)
+                VALUES (:id::uuid, :name, 'trainer', :tid::uuid)
                 """, Map.of("id", id.toString(), "name", name, "tid", trainerId.toString()));
         return id;
     }
@@ -484,19 +484,26 @@ class WorkoutLogRestTest {
     private UUID client(UUID trainerId, String name) {
         var id = UUID.randomUUID();
         jdbc.update("""
-                INSERT INTO client (id, trainer_id, name) VALUES (:id::uuid, :tid::uuid, :name)
+                INSERT INTO client (id, trainer_id, name, client_type) VALUES (:id::uuid, :tid::uuid, :name, 'independent')
                 """, Map.of("id", id.toString(), "tid", trainerId.toString(), "name", name));
         return id;
     }
 
     private UUID trainer(String phone) {
+        String e164 = "+91" + phone;
         jdbc.update("""
-                INSERT INTO trainer (id, phone, name) VALUES (gen_random_uuid(), :phone, :phone)
+                INSERT INTO app_user (id, phone, role) VALUES (gen_random_uuid(), :phone, 'trainer')
                 ON CONFLICT (phone) DO NOTHING
-                """, Map.of("phone", phone));
+                """, Map.of("phone", e164));
+        String appUserId = jdbc.queryForObject(
+                "SELECT id::text FROM app_user WHERE phone = :phone", Map.of("phone", e164), String.class);
+        jdbc.update("""
+                INSERT INTO trainer (id, app_user_id, name) VALUES (gen_random_uuid(), :appUserId::uuid, :phone)
+                ON CONFLICT (app_user_id) DO NOTHING
+                """, Map.of("appUserId", appUserId, "phone", phone));
         return UUID.fromString(jdbc.queryForObject(
-                "SELECT id::text FROM trainer WHERE phone = :phone",
-                Map.of("phone", phone), String.class));
+                "SELECT id::text FROM trainer WHERE app_user_id = :appUserId::uuid",
+                Map.of("appUserId", appUserId), String.class));
     }
 
     private static UsernamePasswordAuthenticationToken token(UUID trainerId) {

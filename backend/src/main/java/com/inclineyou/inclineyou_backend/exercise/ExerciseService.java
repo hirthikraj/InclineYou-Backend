@@ -158,7 +158,7 @@ public class ExerciseService {
         // Build WHERE dynamically — avoids null-param type inference issues with ILIKE
         var conditions = new ArrayList<String>();
         conditions.add("deleted_at IS NULL");
-        conditions.add("(is_custom = false OR trainer_id = :tid::uuid)");
+        conditions.add("(origin = 'inclineyou' OR trainer_id = :tid::uuid)");
 
         /*
          * ?ids=a,b,c — resolve a known handful of UUIDs to their rows.
@@ -235,7 +235,7 @@ public class ExerciseService {
         var rows = jdbc.queryForList(
                 "SELECT " + EXERCISE_COLUMNS +
                 " FROM exercise " + where +
-                " ORDER BY is_custom ASC, name ASC" +
+                " ORDER BY (origin <> 'inclineyou') ASC, name ASC" +
                 (byIds ? "" : " LIMIT :limit OFFSET :offset"),
                 params);
 
@@ -256,7 +256,7 @@ public class ExerciseService {
      * The library a trainer is browsing, by where a row came from.
      *
      * <ul>
-     *   <li>{@code incline} — the catalogue ({@code is_custom = false});</li>
+     *   <li>{@code incline} — the catalogue ({@code origin = 'inclineyou'});</li>
      *   <li>{@code mine} — their own finished movements;</li>
      *   <li>{@code draft} — their own unfinished ones (drafts exist only on
      *       custom rows, so this cannot surface anybody else's);</li>
@@ -270,17 +270,21 @@ public class ExerciseService {
     private static String sourcePredicate(String source) {
         String s = source == null ? "" : source.strip().toLowerCase();
         return switch (s) {
-            case "incline" -> "is_custom = false AND status <> 'draft'";
-            case "mine"    -> "is_custom = true AND status <> 'draft'";
-            case "draft"   -> "is_custom = true AND status = 'draft'";
+            case "incline" -> "origin = 'inclineyou' AND status <> 'draft'";
+            case "mine"    -> "origin = 'trainer' AND status <> 'draft'";
+            case "draft"   -> "origin = 'trainer' AND status = 'draft'";
             default        -> "status <> 'draft'";
         };
     }
 
-    /** The one row of columns every read of this table selects. */
+    /**
+     * The one row of columns every read of this table selects. {@code image_url}
+     * and {@code video_url} are gone from the table (V22 — text-only library) but
+     * stay on the DTO as null: a response field is never removed.
+     */
     private static final String EXERCISE_COLUMNS =
             "id::text, name, muscle_group, body_part, target, equipment, movement_pattern, " +
-            "description, image_url, video_url, level, is_custom, created_at, log_type, " +
+            "description, level, origin, created_at, log_type, " +
             "status, secondary_targets::text, form_cues::text";
 
     // ── One exercise ──────────────────────────────────────────────────────────
@@ -295,7 +299,7 @@ public class ExerciseService {
         var rows = jdbc.queryForList(
                 "SELECT " + EXERCISE_COLUMNS + " FROM exercise" +
                 " WHERE id = :id::uuid AND deleted_at IS NULL" +
-                " AND (is_custom = false OR trainer_id = :tid::uuid)",
+                " AND (origin = 'inclineyou' OR trainer_id = :tid::uuid)",
                 Map.of("id", id.toString(), "tid", trainerId.toString()));
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Exercise not found");
         return toResponse(rows.get(0));
@@ -320,10 +324,10 @@ public class ExerciseService {
     public CategoriesResponse categories(UUID trainerId) {
         var rows = jdbc.queryForList("""
                 SELECT muscle_group, count(*) AS n,
-                       bool_or(NOT is_custom) AS in_catalogue
+                       bool_or(origin = 'inclineyou') AS in_catalogue
                 FROM exercise
                 WHERE deleted_at IS NULL AND status <> 'draft'
-                  AND (is_custom = false OR trainer_id = :tid::uuid)
+                  AND (origin = 'inclineyou' OR trainer_id = :tid::uuid)
                 GROUP BY muscle_group
                 """, Map.of("tid", trainerId.toString()));
 
@@ -357,10 +361,10 @@ public class ExerciseService {
                 str(r.get("equipment")),
                 str(r.get("movement_pattern")),
                 str(r.get("description")),
-                str(r.get("image_url")),
-                str(r.get("video_url")),
+                null,
+                null,
                 str(r.get("level")),
-                Boolean.TRUE.equals(r.get("is_custom")),
+                !"inclineyou".equals(str(r.get("origin"))),
                 toEpochMilli(r.get("created_at")),
                 str(r.get("log_type")),
                 r.get("status") == null ? "published" : str(r.get("status")),
@@ -415,32 +419,32 @@ public class ExerciseService {
     public MetaResponse meta() {
         var groups = stringColumn("""
                 SELECT DISTINCT muscle_group AS val FROM exercise
-                WHERE is_custom = false AND deleted_at IS NULL AND muscle_group IS NOT NULL
+                WHERE origin = 'inclineyou' AND deleted_at IS NULL AND muscle_group IS NOT NULL
                 ORDER BY val
                 """);
 
         var parts = stringColumn("""
                 SELECT DISTINCT body_part AS val FROM exercise
-                WHERE is_custom = false AND deleted_at IS NULL AND body_part IS NOT NULL
+                WHERE origin = 'inclineyou' AND deleted_at IS NULL AND body_part IS NOT NULL
                 ORDER BY val
                 """);
 
         var targets = stringColumn("""
                 SELECT DISTINCT target AS val FROM exercise
-                WHERE is_custom = false AND deleted_at IS NULL AND target IS NOT NULL
+                WHERE origin = 'inclineyou' AND deleted_at IS NULL AND target IS NOT NULL
                 ORDER BY val
                 """);
 
         var equips = stringColumn("""
                 SELECT DISTINCT equipment AS val FROM exercise
-                WHERE is_custom = false AND deleted_at IS NULL AND equipment IS NOT NULL
+                WHERE origin = 'inclineyou' AND deleted_at IS NULL AND equipment IS NOT NULL
                 ORDER BY val
                 """);
 
         // Empty since V21 — see MetaResponse. Kept so the shape does not change.
         var levels = stringColumn("""
                 SELECT DISTINCT level AS val FROM exercise
-                WHERE is_custom = false AND deleted_at IS NULL AND level IS NOT NULL
+                WHERE origin = 'inclineyou' AND deleted_at IS NULL AND level IS NOT NULL
                 ORDER BY val
                 """);
 
@@ -462,20 +466,22 @@ public class ExerciseService {
         params.put("equipment",       req.equipment());
         params.put("movementPattern", req.movementPattern());
         params.put("description",     req.description());
-        params.put("imageUrl",        req.imageUrl());
-        params.put("videoUrl",        req.videoUrl());
         params.put("logType",         logType(req.logType()));
         params.put("target",          target(req.target()));
         params.put("status",          "draft".equals(req.status()) ? "draft" : "published");
         params.put("now",             Timestamp.from(now));
 
+        // tenant_id is left unstamped on purpose — `stamp_tenant_id_if_trainer`
+        // (a BEFORE INSERT trigger) fills it from the active workspace or the
+        // trainer's home tenant, which is what `exercise_origin_ownership`
+        // requires alongside origin = 'trainer'.
         jdbc.update("""
                 INSERT INTO exercise (id, name, muscle_group, equipment, movement_pattern,
-                    description, image_url, video_url, log_type, target, status,
-                    is_custom, trainer_id, created_at, updated_at)
+                    description, log_type, target, status,
+                    origin, trainer_id, created_at, updated_at)
                 VALUES (:id::uuid, :name, :muscleGroup, :equipment, :movementPattern,
-                    :description, :imageUrl, :videoUrl, :logType, :target, :status,
-                    true, :tid::uuid, :now, :now)
+                    :description, :logType, :target, :status,
+                    'trainer', :tid::uuid, :now, :now)
                 """, params);
 
         // bodyPart stays null: it is the seeded library's ten-way taxonomy, and
@@ -484,10 +490,10 @@ public class ExerciseService {
         // different since V9 — the redesigned form asks for it as the primary
         // muscle, and it is what the library's filter reads. A custom movement
         // gets no generated cues or secondary targets: [] until somebody writes
-        // them.
+        // them. imageUrl/videoUrl are always null now — V22 dropped the columns.
         return new ExerciseResponse(
                 id.toString(), req.name(), req.muscleGroup(), null, target(req.target()), req.equipment(),
-                req.movementPattern(), req.description(), req.imageUrl(), req.videoUrl(),
+                req.movementPattern(), req.description(), null, null,
                 null, true, now.toEpochMilli(), logType(req.logType()),
                 (String) params.get("status"), List.of(), List.of()
         );

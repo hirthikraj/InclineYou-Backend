@@ -41,8 +41,8 @@ import java.util.Map;
  * a field actually changed, so restarting the app doesn't churn {@code updated_at}
  * and push 1,324 unchanged exercises down every device's sync cursor.
  *
- * <p>Seeded rows have {@code is_custom = false} and {@code trainer_id = NULL}, which is
- * what makes them visible to every trainer in {@code SyncService.fetchExercises}.
+ * <p>Seeded rows have {@code origin = 'inclineyou'} and {@code trainer_id = NULL}, which
+ * is what makes them visible to every trainer in {@code SyncService.fetchExercises}.
  */
 @Component
 @RequiredArgsConstructor
@@ -126,23 +126,21 @@ public class ExerciseSeeder implements ApplicationRunner {
     }
 
     /**
-     * {@code image_url} and {@code video_url} are written as literal NULLs rather
-     * than left out of the statement. Leaving them out would mean a row seeded
-     * before the media came out keeps its URLs forever, because {@code ON CONFLICT}
-     * only overwrites the columns it names — so the seeder would depend on V22
-     * having run to stay correct. Naming them makes "a seeded exercise carries no
-     * media" true of the code that owns these rows, including on a database
-     * restored from an older dump.
+     * No {@code image_url} / {@code video_url} — the fresh 25 Sep 2026 baseline
+     * never re-added the media columns V22 dropped, and the library stays text
+     * only. Seeded rows are the shared library, so {@code origin = 'inclineyou'}
+     * (the {@code exercise_origin_ownership} check also requires {@code trainer_id}
+     * and {@code tenant_id} NULL and {@code source_id} NOT NULL for that origin).
      */
     private static final String UPSERT_SQL = """
             INSERT INTO exercise (
                 id, name, muscle_group, body_part, target, equipment, movement_pattern,
-                description, image_url, video_url, level, metadata, is_custom, trainer_id,
+                description, level, metadata, origin, trainer_id,
                 source_id, created_at, updated_at
             )
             VALUES (
                 gen_random_uuid(), :name, :muscle_group, :body_part, :target, :equipment, NULL,
-                :description, NULL, NULL, NULL, CAST(:metadata AS jsonb), false, NULL,
+                :description, NULL, CAST(:metadata AS jsonb), 'inclineyou', NULL,
                 :source_id, NOW(), NOW()
             )
             ON CONFLICT (source_id) WHERE source_id IS NOT NULL DO UPDATE SET
@@ -152,8 +150,6 @@ public class ExerciseSeeder implements ApplicationRunner {
                 target       = EXCLUDED.target,
                 equipment    = EXCLUDED.equipment,
                 description  = EXCLUDED.description,
-                image_url    = NULL,
-                video_url    = NULL,
                 metadata     = EXCLUDED.metadata,
                 deleted_at   = NULL
             WHERE exercise.name         IS DISTINCT FROM EXCLUDED.name
@@ -162,8 +158,6 @@ public class ExerciseSeeder implements ApplicationRunner {
                OR exercise.target       IS DISTINCT FROM EXCLUDED.target
                OR exercise.equipment    IS DISTINCT FROM EXCLUDED.equipment
                OR exercise.description  IS DISTINCT FROM EXCLUDED.description
-               OR exercise.image_url    IS NOT NULL
-               OR exercise.video_url    IS NOT NULL
                OR exercise.metadata     IS DISTINCT FROM EXCLUDED.metadata
                OR exercise.deleted_at   IS NOT NULL
             """;

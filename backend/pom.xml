@@ -140,6 +140,35 @@
 
 	<build>
 		<plugins>
+			<!--
+			  Pins the COMPILER, not the JVM Maven itself runs on: whatever JDK
+			  launches `mvnw` (JAVA_HOME/PATH), javac still forks onto this
+			  toolchain's JDK 21 for compilation. That is the fix that matters —
+			  Lombok patches javac's internals, and it silently produces nothing
+			  on a JDK newer than what it was built to patch, cascading into
+			  every Lombok-generated getter/setter/log field failing at once.
+			  Needs ~/.m2/toolchains.xml on each machine naming its own JDK 21
+			  path; that file is per-machine and deliberately not committed here.
+			-->
+			<plugin>
+				<groupId>org.apache.maven.plugins</groupId>
+				<artifactId>maven-toolchains-plugin</artifactId>
+				<version>3.2.0</version>
+				<executions>
+					<execution>
+						<goals>
+							<goal>toolchain</goal>
+						</goals>
+					</execution>
+				</executions>
+				<configuration>
+					<toolchains>
+						<jdk>
+							<version>21</version>
+						</jdk>
+					</toolchains>
+				</configuration>
+			</plugin>
 			<plugin>
 				<groupId>org.springframework.boot</groupId>
 				<artifactId>spring-boot-maven-plugin</artifactId>

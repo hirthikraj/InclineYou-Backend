@@ -48,7 +48,7 @@ import static org.mockito.Mockito.when;
 @MockitoSettings(strictness = Strictness.LENIENT)
 class AuthServiceTest {
 
-    private static final String PHONE = "9876543210";
+    private static final String PHONE = "+919876543210";
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
     @Mock AppUserRepository appUserRepo;
@@ -267,17 +267,20 @@ class AuthServiceTest {
     void clientCanClaimTrainer() {
         stubTokens();
         var existing = new AppUser();
+        existing.setId(UUID.randomUUID());
         existing.setPhone(PHONE);
         existing.setRole(AppUser.ROLE_CLIENT);
         when(appUserRepo.findByPhoneAndDeletedAtIsNull(PHONE)).thenReturn(java.util.Optional.of(existing));
-        when(trainerRepo.findByPhoneAndDeletedAtIsNull(PHONE)).thenReturn(java.util.Optional.empty());
+        when(appUserRepo.save(org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> inv.getArgument(0));
+        when(trainerRepo.findByAppUserIdAndDeletedAtIsNull(existing.getId()))
+                .thenReturn(java.util.Optional.empty());
         when(trainerRepo.save(org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> {
             var t = (com.inclineyou.inclineyou_backend.entity.Trainer) inv.getArgument(0);
             t.setId(UUID.randomUUID());
             return t;
         });
 
-        var res = auth.claimTrainer(PHONE);
+        var res = auth.claimTrainer(PHONE, "2026-09");
 
         assertThat(res.role()).isEqualTo(AuthService.VIEW_TRAINER);
         assertThat(res.token()).isNotNull();

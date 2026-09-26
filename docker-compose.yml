@@ -62,7 +62,6 @@ services:
       OTP_DEV_CODES_IN_LOG: ${OTP_DEV_CODES_IN_LOG:-false}
       RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
       SEED_EXERCISES: ${SEED_EXERCISES:-true}
-      TEAM_ENABLED: ${TEAM_ENABLED:-true}
       FCM_CREDENTIALS: ${FCM_CREDENTIALS:-}
       FORWARD_HEADERS: ${FORWARD_HEADERS:-none}
       REQUIRE_HTTPS: ${REQUIRE_HTTPS:-false}
@@ -72,7 +71,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

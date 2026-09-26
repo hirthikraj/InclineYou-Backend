@@ -61,9 +61,9 @@ class ModeSwitchTest {
     void trainerSwitchesToClient() throws Exception {
         UUID coach = trainer(COACH_PHONE);
         jdbc.update("""
-                INSERT INTO client (id, trainer_id, name, phone, membership_status)
-                VALUES (gen_random_uuid(), :tid::uuid, 'Ravi', :p, 'accepted')
-                """, Map.of("tid", coach.toString(), "p", TRAINER_PHONE));
+                INSERT INTO client (id, trainer_id, name, phone, membership_status, invited_at, accepted_at, client_type)
+                VALUES (gen_random_uuid(), :tid::uuid, 'Ravi', :p, 'accepted', NOW(), NOW(), 'independent')
+                """, Map.of("tid", coach.toString(), "p", "+91" + TRAINER_PHONE));
 
         authenticateAsTrainer(trainerId);
 
@@ -86,7 +86,7 @@ class ModeSwitchTest {
     @Test
     @DisplayName("a client whose number also owns a trainer account switches into trainer mode")
     void clientSwitchesToTrainer() throws Exception {
-        authenticateAsClient(TRAINER_PHONE);
+        authenticateAsClient("+91" + TRAINER_PHONE);
 
         mvc.perform(post("/v1/auth/mode/trainer"))
                 .andExpect(status().isOk())
@@ -118,16 +118,19 @@ class ModeSwitchTest {
     }
 
     private UUID trainer(String phone) {
+        String e164 = "+91" + phone;
         jdbc.update("""
-                INSERT INTO trainer (id, phone, name) VALUES (gen_random_uuid(), :phone, :phone)
+                INSERT INTO app_user (id, phone, role) VALUES (gen_random_uuid(), :phone, 'trainer')
                 ON CONFLICT (phone) DO NOTHING
-                """, Map.of("phone", phone));
+                """, Map.of("phone", e164));
+        String appUserId = jdbc.queryForObject(
+                "SELECT id::text FROM app_user WHERE phone = :phone", Map.of("phone", e164), String.class);
         jdbc.update("""
-                INSERT INTO app_user (phone, role) VALUES (:phone, 'trainer')
-                ON CONFLICT (phone) DO NOTHING
-                """, Map.of("phone", phone));
+                INSERT INTO trainer (id, app_user_id, name) VALUES (gen_random_uuid(), :appUserId::uuid, :phone)
+                ON CONFLICT (app_user_id) DO NOTHING
+                """, Map.of("appUserId", appUserId, "phone", phone));
         return UUID.fromString(jdbc.queryForObject(
-                "SELECT id::text FROM trainer WHERE phone = :phone",
-                Map.of("phone", phone), String.class));
+                "SELECT id::text FROM trainer WHERE app_user_id = :appUserId::uuid",
+                Map.of("appUserId", appUserId), String.class));
     }
 }
