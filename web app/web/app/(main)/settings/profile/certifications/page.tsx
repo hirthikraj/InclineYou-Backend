@@ -3,7 +3,7 @@ import { getIdentity } from '@/lib/profile/api';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: 'Certifications · X REP' };
+export const metadata = { title: 'Certifications · InclineYou' };
 
 /**
  * CERTIFICATIONS — the profile's second tab.
@@ -22,9 +22,5 @@ export const metadata = { title: 'Certifications · X REP' };
 export default async function Page() {
   const identity = await getIdentity();
 
-  return (
-    <div className="body">
-      <CertificationsPanel initial={identity} />
-    </div>
-  );
+  return <CertificationsPanel initial={identity} />;
 }

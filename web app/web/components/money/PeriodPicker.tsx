@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { periodChip, periodSpanLabel, samePeriod, type Period } from '@/lib/money/period';
+import { Button } from '@/web-components/ui/Button';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -94,9 +95,8 @@ export function PeriodPicker({ period, minYear = 2020, nowMs, onChange }: Period
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
       {/* Trigger */}
-      <button
-        className="btn btn--secondary"
-        type="button"
+      <Button
+        variant="secondary"
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={toggle}
@@ -120,7 +120,7 @@ export function PeriodPicker({ period, minYear = 2020, nowMs, onChange }: Period
         >
           <path d="M6 9l6 6 6-6" />
         </svg>
-      </button>
+      </Button>
 
       {/* Dropdown */}
       {open && (
@@ -133,7 +133,11 @@ export function PeriodPicker({ period, minYear = 2020, nowMs, onChange }: Period
             right: 0,
             zIndex: 60,
             width: 240,
-            background: 'var(--w-surface)',
+            /* --w-surface does not exist. An undefined custom property resolves
+               to nothing, so this popup had NO background and the payments table behind
+               it read straight through the month grid. The `--w-*` family is
+               layout and state (hover, selected, rail, row); a surface is `--tx-`. */
+            background: 'var(--tx-surface)',
             border: '1px solid var(--tx-line)',
             borderRadius: 'var(--tx-r3)',
             boxShadow: '0 8px 24px rgba(0,0,0,.18)',

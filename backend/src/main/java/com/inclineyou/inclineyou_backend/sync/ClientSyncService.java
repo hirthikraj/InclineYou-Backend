@@ -233,10 +233,6 @@ public class ClientSyncService {
                 WHERE ws.client_id = :cid::uuid
                 """, params, cursor));
 
-        changes.put("body_metrics", scoped("""
-                SELECT * FROM body_metric WHERE client_id = :cid::uuid
-                """, params, cursor));
-
         changes.put("packages", scoped("""
                 SELECT * FROM package WHERE client_id = :cid::uuid
                 """, params, cursor));
@@ -321,7 +317,7 @@ public class ClientSyncService {
     /** Everything a client is allowed to write. Anything else is dropped, loudly. */
     private static final Set<String> ACCEPTED = Set.of(
             "workout_sessions", "workout_exercises", "set_logs",
-            "body_metrics", "scheduled_sessions");
+            "scheduled_sessions");
 
     @Transactional
     public void push(Scope scope, Map<String, Object> body) {
@@ -335,7 +331,6 @@ public class ClientSyncService {
         pushWorkoutSessions(cid, tid, changes);
         pushWorkoutExercises(cid, changes);
         pushSetLogs(cid, changes);
-        pushBodyMetrics(cid, changes);
         confirmSessions(cid, changes);
         warnOnRefused(cid, changes);
         log.debug("client sync push client={} tables={}", cid, changes.keySet());
@@ -506,45 +501,6 @@ public class ClientSyncService {
                       AND ws.client_id = :cid::uuid AND sl.deleted_at IS NULL
                     """, Map.of("id", id, "cid", cid));
         }
-    }
-
-    @SuppressWarnings("unchecked")
-    private void pushBodyMetrics(String cid, Map<String, Object> changes) {
-        var table = (Map<String, Object>) changes.get("body_metrics");
-        if (table == null) return;
-
-        for (var record : SyncRows.mergeCreatedUpdated(table)) {
-            var p = new java.util.HashMap<String, Object>();
-            p.put("id",          SyncRows.str(record.get("id")));
-            p.put("cid",         cid);
-            p.put("metric_type", SyncRows.str(record.get("metric_type")));
-            p.put("value",       record.get("value"));
-            p.put("unit",        SyncRows.str(record.get("unit")));
-            p.put("notes",       record.get("notes"));
-            p.put("recorded_at", SyncRows.toTimestamp(record.get("recorded_at")));
-            p.put("created_at",  SyncRows.toTimestamp(record.get("created_at")));
-            p.put("updated_at",  SyncRows.toTimestamp(record.get("updated_at")));
-
-            // Append-only by design (FR-1), and the client screen says so in
-            // those words. The upsert is still an upsert because a retry of the
-            // same queued row must not become a second reading.
-            jdbc.update("""
-                    INSERT INTO body_metric (id, client_id, metric_type, value, unit, notes,
-                        recorded_at, created_at, updated_at)
-                    VALUES (:id::uuid, :cid::uuid, :metric_type, :value, :unit, :notes,
-                        COALESCE(:recorded_at, NOW()),
-                        COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
-                    ON CONFLICT (id) DO UPDATE SET
-                        value       = EXCLUDED.value,
-                        unit        = EXCLUDED.unit,
-                        notes       = EXCLUDED.notes,
-                        recorded_at = EXCLUDED.recorded_at,
-                        updated_at  = EXCLUDED.updated_at
-                    WHERE body_metric.client_id = :cid::uuid
-                    """, p);
-        }
-        // No delete path. A client correcting a reading logs another one — that
-        // is the whole point of append-only, and the sheet explains it.
     }
 
     /**

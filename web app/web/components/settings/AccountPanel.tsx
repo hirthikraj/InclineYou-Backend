@@ -3,13 +3,25 @@
 import { useState, useTransition } from 'react';
 
 import { MessageSlot } from '@/components/auth/MessageSlot';
+import { AccountAside } from '@/components/settings/AccountAside';
 import { DeleteAccount } from '@/components/settings/DeleteAccount';
 import { SaveRow } from '@/components/settings/IdentityForm';
 import { PhoneChange } from '@/components/settings/PhoneChange';
 import type { Message } from '@/lib/auth/copy';
-import { saveAccount } from '@/lib/account/actions';
+import {
+  cancelPhoneChange,
+  confirmPhoneChange,
+  requestNewNumber,
+  saveAccount,
+  startPhoneChange,
+  verifyCurrentNumber,
+} from '@/lib/account/actions';
 import type { Account } from '@/lib/account/api';
 import { MAX_EMAIL, MAX_NAME, looksLikeEmail } from '@/lib/account/rules';
+import { Card } from '@/web-components/ui/Card';
+import { Sidecar } from '@/web-components/ui/Sidecar';
+import { Tag } from '@/web-components/ui/Tag';
+import { Field, TextField } from '@/web-components/ui/Field';
 
 /**
  * THE ACCOUNT — Settings' first section, and the only screen in the product
@@ -84,55 +96,100 @@ export function AccountPanel({
         tone: 'ok',
         icon: 'check',
         lead: 'Saved.',
-        rest: 'Your name is what clients see on an invite.',
+        // What the press DID, not what the field was for — the field said that
+        // already, twice, and a confirmation that repeats the hint is a
+        // confirmation that has not confirmed anything.
+        rest: 'Your profile and every new invite use it from now on.',
       });
     });
   }
 
   return (
-    <div className="col gap4" style={{ maxWidth: 620 }}>
-      {/* ── 1 · you ───────────────────────────────────────────────────────── */}
-      <div className="card">
-        <div className="card__hd">
-          <h2 className="card__t">You</h2>
-        </div>
-        <div className="card__b">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              submit();
-            }}
-          >
-            <div className="fld">
-              <label className="fld__l" htmlFor="ac-name">
-                Your name
-              </label>
-              <input
-                className="ctl"
-                id="ac-name"
-                value={name}
-                maxLength={MAX_NAME}
-                autoComplete="name"
-                autoCapitalize="words"
-                disabled={pending}
-                onChange={(e) => {
-                  setName(e.target.value);
-                  if (message) setMessage(null);
-                }}
-                aria-describedby="ac-name-h"
-              />
-              <span className="fld__h" id="ac-name-h">
-                What a client sees when you invite them, and what every screen here greets you by.
-              </span>
-            </div>
+    /*
+      ── WHY THIS IS A SIDECAR AND NOT A 620px COLUMN ────────────────────────
 
-            <div className="fld" style={{ marginTop: 18 }}>
-              <label className="fld__l" htmlFor="ac-email">
-                Email <Optional />
-              </label>
+      It WAS the column, and it was the profile's own defect one level up.
+      MEASURED at 1536×695 before this: 620px of cards in a 1472px content area
+      — 852px, 58% of the page, empty — while the same screen overflowed its
+      window by 355px, so *Delete your account* was entirely below the fold.
+      Width nobody could use, and not enough height.
+
+      `settings/profile/layout.tsx` had already made this move for the same
+      measurement; see `ui/Sidecar.tsx` for the tracks and why the rung is a
+      container query rather than a breakpoint. The aside is the read-back of
+      the account the form is editing, which is what the pattern is for.
+
+      The class goes on `mainClassName`, not on the wrapper: `.sdc__main` is the
+      form column, and `col gap4` is how these three cards have always stacked.
+    */
+    <Sidecar
+      asideLabel="This account"
+      mainClassName="col gap4"
+      aside={
+        <AccountAside name={name} email={email} phone={saved.phone} clientCount={clientCount} />
+      }
+    >
+      {/* ── 1 · you ───────────────────────────────────────────────────────── */}
+      <Card title="You">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+        >
+          {/*
+            ── ONE STATEMENT OF THIS FACT, NOT THREE ──────────────────────────
+
+            This hint, `SaveRow`'s resting note and the save confirmation all
+            used to say *your name is what a client sees on an invite* — three
+            sentences in one 370px card, all carrying the same fact, none
+            carrying the one the trainer beside it needs. The hint keeps it,
+            because it is the one attached to the field it is about; the other
+            two now say something that is true and is said nowhere else.
+          */}
+          <TextField
+            label="Your name"
+            hint="What a client sees when you invite them, and what every screen here greets you by."
+            id="ac-name"
+            value={name}
+            maxLength={MAX_NAME}
+            autoComplete="name"
+            autoCapitalize="words"
+            disabled={pending}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (message) setMessage(null);
+            }}
+          />
+
+          {/*
+            `Field`, not a hand-written `.fld` — this was the one piece of
+            design-system markup left in this file, and `check-components` had
+            it recorded as such. It is also the component that already draws the
+            error in `.fld__e` and the hint in `.fld__h` under one `id`, which
+            is what the copy below was doing by hand.
+          */}
+          <Field
+            id="ac-email"
+            className="mt3"
+            label={<>Email <Optional /></>}
+            error={emailBroken ? 'That doesn’t look like an email address.' : undefined}
+            hint={
+              /*
+                Said plainly, because the field looks exactly like a login and
+                is not one. A trainer who assumes otherwise finds out on the day
+                they lose their SIM, which is the worst possible moment to learn
+                it. Two sentences where there were three — the third said the
+                app sends nothing to it today, which is the same promise as
+                "never with this" from the other side.
+              */
+              'You sign in with your number, never with this. We keep it so there is a way to reach you that is not a WhatsApp message.'
+            }
+          >
+            {(props) => (
               <input
+                {...props}
                 className="ctl"
-                id="ac-email"
                 type="email"
                 value={email}
                 maxLength={MAX_EMAIL}
@@ -147,58 +204,75 @@ export function AccountPanel({
                   setEmail(e.target.value);
                   if (message) setMessage(null);
                 }}
-                aria-describedby="ac-email-h"
               />
-              {emailBroken ? (
-                <p className="fld__e" id="ac-email-h">
-                  That doesn’t look like an email address.
-                </p>
-              ) : (
-                <span className="fld__h" id="ac-email-h">
-                  {/*
-                    Said plainly, because the field looks exactly like a login
-                    and is not one. A trainer who assumes otherwise finds out on
-                    the day they lose their SIM, which is the worst possible
-                    moment to learn it.
-                  */}
-                  You sign in with your number, never with this — we keep it so there is a way to
-                  reach you that is not a WhatsApp message. We don’t send anything to it today.
-                </span>
-              )}
-            </div>
+            )}
+          </Field>
 
-            <MessageSlot message={message} />
+          {/*
+            ── THE SLOT IS RESERVED WHERE A MESSAGE IS POSSIBLE, NOT ALWAYS ────
 
-            <SaveRow
-              pending={pending}
-              dirty={dirty}
-              note="Your name is what a client sees on an invite."
-            />
-          </form>
-        </div>
-      </div>
+            `MessageSlot` keeps its height whether or not it holds anything, so
+            nothing below it moves when a write is refused — the right call on
+            the OTP screens it was written for, where a message lands between a
+            field and the button that produced it. On a resting settings form it
+            was 38px of empty card sitting between the email hint and the note
+            under it, MEASURED, every time this tab is opened.
 
-      {/* ── 2 · signing in ────────────────────────────────────────────────── */}
-      <div className="card">
-        <div className="card__hd">
-          <h2 className="card__t">Signing in</h2>
-        </div>
-        <div className="card__b">
-          <PhoneChange phone={saved.phone} />
-        </div>
-      </div>
+            The invariant it exists for is kept exactly. A message here can only
+            follow a Save, and Save is only drawn while `dirty || pending` — so
+            the slot is mounted before the button it belongs to, stays mounted
+            through the write, and stays for the confirmation afterwards
+            (`message` is non-null on success, which is why it is in the test).
+            Nothing on screen moves that was not already moving.
+          */}
+          {dirty || pending || message ? <MessageSlot message={message} /> : null}
+
+          {/*
+            The resting note says the thing that separates the two fields above
+            it, which is the question a trainer actually has in front of this
+            card — one of them leaves the building and the other never does.
+            It used to restate the name hint verbatim; see the note on the
+            field above.
+          */}
+          <SaveRow
+            pending={pending}
+            dirty={dirty}
+            note="Only your name leaves this screen. Your email is never shown to a client."
+          />
+        </form>
+      </Card>
+
+      {/* ── 2 · signing in ──────────────────────────────────────────────────
+
+          The wire is passed rather than imported by the component, because the
+          client portal mounts the same four steps against `/v1/me/phone/*` and
+          a component importing both sets of actions would register each half's
+          writes in the other half's bundle. `PhoneChange`'s own docstring
+          carries the rest of that argument. */}
+      <Card title="Signing in">
+        <PhoneChange
+          phone={saved.phone}
+          // The aside states it, above the fold and sticky. See `showNumber`.
+          showNumber={false}
+          wire={{
+            start: startPhoneChange,
+            verifyCurrent: verifyCurrentNumber,
+            requestNew: requestNewNumber,
+            confirmNew: confirmPhoneChange,
+            cancel: cancelPhoneChange,
+          }}
+          intact="your clients, your money book and your history are all where they were"
+        />
+      </Card>
 
       {/* ── 3 · leaving ───────────────────────────────────────────────────── */}
-      <div className="card">
-        <div className="card__hd">
-          <h2 className="card__t">Delete your account</h2>
-          <span className="tag tag--danger">Permanent</span>
-        </div>
-        <div className="card__b">
-          <DeleteAccount phone={saved.phone} clientCount={clientCount} />
-        </div>
-      </div>
-    </div>
+      <Card
+        title="Delete your account"
+        aside={<><Tag tone="danger">Permanent</Tag></>}
+      >
+        <DeleteAccount phone={saved.phone} clientCount={clientCount} />
+      </Card>
+    </Sidecar>
   );
 }
 

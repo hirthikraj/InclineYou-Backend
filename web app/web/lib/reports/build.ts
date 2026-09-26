@@ -26,7 +26,7 @@
  *
  * ── AND NO HEALTH DATA, WHICH IS NOT A PREFERENCE ───────────────────────────
  *
- * `body_metric` is a measurement — weight, waist, chest — and is exactly what
+ * A body reading is a measurement — weight, waist, chest — and is exactly what
  * this report is allowed to draw. There is no injury field, no condition field
  * and no PAR-Q flag anywhere near it, and this file must never grow one:
  * `InclineYou_MVP_interaction_map.md` excludes health data outright under the DPDP Act
@@ -90,6 +90,18 @@ export interface ReportBuildInput {
 
 /* ------------------------------------------------------------------ output */
 
+/**
+ * ONE POINT ON A SERIES. Added for the charts, and the reason it carries its
+ * date rather than being a bare number is that measurements are NOT evenly
+ * spaced: a client weighed on week 1, week 2 and week 11 plotted at equal x
+ * would draw a gentle slope where the truth is a plateau and a drop. The chart
+ * gets the dates so the axis can say what it is actually spacing.
+ */
+export interface Reading {
+  at: number;
+  value: number;
+}
+
 export interface MetricChange {
   type: string;
   /** `weight` → `Weight`, `body_fat` → `Body fat`. */
@@ -104,6 +116,17 @@ export interface MetricChange {
   lastAt: number;
   /** True when `from` is a reading taken BEFORE the window — see `metricChange`. */
   baselineIsOlder: boolean;
+  /**
+   * EVERY reading from the baseline through the window, oldest first — the
+   * trajectory, not the endpoints.
+   *
+   * `from → to` was all this type used to carry, and it hides the one thing a
+   * client most wants to know: a waist that went 92 → 90 → 88 → 90 and a waist
+   * that went 92 → 90 are both "−2 cm", and only one of them is a client who
+   * has started drifting back. A trainer looking at the second number wants to
+   * see the shape before they send it.
+   */
+  series: Reading[];
 }
 
 export interface LiftGain {
@@ -120,6 +143,56 @@ export interface LiftGain {
   percent: number;
   /** Days trained on this movement inside the window. */
   days: number;
+  /** Sets logged on this movement inside the window. */
+  sets: number;
+  /**
+   * The best set on each training day, oldest first. What makes a lift row a
+   * trajectory rather than a pair of numbers — and the honest picture of a
+   * block, deloads included, which is exactly what `from`/`to` deliberately
+   * looks past. The pair is the claim; this is the evidence for it.
+   */
+  series: Reading[];
+}
+
+/**
+ * EVERY MOVEMENT TRAINED IN THE WINDOW, WHETHER OR NOT IT WENT UP.
+ *
+ * `LiftGain` is a shortlist by construction — `liftGains` drops anything that
+ * did not beat its own first day, which is right for a card the client keeps
+ * and wrong for the trainer's own reading of the block. A movement trained
+ * eighteen times that has not moved is the single most useful row on this
+ * screen: it is the one to change next month, and the old build had no way to
+ * even see it.
+ *
+ * So this is the complete census. It is never drawn on the card.
+ */
+export interface ExerciseWork {
+  exerciseId: string;
+  name: string;
+  /** Days this movement was trained inside the window. */
+  days: number;
+  sets: number;
+  reps: number;
+  /** Load moved on this movement, kg. Zero for a bodyweight-only movement. */
+  volumeKg: number;
+  /** Heaviest set in the window, or null where nothing was loaded. */
+  topLoad: number | null;
+  /** Most reps in a single set. */
+  topReps: number | null;
+  /** The matching `LiftGain.percent`, or null where it did not gain. */
+  gainPercent: number | null;
+  /** True when the client's FIRST EVER set on this movement is in the window. */
+  isNew: boolean;
+}
+
+/** One week of the window. A bar, with the dates that make its label true. */
+export interface ReportWeek {
+  /** 1-based, for `w1` … `w12`. */
+  index: number;
+  from: number;
+  to: number;
+  /** Days trained in this week. */
+  count: number;
 }
 
 export interface ReportSessions {
@@ -149,13 +222,26 @@ export interface ClientReport {
   sessions: ReportSessions;
   /** One count per week, oldest first. The shape of the client's consistency. */
   weekBars: number[];
+  /** The same series with its dates, for a chart that labels its own columns. */
+  weekSeries: ReportWeek[];
   bestWeek: number;
+  /** Weeks with at least one session in them. */
+  trainedWeeks: number;
+  /** The longest run of consecutive weeks trained. The retention number. */
+  bestStreak: number;
   /** The measurement a client asks about first, so it is not in the list. */
   weight: MetricChange | null;
   measurements: MetricChange[];
   lifts: LiftGain[];
+  /** The complete census — see `ExerciseWork`. Trainer-side only. */
+  exercises: ExerciseWork[];
   /** Total load moved in the window, kg. Zero for a client who logs no loads. */
   volumeKg: number;
+  /** Sets logged in the window, and the reps in them. */
+  setCount: number;
+  repCount: number;
+  /** Movements whose first ever set falls inside the window. */
+  newExerciseCount: number;
   /** Personal bests set inside the window, one per exercise per day. */
   prCount: number;
   exerciseCount: number;
@@ -196,6 +282,16 @@ function metricChange(rows: ReportMetricRow[], from: number, to: number): Metric
   const baseline = inside.length > 1 ? inside[0] : before[before.length - 1];
   if (!baseline || baseline === last) return null;
 
+  /* The baseline first — which is a reading BEFORE the window when there is
+     only one inside it — then everything inside, in order. Deduplicated on
+     identity rather than on date: two readings on one day are two readings, and
+     a chart that silently merges them is a chart claiming a precision the tape
+     did not have. */
+  const series: Reading[] = [
+    ...(baseline === inside[0] ? [] : [{ at: baseline.recordedAt, value: baseline.value }]),
+    ...inside.map((m) => ({ at: m.recordedAt, value: m.value })),
+  ];
+
   return {
     type: last.metricType,
     label: metricLabel(last.metricType),
@@ -207,6 +303,7 @@ function metricChange(rows: ReportMetricRow[], from: number, to: number): Metric
     firstAt: baseline.recordedAt,
     lastAt: last.recordedAt,
     baselineIsOlder: inside.length === 1,
+    series,
   };
 }
 
@@ -258,6 +355,16 @@ function liftGains(
     const best = Math.max(...rows.map(valueOf));
     if (start <= 0 || best <= start) continue;
 
+    /* THE BEST SET OF EACH DAY, not every set of every day.
+       A day's working sets descend — 60, 60, 55, 50 to failure — so plotting
+       all of them draws a sawtooth that says nothing about the block, and the
+       figure the pair above is made of is the day's TOP set. One point per day
+       is the series those two numbers are the ends of. */
+    const series: Reading[] = days.map((at) => ({
+      at,
+      value: Math.max(...rows.filter((r) => r.at === at).map(valueOf)),
+    }));
+
     out.push({
       exerciseId,
       name,
@@ -268,6 +375,8 @@ function liftGains(
       delta: Math.round((best - start) * 10) / 10,
       percent: Math.round(((best - start) / start) * 100),
       days: days.length,
+      sets: rows.length,
+      series,
     });
   }
 
@@ -309,6 +418,89 @@ function personalBests(sets: ReportSetRow[], from: number, to: number): number {
     }
   }
   return count;
+}
+
+/**
+ * THE CENSUS — every movement trained in the window, ranked by how much of it
+ * there was.
+ *
+ * `isNew` is computed against the WHOLE history for the same reason `prCount`
+ * is: "three new movements" has to mean three the client had genuinely never
+ * done, and a windowed read calls every exercise new to a client who has been
+ * training for a year. `firstEver` is built from all of `sets`, and the window
+ * is only then asked whether that first day falls inside it.
+ *
+ * Ranked on days rather than on volume, because volume is a unit a bodyweight
+ * movement does not have: sorting on it puts every plank and every push-up at
+ * the bottom of a trainer's list whatever they actually did.
+ */
+function exerciseCensus(
+  sets: ReportSetRow[],
+  names: Map<string, string>,
+  lifts: LiftGain[],
+  from: number,
+  to: number,
+): ExerciseWork[] {
+  const firstEver = new Map<string, number>();
+  for (const s of sets) {
+    const seen = firstEver.get(s.exerciseId);
+    if (seen === undefined || s.at < seen) firstEver.set(s.exerciseId, s.at);
+  }
+
+  const gain = new Map(lifts.map((l) => [l.exerciseId, l.percent]));
+  const byExercise = new Map<string, ReportSetRow[]>();
+  for (const s of sets) {
+    if (s.at < from || s.at > to) continue;
+    const list = byExercise.get(s.exerciseId);
+    if (list) list.push(s);
+    else byExercise.set(s.exerciseId, [s]);
+  }
+
+  const out: ExerciseWork[] = [];
+  for (const [exerciseId, rows] of byExercise) {
+    const name = names.get(exerciseId);
+    if (!name) continue; // never drawn blank — `liftGains`' rule
+
+    const loads = rows.map((r) => r.loadKg ?? 0).filter((v) => v > 0);
+    const repsList = rows.map((r) => r.reps ?? 0).filter((v) => v > 0);
+
+    out.push({
+      exerciseId,
+      name,
+      days: new Set(rows.map((r) => r.at)).size,
+      sets: rows.length,
+      reps: repsList.reduce((sum, v) => sum + v, 0),
+      volumeKg: Math.round(rows.reduce((sum, r) => sum + (r.loadKg ?? 0) * (r.reps ?? 0), 0)),
+      topLoad: loads.length > 0 ? Math.max(...loads) : null,
+      topReps: repsList.length > 0 ? Math.max(...repsList) : null,
+      gainPercent: gain.get(exerciseId) ?? null,
+      isNew: (firstEver.get(exerciseId) ?? 0) >= from,
+    });
+  }
+
+  return out.sort((a, b) => b.days - a.days || b.sets - a.sets || a.name.localeCompare(b.name));
+}
+
+/**
+ * THE LONGEST RUN OF CONSECUTIVE WEEKS TRAINED.
+ *
+ * The one figure on this report that is about the HABIT rather than about the
+ * work, and the brief's own reason for the whole feature — *clients renew when
+ * they can see progress* — lands hardest here: eleven weeks in a row is a
+ * sentence a client repeats to somebody else, and it is invisible in a total.
+ *
+ * A gap of one week breaks it, which is the honest reading of "in a row" and
+ * not a tuned threshold. It is never framed as a failure when it is short: the
+ * screen prints the run and says nothing about the weeks around it.
+ */
+function bestStreakOf(weekBars: number[]): number {
+  let best = 0;
+  let run = 0;
+  for (const count of weekBars) {
+    run = count > 0 ? run + 1 : 0;
+    if (run > best) best = run;
+  }
+  return best;
 }
 
 /* ------------------------------------------------------------------ the report */
@@ -374,11 +566,26 @@ export function buildClientReport(input: ReportBuildInput, weeks: ReportWeeks): 
     .sort((a, b) => Math.abs(b.delta / (b.from || 1)) - Math.abs(a.delta / (a.from || 1)));
 
   const lifts = liftGains(input.sets, input.exerciseNames, from, to);
+  const exercises = exerciseCensus(input.sets, input.exerciseNames, lifts, from, to);
 
   const windowSets = input.sets.filter((s) => s.at >= from && s.at <= to);
   const volumeKg = Math.round(
     windowSets.reduce((sum, s) => sum + (s.loadKg ?? 0) * (s.reps ?? 0), 0),
   );
+
+  /* ── the weeks, with the dates that label them ────────────────────────────
+     `weekBars` is kept as it was because the card's painter reads it and a
+     canvas wants nothing but the heights. This is the same series for a chart
+     that has to say WHICH week a column is — `w7` alone is a label a client
+     cannot place, and "18 Aug" is one they can. The last week's `to` is
+     clamped to the window's end so the final column does not claim days that
+     have not happened. */
+  const weekSeries: ReportWeek[] = weekBars.map((count, i) => ({
+    index: i + 1,
+    from: from + i * 7 * DAY_MS,
+    to: Math.min(to, from + (i + 1) * 7 * DAY_MS - 1),
+    count,
+  }));
 
   return {
     clientId: input.clientId,
@@ -398,11 +605,18 @@ export function buildClientReport(input: ReportBuildInput, weeks: ReportWeeks): 
       adherence: settled > 0 ? Math.round((done / settled) * 100) : null,
     },
     weekBars,
+    weekSeries,
     bestWeek: weekBars.reduce((m, v) => Math.max(m, v), 0),
+    trainedWeeks: weekBars.filter((v) => v > 0).length,
+    bestStreak: bestStreakOf(weekBars),
     weight,
     measurements,
     lifts,
+    exercises,
     volumeKg,
+    setCount: windowSets.length,
+    repCount: windowSets.reduce((sum, s) => sum + (s.reps ?? 0), 0),
+    newExerciseCount: exercises.filter((e) => e.isNew).length,
     prCount: personalBests(input.sets, from, to),
     exerciseCount: new Set(windowSets.map((s) => s.exerciseId)).size,
     isThin: days.size === 0 && weight === null && measurements.length === 0 && lifts.length === 0,

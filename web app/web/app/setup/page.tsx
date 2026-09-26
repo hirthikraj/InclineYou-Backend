@@ -2,7 +2,7 @@ import { Preflight } from '@/components/setup/Preflight';
 import { SetupShell } from '@/components/setup/SetupShell';
 import { requireSetup } from '@/lib/setup/guard';
 
-export const metadata = { title: 'Setting up · X REP' };
+export const metadata = { title: 'Setting up · InclineYou' };
 
 /**
  * Frames 4a and 4b · `/setup`.

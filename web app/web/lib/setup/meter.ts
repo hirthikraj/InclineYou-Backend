@@ -7,11 +7,11 @@
  *
  * Two rules the weights encode:
  *
- *   · it never opens at zero. Anyone reaching this screen has finished the
- *     flow, so the name / experience / specialities block is already banked —
- *     the meter starts at the work done, not at the work owed. Identical real
- *     effort, and the original endowed-progress study measured a visible head
- *     start roughly doubling completion: 34% against 19%;
+ *   · it never opens at zero. Anyone reaching this screen has answered step 1,
+ *     which is the one the flow refuses to skip, so that block is already
+ *     banked — the meter starts at the work done, not at the work owed.
+ *     Identical real effort, and the original endowed-progress study measured a
+ *     visible head start roughly doubling completion: 34% against 19%;
  *   · items are weighted by business value, not counted. A UPI ID is worth
  *     TWICE a certification, because it is the difference between getting paid
  *     through the app and not.
@@ -51,9 +51,32 @@ export function meterItems(state: SetupState): MeterItem[] {
   return [
     {
       key: 'core',
-      label: 'Name, experience, specialities',
-      // ONE row, not three. Three ticks for one sitting's work makes the meter
-      // feel like it is counting keystrokes.
+      /*
+       * ── IT NAMED THREE ANSWERS AND CHECKED ONE, AND THAT ONLY BECAME A LIE
+       *    WHEN THE FLOW CHANGED ────────────────────────────────────────────
+       *
+       * The label was *Name, experience, specialities* against
+       * `isAnswered('name')`, and it was true by construction: those two steps
+       * were mandatory, so nobody could reach this screen without them. Both
+       * are skippable now — and *Skip to home* lands a trainer in the app with
+       * step 1 and nothing else — so the row would have ticked "experience,
+       * specialities" for a profile that has neither, on the one screen whose
+       * whole job is saying what is still missing.
+       *
+       * The label moved rather than the predicate, and the weights did not
+       * move at all. `app/src/setup/meter.ts` on the phone carries the same
+       * four weights and this file's header is explicit that 70% here and 60%
+       * there is a bug in whichever you saw second; re-cutting 50 into three
+       * rows would have been exactly that divergence. **The phone's copy of
+       * this LABEL needs the same edit** — it is the same stale sentence about
+       * the same row, and the ids and weights it shares with this file are
+       * untouched by the fix.
+       *
+       * Still ONE row, and still the one that stops the meter opening at zero:
+       * step 1 is two answers in one sitting, and two ticks for it would make
+       * the meter feel like it is counting keystrokes.
+       */
+      label: 'Your name and gender',
       done: isAnswered('name', state),
       weight: 50,
     },

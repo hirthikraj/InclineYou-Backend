@@ -1,7 +1,7 @@
 import { permanentRedirect } from 'next/navigation';
 
 /**
- * `/money` is `/business` now — the ledger is one of seven tabs on it.
+ * `/money` is `/business` now — Payments is one of seven tabs on it.
  *
  * Kept as a redirect and not deleted, and this is the one in the set with the
  * most links pointing at it: the client file's *Sell a pack*, Today's hero and
@@ -10,7 +10,7 @@ import { permanentRedirect } from 'next/navigation';
  * `/business` in the same pass, and this route exists for what is already in a
  * browser history or a message.
  *
- * The tab rides along so `/money?tab=owed` still lands on *Owed*: the money
+ * The tab rides along so `/money?tab=owed` still lands on *Pending*: the money
  * book's six tab names are the first six of Business' seven, unchanged, which is
  * what makes the redirect lossless. The one name that is not carried is
  * `?tab=packages`, and it does not need to be — it now lands on the REAL price

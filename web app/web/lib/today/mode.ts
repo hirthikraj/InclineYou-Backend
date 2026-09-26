@@ -21,8 +21,8 @@
 export type DeliveryMode = 'floor' | 'remote';
 
 export const MODE_LABELS: Record<DeliveryMode, string> = {
-  floor: 'Floor',
-  remote: 'Remote',
+  floor: 'In Person',
+  remote: 'Online',
 };
 
 export const DELIVERY_MODES: DeliveryMode[] = ['floor', 'remote'];

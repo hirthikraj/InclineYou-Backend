@@ -29,23 +29,28 @@ and indexes — see [`SCHEMA.md`](SCHEMA.md).
 | [The account](#the-account) | `/v1/trainers/me/phone`, `/v1/trainers/me` | 5 | V36
 | [Working hours](#working-hours) | `/v1/working-hours` | 1 |
 | [Team coaching](#team-coaching) | `/v1/team` | 29 |
-| [Clients](#clients) | `/v1/clients` | 11 |
+| [Clients](#clients) | `/v1/clients` | 10 |
 | [Progress](#progress) | `/v1/clients/{clientId}/progress` | 1 |
-| [Exercises](#exercises) | `/v1/exercises` | 3 |
-| [Templates](#templates) | `/v1/templates` | 8 |
-| [Programs](#programs) | `/v1/programs` | 10 |
+| [Exercises](#exercises) | `/v1/exercises` | 5 | V9
+| [Measuring cycle — V5](#measuring-cycle--v5) | — (fields on `/v1/clients`, `/v1/trainers/me`) | 0 | V5, V22
+| [Assessments — V14](#assessments--v14) | `/v1/assessments`, `/v1/assessment-templates`, `/v1/assessment-catalog` | 11 | V14
+| [Templates](#templates) | `/v1/templates` (incl. `/certified`) | 11 | V11
+| [Programs](#programs) | `/v1/programs` | 11 |
+| [Workout templates](#workout-templates) | `/v1/workout-templates` | 5 | V13
 | [Scheduled sessions (diary)](#scheduled-sessions-diary) | `/v1/sessions` | 6 |
 | [Workout sessions & set logs](#workout-sessions--set-logs) | `/v1/workouts` | 13 |
 | [Packs (the price list)](#packs-the-price-list) | `/v1/packs` | 3 |
-| [Packages & payments (money book)](#packages--payments-money-book) | `/v1/clients/{id}/packages`, `/v1/packages`, `/v1/payments` | 12 |
+| [Packages & payments (money book)](#packages--payments-money-book) | `/v1/clients/{id}/packages`, `/v1/packages`, `/v1/payments` | 14 |
+| [Notifications (the trainer's bell)](#notifications-the-trainers-bell) | `/v1/notifications` | 3 | V15
 | [Nudges](#nudges) | `/v1/clients/{clientId}/nudge`, `/v1/nudges`, `/v1/nudge-templates` | 6 |
 | [Attention dismissals](#attention-dismissals) | `/v1/attention/dismissals` | 3 |
 | [Reports](#reports) | `/v1/clients/{clientId}/report` | 2 |
 | [Push devices](#push-devices) | `/v1/devices` | 2 |
 | [Trainer sync](#trainer-sync) | `/v1/sync` | 2 |
 | [Client sync](#client-sync) | `/v1/client/sync` | 2 |
+| [Client portal](#client-portal--v1me) | `/v1/me` | 34 | modules 11a–11e
 
-**Total: 129 endpoints.**
+**Total: 204 endpoints.** (23 Sep 2026: V8 added `PATCH /v1/payments/{id}/write-off` and `POST /v1/payments/{id}/invoice`; V9 added `GET /v1/exercises/categories` and `GET /v1/exercises/{id}`; V11 added the three `/v1/templates/certified` routes; V13 added the five `/v1/workout-templates` routes; V14 added the eleven assessment routes; V15 added the three bell routes; module 11a added the sixteen `/v1/me` reads 11b the four workout writes 11c the three client writes, 11d the portal bell, `PATCH /v1/me/prefs` and `POST /v1/programs/{id}/notify`, and 11e the seven account routes; and V5's two sitting routes were removed with its table; V5's four body-assessment routes were missing from this table and are now counted. The total had read 129 while its own rows summed to 141 — it is now the sum of the rows.)
 
 ---
 
@@ -60,6 +65,7 @@ Enforced in `config/SecurityConfig.java`, in this order — first match wins:
 | `/v1/auth/membership/**` | `ROLE_INVITED` |
 | `/v1/auth/**`, `/health` | public |
 | `/v1/client/**` | `ROLE_CLIENT` |
+| `/v1/me`, `/v1/me/**` | `ROLE_CLIENT` — the client portal (module 11) |
 | everything else | `ROLE_TRAINER` |
 
 `/v1/team/**` deliberately has **no rule of its own** — it falls through to
@@ -83,7 +89,7 @@ a chatty sync does not spend an ordinary request's budget:
 | `AUTH` | `/v1/auth/**` | 300 / 60s |
 | `SYNC` | `/v1/sync/**`, `/v1/client/sync/**` | 60 / 60s |
 | `MESSAGING` | `POST …/nudge`, `POST …/report/weekly`, `POST /v1/team/invites` | 10 / 60s |
-| `STANDARD` | everything else | 120 / 60s |
+| `STANDARD` | everything else — including every route V6–V15 added (write-off, invoice, exercise categories and by-id, the certified shelf, workout templates), none of which sends a message | 120 / 60s |
 | *(exempt)* | `/health` | — |
 
 Refusals return `429` with an RFC-7807 body carrying `"code": "RATE_LIMITED"`
@@ -140,6 +146,58 @@ branches on (`exception/GlobalExceptionHandler.java`):
 | `CANNOT_LEAVE_OWN` | 422 | You cannot leave your own practice. |
 | `PHONE_IN_THIS_WORKSPACE` | 409 | Another coach in this workspace already has that number. |
 | `NOT_A_COACH_HERE` | 422 | The receiving trainer does not coach in this workspace. |
+| `VALIDATION` | 400 | A field was refused; `detail` names it and says why (`gender: must be one of …`, `dateOfBirth: that date is in the future`, `paidAt: …`, an empty note). **Branch on the field in `detail` only for display** — the code is shared on purpose, so a new field needs no new code. Thrown by `AccountRuleException`, `ClientRuleException`, `PackageRuleException`, `WorkoutRuleException` and `AssessmentRuleException`. |
+| `ALREADY_COLLECTED` | 409 | **V8.** Write-off refused: the payment was already collected (`paid` / `confirmed`). |
+| `WRITTEN_OFF` | 409 | **V8.** The payment was written off — it cannot be invoiced, and it cannot be confirmed. |
+| `GYM_COLLECTED` | 409 | **V8.** Invoice refused: the gym is the collector of record and raises its own receipt. |
+| `NOT_PAID` | 409 | **V8.** Invoice refused: the payment is still pending, and the bill prints *Paid on*. |
+| `PAYMENT_NOT_FOUND` | 404 | **V8.** Not one of the caller's payments, or not in the active workspace. |
+| `PACKAGE_NOT_FOUND` | 404 | Not one of the caller's packages. |
+| `CLIENT_NOT_FOUND` | 404 | Not on the caller's roster (money-book routes). |
+| `PACKAGE_NEEDS_PRICE` · `PACKAGE_NEEDS_SESSIONS` · `PACKAGE_FIELD_INVALID` | 400 | A sale that cannot be written as sent — no price, no session count on a session pack, an unknown enum value or a malformed date. |
+| `PACKAGE_BAD_EXTENSION` | 400 | An extension outside 1–365 days. |
+| `PACKAGE_BAD_SESSION_COUNT` · `PACKAGE_NO_CHANGE` | 400 | A V4 count correction out of range, or to the count it already has. |
+| `PACKAGE_NO_EXPIRY` | 409 | Extending a pack that has no expiry date. |
+| `PACKAGE_FEWER_THAN_DELIVERED` | 409 | Correcting a count below the sessions already delivered. |
+| `PACKAGE_NOT_COUNTED` | 409 | Correcting sessions on a pack that does not count them. |
+| `PACKAGE_ALREADY_PAUSED` · `PACKAGE_NOT_PAUSED` | 409 | Pause on a paused pack, resume on a running one. |
+| `PACKAGE_NOT_LIVE` | 409 | Pause / resume / extend on a pack that has finished — renew instead. |
+| `PACK_NEEDS_NAME` · `PACK_NEEDS_PRICE` · `PACK_NEEDS_SESSIONS` · `PACK_FIELD_INVALID` · `PACK_FIELD_UNKNOWN` | 400 | A price-list entry that cannot be written as sent. |
+| `PACK_OWNER_IMMUTABLE` | 400 | A pack's `owner` cannot change — it would re-attribute every package sold from it. |
+| `PACK_NOT_FOUND` | 404 | Not on the caller's price list. |
+| `NUDGE_TEMPLATE_UNKNOWN` · `NUDGE_TEMPLATE_EMPTY` · `NUDGE_TEMPLATE_TOO_LONG` | 400 | A wording override for a template that does not exist, with no words, or over the cap. |
+| `NUDGE_CLIENT_NOT_FOUND` | 404 | The client is no longer on the caller's roster. |
+| `NUDGE_NO_PHONE` | 422 | The client has no phone number, so there is nowhere to send the link. |
+| `EMAIL_INVALID` · `EMAIL_TOO_LONG` | 400 | V36's contact address is not shaped like one, or is over 254 characters. |
+| `DELETE_NOT_CONFIRMED` | 400 | Closing the account: the typed confirmation is not this account's number. |
+| `ASSESSMENT_NOT_FOUND` | 404 | **V14.** Not one of the caller's sent assessments, or deleted. (V5 used this code for a body reading; that is now `READING_NOT_FOUND`. V5 never shipped, so no build reads the old meaning.) |
+| `ASSESSMENT_TEMPLATE_NOT_FOUND` | 404 | **V14.** Not one of the caller's assessment templates, or deleted. |
+| `READING_NOT_FOUND` | 404 | **Retired by V22** with the routes that raised it (`PUT` / `DELETE /v1/clients/{id}/body-metrics/{metricId}`). Nothing returns it; the code is kept out of reuse. |
+| `SCHEDULE_MISMATCH` | 400 | `POST /v1/templates/{id}/apply`: the schedule — sent, or derived from the client's standing week — does not name the template's days one-for-one. `detail` names the numbers. |
+| `SCHEDULE_INVALID` | 400 | `apply`: a slot on no weekday, two slots on one weekday, or a time that is not `HH:mm`. |
+| `CERTIFIED_READ_ONLY` | 403 | **V11.** `PUT` / `DELETE /v1/templates/{id}` aimed at a certified program — copy it and edit the copy. |
+| `CERTIFIED_COPY_FIRST` | 409 | **V11.** `apply` aimed at a certified program — a client is only ever put on a copy. |
+| `CERTIFIED_NOT_FOUND` | 404 | **V11.** No such certified program, or it has been retired. |
+| `WORKOUT_NOT_FOUND` | 404 | **V13.** Not one of the caller's saved workouts, or deleted. |
+| `NOT_A_CLIENT` | 403 | **Portal.** Signed in as a client, but the number is on no live roster. |
+| `NOT_YOURS` | 403 | **Portal.** `?clientId=` is not one of this number's rows — the same answer whether it exists or not. |
+| `NOT_FOUND` | 404 | **Portal.** An `{id}` route on something that is not this client's (a plan, a workout, an assessment); `detail` is the sentence the page prints. |
+| `SESSION_CANCELLED` | 409 | **Portal 11b.** Starting a workout against a cancelled session. |
+| `WORKOUT_CLOSED` | 409 | **Portal 11b.** A set or a swap on a finished workout. |
+| `NOT_APPROVED` | 422 | **Portal 11b.** A swap to anything but the trainer's approved alternative. |
+| `ALREADY_STARTED` | 409 | **Portal 11b.** A swap of a movement that already has a logged set. |
+| `ALREADY_IN_WORKOUT` | 409 | **Portal 11b.** A swap to a movement already in today's log. |
+| `CLOSED` | 409 | **Portal 11c.** Answering or submitting an assessment already sent back. |
+| `EMPTY` | 400 | **Portal 11c.** Submitting an assessment with nothing answered. |
+| `PHONE_UNCHANGED` · `PHONE_TAKEN` · `PHONE_CHANGE_UNPROVEN` | 400 · 409 · 401 | Also returned by the **portal's** number change (11e), with the trainer's meanings. `PHONE_TAKEN` never says who holds the number. |
+
+The rows from `VALIDATION` down were added on 23 Sep 2026: the six V8 codes are
+new, and the rest already existed in the code and in their own sections below
+(Packages, Packs, Nudges, The account, Body assessments) but were missing from
+this catalogue. Codes documented **only** in their section's own table —
+`PHONE_UNCHANGED`, `PHONE_TAKEN`, `PHONE_CHANGE_UNPROVEN` under *The account*,
+and V5's `ASSESSMENT_METRIC_UNKNOWN` / `ASSESSMENT_VALUE_RANGE` /
+`ASSESSMENT_INTERVAL_RANGE` under *Measuring cycle* — are listed there.
 
 The three team `403`s look like they contradict the *404, not 403* rule below, and
 do not. That rule is about **cross-trainer** access, and it still holds: anything
@@ -436,8 +494,14 @@ Returns id, phone, name, `upiVpa`, `experienceBand`, `specialities[]`,
 `gymName`, `gymSharePercent`, a `preferences` map, V33's identity block —
 `headline`, `bio`, `introVideoUrl`, `introVideoId` — V34's place block:
 `mapLink`, `trainingModes[]`, `serviceAreas[]` — and V35's social block:
-`instagramUrl`, `youtubeUrl`, `instagramHandle`, `youtubeHandle` — and V36's
-`email`.
+`instagramUrl`, `youtubeUrl`, `instagramHandle`, `youtubeHandle` — V36's
+`email` — V5's `assessmentIntervalDays`, `assessmentMetrics` — and V6's `gender`.
+
+**`gender` (V6)** is `woman` · `man` · `nonbinary` · `undisclosed`, or null for
+*never asked*. `undisclosed` is an answer, not an absence, and the setup flow's
+step 1 counts as answered only once `name` and `gender` are both set. On the
+PATCH, null leaves it alone, `""` clears it, and any other id is refused with
+`400 VALIDATION` and a `detail` naming the four.
 
 A null `gymName` means *no gym*, which is not the same as a 0% cut — one hides
 the "your share" line entirely, the other claims an arrangement that keeps all
@@ -484,6 +548,14 @@ stamps `setupCompletedAt`. Settings switches live under `preferences`.
 **Omitting a field leaves it alone; sending `""` clears it.** The one asymmetry
 is `name`, which ignores a blank rather than clearing — a nameless trainer
 cannot send an invite.
+
+**`gender` (V6)** is one of `woman` · `man` · `nonbinary` · `undisclosed`
+(case-insensitive, stored lower-case); `""` clears it and anything else is
+`400 VALIDATION` with a `detail` naming the four — a typed refusal, so the
+sentence reaches the setup step rather than being lost to the servlet error page.
+The redesigned setup flow counts step 1 as answered only once `name` and `gender`
+are both set, so a PATCH that dropped it would leave a trainer unable to finish
+setup — which is what it did before V6.
 
 Three rules on the V33 identity fields:
 
@@ -1099,23 +1171,127 @@ Two deliberate design choices:
 **Purpose:** edit a client. Adds `status` and `weeklySchedule` on top of the
 create fields.
 
+**Sending `weeklySchedule` BOOKS THE DIARY**, in the same transaction — V3, and
+`DiaryService` carries the three-pass rule that keeps a hand-booked session and a
+typed note through the change. Two fields on `ClientResponse` say what that did,
+**appended last**:
+
+| | |
+| --- | --- |
+| `sessionsBooked` | how many sessions THIS REQUEST put in the diary |
+| `firstSessionAt` | epoch ms of the first one it booked |
+
+Both **null** when the request did not touch the rhythm — a name change books
+nothing and must not claim a zero — and both are `DiaryService.Result`'s own
+count rather than a count of the diary afterwards, which would answer a different
+question: adding a fourth training day spreads the same eight sessions, and a
+count of the board would report eight where nothing new was booked. Zero is a
+real answer on a rhythm with nothing to lay down. The same pair
+`PackageResponse.sessionsBooked` carries for the sale.
+
+**Physical information (V7).** `dateOfBirth` is an ISO date (`YYYY-MM-DD`) on the
+request and is **appended last** to `ClientResponse` (null = never given). Null
+leaves it alone and `""` clears it. A date in the future, more than 120 years
+ago, or not a date at all is `400 VALIDATION` with a `detail` naming the field —
+each is a typo in the year. The age the client file prints is derived on read
+and never stored. **`heightCm: 0` clears the height**, for the same reason `""`
+clears the date: null already means *leave it alone*, and nobody is zero
+centimetres tall. Neither field is in the phone's push upsert, so an older build
+cannot null them.
+
+**Moving the phone number runs the same check `POST` does** (`ClientPhoneGuard`),
+and only when the number actually changes — re-saving the number a row already
+holds is not a move. A refusal is `409` with `code` `PHONE_ON_YOUR_ROSTER`,
+`PHONE_ON_ANOTHER_ROSTER` or `PHONE_IS_TRAINER`.
+
 ### `DELETE /v1/clients/{id}` → `204`
 **Purpose:** remove a client from the roster. Soft delete — the row is tombstoned
 with `deleted_at` so sync can propagate the removal.
 
 ### `GET /v1/clients/{id}/body-metrics`
-**Purpose:** the measurement history behind the progress charts.
+**Purpose:** the measurement history behind the progress charts. One row per
+number: `{ id, clientId, metricType, value, unit, notes, recordedAt, createdAt }`,
+newest first.
 
-### `POST /v1/clients/{id}/body-metrics` → `201`
-**Purpose:** record one measurement.
+**Read out of the client's completed assessments since V22** — a body is
+measured in an assessment and nowhere else, and `body_metric` is dropped. Only
+V5's six ids come out (`weight` · `body_fat` · `chest` · `waist` · `hip` ·
+`arm`); the other catalogue measurements stay on the assessment's own detail.
+`id` is **the assessment's id**, so up to six rows share one; `unit` is the
+catalogue's; `notes` is always `null`; `recordedAt` and `createdAt` are both the
+assessment's `completedAt`. A booked, unreturned or deleted assessment
+contributes nothing. The shape is unchanged so the web's three readers did not
+move.
 
-Body: `metricType`, `value`, `unit`, `notes`, `recordedAt` (epoch ms) — all
-required except `notes`.
+**There is no write.** `POST /v1/clients/{id}/body-metrics` was removed in V22
+(`405`); a reading is recorded by taking an assessment (MUST-21).
+
+---
+
+## Measuring cycle — V5
+
+**V5's sitting routes are gone, and so are its reading routes (V22).** V5 as first written had a trainer-taken
+*sitting* — `GET` / `POST /v1/clients/{id}/assessments`, grouping readings in an
+`assessment` table. Both were removed before V5 ever shipped (23 Sep 2026), at the
+product owner's request: the redesign's *assessment* is a questionnaire the client
+answers — see [Assessments](#assessments--v14). What remains of V5 is the cadence
+on the client and trainer. `PUT` and `DELETE /v1/clients/{id}/body-metrics/{metricId}`
+— correcting or dropping one loose reading — went with `body_metric` in V22: a
+reading lives on its assessment, and correcting it is an edit to that
+assessment's readings.
+
+**The six metric ids are fixed** — `weight` (kg) · `body_fat` (%) · `chest` ·
+`waist` · `hip` · `arm` (cm). `metric_type` is an unconstrained varchar, and free
+text there produces two spellings of one measurement. A seventh is a deploy. The
+assessment catalogue uses the same six ids for the measurements it shares.
+
+Refusals on the cycle fields, all with a `code` on a `ProblemDetail`:
+
+| `code` | |
+| --- | --- |
+| `ASSESSMENT_METRIC_UNKNOWN` | an id outside the six on a client's or trainer's `assessmentMetrics` |
+| `ASSESSMENT_INTERVAL_RANGE` | a cadence outside 7–365 days |
+
+### The cycle rides on the client and the trainer
+
+`ClientResponse` carries three fields, **appended last**:
+
+| | |
+| --- | --- |
+| `assessmentIntervalDays` | days between measurements; null = not on a cycle |
+| `nextAssessmentOn` | ISO date, what is owed; null = nothing |
+| `assessmentMetrics` | this client's sheet; null = the trainer's default |
+
+**They are columns on `client`, not derived from the last assessment**, because
+`/today` reads `GET /v1/clients` trainer-wide: a due-check computed from
+last-reading-per-client is one request per client on the screen a trainer opens
+every morning. `nextAssessmentOn` is stored rather than `last + interval` so a
+trainer can push one week without rewriting when the last one happened.
+
+`PUT /v1/clients/{id}` writes all three. `assessmentIntervalDays: 0` takes the
+client off the cycle and clears the date with it; `nextAssessmentOn: ""` clears
+the date alone. Setting an interval on a client with no date **seeds** one at
+today + interval, unless the request carries a date of its own.
+
+> **Nothing advances `nextAssessmentOn` on its own any more.** The removed
+> sitting route moved it when a measurement was recorded; with it gone, the date
+> moves only when a trainer writes it. Wiring a returned questionnaire
+> assessment to advance it is a product decision, not made yet.
+
+`TrainerResponse` carries `assessmentIntervalDays` and `assessmentMetrics`, the
+defaults a new client is offered, written through `PATCH /v1/trainers/me`.
+
+---
 
 ### `GET /v1/clients/{id}/notes`
 **Purpose:** the trainer's own notes on this client, newest first. **V29.**
 
-Returns `[{ id, clientId, body, pinned, createdAt, updatedAt }]`.
+Returns `[{ id, clientId, body, pinned, createdAt, updatedAt, sharedWithClient }]`.
+
+**`sharedWithClient` (V7)** says the client this note is about may read it in
+the portal. It is a **different audience from a teammate, who still sees
+nothing** — sharing never widens V29's rule sideways. It defaults to `false` in
+the DDL, because every note before V7 was written as private.
 
 **The author is in the predicate, not implied by the client.** A team widens
 reads over a teammate's roster (V26) and it must not widen this, for the same
@@ -1142,7 +1318,9 @@ stores that would drift.
 **Purpose:** write a note. **V29.**
 
 Body: `body` (required, non-blank, ≤ 4,000 characters), `pinned` (optional,
-defaults `false`).
+defaults `false`), `sharedWithClient` (optional, V7 — only an explicit `true`
+shares; absent is private). An empty or over-long body is `400 VALIDATION` with
+the reason in `detail`.
 
 The cap is about a note staying a note, not about storage — the column is `TEXT`.
 It is checked before the write so an over-long note is a `400` with a reason
@@ -1151,7 +1329,9 @@ rather than a silent truncation of something somebody just typed.
 ### `PUT /v1/clients/{id}/notes/{noteId}`
 **Purpose:** edit the text, the pin, or both. **V29.**
 
-Body: `body` and `pinned`, **both optional, and absent means unchanged**. That is
+Body: `body`, `pinned` and `sharedWithClient` (V7), **all optional, and absent
+means unchanged**. `{"sharedWithClient":false}` retracts a shared note without
+touching its text or pin. That is
 what lets the strip's pin toggle and the notes tab's editor share one route
 without either clobbering the other's field — `{"pinned":false}` unpins without
 sending the text back, and `{"body":"…"}` rewrites without disturbing the pin.
@@ -1166,6 +1346,113 @@ else's note should not confirm that it exists.
 > **None of the four routes enter sync.** The web is online-only and the phone
 > will read these over REST when it adopts them — V28's argument, and V26's
 > before it.
+
+---
+
+## Assessments — V14
+
+`assessment/AssessmentController.java`. A **questionnaire** a trainer builds and
+sends, and the client answers in the portal: which tape measurements to take,
+which questions to ask. Called *assessment* everywhere, never *check-in*. The
+client's side — answering, submitting — is `/v1/me/assessments*` (the portal
+module); this is the trainer's.
+
+> **Timestamps on these routes are ISO-8601 strings** (`dueAt`, `sentAt`,
+> `completedAt`, `readAt`, `createdAt`, `updatedAt`), **the one deliberate
+> exception** to epoch ms everywhere else — it is what the web's assessment
+> screens read (decided 23 Sep 2026). `dueAt` also accepts a bare `YYYY-MM-DD`,
+> read as midnight IST.
+
+**Status is derived on the server and never stored:** `done` once completed;
+else `booked` while unsent; else `missed` once `dueAt` has passed; otherwise
+`waiting`. `unread` is `status == done && readAt == null` and false in every other
+state. The app reads both and never works them out.
+
+```ts
+Row      { id, clientId, templateId: string|null, name, dueAt, sentAt|null, completedAt|null, readAt|null,
+           status: 'booked'|'waiting'|'missed'|'done', unread,
+           measurements: {got, asked}, questions: {got, asked} }        // list rows carry NO readings/answers
+Question { id, text, kind: 'yesno'|'rating'|'text'|'choice', scale: 5|10|20|null,
+           options: {id, text}[], allowMultiple, allowCustom }
+Template { id, name, description|null, measurements: {on, keys[]}, questions: {on, items: Question[]},
+           createdAt, updatedAt }
+```
+
+### `GET /v1/assessment-catalog`
+**Purpose:** what a template may pick from — `{ groups, measurements, questions }`:
+21 measurements (`{key, label, group, unit, metric}`) in four groups and an
+11-question bank. **The product's, not the trainer's** — never emptied for a new
+account, and a trainer cannot add to it (a measurement is only worth taking if it
+is taken the same way twice). The six measurements V5 also knows use **V5's ids**
+— `weight`, `body_fat`, `chest`, `waist`, `hip`, `arm` — and `metric` names that
+id (null on the other fifteen). **It includes health items** — the *Vitals* group
+(`resting_hr`, `bp`), `visceral`, the `q_pain` question and the *Illness* option —
+by the product owner's recorded decision, kept isolable in `AssessmentCatalogue`.
+
+### `GET /v1/assessment-templates` · `GET /{id}`
+**Purpose:** the caller's templates, most recently touched first; one template, or
+`404 ASSESSMENT_TEMPLATE_NOT_FOUND`.
+
+### `POST /v1/assessment-templates` → `201` · `PUT /{id}`
+**Purpose:** save a template. `name` is **required** (≤ 120; `400 VALIDATION
+name: required`); `description` optional (`""` clears on `PUT`). `PUT` replaces
+each block that is **present**, whole — there is no per-question PATCH.
+
+Normalised on write:
+- a block arrives as `{on, keys|items}` or as a **bare list, which counts as ON**;
+  a missing `on` is ON;
+- measurement keys are filtered to the catalogue and de-duplicated in order;
+- an unknown question `kind` becomes `text`; `scale` is kept only on a `rating`
+  and must be 5, 10 or 20, else 10;
+- `options`, `allowMultiple` and `allowCustom` are **forced empty / false unless
+  `kind == 'choice'`**;
+- missing question ids are minted (`aq_…`), missing option ids are `a`, `b`, …;
+  a question with no text is *Question n*.
+
+### `DELETE /v1/assessment-templates/{id}` → `204`
+Soft. **Every assessment already sent from it survives**, with `templateId` set to
+null in the same transaction — a sent assessment stopped being the template when
+it went out.
+
+### `GET /v1/assessments`
+**Purpose:** the trainer's sent assessments. Query: `status` (a **CSV set** —
+unknown names are ignored, and a set of only unknown names filters nothing),
+`read` (`unread` = returned and not read; `read` = returned and read), `clientId`,
+`q` (matches the assessment's name **or** the client's), `page` (default 0),
+`size` (default 20, max 200). Returns `{ items: Row[], total }`, **`total` counted
+after every filter**, ordered `dueAt` newest first, then `id`.
+
+### `GET /v1/assessments/{id}`
+**Purpose:** one assessment, **assembled on the server**: the `Row` plus
+`client {id, name, status}`, `template {id, name, description} | null`,
+`asked { measurements: Measurement[], questions: Question[] }` (what the template
+asks for, from the **live** template), `readings` (each `{key, value}` joined to
+its catalogue row), `answers` (each joined to its question —
+`{questionId, text, kind, scale, options, allowMultiple, yes, rating, answer,
+optionIds, chosen}`), `history` (per reading key, the value from every one of this
+client's **returned** assessments, oldest first by `completedAt`) and `returned`
+(`{id, name, at}`, newest first). A question is looked up in the template first
+and the bank second; a reading or answer that resolves to neither is **dropped**,
+never drawn as an id. `history` is the only reading history there is — since
+V22 a body reading exists nowhere but on an assessment. Not the caller's:
+`404 ASSESSMENT_NOT_FOUND`.
+
+### `POST /v1/assessments` → `201`
+**Purpose:** book or send one. Body `{ clientId, templateId, dueAt?, sendNow?,
+name? }`. `sendNow: false` books it (`booked`, `sentAt` null); anything else sends
+it now. `name` defaults to the template's. **The asked counts are frozen from the
+template when it is sent.** Refusals: `400 VALIDATION` with `clientId: no such
+client`, `templateId: no such assessment` or `dueAt: must be an ISO date-time`.
+Returns the `Row`.
+
+### `PATCH /v1/assessments/{id}`
+Body `{ read?, dueAt?, send? }`. `read: true` stamps `readAt`; **`read: false`
+genuinely un-reads** (how a trainer parks one opened by accident). `send: true`
+sends a booked one — re-freezing its counts from the template as it now stands —
+and does nothing to one already sent. Returns the `Row`.
+
+### `DELETE /v1/assessments/{id}` → `204`
+Soft — it may hold answers a client wrote.
 
 ---
 
@@ -1191,10 +1478,24 @@ Ownership is checked first; a client that is not this trainer's yields `404`.
 **Purpose:** search and browse the exercise library — **or resolve a known
 handful of ids to their rows.**
 
-Query params: `ids`, `q`, `muscleGroup`, `bodyPart`, `target`, `equipment`,
-`level`, `page` (default `0`), `size` (default `20`). Returns
-`{ exercises: [...], total }` covering both the seeded global library and this
-trainer's own custom exercises.
+Query params: `ids`, `q`, `source`, `muscleGroup`, `bodyPart`, `target`,
+`equipment`, `level`, `page` (default `0`), `size` (default `20`, capped at
+`100`). Returns `{ exercises: [...], total }` covering both the seeded global
+library and this trainer's own custom exercises. `total` is counted after every
+filter.
+
+**`source` (V9)** picks the shelf: `incline` — the catalogue only; `mine` — this
+trainer's finished custom movements; `draft` — their drafts; **anything else,
+absent included, is everything except drafts.** An unknown value falls through
+to that default rather than answering an empty library. It is **not applied to an
+`ids` read**, so a draft already named in a plan still resolves.
+
+**`q` matches `name`, `target`, `movementPattern` and `bodyPart`** (V9,
+case-insensitive substring) — "quads" and "hinge" find movements whose names say
+neither. Not `description`: prose matches everything and ranks nothing.
+
+**The 100-row cap is deliberate and stays.** A caller that wants names for known
+rows uses `ids`, not `size=2000`.
 
 **`ids=a,b,c`** returns exactly those rows and **ignores paging**. The phone
 holds the library in SQLite and joins locally; the online half holds nothing, so
@@ -1222,16 +1523,61 @@ plate step, so every real record is a loud one. Without it a caller has to infer
 the answer from whether past sets carried a load, which is a decent guess with
 nothing at all to go on for an exercise nobody has logged yet.
 
+Every exercise also carries, **appended last by V9**:
+
+| Field | |
+| --- | --- |
+| `status` | `published` \| `draft`. Drafts exist only on custom rows. |
+| `secondaryTargets` | `string[]`, **never null** — `[]` until authored. |
+| `formCues` | `string[]`, **never null** — `[]` until authored. |
+
+**Both lists are empty on every row today, deliberately.** The mock generates cues
+for the whole catalogue and those must not be seeded: a generated form cue served
+as real is a coaching instruction nobody wrote. Filling them is a content pass of
+its own. `imageUrl` / `videoUrl` are still on the shape and always null since V22.
+
 ### `GET /v1/exercises/meta`
-**Purpose:** the filter vocabulary — `muscleGroups[]`, `equipment[]`, `levels[]` —
-so the filter sheet is populated from the data rather than a hardcoded list.
+**Purpose:** the filter vocabulary — `muscleGroups[]`, `bodyParts[]`,
+`targets[]`, `equipment[]`, `levels[]` — so the filter sheet is populated from the
+data rather than a hardcoded list. Read off the catalogue only, alphabetical.
+
+### `GET /v1/exercises/categories`
+**Purpose:** the library's *By categories* view. **V9.**
+
+Returns `{ categories: [{ muscleGroup, count }], total, uncategorised }`.
+
+- Counts **the caller's library** — the catalogue plus this trainer's own custom
+  rows, **drafts excluded** — which is exactly what the default list read shows,
+  so a card saying 34 opens a list of 34.
+- **Ordered by the catalogue's muscle-group list** (`/meta`'s order), **never by
+  count**: a grid that reshuffles whenever a movement is added is one nobody can
+  navigate by position. A group only a custom row uses comes after the
+  catalogue's, alphabetically.
+- Rows with no `muscleGroup` go into `uncategorised`, not into a card; groups with
+  a count of 0 are not returned. `total` is every non-draft row visible.
+
+### `GET /v1/exercises/{id}`
+**Purpose:** one exercise, whole — the exercise info panel. **V9.**
+
+Returns one `ExerciseResponse`, including `secondaryTargets` and `formCues`.
+Visible means what the list means — the catalogue, or this trainer's own custom
+rows, **drafts included**. Anything else is a `404`, not a `403`, so the route
+cannot confirm another trainer's private movement exists. The literal paths
+(`/meta`, `/categories`) are declared before this one.
 
 ### `POST /v1/exercises` → `201`
 **Purpose:** create a custom exercise when the library has no match.
 
 Body: `name` (required), `muscleGroup`, `equipment`, `movementPattern`,
-`description`, `imageUrl`, `videoUrl`, `logType`. Comes back with
-`isCustom: true` and is visible only to the creating trainer.
+`description`, `imageUrl`, `videoUrl`, `logType`, and V9's `target` and
+`status`. Comes back with `isCustom: true` and is visible only to the creating
+trainer.
+
+**`status`: only the literal `draft` makes a draft**; anything else — null, a
+typo — is `published`, because a movement silently filed as a draft is one that
+vanishes from the library its author is looking at. `target` is the primary
+muscle, trimmed and cut at 50. A custom movement gets **no** generated pattern,
+cues or secondary targets — both lists come back `[]`.
 
 `logType` is `weight_reps` | `reps`; anything else, null included, becomes
 `weight_reps` — the same default the sync push applies, so two writers of one
@@ -1251,7 +1597,25 @@ client.
 
 A `TemplateResponse` carries `id`, `name`, `goal`, `description`, `exercises[]`,
 `dayLabels`, `createdAt`, `updatedAt`, and — appended in the V31 pass —
-`weeks`, `trainingDays[]`, `assignedCount` and `activeAssignedCount`.
+`weeks`, `trainingDays[]`, `assignedCount` and `activeAssignedCount`, and —
+appended 23 Sep 2026 — **`assignedClients[]`**.
+
+**`source` and `copiedFrom` (V11), appended after it.** `source` is `own` on every
+row of this shelf — a copy of a certified program is the trainer's own the moment
+it exists — and the certified list answers `certified` in the same field.
+`copiedFrom` is `{id, name, updatedAt}` of the certified original, **frozen at
+copy time** (so it still names the original after it is retired), or null.
+`updatedAt` older than the original's current one is how the builder says *the
+original was revised since you copied it*; nothing is ever propagated.
+
+**`assignedClients` is `{id, name}[]`, the shelf's avatar cluster**: at most **6**
+of the clients on an **active** copy, one entry per client, ordered by name and
+then id so it is a total order and never reshuffles between loads. It is a
+**sample, never a count** — `activeAssignedCount` is the authority for "+N
+more", and nothing may derive a count from the array's length. It lists **only
+the caller's own clients**: a template's copies can sit with a teammate after a
+reassignment, and a coach must not read a teammate's client names off a shelf.
+Read in one query for the whole shelf, on the list and on `GET /{id}`.
 
 **`exercises[]` is camelCase, as documented here, and that is newer than this
 document.** Until 28 Aug 2026 the field was a raw `List<Map<String,Object>>`
@@ -1270,7 +1634,18 @@ Body: `name` (required), `goal`, `description`, `exercises[]`, `dayLabels`,
 
 Each exercise entry carries `exerciseId`, `sets`, `reps`, `restSeconds`,
 `targetLoad`, `notes`, `dayOfWeek`, `orderIndex`, `week`, `durationSeconds`,
-and V31's `tempo`, `altExerciseId`, `groupId` and `setDetail[]`.
+V31's `tempo`, `altExerciseId`, `groupId` and `setDetail[]`, and V10's
+**`workoutId`** and **`workoutName`**.
+
+**A day holds named workouts (V10).** `workoutId` says which block on its day an
+entry belongs to — "Upper A", then "Conditioning" — and `workoutName` is what the
+block is called. The id is a **local handle the builder mints**, not a reference
+to a workout template (pouring a workout into a day re-mints ids on purpose), so
+the server stores it and never resolves it. Both are optional: an entry with
+neither is its day's single unnamed block, which is every entry written before
+V10. Trimmed, blank as null, and cut to 64 / 120 characters — the widths of the
+client copy's columns. They live in `template.structure`, so the blueprint needed
+no migration, and `duplicate` carries them because it copies the blob as stored.
 
 `week` and `durationSeconds` are **not new columns** — both have been in the
 blueprint JSON and copied by `apply` since V20 and V25 — but neither had a field
@@ -1296,6 +1671,11 @@ count — incomplete but true, never a number that is wrong for half the sets.
 when present — `template.structure` is a single jsonb column, so there is no row
 to patch.
 
+A **certified program's id** sent to `PUT` or `DELETE` is `403
+CERTIFIED_READ_ONLY`, and to `POST /{id}/apply` is `409 CERTIFIED_COPY_FIRST` —
+named rather than answered with a bare 404, because the id is real and the
+trainer is one *Copy* away from what they meant.
+
 ### `POST /v1/templates/{id}/duplicate` → `201`
 **Purpose:** copy a blueprint, so a trainer can tweak one for a client without
 touching the version other clients are already on.
@@ -1312,32 +1692,155 @@ blueprint with nobody on it, which is exactly what makes it safe to edit.
 **Purpose:** who is on a copy of this template.
 
 Returns `programId`, `clientId`, `clientName`, `programName`, `startDate`,
-`endDate`, `status`, `createdAt`, `updatedAt`, `behindTemplate`.
+`endDate`, `status`, `createdAt`, `updatedAt`, `behindTemplate`, `divergence`.
 
-`behindTemplate` compares the program's `updated_at` against the template's. A
-copy that differs from its blueprint is the NORMAL state — per-client adjustment
-is what the two tables are for — so this is a fact for the trainer to act on,
-never an error, and nothing repairs it automatically. `POST
-/v1/programs/{id}/resync` is the only thing that does, and only when asked.
+`behindTemplate` compares the program's **`synced_at`** against the template's
+`updated_at`. **It was `updated_at` before V2 and that read is now wrong**: a
+copy the trainer tuned this morning has the newer stamp and has taken nothing,
+so it reported itself up to date having never received the edit. A copy that
+differs from its blueprint is the NORMAL state — per-client adjustment is what
+the two tables are for — so this is a fact for the trainer to act on, never an
+error, and nothing repairs it automatically. `POST /v1/programs/{id}/resync` is
+the only thing that does, and only when asked.
+
+`divergence` (V2) is what the copy SAYS that the blueprint does not, which is a
+different question from the clock above and the one the trainer needs: a resync
+replaces the whole prescription, so pushing a tidied blueprint to thirteen
+clients deletes per-client work, and this is what lets the screen name it first.
+
+```
+{ "added": 0, "removed": 0, "swapped": 1, "changed": 0, "noted": 1,
+  "alts": 0, "shape": 1, "total": 3,
+  "lines": [ { "kind": "swapped", "week": 1, "day": 2,
+               "text": "Tuesday · Push · Bench Press → Dumbbell Press" } ] }
+```
+
+Four things about it are decisions rather than details:
+
+- **rows pair by movement within a lane, never by position.** A copy's row ids
+  were minted by `apply`, so an id-keyed diff reports every row as both added
+  and removed, and a positional one reports four changes for one inserted row.
+- **one out, one in, same lane is a SWAP** — the injury substitution, and as a
+  removal plus an addition it reads as two changes and loses the fact that one
+  replaced the other.
+- **a cue is its own kind** (`noted`), not a re-prescription. Folding
+  `program_exercise.notes` into the prescription reported every copy in the book
+  as re-prescribed against a blueprint it agreed with on every number.
+- **the blueprint is translated into the client's week first.** A template's day
+  is an ordinal slot and a copy's is a weekday; comparing them unmapped reports
+  every row on both sides. Where a program has **no** `schedule` to translate
+  through, the lines say `Day 1` rather than naming a weekday nothing can
+  derive.
 
 ### `POST /v1/templates/{id}/apply` → `201`
 **Purpose:** the point of templates — instantiate one as a live program for a
 client, copying every exercise row across in one transaction.
 
-Body: `clientId` (required), `schedule[]`, plus optional `name`, `goal`,
-`startDate`, `endDate` overrides. Returns a `ProgramSummary` for the program that
-was created.
+Body: `clientId` (required), `schedule[]` (optional since 23 Sep 2026), plus
+optional `name`, `goal`, `startDate`, `endDate` overrides. Returns a
+`ProgramSummary` for the program that was created.
 
 `schedule[]` is `{day, weekday, time}` per ordinal slot — the translation from
 "Day 2" to "Wednesday at 06:30", which is the client's choice and not the
 template's. It must cover **exactly** the template's day slots, one distinct
-weekday each, `time` as 24-hour `HH:mm`, or the call is a 400 naming the
-mismatch. A plan silently missing a day, or with a day nobody scheduled, is
-worse than an error.
+weekday each, `time` as 24-hour `HH:mm`. A plan silently missing a day, or with a
+day nobody scheduled, is worse than an error, so anything else is refused:
+
+| Refusal | Answer |
+| --- | --- |
+| the wrong number of days, or a slot covered twice / not at all | `400 SCHEDULE_MISMATCH`, `detail` naming the numbers |
+| a slot on no weekday, two slots on one weekday, a time that is not `HH:mm` | `400 SCHEDULE_INVALID` |
+
+Both are typed now (`ProgramRuleException`); until 23 Sep 2026 they were bare
+`ResponseStatusException`s whose sentence never reached a screen.
+
+**No `schedule` sent: the client's standing week is the schedule.** The
+redesigned add-a-client flow agrees the days on step 3 and then applies the plan
+with `{clientId}` alone. The server pairs `client.weekly_schedule` with the
+template's days **by position** — the client's k-th slot (by weekday, then time)
+takes the template's k-th training day — and the rest of apply runs exactly as if
+that schedule had been sent, including storing it in `program.schedule`. A week
+with a different number of days, or no week at all, is `400 SCHEDULE_MISMATCH`
+with a sentence naming both numbers: the trainer has to choose which day goes.
+An explicit `schedule` always wins.
+
+**Apply ends the caller's previous plan for that client.** In the same
+transaction, every other `active` program **this trainer** has for the client
+becomes `completed`, with `endDate` set to today (IST) unless it had already
+ended earlier. Before this, re-planning a client left two plans `active` and
+every screen reading "the active program" drew whichever came back first. It is
+scoped by `trainer_id` — *a team widens reads; it never moves ownership*, so a
+teammate's plan on a reassigned client is never ended here. The diary's rhythm
+sessions are re-pointed at the new plan by the same reconcile as before.
 
 **The result is a snapshot.** Nothing reaches back through `program.template_id`
 to rewrite it, so editing the blueprint afterwards changes the blueprint and
 nothing else.
+
+### Certified programs · V11
+
+Programs **InclineYou authors**, which a trainer browses, previews and **copies**.
+Three decisions are fixed: they are authored in-house; using one copies it; and
+**nothing propagates** — a copy is the trainer's own template from the moment it
+exists, and revising the original changes only the original.
+
+They live in their own table, `certified_template`, not in `template`: a
+certified row stamped with any one workspace would be invisible to every other
+under tier-1 RLS. It is a catalogue — readable from every workspace, writable by
+no request — so rows arrive by migration. **The two rows today are samples**
+(`certified.sample: true`, `reviewedAt: null`), written 23 Sep 2026 so the shelf
+has something to render; see `SCHEMA.md`.
+
+The literal paths are declared before `/{id}` — before they existed,
+`GET /v1/templates/certified` bound `certified` to the UUID-typed `{id}` and
+answered **400**, not 404.
+
+#### `GET /v1/templates/certified`
+**Purpose:** the shelf, and the "start from" chooser.
+
+Each item is a **`TemplateWire`** — the same shape `GET /v1/templates` answers, so
+one renderer serves both — with:
+
+| Field | On a certified item |
+| --- | --- |
+| `exercises` | `[]` — never sent on the list |
+| `exerciseCount` | the blueprint's entry count |
+| `assignedCount`, `activeAssignedCount`, `assignedClients` | `0`, `0`, `[]` — nobody is ever on the original |
+| `source` / `copiedFrom` | `certified` / `null` |
+| `certified` | `{ summary, level, equipment, reviewedAt, usedCount, sample }` |
+| `mine` | `{ id, copiedAt, stale }` — the **caller's** newest copy, or `null` |
+
+`level` is `beginner` · `intermediate` · `advanced`; `equipment` is `full-gym` ·
+`dumbbells` · `bodyweight`. **`reviewedAt` is when a qualified human reviewed the
+program, not `updated_at`**, and is null until one has. `sample` (appended beyond
+the mock's shape) is true for a placeholder, and a screen should say so.
+`stale` means the original's `updated_at` is later than the copy's frozen
+`copiedFrom.updatedAt` (compared at millisecond precision). The list is never
+emptied for a new account and never filtered by what the caller has copied;
+it is ordered beginner → advanced, then by name.
+
+#### `GET /v1/templates/certified/{id}`
+**Purpose:** the preview. The same item **with** `exercises` — the full blueprint,
+V31 fields and V10's named workouts included. `404 CERTIFIED_NOT_FOUND` when the
+id is unknown or retired.
+
+**The blueprint is resolved on read.** A certified blueprint names each movement
+by the catalogue's stable `source_id` (`gymvisual-0025`), because catalogue UUIDs
+are minted per database by the seeder after migrations run; the server maps them
+to this database's `exercise.id` in one query, so `exerciseId` on the wire is an
+ordinary library id. An entry whose movement is not in the library is dropped
+rather than drawn blank.
+
+#### `POST /v1/templates/certified/{id}/copy` → `201`
+**Purpose:** use one. Body (optional): `{ "name"?: string }` — the original's name
+is kept by default, with no "(copy)" suffix. Returns the new **`TemplateResponse`**.
+
+One transaction: a trainer-owned template with the blueprint copied **verbatim**
+(`groupId`, `setDetail`, the named workouts, `dayLabels`, `trainingDays`,
+`weeks`), `source: own`, `copiedFrom` frozen as at this moment, and the original's
+`usedCount` incremented — which nothing else ever moves. Copying twice makes two
+copies; `mine` reports the newest. The copy is then an ordinary template:
+editable, deletable, assignable.
 
 ---
 
@@ -1357,8 +1860,66 @@ Body: `clientId` (required), `name` (required), `goal`, `startDate`, `endDate`,
 ### `GET /v1/programs/{id}` · `PUT /v1/programs/{id}` · `DELETE /v1/programs/{id}` → `204`
 **Purpose:** read, edit and archive one program.
 
+`ProgramResponse` carries `dayLabels`, `weeks`, `trainingDays` and `syncedAt`
+since **V2** — the copy's own shape, appended last, so a build that predates them
+reads the ten fields it always read. The three shape fields are keyed by WEEKDAY
+where a template's are ordinal slots; `SCHEMA.md`'s `program` table says why.
+`syncedAt` is null on a program written from scratch, which has never taken a
+blueprint.
+
+`schedule` is appended beside them — ordinal slot → the weekday and time this
+client trains it, exactly what `apply` was given and stored. It is what lets a
+caller compare a copy against its blueprint at all: a template's `dayOfWeek` is
+an ordinal slot and a copy's is a concrete weekday, so an unmapped comparison
+puts every row on both sides of the ledger for a plan nobody has touched.
+`program/PlanDiff.java` states the rule; the web's own diff reads this field for
+the same reason. Null for a plan written from scratch and for one applied before
+the column existed — neither has a blueprint to line up against.
+
+### `POST /v1/programs/{id}/notify`
+**Purpose:** the client plan builder's optional *Tell {client}* after a save.
+**V18.** No body; returns `{ sent }`. It writes nothing to the plan — a row edit
+mints nothing on its own, because a typo fix is not an event — and mints one
+`plan` notification (`subjectAt` = the plan's creation, so the portal says *changed
+your plan*). **`{ sent: false }`, not an error**, when the client has switched plan
+notices off. The plan's owning trainer only; anything else is `404`.
+
 ### `GET /v1/programs/{id}/exercises`
 **Purpose:** the program's exercise rows, in `orderIndex` order.
+
+Every row carries **`workoutId`** and **`workoutName`**, appended last by V10 —
+the named block on its day, copied from the blueprint by `apply` and `resync`.
+`POST` and `PUT /v1/programs/{id}/exercises` take both on each row and store them
+as sent (trimmed, cut to 64 / 120); unlike `groupId` the id is **not re-minted**,
+because it is the board's own handle for the block. On
+`PUT /v1/programs/{id}/exercises/{exId}` null leaves them alone and `""` clears.
+`PlanDiff` ignores both: a renamed or regrouped block is not a change to what the
+client is prescribed.
+
+### `PUT /v1/programs/{id}/exercises`  · V2
+**Purpose:** replace the whole prescription — the client plan builder's save.
+
+Body: `exercises[]` (the same row shape `POST` takes), plus the copy's own shape
+— `dayLabels`, `weeks`, `trainingDays`, `name`. Returns the rows as saved.
+
+One PUT and not a dozen row writes, for `PUT /v1/templates/{id}`'s reason: one
+drag on a board moves every row under it, and a dozen ordered round trips whose
+failure is partial is not a save. The whole thing is one transaction — a refused
+row leaves the previous prescription intact.
+
+Three things it does and does not do:
+
+- **`synced_at` is NOT touched.** Tuning a copy is not the same act as taking
+  the blueprint, and `behindTemplate` must keep telling the truth about a copy
+  the trainer edited this morning.
+- **the days are the CLIENT's weekdays**, not the template's ordinal slots. Rows
+  arrive in the week the screen has been reading them in; this route performs no
+  translation of its own and must not start.
+- **a shape field is written only when it is sent.** `{}` is a real answer
+  meaning *this plan has no day names* and has to be distinguishable from *I am
+  not telling you about the labels*, so absent means unchanged.
+
+Every shape field is optional; a save that only reordered rows sends none.
 
 ### `POST /v1/programs/{id}/exercises` → `201`
 **Purpose:** add an exercise to the program.
@@ -1406,6 +1967,78 @@ Three things it does and does not touch:
 
 A program written from scratch rather than from a template has nothing to pull
 from and answers 400.
+
+---
+
+## Workout templates
+
+`workout/WorkoutTemplateController.java` — **V13.** One reusable session,
+prescribed **per set**, that a trainer saves once and pours into any program day
+(`/programs/workouts`, and the program builder's library pane). **Not a
+`template` with one week**: a week sheet prescribes a row as *N × reps*, a
+workout prescribes each set with a load kind and an effort kind of its own.
+Trainer-owned, tier 1, never in sync.
+
+```ts
+SetWire      { loadKind: 'percent_1rm'|'level'|'weight'|'weight_range'|'bodyweight'|'rpe_level'|'rpe_weight';
+               loadValue: number|null;
+               effortKind: 'max_reps'|'max_time'|'max_distance'|'distance'|'reps'|'rep_interval'|'time';
+               effortValue: number|null; restSeconds: number|null; tempo: string|null; notes: string|null }
+ExerciseWire { id; exerciseId; orderIndex; groupId: string|null;
+               alternatives: { exerciseId; sets: SetWire[] }[]; sets: SetWire[] }
+WorkoutTemplateResponse { id; name; notes: string|null; exercises: ExerciseWire[];
+               dividers: { label; beforeIndex }[]; createdAt; updatedAt;   // epoch ms
+               exerciseCount; setCount }                                   // COUNTED on read, never stored
+```
+
+`setCount` counts every set of every movement; alternatives are not counted,
+because they replace a movement rather than add to it.
+
+### `GET /v1/workout-templates`
+**Purpose:** the caller's saved workouts, most recently touched first (then
+oldest, then id — a total order). An empty account answers `[]`.
+
+### `GET /v1/workout-templates/{id}`
+**Purpose:** one workout, whole — used when it is poured into a program day.
+Not the caller's, or deleted: `404 WORKOUT_NOT_FOUND`.
+
+### `POST /v1/workout-templates` → `201`
+**Purpose:** save one. Body `{ name?, notes?, exercises?, dividers? }`, every
+field optional; `name` defaults to *New workout*.
+
+### `PUT /v1/workout-templates/{id}`
+**Purpose:** save it again. **A whole-body replace of the fields present**:
+each of `name`, `notes`, `exercises` and `dividers` that is sent replaces the
+stored one entirely, and an absent one is left alone. **There is deliberately no
+per-exercise PATCH** — two write granularities on one blob is how a half-saved
+session happens. Dividers sent without exercises are clamped against the
+exercises already stored.
+
+### `DELETE /v1/workout-templates/{id}` → `204`
+**Purpose:** remove one. **Soft** (`deleted_at`). A program day that a workout
+was poured into holds **copies** of its rows, carrying only V10's `workoutName`,
+so nothing cascades and no plan loses a row.
+
+### What the server does to every write
+
+The builder is a drag-and-drop board, so the request is read as loose JSON and
+rebuilt field by field:
+
+| Input | Stored as |
+| --- | --- |
+| an exercise's `orderIndex` | **re-derived from array position**; the sent value is never read |
+| an exercise's `id` | kept when sent (≤ 64 chars), minted when absent |
+| an unknown `loadKind` / `effortKind` | `weight` / `reps` |
+| a `loadValue`, `effortValue` or `restSeconds` that is not a number (a numeric string included) | `null`; `restSeconds` is rounded to whole seconds |
+| an empty `tempo`, `notes` or top-level `notes` | `null` |
+| an alternative with no `exerciseId`, or with no sets | dropped |
+| a divider's `beforeIndex` | rounded, then **clamped to `[0, exercises.length]`** — evaluated after this body's exercises |
+| a divider with an empty `label` | dropped; the rest are sorted by `beforeIndex`, stably |
+| an `exerciseId` (alternatives included) the caller cannot see — neither the catalogue nor their own custom movement — or one that is not a UUID | **`400 VALIDATION`** with `detail` naming the position (`exercises[1].alternatives[0].exerciseId: not a movement in your library`); nothing is stored |
+
+Ceilings, each a `400 VALIDATION` rather than a truncation: 60 movements, 30 sets
+per movement or alternative, 5 alternatives per movement, 30 dividers, a name of
+120 characters and 500 for any note.
 
 ---
 
@@ -1495,6 +2128,16 @@ from scheduled sessions because a plan and a log are different records.
 
 ### `GET /v1/workouts?clientId=…`
 **Purpose:** the workout history, optionally per client.
+
+Every workout response carries **`exerciseCount`** (appended last, 23 Sep 2026):
+how many movements are in the log, **counted on read, never stored**, for the
+client file's Sessions table. It is the live `workout_exercise` cards (not
+removed, not deleted). **A log with no cards at all falls back to the distinct
+movements in its `set_log`**, because `workout_exercise` arrived with V13 and a
+log written before it — or by a phone build that predates it — has a full sheet
+and no cards; counting only cards would print *0 exercises* against it. A log
+whose cards were all removed genuinely holds nothing and answers `0`. No
+migration.
 
 ### `POST /v1/workouts` → `201`
 **Purpose:** log a session that happened.
@@ -1808,6 +2451,22 @@ Body (all optional): `packId`, `sessionsTotal`, `amount`, `discountAmount`,
 said, because that is what renewing means — a trainer renewing a client on a gym
 floor must not be asked to re-type a price they set last month.
 
+**This is also how a client buys more sessions mid-pack**, with exactly one
+field different: `startDate` set to today. A renewal starts where the current
+pack stops (the table below); sessions bought on top of a pack that is still
+running have to be live now, or the client has paid for something that does not
+exist until their current pack lapses. The web calls the two *Renew* and *Add
+sessions* and picks between them on `packBand` — empty, ≤2 left, or ≤7 days to
+run is a renewal, anything else is an addition. Both write a second `package`
+row, because **a package is a sale**: adding sessions to the row bought in
+August would blend two prices into one per-session figure and leave nothing
+saying what was actually agreed. `POST /v1/packages/{id}/sessions` is the
+narrow exception and it moves no money — see below.
+
+The response carries `sessionsBooked`, like a sale: the write reconciles the
+client's standing week inside the same transaction, so a renewal usually puts
+sessions in the diary as well as a row in the books.
+
 A POST, not a PATCH: it **creates** a package and leaves the old row exactly as it
 is, which is what keeps a client's history readable and what the money book is
 still owed against. It sits on the old package's id rather than the client's,
@@ -1864,13 +2523,54 @@ and the more dangerous one" — a route that sets a session count directly can
 silently undo a charge the diary's 24-hour undo exists to reverse properly. These
 three move dates and nothing else.
 
+V4 adds a fourth verb that moves sessions, and it is narrow on purpose: it sets
+the TOTAL and moves what is left by the same delta, so what has been delivered
+cannot change. See `POST /v1/packages/{packageId}/sessions` below.
+
+### `POST /v1/packages/{packageId}/sessions` · V4
+**Purpose:** the pack was sold with twelve and the row says ten. **A correction,
+never a sale.**
+
+Body: `sessionsTotal` (required, 1–500 — the number it *should* have been,
+absolute rather than a delta, because that is the number the trainer knows) and
+`reason`. Returns the updated `PackageResponse` and writes a
+`package_adjustment` of kind `sessions` carrying the signed delta.
+
+**It moves `sessionsTotal` and `sessionsRemaining` and never `amount`.** That is
+the whole line between this and `/renew`: money changing hands is a sale and
+gets its own row; a number that was simply typed wrong is a correction. It is
+the exact sibling of `extend`, which gives days away and leaves the price alone.
+
+**`sessionsRemaining` moves by the DELTA, which is what makes this safe** — and
+it is why it is not the `PATCH /v1/packages/{id}` this file has always refused.
+That route, `BACKEND_GAPS.md` §6's option (b), sets `sessionsRemaining`
+directly, and the danger both documents name is real: it can silently undo a
+charge that the diary's 24-hour undo exists to reverse properly. This route
+cannot. `used = sessionsTotal − sessionsRemaining` is invariant across it by
+construction, so no correction can un-deliver a session, and a total corrected
+to fewer than have already been delivered is refused by name rather than
+clamped. Option (b) stays unbuilt.
+
+Refusals: `PACKAGE_BAD_SESSION_COUNT` (400 — outside 1–500), `PACKAGE_NO_CHANGE`
+(400 — the count it already has, refused rather than answered 200 having done
+nothing), `PACKAGE_NOT_COUNTED` (409 — a monthly pack counts no sessions;
+`extend` is the verb that applies), `PACKAGE_FEWER_THAN_DELIVERED` (409),
+`PACKAGE_NOT_LIVE` (409).
+
 ### `GET /v1/packages/{packageId}/adjustments`
 **Purpose:** everything that has happened to one pack, oldest first.
 
-Each row: `kind` (`pause` | `resume` | `extend`), `days`, `reason`,
-`effectiveAt`, `createdAt`. **Append-only** — no update, no delete; reversing an
-adjustment is another row, which is why `days` is signed. On a resume `days` is
-the pause's length; on a pause it is `0`, because an open pause has no length yet.
+Each row: `kind` (`pause` | `resume` | `extend` | `sessions`), `days`,
+`sessions`, `reason`, `effectiveAt`, `createdAt`. **Append-only** — no update, no
+delete; reversing an adjustment is another row, which is why `days` is signed. On
+a resume `days` is the pause's length; on a pause it is `0`, because an open
+pause has no length yet.
+
+`sessions` is V4 and is the signed change a correction made to the count —
+negative as often as positive, since the commonest correction is a count typed
+too high. It is `0` on pause, resume and extend, which all move days; `days` is
+`0` on a correction, which moves neither dates nor money. A row carries one or
+the other, decided by its `kind`.
 
 It exists so goodwill is a fact rather than a feeling: an extension is the
 cheapest thing a trainer gives away and the easiest to forget having given, and
@@ -1879,6 +2579,12 @@ cheapest thing a trainer gives away and the easiest to forget having given, and
 ### `GET /v1/packages/{packageId}/payments`
 **Purpose:** the payment history against one package — what has been collected
 versus what is owed.
+
+Every payment response — here, `GET /v1/payments`, the record, confirm,
+write-off and invoice routes — carries **`invoiceNo`** and **`invoicedAt`**
+(epoch ms), **appended last** by V8. Both null until somebody raises an invoice,
+which is the common case: the pair is what decides between *Raise an invoice*
+and *INV-2627-0007* on each row.
 
 ### `GET /v1/payments`
 **Purpose:** the trainer's money across the whole roster, in a window.
@@ -1949,8 +2655,112 @@ unchanged and an old build's push neither loses nor clobbers anything new.
 ### `PATCH /v1/payments/{paymentId}/confirm`
 **Purpose:** confirm a pending UPI payment once the money has landed.
 
-Body: `{ "upiReference": "…" }`. Flips `status` and stamps `paidAt`. Separate from
-`POST` because a UPI deep link is fired optimistically and confirmed later.
+Body: `{ "upiReference"?, "method"?, "paidAt"? }`, every field optional. Flips
+`status` to `paid` and stamps `paidAt`. Separate from `POST` because a UPI deep
+link is fired optimistically and confirmed later.
+
+**`paidAt` and `method` (V8).** A trainer settling Tuesday's cash on Thursday
+sends Tuesday; absent means now. Unlike `POST`, which clamps, a `paidAt` in the
+future is **refused** — `400 VALIDATION` — because it is a date somebody typed on
+purpose and silently replacing it would store a day nobody chose (five minutes
+of clock skew are forgiven). `method` overwrites the row's method when sent and
+leaves it alone when not, so a pending row whose method was never known can
+learn it at the moment it is settled.
+
+A **written-off row cannot be confirmed** — `409 WRITTEN_OFF`. Its amount is
+already on the package's `written_off_amount`, and confirming it would count the
+same rupees as both collected and forgiven.
+
+### `PATCH /v1/payments/{paymentId}/write-off`
+**Purpose:** stop chasing a debt, without pretending it was paid and without
+deleting it. **V8.**
+
+Body (optional): `{ "reason"?: string }` — appended to the row's `note` as
+`"<old> · <reason>"`, refused over 500 characters. Returns the payment row.
+
+- `status` becomes `write_off`; `paidAt` and `gymShareAmount` become null. The
+  amount, client and date stay — "₹2,000 was forgiven in March" is still a fact
+  in the books.
+- **The row's amount is added to the package's `written_off_amount`** (and
+  `written_off_at` is stamped if unset), in the same transaction. That is what
+  makes the debt drop: `amountDue` is `amount − paid − writtenOff`, and a pending
+  payment row is a placeholder for money expected, not part of that sum. It is
+  also the column the phone already draws.
+- A write-off **never counts as collected** — `amountPaid` sums `paid` and
+  `confirmed` only.
+
+| Refusal | Answer |
+| --- | --- |
+| already `paid` / `confirmed` | `409 ALREADY_COLLECTED` — money that arrived was not forgiven; delete a wrong entry instead |
+| already written off | `200`, unchanged — a second press must not forgive the amount twice |
+| not this trainer's, or not in the active workspace | `404 PAYMENT_NOT_FOUND` |
+
+### `POST /v1/payments/{paymentId}/invoice`
+**Purpose:** give a collected payment a bill number. **V8.**
+
+No body. Returns the payment row with `invoiceNo` and `invoicedAt`.
+
+**`INV-<FY>-<NNNN>`.** The financial year runs April–March on the Indian
+calendar, so September 2026 is `2627`; the sequence is **per trainer, per
+financial year, across every workspace they coach in**, because a bill series
+belongs to its issuer. It is gap-free and collision-free: the counter row
+(`invoice_counter`) is locked by the upsert that advances it, inside the same
+transaction, and a unique index on `payment (trainer_id, invoice_no)` is the
+backstop.
+
+**Minted on request, never on write**, and **idempotent** — a row that already
+has a number answers it unchanged.
+
+| Refusal | Answer |
+| --- | --- |
+| written off | `409 WRITTEN_OFF` — *"This one was written off. There is nothing to bill for."* |
+| `collectedBy = gym` | `409 GYM_COLLECTED` — *"The gym collected this one and raises its own receipt…"* |
+| still `pending` | `409 NOT_PAID` — the bill prints *Paid on*; mark it paid first |
+| not this trainer's | `404 PAYMENT_NOT_FOUND` |
+
+> **This is the trainer's bill to their client, not a tax invoice.** It computes
+> no tax. `PRICING.md`'s GST-compliant invoices are InclineYou billing the
+> trainer — a different document — and no copy on either half may call this one
+> a tax invoice.
+
+---
+
+## Notifications (the trainer's bell)
+
+`notification/TrainerNotificationController.java` — **V15.** The header bell holds
+**events somebody else did** to the trainer's book — never their own writes.
+Rows are **facts, never sentences**; the web's `lib/notifications/copy.ts` writes
+the English, and drops any `kind` its build does not know.
+
+```ts
+Notification { id, kind: 'payment'|'cancelled'|'metric'|'team', clientId|null, clientName|null,
+               amount|null, subjectAt|null, text|null, at, readAt|null }     // epoch ms
+```
+
+| `kind` | `text` means | Minted by |
+| --- | --- | --- |
+| `team` | the coach the client moved **to** | `POST /v1/team/clients/{id}/reassign`, on the bell of the coach who **lost** the client — and only when somebody else made the move |
+| `metric` | `"<value> <unit>"` | **nothing since V22** — it was the portal weigh-in, `POST /v1/me/metrics`, withdrawn with `body_metric`. Kept in the enum so old rows still render. |
+| `cancelled` | the session's day label; `subjectAt` is the slot | a client-side cancel — **no such route exists yet** |
+| `payment` | the method, or `gym` | a payment somebody other than the trainer records — **Ring 2, not yet** |
+
+A `team` row is totals-free by construction: no amount, no payment — *no role sees
+a teammate's money book*.
+
+### `GET /v1/notifications`
+**Purpose:** the caller's feed, **newest first**, the last **90 days**. No
+`?unread` filter, by design: the header counts what the list holds.
+
+### `POST /v1/notifications/{id}/read`
+**Purpose:** mark one read. **Idempotent and never un-reads** — `readAt` is when
+it was first seen. Returns the row; another trainer's is `404`.
+
+### `POST /v1/notifications/read`
+**Purpose:** mark every unread row read, in **one** request. Returns the feed.
+
+There is **no route that marks a row unread**, and **no push** is sent from the
+bell. Rows are written only through `mint_trainer_notification()` — see
+`SCHEMA.md` → `trainer_notification`.
 
 ---
 
@@ -2307,7 +3117,7 @@ that never asked for a library cursor.
 referential clause over the three tables a client can have — see its own entry
 below.
 
-Tables pulled: `clients`, `body_metrics`, `exercises`, `templates`, `programs`,
+Tables pulled: `clients`, `exercises`, `templates`, `programs`,
 `program_exercises`, `scheduled_sessions`, `workout_sessions`, `set_logs`,
 `workout_exercises`, `packages`, `payments`, `nudge_logs`, `working_hours`,
 `time_blocks`, `packs`, `gym_settlements`, `nudge_rules`, `exercise_favourites`,
@@ -2355,9 +3165,6 @@ When a client moves between coaches (V26 Phase 2):
   while the money book keeps working. Safe because both write paths in
   `pushClients` end in `WHERE client.trainer_id = :tid`, so a phone echoing the
   projected row back is a no-op.
-
-`body_metrics` follows the same widened scope, so a measurement series survives a
-handover on both phones.
 
 `weekly_reports` is **pull-only and must stay that way** — the scheduled job
 writes them, and a phone that could rewrite a sent report would make every one of
@@ -2412,7 +3219,7 @@ trust in the parameter.
 
 Tables: `clients`, `coaches`, `exercises`, `templates`, `programs`,
 `program_exercises`, `scheduled_sessions`, `workout_sessions`,
-`workout_exercises`, `set_logs`, `body_metrics`, `packages`, `payments`,
+`workout_exercises`, `set_logs`, `packages`, `payments`,
 `weekly_reports`.
 
 `libraryPulledAt` is the shared exercise library's own cursor, exactly as on
@@ -2427,10 +3234,135 @@ exercises of their own.
 ### `POST /v1/client/sync/push?clientId=…` → `204`
 **Purpose:** apply what the client logged on their own phone.
 
-Only four tables are accepted — `workout_sessions`, `workout_exercises`,
-`set_logs`, `body_metrics` — plus session confirmations. Anything else in the
+Only three tables are accepted — `workout_sessions`, `workout_exercises`,
+`set_logs` — plus session confirmations. (`body_metrics` left both sync
+directions with its table in V22; a push still carrying it is dropped and
+logged.) Anything else in the
 envelope is dropped and logged as "not a client's to write". A client can record
 what they did; they cannot edit the program, the roster, or the money.
+
+---
+
+## Client portal — `/v1/me`
+
+`portal/PortalController.java` — module 11a, **reads**. The web's `/me/*` pages:
+the client's own view of their coaching. **`ROLE_CLIENT` only**; the token's
+subject is the phone. Until this, a client's whole API was `/v1/client/sync/*`,
+the offline phone's protocol. Timestamps are **epoch ms**, except the assessment
+routes, which are **ISO** like the trainer's side.
+
+**Which roster.** One phone can be a client of two trainers (two `client` rows,
+possibly in two workspaces). Every route takes an optional **`?clientId=`**, which
+the web appends from its roster cookie when there is more than one. Resolution
+(`PortalScope`): no live row for the phone → **`403 NOT_A_CLIENT`**; a `clientId`
+that is not one of the phone's rows → **`403 NOT_YOURS`**; no `clientId` → the
+single row, or else the most recently **accepted** (then newest, then id — a total
+order). A row is live when it and its trainer are not deleted and its membership
+is not `declined` — the same set the tier-4 policies admit. Not-yours on an `{id}`
+route is **`404 NOT_FOUND`**, so it cannot confirm somebody else's row exists.
+
+**Nothing of the trainer's side of the arrangement is on this wire.** Every read
+is projected field by field: no `collected_by`, gym share or UPI reference on a
+payment, no pack charge on a session, no split percentages on the client.
+
+| Route | Returns |
+| --- | --- |
+| `GET /v1/me` | `{ client: {id, name, phone, goal, membershipStatus, deliveryMode, sessionsPerWeek, sessionDurationMinutes, weeklySchedule, startedAt, health}, trainer: {id, name, phone, gymName, headline, mapLink}, rosters: [{clientId, clientName, trainerName}], prefs }`. `trainer` is **the resolved roster's**; `trainer.phone` is exposed on purpose (the portal's WhatsApp links). `startedAt` is `accepted_at`, else `created_at`. `health` is `client.metadata.health` or `""`; the client corrects it with `PATCH /v1/me` (11e). **`prefs`** is the stored `client_prefs` row (11d), or the defaults when there is none: `hideWeight: false`, every `notify` switch on, `nominee: null`. |
+| `GET /v1/me/sessions?from&to` | `[{ id, scheduledAt, durationMinutes, status, dayLabel, templateDay, deliveryMode, location, workoutId }]`, **half-open** `[from, to)` in epoch ms (a missing bound is unbounded), oldest first. `location` is `trainer.gym_name`, or null for a remote session; `workoutId` is the log started from it. |
+| `GET /v1/me/program` | The live plan — the newest `active` one — as `Program`, or a JSON **`null`** (200) when none. |
+| `GET /v1/me/programs` | Every **non-active** plan, newest first: `{ id, name, goal, startDate, endDate, weeks, status, trainingDays, dayCount, exerciseCount, workoutCount }`. `workoutCount` is the workouts logged on it, **or null when there is no record to count from** (no workouts at all, or the block ended before the oldest one) — never a guessed 0. No adherence figure, by rule. |
+| `GET /v1/me/programs/{id}` | One plan, live or finished; `404 "That plan is not here."` |
+| `GET /v1/me/workouts?limit` | Newest first: `{ id, sessionDate, startedAt, endedAt, setCount, volumeKg, exerciseCount, effort }`. `volumeKg` is Σ load × reps, rounded; `exerciseCount` counts movements with a set; `effort` is the client's feedback on it (11b), or null. |
+| `GET /v1/me/workouts/{id}` | `{ id, sessionDate, startedAt, endedAt, dayLabel, programName, deliveryMode, scheduledAt, notes, feedback: {effort, note, at} | null, exercises: [{ exercise, targetSets, targetReps, targetLoad, restSeconds, swappedFromExerciseId, alternative, sets: [{id, setNumber, loadKg, reps, rpe}], lastTime }] }`. Movements are the live `workout_exercise` cards in order, plus any movement with sets and no card (a log from before cards existed). `cue`, `targetLoad` and `alternative` come from the plan's row for that movement (on the session's day where known). `lastTime` is the previous workout's sets for it and the all-time best load and reps, or null. `404 "No such workout."` |
+| `GET /v1/me/sets` | Every set the client has logged, oldest first — **unwindowed**, because a personal best is a claim about all of it: `[{ exerciseId, setNumber, loadKg, reps, sessionDate, createdAt }]`. |
+| `GET /v1/me/exercises?ids=` | `Exercise[]` for the given ids, **narrowed to movements in this client's own set logs** so the route cannot be walked to list the library; unknown ids are dropped, no ids is `[]`. |
+| `GET /v1/me/metrics` | Every body reading, oldest first: `[{ id, metricType, value, unit, recordedAt }]` — **out of the client's returned assessments** since V22, the same six ids and the same shape rules as `GET /v1/clients/{id}/body-metrics` (`id` is the assessment's). |
+| `GET /v1/me/packages` | Newest first: `{ id, name, type, sessionsTotal, sessionsRemaining, amount, amountPaid, amountDue, status, startDate, endDate, pausedAt }`. `name` is the pack's, else *Session pack*; `amountDue = amount − collected − written off`, floored at 0. `pausedAt` is added beyond the mock — a paused pack reading as live is a small lie. |
+| `GET /v1/me/payments` | Newest first: `{ id, amount, method, status, paidAt, createdAt }` — nothing else. |
+| `GET /v1/me/messages` | Newest first, two sources: `client_message` rows (`{id, body, kind, at, readAt, trainerName}`) and the trainer's notes about this client marked **`sharedWithClient`** (`kind: note`, `at` = last edit, `readAt` always null). A private note never appears. |
+| `GET /v1/me/milestones` | Newest first: `{ id, kind, label, value, at }`. Never windowed. |
+| `GET /v1/me/assessments` | **Sent** ones only, newest due first: `{ id, name, dueAt, sentAt, completedAt, status, measurements: {got, asked}, questions: {got, asked} }` (ISO). `status` is the client's three — `done`, else `late` once due (still answerable), else `open`. An open one whose template is gone is dropped. |
+| `GET /v1/me/assessments/{id}` | The row plus `{ description, asked: {measurements, questions}, readings, answers }`. **What is asked comes from the live template**, with no bank fallback. Unsent or not theirs → `404 "No such assessment."` |
+
+### Logging a workout — module 11b
+
+The log is the **same** `workout_session` / `workout_exercise` / `set_log` rows the
+trainer's console and the phone write, so a session the trainer opened and one the
+client opened are one log. Every insert carries the resolved client row's
+`tenant_id` (a client on two rosters writes into the right book). Each returns the
+`Workout` read above unless stated.
+
+| Route | Behaviour |
+| --- | --- |
+| `POST /v1/me/workouts` `{ sessionId? }` | **Resume before create**: an open log for this session — or, with none, an open no-session log dated today — answers **200** as it stands, whoever opened it. Otherwise **201** with a new log (`logged_by: client`) against the live plan, seeded with the plan's rows for **the session's slot** (mapped to the copy's weekday through `program.schedule`), or for today's weekday with no session. Not the client's session → `404`; a cancelled one → `409 SESSION_CANCELLED`. |
+| `POST /v1/me/workouts/{id}/sets` `{ exerciseId, setNumber, loadKg, reps }` | **Upsert on (workout, movement, set number)** — 201 when new, 200 when the same set number is saved again, so a double tap cannot make two sets. Returns `{ id, setNumber, loadKg, reps, rpe }`. The movement must be a **live card in this log** (`400 VALIDATION exerciseId: not in this workout` — the mock accepted any library movement); `setNumber` 1–50, `loadKg` 0–1000, `reps` 0–1000; a finished log → `409 WORKOUT_CLOSED`. |
+| `POST /v1/me/workouts/{id}/swap` `{ exerciseId, toExerciseId }` | Only to the plan row's **approved alternative** (`422 NOT_APPROVED` otherwise) and only **before any set** of it is logged (`409 ALREADY_STARTED`). The card keeps its target sets, takes the plan's reps and records `swappedFromExerciseId`. A movement not in the log → `404`; one already in it → `409 ALREADY_IN_WORKOUT`. |
+| `POST /v1/me/workouts/{id}/finish` `{ effort?, note? }` | **Idempotent** — only the first call closes the log (`endedAt`); every call upserts the feedback it carries into `workout_feedback` (`effort` `easy` · `right` · `hard`, else `400`). **It marks no session and charges no pack** (product decision, 23 Sep 2026): the booked session stays `scheduled` for the trainer, and shows as unmarked on Today. On the call that closes it, **every 25th finished workout mints a milestone** — "25th session with {trainer's first name}" — and a retry cannot mint it twice. |
+
+### What the client writes about themselves — module 11c
+
+| Route | Behaviour |
+| --- | --- |
+| `POST /v1/me/assessments/{id}/answers` | One answer per call: `{ kind: 'measurement', key, value?, clear? }` or `{ kind: 'question', questionId, yes? \| rating? \| text? \| optionIds?, clear? }`. Returns the assessment (as `GET …/{id}`). **The replacement is validated in full before the old answer is removed**, so a refused save leaves what the client already gave. The key or question must be one the **live template** asks (`400 VALIDATION`); a measurement is a finite number > 0; a question is checked by kind — `yesno` a boolean, `rating` a whole number 1–scale (default 10), `text` non-empty, `choice` at least one known option id, or its own text **only when `allowCustom`**, and a single-answer choice keeps the first id. Fields that do not belong to the kind are stored null. `clear: true` withdraws the answer. Readings and answers are kept in the template's order. Unsent or not theirs → `404`; already sent back → `409 CLOSED`; an unknown `kind` → `400`. |
+| `POST /v1/me/assessments/{id}/submit` | Send it back: `completedAt` now, `readAt` cleared so the trainer sees it **unread**. **A partial submission is allowed**; nothing answered at all → `400 EMPTY`; already sent → `409 CLOSED`. It does **not** ring the trainer's bell — returned assessments are read on the assessments list. |
+| ~~`POST /v1/me/metrics`~~ | **Removed in V22** (`405`). The weigh-in was a loose reading, and a body is now measured in an assessment and nowhere else. |
+
+### The client's settings and bell — module 11d
+
+`client_prefs` is **the one table the trainer's half never reads** (no staff
+policy at all). The client's bell holds facts the trainer's actions produced.
+
+| Route | Behaviour |
+| --- | --- |
+| `PATCH /v1/me/prefs` | `{ hideWeight?, notify?: Partial<{programUpdated, sessionReminder, trainerNote, personalBest, packChanged}>, nominee?: {name, phone} \| null }` → the full `prefs`. The row is **created on the first write** with the all-on defaults; `notify` is **merged**, not replaced; `nominee: null` clears it, an absent key leaves it. A nominee needs a trimmed `name` (`400 VALIDATION nominee.name: required`, clipped to 80) and a **10-digit** number (formatting and a `+91` prefix are stripped; else `400`). `hideWeight` is a display switch — nothing refuses a write because of it. The nominee is a third person's data (DPDP §14): stored as specified, dropped with the prefs when the client leaves, and never contacted by the product. |
+| `GET /v1/me/notifications` | The last **21 days**, newest first: `[{ id, kind, amount, subjectAt, text, at, readAt }]` — `kind` `note` · `plan` · `session` · `pack` · `best`; no `clientId`; no `?unread` filter. Rows are facts; the portal writes the sentence and drops a kind it does not know. |
+| `POST /v1/me/notifications/{id}/read` | `{ id, readAt }` — idempotent, never un-reads; not theirs → `404`. |
+| `POST /v1/me/notifications/read` | Marks every unread row in one request → `{ readAt }`. |
+
+**What rings the client's bell** — trainer writes, each gated **at the moment of
+sending** by the matching switch (a switched-off kind writes no row, so switching
+it back on refills nothing), through `mint_client_notification()`:
+
+| Trainer write | `kind` · `text` · other fields | Switch |
+| --- | --- | --- |
+| `POST /v1/sessions` (a future session) | `session` · `booked` · `subjectAt` = the slot | `sessionReminder` |
+| a booking run by the diary (a sale, a renewal, `apply`, a new standing week) | `session` · `booked` — **one** row naming the **first** session booked | `sessionReminder` |
+| `PUT /v1/sessions/{id}` moving it / cancelling it | `session` · `moved` (new slot) / `cancelled` | `sessionReminder` |
+| `DELETE /v1/sessions/{id}` (a future, scheduled one) | `session` · `cancelled` | `sessionReminder` |
+| `POST /v1/clients/{id}/packages` / `POST /v1/packages/{id}/renew` | `pack` · `sold` / `renewed` · `amount` | `packChanged` |
+| a payment recorded as collected, or confirmed | `pack` · the method · `amount` | `packChanged` |
+| `POST /v1/templates/{id}/apply` | `plan` · the plan's name · `subjectAt == at` (a **new** plan) | `programUpdated` |
+| `PUT /v1/programs/{id}` changing name, goal or dates; `POST /v1/programs/{id}/notify` | `plan` · the name · `subjectAt` = the plan's creation (**changed**) | `programUpdated` |
+| the portal's `/finish` minting a milestone | `best` · the milestone's label | `personalBest` |
+
+Notes, a pending payment, a status marked after the fact and a row edit on
+`PUT …/exercises` ring nothing. The phone's sync push rings nothing either — only
+these REST writes do.
+
+### The client's account — module 11e
+
+| Route | Behaviour |
+| --- | --- |
+| `POST /v1/me/phone/challenge` → `204` | A code to the **current** number (the OTP service's waits, ceiling and lock apply unchanged). |
+| `POST /v1/me/phone/verify` `{ otp }` | That code back → `{ ticket }`, a ten-minute signed proof bound to this roster row and this number. A wrong code is the OTP service's own `422 OTP_WRONG` / `OTP_EXPIRED` / `OTP_LOCKED`. |
+| `POST /v1/me/phone/request` `{ ticket, phone }` → `204` | Checked **before** an SMS is spent: a 10-digit mobile (`400 VALIDATION`), a real move (`400 PHONE_UNCHANGED`), and nobody on InclineYou holding it — a trainer, an identity row, or any live roster in any workspace (`409 PHONE_TAKEN`, never saying whose). Then a code to the new number. A missing, forged or stale ticket → `401 PHONE_CHANGE_UNPROVEN`. |
+| `POST /v1/me/phone/confirm` `{ ticket, phone, otp }` | The new number's code; the number moves on **every client row that carries it** (every roster, every workspace, a declined one included) and on the identity row, in one transaction → `{ phone, token }`. **Store the token**: the old credential's phone no longer resolves (`NOT_A_CLIENT`). |
+| `PATCH /v1/me` `{ health }` | Corrects `health` (`client.metadata.health`, ≤ 2,000) → `{ id, phone, health }`. **A `phone` is refused** (`400`) — a number moves only through the two-code ladder above. `health` is health data under the product's standing rule, accepted by the product owner's recorded decision (23 Sep 2026: include it now, strip health collection later if required). |
+| `GET /v1/me/export` | One JSON document: `{ exportedAt, client, trainer, sessions, workouts, sets, measurements, packages, payments, messagesFromTrainer, feedback, milestones, assessments, settings }`. **Field-listed throughout** — the client row without the trainer's or team's arrangement (split and margin percentages, assignment, staleness), payments as `{id, packageId, amount, method, status, upiReference, paidAt, note, createdAt}` without the gym's side. The trainer's **private** notes are not in it; shared notes are, as messages. `settings` is the prefs row, or null. |
+| `DELETE /v1/me` `{ confirmation }` → `204` | **Leaving this trainer — a membership exit, not an erasure** (product decision, 23 Sep 2026). The typed number is re-checked on its last ten digits (`400 DELETE_NOT_CONFIRMED`). Soft-deleted: this roster's `client` row, its prefs (the **nominee erased**), its bell, its assessments, its workout feedback, and its **future** bookings. **Kept as the trainer's records:** payments, packages, logged workouts, past sessions and the trainer's notes. Other rosters on the same number are untouched. A DPDP erasure is separate, policy-first work. |
+
+`Program` is `{ id, name, goal, startDate, endDate, weeks, status, week, dayLabels,
+trainingDays, days: [{ templateDay, label, exercises: [{ exercise, sets, reps,
+targetLoad, restSeconds }] }] }`. **Its days are keyed by the client's day SLOTS**,
+not by weekday: a client's copy stores weekdays (V2's translation at apply) while
+sessions carry the template's ordinal `templateDay`, so each weekday is mapped
+back through `program.schedule` — and `days[].templateDay`, `trainingDays` and the
+keys of `dayLabels` agree with the sessions. A plan written from scratch has no
+schedule and keeps weekdays. A multi-week plan shows one week: `week` (weeks since
+start, clamped) on a live plan, week 1 on a finished one. `Exercise` is `{ id,
+name, muscleGroup, equipment, logType, cue, formCues, steps }` — `cue` is the
+plan's note, `steps` the library description, `formCues` `[]` until authored; no
+clip, by product decision.
 
 ---
 

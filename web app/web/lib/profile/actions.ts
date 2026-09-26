@@ -373,7 +373,7 @@ export async function saveWorkingWeek(
   const merged = mergeWindows(windows);
   /*
    * Refused rather than written. In setup this shape means "I did not answer",
-   * and there is a Skip to say so; here there is no Skip, and writing it would
+   * and Skip for now is there to say so; here there is no Skip, and writing it would
    * close all seven days — which is a much louder claim than an unanswered
    * question, and the one that leaves add-client with no slots to offer and the
    * day ribbon with no ground to draw on.

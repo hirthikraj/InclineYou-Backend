@@ -135,7 +135,7 @@ UPDATE program_exercise  SET deleted_at = now(), updated_at = now()
         (SELECT id FROM program WHERE client_id IN (SELECT id FROM old_clients));
 UPDATE program           SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND client_id IN (SELECT id FROM old_clients);
-UPDATE body_metric       SET deleted_at = now(), updated_at = now()
+UPDATE assessment        SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND client_id IN (SELECT id FROM old_clients);
 UPDATE client            SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND id IN (SELECT id FROM old_clients);
@@ -1394,41 +1394,44 @@ AND exercise_id IN (
     LIMIT 1
 );
 
--- ── Bodyweight and tape ─────────────────────────────────────────────────────
+-- ── Bodyweight and tape — as assessments ───────────────────────────────────
 --
--- Weekly across the same nine weeks, trending the way each client's goal says it
--- should. Waist and chest on a handful, because the metric picker with one
--- option in it never shows what it is for.
+-- A body is measured in an assessment and nowhere else (V22 dropped
+-- `body_metric`), so the history is one trainer-entered assessment every four
+-- weeks, trending the way each client's goal says it should. Waist and chest on
+-- a handful, because a chart with one line in it never shows what it is for.
 
-INSERT INTO body_metric (id, client_id, metric_type, value, unit, notes, recorded_at, created_at)
-SELECT md5(:'trainer_phone' || ':real20:bm:' || c.key || ':' || m.kind || ':' || w)::uuid,
-       c.id, m.kind,
-       (m.base + m.drift * w)::numeric(8,2), m.unit,
-       CASE WHEN w = 0 THEN 'First measurement.' END,
-       (CURRENT_DATE - c.hist_weeks * 7 + w * 7)::timestamptz,
-       (CURRENT_DATE - c.hist_weeks * 7 + w * 7)::timestamptz
+INSERT INTO assessment (id, client_id, trainer_id, name, due_at, sent_at, completed_at, read_at,
+                        entered_by, measurements_asked, questions_asked, readings, created_at)
+SELECT md5(:'trainer_phone' || ':real20:as:' || c.key || ':' || w)::uuid,
+       c.id, (SELECT id FROM seed_trainer), 'Monthly measurements',
+       t.at, t.at, t.at, t.at, 'trainer', jsonb_array_length(r.readings), 0, r.readings, t.at
 FROM r20_client c
-CROSS JOIN LATERAL (VALUES
-        ('weight', 'kg',
-         (52 + (abs(hashtext(c.key)) % 35))::numeric,
-         CASE c.goal WHEN 'Muscle gain' THEN 0.4 WHEN 'Powerlifting' THEN 0.3 ELSE -0.35 END::numeric),
-        ('waist', 'cm',
-         (72 + (abs(hashtext(c.key)) % 22))::numeric,
-         CASE c.goal WHEN 'Fat loss' THEN -0.5 ELSE -0.1 END::numeric),
-        ('chest', 'cm',
-         (86 + (abs(hashtext(c.key)) % 18))::numeric,
-         CASE c.goal WHEN 'Muscle gain' THEN 0.3 ELSE 0.0 END::numeric)
-     ) AS m(kind, unit, base, drift)
-CROSS JOIN generate_series(0, GREATEST(c.hist_weeks, 0)) AS w
--- Everybody gets weighed. The tape comes out for the clients whose goal is about
--- shape rather than about load.
-WHERE (m.kind = 'weight'
-   OR (m.kind = 'waist' AND c.goal IN ('Fat loss', 'Post-natal'))
-   OR (m.kind = 'chest' AND c.goal IN ('Muscle gain', 'Powerlifting')))
-  AND c.hist_weeks > 0
+CROSS JOIN generate_series(0, GREATEST(c.hist_weeks, 0), 4) AS w
+CROSS JOIN LATERAL (SELECT (CURRENT_DATE - c.hist_weeks * 7 + w * 7)::timestamptz + INTERVAL '6 hours' AS at) t
+CROSS JOIN LATERAL (
+    SELECT jsonb_agg(jsonb_build_object('key', m.kind, 'value', round(m.base + m.drift * w, 1)) ORDER BY m.ord) AS readings
+    FROM (VALUES
+            (1, 'weight',
+             (52 + (abs(hashtext(c.key)) % 35))::numeric,
+             CASE c.goal WHEN 'Muscle gain' THEN 0.4 WHEN 'Powerlifting' THEN 0.3 ELSE -0.35 END::numeric),
+            (2, 'chest',
+             (86 + (abs(hashtext(c.key)) % 18))::numeric,
+             CASE c.goal WHEN 'Muscle gain' THEN 0.3 ELSE 0.0 END::numeric),
+            (3, 'waist',
+             (72 + (abs(hashtext(c.key)) % 22))::numeric,
+             CASE c.goal WHEN 'Fat loss' THEN -0.5 ELSE -0.1 END::numeric)
+         ) AS m(ord, kind, base, drift)
+    -- Everybody gets weighed. The tape comes out for the clients whose goal is
+    -- about shape rather than about load.
+    WHERE m.kind = 'weight'
+       OR (m.kind = 'waist' AND c.goal IN ('Fat loss', 'Post-natal'))
+       OR (m.kind = 'chest' AND c.goal IN ('Muscle gain', 'Powerlifting'))
+) r
+WHERE c.hist_weeks > 0
 ON CONFLICT (id) DO UPDATE SET
-    value = EXCLUDED.value, unit = EXCLUDED.unit,
-    deleted_at = NULL, updated_at = now();
+    readings = EXCLUDED.readings, measurements_asked = EXCLUDED.measurements_asked,
+    completed_at = EXCLUDED.completed_at, deleted_at = NULL, updated_at = now();
 
 -- ── Make the packs tell the truth ───────────────────────────────────────────
 --
@@ -1754,8 +1757,8 @@ UNION ALL SELECT '  · taken out of the day', count(*) FROM workout_exercise we
 UNION ALL SELECT 'sets', count(*) FROM set_log l
     WHERE l.deleted_at IS NULL AND l.workout_session_id IN
         (SELECT id FROM workout_session WHERE client_id IN (SELECT id FROM mine) AND deleted_at IS NULL)
-UNION ALL SELECT 'body measurements', count(*) FROM body_metric
-    WHERE client_id IN (SELECT id FROM mine) AND deleted_at IS NULL
+UNION ALL SELECT 'assessments taken', count(*) FROM assessment
+    WHERE client_id IN (SELECT id FROM mine) AND deleted_at IS NULL AND completed_at IS NOT NULL
 UNION ALL SELECT 'templates', count(*) FROM template
     WHERE trainer_id IN (SELECT id FROM me) AND deleted_at IS NULL
 -- The blueprint entries that actually resolved to a real exercise. If a library

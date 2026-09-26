@@ -4,6 +4,7 @@ import { useCallback, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { closeLog } from '@/lib/log/actions';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * *FINISH THE LOG* — WHICH IS NOT *MARK THE SESSION DONE*.
@@ -43,8 +44,8 @@ export function FinishLog({ routeId, workoutId }: { routeId: string; workoutId: 
   }, [routeId, workoutId, router, startTransition]);
 
   return (
-    <button className="btn btn--primary" type="button" onClick={finish}>
+    <Button variant="primary" onClick={finish}>
       Finish the log
-    </button>
+    </Button>
   );
 }

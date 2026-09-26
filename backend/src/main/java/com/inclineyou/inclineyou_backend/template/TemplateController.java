@@ -15,6 +15,7 @@ import java.util.UUID;
 public class TemplateController {
 
     private final TemplateService templateService;
+    private final CertifiedService certifiedService;
 
     @GetMapping
     public List<TemplateService.TemplateResponse> list() {
@@ -25,6 +26,30 @@ public class TemplateController {
     @ResponseStatus(HttpStatus.CREATED)
     public TemplateService.TemplateResponse create(@Valid @RequestBody TemplateService.CreateTemplateRequest req) {
         return templateService.create(trainerId(), req);
+    }
+
+    /*
+     * ── V11 · THE CERTIFIED SHELF ─────────────────────────────────────────
+     * Declared BEFORE `/{id}`. Before these existed, `GET /v1/templates/
+     * certified` bound "certified" to the UUID-typed `{id}` and answered 400,
+     * not 404 — which is what a literal path next to a typed variable does.
+     */
+    @GetMapping("/certified")
+    public List<CertifiedService.CertifiedResponse> certified() {
+        return certifiedService.list(trainerId());
+    }
+
+    @GetMapping("/certified/{id}")
+    public CertifiedService.CertifiedResponse certifiedOne(@PathVariable UUID id) {
+        return certifiedService.get(trainerId(), id);
+    }
+
+    @PostMapping("/certified/{id}/copy")
+    @ResponseStatus(HttpStatus.CREATED)
+    public TemplateService.TemplateResponse copyCertified(
+            @PathVariable UUID id,
+            @RequestBody(required = false) CertifiedService.CopyRequest req) {
+        return certifiedService.copy(trainerId(), id, req);
     }
 
     @GetMapping("/{id}")

@@ -22,7 +22,12 @@ spring:
 
   jpa:
     hibernate:
-      ddl-auto: validate
+      # TEMPORARY (25 Sep 2026): `none`, not `validate`. The schema was rebuilt as
+      # a fresh v1 and the five JPA entities are being adapted to it module by
+      # module; `validate` would refuse to boot until all five match. Flyway still
+      # owns the schema. Put `validate` back once AppUser, Trainer, Client,
+      # ClientNote and OtpRequest match the new tables.
+      ddl-auto: none
     show-sql: false
     properties:
       hibernate:

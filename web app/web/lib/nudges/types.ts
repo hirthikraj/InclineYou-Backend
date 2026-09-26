@@ -7,7 +7,7 @@
  * A nudge belongs next to the thing that triggered it. Making a trainer navigate
  * to a Nudges destination to follow up is exactly the friction that stops the
  * follow-up happening — so the buttons are on Today's session rows, the attention
- * queue, the client rows, the dues list, the packs that are ending and the
+ * queue, the client rows, the pending list, the packs that are ending and the
  * sessions nobody turned up to, and `/nudges` is a permanent redirect into
  * Settings.
  *

@@ -1,7 +1,10 @@
 'use client';
 
+import { useEffect, useRef } from 'react';
+
 import type { LogExerciseView } from '@/lib/log/log';
 import { Plus } from './Icons';
+import { Tag } from '@/web-components/ui/Tag';
 
 /**
  * ONE EXERCISE IS OPEN AND THE REST ARE ROWS.
@@ -33,10 +36,31 @@ export function ExerciseList({
   onOpen: (exerciseId: string) => void;
   onAdd: () => void;
 }) {
+  /* ── THE OPEN CHIP HAS TO BE ON THE SCREEN ─────────────────────────────
+     Below 980px this list is a horizontal rail, and the rail does not scroll
+     itself. MEASURED at 390 on the seeded session: 1024px of chips in a 351px
+     window, so an exercise five along is opened from the dock's *Next* or from
+     `?ex=` and the chip that is now current is 400px off the right edge —
+     the one part of the screen that says WHERE IN THE SESSION YOU ARE, showing
+     somewhere you are not.
+
+     `block:'nearest'` and `inline:'center'`, which is the split `SetGrid`'s own
+     scroll-into-view makes for the same reason: the page must not move
+     vertically (the trainer is looking at the grid), and the rail must, so the
+     chips on either side are visible and the rail reads as a place in a
+     sequence rather than a single chip. */
+  const rail = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!rail.current || !current) return;
+    rail.current
+      .querySelector('[aria-current="true"]')
+      ?.scrollIntoView({ block: 'nearest', inline: 'center', behavior: 'smooth' });
+  }, [current]);
+
   return (
     <div>
       <p className="micro" style={{ marginBottom: 7 }}>{planLabel}</p>
-      <div className="exl">
+      <div className="exl" ref={rail}>
         {exercises.map((e) => (
           <button
             className={`exr${e.complete ? ' exr--done' : e.started ? ' exr--part' : ''}`}
@@ -48,14 +72,32 @@ export function ExerciseList({
             <span className="exr__m">
               <span className="exr__h">
                 <span className="exr__t">{e.name}</span>
+                {/* ── WHAT THE CHIP RAIL GAVE UP, PUT BACK AS A FIGURE ──────
+                    Below 980px `.exr__s`, `.exr__n` and the verdict tag are all
+                    `display:none`, so a chip is a NAME and nothing else and the
+                    rail answers *which exercises are on today* while saying
+                    nothing about how far through any of them the session is.
+                    The spine under the chip is two states (started, done) and
+                    cannot count.
+
+                    `2/4` is the part of `.exr__s` that is a fact rather than a
+                    sentence — the summary in full is *2 of 4 sets · top 37.5 kg
+                    × 6*, which is a 190px line and is why the rail dropped it.
+                    Drawn only where the chips are chips: on the desk the list
+                    column states it in words, and two spellings of one count in
+                    one component is the duplication `.setg__sum` was written to
+                    avoid. */}
+                <span className="exr__c" aria-hidden="true">
+                  {e.sets.filter((s) => s.done).length}/{e.sets.length}
+                </span>
                 {e.verdict === 'record' ? (
-                  <span className="tag tag--pr">Record</span>
+                  <Tag tone="pr">Record</Tag>
                 ) : e.verdict === 'quiet' ? (
-                  <span className="tag tag--pr">Record · quiet</span>
+                  <Tag tone="pr">Record · quiet</Tag>
                 ) : e.verdict === 'matched' ? (
-                  <span className="tag">Matched</span>
+                  <Tag>Matched</Tag>
                 ) : e.verdict === 'first' ? (
-                  <span className="tag tag--info">First</span>
+                  <Tag tone="info">First</Tag>
                 ) : null}
               </span>
               <span className="exr__s">{e.summary}</span>

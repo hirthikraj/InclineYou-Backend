@@ -7,7 +7,7 @@ import { getToken } from '@/lib/auth/session';
    not one behind `server-only`. See `lib/setup/errors.ts`. */
 import { SetupApiError } from './errors';
 import { type HourWindow } from './hours';
-import { asWorkMode } from './options';
+import { asGender, asWorkMode } from './options';
 import type { Pack, PackType } from './money';
 import type { SetupState, SetupStep } from './steps';
 import { readSkipped } from './skipped';
@@ -71,6 +71,8 @@ interface TrainerProfile {
   languages: string[] | null;
   setupComplete: boolean;
   setupCompletedAt: string | null;
+  /** The other half of step 1. See `GENDERS` in `options.ts`. */
+  gender?: string | null;
   workMode?: string | null;
   gymName?: string | null;
   gymSharePercent?: number | null;
@@ -99,6 +101,13 @@ export interface TrainerUpdate {
   specialities?: string[];
   certifications?: string[];
   languages?: string[];
+  /**
+   * `'woman' | 'man' | 'nonbinary' | 'undisclosed'`. An empty string clears it,
+   * the same rule the rest of this interface follows — but nothing in the flow
+   * sends one: step 1 refuses to save without a value, and `'undisclosed'` is
+   * the way to decline, so clearing is a Settings action rather than a setup one.
+   */
+  gender?: string;
   /** Stamps `setupCompletedAt`. The server never un-stamps it. */
   completeSetup?: boolean;
   /** 'independent' | 'gym' | 'both'. An empty string clears the answer. */
@@ -401,6 +410,7 @@ export async function getSetupState(): Promise<SetupState> {
     name: profile.name === profile.phone ? '' : profile.name,
     experience: profile.experienceBand ?? null,
     headline: profile.headline ?? '',
+    gender: asGender(profile.gender),
     specialities: profile.specialities ?? [],
     certifications: profile.certifications ?? [],
     languages: profile.languages ?? [],

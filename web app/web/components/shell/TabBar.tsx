@@ -2,18 +2,21 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 
 import type { DeckSession } from '@/lib/today/deck';
-import { avatarToken, initials } from '@/lib/today/time';
+import { initials } from '@/lib/today/time';
 import { formatPhone } from '@/lib/auth/policy';
+import { useDismiss } from '@/lib/ui/dismiss';
 import { signOut } from '@/lib/auth/actions';
 import {
   ACCOUNT, BAR, HIDDEN_FROM_BAR, PRIMARY,
   type Destination, type RailBadge, type RailCounts, type RailKey,
-  moreBadge,
+  activePageKey, moreBadge,
 } from './nav';
 import { Check, Dots6, Out, Plus } from './Icons';
 import { AddSheet } from './AddSheet';
+import { Avatar } from '@/web-components/ui/Avatar';
 
 /**
  * THE RAIL, AT 390px — three destinations, a raised +, and a door to the other two.
@@ -67,11 +70,12 @@ import { AddSheet } from './AddSheet';
  * thumb finds it in the same place on both halves.
  *
  * **Five slots, and the + is RAISED.** A centre action only looks centred if what
- * flanks it is symmetrical, so the bar is `Today · Clients · (+) · Schedule ·
- * More`: two tabs, the action, a tab and the door.
+ * flanks it is symmetrical, so the bar is `Today · Schedule · (+) · Clients ·
+ * More`: two tabs, the action, a tab and the door. `nav.tsx`'s `BAR_ORDER` is
+ * where that order is decided and why it is not the rail's.
  *
  * *Programs* and *Business* are what came off, and `nav.tsx`'s `BAR` carries the
- * argument plus the one thing it cost — the owed badge is the only `alert` in the
+ * argument plus the one thing it cost — the pending badge is the only `alert` in the
  * shell, so it is summed into the dot on *More* rather than lost.
  * `HIDDEN_FROM_BAR` is read by the sheet below, so a destination the bar drops is
  * a destination the sheet gains, by construction rather than by two people
@@ -161,6 +165,7 @@ export function TabBar({
   current,
   trainerName,
   trainerPhone = null,
+  tabs,
   counts = {},
   pins = [],
   firstRun = false,
@@ -168,6 +173,34 @@ export function TabBar({
   current: RailKey;
   trainerName: string;
   trainerPhone?: string | null;
+  /**
+   * A FLAT BAR OF N TABS, for the client portal — no centre +, no *More*.
+   *
+   * Absent, the bar is the trainer's: three tabs around a raised action with a
+   * door to the two destinations it dropped, and every argument in this file's
+   * header applies to it unchanged.
+   *
+   * Present, it is `CLIENT_PRIMARY`'s four, drawn flat. Three things follow, and
+   * each is why this is a parameter rather than a second component:
+   *
+   *   · **No +.** A trainer CREATES — clients, sessions, exercises, payments —
+   *     and a client creates exactly one thing, a workout, started from the one
+   *     button Home is arranged around. `nav.tsx`'s `CLIENT_PRIMARY` carries
+   *     the argument, and `NavBar.tsx` on the phone reached it first: it draws
+   *     no + for the client role at all.
+   *   · **No *More*.** There is nothing behind it. `HIDDEN_FROM_BAR` exists
+   *     because five labelled slots plus a raised action is six targets on a
+   *     390px screen; four labelled slots and no action is four, which fits
+   *     320px with room. That is the "four tabs, no more" rule paying for
+   *     itself a second time.
+   *   · **No `SPLIT`.** That constant is a fact about a row with a centre
+   *     action in it, and this row has none — deriving a midpoint here would
+   *     put a gap in the middle of four tabs for no reason.
+   *
+   * `Tab` itself is untouched and shared, which is the point: one `.tabs__i`,
+   * one `aria-current`, one always-drawn label, one badge.
+   */
+  tabs?: Destination[];
   counts?: RailCounts;
   pins?: DeckSession[];
   firstRun?: boolean;
@@ -215,12 +248,57 @@ export function TabBar({
     if (!next) addTrigger.current?.focus();
   }, []);
 
+  /**
+   * EACH SHEET'S OWN WAY OUT, BORROWED BY THE BUTTON THAT OPENED IT.
+   *
+   * Both buttons are toggles, and a toggle that closes by flipping a boolean
+   * unmounts the box — which is the one dismissal that skips the exit
+   * transition, and it is the one a thumb reaches for most. The sheets run
+   * `useDismiss`, so each hands its `dismiss` up here on mount and the button
+   * calls that instead of `setOpen(false)`.
+   *
+   * A ref and not state: this changes on mount and unmount, and re-rendering
+   * the bar because a sheet appeared is a render of five tabs for nothing.
+   * `?? setOpen(false)` is the honest fallback rather than a guard — if a sheet
+   * ever renders without registering, the button still closes it, just without
+   * the 180ms.
+   *
+   * The callbacks are `useCallback`ed because each is in the child's effect
+   * dependency list, and a fresh identity every render would re-register on
+   * every keystroke anywhere in the shell.
+   */
+  const moreOut = useRef<(() => void) | null>(null);
+  const addOut = useRef<(() => void) | null>(null);
+  const moreReady = useCallback((fn: () => void) => { moreOut.current = fn; }, []);
+  const addReady = useCallback((fn: () => void) => { addOut.current = fn; }, []);
+  const closeMore = useCallback(() => {
+    if (moreOut.current) moreOut.current();
+    else setOpen(false);
+  }, [setOpen]);
+  const closeAdd = useCallback(() => {
+    if (addOut.current) addOut.current();
+    else setAdd(false);
+  }, [setAdd]);
+
   // Whether the current screen is one of the ones behind *More* — Programs,
   // Business, Settings and Team. Without it the bar has no selected slot at all on
   // those pages, which reads as "you are nowhere". `BAR` and not `PRIMARY`: the
   // test is "does the bar draw a tab for where I am", and it does not draw one for
   // the two primaries it dropped.
   const inMore = !BAR.some((d) => d.key === current);
+
+  /* The client's bar. Returned before any of the trainer's state is used —
+     the hooks above still run, which is what the rules of hooks require, and
+     nothing they hold is read on this path. */
+  if (tabs) {
+    return (
+      <nav className="tabs" aria-label="Sections">
+        {tabs.map((d) => (
+          <Tab key={d.key} dest={d} current={current} badge={shown[d.key as keyof RailCounts]} />
+        ))}
+      </nav>
+    );
+  }
 
   return (
     <>
@@ -248,7 +326,7 @@ export function TabBar({
           aria-haspopup="dialog"
           aria-expanded={added}
           aria-controls={added ? addId : undefined}
-          onClick={() => setAdd(!added)}
+          onClick={() => (added ? closeAdd() : setAdd(true))}
         >
           <span className="fab">
             <Plus size={22} />
@@ -267,7 +345,7 @@ export function TabBar({
           aria-expanded={open}
           aria-controls={open ? sheetId : undefined}
           {...(inMore ? { 'aria-current': 'page' as const } : {})}
-          onClick={() => setOpen(!open)}
+          onClick={() => (open ? closeMore() : setOpen(true))}
         >
           <span className="tabs__ic">
             <Dots6 />
@@ -277,7 +355,7 @@ export function TabBar({
         </button>
       </nav>
 
-      {added && <AddSheet id={addId} onClose={() => setAdd(false)} />}
+      {added && <AddSheet id={addId} onClose={() => setAdd(false)} onReady={addReady} />}
 
       {open && (
         <MoreSheet
@@ -288,6 +366,7 @@ export function TabBar({
           trainerName={trainerName}
           trainerPhone={trainerPhone}
           onClose={() => setOpen(false)}
+          onReady={moreReady}
         />
       )}
     </>
@@ -319,6 +398,7 @@ function MoreSheet({
   trainerName,
   trainerPhone,
   onClose,
+  onReady,
 }: {
   id: string;
   current: RailKey;
@@ -327,8 +407,44 @@ function MoreSheet({
   trainerName: string;
   trainerPhone: string | null;
   onClose: () => void;
+  /**
+   * Hands the bar a way to dismiss this sheet WITH its exit motion.
+   *
+   * The *More* button is a toggle, so pressing it while the sheet is open used
+   * to call `setOpen(false)` and unmount the box — which is the one path that
+   * skipped the animation, and it is the path a thumb takes most. The state
+   * stays in `TabBar` (it owns which of the two sheets is open) and the wait
+   * lives here (it owns the element), so the button borrows the second.
+   */
+  onReady?: (dismiss: () => void) => void;
 }) {
-  const panel = useRef<HTMLDivElement>(null);
+  /**
+   * THE EXIT, AND THE REASON IT IS NOT JUST A CLASS.
+   *
+   * `.sheet` now rises on a transition and leaves on one, and a transition can
+   * only leave while its box is still mounted — so closing is two steps: put
+   * the closed state back, then unmount. `useDismiss` is the wait, and it asks
+   * the element what is actually running rather than counting: under
+   * `prefers-reduced-motion` the stylesheet sets `transition:none`, nothing is
+   * running, and the sheet closes on the spot with no timer to get wrong.
+   *
+   * `dismiss` replaces `onClose` for every way OUT of the sheet — Escape, the
+   * scrim, and the bar's own *More* button through `onReady`. It deliberately
+   * does NOT replace it on the rows: those are navigations, and holding a
+   * scrim over the screen the trainer just asked for is the sheet outstaying
+   * the decision that closed it.
+   *
+   * One ref, not two. The hook needs the element to ask it about transitions
+   * and the focus call below needs the same element to find its first control.
+   */
+  const { closing, dismiss, ref: panel } = useDismiss<HTMLDivElement>(onClose);
+
+  useEffect(() => { onReady?.(dismiss); }, [onReady, dismiss]);
+
+  /* Read here rather than passed down from `AppShell`: `current` is a RailKey and
+     names the SECTION, which is all the bar's five tabs ever needed. The sheet's
+     section groups mark a PAGE, and no key exists for one. */
+  const pathname = usePathname();
 
   // Escape, and focus into the sheet on the render that created it. Both are the
   // obligations of `aria-modal`, and a modal that keeps focus outside itself is
@@ -337,13 +453,42 @@ function MoreSheet({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onClose();
+        dismiss();
       }
     };
     document.addEventListener('keydown', onKey);
-    panel.current?.querySelector<HTMLElement>('a,button')?.focus();
+    /* `preventScroll`, AND IT IS THE WHOLE BUG REPORT.
+
+       MEASURED BUG, REPORTED as *the background screen is moving when clicking
+       More*. The sheet now MOUNTS at `translateY(100%)` — `@starting-style`'s
+       pose, 658px below the fold — and this line then asked the browser to put
+       the first row where a user could see it. The browser obliged the only way
+       it can: it scrolled the nearest scrollport, which is `.app`.
+
+       `.app` is `overflow:hidden`, and **`hidden` still creates a scrollport**.
+       There is no scrollbar and a finger cannot drag it, so nothing in the app
+       had ever scrolled it and nothing looked scrollable — but `focus()` can,
+       and did. MEASURED at 390x700 on `/today`: `.app.scrollTop` went 0 to
+       **421.6px**, putting the top bar at `y:-421.6` and the tab bar in the
+       middle of the screen. The whole shell slid up behind the sheet and stayed
+       there.
+
+       Isolated rather than assumed — the same focus call with and without this
+       flag, three times each: without it 421.6px, with it 0.
+
+       It is the RIGHT answer here and not a workaround. The element is not
+       off-screen because it is somewhere else; it is off-screen because it is
+       240ms into arriving, and it will be in the middle of the viewport when it
+       stops. Scrolling the page to chase a box that is already on its way is
+       the browser solving a problem that is in the act of solving itself.
+
+       `.app` was hardened as well — webapp.css now says `overflow:clip`, which
+       clips exactly as `hidden` did and creates no scrollport at all, so no
+       future `focus()` or `scrollIntoView` anywhere in the product can move the
+       shell. This flag is the fix; that is the class. */
+    panel.current?.querySelector<HTMLElement>('a,button')?.focus({ preventScroll: true });
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [dismiss, panel]);
 
   const name = trainerName || 'Your account';
   // `formatPhone` always returns a string — handed '' it answers a bare `+91 `,
@@ -352,6 +497,90 @@ function MoreSheet({
   const phone = trainerPhone ? formatPhone(trainerPhone) : null;
 
   const dropped = PRIMARY.filter((d) => HIDDEN_FROM_BAR.includes(d.key));
+
+  /**
+   * Every section, not just the dropped ones — and the hrefs the bar already
+   * reaches, so a page is never drawn twice.
+   *
+   * ── THE DEFECT THIS CLOSES ─────────────────────────────────────────────
+   *
+   * This read `dropped.filter((d) => d.pages …)`, which is the right list for
+   * *why the sheet exists* and the wrong one for *what a phone can reach*. A
+   * section's pages are drawn in the rail's pane, the pane is `display:none`
+   * under 900px, and the sheet was the only replacement — but it only drew the
+   * pages of the two destinations the BAR dropped. A section the bar KEEPS
+   * still loses its pane at 390px, and its pages went nowhere.
+   *
+   * *Clients* is that section. `PRIMARY` gives it two pages, and the second is
+   * **Assessments** — added in the pass whose own note in `nav.tsx` says "the
+   * cost of adding *Assessments* was one row". It cost one row on a desk and it
+   * cost the whole page on a phone: `/clients/assessments` had no door in the
+   * bar, none in the sheet and none in a pane that is not drawn, so the only
+   * way to it was typing the URL. REPORTED as missing from *More*.
+   *
+   * ── AND `/clients` IS NOT DRAWN TWICE ──────────────────────────────────
+   *
+   * The block below already refuses to put a destination's own row above its
+   * pages, because the row and the first page lead to the same screen. The
+   * same duplication arrives from the other direction here: *All clients* is a
+   * page of this section AND the bar's third tab, 60px below the sheet, so
+   * drawing it would put two controls for one screen on the phone at once.
+   *
+   * Tested against the BAR's hrefs rather than against `HIDDEN_FROM_BAR`,
+   * because the question is "can a thumb already reach this screen", and the
+   * bar is the list of screens a thumb can already reach. It is derived for the
+   * usual reason: *Assessments* is not named here, so a third page under
+   * Clients appears in this sheet on the commit that adds it.
+   */
+  const reachable = new Set(BAR.map((b) => b.href));
+  const sections = PRIMARY.filter((d) => (d.pages?.length ?? 0) > 1);
+
+  /**
+   * A SECTION, DRAWN AS A HEADING AND ITS PAGES — and the row for it goes away.
+   *
+   * The rail's pane is `display:none` under 900px, so this sheet is the ONLY
+   * surface a section's pages can be reached from at phone width. Before this
+   * block, *Fitness* was one row leading to `/programs` and the other three pages
+   * — Workouts, Templates, the exercise library — had no door on a phone at all:
+   * the horizontal strip that used to carry them was removed in the same pass
+   * that built the pane, and the pane is not drawn here.
+   *
+   * The destination's own row is REPLACED rather than kept above the pages. Its
+   * href is the first page's href — `nav.tsx` says why they are the same
+   * navigation — so keeping both would put two rows one line apart leading to the
+   * identical screen under two different names, which is the duplication
+   * `CLIENT_ACCOUNT`'s docstring rejected for exactly this surface.
+   *
+   * What is lost with the row is the `purpose` line, and it is the right thing to
+   * lose: *what the clients do* describes the section, and a heading over four
+   * rows is already doing that job with the label the rail uses.
+   */
+  const section = (d: Destination) => {
+    const pages = (d.pages ?? []).filter((p) => !reachable.has(p.href));
+    /* A section whose every page is a bar tab has nothing to add here, and a
+       heading over nothing is a heading over nothing. Cannot happen today —
+       Clients keeps *Assessments* — and it is the shape of this list changing
+       under the sheet rather than an impossible state. */
+    if (pages.length === 0) return null;
+    const active = activePageKey(pages, pathname);
+    return (
+      <div key={d.key} className="sheet__g sheet__g--first">
+        <p className="sheet__gk">{d.label}</p>
+        {pages.map((page) => (
+          <Link
+            key={page.key}
+            className="sheet__i"
+            href={page.href}
+            onClick={onClose}
+            {...(page.key === active ? { 'aria-current': 'page' as const } : {})}
+          >
+            {page.icon}
+            <span className="sheet__l">{page.label}</span>
+          </Link>
+        ))}
+      </div>
+    );
+  };
 
   const row = (d: Destination) => (
     <Link
@@ -389,9 +618,14 @@ function MoreSheet({
     <>
       {/* A button rather than a div with an onClick, for `Palette.tsx`'s reason:
           tapping away is a real way out and it should be one for a keyboard too. */}
-      <button className="scrim scrim--top" type="button" aria-label="Close" onClick={onClose} />
+      <button
+        className={`scrim scrim--top${closing ? ' scrim--out' : ''}`}
+        type="button"
+        aria-label="Close"
+        onClick={dismiss}
+      />
       <div
-        className="sheet"
+        className={`sheet${closing ? ' sheet--out' : ''}`}
         id={id}
         role="dialog"
         aria-modal="true"
@@ -420,8 +654,21 @@ function MoreSheet({
             keep their headings because they are a different KIND of thing, not a
             different frequency of the same thing.
           */}
-          {dropped.length > 0 && (
-            <div className="sheet__g sheet__g--first">{dropped.map(row)}</div>
+          {/* Sections first, each as its own headed group, then whatever the bar
+              dropped that is a single screen. Written as two passes over two
+              lists rather than one pass that branches, so the sheet's ORDER is
+              stated here instead of falling out of `PRIMARY`'s.
+
+              WITHIN the first pass the order IS `PRIMARY`'s, which is the rail's
+              column top to bottom: Clients, then Fitness, then the money book.
+              That is deliberate rather than incidental — the sheet and the rail
+              are the same navigation at two widths, and a trainer who learns the
+              column at a desk should not have to relearn it with a thumb. */}
+          {sections.map(section)}
+          {dropped.filter((d) => !d.pages || d.pages.length <= 1).length > 0 && (
+            <div className="sheet__g sheet__g--first">
+              {dropped.filter((d) => !d.pages || d.pages.length <= 1).map(row)}
+            </div>
           )}
 
           {pins.length > 0 && (
@@ -438,13 +685,7 @@ function MoreSheet({
                   href={`/clients/${s.clientId}`}
                   onClick={onClose}
                 >
-                  <span
-                    className="av av--sm"
-                    style={{ background: `var(${avatarToken(s.clientId)})` }}
-                    aria-hidden="true"
-                  >
-                    {initials(s.clientName)}
-                  </span>
+                  <Avatar name={s.clientName} id={s.clientId} size="sm" />
                   <span className="sheet__l">{s.clientName}</span>
                   {s.done ? (
                     <span className="rail__pt rail__pt--done">
@@ -472,10 +713,16 @@ function MoreSheet({
                 {phone && <i>{phone}</i>}
               </span>
             </div>
-            {/* Settings and Team, from `ACCOUNT` — the same two rows, in the same
-                order, that `AccountMenu.tsx` draws in the rail's foot. Written
-                once in `nav.tsx` so the two widths cannot disagree about what is
-                on the account shelf. */}
+            {/* Your profile and Settings, from `ACCOUNT` — the same two rows, in
+                the same order, that `AccountMenu.tsx` draws in the rail's foot.
+                Written once in `nav.tsx` so the two widths cannot disagree about
+                what is on the account shelf.
+
+                It was three. *Team* came off the shelf entirely when a team
+                became a WORKSPACE rather than a permissions screen — it is the
+                top bar's switcher now, which this half draws at every width, so
+                the phone loses nothing by the row going. `nav.tsx` carries the
+                argument. */}
             {ACCOUNT.map((d) => (
               <Link
                 key={d.key}

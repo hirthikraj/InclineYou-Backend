@@ -2,18 +2,29 @@
 
 import { useMemo } from 'react';
 
-import { formatMinute, formatSpan, minuteOfDay, rupees } from '@/lib/today/time';
+import { formatHourMark, formatMinute, formatMinuteRange, formatSpan, minuteOfDay, rupees } from '@/lib/today/time';
 import { dayMoney, gapWorth, type Gap } from '@/lib/today/day';
 import type { RateSource } from '@/lib/today/day';
 import {
   hoursWord, laneStyle, ticksFor,
-  type GridRow, type Placed, type ScheduleDay, type ScheduleGrid, type Segment,
+  type GridRow, type ScheduleDay, type ScheduleGrid, type Segment,
 } from '@/lib/schedule/grid';
 import { SNAP_MINUTES } from '@/lib/schedule/result';
 import { SessionBlock } from './SessionBlock';
 import { useGridKeys } from './useGridKeys';
 import { useCwScale } from './useCwScale';
 import { Fold, Unfold, WarnTriangle } from './Icons';
+import { Button } from '@/web-components/ui/Button';
+import { Tag } from '@/web-components/ui/Tag';
+
+/** A lane row's own height in pixels, which does not scale — a duration does.
+ *  Mixing the two unconverted is what made the lane overrun its segment one
+ *  scale factor ago. `laneFits` is the surviving reader of it.
+ *
+ *  Module scope, not the component body: `laneFits` is a `useMemo` whose
+ *  callback runs during the render that declares it, so a `const` below it is
+ *  in the temporal dead zone and throws — a class `tsc` does not catch. */
+const LANE_ROW = 38;
 
 /**
  * THE WEEK AND THE DAY ARE ONE COMPONENT, BECAUSE THEY ARE ONE GEOMETRY.
@@ -50,6 +61,12 @@ interface TimeGridProps {
   showGaps: boolean;
   /** The day view draws one column and a context lane; the week draws seven. */
   lane: boolean;
+  /**
+   * The trainer has answered when they work — anywhere in the week, not on the
+   * day being drawn. `offRunsIn` is the only reader and its note says why the
+   * question has to be asked at that scope.
+   */
+  hoursSet: boolean;
   onToggleBand: (from: number) => void;
   onOpenSession: (id: string) => void;
   /** A `+N` chip's destination: the day view, where nothing is capped. */
@@ -76,7 +93,7 @@ interface TimeGridProps {
 }
 
 export function TimeGrid({
-  grid, rates, gymSharePercent, now, showGaps, lane,
+  grid, rates, gymSharePercent, now, showGaps, lane, hoursSet,
   onToggleBand, onOpenSession, onOpenDay, onBook, justMovedId, placing,
 }: TimeGridProps) {
   /* The pixels-per-minute the whole grid is drawn at. One number, measured from
@@ -117,10 +134,21 @@ export function TimeGrid({
       (n, r) => (r.kind === 'segment' ? n + (r.to - r.from) : n),
       0,
     );
-    /* `track` is minutes and the cards are pixels, so the comparison only
+    /* `track` is minutes and the rows are pixels, so the comparison only
        holds once the track is converted. Before the hour became a measurement
        these were numerically the same and the bug was invisible; at 90px/hour a
-       segment holds nearly twice the cards it used to. */
+       segment holds nearly twice the rows it used to.
+
+       The test is UNCHANGED by the lane becoming a list, and deliberately so.
+       It never measured whether alignment was keepable — `ContextLane` handled
+       that itself and now does not need to. It measures whether the day's rows
+       fit the day's height at all, and a day that fails it is one where the
+       lane would be a 900px list inside a 300px cell: a nested scroller showing
+       eight of twenty-six behind a hairline. The trade the comment above
+       describes is the same trade, for the same reason, at the same threshold —
+       the width goes to the spine, where those blocks are ~290px instead of
+       ~93px, and everything the lane would have said is on the session panel
+       one tap away. */
     return day.placed.length * (LANE_ROW + 3) <= track * scale;
   }, [lane, grid, scale]);
 
@@ -157,11 +185,20 @@ export function TimeGrid({
             on a phone, and without it the day names would slide over the hours. */}
         <div className="cal__hd cw__corner" aria-hidden="true" />
         {grid.days.map((day) => (
-          <DayHead key={day.at} day={day} />
+          <DayHead key={day.at} day={day} hoursSet={hoursSet} />
         ))}
         {laneFits && (
           <div className="cal__hd cw__lanehd">
-            <p className="cal__d">Plan · package · money</p>
+            {/* Column heads, on the row's own track list — see `--dtl-cols`.
+                This read `Plan · package · money` at the far left of an 811px
+                cell while the money it named sat 500px to its right: three
+                words naming three things and standing over none of them. */}
+            <p className="cal__d dtl">
+              <span>Time</span>
+              <span>Client</span>
+              <span>Plan · package</span>
+              <span className="dtl__m">Money</span>
+            </p>
           </div>
         )}
 
@@ -184,6 +221,7 @@ export function TimeGrid({
               nowMinute={nowMinute}
               showGaps={showGaps}
               lane={laneFits}
+              hoursSet={hoursSet}
               activeId={tabStop}
               onOpenSession={onOpenSession}
               onOpenDay={onOpenDay}
@@ -208,7 +246,12 @@ export function TimeGrid({
 
 const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-function DayHead({ day }: { day: ScheduleDay }) {
+function DayHead({ day, hoursSet }: { day: ScheduleDay; hoursSet: boolean }) {
+  /* A rest day — the trainer's hours exist and none of them are on this weekday.
+     Same test as the hatch below it, so the column and its head cannot disagree
+     about what kind of empty this is. */
+  const closed = hoursSet && day.windows.length === 0;
+
   const classes = ['cal__hd'];
   if (day.isToday) classes.push('cal__hd--today');
   if (day.hasClash) classes.push('cal__hd--clash');
@@ -222,9 +265,15 @@ function DayHead({ day }: { day: ScheduleDay }) {
   return (
     <div
       className={classes.join(' ')}
+      /* The tint, the lime lettering and the 3px accent bar say TODAY three
+         ways and a reader hears none of them. `MonthGrid` has marked its own
+         cell `aria-current="date"` since it was written; this head never did,
+         so the week's answer to *which column is now* was visual only. */
+      aria-current={day.isToday ? 'date' : undefined}
       aria-label={
-        `${DAY_SHORT[day.weekday]} ${day.dayOfMonth}, `
+        `${DAY_SHORT[day.weekday]} ${day.dayOfMonth}${day.isToday ? ', today' : ''}, `
         + `${day.count} ${day.count === 1 ? 'session' : 'sessions'}`
+        + (closed ? ', a day off' : '')
         + (day.hasClash ? ', with a clash' : '')
       }
     >
@@ -247,10 +296,27 @@ function DayHead({ day }: { day: ScheduleDay }) {
         wearing the count's clothes.
       */}
       <p className="cal__d cw__hdn" aria-hidden="true">
-        {day.count ? (
-          <span className={day.hasClash ? 'cw__hdc cw__hdc--clash' : 'cw__hdc'}>
-            {day.count}
-          </span>
+        {/* A day off says so, and it takes the slot the em dash was in. That dash
+            meant *no sessions*, which on a Sunday the trainer does not work is
+            the least useful true thing the head could print — the column is
+            hatched for the same reason, and `/today` uses this exact phrase for
+            this exact state. A closed day that somehow HOLDS sessions still
+            prints the count: the booking is the more surprising fact, and the
+            hatch behind it is already saying the rest. */}
+        {closed && !day.count ? (
+          <i className="cw__hdo">Day off</i>
+        ) : day.count ? (
+          <>
+            <span className={day.hasClash ? 'cw__hdc cw__hdc--clash' : 'cw__hdc'}>
+              {day.count}
+            </span>
+            {/* The unit, drawn only on the DAY view — see `.cw__hdu` in app.css.
+                Seven columns have no room for it and do not need it: a row of
+                seven bare figures under seven dates reads as a count already.
+                One column with a bare `8` under it reads as nothing, and the day
+                head is the only head on that view. */}
+            <i className="cw__hdu">{day.count === 1 ? 'session' : 'sessions'}</i>
+          </>
         ) : (
           '—'
         )}
@@ -279,9 +345,9 @@ function BandRow({
       <div className="cw__band cw__band--held">
         <span className="cw__bandin">
           <WarnTriangle size={13} />
-          <span title={`${formatMinute(row.from)} – ${formatMinute(row.to)} is outside your working hours, and ${row.heldOpen}`}>
+          <span title={`${formatMinuteRange(row.from, row.to)} is outside your working hours, and ${row.heldOpen}`}>
             <b>
-              {formatMinute(row.from)} – {formatMinute(row.to)}
+              {formatMinuteRange(row.from, row.to)}
             </b>{' '}
             · outside your hours — {row.heldOpen}
           </span>
@@ -305,13 +371,13 @@ function BandRow({
         {open ? <Fold size={13} /> : <Unfold size={13} />}
         <span
           title={
-            `${formatMinute(row.from)} – ${formatMinute(row.to)}: `
+            `${formatMinuteRange(row.from, row.to)}: `
             + `${hoursWord(row.to - row.from)} that fall outside your working hours on every `
             + 'day shown, with nothing booked in them'
           }
         >
           <b>
-            {formatMinute(row.from)} – {formatMinute(row.to)}
+            {formatMinuteRange(row.from, row.to)}
           </b>{' '}
           · {hoursWord(row.to - row.from)} outside your hours
         </span>{' '}
@@ -333,6 +399,7 @@ interface SegmentRowProps {
   nowMinute: number;
   showGaps: boolean;
   lane: boolean;
+  hoursSet: boolean;
   activeId: string | null;
   onOpenSession: (id: string) => void;
   onOpenDay: (dayAt: number) => void;
@@ -370,6 +437,14 @@ function SegmentRow(props: SegmentRowProps) {
 
   const nowHere = props.nowMinute >= seg.from && props.nowMinute <= seg.to;
 
+  /* The hour labels, and which of them owns the minute it is now. `nowIn` is
+     half-open so an exact hour belongs to the hour it opens and not to the one
+     it closes — the same convention `.cw__now` draws its rule on. */
+  const ticks = ticksFor(seg);
+  const firstTick = ticks.length ? ticks[0].minute : seg.to;
+  const nowIn = (from: number, to: number) =>
+    nowHere && props.nowMinute >= from && props.nowMinute < to;
+
   return (
     <>
       <div className="cw__seg cw__seg--gut" style={{ height }}>
@@ -378,15 +453,40 @@ function SegmentRow(props: SegmentRowProps) {
             straddles the segment's top edge — and content overflowing the
             inline-start edge of a scroll container is unreachable overflow. The
             same bug the day ribbon's ruler had, in the other axis. */}
-        <span className="cw__tl cw__tl--first">{formatMinute(seg.from)}</span>
-        {ticksFor(seg).map((tick) => (
+        {/* The axis form, same as every `tick` below it. This one is the
+            segment's own opening mark rather than an hour ruling, and it was
+            reading `6:00 AM` under a column of `7 AM` / `8 AM` - the odd one
+            out at the top of its own scale. A segment can open on a half hour,
+            and `formatHourMark` keeps the minutes when it does. */}
+        {/* WHICH HOUR IS IT — said on the rail, which is where a trainer looks
+            for an hour.
+
+            The row axis already carries three marks for the MINUTE: the rule
+            across the week, the accent dot where it crosses today, and the
+            `.cw__nt` pill. None of them was on a LABEL, so the one column whose
+            whole job is to name hours could not name the one in progress — and
+            on a week scrolled to the morning the minute marks are off screen
+            entirely while the label ladder is not.
+
+            A label owns the hour it OPENS: `--first` owns from the segment's
+            start to the first whole hour (a segment can open on a half hour),
+            and every tick owns sixty minutes from itself. `last` sits on the
+            segment's closing edge and opens nothing, which the interval test
+            gives for free. */}
+        <span className={`cw__tl cw__tl--first${nowIn(seg.from, firstTick) ? ' cw__tl--now' : ''}`}>
+          {formatHourMark(seg.from)}
+        </span>
+        {ticks.map((tick) => (
           <span key={tick.minute}>
             <span
               className="cw__l cw__l--h"
               style={{ top: (tick.minute - seg.from) * scale }}
             />
             <span
-              className={tick.last ? 'cw__tl cw__tl--last' : 'cw__tl'}
+              className={
+                (tick.last ? 'cw__tl cw__tl--last' : 'cw__tl')
+                + (nowIn(tick.minute, tick.minute + 60) ? ' cw__tl--now' : '')
+              }
               style={{ top: (tick.minute - seg.from) * scale }}
             >
               {tick.label}
@@ -420,7 +520,7 @@ function SegmentRow(props: SegmentRowProps) {
 /* ------------------------------------------------------------------- day ── */
 
 function DayColumn({
-  day, seg, rates, gymSharePercent, nowMinute, showGaps,
+  day, seg, rates, gymSharePercent, nowMinute, showGaps, hoursSet,
   activeId, onOpenSession, onOpenDay, onBook, justMovedId, scale,
 }: SegmentRowProps & { day: ScheduleDay }) {
   const height = (seg.to - seg.from) * scale;
@@ -438,26 +538,93 @@ function DayColumn({
    * time it chose, so a click that landed a minute off is visible before anything
    * is written.
    */
+  /**
+   * Pixels back to minutes, and this is the direction that has to be right.
+   * Every other conversion on this screen only misdraws; this one WRITES. At
+   * 90px/hour an unscaled ordinate turns a click on 12:00 into a booking at
+   * 08:00 — off by a third of a day, in a panel that opens showing the wrong
+   * time as if the trainer had chosen it.
+   *
+   * Shared by the click and by the hover mark below, so the minute the ghost
+   * promises and the minute the panel opens at cannot disagree — the whole
+   * value of showing it is that it is the same number.
+   */
+  const minuteAt = (clientY: number, rect: DOMRect) => {
+    const raw = seg.from + (clientY - rect.top) / scale;
+    const snapped = Math.round(raw / SNAP_MINUTES) * SNAP_MINUTES;
+    return Math.max(seg.from, Math.min(seg.to - SNAP_MINUTES, snapped));
+  };
+
   const bookHere = (event: React.MouseEvent<HTMLDivElement>) => {
     const target = event.target as HTMLElement;
     // A click that landed on a block or a gap has already been handled by it.
     if (target.closest('button')) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    /* Pixels back to minutes, and this is the direction that has to be right.
-       Every other conversion on this screen only misdraws; this one WRITES. At
-       90px/hour an unscaled ordinate turns a click on 12:00 into a booking at
-       08:00 — off by a third of a day, in a panel that opens showing the wrong
-       time as if the trainer had chosen it. */
-    const raw = seg.from + (event.clientY - rect.top) / scale;
-    const snapped = Math.round(raw / SNAP_MINUTES) * SNAP_MINUTES;
-    onBook(day.at, Math.max(seg.from, Math.min(seg.to - SNAP_MINUTES, snapped)));
+    onBook(day.at, minuteAt(event.clientY, event.currentTarget.getBoundingClientRect()));
+  };
+
+  /**
+   * THE BOOKABLE SLOT, WHICH THE TRACK HAS ALWAYS BEEN AND NEVER SAID.
+   *
+   * `bookHere` above is the fastest way to book in the product — one click at
+   * the minute you want, against three for the panel — and MEASURED on the live
+   * grid it was drawing nothing at all: `.cw__seg` is a plain `<div>` with
+   * `cursor:auto`, no hover rule and no mark. A trainer finds it by accident or
+   * never, and "never" is the safe bet, because empty track is the one part of
+   * a calendar a user has been trained by every other calendar not to click.
+   *
+   * So the track answers the pointer: a dashed accent rule at the minute the
+   * click would snap to, with that minute written beside it. Dashed and accent
+   * because `.gapb` — the other bookable thing on this grid — is already dashed
+   * and accent, and this is the same offer without a measured gap behind it.
+   *
+   * ── WHY THIS WRITES TO THE DOM AND NOT TO STATE ─────────────────────────
+   *
+   * A `useState` here re-renders a column on every pointer move, and a week is
+   * seven of these mounted at once with 43 blocks between them. The mark is
+   * presentation with no consequence — nothing reads it back, and a frame of it
+   * lost to a re-render costs nothing — so it rides two custom properties set
+   * straight on the node. React owns the element; this owns two properties on
+   * it that React never sets, which is the same division `useCwScale` makes.
+   *
+   * ── AND WHY IT IS MOUSE-ONLY ────────────────────────────────────────────
+   *
+   * `pointerType` is checked rather than `@media (pointer:coarse)` — trap 39
+   * says a desktop harness cannot see that query in either direction, and a
+   * hybrid laptop answers both anyway. A finger has no hover: on touch the mark
+   * would appear under the fingertip at the moment of the tap and be read as the
+   * result of it, which is a promise the tap does not keep.
+   *
+   * There is no keyboard equivalent and none is needed. `n` opens the booking
+   * panel from anywhere on this screen, `.gapb` is a real focusable button that
+   * books its own gap, and a roving grid already owns the arrow keys — see
+   * `useGridKeys`. This is a pointer accelerator, so it is drawn for pointers.
+   */
+  const markSlot = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'mouse') return;
+    const el = event.currentTarget;
+    const target = event.target as HTMLElement;
+    // Over a block or a gap the click belongs to that button, so promise nothing.
+    if (target.closest('button')) return clearSlot(event);
+    const minute = minuteAt(event.clientY, el.getBoundingClientRect());
+    el.style.setProperty('--cw-slot-y', `${(minute - seg.from) * scale}px`);
+    el.dataset.slot = formatMinute(minute);
+  };
+
+  const clearSlot = (event: React.PointerEvent<HTMLDivElement>) => {
+    delete event.currentTarget.dataset.slot;
   };
 
   const classes = ['cw__seg'];
   if (day.isToday) classes.push('cw__seg--today');
 
   return (
-    <div className={classes.join(' ')} style={{ height }} onClick={bookHere}>
+    <div
+      className={classes.join(' ')}
+      style={{ height }}
+      onClick={bookHere}
+      onPointerMove={markSlot}
+      onPointerLeave={clearSlot}
+    >
       {/* The hour rulings, drawn on the track. Decorative, and `pointer-events`
           are off in app.css so they can never eat the click that books. */}
       {ticksFor(seg).map((tick) => (
@@ -472,7 +639,7 @@ function DayColumn({
       {/* Outside the working windows: HATCHED, never blocked. The rule
           `WorkingHoursScreen` states on itself — working hours constrain what a
           CLIENT can self-book and have never constrained the trainer. */}
-      {offRunsIn(day, seg).map((run) => (
+      {offRunsIn(day, seg, hoursSet).map((run) => (
         <span
           key={run.from}
           className="cw__off"
@@ -576,12 +743,47 @@ function DayColumn({
   );
 }
 
-/** The parts of a segment that fall outside this day's merged working windows. */
-function offRunsIn(day: ScheduleDay, seg: Segment): { from: number; to: number }[] {
-  // No hours answered at all means no hatch, not a fully hatched day: the server
-  // returns `[]` rather than a default week precisely so nothing is invented, and
-  // hatching the whole grid would be inventing the opposite.
-  if (!day.windows.length) return [];
+/**
+ * The parts of a segment that fall outside this day's merged working windows.
+ *
+ * ── AN EMPTY `windows` MEANS TWO DIFFERENT THINGS AND THIS READ THEM AS ONE ──
+ *
+ * It returned `[]` for any day with no windows, under a comment that is right
+ * about one of the two cases and was being applied to both:
+ *
+ *   nobody has been asked   the server sends `[]` rather than a default week
+ *                           precisely so that nothing is invented, and hatching
+ *                           the whole grid would be inventing the opposite.
+ *   this weekday is off     the trainer HAS told us when they work and this is
+ *                           not one of those days. That is a fact about Sunday,
+ *                           and the grid was drawing it as open track.
+ *
+ * MEASURED against the seeded book, which works Monday to Saturday: Sunday drew
+ * **a full column of unhatched, bookable-looking track** with no mark anywhere
+ * saying why it was empty — while `/today` calls the same day *A day off* on a
+ * card of its own and `.cal__c--off` has been in the design system for a month
+ * cell in exactly this state. The week by client now says it too, so this was
+ * the one arrangement of three that did not.
+ *
+ * The two cases are told apart at the scope the question belongs to — the WEEK,
+ * not the day: one window anywhere in the range means the hours exist, and a
+ * weekday with none of them is a rest day. `hoursSet` is passed down from
+ * `Schedule`, which holds the trainer's own `working_hours` rows, rather than
+ * derived from `grid.days` here: the day view draws ONE column, so a grid asked
+ * that question about a single Sunday would answer *nobody has been asked* and
+ * draw exactly the bug this is fixing.
+ *
+ * Hatched, never blocked, on the same rule as every other off-hour: working
+ * hours constrain what a CLIENT can self-book and have never constrained the
+ * trainer. A click anywhere in that column still books there.
+ */
+function offRunsIn(
+  day: ScheduleDay,
+  seg: Segment,
+  hoursSet: boolean,
+): { from: number; to: number }[] {
+  if (!hoursSet) return [];
+  if (!day.windows.length) return [{ from: seg.from, to: seg.to }];
 
   const out: { from: number; to: number }[] = [];
   let cursor = seg.from;
@@ -637,7 +839,7 @@ function GapBlock({
       onClick={onBook}
     >
       <b>
-        {formatMinute(gap.startMinute)} – {formatMinute(gap.endMinute)}
+        {formatMinuteRange(gap.startMinute, gap.endMinute)}
       </b>
       <span>
         {formatSpan(gap.minutes)} · {sessions}
@@ -650,12 +852,58 @@ function GapBlock({
 /* ------------------------------------------------------------------ lane ── */
 
 /**
- * The day view's context lane — one card per session, positioned at the same
- * minute as the block it belongs to.
+ * THE DAY'S SESSIONS, AS A LIST — AND WHY IT STOPPED PRETENDING TO BE A LANE.
  *
- * The wide screen's real advantage over the phone is not a taller hour, it is
- * room to say WHY each block matters. Aligned to the same axis rather than listed
- * beside it, so the day reads as one timeline and not as a grid next to a table.
+ * This was a "context lane": one card per session, absolutely positioned at the
+ * same minute as the block it describes, "so the day reads as one timeline and
+ * not as a grid next to a table". It is a good idea and this file could not
+ * deliver it, which it had already conceded in three separate places without
+ * ever saying so on the screen:
+ *
+ *   · `laneRows` pushed a card down to `cursor` whenever its own minute would
+ *     put it inside the card above — silently, so a card 41px below its block
+ *     still looked like it was claiming that minute;
+ *   · `dense` gave up alignment for a whole segment when the cards outgrew it;
+ *   · `laneFits` dropped the lane entirely when the day outgrew the screen.
+ *
+ * MEASURED on the dev database, Wednesday 16 September, a day with one clash —
+ * eight sessions, eight cards: **two sat beside their block.** Vikram Rao was
+ * 41px out, Sanjay Reddy 113px, Nikhil Kumar 76px. Six of eight were somewhere
+ * a reader would have to look up.
+ *
+ * ── THE FAILURE IS STRUCTURAL, NOT A TUNING PROBLEM ─────────────────────────
+ *
+ * Two sessions at the same minute occupy ONE vertical slot in the spine — it
+ * splits them sideways into lanes, which is the right answer and the whole
+ * reason the spine works. A lane has no sideways to split into, so it must
+ * stack them, and the second one is immediately wrong about its own minute.
+ * A day with a single clash therefore CANNOT be aligned, and this trainer's
+ * roster runs concurrent sessions on purpose — `hasClash` is `lanes > 1` and
+ * rings 68 of 81 blocks in a week.
+ *
+ * Alignment that holds for a quarter of the rows is worse than no alignment,
+ * because it is indistinguishable from alignment that holds. So the lane stops
+ * claiming it. Every row now carries its own start time — which the `dense`
+ * layout had already worked out was what a list needs — and the two halves of
+ * the day correspond by the two facts printed on both, the time and the client,
+ * rather than by a y-coordinate that is usually a lie.
+ *
+ * ── WHAT IS KEPT: THE SEGMENTS ──────────────────────────────────────────────
+ *
+ * The list is still drawn one segment at a time, in the same grid rows as the
+ * spine. So a quiet band still divides it, and "5 hours outside your hours"
+ * still separates the morning's sessions from the evening's on BOTH halves of
+ * the screen. That is correspondence the structure can actually keep, and it is
+ * the level at which the two halves genuinely do line up.
+ *
+ * ── AND WHAT THE ROW BECAME ─────────────────────────────────────────────────
+ *
+ * Six real columns instead of a sentence and three trailing controls. MEASURED
+ * before: the plan track was `minmax(0,1fr)` — **499px holding 118px of ink, so
+ * 381px of every 782px row was empty**, and the client's name was jammed into
+ * the plan cell behind a `·`. Giving client and plan their own tracks spends
+ * that width on two columns that line up down the list, which is the only
+ * reason to put things in a table at all.
  */
 function ContextLane({
   seg, grid, rates, onOpenSession, scale,
@@ -669,128 +917,57 @@ function ContextLane({
 
   const money = dayMoney(day.placed.map((p) => p.session), rates);
   const height = (seg.to - seg.from) * scale;
-  const rows = laneRows(day, seg, scale);
-
-  /*
-   * ── FOUND BY RENDERING REAL ROWS · THE LANE ESCAPED ITS OWN SEGMENT ────────
-   *
-   * `laneRows` gives up alignment where it cannot be kept, and on a 26-session
-   * Tuesday it has to give it up almost everywhere: twenty-two cards at one row
-   * each need 900px inside a 06:00–11:00 segment that is 300px tall. The cards
-   * did not stop at the segment's foot — nothing clipped them — so they carried
-   * on straight through the quiet band and over the segment beneath it, and the
-   * lane's last third was printed on top of two other rows of the grid.
-   *
-   * A lane that has drifted this far is not a context lane any more; it is a
-   * list wearing a list's shape and lying about its position. So it becomes one
-   * honestly, and the switch is measured rather than guessed: if the aligned
-   * layout fits the segment, it is used unchanged — which is every day this
-   * lane was designed against. If it does not, the cards flow and the segment
-   * scrolls, and each card grows the one thing the aligned version never needed
-   * and the flowing one cannot do without: **its own start time**.
-   */
-  const dense = rows.length > 0 && rows[rows.length - 1].top + rows[rows.length - 1].height > height;
-
-  const card = (p: Placed, style?: React.CSSProperties) => {
-    const rate = rates.perSession.get(p.session.clientId);
-    return (
-      <div key={p.session.id} className={dense ? 'dtl dtl--flow' : 'dtl'} style={style}>
-        <span className="dtl__p">
-          {/* The time is drawn only when the card has stopped standing at it.
-              In the aligned layout the position IS the time, and printing it as
-              well is the redundancy the design deliberately left out. */}
-          {dense && <i className="dtl__at">{formatMinute(p.startMinute)}</i>}
-          <b>{p.session.detail}</b>
-          {!dense && p.endMinute - p.startMinute >= 45 ? <br /> : ' · '}
-          {p.session.clientName}
-        </span>
-        <span className="dtl__m">
-          {rate ? rupees(rate) : money.partial ? 'No rate set' : ''}
-        </span>
-        {/*
-          THE TAG SAYS WHAT STATE THE SESSION IS IN, AND NOTHING ELSE.
-
-          It used to read "Clash" for anything sharing a minute, which on a real
-          Tuesday meant twenty-six identical red tags down a single lane — a
-          column of danger tone carrying no information, since a tag that is
-          always on distinguishes nothing. Overlap is already said three times on
-          this screen and each time in a place the eye can act on: the ring on
-          the block, the bracket in the gutter, and the underline on the day
-          head. It did not need a fourth, least of all as the loudest thing in a
-          lane whose subject is plan, package and money.
-        */}
-        <span
-          className={`tag tag--${p.session.done ? 'ok' : p.session.noShow ? 'danger' : 'info'}`}
-        >
-          {p.session.done ? 'Done' : p.session.noShow ? 'No-show' : 'Booked'}
-        </span>
-        <button
-          className="btn btn--sm btn--secondary"
-          type="button"
-          onClick={() => onOpenSession(p.session.id)}
-        >
-          Open
-        </button>
-      </div>
-    );
-  };
+  /* Start-minute order, which is the order the spine reads in and therefore the
+     only order that lets a reader walk the two together. `day.placed` is already
+     sorted; this is the filter to this segment and nothing else. */
+  const rows = day.placed.filter(
+    (p) => p.startMinute >= seg.from && p.startMinute < seg.to,
+  );
 
   return (
-    <div
-      className={dense ? 'cw__seg cw__seg--dtl cw__seg--dense' : 'cw__seg cw__seg--dtl'}
-      style={{ height }}
-    >
-      {!dense
-        && ticksFor(seg).map((tick) => (
-          <span
-            key={tick.minute}
-            className="cw__l cw__l--h"
-            style={{ top: (tick.minute - seg.from) * scale }}
-            aria-hidden="true"
-          />
-        ))}
-      {dense
-        ? rows.map(({ p }) => card(p))
-        : rows.map(({ p, top, height: h }) => card(p, { top, height: h }))}
+    <div className="cw__seg cw__seg--dtl" style={{ height }}>
+      {rows.map((p) => {
+        const rate = rates.perSession.get(p.session.clientId);
+        return (
+          <div key={p.session.id} className="dtl">
+            {/* Tabular, so eight start times make a column rather than a ragged
+                edge — and this is now the row's anchor to the block it is about,
+                so it leads. */}
+            <i className="dtl__at">{formatMinute(p.startMinute)}</i>
+            {/* The client is the other fact printed on the block, and it is what
+                a human scans a list of eight by. Its own track, so the names
+                line up. */}
+            <b className="dtl__c">{p.session.clientName}</b>
+            {/* The plan is the lane's stated subject and the thing the spine has
+                no room to say. Quiet, because it is read after the name. */}
+            <span className="dtl__p">{p.session.detail}</span>
+            <span className="dtl__m">
+              {rate ? rupees(rate) : money.partial ? 'No rate set' : ''}
+            </span>
+            {/*
+              THE TAG SAYS WHAT STATE THE SESSION IS IN, AND NOTHING ELSE.
+
+              It used to read "Clash" for anything sharing a minute, which on a
+              real Tuesday meant twenty-six identical red tags down a single lane
+              — a column of danger tone carrying no information, since a tag that
+              is always on distinguishes nothing. Overlap is already said three
+              times on this screen and each time in a place the eye can act on:
+              the ring on the block, the bracket in the gutter, and the underline
+              on the day head. It did not need a fourth.
+            */}
+            <Tag tone={p.session.done ? 'ok' : p.session.noShow ? 'danger' : 'info'}>
+              {p.session.done ? 'Done' : p.session.noShow ? 'No-show' : 'Booked'}
+            </Tag>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => onOpenSession(p.session.id)}
+            >
+              Open
+            </Button>
+          </div>
+        );
+      })}
     </div>
   );
-}
-
-/**
- * MEASURED BUG, FOUND BY RENDERING A THREE-WAY CLASH.
- *
- * The lane positioned every card at `top: startMinute`, which is right for a day
- * whose sessions do not overlap and is §01.4 all over again for one whose do:
- * three sessions starting at 16:30, 17:00 and 17:15 produced three cards inside
- * 45px, printed on top of each other — three plan lines, three rupee figures and
- * three *Open* buttons in one illegible stack. The spine had already solved this
- * by splitting sideways; the lane has no sideways to split into.
- *
- * So the lane keeps alignment wherever the day allows it and gives it up exactly
- * where it cannot be kept. A card sits at its own minute unless that would put it
- * inside the card above, in which case it is pushed to just below it. A card in a
- * clash group takes one ROW's height rather than its duration's, because three
- * durations stacked would run 195px past the minute they describe and into the
- * next segment's cards.
- *
- * The alternative — a lane that stays aligned and overlaps — is the one thing a
- * context lane cannot be, since its whole job is to be read.
- */
-const LANE_ROW = 38;
-
-function laneRows(day: ScheduleDay, seg: Segment, scale: number) {
-  const out: { p: Placed; top: number; height: number }[] = [];
-  let cursor = -Infinity;
-
-  for (const p of day.placed) {
-    if (p.startMinute < seg.from || p.startMinute >= seg.to) continue;
-    /* LANE_ROW is a card's own height in pixels and does not scale; a duration
-       does. Mixing the two unconverted is what made the lane overrun its
-       segment in the first place, one scale factor earlier. */
-    const height = p.lanes > 1 ? LANE_ROW : (p.endMinute - p.startMinute) * scale;
-    const top = Math.max((p.startMinute - seg.from) * scale, cursor);
-    out.push({ p, top, height });
-    cursor = top + height + 3;
-  }
-  return out;
 }

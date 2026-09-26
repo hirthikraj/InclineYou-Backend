@@ -136,6 +136,21 @@ interface SetLogWire {
   notes: string | null;
 }
 
+/**
+ * The same set, off the BULK route, where two more fields come with it.
+ *
+ * `GET /v1/workouts/{id}/sets` answers about one log and the caller already
+ * knows which; `GET /v1/workouts/sets?clientId=` answers about all of them, so
+ * a row has to say which log it belongs to and when it happened. Separate type
+ * rather than optional fields on `SetLogWire`, because every reader of that one
+ * has a workout in hand and none of them should have to check.
+ */
+interface HistorySetWire extends SetLogWire {
+  workoutSessionId: string;
+  sessionDate: string;
+  createdAt: number;
+}
+
 interface ProgramWire {
   id: string;
   clientId: string;
@@ -178,6 +193,30 @@ export interface SessionRow {
   notes: string | null;
 }
 
+/**
+ * WHAT THEY DID THE LAST TIME THIS MOVEMENT CAME UP.
+ *
+ * The question a trainer opens an upcoming session to answer, and the one the
+ * page could not answer until now: the `Target` column is a program field that
+ * almost no program fills in, so it drew a dash in every row while the number
+ * the trainer actually wanted sat one request away.
+ *
+ * The TOP set of that session and not the whole thing — heaviest, then most
+ * reps at that weight. Five rows per movement is the console's job; one line
+ * that says *105 × 5, three weeks ago* is what you read walking in.
+ *
+ * `at` is kept beside the date because the view says "3 weeks ago" and the
+ * distance is what carries the meaning: the same 105 kg is a starting point
+ * this week and a question mark after two months.
+ */
+export interface LastTime {
+  loadKg: number | null;
+  reps: number | null;
+  /** How many sets landed on it that day, for "· 4 sets". */
+  setCount: number;
+  at: number;
+}
+
 /** One row of the prescription — what the program said to do. */
 export interface PlannedRow {
   exerciseId: string;
@@ -191,6 +230,12 @@ export interface PlannedRow {
   orderIndex: number;
   /** Only meaningful once a log exists: did any set land against it? */
   loggedSets: number;
+  /**
+   * The last session BEFORE this one that touched this movement, or null when
+   * there isn't one — which is itself worth drawing, because a movement the
+   * client has never done is the one to watch on the floor.
+   */
+  lastTime: LastTime | null;
 }
 
 export interface PlanView {
@@ -257,6 +302,26 @@ export interface ExerciseGroup {
   } | null;
   /** Nobody planned it. The trainer added it on the floor. */
   unplanned: boolean;
+  /**
+   * THE SAME MOVEMENT, THE LAST TIME IT CAME UP — ON THE CARD THAT DRAWS IT.
+   *
+   * This is the same `LastTime` the plan table has carried since the pass that
+   * added it, and until now the log side could not see it. The consequence on a
+   * finished session was that the two halves of every comparison were drawn
+   * ~900px apart: the card said *85 × 9* and the table at the foot of the page
+   * said *82.5 × 9, 7 days ago*, and the trainer did the subtraction in their
+   * head, five times, scrolling between two different table shapes to do it.
+   *
+   * A comparison whose two operands are not on screen together is not a
+   * comparison. It costs NOTHING to fix — `lastTimeByExercise` was already
+   * being computed off history that was already being fetched — and it is the
+   * single number this page exists to show.
+   *
+   * Null for a movement the client has never done before, which reads as *first
+   * time* rather than as a dash: the two are different instructions to somebody
+   * deciding what to load.
+   */
+  lastTime: LastTime | null;
 }
 
 export interface SessionDetailData {
@@ -283,9 +348,43 @@ export interface SessionDetailData {
   now: number;
 }
 
+/**
+ * THE WORKOUTS SCREEN'S THREE BUCKETS — `/programs/workouts`.
+ *
+ * It was two — `upcoming` and `past` — while this data drew `/sessions`, a list
+ * with two tabs reading *Upcoming* and *Past sessions*. The third arrives with
+ * the screen: Fitness' *Workouts* page asks *what happened, what is booked, and
+ * what fell through*, and the last of those three had no bucket.
+ *
+ * ── AND THE THIRD ONE WAS NOT A RENAME. IT WAS TWO KINDS OF ROW NOBODY DREW ──
+ *
+ * A missed workout arrives in this product two ways, and the old split lost
+ * both:
+ *
+ * 1. **Marked `no_show`.** `DEAD` dropped it with `cancelled` and `skipped`
+ *    before the rows were bucketed at all. A cancelled session is one that never
+ *    happened and nobody expected to; a no-show is one that WAS expected, and a
+ *    trainer deciding whether to charge for it needs to find it. Only the first
+ *    two are dropped now — see `CANCELLED` below.
+ * 2. **Still `scheduled`, with its time in the past.** The old `past` filter read
+ *    `scheduledAt < now && status !== 'scheduled'`, so these matched neither
+ *    bucket and fell off the screen — while the comment directly above it
+ *    claimed they were in `past` ("done, or still scheduled but in the past").
+ *    **The comment described the intent and the code did the opposite**, which is
+ *    why it went unnoticed: every reader of the file was told the rows were
+ *    handled. They are the unmarked ones, which is the set a trainer most needs,
+ *    because the fix is a click rather than a conversation.
+ *
+ * `completed` is therefore narrower than `past` was and deliberately so: it is
+ * what DID happen, not what is no longer ahead.
+ */
 export interface SessionsData {
-  upcoming: SessionRow[];
-  past: SessionRow[];
+  /** Booked and still ahead, soonest first. */
+  scheduled: SessionRow[];
+  /** Done, most recent first. */
+  completed: SessionRow[];
+  /** No-showed, or past its slot and never marked. Most recent first. */
+  missed: SessionRow[];
   now: number;
 }
 
@@ -293,7 +392,13 @@ export interface SessionsData {
 
 const DEFAULT_DURATION = 60;
 const DEAD_PROGRAM = ['cancelled', 'canceled', 'completed', 'archived'];
-const DEAD = new Set(['cancelled', 'canceled', 'no_show', 'noshow', 'skipped']);
+/* Was `DEAD`, and it was one set too wide. `no_show`/`noshow` left it when
+   *Missed* got a tab — see `SessionsData`. What remains is the two statuses that
+   mean the session is not part of anybody's history: a cancelled slot and a
+   skipped one were both called off in advance, so there is nothing to report,
+   charge for or follow up on. */
+const CANCELLED = new Set(['cancelled', 'canceled', 'skipped']);
+const NO_SHOW = new Set(['no_show', 'noshow']);
 
 function resolveMode(raw: string | null): 'floor' | 'remote' {
   return raw?.toLowerCase() === 'remote' ? 'remote' : 'floor';
@@ -302,6 +407,13 @@ function resolveMode(raw: string | null): 'floor' | 'remote' {
 function isoDay(at: number): string {
   const d = new Date(at);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Midnight local, as the cutoff `lastTimeByExercise` reads. */
+function startOfDay(at: number): number {
+  const d = new Date(at);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
 }
 
 function toRow(
@@ -370,7 +482,7 @@ export const getSessions = cache(async (): Promise<SessionsData> => {
   }
 
   const rows = (sessions ?? [])
-    .filter((s) => !DEAD.has((s.status ?? '').toLowerCase()))
+    .filter((s) => !CANCELLED.has((s.status ?? '').toLowerCase()))
     .map((s) =>
       toRow(
         s,
@@ -380,18 +492,29 @@ export const getSessions = cache(async (): Promise<SessionsData> => {
       ),
     );
 
-  /* Upcoming: future scheduled sessions, ascending (next session first). */
-  const upcoming = rows
+  /* Scheduled: booked and still ahead, ascending (next one first). The only
+     bucket read forwards, because it is the only one about what is coming. */
+  const scheduled = rows
     .filter((r) => r.status === 'scheduled' && r.scheduledAt >= now)
     .sort((a, b) => a.scheduledAt - b.scheduledAt);
 
-  /* Past: sessions that already happened (done, or still scheduled but in the
-     past), descending (most recent first). */
-  const past = rows
-    .filter((r) => r.scheduledAt < now && r.status !== 'scheduled')
+  /* Completed: it happened. Descending, most recent first, which is the order
+     every history in this product is read in. */
+  const completed = rows
+    .filter((r) => !NO_SHOW.has(r.status.toLowerCase()) && r.scheduledAt < now
+      && r.status !== 'scheduled')
     .sort((a, b) => b.scheduledAt - a.scheduledAt);
 
-  return { upcoming, past, now };
+  /* Missed: the two kinds, in one list. `SessionsData` says why they belong
+     together — both are a slot the client did not train in, and the difference
+     between them is whether the trainer has got round to saying so. The status
+     tag on the row is what tells them apart, so nothing is lost by merging. */
+  const missed = rows
+    .filter((r) => NO_SHOW.has(r.status.toLowerCase())
+      || (r.status === 'scheduled' && r.scheduledAt < now))
+    .sort((a, b) => b.scheduledAt - a.scheduledAt);
+
+  return { scheduled, completed, missed, now };
 });
 
 /* ────────────────────────────────────────────────────── session detail ── */
@@ -436,6 +559,79 @@ function exercisesByIds(ids: (string | null | undefined)[]): Promise<Map<string,
  * and means a mapper setting cannot turn a comparison into a string compare, in
  * which case `"9" >= "10"` and the badge lands on the wrong set.
  */
+/**
+ * EVERY SET THIS CLIENT HAS EVER LOGGED, ONCE.
+ *
+ * One request for the whole history, which is the shape `lib/log/api.ts` already
+ * settled on for the console and for the same reason it gives there: a window
+ * with a bigger number is still a window, and the movement whose last outing was
+ * outside it is exactly the one the trainer has forgotten.
+ *
+ * `cache()`d per request, so the plan table and anything else that wants it
+ * share the one round trip — and it is issued in the SAME `Promise.all` as the
+ * client, the notes and the bests, so it costs latency only if it is the slowest
+ * of the four.
+ */
+const historyFor = cache(async (clientId: string) =>
+  lenient<HistorySetWire[]>(`/v1/workouts/sets?clientId=${clientId}`, []),
+);
+
+/**
+ * The top set of the most recent session before `before`, per exercise.
+ *
+ * BEFORE, and that word is the whole of the correctness here. Reading this page
+ * on a session that is already logged, the newest sets for every movement are
+ * the ones printed further up the same screen — so without the cutoff the column
+ * would say "last time: 105 × 5" beside the very sets that say 105 × 5, which is
+ * not a comparison, it is an echo. The cutoff is the session's own day, so a
+ * second log entered on the same day is excluded too.
+ *
+ * Heaviest first, then most reps at that weight: a client who worked up to 110
+ * and then dropped to 90 for volume did their top set at 110, and a "last set"
+ * rule would report the back-off as the benchmark.
+ */
+function lastTimeByExercise(
+  history: HistorySetWire[],
+  before: number,
+): Map<string, LastTime> {
+  /* Group to the SESSION and not to the set: "last time" names a day, and the
+     set count that qualifies it — *105 × 5 · 4 sets* — can only be counted once
+     the day is chosen. */
+  const byExercise = new Map<string, Map<string, HistorySetWire[]>>();
+  for (const s of history) {
+    if (s.createdAt >= before) continue;
+    const days = byExercise.get(s.exerciseId) ?? new Map<string, HistorySetWire[]>();
+    const key = s.workoutSessionId;
+    days.set(key, [...(days.get(key) ?? []), s]);
+    byExercise.set(s.exerciseId, days);
+  }
+
+  const out = new Map<string, LastTime>();
+  for (const [exerciseId, days] of byExercise) {
+    let latest: HistorySetWire[] | null = null;
+    let latestAt = -Infinity;
+    for (const sets of days.values()) {
+      const at = Math.max(...sets.map((s) => s.createdAt));
+      if (at > latestAt) {
+        latestAt = at;
+        latest = sets;
+      }
+    }
+    if (!latest) continue;
+
+    const top = [...latest].sort(
+      (a, b) => (b.loadKg ?? 0) - (a.loadKg ?? 0) || (b.reps ?? 0) - (a.reps ?? 0),
+    )[0];
+    out.set(exerciseId, {
+      loadKg: top.loadKg,
+      reps: top.reps,
+      setCount: latest.length,
+      at: latestAt,
+    });
+  }
+  return out;
+}
+
 const bestsFor = cache(async (clientId: string) => {
   const res = await lenient<{ prs: PrWire[] }>(`/v1/clients/${clientId}/progress`, { prs: [] });
   const map = new Map<string, { load: number | null; reps: number | null }>();
@@ -451,7 +647,7 @@ const bestsFor = cache(async (clientId: string) => {
 /**
  * WHICH SET, IF ANY, WEARS THE BADGE.
  *
- * The TOP set and only the top set. A client who worked up to her best and then
+ * The TOP set and only the top set. A client who worked up to their best and then
  * did four more at the same weight did one remarkable thing, not five, and a
  * column of five identical badges says nothing — the same reason `judge` in
  * `lib/log/log.ts` reduces a session to one top set before comparing anything.
@@ -559,13 +755,19 @@ export const getSessionDetail = cache(
 
     /* The workout list is only needed when a booking has to find its log; when
        the route id WAS the log there is nothing to look up. */
-    const [client, workouts, notes, bests] = await Promise.all([
+    const [client, workouts, notes, bests, history] = await Promise.all([
       optional<ClientWire>(`/v1/clients/${clientId}`),
       workout
         ? Promise.resolve<WorkoutWire[]>([])
         : request<WorkoutWire[]>(`/v1/workouts?clientId=${clientId}`),
       lenient<ClientNoteWire[]>(`/v1/clients/${clientId}/notes`, []),
       bestsFor(clientId),
+      /* The fifth read, and it is here rather than beside the plan below so it
+         overlaps the other four instead of queueing after the program. The plan
+         is what CONSUMES it, but nothing about the request depends on the plan —
+         it is keyed on the client, and the movements are filtered out of the
+         answer. */
+      historyFor(clientId),
     ]);
 
     if (!workout && session) {
@@ -583,7 +785,7 @@ export const getSessionDetail = cache(
 
     /* The log's own `programId` wins OUTRIGHT, then the booking's; only when
        neither names one does the client's live program stand in, which is what
-       a trainer means by "her program" when nobody chose. Two steps rather than
+       a trainer means by "their program" when nobody chose. Two steps rather than
        one `find` with an `||` in it — that version would take whichever program
        came first and satisfied either half, so a session explicitly attached to
        an old block would silently draw the new one's exercises. */
@@ -619,6 +821,20 @@ export const getSessionDetail = cache(
     }
 
     /* ── what happened ────────────────────────────────────────────────────── */
+
+    /* HOISTED OUT OF `if (plan)`, where this used to live.
+       Both halves of the page want it now — the plan table for its `Last time`
+       column and every exercise card for the delta in its header — and a
+       session logged against no program has no `plan` at all, which is exactly
+       the session whose cards would otherwise lose the comparison. Computing it
+       here costs nothing new: `history` is already resolved above.
+
+       The cutoff is THIS session's day, not `now`. Reading a session from three
+       weeks ago, "last time" has to mean the outing before it — the one the
+       trainer was comparing against on the floor — and not the one that
+       happened last Tuesday, which nobody in that gym had done yet. */
+    const before = session ? startOfDay(session.scheduledAt) : startOfDay(now);
+    const lastByExercise = lastTimeByExercise(history, before);
 
     let workoutData: SessionDetailData['workout'] = null;
     const loggedByExercise = new Map<string, number>();
@@ -685,6 +901,7 @@ export const getSessionDetail = cache(
             bestEver: s.id === bestSetId(sorted, best),
           })),
           volumeKg: Math.round(volume * 10) / 10,
+          lastTime: lastByExercise.get(exerciseId) ?? null,
           target: planRow
             ? {
                 sets: planRow.sets,
@@ -722,6 +939,7 @@ export const getSessionDetail = cache(
           targetLoad: r.targetLoad == null ? null : Number(r.targetLoad),
           orderIndex: r.orderIndex,
           loggedSets: loggedByExercise.get(r.exerciseId) ?? 0,
+          lastTime: lastByExercise.get(r.exerciseId) ?? null,
         };
       });
       plan.totalSets = plan.exercises.reduce((sum, e) => sum + (e.targetSets ?? 0), 0);

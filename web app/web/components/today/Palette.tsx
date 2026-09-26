@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation';
 
 import type { AttentionItem } from '@/lib/today/deck';
 import type { DeckSession } from '@/lib/today/deck';
-import { avatarToken, formatMinute, initials, minuteOfDay } from '@/lib/today/time';
+import { formatMinute, minuteOfDay } from '@/lib/today/time';
 import { Calendar, Clock, Dumbbell, Rupee, Search } from '@/components/shell/Icons';
 import { PRIMARY } from '@/components/shell/nav';
+import { Avatar } from '@/web-components/ui/Avatar';
 
 /**
  * ⌘K.
@@ -186,13 +187,7 @@ export function Palette({
         key: `cli-${c.id}`,
         group: 'Clients',
         icon: (
-          <span
-            className="av av--sm"
-            style={{ background: `var(${avatarToken(c.id)})` }}
-            aria-hidden="true"
-          >
-            {initials(c.name)}
-          </span>
+          <Avatar name={c.name} id={c.id} size="sm" />
         ),
         label: c.name,
         plain: c.name,
@@ -337,15 +332,11 @@ export function Palette({
         */}
         <div className="pal__list" id={LIST_ID} role="listbox" aria-label="Results">
           {rows.map((row, i) => {
-            /* Asked of the PREVIOUS ROW, not of a `let` carried across the map.
-               A closure that writes to a variable in the component body is a
-               write after render completes — React may re-run this callback
-               without re-running the body, and the second pass then compares
-               against the last group of the FIRST pass and drops every header.
-               Reading `rows[i - 1]` is the same answer with nothing to stale:
-               every `group` is a non-empty literal, so the `i === 0` arm is
-               exactly what the `''` seed used to buy. */
-            const header = i === 0 || row.group !== rows[i - 1].group ? row.group : null;
+            /* The header is a comparison against the PREVIOUS row rather than
+               a `lastGroup` the map reassigns. Same output, and the mutable
+               version is a variable written after render has completed, which
+               is unstable the moment React replays this render. */
+            const header = rows[i - 1]?.group !== row.group ? row.group : null;
             return (
               <Fragment key={row.key}>
                 {header && (

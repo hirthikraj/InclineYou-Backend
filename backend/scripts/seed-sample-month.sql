@@ -95,7 +95,7 @@ UPDATE package           SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND client_id IN (SELECT id FROM old_clients);
 UPDATE program           SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND client_id IN (SELECT id FROM old_clients);
-UPDATE body_metric       SET deleted_at = now(), updated_at = now()
+UPDATE assessment        SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND client_id IN (SELECT id FROM old_clients);
 UPDATE client            SET deleted_at = now(), updated_at = now()
     WHERE deleted_at IS NULL AND id IN (SELECT id FROM old_clients);
@@ -760,20 +760,28 @@ ON CONFLICT (id) DO UPDATE SET
     load_kg = EXCLUDED.load_kg, reps = EXCLUDED.reps,
     deleted_at = NULL, updated_at = now();
 
--- ── Bodyweight, weekly ──────────────────────────────────────────────────────
+-- ── Bodyweight — as assessments ─────────────────────────────────────────────
+--
+-- A body is measured in an assessment and nowhere else (V22 dropped
+-- `body_metric`): one trainer-entered weigh-in a fortnight across the month.
 
-INSERT INTO body_metric (id, client_id, metric_type, value, unit, recorded_at, created_at)
-SELECT md5(:'trainer_phone' || ':seed:bm:' || s.key || ':' || w)::uuid, s.id, 'weight',
-       (CASE s.key WHEN 'ananya' THEN 58 WHEN 'karthik' THEN 84 WHEN 'meera' THEN 66
-                   WHEN 'farhan' THEN 72 WHEN 'sneha' THEN 61 ELSE 74 END
-        -- Fat-loss clients trend down, muscle-gain trends up.
-        + (CASE WHEN s.goal = 'Muscle gain' THEN 0.4 ELSE -0.3 END) * w)::numeric(8,2),
-       'kg',
-       (CURRENT_DATE - 28 + w * 7)::timestamptz,
-       (CURRENT_DATE - 28 + w * 7)::timestamptz
-FROM seed_client s, generate_series(0, 4) AS w
+INSERT INTO assessment (id, client_id, trainer_id, name, due_at, sent_at, completed_at, read_at,
+                        entered_by, measurements_asked, questions_asked, readings, created_at)
+SELECT md5(:'trainer_phone' || ':seed:as:' || s.key || ':' || w)::uuid,
+       s.id, (SELECT id FROM seed_trainer), 'Weigh-in',
+       t.at, t.at, t.at, t.at, 'trainer', 1, 0,
+       jsonb_build_array(jsonb_build_object('key', 'weight', 'value',
+           CASE s.key WHEN 'ananya' THEN 58 WHEN 'karthik' THEN 84 WHEN 'meera' THEN 66
+                      WHEN 'farhan' THEN 72 WHEN 'sneha' THEN 61 ELSE 74 END
+           -- Fat-loss clients trend down, muscle-gain trends up.
+           + (CASE WHEN s.goal = 'Muscle gain' THEN 0.4 ELSE -0.3 END) * w)),
+       t.at
+FROM seed_client s
+CROSS JOIN generate_series(0, 4, 2) AS w
+CROSS JOIN LATERAL (SELECT (CURRENT_DATE - 28 + w * 7)::timestamptz + INTERVAL '6 hours' AS at) t
 ON CONFLICT (id) DO UPDATE SET
-    value = EXCLUDED.value, deleted_at = NULL, updated_at = now();
+    readings = EXCLUDED.readings, completed_at = EXCLUDED.completed_at,
+    deleted_at = NULL, updated_at = now();
 
 -- ── Make the packs tell the truth ───────────────────────────────────────────
 --

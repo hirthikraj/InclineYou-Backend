@@ -5,6 +5,14 @@ import { useState, useTransition } from 'react';
 import type { MoneyClient, MoneyPackage, MoneyTrainer } from '@/lib/money/api';
 import { recordPayment, type MoneyWriteResult } from '@/lib/money/actions';
 import { rupees } from '@/lib/today/time';
+import { Checkbox } from '@/web-components/ui/Checkbox';
+import { useDismiss } from '@/lib/ui/dismiss';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
+import { Chip } from '@/web-components/ui/Chip';
+import { Field, TextField } from '@/web-components/ui/Field';
+import { KeyValueRow } from '@/web-components/ui/KeyValue';
+import { Why } from '@/web-components/ui/Why';
 
 interface Props {
   clients: MoneyClient[];
@@ -63,7 +71,7 @@ function localDate(ms: number): string {
  * chosen day everywhere.
  *
  * Today keeps the real clock time, because a payment recorded now happened now
- * and the ledger orders by it.
+ * and the payments list orders by it.
  */
 function paidAtFor(dateStr: string, now: number): number {
   if (dateStr === localDate(now)) return now;
@@ -83,7 +91,7 @@ function paidAtFor(dateStr: string, now: number): number {
  * them. Under the old predicate their pack would vanish from this list and the
  * money could never be recorded against it.
  *
- * So the question is *is there money outstanding on it*, not *is it running*.
+ * So the question is *is there money pending on it*, not *is it running*.
  * A finished pack with a balance stays here until the balance is nil; a live one
  * is always here, because a client can pay a deposit on the day they buy.
  *
@@ -103,6 +111,19 @@ export function RecordPanel({
   initialClientId = null,
   onClose,
 }: Props) {
+  /* ── THE PANEL OWNS ITS SCRIM NOW, AND THAT IS WHAT THE EXIT NEEDED ────────
+   *
+   * `Business.tsx` used to render the scrim beside this panel, as siblings under
+   * one `recordPanelOpen`. That was fine while closing was instant and wrong the
+   * moment it stopped being: the wash and the surface leave together, and only
+   * this component knows when "leaving" has finished. Two owners meant the scrim
+   * would blink out on the click while the panel was still gliding.
+   *
+   * So the scrim moved in, which is also what every other panel in this app
+   * already does. `lib/ui/dismiss.ts` holds both for as long as the transition
+   * they can see actually runs. */
+  const { closing, dismiss, dismissThen, ref: panelRef } = useDismiss<HTMLElement>(onClose);
+
   const [clientId, setClientId] = useState(initialClientId ?? '');
   /*
    * The pack is seeded too when the client has exactly one running, which is the
@@ -127,7 +148,7 @@ export function RecordPanel({
   /*
    * The date the money changed hands, defaulted to today and almost never
    * touched — which is the whole design of this field. Trainers catch up on a
-   * Sunday, and "he paid on Thursday" has to be recordable without it becoming a
+   * Sunday, and "they paid on Thursday" has to be recordable without it becoming a
    * step in the common path. It writes `paid_at`, so a back-dated payment lands
    * in the right bar of the trend chart.
    */
@@ -137,7 +158,7 @@ export function RecordPanel({
    * The one case that is still genuinely pending: a UPI request sent to a client
    * who has not paid it yet. It used to be the ONLY case — this panel wrote every
    * row `pending` and nothing on the web could confirm one, so a trainer handed
-   * cash recorded a debt and the ledger's *Collected* never moved. Now it is a
+   * cash recorded a debt and the payments list's *Collected* never moved. Now it is a
    * deliberate opt-in, off by default, and offered only where it is real.
    */
   const [awaiting, setAwaiting] = useState(false);
@@ -200,7 +221,9 @@ export function RecordPanel({
         note: note || undefined,
       });
       if (result.ok) {
-        onClose();
+        /* A recorded payment leaves the way Cancel does. Only the success branch
+           — a failure keeps the panel open with its message. */
+        dismissThen(onClose);
       } else {
         setError(result.message ?? 'Something went wrong.');
       }
@@ -210,22 +233,35 @@ export function RecordPanel({
   const hasGym = trainer.gymName !== null && gymSharePercent > 0;
 
   /* Cash in a hand and a gym counter's slip are settled by the time they are
-     typed; only a UPI or bank request can be outstanding. Offering "not arrived
+     typed; only a UPI or bank request can be pending. Offering "not arrived
      yet" against cash would be offering a state that cannot happen. */
   const showAwaiting = method === 'upi' || method === 'bank';
   const isAwaiting = showAwaiting && awaiting;
 
   return (
+    /* `.rp-panel` and NOT a `style` attribute, which is what this was. An inline
+       `width:420` outranks every selector including a media query, so the sheet
+       rule app.css writes for this panel could never have applied and at 390px
+       the form rendered 30px off the left edge of the screen. The class carries
+       the same four declarations at a desk; app.css's own block is where the
+       phone re-decides them. */
+    <>
+    <button
+      className={`scrim scrim--soft${closing ? ' scrim--out' : ''}`}
+      type="button"
+      aria-label="Close panel"
+      onClick={dismiss}
+    />
     <aside
-      className="panel"
+      ref={panelRef}
+      className={`panel rp-panel${closing ? ' panel--out' : ''}`}
       role="dialog"
       aria-label="Record payment"
-      style={{ position: 'fixed', right: 0, top: 0, height: '100dvh', width: 420, zIndex: 30 }}
     >
       <div className="panel__hd">
         <span className="panel__t">Record payment</span>
         <span style={{ flex: 1 }} />
-        <button className="btn btn--icon btn--ghost" type="button" aria-label="Close" onClick={onClose}>
+        <button className="btn btn--icon btn--ghost" type="button" aria-label="Close" onClick={dismiss}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M18 6 6 18M6 6l12 12"/>
           </svg>
@@ -234,20 +270,19 @@ export function RecordPanel({
 
       <div className="panel__body">
         {/* Client picker */}
-        <div className="fld">
-          <label className="fld__l" htmlFor="rp-client">Client</label>
-          <select
-            className="ctl"
-            id="rp-client"
-            value={clientId}
-            onChange={(e) => handleClientChange(e.target.value)}
-          >
+        <Field
+          label="Client"
+          id="rp-client"
+        >
+          {(a) => (
+            <select className="ctl" {...a} value={clientId} onChange={(e) => handleClientChange(e.target.value)}>
             <option value="">Select a client…</option>
             {activeClients.map((c) => (
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
-        </div>
+          )}
+        </Field>
 
         {/* Package picker */}
         {clientId && (
@@ -256,7 +291,7 @@ export function RecordPanel({
             {clientPackages.length === 0 ? (
               <p className="small" style={{ color: 'var(--tx-ink-3)', marginTop: 4 }}>
                 Nothing to record against {selectedClient?.name} — no pack running
-                and nothing outstanding on the ones that finished. Sell a pack from
+                and nothing pending on the ones that finished. Sell a pack from
                 their file first.
               </p>
             ) : (
@@ -274,7 +309,7 @@ export function RecordPanel({
                   const tail =
                     p.status === 'active'
                       ? `${p.sessionsRemaining ?? '?'} left`
-                      : `finished · ${rupees(p.amountDue)} still owed`;
+                      : `finished · ${rupees(p.amountDue)} still pending`;
                   const label = p.type === 'single'
                     ? `Single session · ${rupees(p.amount)}`
                     : `${p.sessionsTotal ?? '?'}-session pack · ${rupees(p.amount)} · ${tail}`;
@@ -312,7 +347,7 @@ export function RecordPanel({
                     owed the whole pack less that instalment, which is the figure
                     they cleared two payments ago. Partial payment is the normal
                     case in this business and the panel has to count it. */}
-                <span>{rupees(selectedPackage.amountDue - amountNum)} will still be owed</span>
+                <span>{rupees(selectedPackage.amountDue - amountNum)} will still be pending</span>
               </p>
             )}
           </div>
@@ -329,15 +364,13 @@ export function RecordPanel({
               style={{ flexWrap: 'wrap' }}
             >
               {(['upi', 'cash', 'bank', 'gym'] as Method[]).map((m) => (
-                <button
+                <Chip
+                  pressed={method === m}
                   key={m}
-                  className="chip"
-                  type="button"
-                  aria-pressed={method === m}
                   onClick={() => setMethod(m)}
                 >
                   {METHOD_LABEL[m]}
-                </button>
+                </Chip>
               ))}
             </div>
           </div>
@@ -370,21 +403,22 @@ export function RecordPanel({
         )}
 
         {showAwaiting && packageId && (
-          <label
-            className="row gap2 mt3"
-            style={{ alignItems: 'flex-start', cursor: 'pointer' }}
-          >
-            <input
-              type="checkbox"
-              checked={awaiting}
-              onChange={(e) => setAwaiting(e.target.checked)}
-              style={{ marginTop: 2 }}
-            />
-            <span className="small" style={{ color: 'var(--tx-ink-2)', lineHeight: 1.5 }}>
-              <b>The money has not arrived yet.</b> Records it as pending so it shows
-              under <i>Owed</i> until you confirm it.
-            </span>
-          </label>
+          /* `ui/Checkbox`, not a hand-built label. The input here carried NO
+             class at all, so `.check` never applied and the UA painted its own
+             blue box — the design system's lime one was two lines away in the
+             same stylesheet and unreachable. Reported from a screenshot. */
+          <Checkbox
+            className="mt3"
+            align="start"
+            checked={awaiting}
+            onChange={(e) => setAwaiting(e.target.checked)}
+            label={
+              <>
+                <b>The money has not arrived yet.</b> It shows under <i>Pending</i>
+                until you confirm it.
+              </>
+            }
+          />
         )}
 
         {/* Reference — UPI and bank both have one worth keeping */}
@@ -408,52 +442,48 @@ export function RecordPanel({
             has existed since V11 and the only field that ever reached it was a
             UPI reference under a different name. */}
         {packageId && (
-          <div className="fld mt3">
-            <label className="fld__l" htmlFor="rp-note">Note (optional)</label>
-            <input
-              className="ctl"
-              id="rp-note"
-              type="text"
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g. rest of the pack, paying Tuesday"
-              maxLength={280}
-            />
-          </div>
+          <TextField
+            label="Note (optional)"
+            id="rp-note"
+            className="mt3"
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. rest of the pack, paying Tuesday"
+            maxLength={280}
+          />
         )}
 
         {/* Gym split computation. Hidden while awaiting: the cut is stamped when
             the money is confirmed, and showing a split for a payment that has not
             happened states a fact about a month that has not closed. */}
         {hasGym && amountNum > 0 && packageId && !isAwaiting && (
-          <div className="card card--acc mt4">
-            <div className="card__b" style={{ padding: '12px 14px' }}>
-              <div className="kv" style={{ border: 0, padding: '4px 0' }}>
-                <span className="kv__k">Billed</span>
-                <span className="kv__v">{rupees(amountNum)}</span>
-              </div>
+          <Card tone="acc" className="mt4">
+            <Card.Body style={{ padding: '12px 14px' }}>
+              <KeyValueRow k="Billed" style={{ border: 0, padding: '4px 0' }}>{rupees(amountNum)}</KeyValueRow>
               {isFloor && (
-                <div className="kv" style={{ border: 0, padding: '4px 0' }}>
-                  <span className="kv__k">Gym&#8217;s {gymSharePercent}%</span>
-                  <span className="kv__v warn">−{rupees(gymCut)}</span>
-                </div>
+                <KeyValueRow
+                  k={<>Gym&#8217;s {gymSharePercent}%</>}
+                  valueClassName="warn"
+                  style={{ border: 0, padding: '4px 0' }}
+                >−{rupees(gymCut)}</KeyValueRow>
               )}
-              <div className="kv" style={{ border: 0, padding: '4px 0' }}>
-                <span className="kv__k">You keep</span>
-                <span className="kv__v acc">{rupees(yours)}</span>
-              </div>
-            </div>
-          </div>
+              <KeyValueRow
+                k="You keep"
+                valueClassName="acc"
+                style={{ border: 0, padding: '4px 0' }}
+              >{rupees(yours)}</KeyValueRow>
+            </Card.Body>
+          </Card>
         )}
 
         {/* Honesty note */}
-        <div className="why" style={{ marginTop: 14 }}>
-          <p className="why__k">The money never touches us</p>
+        <Why heading="The money never touches us" style={{ marginTop: 14 }}>
           <p>
-            Recording a payment is bookkeeping, not a transaction. X REP holds no balance and
+            Recording a payment is bookkeeping, not a transaction. InclineYou holds no balance and
             moves no money — this row says what already happened.
           </p>
-        </div>
+        </Why>
 
         {/* Error */}
         {error && (
@@ -477,18 +507,18 @@ export function RecordPanel({
         gone until there is something for it to call.
       */}
       <div className="panel__foot">
-        <button className="btn btn--ghost" type="button" onClick={onClose} disabled={isPending}>
+        <Button variant="ghost" onClick={dismiss} disabled={isPending}>
           Cancel
-        </button>
-        <button
-          className="btn btn--primary"
-          type="button"
+        </Button>
+        <Button
+          variant="primary"
           onClick={handleSave}
           disabled={isPending || !packageId || !amountNum}
         >
           {isPending ? 'Saving…' : isAwaiting ? 'Record as pending' : 'Record payment'}
-        </button>
+        </Button>
       </div>
     </aside>
+    </>
   );
 }

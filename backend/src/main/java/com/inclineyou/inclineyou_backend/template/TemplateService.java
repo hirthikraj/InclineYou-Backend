@@ -1,9 +1,13 @@
 package com.inclineyou.inclineyou_backend.template;
 
+import com.inclineyou.inclineyou_backend.session.DiaryService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.inclineyou.inclineyou_backend.program.PlanDiff;
+import com.inclineyou.inclineyou_backend.program.ProgramRuleException;
+import com.inclineyou.inclineyou_backend.session.SessionPlanner;
 import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -24,6 +28,10 @@ import java.util.*;
 public class TemplateService {
 
     private final NamedParameterJdbcTemplate jdbc;
+    /** V3 · a plan arriving names the sessions already booked. See {@link #apply}. */
+    private final DiaryService diary;
+    /** V18 · facts for the client's bell, gated by their own switches. */
+    private final com.inclineyou.inclineyou_backend.notification.ClientNotificationService clientBell;
 
     /**
      * The blueprint's STORAGE format, and the only place snake_case is correct.
@@ -44,6 +52,9 @@ public class TemplateService {
      * typed record now, in the casing the contract always claimed; the storage
      * format is untouched, so no phone build notices.
      */
+    /** "Today" for ending a plan is an Indian calendar day, not the server's. */
+    private static final java.time.ZoneId IST = java.time.ZoneId.of("Asia/Kolkata");
+
     private static final ObjectMapper STORE = new ObjectMapper()
             .setPropertyNamingStrategy(PropertyNamingStrategies.SNAKE_CASE);
 
@@ -87,8 +98,37 @@ public class TemplateService {
             String tempo,
             String altExerciseId,
             String groupId,
-            List<SetDetail> setDetail
-    ) {}
+            List<SetDetail> setDetail,
+            /*
+             * V10 · which named workout on its day this entry belongs to. A local
+             * handle the builder mints, NOT a reference to `workout_template` —
+             * and the name a person reads ("Upper A"). Both nullable: an entry
+             * with neither is its day's single unnamed block, which is every
+             * entry written before V10.
+             */
+            String workoutId,
+            String workoutName
+    ) {
+        /** Trimmed, blank as null, and cut to the copy's column widths (64 / 120). */
+        TemplateExerciseInput normalised() {
+            return new TemplateExerciseInput(exerciseId, sets, reps, restSeconds, targetLoad, notes,
+                    dayOfWeek, orderIndex, week, durationSeconds, tempo, altExerciseId, groupId,
+                    setDetail, clip(workoutId, MAX_WORKOUT_ID), clip(workoutName, MAX_WORKOUT_NAME));
+        }
+    }
+
+    /** The widths of `program_exercise.workout_id` / `workout_name` (V10). */
+    public static final int MAX_WORKOUT_ID = 64;
+    public static final int MAX_WORKOUT_NAME = 120;
+
+    public static String clip(String raw, int max) {
+        if (raw == null || raw.isBlank()) return null;
+        String v = raw.strip();
+        return v.length() > max ? v.substring(0, max) : v;
+    }
+
+    /** One client on the shelf's avatar cluster. */
+    public record AssignedClient(String id, String name) {}
 
     public record CreateTemplateRequest(
             @NotBlank String name,
@@ -160,7 +200,10 @@ public class TemplateService {
             String tempo,
             String altExerciseId,
             String groupId,
-            List<SetDetail> setDetail
+            List<SetDetail> setDetail,
+            /* V10 · appended last. See TemplateExerciseInput. */
+            String workoutId,
+            String workoutName
     ) {}
 
     public record TemplateResponse(
@@ -188,8 +231,35 @@ public class TemplateService {
              * is how much breaks if it changes.
              */
             int assignedCount,
-            int activeAssignedCount
+            int activeAssignedCount,
+            /*
+             * ── APPENDED 23 SEP 2026 · WHO IS ON IT ──────────────────────────
+             * The shelf's avatar cluster: at most SAMPLE_SIZE of the clients on
+             * an ACTIVE copy, ordered by name and then id so it cannot reshuffle
+             * between loads. A sample and never a count — `activeAssignedCount`
+             * stays the authority for "+3 more", and nothing may derive a count
+             * from this list's length. Only the caller's own clients: a
+             * template's copies can sit with a teammate after a reassignment,
+             * and a coach must not read a teammate's client names off a shelf.
+             */
+            List<AssignedClient> assignedClients,
+            /*
+             * ── APPENDED BY V11 · WHERE IT CAME FROM ─────────────────────────
+             * 'own' on every row of this shelf — a copy of a certified program
+             * is the trainer's own the moment it exists. The certified list
+             * answers 'certified' in the same field.
+             */
+            String source,
+            /**
+             * The certified original this was copied from, AS AT COPY TIME —
+             * or null. `updatedAt` older than the original's current one is how
+             * the builder says "the original was revised since you copied it".
+             */
+            CopiedFrom copiedFrom
     ) {}
+
+    /** V11 · the provenance of a copy, frozen when it was taken. */
+    public record CopiedFrom(String id, String name, Long updatedAt) {}
 
     public record ProgramSummary(
             String id,
@@ -228,7 +298,22 @@ public class TemplateService {
              * `POST /v1/programs/{id}/resync` does and only ever does when
              * asked.
              */
-            boolean behindTemplate
+            boolean behindTemplate,
+            /**
+             * V2 · WHAT THIS COPY SAYS THAT THE BLUEPRINT DOES NOT — and
+             * therefore what a push would delete.
+             *
+             * `behindTemplate` above is a clock and answers a different
+             * question. It cannot tell a copy nobody has touched from one a
+             * trainer rewrote for a shoulder injury three weeks ago, and
+             * `POST /v1/programs/{id}/resync` replaces the whole prescription
+             * either way — so the panel that offers the push was, until this
+             * field, offering to destroy work it had no way to mention.
+             *
+             * Appended last, and null-safe by construction: a build that
+             * predates it reads the ten fields it always read.
+             */
+            PlanDiff.Result divergence
     ) {}
 
     // ── List ──────────────────────────────────────────────────────────────────
@@ -237,7 +322,8 @@ public class TemplateService {
         var rows = jdbc.queryForList("""
                 SELECT t.id::text, t.name, t.goal, t.description, t.structure::text AS structure,
                        t.day_labels::text AS day_labels, t.weeks, t.training_days,
-                       t.created_at, t.updated_at,
+                       t.created_at, t.updated_at, t.source, t.copied_from_id::text AS copied_from_id,
+                       t.copied_from_name, t.copied_from_updated_at,
                        COALESCE(a.total,  0) AS assigned_count,
                        COALESCE(a.active, 0) AS active_assigned_count
                 FROM template t
@@ -260,7 +346,10 @@ public class TemplateService {
                 -- nothing can tie on.
                 ORDER BY t.updated_at DESC, t.created_at ASC, t.id
                 """, Map.of("tid", trainerId.toString()));
-        return rows.stream().map(this::toResponse).toList();
+        var samples = assignedSample(trainerId, rows.stream().map(r -> str(r.get("id"))).toList());
+        return rows.stream()
+                .map(r -> toResponse(r, samples.getOrDefault(str(r.get("id")), List.of())))
+                .toList();
     }
 
     // ── Create ────────────────────────────────────────────────────────────────
@@ -276,7 +365,7 @@ public class TemplateService {
         p.put("name",         req.name());
         p.put("goal",         req.goal());
         p.put("description",  req.description());
-        p.put("structure",    toJsonString(req.exercises()));
+        p.put("structure",    toJsonString(normalised(req.exercises())));
         p.put("dayLabels",    toJsonObject(req.dayLabels()));
         p.put("weeks",        normaliseWeeks(req.weeks()));
         p.put("trainingDays", trainingDaysCsv(req.trainingDays()));
@@ -296,13 +385,16 @@ public class TemplateService {
     // ── Get ───────────────────────────────────────────────────────────────────
 
     public TemplateResponse get(UUID id, UUID trainerId) {
-        return toResponse(findOwned(id, trainerId));
+        var row = findOwned(id, trainerId);
+        return toResponse(row, assignedSample(trainerId, List.of(id.toString()))
+                .getOrDefault(id.toString(), List.of()));
     }
 
     // ── Update ────────────────────────────────────────────────────────────────
 
     @Transactional
     public TemplateResponse update(UUID id, UUID trainerId, UpdateTemplateRequest req) {
+        refuseCertified(id, false);
         findOwned(id, trainerId);
 
         var sets = new ArrayList<String>();
@@ -315,7 +407,7 @@ public class TemplateService {
         if (req.name() != null)        { p.put("name",      req.name());        sets.add("name = :name"); }
         if (req.goal() != null)        { p.put("goal",      req.goal());        sets.add("goal = :goal"); }
         if (req.description() != null) { p.put("desc",      req.description()); sets.add("description = :desc"); }
-        if (req.exercises() != null)   { p.put("structure", toJsonString(req.exercises()));
+        if (req.exercises() != null)   { p.put("structure", toJsonString(normalised(req.exercises())));
                                          sets.add("structure = CAST(:structure AS jsonb)"); }
         if (req.dayLabels() != null)   { p.put("dayLabels", toJsonObject(req.dayLabels()));
                                          sets.add("day_labels = CAST(:dayLabels AS jsonb)"); }
@@ -334,11 +426,47 @@ public class TemplateService {
 
     @Transactional
     public void delete(UUID id, UUID trainerId) {
+        refuseCertified(id, false);
         findOwned(id, trainerId);
         jdbc.update("""
                 UPDATE template SET deleted_at = NOW(), updated_at = NOW()
                 WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
                 """, Map.of("id", id.toString(), "tid", trainerId.toString()));
+    }
+
+    /**
+     * V11 · write a trainer-owned template that is a copy of a certified one.
+     * The blueprint arrives already resolved to this database's exercise ids
+     * and is stored as given; the provenance is frozen as at this moment.
+     */
+    @Transactional
+    public TemplateResponse insertCopy(UUID trainerId, String name, String goal, String description,
+                                       String structureJson, String dayLabelsJson, Object weeks,
+                                       Object trainingDays, CopiedFrom from) {
+        UUID id = UUID.randomUUID();
+        var p = new HashMap<String, Object>();
+        p.put("id",           id.toString());
+        p.put("tid",          trainerId.toString());
+        p.put("name",         name);
+        p.put("goal",         goal);
+        p.put("description",  description);
+        p.put("structure",    structureJson);
+        p.put("dayLabels",    dayLabelsJson);
+        p.put("weeks",        weeks);
+        p.put("trainingDays", trainingDays);
+        p.put("fromId",       from.id());
+        p.put("fromName",     from.name());
+        p.put("fromAt",       from.updatedAt() == null ? null : Timestamp.from(Instant.ofEpochMilli(from.updatedAt())));
+        p.put("now",          Timestamp.from(Instant.now()));
+        jdbc.update("""
+                INSERT INTO template (id, trainer_id, name, goal, description, structure, day_labels,
+                    weeks, training_days, source, copied_from_id, copied_from_name,
+                    copied_from_updated_at, created_at, updated_at)
+                VALUES (:id::uuid, :tid::uuid, :name, :goal, :description,
+                    CAST(:structure AS jsonb), CAST(:dayLabels AS jsonb), :weeks, :trainingDays,
+                    'own', :fromId::uuid, :fromName, :fromAt, :now, :now)
+                """, p);
+        return get(id, trainerId);
     }
 
     // ── Duplicate ─────────────────────────────────────────────────────────────
@@ -434,16 +562,24 @@ public class TemplateService {
     public List<AssignmentResponse> assignments(UUID templateId, UUID trainerId) {
         var tmpl = findOwned(templateId, trainerId);
         long templateUpdated = toEpochMilli(tmpl.get("updated_at"));
+        var blueprint = parseStructure(str(tmpl.get("structure")));
+        Object tw = tmpl.get("weeks");
+        Integer templateWeeks = tw == null ? null : ((Number) tw).intValue();
 
         var rows = jdbc.queryForList("""
                 SELECT p.id::text AS program_id, p.client_id::text, c.name AS client_name,
                        p.name AS program_name, p.start_date::text, p.end_date::text, p.status,
-                       p.created_at, p.updated_at
+                       p.created_at, p.updated_at, p.synced_at, p.schedule::text AS schedule,
+                       p.day_labels::text AS day_labels, p.weeks
                 FROM program p
                 JOIN client c ON c.id = p.client_id
                 WHERE p.template_id = :tmpl::uuid AND p.trainer_id = :tid::uuid AND p.deleted_at IS NULL
                 ORDER BY (p.status = 'active') DESC, p.created_at DESC
                 """, Map.of("tmpl", templateId.toString(), "tid", trainerId.toString()));
+
+        /* One read for every name either side of every diff, and none at all
+           for a blueprint nobody is on. */
+        var names = rows.isEmpty() ? Map.<String, String>of() : exerciseNames(templateId, trainerId);
 
         return rows.stream().map(r -> new AssignmentResponse(
                 str(r.get("program_id")),
@@ -455,8 +591,125 @@ public class TemplateService {
                 str(r.get("status")),
                 toEpochMilli(r.get("created_at")),
                 toEpochMilli(r.get("updated_at")),
-                toEpochMilli(r.get("updated_at")) < templateUpdated
+                /* `synced_at` AND NOT `updated_at`, since V2. A copy the trainer
+                   tuned this morning has a newer `updated_at` than a blueprint
+                   edited yesterday and has still never received it — the read
+                   this used to make said the opposite. `created_at` is the
+                   fallback for a row written before the backfill, which is the
+                   same moment the backfill would have chosen. */
+                (r.get("synced_at") == null
+                        ? toEpochMilli(r.get("created_at"))
+                        : toEpochMilli(r.get("synced_at"))) < templateUpdated,
+                divergenceOf(str(r.get("program_id")), blueprint, templateWeeks,
+                             str(r.get("schedule")), str(r.get("day_labels")),
+                             r.get("weeks") == null ? null : ((Number) r.get("weeks")).intValue(),
+                             names)
         )).toList();
+    }
+
+    /**
+     * One copy against the blueprint, for the push panel — see {@link PlanDiff}.
+     *
+     * <p>Read per assignment rather than in one join, deliberately: the rows of
+     * thirteen prescriptions are thirteen small indexed reads on one column, and
+     * the alternative is a join whose grouping this method would then have to
+     * undo. A template with nobody on it makes none of them.
+     */
+    private PlanDiff.Result divergenceOf(String programId,
+                                         List<TemplateExerciseResponse> blueprint,
+                                         Integer templateWeeks,
+                                         String scheduleJson,
+                                         String dayLabelsJson,
+                                         Integer programWeeks,
+                                         Map<String, String> names) {
+        var copy = jdbc.queryForList("""
+                SELECT exercise_id::text, day_of_week, week, order_index, sets, reps,
+                       duration_seconds, rest_seconds, target_load, tempo, notes,
+                       alt_exercise_id::text, set_detail::text AS set_detail
+                FROM program_exercise
+                WHERE program_id = :pid::uuid AND deleted_at IS NULL
+                ORDER BY COALESCE(week, 1), COALESCE(day_of_week, 999), order_index ASC
+                """, Map.of("pid", programId)).stream().map(this::toDiffRow).toList();
+
+        var bySlot = new HashMap<Integer, ScheduleEntry>();
+        for (var e : parseSchedule(scheduleJson)) bySlot.put(e.day(), e);
+
+        var base = blueprint.stream().map(e -> new PlanDiff.Row(
+                e.exerciseId(), e.dayOfWeek(), e.week(), e.orderIndex(), e.sets(), e.reps(),
+                e.durationSeconds(), e.restSeconds(),
+                e.targetLoad() == null ? null : java.math.BigDecimal.valueOf(e.targetLoad()),
+                e.tempo(), e.notes(), e.altExerciseId(), e.setDetail())).toList();
+
+        return PlanDiff.between(base, copy, bySlot, templateWeeks, programWeeks,
+                parseDayLabels(dayLabelsJson),
+                id -> names.getOrDefault(id, "an exercise"));
+    }
+
+    private PlanDiff.Row toDiffRow(Map<String, Object> r) {
+        Object tl = r.get("target_load");
+        Object oi = r.get("order_index");
+        return new PlanDiff.Row(
+                str(r.get("exercise_id")),
+                num(r.get("day_of_week")), num(r.get("week")),
+                oi == null ? 0 : ((Number) oi).intValue(),
+                num(r.get("sets")), num(r.get("reps")),
+                num(r.get("duration_seconds")), num(r.get("rest_seconds")),
+                tl instanceof java.math.BigDecimal bd ? bd
+                        : (tl == null ? null : new java.math.BigDecimal(tl.toString())),
+                str(r.get("tempo")), str(r.get("notes")), str(r.get("alt_exercise_id")),
+                parseSetDetail(str(r.get("set_detail"))));
+    }
+
+    private Integer num(Object v) { return v == null ? null : ((Number) v).intValue(); }
+
+    /**
+     * Names for every movement either side of the diff mentions, in one read.
+     *
+     * Scoped to the caller's own library plus the global one, the same way every
+     * other exercise read on this service is — a diff line naming an exercise
+     * the trainer cannot see would be a disclosure through a sentence.
+     */
+    private Map<String, String> exerciseNames(UUID templateId, UUID trainerId) {
+        var rows = jdbc.queryForList("""
+                SELECT DISTINCT e.id::text AS id, e.name
+                FROM exercise e
+                WHERE e.deleted_at IS NULL
+                  AND (e.trainer_id IS NULL OR e.trainer_id = :tid::uuid)
+                  AND (e.id IN (SELECT pe.exercise_id FROM program_exercise pe
+                                JOIN program p ON p.id = pe.program_id
+                                WHERE p.template_id = :tmpl::uuid AND p.trainer_id = :tid::uuid
+                                  AND pe.deleted_at IS NULL)
+                    OR e.id IN (SELECT pe.alt_exercise_id FROM program_exercise pe
+                                JOIN program p ON p.id = pe.program_id
+                                WHERE p.template_id = :tmpl::uuid AND p.trainer_id = :tid::uuid
+                                  AND pe.deleted_at IS NULL AND pe.alt_exercise_id IS NOT NULL)
+                    OR e.id::text IN (SELECT jsonb_array_elements(t.structure) ->> 'exercise_id'
+                                      FROM template t WHERE t.id = :tmpl::uuid))
+                """, Map.of("tmpl", templateId.toString(), "tid", trainerId.toString()));
+        var out = new HashMap<String, String>();
+        for (var r : rows) out.put(str(r.get("id")), str(r.get("name")));
+        return out;
+    }
+
+    /** The client's chosen layout, as `apply` wrote it. */
+    public List<ScheduleEntry> parseSchedule(String json) {
+        if (json == null || json.isBlank() || json.equals("null")) return List.of();
+        try {
+            return STORE.readValue(json, new TypeReference<List<ScheduleEntry>>() {});
+        } catch (Exception e) {
+            log.warn("Unreadable program schedule: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private List<SetDetail> parseSetDetail(String json) {
+        if (json == null || json.isBlank() || json.equals("null")) return null;
+        try {
+            var out = STORE.readValue(json, new TypeReference<List<SetDetail>>() {});
+            return out.isEmpty() ? null : out;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     // ── Apply → creates an independent per-client program ─────────────────────
@@ -479,6 +732,7 @@ public class TemplateService {
      */
     @Transactional
     public ProgramSummary apply(UUID templateId, UUID trainerId, ApplyTemplateRequest req) {
+        refuseCertified(templateId, true);
         var tmpl = findOwned(templateId, trainerId);
 
         Boolean owned = jdbc.queryForObject(
@@ -499,7 +753,18 @@ public class TemplateService {
             }
         }
 
-        Map<Integer, ScheduleEntry> bySlot = validateSchedule(req.schedule(), slots);
+        /* NO SCHEDULE SENT: THE CLIENT'S OWN WEEK IS THE SCHEDULE.
+           The redesigned add-a-client flow agrees the days on step 3 and then
+           applies the plan with just `{clientId}` — the days are already on the
+           client, and asking again would be the same question twice. So a
+           missing schedule is DERIVED by position from `client.weekly_schedule`
+           (the web's old `pairSchedule`, now the server's), and the rest of apply
+           runs exactly as if it had been sent. An explicit schedule still wins. */
+        List<ScheduleEntry> schedule = req.schedule();
+        if ((schedule == null || schedule.isEmpty()) && !slots.isEmpty()) {
+            schedule = scheduleFromStandingWeek(req.clientId(), trainerId.toString(), slots);
+        }
+        Map<Integer, ScheduleEntry> bySlot = validateSchedule(schedule, slots);
 
         UUID programId = UUID.randomUUID();
         Instant now = Instant.now();
@@ -518,18 +783,75 @@ public class TemplateService {
         p.put("goal",      goal);
         p.put("startDate", startDate);
         p.put("endDate",   endDate);
-        p.put("schedule",  req.schedule() == null || req.schedule().isEmpty()
-                ? null : toJsonString(req.schedule()));
+        p.put("schedule",  schedule == null || schedule.isEmpty()
+                ? null : toJsonString(schedule));
         p.put("now",       Timestamp.from(now));
+
+        /* V2 · THE SHAPE COMES ACROSS WITH THE ROWS, because the copy is going
+           to be edited. Translated into this client's week by `shapeFor`, which
+           carries the argument — and `synced_at` is stamped here because apply
+           is one of the two moments a copy TAKES the blueprint. */
+        var shape = shapeFor(templateId, trainerId, bySlot);
+        p.put("dayLabels",    toJsonString(shape.dayLabels()));
+        p.put("weeks",        shape.weeks());
+        p.put("trainingDays", dayCsv(shape.trainingDays()));
+
+        /* ONE LIVE PLAN PER CLIENT, BUT ONLY THE CALLER'S.
+           Apply used to leave the previous plan `active`, so a client re-planned
+           twice had two, and every screen reading "the active program" drew
+           whichever came back first. The older ones are closed here, in the same
+           transaction as the new copy: `completed`, with an end date of today
+           unless they had already ended earlier. Scoped by `trainer_id` — a team
+           widens reads and never moves ownership, so a teammate's plan on a
+           reassigned client is not this caller's to end. */
+        jdbc.update("""
+                UPDATE program
+                SET status     = 'completed',
+                    end_date   = LEAST(COALESCE(end_date, :today), :today),
+                    updated_at = :now
+                WHERE client_id = :cid::uuid AND trainer_id = :tid::uuid
+                  AND status = 'active' AND deleted_at IS NULL
+                """, Map.of("cid", req.clientId(), "tid", trainerId.toString(),
+                            "today", java.sql.Date.valueOf(java.time.LocalDate.now(IST)),
+                            "now", Timestamp.from(now)));
 
         jdbc.update("""
                 INSERT INTO program (id, trainer_id, client_id, template_id, name, goal,
-                    start_date, end_date, schedule, status, created_at, updated_at)
+                    start_date, end_date, schedule, status, created_at, updated_at,
+                    day_labels, weeks, training_days, synced_at)
                 VALUES (:id::uuid, :tid::uuid, :cid::uuid, :tmplId::uuid, :name, :goal,
-                    :startDate, :endDate, CAST(:schedule AS jsonb), 'active', :now, :now)
+                    :startDate, :endDate, CAST(:schedule AS jsonb), 'active', :now, :now,
+                    CAST(:dayLabels AS jsonb), :weeks, :trainingDays, :now)
                 """, p);
 
         copyBlueprintInto(programId, blueprint, bySlot, now);
+
+        /* ── AND THE CLIENT'S WEEK, AND THE DIARY ON IT · V3 ───────────────────
+
+           The mapping this panel makes — "Day 1 is this client's Monday 6am" — is
+           the same fact `client.weekly_schedule` holds, and it was being written
+           to `program.schedule` only. So a trainer who set the days here and a
+           trainer who set them in the add-a-client flow were filling two
+           different columns with one answer, and whichever screen read the other
+           one found nothing.
+
+           Writing it to both makes the rhythm survive the plan: a client stays on
+           their Tuesdays when this block ends and the next one is assigned, and
+           the sessions their pack already booked get this plan's names rather
+           than a second set of bookings on top.
+
+           `reconcile` is the join. Where the schedule moved a day, the diary moves
+           with it; where it did not, the rows are kept and re-labelled. Same
+           transaction as the copy — a plan whose sessions failed to land is worse
+           than no plan. */
+        writeStandingWeek(req.clientId(), trainerId.toString(), bySlot);
+        diary.reconcile(trainerId, req.clientId());
+        /* V18 · a NEW plan: `subjectAt == at` is how the portal words it as new
+           rather than changed — so the subject is the TRANSACTION's clock, which
+           is exactly what the row's `at DEFAULT now()` takes. Java's `now` is a
+           few milliseconds later, and a few milliseconds is "changed". */
+        Timestamp txNow = jdbc.queryForObject("SELECT now()", Map.of(), Timestamp.class);
+        clientBell.mint(req.clientId(), "plan", null, txNow.toInstant(), programName);
 
         return new ProgramSummary(
                 programId.toString(), req.clientId(), templateId.toString(),
@@ -537,6 +859,83 @@ public class TemplateService {
                 startDate != null ? startDate.toString() : null,
                 endDate   != null ? endDate.toString()   : null,
                 "active", now.toEpochMilli(), now.toEpochMilli());
+    }
+
+    /**
+     * The schedule the panel chose, onto the client it is for.
+     *
+     * <p>Same shape and same weekday convention as {@code program.schedule} — 1 =
+     * Monday … 7 = Sunday, which {@link #validateSchedule} has already enforced on
+     * the way in, so nothing here can produce a day outside it.
+     *
+     * <p>{@code templateDay} carries the template's ORDINAL slot rather than the
+     * client's position, deliberately: the phone's plan screens read a slot's
+     * ordinal off this column, and renumbering to 1..n here would turn a plan
+     * whose days are 2 and 4 into one whose days are 1 and 2.
+     * {@code SessionPlanner.parseSlots} keeps whatever ordinal it is given and
+     * only fills in a missing one.
+     */
+    /**
+     * The client's standing week, paired with the template's days BY POSITION —
+     * the k-th slot of their week (by weekday, then time) takes the template's
+     * k-th training day. Exactly the rule the web's `pairSchedule` applied before
+     * it moved here, so a plan applied from either path lands the same way.
+     *
+     * <p>A count that does not match is refused with {@code SCHEDULE_MISMATCH}
+     * and a sentence that names both numbers, rather than quietly dropping a
+     * day or leaving one unscheduled: the trainer has to choose which day goes.
+     */
+    private List<ScheduleEntry> scheduleFromStandingWeek(String clientId, String tid, Set<Integer> slots) {
+        String json = jdbc.queryForObject("""
+                SELECT weekly_schedule::text FROM client
+                WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                """, Map.of("cid", clientId, "tid", tid), String.class);
+        List<Map<String, Object>> raw;
+        try {
+            raw = json == null ? List.of() : STORE.readValue(json, new TypeReference<>() {});
+        } catch (Exception e) {
+            raw = List.of();
+        }
+        var week = SessionPlanner.parseSlots(raw).stream()
+                .sorted(Comparator.comparingInt(SessionPlanner.Slot::weekday)
+                        .thenComparing(SessionPlanner.Slot::time))
+                .toList();
+        if (week.isEmpty()) {
+            throw ProgramRuleException.scheduleMismatch(
+                    "This client has no training days agreed yet. Choose the days for this plan, "
+                            + "or set their week on their file first.");
+        }
+        if (week.size() != slots.size()) {
+            throw ProgramRuleException.scheduleMismatch(
+                    "This program trains %d day%s a week and this client trains %d. Choose which days it goes on."
+                            .formatted(slots.size(), slots.size() == 1 ? "" : "s", week.size()));
+        }
+        var ordinals = new ArrayList<>(new TreeSet<>(slots));
+        var out = new ArrayList<ScheduleEntry>(week.size());
+        for (int k = 0; k < week.size(); k++) {
+            out.add(new ScheduleEntry(ordinals.get(k), week.get(k).weekday(), week.get(k).time()));
+        }
+        return out;
+    }
+
+    private void writeStandingWeek(String clientId, String tid, Map<Integer, ScheduleEntry> bySlot) {
+        if (bySlot.isEmpty()) return;
+        var week = bySlot.entrySet().stream()
+                .sorted(Comparator.comparingInt(e -> e.getValue().weekday()))
+                .map(e -> Map.<String, Object>of("templateDay", e.getKey(),
+                                                 "weekday", e.getValue().weekday(),
+                                                 "time", e.getValue().time()))
+                .toList();
+        jdbc.update("""
+                UPDATE client
+                SET weekly_schedule   = CAST(:week AS jsonb),
+                    sessions_per_week = :perWeek,
+                    updated_at        = NOW()
+                WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                """, Map.of("week", toJsonString(week),
+                            "perWeek", week.size(),
+                            "cid", clientId,
+                            "tid", tid));
     }
 
     /**
@@ -586,18 +985,59 @@ public class TemplateService {
             // same thing, but writing the 1 makes the client's plan explicit
             // about a shape the trainer can now see week by week.
             ep.put("week",            ex.week() == null ? 1 : ex.week());
+            // V10 · the block survives the copy. Carried as-is, unlike the
+            // group id above: it is a board handle, not a correlation id a
+            // query joins on, so two clients sharing one crosses nothing.
+            ep.put("workoutId",       clip(ex.workoutId(), MAX_WORKOUT_ID));
+            ep.put("workoutName",     clip(ex.workoutName(), MAX_WORKOUT_NAME));
             ep.put("now",             Timestamp.from(now));
 
             jdbc.update("""
                     INSERT INTO program_exercise (id, program_id, exercise_id, sets, reps,
                         rest_seconds, duration_seconds, target_load, notes, day_of_week, week,
-                        order_index, tempo, alt_exercise_id, group_id, set_detail, created_at, updated_at)
+                        order_index, tempo, alt_exercise_id, group_id, set_detail,
+                        workout_id, workout_name, created_at, updated_at)
                     VALUES (:id::uuid, :programId::uuid, :exerciseId::uuid, :sets, :reps,
                         :restSeconds, :durationSeconds, :targetLoad, :notes, :dayOfWeek, :week,
                         :orderIndex, :tempo, :altExerciseId::uuid, :groupId::uuid,
-                        CAST(:setDetail AS jsonb), :now, :now)
+                        CAST(:setDetail AS jsonb), :workoutId, :workoutName, :now, :now)
                     """, ep);
         }
+    }
+
+    /**
+     * THE SHAPE A COPY TAKES, TRANSLATED INTO THE CLIENT'S OWN WEEK.
+     *
+     * `copyBlueprintInto` has translated the ROWS since V24 — a template's
+     * ordinal "Day 2" becomes whatever weekday this client chose for it — and
+     * V2 gives the copy the three shape columns to go with them. They have to be
+     * translated the same way or they describe a week the rows do not sit in.
+     *
+     * Copying `day_labels` verbatim is the trap, and it is silent: a client on
+     * Mon/Tue/Thu/Fri takes slots 1,2,3,4 onto weekdays 1,2,4,5, so the
+     * blueprint's name for slot 3 would land on a Wednesday they never train
+     * while their Thursday went unnamed. Every label is re-keyed through the
+     * schedule they actually chose.
+     *
+     * `weeks` needs no translation: the length of a block is the same fact on
+     * both sides of the copy.
+     */
+    public record ProgramShape(Map<String, String> dayLabels, Integer weeks, List<Integer> trainingDays) {}
+
+    public ProgramShape shapeFor(UUID templateId, UUID trainerId, Map<Integer, ScheduleEntry> bySlot) {
+        var tmpl = findOwned(templateId, trainerId);
+        var slotLabels = parseDayLabels(str(tmpl.get("day_labels")));
+
+        var labels = new LinkedHashMap<String, String>();
+        var weekdays = new ArrayList<Integer>();
+        for (var e : bySlot.entrySet()) {
+            int weekday = e.getValue().weekday();
+            weekdays.add(weekday);
+            String label = slotLabels.get(String.valueOf(e.getKey()));
+            if (label != null && !label.isBlank()) labels.put(String.valueOf(weekday), label);
+        }
+        Object w = tmpl.get("weeks");
+        return new ProgramShape(labels, w == null ? null : ((Number) w).intValue(), weekdays);
     }
 
     /**
@@ -624,7 +1064,8 @@ public class TemplateService {
         var rows = jdbc.queryForList("""
                 SELECT t.id::text, t.name, t.goal, t.description, t.structure::text AS structure,
                        t.day_labels::text AS day_labels, t.weeks, t.training_days,
-                       t.created_at, t.updated_at,
+                       t.created_at, t.updated_at, t.source, t.copied_from_id::text AS copied_from_id,
+                       t.copied_from_name, t.copied_from_updated_at,
                        COALESCE(a.total,  0) AS assigned_count,
                        COALESCE(a.active, 0) AS active_assigned_count
                 FROM template t
@@ -642,7 +1083,24 @@ public class TemplateService {
         return rows.get(0);
     }
 
-    /** "1,2,3" → {1,2,3}. Junk and out-of-range values are dropped, not thrown. */
+    /**
+     * "1,2,3" → {1,2,3}. Junk and out-of-range values are dropped, not thrown.
+     *
+     * PUBLIC since V2, because `program.training_days` uses the identical
+     * encoding for a different meaning — the WEEKDAYS one client trains, where
+     * a template's are ordinal slots. One parser, so the two columns cannot
+     * drift into two dialects of the same CSV.
+     */
+    public List<Integer> parseDayCsv(String csv) {
+        return List.copyOf(parseTrainingDaysCsv(csv));
+    }
+
+    /** {3,1,2} → "1,2,3", shared with `program.training_days` for the reason
+     *  above. */
+    public String dayCsv(List<Integer> days) {
+        return trainingDaysCsv(days);
+    }
+
     private Set<Integer> parseTrainingDaysCsv(String csv) {
         if (csv == null || csv.isBlank()) return Set.of();
         var out = new TreeSet<Integer>();
@@ -682,7 +1140,7 @@ public class TemplateService {
     private Map<Integer, ScheduleEntry> validateSchedule(List<ScheduleEntry> schedule, Set<Integer> slots) {
         int given = schedule == null ? 0 : schedule.size();
         if (given != slots.size()) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+            throw ProgramRuleException.scheduleMismatch(
                     "This program trains %d day%s a week — schedule exactly %d weekday%s for it (got %d)."
                             .formatted(slots.size(), slots.size() == 1 ? "" : "s",
                                        slots.size(), slots.size() == 1 ? "" : "s", given));
@@ -693,15 +1151,15 @@ public class TemplateService {
         var weekdays = new HashSet<Integer>();
         for (ScheduleEntry entry : schedule) {
             if (!slots.contains(entry.day()) || bySlot.put(entry.day(), entry) != null) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                throw ProgramRuleException.scheduleMismatch(
                         "The schedule must cover each of this program's days exactly once.");
             }
             if (entry.weekday() < 1 || entry.weekday() > 7 || !weekdays.add(entry.weekday())) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                throw ProgramRuleException.scheduleInvalid(
                         "Each day needs its own weekday, Monday (1) through Sunday (7).");
             }
             if (entry.time() == null || !HHMM.matcher(entry.time()).matches()) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                throw ProgramRuleException.scheduleInvalid(
                         "Each day needs a time, as 24-hour HH:mm.");
             }
         }
@@ -709,6 +1167,10 @@ public class TemplateService {
     }
 
     private TemplateResponse toResponse(Map<String, Object> r) {
+        return toResponse(r, List.of());
+    }
+
+    private TemplateResponse toResponse(Map<String, Object> r, List<AssignedClient> sample) {
         var entries = parseStructure(str(r.get("structure")));
         var days = new TreeSet<>(parseTrainingDaysCsv(str(r.get("training_days"))));
         // The union the app draws, and the reason `trainingDays` is a read the
@@ -731,7 +1193,66 @@ public class TemplateService {
                 r.get("weeks") instanceof Number n ? n.intValue() : null,
                 List.copyOf(days),
                 intOf(r.get("assigned_count")),
-                intOf(r.get("active_assigned_count")));
+                intOf(r.get("active_assigned_count")),
+                sample,
+                r.get("source") == null ? "own" : str(r.get("source")),
+                r.get("copied_from_id") == null && r.get("copied_from_name") == null ? null
+                        : new CopiedFrom(str(r.get("copied_from_id")), str(r.get("copied_from_name")),
+                                         r.get("copied_from_updated_at") == null ? null
+                                                 : toEpochMilli(r.get("copied_from_updated_at"))));
+    }
+
+    /**
+     * V11 · a certified program's id sent to a route that writes a TRAINER'S
+     * template. Named rather than answered with a bare 404, because the id is
+     * real and the trainer is one button away from the thing they meant.
+     */
+    private void refuseCertified(UUID id, boolean applying) {
+        Boolean certified = jdbc.queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM certified_template WHERE id = :id::uuid AND deleted_at IS NULL)",
+                Map.of("id", id.toString()), Boolean.class);
+        if (!Boolean.TRUE.equals(certified)) return;
+        throw applying ? ProgramRuleException.certifiedCopyFirst() : ProgramRuleException.certifiedReadOnly();
+    }
+
+    /** The avatar cluster's cap — the most a shelf row draws before "+N". */
+    static final int SAMPLE_SIZE = 6;
+
+    /**
+     * Up to {@link #SAMPLE_SIZE} clients on an ACTIVE copy of each template, in
+     * ONE query for the whole shelf. Distinct per client (a client on two
+     * active copies of one blueprint is one face), ordered by name then id so
+     * the cluster is a total order and never reshuffles. Scoped to the caller's
+     * own programs — see {@code TemplateResponse.assignedClients}.
+     */
+    private Map<String, List<AssignedClient>> assignedSample(UUID trainerId, List<String> templateIds) {
+        if (templateIds.isEmpty()) return Map.of();
+        var rows = jdbc.queryForList("""
+                SELECT template_id, client_id, name FROM (
+                    SELECT d.*, row_number() OVER (PARTITION BY d.template_id
+                                                   ORDER BY d.name, d.client_id) AS rn
+                    FROM (
+                        SELECT DISTINCT p.template_id::text AS template_id,
+                               c.id::text AS client_id, c.name
+                        FROM program p
+                        JOIN client c ON c.id = p.client_id AND c.deleted_at IS NULL
+                        WHERE p.trainer_id = :tid::uuid AND p.status = 'active'
+                          AND p.deleted_at IS NULL AND p.template_id::text IN (:ids)
+                    ) d
+                ) x
+                WHERE rn <= :cap
+                ORDER BY template_id, rn
+                """, Map.of("tid", trainerId.toString(), "ids", templateIds, "cap", SAMPLE_SIZE));
+        var out = new HashMap<String, List<AssignedClient>>();
+        for (var r : rows) {
+            out.computeIfAbsent(str(r.get("template_id")), k -> new ArrayList<>())
+               .add(new AssignedClient(str(r.get("client_id")), str(r.get("name"))));
+        }
+        return out;
+    }
+
+    private List<TemplateExerciseInput> normalised(List<TemplateExerciseInput> in) {
+        return in == null ? null : in.stream().map(e -> e == null ? null : e.normalised()).toList();
     }
 
     /**
@@ -777,7 +1298,9 @@ public class TemplateService {
                     text(e, "tempo", "tempo"),
                     text(e, "alt_exercise_id", "altExerciseId"),
                     text(e, "group_id", "groupId"),
-                    setDetail(e)));
+                    setDetail(e),
+                    text(e, "workout_id", "workoutId"),
+                    text(e, "workout_name", "workoutName")));
         }
         // week → day → position, so every caller gets the same order and no
         // caller has to sort. Matches `parseBlueprint` on the phone.
@@ -829,7 +1352,11 @@ public class TemplateService {
         return null;
     }
 
-    private Map<String, String> parseDayLabels(String json) {
+    /** PUBLIC since V2: `shapeFor` re-keys these onto a client's weekdays, and
+     *  `ProgramService` reads the copy's own set back the same way. Unreadable
+     *  is no names rather than a failed read — a plan whose labels will not
+     *  parse still has days in it. */
+    public Map<String, String> parseDayLabels(String json) {
         if (json == null || json.isBlank() || json.equals("null") || json.equals("{}")) return Map.of();
         try {
             return STORE.readValue(json, new TypeReference<>() {});

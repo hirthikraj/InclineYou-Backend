@@ -91,7 +91,14 @@ public class WorkoutSessionService {
              * tidiness: every existing caller destructures by name, so a reader
              * written against the nine-field shape keeps working.
              */
-            Long endedAt
+            Long endedAt,
+            /*
+             * ── APPENDED 23 SEP 2026 · HOW MANY MOVEMENTS ─────────────────────
+             * The client file's Sessions table prints it in an *Exercises*
+             * column. COUNTED on read, never stored. See EXERCISE_COUNT for the
+             * one fallback, which is what keeps a pre-V13 log from reading "0".
+             */
+            Integer exerciseCount
     ) {}
 
     public record CreateSetRequest(
@@ -258,7 +265,9 @@ public class WorkoutSessionService {
         // what has happened — the trainer started logging a session.
         return new WorkoutSessionResponse(id.toString(), req.clientId(), req.programId(),
                 req.scheduledSessionId(), "trainer", req.sessionDate(), req.notes(),
-                now.toEpochMilli(), now.toEpochMilli(), null);
+                now.toEpochMilli(), now.toEpochMilli(), null,
+                // Nothing is in a log that was created a moment ago.
+                0);
     }
 
     // ── Get session ───────────────────────────────────────────────────────────
@@ -636,9 +645,33 @@ public class WorkoutSessionService {
             "id::text, workout_session_id::text, exercise_id::text, " +
             "set_number, load_kg, reps, rpe, notes, created_at, updated_at";
 
+    /**
+     * How many movements are in a log.
+     *
+     * <p>{@code workout_exercise} rows that are live and not removed — what the
+     * log holds today, including a card added before its first set. That table
+     * arrived with V13, so a log written before it (or by a phone build that
+     * predates it) has sets and no rows, and counting only rows would print
+     * <i>0 exercises</i> against a session with a full sheet. So when a log has
+     * no {@code workout_exercise} rows AT ALL — not even removed ones — the
+     * count falls back to the distinct movements in its {@code set_log}. A log
+     * whose rows were all removed genuinely holds nothing and says 0.
+     *
+     * <p>Both subqueries are covered by an index on {@code workout_session_id}.
+     */
+    private static final String EXERCISE_COUNT = """
+            CASE WHEN EXISTS (SELECT 1 FROM workout_exercise we
+                               WHERE we.workout_session_id = workout_session.id AND we.deleted_at IS NULL)
+                 THEN (SELECT count(*) FROM workout_exercise we
+                        WHERE we.workout_session_id = workout_session.id
+                          AND we.deleted_at IS NULL AND we.removed_at IS NULL)
+                 ELSE (SELECT count(DISTINCT sl.exercise_id) FROM set_log sl
+                        WHERE sl.workout_session_id = workout_session.id AND sl.deleted_at IS NULL)
+            END AS exercise_count""";
+
     private static final String SESSION_COLUMNS =
             "id::text, client_id::text, program_id::text, scheduled_session_id::text, " +
-            "logged_by, session_date::text, notes, created_at, updated_at, ended_at";
+            "logged_by, session_date::text, notes, created_at, updated_at, ended_at, " + EXERCISE_COUNT;
 
     private Map<String, Object> findOwnedSession(UUID id, UUID trainerId) {
         var rows = jdbc.queryForList(
@@ -663,7 +696,8 @@ public class WorkoutSessionService {
                 // Null-preserving, and that is the whole point: `0` would mean the
                 // log was closed at the epoch, which reads as CLOSED. An open log
                 // has to come back as absent.
-                nullableEpochMilli(r.get("ended_at")));
+                nullableEpochMilli(r.get("ended_at")),
+                r.get("exercise_count") instanceof Number n ? n.intValue() : null);
     }
 
     /** Epoch millis, or null when the column is null — never 0 for absent. */

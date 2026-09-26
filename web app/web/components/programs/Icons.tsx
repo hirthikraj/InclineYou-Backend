@@ -45,6 +45,25 @@ export const DotsIcon = ({ size = 18 }: P) => (
 
 export const ChevronDown = ({ size = 13 }: P) => <Glyph size={size} d="M6 9l6 6 6-6" />;
 export const ChevronRight = ({ size = 12 }: P) => <Glyph size={size} d="M9 6l6 6-6 6" />;
+export const ChevronLeft = ({ size = 12 }: P) => <Glyph size={size} d="M15 6l-6 6 6 6" />;
+
+/** The detail panel's opener. A circled i, in the same 24-box as the rest.
+ *  The dot is a `path` of zero length with a round cap rather than a `circle`,
+ *  so it inherits `Glyph`'s stroke width and cannot drift from the ring. */
+export const InfoIcon = ({ size = 14 }: P) => (
+  <Glyph size={size}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 11.2v5" />
+    <path d="M12 7.9v.01" />
+  </Glyph>
+);
+/** A rest day. One path — the crescent — because a moon with stars beside it
+ *  reads as "night" and a slot the program does not train is not a time of day;
+ *  the crescent alone is the app's one glyph for *stood down*. */
+export const MoonIcon = ({ size = 14 }: P) => (
+  <Glyph size={size} d="M20 14.2A8.4 8.4 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2Z" />
+);
+
 export const CheckIcon = ({ size = 14 }: P) => <Glyph size={size} d="M4 12l6 6L20 6" />;
 export const CloseIcon = ({ size = 14 }: P) => <Glyph size={size} d="M6 6l12 12M18 6L6 18" />;
 
@@ -73,6 +92,9 @@ export const TrashIcon = ({ size = 14 }: P) => (
 
 export const ArrowUp = ({ size = 14 }: P) => <Glyph size={size} d="M12 19V5M6 11l6-6 6 6" />;
 export const ArrowDown = ({ size = 14 }: P) => <Glyph size={size} d="M12 5v14M6 13l6 6 6-6" />;
+/* SIDEWAYS, and that is the whole distinction: up and down move a row inside
+   its day, right sends it to another one. */
+export const ArrowRight = ({ size = 14 }: P) => <Glyph size={size} d="M5 12h14M13 6l6 6-6 6" />;
 
 /** The ladder — the progression panel's own mark. Three rising rungs. */
 export const LadderIcon = ({ size = 15 }: P) => (
@@ -85,5 +107,16 @@ export const SendIcon = ({ size = 14 }: P) => (
   <Glyph size={size}>
     <path d="M4 12h13" />
     <path d="M13 7l5 5-5 5" />
+  </Glyph>
+);
+
+/** The out-of-band marker on a balance track. A triangle, not a circle: the
+ *  circled-i is *there is more to read* and this is *this figure is outside a
+ *  range you set*. */
+export const WarnIcon = ({ size = 13 }: P) => (
+  <Glyph size={size}>
+    <path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" />
+    <path d="M12 9v4" />
+    <path d="M12 17h.01" />
   </Glyph>
 );

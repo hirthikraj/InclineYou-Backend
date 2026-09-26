@@ -28,7 +28,7 @@ export async function generateMetadata(props: PageProps<'/schedule'>) {
   const anchor = parseAnchor(first(q.d)) ?? Date.now();
   // The tab title names the range, so a trainer with three weeks open in three
   // tabs can tell them apart without switching to each one.
-  return { title: `${crumbFor(view, anchor)} · Schedule · X REP` };
+  return { title: `${crumbFor(view, anchor)} · Schedule · InclineYou` };
 }
 
 /**

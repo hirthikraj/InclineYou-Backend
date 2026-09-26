@@ -222,7 +222,7 @@ export function buildPracticeReport(input: ReportInput, count = REPORT_MONTHS): 
 
   /* ── revenue, by the month the money ARRIVED in ───────────────────────────
      `settledAt` and the trainer's own share, both of which `computeTrend`
-     already argues for: the ledger dates by `createdAt` because a month's
+     already argues for: the payments list dates by `createdAt` because a month's
      BILLING is what was raised in it, and "is my income going up" is a question
      about money that landed. Half of ₹6,000 collected on a gym floor is not
      income, so the cut comes out here as it does on every other income figure

@@ -5,7 +5,7 @@ import { getNewClientData, type NewClientData } from '@/lib/clients/new-api';
 import { listRecentNudges } from '@/lib/nudges/api';
 import { COOLDOWN_DAYS, lastContactMap } from '@/lib/nudges/cooldown';
 
-export const metadata = { title: 'Clients · X REP' };
+export const metadata = { title: 'Clients · InclineYou' };
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {

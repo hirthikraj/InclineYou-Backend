@@ -1,17 +1,37 @@
 /**
- * FOUR WAYS THE CARD LEAVES THE BUILDING, AND WHY THERE ARE FOUR.
+ * HOW THE REPORT LEAVES THE BUILDING — TWO ARTEFACTS, FIVE ROUTES.
  *
- * The brief asks for "a one-tap share to WhatsApp", and on a browser that is one
- * capability on a phone and a different one on a desk. Pretending otherwise
+ * ── THE TWO ARTEFACTS ARE FOR TWO DIFFERENT MOMENTS ─────────────────────────
+ *
+ * **The card** is a 1080×1350 PNG: one image, 4:5, built to be posted to a
+ * WhatsApp status or an Instagram story. It carries the headline and drops
+ * whatever will not fit above its footer, because a card with a hole in it is
+ * worse than a card with three lifts on it.
+ *
+ * **The report** is a multi-page A4 PDF: every lift, every movement trained
+ * whether or not it went up, every measurement with its whole series, and the
+ * note saying how each figure was arrived at. It is the thing a client keeps
+ * and the thing they forward to a physio. Its first page is the card, painted
+ * by the same function, so the two can never disagree.
+ *
+ * Both, and not one: a client who asks *"how am I doing"* wants the card, and a
+ * client who asks *"can you send me the numbers"* wants the PDF, and a product
+ * that guesses gets it wrong half the time.
+ *
+ * ── AND FIVE ROUTES, BECAUSE A BROWSER IS TWO DIFFERENT MACHINES ────────────
+ *
+ * The brief asks for "a one-tap share to WhatsApp", and on a browser that is
+ * one capability on a phone and a different one on a desk. Pretending otherwise
  * gives every trainer the worse of the two, so the screen offers the best route
  * the machine in front of it actually has:
  *
  * | | What it does | Where it is the right answer |
  * | --- | --- | --- |
- * | **Share** | `navigator.share` with the PNG attached | a phone or a tablet — genuinely one tap, and the OS sheet lists WhatsApp, Instagram and everything else |
+ * | **Share** | `navigator.share` with the PNG *and* the PDF attached | a phone or a tablet — genuinely one tap, and the OS sheet lists WhatsApp, Instagram and everything else |
  * | **WhatsApp** | `wa.me/<number>?text=` | a desk, where the text opens in WhatsApp Web against the right chat |
  * | **Copy image** | the PNG on the clipboard | a desk, where the trainer then pastes it into that same chat |
- * | **Download** | the PNG in Downloads | everywhere, and the only one that cannot fail |
+ * | **Save image** | the PNG in Downloads | everywhere, and one of the two that cannot fail |
+ * | **Save report** | the PDF in Downloads | a desk, to attach to the chat, or to print |
  *
  * ── THE TEXT AND THE IMAGE ARE NOT THE SAME SHARE ───────────────────────────
  *
@@ -36,6 +56,7 @@
 import type { ClientReport } from './build';
 import { reportMessage } from './build';
 import { reportCardBlob, reportCardFilename } from './card-image';
+import { reportPdfBlob, reportPdfFilename } from './report-pdf';
 
 /** What `wa.me` wants: country code, no punctuation. Copied from `Header.tsx`
  *  rather than imported, because that file is a component and this one is not. */
@@ -56,31 +77,58 @@ export function whatsappUrl(r: ClientReport): string {
     : `https://wa.me/?text=${text}`;
 }
 
-export type ShareOutcome = 'shared' | 'downloaded' | 'copied' | 'unsupported' | 'cancelled' | 'failed';
+export type ShareOutcome =
+  | 'shared'
+  | 'downloaded'
+  | 'saved-pdf'
+  | 'copied'
+  | 'unsupported'
+  | 'cancelled'
+  | 'failed';
 
 /**
- * The native share sheet, with the card attached.
+ * The native share sheet, with BOTH artefacts attached.
  *
  * `canShare({files})` is asked BEFORE anything is painted, because a desktop
  * Chrome answers false and the honest response is to fall through to the other
- * three buttons rather than to spend a second rendering a PNG nothing will take.
+ * buttons rather than to spend two seconds rendering files nothing will take.
  *
- * An `AbortError` is the trainer closing the sheet, which is not a failure and
- * must not be reported as one — a toast saying "could not share" after somebody
- * deliberately pressed Cancel is the product arguing with them.
+ * ── THE PAIR DEGRADES TO THE IMAGE, NOT TO NOTHING ──────────────────────────
+ *
+ * `canShare` is asked a second time with the pair, and the reason is a real
+ * platform split rather than caution: Android's sheet takes a mixed-type
+ * multi-file share and several iOS versions accept a single file only. So the
+ * pair is offered, and where it is refused the CARD goes on its own — it is
+ * the artefact the button is named after, and the PDF has its own Save button
+ * one row down. Dropping the share entirely because the second file was
+ * unwelcome would be the product punishing the trainer for their OS.
+ *
+ * ── AND CANCEL IS NOT A FAILURE ─────────────────────────────────────────────
+ *
+ * An `AbortError` is the trainer closing the sheet, which must not be reported
+ * as an error — a message saying "could not share" after somebody deliberately
+ * pressed Cancel is the product arguing with them.
  */
 export async function shareCard(r: ClientReport): Promise<ShareOutcome> {
   if (typeof navigator === 'undefined' || !navigator.canShare) return 'unsupported';
 
-  const blob = await reportCardBlob(r);
-  if (!blob) return 'failed';
+  const [png, pdf] = await Promise.all([reportCardBlob(r), reportPdfBlob(r)]);
+  if (!png) return 'failed';
 
-  const file = new File([blob], reportCardFilename(r), { type: 'image/png' });
-  if (!navigator.canShare({ files: [file] })) return 'unsupported';
+  const card = new File([png], reportCardFilename(r), { type: 'image/png' });
+  const report = pdf ? new File([pdf], reportPdfFilename(r), { type: 'application/pdf' }) : null;
+
+  const files =
+    report && navigator.canShare({ files: [card, report] })
+      ? [card, report]
+      : navigator.canShare({ files: [card] })
+        ? [card]
+        : null;
+  if (!files) return 'unsupported';
 
   try {
     await navigator.share({
-      files: [file],
+      files,
       text: reportMessage(r),
       title: `${r.clientName} · ${r.weeks} weeks`,
     });
@@ -107,20 +155,40 @@ export async function copyCard(r: ClientReport): Promise<ShareOutcome> {
   }
 }
 
-/** The PNG in Downloads. The same object-URL dance `downloadCsv` does, and the
- *  one route on this screen with no capability behind it to fail. */
-export async function downloadCard(r: ClientReport): Promise<ShareOutcome> {
-  const blob = await reportCardBlob(r);
-  if (!blob) return 'failed';
-
+/** A blob into the trainer's Downloads. The same object-URL dance
+ *  `downloadCsv` does, and the two routes on this screen with no browser
+ *  capability behind them to fail. */
+function saveBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = reportCardFilename(r);
+  a.download = filename;
   a.style.display = 'none';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   requestAnimationFrame(() => URL.revokeObjectURL(url));
+}
+
+/** The card, as a PNG. */
+export async function downloadCard(r: ClientReport): Promise<ShareOutcome> {
+  const blob = await reportCardBlob(r);
+  if (!blob) return 'failed';
+  saveBlob(blob, reportCardFilename(r));
   return 'downloaded';
+}
+
+/**
+ * The full report, as a PDF.
+ *
+ * A separate outcome from the PNG's — `saved-pdf` rather than `downloaded` —
+ * because the screen has to be able to say WHICH file landed. Two buttons that
+ * both report "saved to your downloads" is a trainer opening their Downloads
+ * folder to find out what they just pressed.
+ */
+export async function downloadReportPdf(r: ClientReport): Promise<ShareOutcome> {
+  const blob = await reportPdfBlob(r);
+  if (!blob) return 'failed';
+  saveBlob(blob, reportPdfFilename(r));
+  return 'saved-pdf';
 }

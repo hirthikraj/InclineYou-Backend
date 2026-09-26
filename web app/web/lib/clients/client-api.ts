@@ -120,6 +120,25 @@ export interface TrainerDetailWire {
   gymName: string | null;
   gymSharePercent: number | null;
   setupComplete: boolean;
+  /**
+   * ── THE TWO FIELDS AN INVOICE NEEDS AND NOTHING ELSE HERE DOES ───────────
+   *
+   * `GET /v1/trainers/me` has always answered with both. This interface did not
+   * declare them, which is trap 28 in the direction that hides a column rather
+   * than inventing one — and it mattered the moment the client file learned to
+   * raise a bill, because the *From* block on an invoice is exactly the place a
+   * stranger looks to find out who to pay and what they do.
+   *
+   * `upiVpa` is on the document so the person reading it can settle it without
+   * writing back to ask. `headline` is what the trainer calls their own work —
+   * *Strength coach · 9 years on the floor* — which is the line that turns a
+   * name into a supplier on a bill somebody has to file.
+   *
+   * Optional, because a profile that never filled them in is a normal profile
+   * and the document draws without them.
+   */
+  upiVpa?: string | null;
+  headline?: string | null;
 }
 
 export interface ClientDetailWire {
@@ -130,6 +149,43 @@ export interface ClientDetailWire {
   deliveryMode: string | null;
   trainerSplitPercent: number | null;
   weeklySchedule: Array<{ templateDay: number; weekday: number; time: string }> | null;
+  /**
+   * How long this client's sessions run. Read by the sell panel so a pack booked
+   * for somebody on 45-minute sessions does not lay down twelve hour-long blocks
+   * over the top of the next client's slot.
+   */
+  sessionDurationMinutes: number | null;
+  /**
+   * WHAT THEY ARE TRAINING FOR, and it was missing from this interface rather
+   * than from the wire.
+   *
+   * `GET /v1/clients/{id}` has answered `"goal": "Fat loss"` since the roster
+   * was written — `ClientRow.goal` in `mock/types.ts`, set from `CAST` in the
+   * seed — and the trainer's half declared it nowhere, so the one screen a
+   * trainer opens before walking over to somebody could not say what the
+   * session is for. Trap 28 in the other direction: an interface is a claim,
+   * and an incomplete one hides a column rather than inventing it. CHECKED
+   * against a real response, not against a type.
+   *
+   * Optional, because a client added before the field was collected has none
+   * and a screen must read the absence rather than print `undefined`.
+   */
+  goal?: string | null;
+  /**
+   * How many sessions a week the arrangement asks for. Written by step 3 of the
+   * add flow beside `weeklySchedule`, and the honest denominator for anything
+   * that counts a week: a two-a-week client who trained twice is at 2 of 2, not
+   * 2 of 7.
+   */
+  sessionsPerWeek?: number | null;
+  /**
+   * The two physical attributes. Optional on the wire because a row written
+   * before they existed carries neither. See `ClientRow` in `mock/types.ts` for
+   * why they are attributes on the client and not assessment readings.
+   */
+  heightCm?: number | null;
+  /** ISO `YYYY-MM-DD`. */
+  dateOfBirth?: string | null;
   metadata: Record<string, unknown> | null;
   createdAt: number;
   updatedAt: number;
@@ -145,6 +201,19 @@ export interface ClientSessionWire {
   dayLabel: string | null;
   deliveryMode: string | null;
   programId: string | null;
+  /**
+   * V31 · when the server last WROTE this row — booked, moved, cancelled, marked.
+   *
+   * The Sessions tab's *Edited on* column, and it cannot be derived here:
+   * `scheduledAt` is when the session IS, which a row booked a month early and
+   * a row marked a no-show the next morning both disagree with, in opposite
+   * directions.
+   *
+   * Optional, and absent means *never edited since it was booked* — old rows
+   * predate the column, and a table that printed `1 Jan 1970` for them would be
+   * worse than one that prints a dash. `BACKEND_GAPS.md` carries the ask.
+   */
+  updatedAt?: number | null;
 }
 
 /**
@@ -228,6 +297,31 @@ export interface ClientPaymentWire {
   gymShareAmount: number | string | null;
   createdAt: number;
   paidAt: number | null;
+  /**
+   * The bank's own reference for the transfer — the UPI RRN, or whatever the
+   * trainer typed when they confirmed the money had landed.
+   *
+   * Optional on the wire and optional in life: it exists for a UPI or a bank
+   * transfer and cannot exist for cash, so the client file draws a dash rather
+   * than an empty cell. It is the ONE field on a payment that a client could
+   * quote back at a trainer, which is what makes it worth a column.
+   */
+  upiReference?: string | null;
+  /**
+   * The bill raised against this payment, or null because none was asked for.
+   *
+   * `INV-2627-0014` — the Indian financial year, then a per-trainer sequence.
+   * Optional on the wire because a backend that predates the column answers
+   * without it, and a screen that blanked its whole money table against an old
+   * server would be worse than one that reads the absence as *not raised*.
+   *
+   * **Null is the normal value.** Most payments never get a number: a gym-
+   * collected row can never have one (the gym raises that receipt), and an
+   * independent client only gets one when they ask. See `PaymentRow.invoiceNo`
+   * in the mock for the rule and where it is enforced.
+   */
+  invoiceNo?: string | null;
+  invoicedAt?: number | null;
 }
 
 export interface ClientProgramWire {
@@ -248,6 +342,29 @@ export interface ClientWorkoutWire {
   notes: string | null;
   endedAt: number | null;
   createdAt: number;
+  /* ── V31 · appended, so a reader of the six-field shape keeps working ──── */
+  /**
+   * The diary row this log was kept against, or null for a walk-in nobody
+   * booked.
+   *
+   * It is the join the Sessions tab's completed view is built on: the session
+   * says what was MEANT to happen and when, the workout says what actually did
+   * — the minute it started, the minute it ended, and how much was in it.
+   */
+  scheduledSessionId?: string | null;
+  /** The plan it was logged under, when there was one. */
+  programId?: string | null;
+  /**
+   * How many exercises the log holds, excluding any the trainer took out
+   * mid-session.
+   *
+   * A count rather than the rows, because the only reader is one table column
+   * and fetching every workout's exercise list to take its length is twenty
+   * requests for twenty numbers. Absent means *the server did not send it*, and
+   * the column draws a dash — never a zero, which would say the trainer logged
+   * a session with nothing in it.
+   */
+  exerciseCount?: number | null;
 }
 
 /**
@@ -264,6 +381,12 @@ export interface ClientNoteWire {
   clientId: string;
   body: string;
   pinned: boolean;
+  /**
+   * The client can read this one. Absent on rows written before the field
+   * existed, which is why every reader coerces rather than trusts it — and why
+   * the coercion is `=== true`: the safe reading of "we do not know" is private.
+   */
+  sharedWithClient?: boolean;
   createdAt: number;
   updatedAt: number;
 }
@@ -284,6 +407,9 @@ export interface ClientFilePayload {
   client: ClientDetailWire;
   trainerName: string;
   trainerPhone: string | null;
+  /** For the *From* block on an invoice. See `TrainerDetailWire`. */
+  trainerUpiVpa: string | null;
+  trainerHeadline: string | null;
   gymName: string | null;
   gymSharePercent: number | null;
   sessions: ClientSessionWire[];
@@ -327,9 +453,19 @@ export const getClientDetail = cache(async (clientId: string): Promise<ClientDet
 const getClientSessionsWindowed = cache(async (clientId: string): Promise<ClientSessionWire[]> => {
   const now = Date.now();
   const threeMonthsAgo = now - 90 * 24 * 60 * 60 * 1000;
-  const fourWeeksAhead = now + 28 * 24 * 60 * 60 * 1000;
+  /**
+   * FOUR MONTHS FORWARD, AND IT WAS FOUR WEEKS.
+   *
+   * Selling a pack now books every session it owes, and a twelve-session pack on
+   * two days a week runs six weeks — so the tab that exists to answer *what is
+   * booked* would have shown eight of the twelve and hidden the rest behind a
+   * window nobody could see. Four months covers a sixty-day validity with room,
+   * and the rows are one client's, which is the read this window was drawn
+   * tight for in the first place: the roster-wide version still asks for a week.
+   */
+  const fourMonthsAhead = now + 120 * 24 * 60 * 60 * 1000;
   const rows = await get<ClientSessionWire[]>(
-    `/v1/sessions?clientId=${clientId}&from=${threeMonthsAgo}&to=${fourWeeksAhead}`,
+    `/v1/sessions?clientId=${clientId}&from=${threeMonthsAgo}&to=${fourMonthsAhead}`,
   );
   return rows ?? [];
 });
@@ -480,6 +616,8 @@ export async function getClientFilePayload(clientId: string): Promise<ClientFile
     client,
     trainerName: trainer.name,
     trainerPhone: trainer.phone,
+    trainerUpiVpa: trainer.upiVpa ?? null,
+    trainerHeadline: trainer.headline ?? null,
     gymName: trainer.gymName,
     gymSharePercent: trainer.gymSharePercent,
     sessions,
@@ -498,18 +636,32 @@ export async function getClientFilePayload(clientId: string): Promise<ClientFile
 
 /* ----------------------------------------------------------- note writes ── */
 
-export const createNote = (clientId: string, body: string, pinned: boolean) =>
-  send<ClientNoteWire>('POST', `/v1/clients/${clientId}/notes`, { body, pinned });
+export const createNote = (
+  clientId: string,
+  body: string,
+  pinned: boolean,
+  sharedWithClient: boolean,
+) =>
+  send<ClientNoteWire>('POST', `/v1/clients/${clientId}/notes`, {
+    body,
+    pinned,
+    sharedWithClient,
+  });
 
 /**
- * Both fields are optional and absent means UNCHANGED, which is the contract
- * `PUT /v1/clients/{id}/notes/{noteId}` states. So the pin toggle sends only
- * `pinned` and the editor sends only `body`, and neither clobbers the other.
+ * All three fields are optional and absent means UNCHANGED, which is the
+ * contract `PUT /v1/clients/{id}/notes/{noteId}` states. So the pin toggle
+ * sends only `pinned`, the share switch only `sharedWithClient` and the editor
+ * only `body`, and none of the three clobbers the others.
+ *
+ * That the share switch sends one field is not tidiness — a `PUT` carrying the
+ * whole note would let a stale `body` from a row rendered before somebody else
+ * edited it ride along behind a switch flip.
  */
 export const editNote = (
   clientId: string,
   noteId: string,
-  patch: { body?: string; pinned?: boolean },
+  patch: { body?: string; pinned?: boolean; sharedWithClient?: boolean },
 ) => send<ClientNoteWire>('PUT', `/v1/clients/${clientId}/notes/${noteId}`, patch);
 
 export const removeNote = (clientId: string, noteId: string) =>
@@ -527,7 +679,26 @@ export const removeNote = (clientId: string, noteId: string) =>
  * `PATCH /v1/packages/{id}` that could set a session count directly.
  */
 
-/** Sell a pack. With `packId`, the price list fills in everything left blank. */
+/**
+ * Sell a pack. With `packId`, the price list fills in everything left blank.
+ *
+ * ── AND IT BOOKS THE SESSIONS, WHICH IS NEW ─────────────────────────────────
+ *
+ * `weeklySchedule` is the days and times the trainer just agreed with the client
+ * standing in front of them, and sending it here is what turns a count into a
+ * diary: the server writes it onto the CLIENT — it is their standing week, not
+ * this pack's, so the next pack needs no re-typing — and lays down the sessions
+ * the pack owes, stopping at whichever runs out first, the count or the validity.
+ *
+ * Omitted or empty means *do not change their week*, and a client who already
+ * trains Tuesdays and Fridays keeps them. It never means *book nothing*: a
+ * second pack sold to a client with a rhythm books on that rhythm.
+ *
+ * `sessionsBooked` comes back on the response and is NOT a package column — it
+ * is what this request did, so the panel can say "12 booked, first on Monday"
+ * instead of closing silently. Counting the diary afterwards would answer a
+ * different question.
+ */
 export const sellPackage = (
   clientId: string,
   input: {
@@ -539,8 +710,16 @@ export const sellPackage = (
     endDate?: string | null;
     discountAmount?: number | null;
     dueDate?: string | null;
+    /** 0 = Monday … 6 = Sunday. `lib/clients/booking.ts` states the convention. */
+    weeklySchedule?: Array<{ templateDay: number; weekday: number; time: string }> | null;
+    sessionDurationMinutes?: number | null;
   },
-) => send<ClientPackageWire>('POST', `/v1/clients/${clientId}/packages`, input);
+) =>
+  send<ClientPackageWire & { sessionsBooked?: number }>(
+    'POST',
+    `/v1/clients/${clientId}/packages`,
+    input,
+  );
 
 /**
  * Repeat a pack that has run out. An empty body is a complete request — same
@@ -574,3 +753,76 @@ export const resumePackage = (
 /** Goodwill, in days. Logged, so it is a fact next time and not a feeling. */
 export const extendPackage = (packageId: string, days: number, reason?: string | null) =>
   send<ClientPackageWire>('POST', `/v1/packages/${packageId}/extend`, { days, reason });
+
+/* --------------------------------------------------- client lifecycle writes ── */
+
+/**
+ * THE TWO WRITES THAT CHANGE WHAT A CLIENT *IS*, rather than what is on them.
+ *
+ * Everything else on this path writes a child row — a note, a package, a
+ * measurement. These two move `client.status`, which is the field the whole
+ * roster is derived from: `buildRoster` drops `archived` before it builds a
+ * single row, and `deriveTag` puts `paused` above every tag it would otherwise
+ * compute, so a trainer's own statement outranks anything read from the data.
+ *
+ * ── PUT AND NOT PATCH, AND WHY THAT IS SAFE HERE ─────────────────────────────
+ *
+ * `PUT /v1/clients/{id}` is a PARTIAL update on this backend — the same request
+ * `updateClientSchedule` already makes with nothing but `weeklySchedule` in the
+ * body. Absent means unchanged. That is the contract these two rely on, and it
+ * is the reason `pauseClient` below has to READ before it writes: `metadata` is
+ * a whole object, so a body carrying `{ pausedAt }` alone would delete the
+ * `mode` key that `readMode` still falls back to on older rows.
+ *
+ * ── ARCHIVE IS A DELETE, AND IT IS STILL NOT A DELETION ──────────────────────
+ *
+ * `DELETE /v1/clients/{id}` sets `status = 'archived'` and
+ * `membership_status = 'removed'`; the row, their sessions, their payments and
+ * their history all stay. A trainer who archives somebody by accident has lost
+ * a roster row and nothing else — which is exactly why the verb the menu offers
+ * is *Archive* and not *Delete*.
+ */
+
+/** Move `client.status`, and nothing else on the row. */
+export const putClientStatus = (
+  clientId: string,
+  patch: { status?: string; metadata?: Record<string, unknown> | null },
+) => send<ClientDetailWire>('PUT', `/v1/clients/${clientId}`, patch);
+
+/** Off the roster, into the archive. Answers `204` with no body. */
+export const archiveClientRow = (clientId: string) =>
+  send<null>('DELETE', `/v1/clients/${clientId}`);
+
+/**
+ * WHO THE CLIENT IS — the name on every screen and the number they log in with.
+ *
+ * Partial like the two above, and for the same reason: `PUT /v1/clients/{id}`
+ * treats an absent key as unchanged, so this sends only the two fields the
+ * contact form owns and cannot disturb `metadata`, `weeklySchedule` or the
+ * status the roster is derived from.
+ *
+ * **The phone is not a contact detail.** `POST /v1/auth/request-otp` finds a
+ * client by the last ten digits of this field and nothing else — there is no
+ * password and no e-mail on this record — so editing it moves which number can
+ * open the portal. That is a real consequence and the form says so; it is not a
+ * reason to make the field read-only, because the trainer who typed a digit
+ * wrong on the add-a-client flow currently has no way back.
+ */
+export const putClientContact = (
+  clientId: string,
+  patch: { name?: string; phone?: string | null },
+) => send<ClientDetailWire>('PUT', `/v1/clients/${clientId}`, patch);
+
+/**
+ * Height and birth date — the physical card's own two.
+ *
+ * A separate call from `putClientContact` rather than one wide `putClient`,
+ * because the two cards save independently and a shared writer would let the
+ * contact form's stale copy of a birth date ride along behind a height edit.
+ * Partial, like everything else on this path: absent means unchanged, and an
+ * explicit `null` is how a trainer takes a value back off.
+ */
+export const putClientPhysical = (
+  clientId: string,
+  patch: { heightCm?: number | null; dateOfBirth?: string | null },
+) => send<ClientDetailWire>('PUT', `/v1/clients/${clientId}`, patch);

@@ -38,6 +38,13 @@ import {
 export interface PackageResult {
   ok: boolean;
   message?: string;
+  /**
+   * How many sessions the sale put in the diary. Present only on a sale or a
+   * renewal that carried a rhythm, and `0` is a real answer — a pack sold to
+   * somebody whose days are not agreed yet books nothing, and the panel says so
+   * rather than implying a diary that is not there.
+   */
+  sessionsBooked?: number;
 }
 
 function fail(error: unknown, subject: string): PackageResult {
@@ -67,7 +74,7 @@ function fail(error: unknown, subject: string): PackageResult {
  * The file itself is `'layout'` because every tab is a route and the header's
  * pack chip is drawn on all six. Beyond it: `/today`, whose queue is built from
  * packs running low and whose *Renew* row this write is what closes; `/business`
- * as a layout, because the ledger, the owed tab and the price list's *Ending
+ * as a layout, because Payments, the Pending tab and the price list's *Ending
  * soon* and `activeClients` count all move; and `/clients`, whose roster draws
  * the *pack running low* attention band.
  *
@@ -79,6 +86,11 @@ function refresh(clientId: string): void {
   revalidatePath('/business', 'layout');
   revalidatePath('/today');
   revalidatePath('/clients');
+  /* THE FIFTH SURFACE, AND IT IS NEW BECAUSE THE WRITE IS. A sale now books the
+     sessions it owes, so the calendar is no longer a screen a pack cannot
+     touch — and the one thing worse than a schedule that did not get the
+     bookings is a schedule that has them and is showing a cached week without. */
+  revalidatePath('/schedule');
 }
 
 /**
@@ -105,6 +117,17 @@ export async function assignPackage(
     startDate?: string | null;
     discountAmount?: number | null;
     dueDate?: string | null;
+    /**
+     * The days and times agreed on the sale. 0 = Monday … 6 = Sunday.
+     *
+     * This is what makes a sale produce a diary rather than a number. It is
+     * written onto the CLIENT as their standing week and the pack's sessions are
+     * laid down on it — see `sellPackage`. Omitted means *leave their week
+     * alone*, which is the right default for a second pack sold to somebody who
+     * has been coming on Tuesdays for a year.
+     */
+    weeklySchedule?: Array<{ templateDay: number; weekday: number; time: string }> | null;
+    sessionDurationMinutes?: number | null;
   },
 ): Promise<PackageResult> {
   // Only checked when the price list is not filling it in. A pack chosen off the
@@ -114,9 +137,9 @@ export async function assignPackage(
     return { ok: false, message: 'A pack needs a price.' };
   }
   try {
-    await sellPackage(clientId, input);
+    const sold = await sellPackage(clientId, input);
     refresh(clientId);
-    return { ok: true };
+    return { ok: true, sessionsBooked: sold?.sessionsBooked ?? 0 };
   } catch (error) {
     return fail(error, 'That pack');
   }

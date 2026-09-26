@@ -133,11 +133,6 @@ export interface ActivityRow {
 }
 
 export interface TeamData {
-  /* The request's clock. A page component is subject to React's purity rule, so
-   * `Date.now()` cannot be read in one — the same argument `app/(main)/schedule/
-   * page.tsx` spells out: the clock belongs to the request, and the guard IS the
-   * request. Read here, threaded down as a prop, never re-read below. */
-  now: number;
   team: TeamResponse | null;
   members: MemberResponse[];
   invitations: InvitationResponse[];

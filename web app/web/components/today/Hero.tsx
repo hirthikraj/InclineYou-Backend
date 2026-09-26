@@ -9,6 +9,7 @@ import { GAP_FOLD_MIN, gapWorth, sellableNote } from '@/lib/today/day';
 import {
   WEEKDAYS_LONG,
   formatMinute,
+  formatMinuteRange,
   formatSpan,
   isoWeekday,
   minuteOfDay,
@@ -20,6 +21,9 @@ import {
 } from '@/components/shell/Icons';
 import { Elapsed, Relative, elapsedMinutes, minutesUntil } from './Clock';
 import { NudgeButton } from '@/components/nudge/NudgeButton';
+import { Tag } from '@/web-components/ui/Tag';
+import { Button } from '@/web-components/ui/Button';
+import { HeroCard } from '@/web-components/ui/HeroCard';
 
 /**
  * FOUR STATES, ONE SLOT — plus the empty one the phone also ships.
@@ -45,124 +49,6 @@ import { NudgeButton } from '@/components/nudge/NudgeButton';
  * plus "your morning ends at 10:00, thirty minutes after this one, under the hour
  * a session needs" is a decision. Every state below earns one.
  */
-
-/* ───────────────────────────────────────────────────────────── the frame ── */
-
-function Card({
-  kicker,
-  live = false,
-  lead = false,
-  figure,
-  unit,
-  name,
-  nameHref,
-  detail,
-  chips,
-  band,
-  actions,
-  label,
-  quiet = false,
-}: {
-  kicker: React.ReactNode;
-  live?: boolean;
-  /**
-   * The first card in the row, and the only one that gets a ground.
-   *
-   * `live` and `lead` are different claims and the stylesheet keeps them apart:
-   * `card--acc` is a flat accent tint meaning *a log is open right now*, and
-   * `card--lead` is a corner wash meaning *start reading here*. A card can be
-   * both — it never is today, because the running card is the lead and wears its
-   * live tint — and neither, which is every trailing card.
-   */
-  lead?: boolean;
-  figure?: React.ReactNode;
-  unit?: string;
-  name?: React.ReactNode;
-  /**
-   * Where the name goes, on the cards whose name is a session.
-   *
-   * The verbs in `actions` are the card's job — *Start session*, *Open the log* —
-   * and this is deliberately not one of them: the cards are tuned to two verbs
-   * each and a third would blunt the one that matters. It is the name itself,
-   * which is the thing a trainer points at when they mean "that one", and it
-   * costs the card no weight. Absent on the money and no-work cards, whose name
-   * is a phrase rather than a person.
-   */
-  nameHref?: string;
-  detail?: React.ReactNode;
-  /**
-   * The facts that are not a sentence — where it is, and whether there is a note.
-   *
-   * A row of tags rather than more clauses on `detail`, because `detail` is
-   * already "Full Body B · Remote · 1 h" and a fourth dot-separated clause is the
-   * point at which a reader stops parsing the line. These are things the eye
-   * checks rather than reads.
-   */
-  chips?: React.ReactNode;
-  band?: { icon: React.ReactNode; tone?: 'acc' | 'warn'; text: React.ReactNode };
-  actions?: React.ReactNode;
-  /**
-   * Required wherever there is a figure, and not optional for tidiness: a screen
-   * reader given `12:00` reads "twelve colon zero zero", so the figure is
-   * `aria-hidden` and this is the card's actual name.
-   */
-  label: string;
-  quiet?: boolean;
-}) {
-  return (
-    <div
-      className={`card${live && !quiet ? ' card--acc' : ''}${lead ? ' card--lead' : ''}`}
-      role="group"
-      aria-label={label}
-    >
-      <div className="hro">
-        {/*
-          AN `<h2>`, AND THE WHOLE SCREEN HAD NO HEADINGS BEFORE THIS.
-          The page's outline was empty: the date was a `<p>`, every card title a
-          `<span>`, and this kicker a `<span>` — so a screen reader's heading list
-          for a screen with six modules on it came back with nothing in it, and
-          the only way through was to walk every element. `.hro__k` already sets
-          its own font-size and weight, so the tag change costs no CSS.
-
-          The `role="group"` above stays and is not redundant with it: the heading
-          says which card this is ("In session · Floor"), and the group's label is
-          the whole sentence including the figure, which is the part the eye reads
-          and a reader cannot ("12" is announced as twelve; twelve of what?).
-        */}
-        <h2 className={`hro__k${live ? ' hro__k--live' : ''}`}>
-          {live && <i />}
-          {kicker}
-        </h2>
-        {figure !== undefined && (
-          <p className="hro__c" aria-hidden="true">
-            {figure}
-            {unit && <em>{unit}</em>}
-          </p>
-        )}
-        {name && (
-          <p className="hro__n">
-            {nameHref ? (
-              <Link href={nameHref} style={{ color: 'inherit' }}>
-                {name}
-              </Link>
-            ) : (
-              name
-            )}
-          </p>
-        )}
-        {detail && <p className="hro__d">{detail}</p>}
-        {chips && <div className="hro__c2">{chips}</div>}
-        {band && (
-          <div className={`hro__w${band.tone ? ` hro__w--${band.tone}` : ''}`}>
-            {band.icon}
-            <span>{band.text}</span>
-          </div>
-        )}
-        {actions && <div className="hro__a">{actions}</div>}
-      </div>
-    </div>
-  );
-}
 
 /**
  * WHERE IT IS, AND WHETHER THERE IS A NOTE.
@@ -217,23 +103,27 @@ function SessionChips({
         : MODE_LABELS.floor;
   return (
     <>
-      <span className="tag">
+      <Tag>
         <Pin size={12} />
         {place}
-      </span>
+      </Tag>
       {session.hasNote && (
         /*
-          A LINK, NOT A TAG, AND THAT IS THE WHOLE VALUE OF IT.
+          A LINK, NOT A LABEL, AND THAT IS THE WHOLE VALUE OF IT.
 
           A chip that says a note exists and cannot open it has told the trainer
           about a thing and then asked them to go and find it — on the screen whose
           rule is that every card has a one-tap action. The client's file is where
           the text lives, so the chip is the way there.
+
+          `ui/Tag` with an `href`, not a hand-written `<Link className="tag
+          tag--link">`. Both existed for as long as this card has, and neither
+          the design set nor the component knew about the other.
         */
-        <Link className="tag tag--link" href={`/clients/${session.clientId}`}>
+        <Tag href={`/clients/${session.clientId}`}>
           <Note size={12} />
           Has a note
-        </Link>
+        </Tag>
       )}
     </>
   );
@@ -277,7 +167,7 @@ function Running({
   const mode = MODE_LABELS[running.mode];
 
   return (
-    <Card
+    <HeroCard
       live
       kicker={`In session · ${mode}`}
       figure={<Elapsed from={running.startedAt} now={now} />}
@@ -290,7 +180,7 @@ function Running({
       unit="min elapsed"
       name={running.clientName}
       nameHref={`/sessions/${running.scheduledId}`}
-      detail={`${running.detail} · ${formatMinute(minuteOfDay(running.scheduledAt))}–${formatMinute(minuteOfDay(endsAt))}`}
+      detail={<>{running.detail}<i>{formatMinuteRange(minuteOfDay(running.scheduledAt), minuteOfDay(endsAt))}</i></>}
       chips={
         <SessionChips
           session={{ clientId: running.clientId, mode: running.mode, hasNote }}
@@ -299,7 +189,6 @@ function Running({
       }
       band={{
         icon: <Clock size={16} />,
-        tone: 'acc',
         text:
           running.mode === 'remote' ? (
             <>
@@ -322,13 +211,13 @@ function Running({
       }}
       actions={
         <>
-          <Link className="btn btn--sm btn--primary" href={`/sessions/${running.workoutId}`}>
+          <Button href={`/sessions/${running.workoutId}`} variant="primary" size="sm">
             <Play size={15} />
             Open the log
-          </Link>
-          <Link className="btn btn--sm btn--ghost" href={`/sessions/${running.workoutId}`}>
+          </Button>
+          <Button href={`/sessions/${running.workoutId}`} variant="ghost" size="sm">
             End session
-          </Link>
+          </Button>
         </>
       }
       label={`In session: ${running.clientName}, ${elapsedMinutes(running.startedAt, now)} minutes elapsed, ${left} minutes left`}
@@ -361,6 +250,7 @@ function Next({
   nextGap,
   money,
   gymSharePercent,
+  onBook,
   gymName,
   after,
   ordinal,
@@ -372,6 +262,8 @@ function Next({
   nextGap: Gap | null;
   money: DayMoney;
   gymSharePercent: number | null;
+  /** See `HeroProps.onBook` — the sellable-hour chip below is its only caller. */
+  onBook: (minute: number) => void;
   /** For the location chip — see `SessionChips`. */
   gymName: string | null;
   /** True for a card after the first — "After that", never the hero. */
@@ -395,7 +287,7 @@ function Next({
 
   if (session.late && !after) {
     return (
-      <Card
+      <HeroCard
         /*
          * `lead`, and it USED TO BE `live`.
          *
@@ -418,7 +310,7 @@ function Next({
         figure={formatMinute(minuteOfDay(session.at))}
         name={session.clientName}
         nameHref={`/sessions/${session.id}`}
-        detail={`${session.detail} · ${formatSpan(session.minutes)}`}
+        detail={<>{session.detail}<i>{formatSpan(session.minutes)}</i></>}
         chips={chips}
         band={{
           icon: <Warn size={16} />,
@@ -432,14 +324,14 @@ function Next({
         }}
         actions={
           <>
-            <Link className="btn btn--sm btn--primary" href={`/sessions/new?session=${session.id}`}>
+            <Button href={`/sessions/new?session=${session.id}`} variant="primary" size="sm">
               <Play size={15} />
               Start session
-            </Link>
-            <Link className="btn btn--sm btn--ghost" href={`/schedule?session=${session.id}`}>
+            </Button>
+            <Button href={`/schedule?session=${session.id}`} variant="ghost" size="sm">
               <No size={15} />
               Mark no-show
-            </Link>
+            </Button>
           </>
         }
         label={`Next: ${session.clientName} at ${formatMinute(minuteOfDay(session.at))}, ${session.minutes} minutes, nothing logged`}
@@ -469,8 +361,8 @@ function Next({
         icon: <Clock size={16} />,
         text: (
           <>
-            <b>Your shift ends at {formatMinute(closesAt!)}</b> — {minutesLeftInShift} min from now,
-            under the hour a session needs.
+            <b>Your shift ends at {formatMinute(closesAt!)}</b>, {minutesLeftInShift} min from now,
+            which is under the hour a session needs.
             {nextGap && (
               <> Next sellable hour: <b>{formatMinute(nextGap.startMinute)}</b>.</>
             )}
@@ -483,9 +375,9 @@ function Next({
           text: (
             <>
               <b>
-                {formatMinute(nextGap.startMinute)}–{formatMinute(nextGap.endMinute)} is free
+                {formatMinuteRange(nextGap.startMinute, nextGap.endMinute)} is free
               </b>{' '}
-              inside your own hours — {formatSpan(nextGap.minutes)}
+              inside your own hours: {formatSpan(nextGap.minutes)}
               {worth && <>, {worth}</>}.
             </>
           ),
@@ -493,7 +385,7 @@ function Next({
       : undefined;
 
   return (
-    <Card
+    <HeroCard
       quiet
       /* The hero wears the wash; the card after it wears nothing at all. That
          contrast IS the second column's job — see the chooser. */
@@ -506,7 +398,7 @@ function Next({
       figure={formatMinute(minuteOfDay(session.at))}
       name={session.clientName}
       nameHref={`/sessions/${session.id}`}
-      detail={`${session.detail} · ${formatSpan(session.minutes)}`}
+      detail={<>{session.detail}<i>{formatSpan(session.minutes)}</i></>}
       chips={chips}
       band={band}
       /*
@@ -525,10 +417,10 @@ function Next({
       actions={
         after ? (
           <>
-            <Link className="btn btn--sm btn--ghost" href={`/schedule?session=${session.id}`}>
+            <Button href={`/schedule?session=${session.id}`} variant="ghost" size="sm">
               <Calendar size={15} />
               Move {session.clientName.split(' ')[0]}
-            </Link>
+            </Button>
             {/*
               THE SECOND VERB ON THE TRAILING CARD, AND ONLY ON THE TRAILING CARD.
 
@@ -554,18 +446,19 @@ function Next({
           </>
         ) : (
           <>
-            <Link className="btn btn--sm btn--primary" href={`/sessions/new?session=${session.id}`}>
+            <Button href={`/sessions/new?session=${session.id}`} variant="primary" size="sm">
               <Play size={15} />
               Start session
-            </Link>
+            </Button>
             {nextGap && (
-              <Link
-                className="btn btn--sm btn--secondary"
-                href={`/schedule?book=${nextGap.startMinute}`}
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => onBook(nextGap.startMinute)}
               >
                 <Plus size={15} />
                 Book the {formatMinute(nextGap.startMinute)}
-              </Link>
+              </Button>
             )}
           </>
         )
@@ -598,13 +491,13 @@ function Tomorrow({
 }) {
   const weekday = WEEKDAYS_LONG[isoWeekday(session.at)];
   return (
-    <Card
+    <HeroCard
       quiet
       kicker={`Tomorrow · ${weekday}`}
       figure={formatMinute(minuteOfDay(session.at))}
       name={session.clientName}
       nameHref={`/sessions/${session.id}`}
-      detail={`${session.detail} · ${count} session${count === 1 ? '' : 's'} tomorrow`}
+      detail={<>{session.detail}<i>{count} session{count === 1 ? '' : 's'} tomorrow</i></>}
       chips={<SessionChips session={session} gymName={gymName} />}
       band={
         clash
@@ -616,7 +509,7 @@ function Tomorrow({
                   <b>
                     {clash.a} and {clash.b} overlap by {clash.minutes} min
                   </b>{' '}
-                  from {formatMinute(clash.from)} — found tonight, not at{' '}
+                  from {formatMinute(clash.from)}. Found tonight, not at{' '}
                   {formatMinute(clash.from)} tomorrow.
                 </>
               ),
@@ -634,10 +527,10 @@ function Tomorrow({
       actions={
         <>
           {clash && (
-            <Link className="btn btn--sm btn--primary" href="/schedule">
+            <Button href="/schedule" variant="primary" size="sm">
               <Calendar size={15} />
               Fix the clash
-            </Link>
+            </Button>
           )}
           <Link className={`btn btn--sm btn--${clash ? 'ghost' : 'secondary'}`} href="/schedule">
             See tomorrow
@@ -741,7 +634,7 @@ function DayClosed({
       : null;
 
   return (
-    <Card
+    <HeroCard
       quiet
       kicker="The day, closed"
       figure={rupees(money.yours)}
@@ -750,8 +643,11 @@ function DayClosed({
       detail={
         <>
           {delivered} session{delivered === 1 ? '' : 's'} delivered
-          {money.cut > 0 && ` · ${rupees(money.cut)} to the gym`}
-          {money.partial && ` · ${money.priced} of ${money.total} priced`}
+          {/* Each extra fact is set apart by the 12px gap rather than by another
+              middle dot. Three facts joined by two dots is a line where the
+              separator has stopped separating anything. */}
+          {money.cut > 0 && <i>{rupees(money.cut)} to the gym</i>}
+          {money.partial && <i>{money.priced} of {money.total} priced</i>}
         </>
       }
       band={
@@ -763,11 +659,11 @@ function DayClosed({
                 gaps.length === 1 ? (
                   <>
                     <b>
-                      {formatMinute(largest.startMinute)}–{formatMinute(largest.endMinute)} went
+                      {formatMinuteRange(largest.startMinute, largest.endMinute)} went
                       unsold
                     </b>{' '}
-                    — {formatSpan(largest.minutes)} inside your own hours
-                    {worth && <>, {worth}</>}.
+                    ({formatSpan(largest.minutes)} inside your own hours
+                    {worth && <>, {worth}</>}).
                   </>
                 ) : (
                   <>
@@ -775,7 +671,7 @@ function DayClosed({
                       {formatSpan(unsoldMinutes)} went unsold across {gaps.length} empty windows
                     </b>
                     {total && <>, {total}</>}. The longest was{' '}
-                    {formatMinute(largest.startMinute)}–{formatMinute(largest.endMinute)}.
+                    {formatMinuteRange(largest.startMinute, largest.endMinute)}.
                   </>
                 ),
             }
@@ -791,15 +687,15 @@ function DayClosed({
       }
       actions={
         unmarkedToday > 0 ? (
-          <Link className="btn btn--sm btn--primary" href="/sessions">
+          <Button href="/programs/workouts?view=missed" variant="primary" size="sm">
             <Check size={15} />
             Log today’s {unmarkedToday === 1 ? 'session' : `${unmarkedToday} sessions`}
-          </Link>
+          </Button>
         ) : (
-          <Link className="btn btn--sm btn--secondary" href="/business">
+          <Button href="/business" variant="secondary" size="sm">
             <Rupee size={15} />
             Open the money book
-          </Link>
+          </Button>
         )
       }
       label={`The day, closed: ${money.yours} rupees yours of ${money.billed} billed${unmarkedToday > 0 ? `, ${unmarkedToday} not yet marked` : ''}`}
@@ -856,10 +752,10 @@ function ClearDay({
   // so the card agrees with it rather than reporting a problem.
   if (!worksToday && hasAnyHours) {
     return (
-      <Card
+      <HeroCard
         quiet
         kicker="A day off"
-        figure="—"
+        figure="Off"
         unit="not a working day"
         name="You do not work this day"
         detail="Your working week does not cover it, so there is nothing to sell and nothing missing."
@@ -867,20 +763,20 @@ function ClearDay({
           icon: <Calendar size={16} />,
           text: (
             <>
-              <b>Booking here still works.</b> Your hours stop clients self-booking, never you —
+              <b>Booking here still works.</b> Your hours stop clients self-booking, never you,
               so a one-off on a day off is a session, not an exception.
             </>
           ),
         }}
         actions={
           <>
-            <Link className="btn btn--sm btn--secondary" href="/schedule">
+            <Button href="/schedule" variant="secondary" size="sm">
               <Plus size={15} />
               Book anyway
-            </Link>
-            <Link className="btn btn--sm btn--ghost" href="/settings/hours">
+            </Button>
+            <Button href="/settings/hours" variant="ghost" size="sm">
               Change your week
-            </Link>
+            </Button>
           </>
         }
         label="A day off. Your working week does not cover this day."
@@ -892,22 +788,22 @@ function ClearDay({
   // reason it must not wear the sentence above.
   if (!hasAnyHours) {
     return (
-      <Card
+      <HeroCard
         quiet
         kicker="No working week yet"
-        figure="—"
-        unit="no hours set"
+        figure="0"
+        unit="hours set"
         name="No working hours on record"
         detail="Set your working week and this day gets a shape, a price and a list of gaps worth filling."
         actions={
           <>
-            <Link className="btn btn--sm btn--primary" href="/settings/hours">
+            <Button href="/settings/hours" variant="primary" size="sm">
               Set your hours
-            </Link>
-            <Link className="btn btn--sm btn--ghost" href="/schedule">
+            </Button>
+            <Button href="/schedule" variant="ghost" size="sm">
               <Plus size={15} />
               Book a session
-            </Link>
+            </Button>
           </>
         }
         label="Nothing booked today, and no working hours on record."
@@ -916,7 +812,7 @@ function ClearDay({
   }
 
   return (
-    <Card
+    <HeroCard
       quiet
       kicker="Nothing booked today"
       figure={String(sellable)}
@@ -925,14 +821,14 @@ function ClearDay({
       detail={
         <>
           Every hour inside your working windows is free
-          {worth !== null && <> — {rupees(worth)} of billing if all of it went</>}.
+          {worth !== null && <>, {rupees(worth)} of billing if all of it went</>}.
         </>
       }
       actions={
-        <Link className="btn btn--sm btn--primary" href="/schedule">
+        <Button href="/schedule" variant="primary" size="sm">
           <Plus size={15} />
           Book a session
-        </Link>
+        </Button>
       }
       label={`Nothing booked today. ${sellable} sellable hour${sellable === 1 ? '' : 's'} open.`}
     />
@@ -953,6 +849,15 @@ export interface HeroProps {
   clash: { a: string; b: string; from: number; minutes: number } | null;
   /** Whether the trainer has answered the working-week step at all — see ClearDay. */
   hasAnyHours: boolean;
+  /**
+   * Open the booking form on a particular minute of today.
+   *
+   * *Book the 11:00* was a `<Link>` to `/schedule?book=660`, which left the
+   * screen to draw a week before it could draw the form. `Today.tsx` opens the
+   * same panel in place now and carries the argument; the chip only has to say
+   * which hour it meant.
+   */
+  onBook: (minute: number) => void;
 }
 
 /**
@@ -1006,6 +911,7 @@ export interface HeroProps {
  */
 export function Hero({
   deck, now, money, gaps, windows, gymSharePercent, gymName, clash, hasAnyHours,
+  onBook,
 }: HeroProps) {
   // The three facts every "next" card needs, in one place: when the current shift
   // closes, how much of it is left, and the next hour that could be sold. They
@@ -1020,6 +926,7 @@ export function Hero({
     nextGap,
     money,
     gymSharePercent,
+    onBook,
     gymName,
   };
 

@@ -89,6 +89,49 @@ class WorkoutLogRestTest {
         SecurityContextHolder.clearContext();
     }
 
+    /* ─────────────────────────────────────────── exerciseCount (23 Sep) ── */
+
+    @Test
+    @DisplayName("exerciseCount counts the live cards in a log, not the removed one")
+    void exerciseCountCountsLiveCards() throws Exception {
+        var log = workout(client, "2026-08-20", null);
+        card(log, bench, false);
+        card(log, chinUp, true);
+
+        mvc.perform(get("/v1/workouts").param("clientId", client.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].exerciseCount").value(1));
+    }
+
+    @Test
+    @DisplayName("a pre-V13 log — sets but no cards — counts its distinct movements, not 0")
+    void exerciseCountFallsBackToSets() throws Exception {
+        var log = workout(client, "2026-08-20", null);
+        set(log, bench, 1, "60", 8);
+        set(log, bench, 2, "60", 8);
+        set(log, chinUp, 1, null, 6);
+
+        mvc.perform(get("/v1/workouts/" + log))
+                .andExpect(jsonPath("$.exerciseCount").value(2));
+    }
+
+    @Test
+    @DisplayName("a log created a moment ago holds nothing and says 0")
+    void freshLogIsZero() throws Exception {
+        mvc.perform(post("/v1/workouts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientId\":\"" + client + "\",\"sessionDate\":\"2026-08-21\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.exerciseCount").value(0));
+    }
+
+    private void card(UUID workoutId, UUID exerciseId, boolean removed) {
+        jdbc.update("""
+                INSERT INTO workout_exercise (workout_session_id, exercise_id, removed_at)
+                VALUES (:w::uuid, :e::uuid, CASE WHEN :removed THEN now() END)
+                """, Map.of("w", workoutId.toString(), "e", exerciseId.toString(), "removed", removed));
+    }
+
     /* ────────────────────────────────────────── closing a log (gap 4) ── */
 
     @Test

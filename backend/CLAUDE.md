@@ -20,7 +20,7 @@ and has its own `CLAUDE.md`.
   why.
 - `API.md` — the complete endpoint reference, the authorization table, the rate-limit
   tiers, and the error `code` catalogue. **Keep it in sync with any endpoint change.**
-- `SCHEMA.md` — the same thing for the database: all 34 tables, every column with
+- `SCHEMA.md` — the same thing for the database: all 46 tables, every column with
   the migration that added it, all 53 foreign keys, the uniqueness and check
   constraints, the index inventory, and the table→sync-collection mapping.
   **Keep it in sync with any migration.**
@@ -41,6 +41,7 @@ docker compose -f ../docker-compose.yml up -d   # Postgres 16 + Redis 7
 ./scripts/seed-sample-month.sh <phone>          # 6 clients, one month — the small seed
 ./scripts/seed-full-demo.sh <phone>             # 44 clients, every feature — the big seed
 ./scripts/seed-realistic-20.sh <phone>          # 20 clients, a plausible week — the realistic seed
+python3 scripts/refresh-schema-xml.py           # schema.xml + schema.html from the live db; --check to test
 ```
 
 The three seed scripts are alternatives, not layers — running one over another
@@ -96,7 +97,7 @@ blueprint, so copy from one of the other two.
 
 `auth` · `client` · `exercise` · `template` · `program` · `session` ·
 `progress` · `payment` · `report` · `nudge` · `push` · `sync` · `trainer` ·
-`team`
+`team` · `workout` · `assessment` · `notification` · `portal`
 
 Cross-cutting: `config` (security, Redis, health, `AppProperties`),
 `ratelimit`, `exception` (the global RFC-7807 handler), `entity` + `repository`
@@ -179,7 +180,9 @@ difference in 4,300 lines was `gen_random_uuid()` becoming schema-qualified.
 **The V-numbers elsewhere in these notes and all through `SCHEMA.md` are
 historical labels, not files.** `V30 gave the sold package pause/resume` still
 tells you why `paused_at` is a column; it no longer points at a migration you
-can open. `git log` has them. **The next migration is `V2`.**
+can open. `git log` has them.
+
+**25 Sep 2026 — rebuilt as a fresh v1.** `V1__init_schema.sql` was replaced by a new baseline that builds the 41 tables approved in `../release/proposed-schema.html` (that page carries the reasoning; later-release tables are in `../release/later-schema.html`). The old baseline and `V2`–`V22` are archived in `db-archive/pre-v1-2026-09-25/` — `V4`–`V22` were never in git, so that folder is their only copy. **The next migration is `V2`.** Until every module is adapted, `ddl-auto` is `none` (put `validate` back when the five entities match), and `SCHEMA.md`, `API.md` and the three seed scripts describe the old schema. A stale `target/classes/db/migration` from an earlier build will make Flyway run the archived files — run `./mvnw clean` first.
 
 From here the law is what it always was: **never edit a migration that has
 run** — append a new `V{n}__name.sql`. Never drop or repurpose a column, and
@@ -187,6 +190,13 @@ never remove or rename a response field: old app builds on trainers' phones must
 keep working. The client's WatermelonDB migrations in
 `../app/src/db/migrations.ts` were reset to schema v1 in the same change and
 follow the same law, in lockstep.
+
+**The one exception is `V22__drop_body_metric.sql`** (24 Sep 2026): a body is
+measured in an assessment and nowhere else, so `body_metric` lost every writer
+and was dropped — with the phone build and sync out of v1 and nothing in
+production, there was no row anywhere to lose. Readings live on
+`assessment.readings`; `assessment/MetricReadings.java` is the one reader that
+turns them into a series. Don't treat it as a precedent.
 
 ### Ownership is a query filter
 

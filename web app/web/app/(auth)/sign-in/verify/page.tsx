@@ -4,7 +4,7 @@ import { AuthShell } from '@/components/auth/AuthShell';
 import { VerifyForm } from '@/components/auth/VerifyForm';
 import { getPendingPhone, getToken } from '@/lib/auth/session';
 
-export const metadata = { title: 'Enter the code · X REP' };
+export const metadata = { title: 'Enter the code · InclineYou' };
 
 /**
  * Frames 1b and 1c · `/sign-in/verify`.
@@ -24,7 +24,10 @@ export default async function VerifyPage() {
   if (!phone) redirect('/sign-in');
 
   return (
-    <AuthShell quote="Two books, one login. Your own training never touches a client’s.">
+    <AuthShell
+      lead="Six digits. That is it."
+      quote="No password to remember and nothing to reset — the code lands in about ten seconds."
+    >
       <VerifyForm phone={phone} />
     </AuthShell>
   );

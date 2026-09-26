@@ -6,20 +6,26 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { ConsoleData } from '@/lib/log/api';
 import type { LogExerciseView, LogSetRow } from '@/lib/log/log';
-import { stampDate } from '@/lib/log/log';
+import { floorTime, stampDate } from '@/lib/log/log';
 import { addExercise, deleteSet, logSet, setRest, swapExercise, updateSet } from '@/lib/log/actions';
 import type { SwapScope } from '@/lib/log/result';
 import { UNDO_SECONDS } from '@/lib/log/result';
 import { TopBar } from '@/components/shell/TopBar';
 import { AddPanel } from './AddPanel';
 import { ExerciseList } from './ExerciseList';
-import { ExerciseTimeline, RecordCard } from './RecordCard';
+import { ExerciseTimeline, HistorySheet, RecordCard } from './RecordCard';
 import { FinishLog } from './FinishLog';
 import { Chart, Dots, Info, Tick, Warn } from './Icons';
 import { Keys } from './Keys';
 import { SetGrid, draftKey, readDraft, type Draft } from './SetGrid';
 import { SetPanel } from './SetPanel';
 import { SwapModal } from './SwapModal';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
+import { Chip } from '@/web-components/ui/Chip';
+import { Strip } from '@/web-components/ui/Strip';
+import { PageHeader } from '@/web-components/ui/PageHeader';
+import { Why } from '@/web-components/ui/Why';
 
 /**
  * THE WORKOUT CONSOLE — THE DESK HALF OF A FLOOR SCREEN.
@@ -400,6 +406,14 @@ export function Console({ data }: { data: ConsoleData }) {
   const swapFor = params.get('swap');
   const swapView = exercises.find((e) => e.exerciseId === swapFor) ?? null;
 
+  /* `?hist=` is the exercise whose history is open as a sheet. In the URL for
+     the same reason `?set=`, `?add=` and `?swap=` are: it is one of this
+     screen's four panels, and this screen keeps its panels addressable. It
+     carries the exercise id rather than a `1` because the sheet names an
+     exercise and `?ex=` can change under it. */
+  const histFor = params.get('hist');
+  const histView = exercises.find((e) => e.exerciseId === histFor) ?? null;
+
   /**
    * One card, in the shape the write takes.
    *
@@ -453,42 +467,61 @@ export function Console({ data }: { data: ConsoleData }) {
 
   return (
     <>
-      <TopBar crumb="Sessions" onSearch={() => {}} />
+      <TopBar
+        crumb="Sessions"
+        /* Six screens in this flow pass the crumb *Sessions* — it names the
+           flow, and it is the wrong thing for a 390px header to say when the
+           one fact the trainer needs at the top is whose session this is.
+           `screenTitle` would derive *Sessions* from it, so the title is
+           stated. The `<h1>` under it keeps the plan head the bar has no room
+           for, which is why these screens are not `.ph--named`. */
+        title={view.clientName}
+      />
 
       <main className="main" id="main-content">
-        <div className="ph">
-          <div className="ph__row">
-            <div>
-              <nav className="crumbs" aria-label="Breadcrumb">
-                <Link href="/sessions">Sessions</Link>
-                <i aria-hidden="true">/</i>
-                <b>{crumb}</b>
-              </nav>
-              <h1 className="ph__t">
-                {view.clientName}
-                {view.planHead ? <> &middot; {view.planHead}</> : null}
-              </h1>
-              <p className="ph__sub">
-                {view.plan ? `${view.plan} · ` : ''}
-                {view.endedAt ? 'logged, closed' : 'logging here, saved on the server as you go'}
-              </p>
-            </div>
-            <div className="ph__acts">
-              <Link className="btn btn--secondary" href={`/clients/${view.clientId}/progress`}>
-                <Chart /> Her history
-              </Link>
-              <Link
-                className="btn btn--secondary btn--icon"
-                href={`/clients/${view.clientId}`}
-                aria-label="Her client file"
-                title="Her client file"
-              >
-                <Dots />
-              </Link>
-              <FinishLog routeId={data.routeId} workoutId={view.workoutId} />
-            </div>
-          </div>
-        </div>
+        <PageHeader
+          title={<>{view.clientName}
+            {view.planHead ? <> &middot; {view.planHead}</> : null}</>}
+          sub={<>{/* The program is the second half of the `h1` directly above.
+                Below 620px it stands down, and what is left is the week and
+                the state — which nothing else on this screen says. */}
+            {view.plan ? <span className="ph__prog">{view.plan} &middot; </span> : null}
+            {view.endedAt ? (
+              'logged, closed'
+            ) : (
+              <>
+                {/* The tail clause is an explainer and stands down below
+                    620px. MEASURED, it wraps the subtitle to two lines at
+                    the 360 floor — 19px of a 640px screen, spent on a
+                    sentence a trainer reads once, on the state they are in
+                    while logging. The state word stays. */}
+                logging here<span className="ph__hint">, saved on the server as you go</span>
+              </>
+            )}</>}
+          crumbs={<nav className="crumbs" aria-label="Breadcrumb">
+              <Link href="/programs/workouts">Workouts</Link>
+              <i aria-hidden="true">/</i>
+              <b>{crumb}</b>
+            </nav>}
+          actions={<>{/* The label is CLIPPED below 620px, not dropped — `.omni`'s rule
+                and the bug that taught it: `display:none` takes an element out
+                of the accessibility tree too, and this span is the link's only
+                text and therefore its accessible name. The sixth control in
+                this shell to need clipped-not-dropped. */}
+            <Button href={`/clients/${view.clientId}/progress`} variant="secondary" className="ph__hist">
+              <Chart /> <span className="ph__histl">Client history</span>
+            </Button>
+            <Button
+              href={`/clients/${view.clientId}`}
+              variant="secondary"
+              iconOnly
+              label="Client file"
+              title="Client file"
+              icon={<Dots />}
+            />
+            <FinishLog routeId={data.routeId} workoutId={view.workoutId} /></>}
+          className="ph--log"
+        />
 
         <div className="body">
           {deleted ? (
@@ -496,9 +529,9 @@ export function Console({ data }: { data: ConsoleData }) {
               <Tick />
               Set {deleted.setNumber} deleted.
               <span className="bulk__acts">
-                <button className="btn btn--secondary btn--sm" type="button" onClick={undo}>
+                <Button variant="secondary" size="sm" onClick={undo}>
                   Undo
-                </button>
+                </Button>
               </span>
             </div>
           ) : null}
@@ -506,41 +539,45 @@ export function Console({ data }: { data: ConsoleData }) {
           {/* Four figures, and none of them is a streak, a score or a completion
               percentage — Harley's vanity metrics, 2019. Sets, kilos, minutes,
               and a pack that has NOT moved, which is status about something that
-              did not happen and the harder kind to remember to show. */}
-          <div className="strip">
-            <div>
-              <b>
-                {view.setsLogged}
-                <span className="ink3" style={{ fontSize: 14 }}>/{view.setsPlanned}</span>
-              </b>
-              <i>sets logged</i>
-            </div>
-            <div>
-              <b>{view.volumeKg.toLocaleString('en-IN')}</b>
-              <i>kg moved</i>
-            </div>
-            <div>
-              <b>
-                {view.minutes === null ? '—' : view.minutes}
-                {view.minutes === null ? null : (
-                  <span className="ink3" style={{ fontSize: 14 }}> min</span>
-                )}
-              </b>
-              <i>{view.minutes === null ? 'left open' : 'on the floor'}</i>
-            </div>
-            <div>
-              <b>
-                {data.pack
-                  ? <>{data.pack.remaining}<span className="ink3" style={{ fontSize: 14 }}>/{data.pack.total}</span></>
-                  : '—'}
-              </b>
-              <i>{data.pack ? 'pack, unchanged' : 'no session pack'}</i>
-            </div>
-          </div>
+              did not happen and the harder kind to remember to show.
+
+              `c-strip` rather than the hand-written `.strip` markup this band
+              was: the class had no component and five screens each wrote it
+              out, two of them disagreeing about the size of a denominator in
+              an inline style. See `ui/Strip.tsx`.
+
+              THE MINUTES ARE `floorTime`'d. A live log is not closed the
+              minute the client leaves, so this is routinely in the hundreds —
+              it read **349 min** here, which is a figure a reader converts
+              rather than glances at. */}
+          <Strip className="log-strip">
+            <Strip.Cell value={view.setsLogged} of={view.setsPlanned} label="sets logged" />
+            <Strip.Cell value={view.volumeKg.toLocaleString('en-IN')} unit="kg" label="moved" />
+            {view.minutes === null ? (
+              <Strip.Cell value="—" label="left open" />
+            ) : (
+              <Strip.Cell {...floorTime(view.minutes)} label="on the floor" />
+            )}
+            {data.pack ? (
+              <Strip.Cell
+                value={data.pack.remaining}
+                of={data.pack.total}
+                label="pack, unchanged"
+              />
+            ) : (
+              <Strip.Cell value="—" label="no session pack" />
+            )}
+          </Strip>
 
           {view.emptyPlan ? (
             <EmptyPlan data={data} onAdd={() => go({ add: '1' })} />
           ) : (
+            /* `.wkcw` exists ONLY to be a container query's container — a grid
+               cannot query its own inline size to decide its own tracks, and
+               what has to be measured is the width `.wkc` actually gets, which
+               the rail's expanded/minimised state moves by 184px at one
+               viewport width. `app.css` carries the arithmetic. */
+            <div className="wkcw">
             <div className="wkc">
               <ExerciseList
                 exercises={exercises}
@@ -577,22 +614,39 @@ export function Console({ data }: { data: ConsoleData }) {
                   }
                   onAdjustRest={adjustRest}
                   onSkipRest={() => setRunningRest(null)}
+                  /* The next card with a slot still open, for the thumb dock —
+                     and it is `!complete` rather than the one after this in the
+                     list, because a trainer who jumped back to fix set 2 of
+                     bench does not want *Next · bench* underneath them. Null
+                     when this is the last unfinished card, and the dock draws
+                     nothing rather than a control that goes nowhere; `Finish
+                     the log` is in the header, which is where a session ends. */
+                  next={(() => {
+                    const after = exercises.find(
+                      (e) => !e.complete && e.exerciseId !== open.exerciseId,
+                    );
+                    return after
+                      ? {
+                          name: after.name,
+                          onOpen: () => go({ ex: after.exerciseId, set: null }),
+                        }
+                      : null;
+                  })()}
                   handlers={{
                     commit,
                     remove,
                     openSet: (exerciseId, n) => go({ ex: exerciseId, set: String(n) }),
                     openSwap: (exerciseId) => go({ ex: exerciseId, swap: exerciseId }),
+                    openHistory: (exerciseId) => go({ ex: exerciseId, hist: exerciseId }),
                     addSlot: (exerciseId) =>
                       setExtra((held) => ({ ...held, [exerciseId]: (held[exerciseId] ?? 0) + 1 })),
                     changeRest: (exerciseId) => setRestFor(exerciseId),
                   }}
                 />
               ) : (
-                <div className="card">
-                  <div className="card__b">
-                    <p className="small">Pick an exercise on the left, or add one.</p>
-                  </div>
-                </div>
+                <Card>
+                  <p className="small">Pick an exercise on the left, or add one.</p>
+                </Card>
               )}
 
               <div>
@@ -614,6 +668,7 @@ export function Console({ data }: { data: ConsoleData }) {
                   </p>
                 ) : null}
               </div>
+            </div>
             </div>
           )}
         </div>
@@ -656,6 +711,20 @@ export function Console({ data }: { data: ConsoleData }) {
               router.refresh();
             });
           }}
+        />
+      ) : null}
+
+      {histView ? (
+        <HistorySheet
+          name={histView.name}
+          clientId={view.clientId}
+          exerciseId={histView.exerciseId}
+          /* `!s.today` for the same reason the third column filters it: today's
+             sets are the table behind the sheet, and a session that prints its
+             own rows back at itself is an echo rather than a comparison. */
+          sessions={(data.timelines[histView.exerciseId] ?? []).filter((s) => !s.today)}
+          card={view.records.find((r) => r.exerciseId === histView.exerciseId) ?? null}
+          onClose={() => go({ hist: null })}
         />
       ) : null}
 
@@ -754,7 +823,7 @@ export function Console({ data }: { data: ConsoleData }) {
  * rather than an error**, because logging is allowed to happen before
  * programming exists. The likeliest first screen a new trainer ever sees.
  *
- * The offer is the **last whole session she did**, not a template: the commonest
+ * The offer is the **last whole session they did**, not a template: the commonest
  * thing a trainer wants on a day with no plan is *last time again*, and every
  * logger in the teardown makes them build it out of a routine instead. And
  * nothing here auto-progresses it — §09: the app never puts a number in a row
@@ -792,12 +861,12 @@ function EmptyPlan({ data, onAdd }: { data: ConsoleData; onAdd: () => void }) {
           <button className="lrow" type="button" onClick={onAdd}>
             <span className="lrow__m" style={{ flex: 1 }}>
               <span className="lrow__t">Add an exercise</span>
-              <span className="lrow__s">recents first, with what she last lifted</span>
+              <span className="lrow__s">recents first, with what was last lifted</span>
             </span>
           </button>
           <Link className="lrow" href={`/clients/${view.clientId}/programs`}>
             <span className="lrow__m" style={{ flex: 1 }}>
-              <span className="lrow__t">Assign her a program</span>
+              <span className="lrow__t">Assign a program</span>
               <span className="lrow__s">and this log seeds itself next time</span>
             </span>
           </Link>
@@ -815,14 +884,13 @@ function EmptyPlan({ data, onAdd }: { data: ConsoleData; onAdd: () => void }) {
       </div>
 
       <div>
-        <div className="why">
-          <p className="why__k">The last whole session, as something to repeat</p>
+        <Why heading="The last whole session, as something to repeat">
           <p>
-            Not a template and not a suggestion: the actual session she did, offered whole. The
+            Not a template and not a suggestion: the actual session they did, offered whole. The
             commonest thing a trainer wants on a day with no plan is <b>last time again</b>, and
             every logger in the teardown makes them build it from a routine instead.
           </p>
-        </div>
+        </Why>
         <p className="small" style={{ marginTop: 12 }}>
           And nothing here auto-progresses it. §09:{' '}
           <b className="ink">the app never puts a number in a row that nobody lifted</b>. Repeating
@@ -869,30 +937,34 @@ function RestModal({
           <p className="modal__t">Rest after a {name.toLowerCase()} set</p>
         </div>
         <div className="modal__body">
+          {/* The second and third sentences went on 21 Sep 2026. *90 seconds
+              after a bench set and 20 after a curl is one trainer, not two
+              preferences* and *every app that made rest a single global number
+              made it a number people turn off* are the argument for building
+              it this way, addressed to a reviewer — and this dialog is opened
+              mid-session by somebody who wants to press a number. What is left
+              is the one line that tells them what they are about to change. */}
           <p style={{ margin: 0 }}>
-            Per exercise, not per trainer. 90 seconds after a bench set and 20 after a curl is one
-            trainer, not two preferences — and every app that made rest a single global number made
-            it a number people turn off.
+            Rest is set per exercise, so changing it here changes it for{' '}
+            <b className="ink">{name.toLowerCase()}</b> and nothing else.
           </p>
           <div className="wk" style={{ marginTop: 14 }}>
             {REST_CHOICES.map((s) => (
-              <button
-                className="chip"
-                type="button"
+              <Chip
+                pressed={seconds === s}
                 key={s}
-                aria-pressed={seconds === s}
                 onClick={() => onPick(s)}
               >
                 {s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`}
-              </button>
+              </Chip>
             ))}
           </div>
           <p className="small" style={{ marginTop: 10 }}>
-            It is saved on her program row, so it is there next Tuesday too.
+            It is saved on the program row, so it is there next Tuesday too.
           </p>
         </div>
         <div className="modal__foot">
-          <button className="btn btn--ghost" type="button" onClick={onClose}>Cancel</button>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
         </div>
       </div>
     </>

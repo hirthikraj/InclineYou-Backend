@@ -1520,7 +1520,7 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
  * `unmarked`, `no-program` and `log` are deliberately absent. Their verbs are
  * *Mark*, *Assign* and *Close*: the trainer's own housekeeping, which nobody
  * outside this account ever finds out about. Messaging Meera on Monday does not
- * mark her Tuesday session done, so demoting the row that says so would be the
+ * mark their Tuesday session done, so demoting the row that says so would be the
  * cooldown reaching into work it has nothing to do with.
  *
  * `milestone` IS here. Its verb is *Wish*, which sends — and a well-done landing

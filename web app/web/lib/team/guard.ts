@@ -15,10 +15,18 @@ import {
 } from './api';
 
 export type TeamResult =
-  | { ok: true; data: TeamData }
+  | { ok: true; data: TeamData; now: number }
   | { ok: false; kind: 'unreachable' }
   | { ok: false; kind: 'refused'; status: number };
 
+/**
+ * The clock is read HERE and not in the page, which is the rule
+ * `app/(main)/schedule/page.tsx` writes out in full: a page component is subject
+ * to React's purity rule, so `Date.now()` in one is a value that can change
+ * between a render and its replay. The clock belongs to the REQUEST, and the
+ * guard is what the request is. `Team`'s invitation cards print "expires in N
+ * days" off it.
+ */
 export async function requireTeam(): Promise<TeamResult> {
   if (!(await getToken())) redirect('/sign-in');
 
@@ -31,8 +39,8 @@ export async function requireTeam(): Promise<TeamResult> {
     if (!team) {
       return {
         ok: true,
+        now: Date.now(),
         data: {
-          now: Date.now(),
           team: null,
           members: [],
           invitations,
@@ -56,8 +64,8 @@ export async function requireTeam(): Promise<TeamResult> {
 
     return {
       ok: true,
+      now: Date.now(),
       data: {
-        now: Date.now(),
         team,
         members,
         invitations,

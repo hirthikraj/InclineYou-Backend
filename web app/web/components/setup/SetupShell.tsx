@@ -8,7 +8,7 @@ import type { SetupState, SetupStep } from '@/lib/setup/steps';
  * product wants read before anything is asked. This is a RAIL beside a form,
  * and the rail is working — it is the progress indicator and the record of the
  * answers, which is why the left half here does not disappear on a narrow
- * window the way `.authwrap__l` does. Losing the brand plate costs a sentence;
+ * window the way the sign-in plate's brand half once did. Losing the brand plate costs a sentence;
  * losing the rail costs the only thing telling a trainer where they are.
  */
 export function SetupShell({
@@ -22,7 +22,7 @@ export function SetupShell({
   children: React.ReactNode;
 }) {
   return (
-    <div className="app app--noshell" data-theme="dark">
+    <div className="app app--noshell">
       <div className="stp">
         {/* Keyed on the step so the rail's disclosure resets on the way out.
             Every step renders the same tree in the same slot, so React would

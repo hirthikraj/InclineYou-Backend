@@ -45,11 +45,41 @@ export interface ScheduleSession extends DeckSession {
   programName: string | null;
 }
 
+/**
+ * THE PART OF A SESSION THE BOOKING FORM READS, AND ONLY THAT PART.
+ *
+ * `BookPanel` asks two questions of the sessions around a slot — *who already
+ * trains at this hour* (`suggestClients`) and *what does this land on*
+ * (`collisionsAt`) — and both are answered from five fields. It took a whole
+ * `ScheduleSession[]` because the schedule was the only screen that opened it.
+ *
+ * Today opens the same panel now, from a deck whose sessions are `DeckSession`s:
+ * they have no `status`, no `packDelta`, no `programName`, and building those on
+ * Today would mean fetching rows for a form that never reads them. So the panel
+ * asks for the intersection instead. `ScheduleSession` extends `DeckSession`, so
+ * the schedule still passes its own rows unchanged.
+ */
+export type BookSession = Pick<
+  DeckSession, 'id' | 'clientId' | 'clientName' | 'at' | 'minutes' | 'dead'
+>;
+
 /** One roster row, with the four facts the booking form and the panel read. */
 export interface ScheduleClient {
   id: string;
   name: string;
   status: string;
+  /**
+   * The ROSTER relationship — `invited`, `active`, `paused`, `removed` — which
+   * is a different fact from `status` above and the one that matters here.
+   *
+   * FOUND BY RENDERING the week by client: `status` is the client record's own
+   * lifecycle and is only ever `active` or `archived`, so a paused client and a
+   * prospect who has never trained both arrived as `active` and both drew
+   * *Nothing booked* in warn, which is the exact conflation `buildWeekPivot`
+   * exists to avoid. It has been on `ClientResponse` all along — `lib/clients/`
+   * and `lib/business/` both read it — and this screen simply never declared it.
+   */
+  membership: string;
   mode: 'floor' | 'remote';
   /** What this client's sessions are, in minutes — `session_duration_minutes`,
    *  which has existed since schema V2 and which §01.2 found the design set had

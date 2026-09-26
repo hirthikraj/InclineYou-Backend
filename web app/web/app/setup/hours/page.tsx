@@ -3,7 +3,7 @@ import { SetupShell } from '@/components/setup/SetupShell';
 import { getHours } from '@/lib/setup/api';
 import { requireSetup } from '@/lib/setup/guard';
 
-export const metadata = { title: 'When you work · X REP' };
+export const metadata = { title: 'When you work · InclineYou' };
 
 /**
  * Frame 5c · step 6 of 8.
@@ -17,7 +17,7 @@ export default async function Page() {
   const stored = await getHours();
   return (
     <SetupShell current="hours" state={state}>
-      <HoursForm stored={stored} />
+      <HoursForm stored={stored} state={state} />
     </SetupShell>
   );
 }

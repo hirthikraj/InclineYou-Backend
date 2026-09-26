@@ -2,6 +2,7 @@ package com.inclineyou.inclineyou_backend.seed;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.inclineyou.inclineyou_backend.config.AppProperties;
+import com.inclineyou.inclineyou_backend.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -98,7 +99,16 @@ public class ExerciseSeeder implements ApplicationRunner {
             return;
         }
 
-        int written = upsert(seed);
+        // The global library belongs to no workspace, and since V21 no request
+        // may write it — only the SYSTEM actor. Declared here, and cleared in the
+        // same breath, so it cannot outlive the seed on this thread.
+        int written;
+        TenantContext.set(TenantContext.SYSTEM);
+        try {
+            written = upsert(seed);
+        } finally {
+            TenantContext.clear();
+        }
         long total = countSeeded();
         log.info("Exercise library seeded: {} rows changed, {} seeded exercises in total (text only — "
                 + "no media, pending a Gym visual licence)", written, total);

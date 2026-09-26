@@ -10,8 +10,9 @@ import { WORK_MODES, type WorkMode } from '@/lib/setup/options';
 import type { SetupState } from '@/lib/setup/steps';
 import { PackSheet, type PackFields } from './PackSheet';
 import { GroupLabel, StepHead } from './SetupShell';
-import { StepFoot } from './StepFoot';
+import { StepFoot, skipHomeAction } from './StepFoot';
 import { useStepAction } from './useStepAction';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * Frame 5d · `/setup/packs` — step 7, the price before the pipe.
@@ -182,15 +183,14 @@ export function PacksForm({ state, packs }: { state: SetupState; packs: Pack[] }
               onCancel={() => panel(null)}
             />
           ) : (
-            <button
-              className="btn btn--secondary"
-              type="button"
+            <Button
+              variant="secondary"
               style={{ marginTop: 12 }}
               onClick={() => panel('trainer')}
             >
               <IconPlus size={14} />
               {mine.length === 0 ? 'Add a pack' : 'Add another'}
-            </button>
+            </Button>
           )}
           {pressed && needsOwnPacks ? (
             <p className="fld__e" style={{ marginTop: 10, maxWidth: '64ch' }}>
@@ -244,15 +244,14 @@ export function PacksForm({ state, packs }: { state: SetupState; packs: Pack[] }
                   onCancel={() => panel(null)}
                 />
               ) : (
-                <button
-                  className="btn btn--secondary"
-                  type="button"
+                <Button
+                  variant="secondary"
                   style={{ marginTop: 12 }}
                   onClick={() => panel('gym')}
                 >
                   <IconPlus size={14} />
                   {theirs.length === 0 ? `Add a ${gym} package` : 'Add another'}
-                </button>
+                </Button>
               )}
               {pressed && needsGymPacks ? (
                 <p className="fld__e" style={{ marginTop: 10, maxWidth: '64ch' }}>
@@ -283,6 +282,7 @@ export function PacksForm({ state, packs }: { state: SetupState; packs: Pack[] }
         pending={pending}
         onContinue={submit}
         onSkip={() => run(() => skipStep('packs'))}
+        onSkipHome={skipHomeAction(state, run)}
       />
     </>
   );
@@ -343,14 +343,14 @@ function PackTable({
               {perSession(pack) != null ? rupees(perSession(pack)!) : '—'}
             </td>
             <td style={{ textAlign: 'right' }}>
-              <button
-                className="btn btn--sm btn--ghost"
-                type="button"
+              <Button
+                variant="ghost"
+                size="sm"
                 disabled={pending}
                 onClick={() => onRemove(pack.id)}
               >
                 Remove
-              </button>
+              </Button>
             </td>
           </tr>
         ))}

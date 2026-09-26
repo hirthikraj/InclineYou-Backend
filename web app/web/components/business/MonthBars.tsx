@@ -15,7 +15,7 @@ import type { ReportMonth } from '@/lib/business/report';
  *
  * A month in progress beside eleven whole ones reads as a collapse. It takes the
  * accent and a *so far* in its title, and `wholeMonthAverage` leaves it out —
- * the same call `computeTrend` makes on the ledger, for the same reason: an
+ * the same call `computeTrend` makes on Payments, for the same reason: an
  * average dragged down by the 2nd lies for four weeks.
  *
  * ── ONE THING IT DOES THAT THE TWO OLDER CHARTS DO NOT ──────────────────────
@@ -28,6 +28,43 @@ import type { ReportMonth } from '@/lib/business/report';
  * `GstTab` both do exactly that and are both half a column out. They are not
  * touched here: a pass about this tab does not get to restyle two others, and it
  * is recorded in AGENTS.md instead.
+ *
+ * -- THE GEOMETRY IS A PROPORTION, SO THE PLOT TAKES THE ROOM IT IS GIVEN -----
+ *
+ * Every offset used to be a PIXEL derived from `height`, which pinned the plot
+ * at 150 however much room the card had. `.rptgrid` is two tracks of unequal
+ * natural height, so the revenue chart sat in a card 90-130px shorter than *The
+ * year in figures* beside it at every desktop width and the row ended in dead
+ * canvas. Stretching the card without this change would only have moved the hole
+ * indoors: a 150px plot floating in a 260px body.
+ *
+ * So `height` is a FLOOR now and the plot is `100%` of whatever it lands in,
+ * with every bar, gridline and the average rule stated as a fraction of one
+ * `calc(100% - PLOT_INSET)`. Two consequences worth knowing:
+ *
+ * - a bar's floor is `max(3px, ...)` in CSS rather than `Math.max` in JS,
+ *   because the number it is a fraction OF is not known until layout. Same
+ *   floor, same reason: a real but tiny month must not render as nothing.
+ * - in a parent with no height of its own, `height:100%` resolves to `auto`, and
+ *   every bar is absolutely positioned, so the content height is zero and
+ *   `minHeight` is what holds the box open. A caller that does not stretch
+ *   therefore draws exactly what it drew before.
+ *
+ * -- AND A MONTH BEFORE THE FIRST ONE ON THE BOOKS IS NOT A ZERO --------------
+ *
+ * Twelve columns is deliberate: a year is the shortest window that can show a
+ * trainer their own seasonality. But a practice six months old spends three
+ * quarters of that window on months it did not exist for, and every one of them
+ * printed an em-dash in the same ink as a real figure -- 9 of 12 on two of these
+ * three charts, measured. An em-dash reads as MISSING, which on a chart is a
+ * claim that something failed to load.
+ *
+ * Months before the first one carrying any data print nothing at all. A zero
+ * INSIDE the trading period still prints one, because that zero is a fact the
+ * trainer should see. Only the printed LABEL changes: every bar keeps the
+ * caller's own `title`, so the exact figure for an empty month is still one
+ * hover away and no reader is told less than before. Two emptinesses, told apart -- the rule `LedgerTab`'s own
+ * table already follows for "nothing billed" against "nothing matches".
  */
 export function MonthBars({
   months,
@@ -55,26 +92,39 @@ export function MonthBars({
   const max = Math.max(...values, 1);
   const n = months.length;
 
+  /* 22 for the axis strip, 16 of headroom for the value printed above the
+     tallest bar. Everything below is a fraction of what is left. */
   const FLOOR = 22;
-  const CEILING = height - FLOOR - 16;
+  const PLOT = `(100% - ${FLOOR + 16}px)`;
 
-  const heightOf = (v: number) => (v > 0 ? Math.max(3, Math.round((v / max) * CEILING)) : 0);
-  const avgOffset = average !== null && average > 0 ? FLOOR + heightOf(average) : null;
+  /** A bar as a share of the plot — `max()` in CSS, because the plot's height
+   *  is not known until layout. Zero returns zero: no bar, no floor. */
+  const barHeight = (v: number) =>
+    v > 0 ? `max(3px, calc(${PLOT} * ${(v / max).toFixed(4)}))` : '0px';
+  const above = (frac: number) => `calc(${FLOOR}px + ${PLOT} * ${frac.toFixed(4)})`;
+
+  const avgFrac = average !== null && average > 0 ? Math.min(average / max, 1) : null;
+
+  /* The first month with anything in it. Everything before it is a month this
+     practice did not trade in, which is not the same statement as a zero — see
+     the docstring. `-1` when the whole year is empty, which correctly makes
+     every column pre-history rather than twelve em-dashes on a blank chart. */
+  const firstWithData = values.findIndex((v) => v > 0);
 
   return (
-    <div className="chart" style={{ height }}>
+    <div className="chart" style={{ minHeight: height, height: '100%' }}>
       <i className="chart__g" style={{ bottom: FLOOR }} />
-      <i className="chart__g" style={{ bottom: FLOOR + CEILING / 2 }} />
-      <i className="chart__g" style={{ bottom: FLOOR + CEILING }} />
+      <i className="chart__g" style={{ bottom: above(0.5) }} />
+      <i className="chart__g" style={{ bottom: above(1) }} />
 
-      {avgOffset !== null && avgOffset < height && (
+      {avgFrac !== null && (
         <i
           aria-hidden="true"
           style={{
             position: 'absolute',
             left: 12,
             right: 12,
-            bottom: avgOffset,
+            bottom: above(avgFrac),
             height: 0,
             borderTop: '1px dashed var(--tx-accent)',
             opacity: 0.55,
@@ -90,12 +140,27 @@ export function MonthBars({
             left: `calc(${(i / n) * 100}% + 16px)`,
             width: `calc(${(1 / n) * 100}% - 6px)`,
             bottom: FLOOR,
-            height: heightOf(values[i] ?? 0),
+            height: barHeight(values[i] ?? 0),
             ...(tone === 'quiet' && !m.isCurrent ? { background: 'var(--tx-ink-off)' } : {}),
           }}
+          /* The caller's own sentence on every month, including the empty
+             ones. A pre-history override was tried and was WRONG on the clients
+             chart: its `+2` captions show people joining in months this series
+             has no bar for, because the series is "trained at least once" and
+             joining is not training. The caller knows which question it asked;
+             this component does not. */
           title={title(m, values[i] ?? 0)}
         >
-          <b>{(values[i] ?? 0) > 0 ? format(values[i]) : '—'}</b>
+          {/* Nothing before the practice's first recorded month; an em-dash for
+              a zero inside it. See the docstring — the two are different facts
+              and only one of them is the trainer's to act on. */}
+          <b>
+            {(values[i] ?? 0) > 0
+              ? format(values[i])
+              : firstWithData !== -1 && i > firstWithData
+                ? '—'
+                : ''}
+          </b>
         </i>
       ))}
 

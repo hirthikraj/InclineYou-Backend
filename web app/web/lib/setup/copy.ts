@@ -31,7 +31,7 @@ export const RAIL_FOOT =
 /** Frame 4a's trust line. */
 export const PREFLIGHT_TRUST_LEAD = 'You can leave at any point.';
 export const PREFLIGHT_TRUST_REST =
-  'Each answer is saved to your account as you give it, not held here until the end — so a closed tab costs you nothing, and the only question we cannot skip is your name.';
+  'Each answer is saved to your account as you give it, not held here until the end — so a closed tab costs you nothing, and step 1 is the only one we cannot skip.';
 
 /**
  * Frame 4b's trust line — the one the frame gets most wrong, and the one whose

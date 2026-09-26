@@ -6,6 +6,8 @@ import { useTransition } from 'react';
 import { abandonPending } from '@/lib/auth/actions';
 import { IconUser } from './Icons';
 import { TrustLine } from './TrustLine';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
 
 /**
  * §08 · 7e — a client with nobody.
@@ -74,8 +76,8 @@ export function Unattached({
         and the fix is on somebody else’s phone.
       </p>
 
-      <div className="card" style={{ marginTop: 20 }}>
-        <div className="card__b" style={{ display: 'flex', alignItems: 'flex-start', gap: 13 }}>
+      <Card style={{ marginTop: 20 }}>
+        <Card.Body style={{ display: 'flex', alignItems: 'flex-start', gap: 13 }}>
           {/* The glyph the phone uses on this card. It sits beside a heading that
               already says what it means, so it is aria-hidden like every other. */}
           <span
@@ -108,8 +110,8 @@ export function Unattached({
               it.
             </p>
           </span>
-        </div>
-      </div>
+        </Card.Body>
+      </Card>
 
       {/*
         The phone adds one line the design does not, and it is worth keeping: it
@@ -120,15 +122,15 @@ export function Unattached({
         Signing in again costs one more code. Your number stays yours either way.
       </p>
 
-      <button
-        className="btn btn--secondary btn--lg"
-        type="button"
+      <Button
+        variant="secondary"
+        size="lg"
         style={{ marginTop: 12 }}
         onClick={differentNumber}
         disabled={pending}
       >
         {pending ? 'Starting again…' : 'Use a different number'}
-      </button>
+      </Button>
 
       <TrustLine>
         There is no <b>I’m a trainer</b> on this screen, and that is deliberate: this number’s

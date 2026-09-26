@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.report;
 
+import com.inclineyou.inclineyou_backend.assessment.MetricReadings;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.EmptyResultDataAccessException;
@@ -19,6 +20,7 @@ import java.util.UUID;
 public class ReportService {
 
     private final NamedParameterJdbcTemplate jdbc;
+    private final MetricReadings metricReadings;
 
     private static final DateTimeFormatter DATE_FMT  = DateTimeFormatter.ofPattern("d MMM yyyy");
     private static final DateTimeFormatter SESS_FMT  = DateTimeFormatter.ofPattern("EEEE, d MMM · h:mm a");
@@ -56,16 +58,11 @@ public class ReportService {
         long scheduled = toLong(sessionStats.get("scheduled_count"));
         String adherence = scheduled > 0 ? Math.round(done * 100.0 / scheduled) + "%" : "—";
 
-        // Latest body weight
-        String latestWeight = null;
-        try {
-            var w = jdbc.queryForMap("""
-                    SELECT value, unit FROM body_metric
-                    WHERE client_id = :cid::uuid AND metric_type = 'weight' AND deleted_at IS NULL
-                    ORDER BY recorded_at DESC LIMIT 1
-                    """, Map.of("cid", clientId.toString()));
-            latestWeight = w.get("value") + " " + (w.get("unit") != null ? w.get("unit") : "kg");
-        } catch (EmptyResultDataAccessException ignored) {}
+        // Latest body weight — from the last assessment that took one (V22)
+        String latestWeight = metricReadings.latest(clientId, "weight", 1).stream()
+                .findFirst()
+                .map(w -> w.value().stripTrailingZeros().toPlainString() + " " + w.unit())
+                .orElse(null);
 
         // Top 5 PRs
         List<Map<String, Object>> prs = jdbc.queryForList("""

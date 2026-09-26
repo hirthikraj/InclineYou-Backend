@@ -1,5 +1,7 @@
 package com.inclineyou.inclineyou_backend.team;
 
+import com.inclineyou.inclineyou_backend.assessment.MetricReadings;
+import com.inclineyou.inclineyou_backend.notification.TrainerNotificationService;
 import com.inclineyou.inclineyou_backend.push.PushService;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -46,8 +48,10 @@ import java.util.*;
 public class TeamClientService {
 
     private final NamedParameterJdbcTemplate jdbc;
+    private final MetricReadings metricReadings;
     private final TeamScope scope;
     private final PushService push;
+    private final TrainerNotificationService bell;
 
     /* ------------------------------------------------------------------ DTOs */
 
@@ -389,14 +393,6 @@ public class TeamClientService {
                   AND scheduled_at >= NOW()
                 """, ids);
 
-        // Measurements belong to the person, not to a coach. Stamped so they
-        // reach the new coach's phone, where the whole point is being able to
-        // see the trend they are inheriting.
-        jdbc.update("""
-                UPDATE body_metric SET updated_at = :now
-                WHERE client_id = :cid::uuid AND deleted_at IS NULL
-                """, ids);
-
         jdbc.update("""
                 INSERT INTO client_assignment
                     (id, client_id, team_id, from_trainer_id, to_trainer_id,
@@ -420,6 +416,16 @@ public class TeamClientService {
 
         log.info("team {} reassigned client {} from={} to={} action={} by={}",
                 teamId, clientId, from, to, action, actorId);
+
+        /* V15 · THE BELL ROW, for the coach who LOST the client — "Meera moved
+           to Arun" answers the question they have on seeing it, *who did I
+           lose*. Only when somebody else made the move: the bell holds events
+           other people did, and an owner moving their own client already knows. */
+        if (!actorId.equals(from)) {
+            String toName = jdbc.queryForObject("SELECT name FROM trainer WHERE id = :id::uuid",
+                    Map.of("id", to.toString()), String.class);
+            bell.mint(from, "team", clientId, null, null, toName);
+        }
 
         notify(to, "New client assigned",
                 clientName + " is now yours. Their training history came with them.");
@@ -498,20 +504,10 @@ public class TeamClientService {
                 .toList();
     }
 
+    /** The twelve newest readings, out of this client's assessments (V22). */
     private List<MetricRow> recentMetrics(UUID clientId) {
-        return jdbc.queryForList("""
-                SELECT metric_type, value, unit, recorded_at
-                FROM body_metric
-                WHERE client_id = :cid::uuid AND deleted_at IS NULL
-                ORDER BY recorded_at DESC
-                LIMIT 12
-                """, Map.of("cid", clientId.toString()))
-                .stream()
-                .map(r -> new MetricRow(
-                        (String) r.get("metric_type"),
-                        (BigDecimal) r.get("value"),
-                        (String) r.get("unit"),
-                        millis(r.get("recorded_at"))))
+        return metricReadings.latest(clientId, null, 12).stream()
+                .map(m -> new MetricRow(m.metricType(), m.value(), m.unit(), m.recordedAt().toEpochMilli()))
                 .toList();
     }
 

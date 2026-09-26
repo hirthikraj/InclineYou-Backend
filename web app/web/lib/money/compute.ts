@@ -537,7 +537,7 @@ export function computeWriteOffs(
  * Not money owed and not money collected — **the value of coaching already sold
  * and not yet delivered**. A trainer with ₹40,000 of sessions on the books and
  * an empty ledger week is in a different position from one with neither, and
- * until now this screen could not tell them apart: *Billed* is history, *Owed* is
+ * until now this screen could not tell them apart: *Billed* is history, *Pending* is
  * a debt, and the work standing between a paid-up client and their last session
  * appeared nowhere.
  *
@@ -622,12 +622,12 @@ export function computeUpcoming(packages: MoneyPackage[]): UpcomingStats {
  * date-range picker, a second series or a trend line, and every one of those
  * turns a glance into a reading.
  *
- * ── IT DATES BY WHEN THE MONEY ARRIVED, WHICH IS THE OPPOSITE OF THE LEDGER ──
+ * ── IT DATES BY WHEN THE MONEY ARRIVED, WHICH IS THE OPPOSITE OF PAYMENTS ──
  *
  * `computeLedger` windows on `createdAt`, deliberately, and `GET /v1/payments`
  * does the same: a month's BILLING is what was raised that month, and dating by
  * settlement would move an invoice into whichever month it was paid in and drop
- * every unpaid one — which is the figure *still owed* is made of.
+ * every unpaid one — which is the figure *still pending* is made of.
  *
  * This chart asks the other question. "Is my income going up" is about money
  * that ARRIVED, so a bar is `paidAt`, falling back to `createdAt` for the rows

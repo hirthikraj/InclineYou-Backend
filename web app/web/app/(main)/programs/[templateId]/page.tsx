@@ -20,10 +20,21 @@ export async function generateMetadata({
 }) {
   const { templateId } = await params;
   const result = await requireBuilder(templateId);
-  return { title: result.ok ? `${result.data.template.name} · X REP` : 'Programs · X REP' };
+  return { title: result.ok ? `${result.data.template.name} · InclineYou` : 'Fitness · InclineYou' };
 }
 
-export default async function Page({ params }: { params: Promise<{ templateId: string }> }) {
+/* NO `searchParams`, AND `?copied=1` IS GONE WITH IT.
+   The certified copy used to land here carrying that flag so the builder could
+   seed a `.pg__flash` band from it — a round trip through the URL that existed
+   only because a confirm raised on the shelf could not survive the navigation
+   to this screen. The toast deck is mounted in the app shell, above the
+   router's children, so it does; `CertifiedCard` raises the card and pushes,
+   and nothing has to be read back out of the query string here. */
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ templateId: string }>;
+}) {
   const { templateId } = await params;
   const result = await requireBuilder(templateId);
 
@@ -45,6 +56,8 @@ export default async function Page({ params }: { params: Promise<{ templateId: s
     <Programs
       data={{ templates: result.data.templates, names: result.data.names }}
       open={result.data}
+      /* See the sibling route, and `Guarded<T>` for why it is the guard's. */
+      now={result.now}
     />
   );
 }

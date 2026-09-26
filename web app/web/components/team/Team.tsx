@@ -29,6 +29,15 @@ import {
 import { TopBar } from '@/components/shell/TopBar';
 import { Glyph, Plus, Team as TeamIcon, Users } from '@/components/shell/Icons';
 import { rupees } from '@/lib/today/time';
+import { useToast } from '@/lib/toast/store';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
+import { Chip } from '@/web-components/ui/Chip';
+import { PageHeader } from '@/web-components/ui/PageHeader';
+import { Table, Row } from '@/web-components/ui/Table';
+import { EmptyState } from '@/web-components/ui/EmptyState';
+import { Message } from '@/web-components/ui/Message';
+import { Avatar } from '@/web-components/ui/Avatar';
 
 /* ────────────────────────────────────────────────── small icons ── */
 
@@ -72,6 +81,17 @@ function Copy({ size = 14 }: { size?: number }) {
 function Arrow({ size = 14 }: { size?: number }) {
   return <Glyph size={size} d="M5 12h14M13 5l7 7-7 7" />;
 }
+/* The glyph the product's other form-level errors carry. This screen drew its
+   errors as bare red text under a class of its own; see `ui/Message.tsx`. */
+function Warn({ size = 15 }: { size?: number }) {
+  return (
+    <Glyph size={size}>
+      <path d="M12 3l9 16H3l9-16z" />
+      <path d="M12 9v5" />
+      <path d="M12 17h.01" />
+    </Glyph>
+  );
+}
 function ChevronDown({ size = 13 }: { size?: number }) {
   return <Glyph size={size} d="M6 9l6 6 6-6" />;
 }
@@ -106,30 +126,24 @@ function roleBadge(role: string) {
   );
 }
 
-function avatarColor(name: string): string {
-  if (!name) return 'var(--tx-av-1)';
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return `var(--tx-av-${(h % 12) + 1})`;
-}
+/* `avatarColor` and a local `Avatar` used to live here. Both are gone.
 
-function Avatar({ name, size = 32 }: { name: string | null | undefined; size?: number }) {
-  const safe = name ?? '';
-  const initials = safe
-    .split(' ')
-    .slice(0, 2)
-    .map((p) => p[0]?.toUpperCase() ?? '')
-    .join('') || '?';
-  return (
-    <span
-      className={`av${size <= 24 ? ' av--sm' : size >= 48 ? ' av--lg' : ''}`}
-      style={{ background: avatarColor(safe), color: '#fff', flexShrink: 0 }}
-      aria-hidden="true"
-    >
-      {initials}
-    </span>
-  );
-}
+   The colour was a third hash — `avatarToken` in `lib/today/time.ts` keys off
+   the client id, `avatarTint` in `lib/setup/options.ts` took the modulo inside
+   the loop, and this one hashed the NAME with `>>> 0`. Three functions, three
+   answers, and the visible cost was on line ~1200 of this file: a client in a
+   coach's roster was drawn from their name here and from `row.id` on the
+   clients screen, so the same person was two different colours depending on
+   which screen you were looking at. That is precisely what `avatarToken`'s own
+   comment says the rule exists to prevent.
+
+   The initials differed too — this one took the first letter of the first two
+   words, `ui/Avatar` takes first + last — so a three-part name read `MK` here
+   and `MI` everywhere else.
+
+   Passing the trainer id (or the client id) rather than the name is what makes
+   a coach one colour in the member list, in their roster header, in the
+   templates table and in the revenue table. */
 
 function relDate(ms: number): string {
   const diff = Date.now() - ms;
@@ -177,17 +191,17 @@ function NoTeam({ invitations, now }: { invitations: InvitationResponse[]; now: 
 
   return (
     <>
-      <TopBar crumb="Team" onSearch={() => {}} />
-      <div className="body">
-        <div className="ph">
-          <div className="ph__row">
-            <div>
-              <h1 className="ph__t">Team</h1>
-              <p className="ph__sub">Coach together, grow together</p>
-            </div>
-          </div>
-        </div>
+      <TopBar crumb="Team" />
+      {/* The dashboard's shape, and this branch needs it for the same reason:
+          `.ph` is the frame's pinned row and `.body` is the scrolling one. */}
+      <main className="main" id="main-content">
+        <PageHeader
+          title="Team"
+          sub="Coach together, grow together"
+          className="ph--named"
+        />
 
+        <div className="body">
         {invitations.length > 0 && (
           <section aria-label="Pending invitations">
             <h2 className="section-label">Pending invitations</h2>
@@ -200,54 +214,41 @@ function NoTeam({ invitations, now }: { invitations: InvitationResponse[]; now: 
         )}
 
         {!showCreate ? (
-          <div className="empty" style={{ minHeight: '40vh' }}>
-            <div className="empty__ic">
-              <TeamIcon />
-            </div>
-            <p className="empty__t">No team yet</p>
-            <p className="empty__b">
-              Create a team to coach clients together with other trainers, share programs, and
-              track revenue as a group.
-            </p>
-            <button
-              type="button"
-              className="btn btn--primary btn--lg"
+          <EmptyState
+            icon={<><TeamIcon /></>}
+            title="No team yet"
+            body="Create a team to coach clients together with other trainers, share programs, and track revenue as a group."
+            action={<><Button
+              variant="primary"
+              size="lg"
               onClick={() => setShowCreate(true)}
             >
               <Plus size={16} /> Create a team
-            </button>
-          </div>
+            </Button></>}
+            style={{ minHeight: '40vh' }}
+          />
         ) : (
-          <div className="card team-create-card">
-            <div className="card__hd">
-              <span className="card__t">Create your team</span>
-              <div className="card__acts">
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--sm"
+          <Card
+            title="Create your team"
+            actions={<><Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setShowCreate(false)}
                 >
                   Cancel
-                </button>
-              </div>
-            </div>
-            <div className="card__b">
-              <CreateTeamForm onDone={() => setShowCreate(false)} />
-            </div>
-          </div>
+                </Button></>}
+            className="team-create-card"
+          >
+            <CreateTeamForm onDone={() => setShowCreate(false)} />
+          </Card>
         )}
-      </div>
+        </div>
+      </main>
     </>
   );
 }
 
-function InvitationCard({
-  invitation: inv,
-  now,
-}: {
-  invitation: InvitationResponse;
-  now: number;
-}) {
+function InvitationCard({ invitation: inv, now }: { invitation: InvitationResponse; now: number }) {
   const [accepting, startAccept] = useTransition();
   const [declining, startDecline] = useTransition();
   const [error, setError] = useState<string | undefined>();
@@ -265,10 +266,13 @@ function InvitationCard({
     });
   };
 
+  /* `now` is the SERVER's instant, threaded from the page, not `Date.now()`.
+     Reading the clock during render is impure — the same render can produce a
+     different figure on a re-render — and this one is printed in a sentence. */
   const daysLeft = Math.max(0, Math.ceil((inv.expiresAt - now) / 86_400_000));
 
   return (
-    <div className="card inv-card">
+    <Card bare className="inv-card">
       <div className="inv-card__body">
         <span className="inv-card__icon">
           <Mail size={20} />
@@ -283,26 +287,26 @@ function InvitationCard({
           )}
         </div>
         <div className="inv-card__acts">
-          <button
-            type="button"
-            className="btn btn--primary btn--sm"
+          <Button
+            variant="primary"
+            size="sm"
             onClick={handleAccept}
             disabled={accepting || declining}
           >
             {accepting ? 'Joining…' : 'Accept'}
-          </button>
-          <button
-            type="button"
-            className="btn btn--secondary btn--sm"
+          </Button>
+          <Button
+            variant="secondary"
+            size="sm"
             onClick={handleDecline}
             disabled={accepting || declining}
           >
             {declining ? 'Declining…' : 'Decline'}
-          </button>
+          </Button>
         </div>
       </div>
-      {error && <p className="form-err" role="alert">{error}</p>}
-    </div>
+      {error && <Message tone="err" icon={<Warn size={15} />} alert>{error}</Message>}
+    </Card>
   );
 }
 
@@ -331,15 +335,16 @@ function CreateTeamForm({ onDone }: { onDone: () => void }) {
           autoFocus
         />
       </div>
-      {state.error && <p className="form-err" role="alert">{state.error}</p>}
+      {state.error && <Message tone="err" icon={<Warn size={15} />} alert>{state.error}</Message>}
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-        <button
+        <Button
+          variant="primary"
+          size="lg"
           type="submit"
-          className="btn btn--primary btn--lg"
           disabled={pending}
         >
           {pending ? 'Creating…' : 'Create team'}
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -376,9 +381,23 @@ function TeamDashboard(props: Props & { team: TeamResponse }) {
 
   return (
     <>
-      <TopBar crumb="Team" onSearch={() => {}} />
-      <div className="body">
-        <div className="ph">
+      {/* The crumb is the SECTION and the heading is this team's name, so the
+          bar's phone title is stated rather than derived — *Team* over a screen
+          that opens with *Iron Yard Coaching* names the shelf, not the book. */}
+      <TopBar crumb="Team" title={team.name} />
+      {/* `main.main` + `.ph` + `.body`, WHICH IS THE SHAPE EVERY OTHER SCREEN
+          HAS. This one rendered `.body` as its root with the `.ph` INSIDE it,
+          and the two consequences were both measured on a phone: `.ph` scrolled
+          away with the panel — top 58 → −243 — so the team's name and its whole
+          tab strip left the screen, on the only screen in the app where that
+          happened; and with no `<main>` at all the skip link had no target and
+          `.body` auto-placed into the grid rather than taking the `main` area,
+          which is where the stray 12px above the header came from (y=58 against
+          every peer's y=46). `.main` is `overflow:hidden` and `.body` is the
+          `overflow-y:auto` child, so the header is pinned by the frame rather
+          than by a `position:sticky` this file would have had to invent. */}
+      <main className="main" id="main-content">
+        <div className="ph ph--named">
           <div className="ph__row">
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
               {team.logoUrl ? (
@@ -426,6 +445,7 @@ function TeamDashboard(props: Props & { team: TeamResponse }) {
           </div>
         </div>
 
+        <div className="body">
         <div role="tabpanel" aria-labelledby={`tab-${tab}`} className="team-panel">
           {tab === 'overview' && (
             <OverviewTab team={team} members={members} isOwner={isOwner} />
@@ -451,7 +471,8 @@ function TeamDashboard(props: Props & { team: TeamResponse }) {
             <RevenueTab team={team} />
           )}
         </div>
-      </div>
+        </div>
+      </main>
     </>
   );
 }
@@ -519,13 +540,13 @@ function OverviewTab({
             <span className="card__t">Team details</span>
             {isOwner && (
               <div className="card__acts">
-                <button
-                  type="button"
-                  className="btn btn--ghost btn--sm"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setEditing((p) => !p)}
                 >
                   {editing ? 'Cancel' : 'Edit'}
-                </button>
+                </Button>
               </div>
             )}
           </div>
@@ -555,91 +576,91 @@ function OverviewTab({
         </div>
 
         {/* Member roster preview */}
-        <div className="card">
-          <div className="card__hd">
-            <span className="card__t">Members</span>
-          </div>
-          <div className="card__b card__b--flush">
-            <ul className="member-list">
-              {active.map((m) => (
-                <li key={m.id} className="member-row">
-                  <Avatar name={m.name} size={32} />
-                  <div className="member-row__info">
-                    <strong>{m.name}</strong>
-                    <span className="member-row__meta">
-                      {m.clientCount} client{m.clientCount !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-                  {roleBadge(m.role)}
-                </li>
-              ))}
-              {pending.map((m) => (
-                <li key={m.id} className="member-row member-row--pending">
-                  <span className="av av--pending" aria-hidden="true">
-                    <Mail size={14} />
+        <Card
+          title="Members"
+          flush
+        >
+          <ul className="member-list">
+            {active.map((m) => (
+              <li key={m.id} className="member-row">
+                <Avatar name={m.name} id={m.trainerId ?? undefined} />
+                <div className="member-row__info">
+                  <strong>{m.name}</strong>
+                  <span className="member-row__meta">
+                    {m.clientCount} client{m.clientCount !== 1 ? 's' : ''}
                   </span>
-                  <div className="member-row__info">
-                    <strong>{m.name || m.phone}</strong>
-                    <span className="member-row__meta">Invite pending</span>
-                  </div>
-                  <span className="badge badge--pending">Pending</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
+                </div>
+                {roleBadge(m.role)}
+              </li>
+            ))}
+            {pending.map((m) => (
+              <li key={m.id} className="member-row member-row--pending">
+                <span className="av av--pending" aria-hidden="true">
+                  <Mail size={14} />
+                </span>
+                <div className="member-row__info">
+                  <strong>{m.name || m.phone}</strong>
+                  <span className="member-row__meta">Invite pending</span>
+                </div>
+                <span className="badge badge--pending">Pending</span>
+              </li>
+            ))}
+          </ul>
+        </Card>
       </div>
 
       {/* Danger zone — owner only */}
       {isOwner && (
-        <div className="card card--danger-zone" style={{ marginTop: 0 }}>
-          <div className="card__hd">
-            <span className="card__t" style={{ color: 'var(--tx-danger)' }}>
-              Danger zone
-            </span>
-          </div>
-          <div className="card__b">
-            {!confirmDelete ? (
-              <div className="danger-row">
-                <div>
-                  <strong>Delete team</strong>
-                  <p className="micro">Soft-deletes the team and all memberships. Cannot be undone.</p>
-                </div>
-                <button
-                  type="button"
-                  className="btn btn--danger btn--sm"
-                  onClick={() => setConfirmDelete(true)}
-                >
-                  Delete team
-                </button>
-              </div>
-            ) : (
+        /* `card--danger`, a real §04 variant. This said `card--danger-zone`,
+           which was defined in no stylesheet at all — so the card drew like
+           every other card and the only thing marking the irreversible action
+           was the inline colour on the title, which is a component's job done
+           by a style attribute. */
+        <Card
+          title="Danger zone"
+          tone="danger"
+          style={{ marginTop: 0 }}
+        >
+          {!confirmDelete ? (
+            <div className="danger-row">
               <div>
-                <p style={{ marginBottom: 12, fontSize: 13.5 }}>
-                  Are you sure? This will end the team for all {team.activeMembers} members.
-                </p>
-                {deleteError && <p className="form-err" role="alert">{deleteError}</p>}
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <button
-                    type="button"
-                    className="btn btn--danger btn--sm"
-                    onClick={handleDelete}
-                    disabled={deleting}
-                  >
-                    {deleting ? 'Deleting…' : 'Yes, delete'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn--ghost btn--sm"
-                    onClick={() => setConfirmDelete(false)}
-                  >
-                    Cancel
-                  </button>
-                </div>
+                <strong>Delete team</strong>
+                <p className="micro">Soft-deletes the team and all memberships. Cannot be undone.</p>
               </div>
-            )}
-          </div>
-        </div>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={() => setConfirmDelete(true)}
+              >
+                Delete team
+              </Button>
+            </div>
+          ) : (
+            <div>
+              <p style={{ marginBottom: 12, fontSize: 13.5 }}>
+                Are you sure? This will end the team for all {team.activeMembers} members.
+              </p>
+              {deleteError && <Message tone="err" icon={<Warn size={15} />} alert>{deleteError}</Message>}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Button
+                  variant="danger"
+                  size="sm"
+                  onClick={handleDelete}
+                  disabled={deleting}
+                >
+                  {deleting ? 'Deleting…' : 'Yes, delete'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setConfirmDelete(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+        </Card>
       )}
     </div>
   );
@@ -684,11 +705,11 @@ function EditTeamForm({
           placeholder="https://…"
         />
       </div>
-      {state.error && <p className="form-err" role="alert">{state.error}</p>}
+      {state.error && <Message tone="err" icon={<Warn size={15} />} alert>{state.error}</Message>}
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-        <button type="submit" className="btn btn--primary btn--sm" disabled={pending}>
+        <Button variant="primary" size="sm" type="submit" disabled={pending}>
           {pending ? 'Saving…' : 'Save'}
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -722,13 +743,12 @@ function MembersTab({
       {isAdminOrOwner && (
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           {!showInvite && canSeat && (
-            <button
-              type="button"
-              className="btn btn--primary"
+            <Button
+              variant="primary"
               onClick={() => { setShowInvite(true); setInviteResult(null); }}
             >
               <Plus size={15} /> Invite coach
-            </button>
+            </Button>
           )}
           {!canSeat && (
             <p className="micro" style={{ color: 'var(--tx-warn)' }}>
@@ -739,81 +759,72 @@ function MembersTab({
       )}
 
       {showInvite && (
-        <div className="card">
-          <div className="card__hd">
-            <span className="card__t">Invite a coach</span>
-            <div className="card__acts">
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
+        <Card
+          title="Invite a coach"
+          actions={<><Button
+                variant="ghost"
+                size="sm"
                 onClick={() => { setShowInvite(false); setInviteResult(null); }}
               >
                 Cancel
-              </button>
-            </div>
-          </div>
-          <div className="card__b">
-            {inviteResult ? (
-              <InviteSent
-                whatsappUrl={inviteResult.whatsappUrl}
-                message={inviteResult.message}
-                onDone={() => { setShowInvite(false); setInviteResult(null); }}
-              />
-            ) : (
-              <InviteForm
-                onSent={(r) => setInviteResult(r)}
-              />
-            )}
-          </div>
-        </div>
+              </Button></>}
+        >
+          {inviteResult ? (
+            <InviteSent
+              whatsappUrl={inviteResult.whatsappUrl}
+              message={inviteResult.message}
+              onDone={() => { setShowInvite(false); setInviteResult(null); }}
+            />
+          ) : (
+            <InviteForm
+              onSent={(r) => setInviteResult(r)}
+            />
+          )}
+        </Card>
       )}
 
       {active.length > 0 && (
-        <div className="card">
-          <div className="card__hd">
-            <span className="card__t">Active members</span>
-          </div>
-          <div className="card__b card__b--flush">
-            <ul className="member-list">
-              {active.map((m) => (
-                <MemberRow
-                  key={m.id}
-                  member={m}
-                  isAdminOrOwner={isAdminOrOwner}
-                  isOwner={isOwner}
-                  teamOwnerTrainerId={team.ownerTrainerId}
-                />
-              ))}
-            </ul>
-          </div>
-        </div>
+        <Card
+          title="Active members"
+          flush
+        >
+          <ul className="member-list">
+            {active.map((m) => (
+              <MemberRow
+                key={m.id}
+                member={m}
+                isAdminOrOwner={isAdminOrOwner}
+                isOwner={isOwner}
+                teamOwnerTrainerId={team.ownerTrainerId}
+              />
+            ))}
+          </ul>
+        </Card>
       )}
 
       {pending.length > 0 && (
-        <div className="card">
-          <div className="card__hd">
-            <span className="card__t">Pending invitations</span>
-          </div>
-          <div className="card__b card__b--flush">
-            <ul className="member-list">
-              {pending.map((m) => (
-                <PendingMemberRow
-                  key={m.id}
-                  member={m}
-                  isAdminOrOwner={isAdminOrOwner}
-                />
-              ))}
-            </ul>
-          </div>
-        </div>
+        <Card
+          title="Pending invitations"
+          flush
+        >
+          <ul className="member-list">
+            {pending.map((m) => (
+              <PendingMemberRow
+                key={m.id}
+                member={m}
+                isAdminOrOwner={isAdminOrOwner}
+              />
+            ))}
+          </ul>
+        </Card>
       )}
 
       {active.length === 0 && pending.length === 0 && (
-        <div className="empty">
-          <div className="empty__ic"><Users /></div>
-          <p className="empty__t">No members yet</p>
-          <p className="empty__b">Invite coaches to join your team.</p>
-        </div>
+        <EmptyState
+          icon={<><Users /></>}
+          title="No members yet"
+          body="Invite coaches to join your team."
+        />
       )}
     </div>
   );
@@ -852,10 +863,10 @@ function InviteForm({
           They will receive a WhatsApp invite from you.
         </p>
       </div>
-      {state.error && <p className="form-err" role="alert">{state.error}</p>}
-      <button type="submit" className="btn btn--primary btn--lg" disabled={pending}>
+      {state.error && <Message tone="err" icon={<Warn size={15} />} alert>{state.error}</Message>}
+      <Button variant="primary" size="lg" type="submit" disabled={pending}>
         {pending ? 'Sending…' : 'Send invite'}
-      </button>
+      </Button>
     </form>
   );
 }
@@ -898,18 +909,19 @@ function InviteSent({
       )}
       <div style={{ display: 'flex', gap: 8 }}>
         {whatsappUrl && (
-          <a
+          <Button
             href={whatsappUrl}
+            variant="primary"
+            size="sm"
             target="_blank"
             rel="noopener noreferrer"
-            className="btn btn--primary btn--sm"
           >
             Open WhatsApp
-          </a>
+          </Button>
         )}
-        <button type="button" className="btn btn--secondary btn--sm" onClick={onDone}>
+        <Button variant="secondary" size="sm" onClick={onDone}>
           Done
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -969,7 +981,7 @@ function MemberRow({
 
   return (
     <li className={`member-row${busy ? ' member-row--busy' : ''}`}>
-      <Avatar name={m.name} size={32} />
+      <Avatar name={m.name} id={m.trainerId ?? undefined} />
       <div className="member-row__info">
         <strong>{m.name}</strong>
         <span className="member-row__meta">
@@ -977,9 +989,9 @@ function MemberRow({
           {m.joinedAt && ` · joined ${relDate(m.joinedAt)}`}
         </span>
         {err && (
-          <span className="form-err" style={{ display: 'block', marginTop: 2 }} role="alert">
+          <Message tone="err" icon={<Warn size={15} />} alert style={{ marginTop: 2 }}>
             {err}
-          </span>
+          </Message>
         )}
       </div>
       {confirmRemove ? (
@@ -987,37 +999,38 @@ function MemberRow({
           <span style={{ fontSize: 12.5, color: 'var(--tx-ink-2)', whiteSpace: 'nowrap' }}>
             Remove {m.name.split(' ')[0]}?
           </span>
-          <button
-            type="button"
-            className="btn btn--danger btn--sm"
+          <Button
+            variant="danger"
+            size="sm"
             onClick={handleRemove}
             disabled={busy}
           >
             {busy ? 'Removing…' : 'Remove'}
-          </button>
-          <button
-            type="button"
-            className="btn btn--ghost btn--sm"
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setConfirmRemove(false)}
           >
             Cancel
-          </button>
+          </Button>
         </div>
       ) : (
         <>
           {roleBadge(m.role)}
           {canEdit && (
             <div ref={menuRef} style={{ position: 'relative' }}>
-              <button
-                type="button"
-                className="btn btn--ghost btn--icon btn--sm"
-                aria-label="Member actions"
+              <Button
+                variant="ghost"
+                size="sm"
+                iconOnly
+                label="Member actions"
                 aria-expanded={menuOpen}
                 aria-haspopup="menu"
                 onClick={() => setMenuOpen((p) => !p)}
-              >
-                <ChevronDown size={14} />
-              </button>
+                title={undefined}
+                icon={<ChevronDown size={14} />}
+              />
               {menuOpen && (
                 <ul className="drop-menu" role="menu">
                   {m.role !== 'admin' && isAdminOrOwner && (
@@ -1079,20 +1092,20 @@ function PendingMemberRow({
         <span className="member-row__meta">
           Invite sent{m.invitedAt ? ` ${relDate(m.invitedAt)}` : ''}
         </span>
-        {err && <span className="form-err" style={{ display: 'block', marginTop: 2 }}>{err}</span>}
+        {err && <Message tone="err" icon={<Warn size={15} />} style={{ marginTop: 2 }}>{err}</Message>}
       </div>
       <span className="badge badge--pending">Pending</span>
       {isAdminOrOwner && (
-        <button
-          type="button"
-          className="btn btn--ghost btn--icon btn--sm"
-          aria-label="Revoke invite"
+        <Button
+          variant="ghost"
+          size="sm"
+          iconOnly
+          label="Revoke invite"
           onClick={handleRevoke}
           disabled={busy}
           title="Revoke invite"
-        >
-          <X size={14} />
-        </button>
+          icon={<X size={14} />}
+        />
       )}
     </li>
   );
@@ -1118,11 +1131,11 @@ function ClientsTab({
 
   if (totalClients === 0) {
     return (
-      <div className="empty">
-        <div className="empty__ic"><Users /></div>
-        <p className="empty__t">No team clients</p>
-        <p className="empty__b">Clients will appear here as coaches add them.</p>
-      </div>
+      <EmptyState
+        icon={<><Users /></>}
+        title="No team clients"
+        body="Clients will appear here as coaches add them."
+      />
     );
   }
 
@@ -1133,36 +1146,31 @@ function ClientsTab({
       </p>
 
       {reassigning && (
-        <div className="card">
-          <div className="card__hd">
-            <span className="card__t">Reassign {reassigning.name}</span>
-            <div className="card__acts">
-              <button type="button" className="btn btn--ghost btn--sm" onClick={() => setReassigning(null)}>
+        <Card
+          title={<>Reassign {reassigning.name}</>}
+          actions={<><Button variant="ghost" size="sm" onClick={() => setReassigning(null)}>
                 Cancel
-              </button>
-            </div>
-          </div>
-          <div className="card__b">
-            <ReassignForm
-              client={reassigning}
-              members={members.filter((m) => m.status === 'active' && m.trainerId !== reassigning.coachTrainerId)}
-              onDone={() => setReassigning(null)}
-            />
-          </div>
-        </div>
+              </Button></>}
+        >
+          <ReassignForm
+            client={reassigning}
+            members={members.filter((m) => m.status === 'active' && m.trainerId !== reassigning.coachTrainerId)}
+            onDone={() => setReassigning(null)}
+          />
+        </Card>
       )}
 
       {clients.map((group) => {
         const expanded = expandedCoach === group.trainerId;
         return (
-          <div key={group.trainerId} className="card">
+          <Card key={group.trainerId}>
             <button
               type="button"
               className="card__hd card__hd--btn"
               aria-expanded={expanded}
               onClick={() => setExpandedCoach(expanded ? null : group.trainerId)}
             >
-              <Avatar name={group.coachName} size={32} />
+              <Avatar name={group.coachName} id={group.trainerId} />
               <div style={{ flex: 1, textAlign: 'left' }}>
                 <span className="card__t">{group.coachName}</span>
                 <span className="micro" style={{ color: 'var(--tx-ink-3)', marginLeft: 8 }}>
@@ -1177,53 +1185,66 @@ function ClientsTab({
               </span>
             </button>
             {expanded && (
-              <div className="card__b card__b--flush">
-                <table className="tbl" style={{ width: '100%' }}>
-                  <thead>
-                    <tr>
-                      <th>Client</th>
-                      <th>Status</th>
-                      <th className="tbl-col--hide-mobile">Program</th>
-                      <th className="tbl-col--hide-mobile num">Last session</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.clients.map((c) => (
-                      <tr key={c.id}>
-                        <td>
-                          <div className="who">
-                            <Avatar name={c.name} size={24} />
-                            <b>{c.name}</b>
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`chip chip--sm${c.status === 'active' ? ' chip--active-status' : ''}`}>
-                            {c.status}
-                          </span>
-                        </td>
-                        <td className="tbl-col--hide-mobile" style={{ color: c.hasActiveProgram ? 'var(--tx-ink-2)' : 'var(--tx-ink-3)' }}>
-                          {c.hasActiveProgram ? '● Active' : '○ None'}
-                        </td>
-                        <td className="tbl-col--hide-mobile num" style={{ color: 'var(--tx-ink-3)' }}>
-                          {c.lastSessionAt ? relDate(c.lastSessionAt) : '—'}
-                        </td>
-                        <td>
-                          <button
-                            type="button"
-                            className="btn btn--ghost btn--sm"
-                            onClick={() => setReassigning(c)}
-                          >
-                            <Arrow size={13} /> Reassign
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Card.Body flush>
+                <Table
+                  caption={`${group.coachName}'s clients`}
+                  columns={[
+                    { key: 'client', label: 'Client' },
+                    { key: 'status', label: 'Status' },
+                    { key: 'program', label: 'Program', className: 'tbl-col--hide-mobile' },
+                    { key: 'last', label: 'Last session', numeric: true, className: 'tbl-col--hide-mobile' },
+                    { key: 'act', label: '' },
+                  ]}
+                >
+                  {group.clients.map((c) => (
+                    <Row
+                      key={c.id}
+                      cells={[
+                        {
+                          key: 'client',
+                          content: (
+                            <div className="who">
+                              <Avatar name={c.name} id={c.id} size="sm" />
+                              <b>{c.name}</b>
+                            </div>
+                          ),
+                        },
+                        {
+                          key: 'status',
+                          content: (
+                            <span className={`chip chip--sm${c.status === 'active' ? ' chip--active-status' : ''}`}>
+                              {c.status}
+                            </span>
+                          ),
+                        },
+                        {
+                          key: 'program',
+                          className: 'tbl-col--hide-mobile',
+                          style: { color: c.hasActiveProgram ? 'var(--tx-ink-2)' : 'var(--tx-ink-3)' },
+                          content: c.hasActiveProgram ? '● Active' : '○ None',
+                        },
+                        {
+                          key: 'last',
+                          className: 'tbl-col--hide-mobile',
+                          numeric: true,
+                          style: { color: 'var(--tx-ink-3)' },
+                          content: c.lastSessionAt ? relDate(c.lastSessionAt) : '—',
+                        },
+                        {
+                          key: 'act',
+                          content: (
+                            <Button variant="ghost" size="sm" onClick={() => setReassigning(c)}>
+                              <Arrow size={13} /> Reassign
+                            </Button>
+                          ),
+                        },
+                      ]}
+                    />
+                  ))}
+                </Table>
+              </Card.Body>
             )}
-          </div>
+          </Card>
         );
       })}
     </div>
@@ -1289,11 +1310,11 @@ function ReassignForm({
           maxLength={500}
         />
       </div>
-      {err && <p className="form-err" role="alert">{err}</p>}
+      {err && <Message tone="err" icon={<Warn size={15} />} alert>{err}</Message>}
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
-        <button type="submit" className="btn btn--primary btn--sm" disabled={busy}>
+        <Button variant="primary" size="sm" type="submit" disabled={busy}>
           {busy ? 'Moving…' : 'Reassign'}
-        </button>
+        </Button>
       </div>
     </form>
   );
@@ -1306,6 +1327,7 @@ function LibraryTab({ templates }: { templates: TeamTemplateRow[] }) {
   const [err, setErr] = useState<string | undefined>();
   const [search, setSearch] = useState('');
   const [, startCopy] = useTransition();
+  const { show } = useToast();
 
   const filtered = templates.filter(
     (t) =>
@@ -1320,7 +1342,25 @@ function LibraryTab({ templates }: { templates: TeamTemplateRow[] }) {
     startCopy(async () => {
       const r = await copyTemplate(id);
       if (r.error) setErr(r.error);
-      else setErr(undefined);
+      else {
+        setErr(undefined);
+        /* THE COPY LANDS ON ANOTHER SCREEN. It goes onto the trainer's own
+           shelf under `/programs`, and this row — a teammate's template — is
+           unchanged by it, so there is nothing here for the write to be
+           answered on. Before this the button simply stopped saying *Copying…*
+           and a trainer had no way to tell a copy from a click that missed. */
+        const row = templates.find(t => t.id === id);
+        show({
+          tone: 'ok',
+          title: <>Copied to your programs</>,
+          body: (
+            <>
+              {row?.name ?? 'The template'}
+              {row?.ownerName ? <> &mdash; {row.ownerName}&rsquo;s copy is untouched.</> : null}
+            </>
+          ),
+        });
+      }
       setCopying(null);
     });
   };
@@ -1330,7 +1370,7 @@ function LibraryTab({ templates }: { templates: TeamTemplateRow[] }) {
       <div className="empty">
         <div className="empty__ic"><Dumbbell /></div>
         <p className="empty__t">No shared templates</p>
-        <p className="empty__b">Team members’ program templates appear here once they join.</p>
+        <p className="empty__b">Team members&rsquo; program templates appear here once they join.</p>
       </div>
     );
   }
@@ -1347,59 +1387,70 @@ function LibraryTab({ templates }: { templates: TeamTemplateRow[] }) {
           aria-label="Search templates"
         />
       </div>
-      {err && <p className="form-err" role="alert">{err}</p>}
+      {err && <Message tone="err" icon={<Warn size={15} />} alert>{err}</Message>}
       {filtered.length === 0 ? (
-        <p className="micro" style={{ color: 'var(--tx-ink-3)' }}>No results for “{search}”</p>
+        <p className="micro" style={{ color: 'var(--tx-ink-3)' }}>No results for &ldquo;{search}&rdquo;</p>
       ) : (
-        <div className="card">
-          <div className="card__b card__b--flush">
-            <table className="tbl" style={{ width: '100%' }}>
-              <thead>
-                <tr>
-                  <th>Template</th>
-                  <th className="tbl-col--hide-mobile">Goal</th>
-                  <th className="num">Days</th>
-                  <th>Owner</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((t) => (
-                  <tr key={t.id}>
-                    <td>
-                      <span className="strong">{t.name}</span>
-                      {t.mine && <span className="chip chip--sm" style={{ marginLeft: 6 }}>Mine</span>}
-                    </td>
-                    <td className="tbl-col--hide-mobile" style={{ color: 'var(--tx-ink-3)' }}>
-                      {t.goal ?? '—'}
-                    </td>
-                    <td className="num">{t.dayCount}</td>
-                    <td>
+        <Card flush>
+          <Table
+            caption="Program templates shared with the team"
+            columns={[
+              { key: 'template', label: 'Template' },
+              { key: 'goal', label: 'Goal', className: 'tbl-col--hide-mobile' },
+              { key: 'days', label: 'Days', numeric: true },
+              { key: 'owner', label: 'Owner' },
+              { key: 'act', label: '' },
+            ]}
+          >
+            {filtered.map((t) => (
+              <Row
+                key={t.id}
+                cells={[
+                  {
+                    key: 'template',
+                    content: (
+                      <>
+                        <span className="strong">{t.name}</span>
+                        {t.mine && <Chip className="chip--sm" style={{ marginLeft: 6 }}>Mine</Chip>}
+                      </>
+                    ),
+                  },
+                  {
+                    key: 'goal',
+                    className: 'tbl-col--hide-mobile',
+                    style: { color: 'var(--tx-ink-3)' },
+                    content: t.goal ?? '—',
+                  },
+                  { key: 'days', content: t.dayCount, numeric: true },
+                  {
+                    key: 'owner',
+                    content: (
                       <div className="who">
-                        <Avatar name={t.ownerName} size={20} />
+                        <Avatar name={t.ownerName ?? ''} id={t.ownerTrainerId} size="sm" />
                         <span>{t.ownerName}</span>
                       </div>
-                    </td>
-                    <td>
-                      {!t.mine && (
-                        <button
-                          type="button"
-                          className="btn btn--secondary btn--sm"
-                          onClick={() => handleCopy(t.id)}
-                          disabled={copying === t.id}
-                          title="Copy to my library"
-                        >
-                          <Copy size={13} />
-                          {copying === t.id ? ' Copying…' : ' Copy'}
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                    ),
+                  },
+                  {
+                    key: 'act',
+                    content: !t.mine && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => handleCopy(t.id)}
+                        disabled={copying === t.id}
+                        title="Copy to my library"
+                      >
+                        <Copy size={13} />
+                        {copying === t.id ? ' Copying…' : ' Copy'}
+                      </Button>
+                    ),
+                  },
+                ]}
+              />
+            ))}
+          </Table>
+        </Card>
       )}
     </div>
   );
@@ -1410,11 +1461,11 @@ function LibraryTab({ templates }: { templates: TeamTemplateRow[] }) {
 function ActivityTab({ rows }: { rows: ActivityRow[] }) {
   if (rows.length === 0) {
     return (
-      <div className="empty">
-        <div className="empty__ic"><TeamIcon /></div>
-        <p className="empty__t">No activity yet</p>
-        <p className="empty__b">Plan edits and reassignments made by admins will appear here.</p>
-      </div>
+      <EmptyState
+        icon={<><TeamIcon /></>}
+        title="No activity yet"
+        body="Plan edits and reassignments made by admins will appear here."
+      />
     );
   }
 
@@ -1427,31 +1478,29 @@ function ActivityTab({ rows }: { rows: ActivityRow[] }) {
   };
 
   return (
-    <div className="card">
-      <div className="card__b card__b--flush">
-        <ul className="activity-list">
-          {rows.map((r) => (
-            <li key={r.id} className="activity-row">
-              <Avatar name={r.adminName} size={28} />
-              <div className="activity-row__body">
-                <p className="activity-row__text">
-                  <strong>{r.adminName}</strong>{' '}
-                  <span style={{ color: 'var(--tx-ink-3)' }}>
-                    {ACTION_LABELS[r.action] ?? r.action}
-                  </span>{' '}
-                  {r.detail && <em style={{ color: 'var(--tx-ink-2)' }}>{r.detail}</em>}{' '}
-                  on <strong>{r.clientName}</strong>
-                  {r.coachName && ` (coach: ${r.coachName})`}
-                </p>
-                <time className="micro" style={{ color: 'var(--tx-ink-3)' }}>
-                  {relDate(r.at)}
-                </time>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
+    <Card flush>
+      <ul className="activity-list">
+        {rows.map((r) => (
+          <li key={r.id} className="activity-row">
+            <Avatar name={r.adminName} />
+            <div className="activity-row__body">
+              <p className="activity-row__text">
+                <strong>{r.adminName}</strong>{' '}
+                <span style={{ color: 'var(--tx-ink-3)' }}>
+                  {ACTION_LABELS[r.action] ?? r.action}
+                </span>{' '}
+                {r.detail && <em style={{ color: 'var(--tx-ink-2)' }}>{r.detail}</em>}{' '}
+                on <strong>{r.clientName}</strong>
+                {r.coachName && ` (coach: ${r.coachName})`}
+              </p>
+              <time className="micro" style={{ color: 'var(--tx-ink-3)' }}>
+                {relDate(r.at)}
+              </time>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }
 
@@ -1468,46 +1517,43 @@ function RevenueTab({ team: _team }: { team: TeamResponse }) {
 
   return (
     <div className="stack">
-      <div className="card">
-        <div className="card__hd">
-          <span className="card__t">Revenue report</span>
-          <span className="micro" style={{ marginLeft: 'auto' }}>Owner only</span>
-        </div>
-        <div className="card__b">
-          <form action={action}>
-            <div className="date-range-row">
-              <div className="fld" style={{ margin: 0 }}>
-                <label className="fld__h" htmlFor="rev-from">From</label>
-                <input
-                  id="rev-from"
-                  name="from"
-                  type="date"
-                  className="ctl"
-                  defaultValue={defaultFrom}
-                />
-              </div>
-              <div className="fld" style={{ margin: 0 }}>
-                <label className="fld__h" htmlFor="rev-to">To</label>
-                <input
-                  id="rev-to"
-                  name="to"
-                  type="date"
-                  className="ctl"
-                  defaultValue={defaultTo}
-                />
-              </div>
-              <button type="submit" className="btn btn--primary" disabled={pending}>
-                {pending ? 'Loading…' : 'Load'}
-              </button>
+      <Card
+        title="Revenue report"
+        aside={<><span className="micro" style={{ marginLeft: 'auto' }}>Owner only</span></>}
+      >
+        <form action={action}>
+          <div className="date-range-row">
+            <div className="fld" style={{ margin: 0 }}>
+              <label className="fld__h" htmlFor="rev-from">From</label>
+              <input
+                id="rev-from"
+                name="from"
+                type="date"
+                className="ctl"
+                defaultValue={defaultFrom}
+              />
             </div>
-            {state.error && (
-              <p className="form-err" style={{ marginTop: 12 }} role="alert">
-                {state.error}
-              </p>
-            )}
-          </form>
-        </div>
-      </div>
+            <div className="fld" style={{ margin: 0 }}>
+              <label className="fld__h" htmlFor="rev-to">To</label>
+              <input
+                id="rev-to"
+                name="to"
+                type="date"
+                className="ctl"
+                defaultValue={defaultTo}
+              />
+            </div>
+            <Button variant="primary" type="submit" disabled={pending}>
+              {pending ? 'Loading…' : 'Load'}
+            </Button>
+          </div>
+          {state.error && (
+            <Message tone="err" icon={<Warn size={15} />} alert style={{ marginTop: 12 }}>
+              {state.error}
+            </Message>
+          )}
+        </form>
+      </Card>
 
       {data && (
         <>
@@ -1520,7 +1566,7 @@ function RevenueTab({ team: _team }: { team: TeamResponse }) {
             <div className="stat">
               <div className="stat__k">GYM SHARE</div>
               <div className="stat__v">{toRs(data.teamGymShare)}</div>
-              <div className="stat__d">gym’s cut</div>
+              <div className="stat__d">gym&rsquo;s cut</div>
             </div>
             <div className="stat stat--acc">
               <div className="stat__k">NET</div>
@@ -1531,56 +1577,54 @@ function RevenueTab({ team: _team }: { team: TeamResponse }) {
             </div>
           </div>
 
-          <div className="card">
-            <div className="card__hd">
-              <span className="card__t">By coach</span>
-            </div>
-            <div className="card__b card__b--flush">
-              <table className="tbl" style={{ width: '100%' }}>
-                <thead>
-                  <tr>
-                    <th>Coach</th>
-                    <th className="num">Collected</th>
-                    <th className="num tbl-col--hide-mobile">Gym share</th>
-                    <th className="num tbl-col--hide-mobile">Payments</th>
-                    <th className="num">Clients</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.coaches.map((c) => (
-                    <tr key={c.trainerId}>
-                      <td>
-                        <div className="who">
-                          <Avatar name={c.coachName} size={24} />
-                          <b>{c.coachName}</b>
-                          <span style={{ marginLeft: 4 }}>{roleBadge(c.role)}</span>
-                        </div>
-                      </td>
-                      <td className="num strong">{toRs(c.collected)}</td>
-                      <td className="num tbl-col--hide-mobile" style={{ color: 'var(--tx-ink-3)' }}>
-                        {toRs(c.gymShare)}
-                      </td>
-                      <td className="num tbl-col--hide-mobile">{c.payments}</td>
-                      <td className="num">{c.payingClients}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr>
-                    <td><strong>Total</strong></td>
-                    <td className="num strong">{toRs(data.teamCollected)}</td>
-                    <td className="num tbl-col--hide-mobile strong">{toRs(data.teamGymShare)}</td>
-                    <td className="num tbl-col--hide-mobile strong">
-                      {data.coaches.reduce((s, c) => s + c.payments, 0)}
+          <Card
+            title="By coach"
+            flush
+          >
+            <table className="tbl" style={{ width: '100%' }}>
+              <thead>
+                <tr>
+                  <th>Coach</th>
+                  <th className="num">Collected</th>
+                  <th className="num tbl-col--hide-mobile">Gym share</th>
+                  <th className="num tbl-col--hide-mobile">Payments</th>
+                  <th className="num">Clients</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.coaches.map((c) => (
+                  <tr key={c.trainerId}>
+                    <td>
+                      <div className="who">
+                        <Avatar name={c.coachName} id={c.trainerId} size="sm" />
+                        <b>{c.coachName}</b>
+                        <span style={{ marginLeft: 4 }}>{roleBadge(c.role)}</span>
+                      </div>
                     </td>
-                    <td className="num strong">
-                      {data.coaches.reduce((s, c) => s + c.payingClients, 0)}
+                    <td className="num strong">{toRs(c.collected)}</td>
+                    <td className="num tbl-col--hide-mobile" style={{ color: 'var(--tx-ink-3)' }}>
+                      {toRs(c.gymShare)}
                     </td>
+                    <td className="num tbl-col--hide-mobile">{c.payments}</td>
+                    <td className="num">{c.payingClients}</td>
                   </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td><strong>Total</strong></td>
+                  <td className="num strong">{toRs(data.teamCollected)}</td>
+                  <td className="num tbl-col--hide-mobile strong">{toRs(data.teamGymShare)}</td>
+                  <td className="num tbl-col--hide-mobile strong">
+                    {data.coaches.reduce((s, c) => s + c.payments, 0)}
+                  </td>
+                  <td className="num strong">
+                    {data.coaches.reduce((s, c) => s + c.payingClients, 0)}
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </Card>
         </>
       )}
     </div>

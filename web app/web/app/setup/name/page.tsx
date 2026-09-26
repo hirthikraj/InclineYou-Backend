@@ -2,7 +2,7 @@ import { NameForm } from '@/components/setup/NameForm';
 import { SetupShell } from '@/components/setup/SetupShell';
 import { requireSetup } from '@/lib/setup/guard';
 
-export const metadata = { title: 'Your name · X REP' };
+export const metadata = { title: 'Your name · InclineYou' };
 
 /** Frame 5a · step 1 of 8. */
 export default async function Page() {

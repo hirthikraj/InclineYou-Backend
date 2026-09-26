@@ -98,6 +98,10 @@ public class SecurityConfig {
                         .requestMatchers("/v1/auth/membership/**").hasRole("INVITED")
                         .requestMatchers("/v1/auth/**", "/health").permitAll()
                         .requestMatchers("/v1/client/**").hasRole("CLIENT")
+                        // The client portal's REST surface (module 11). A client is
+                        // never a trainer, so nothing under /v1/me is reachable with
+                        // a trainer token, and the rule below never sees it.
+                        .requestMatchers("/v1/me", "/v1/me/**").hasRole("CLIENT")
                         .anyRequest().hasRole("TRAINER")
                 )
                 .exceptionHandling(ex -> ex

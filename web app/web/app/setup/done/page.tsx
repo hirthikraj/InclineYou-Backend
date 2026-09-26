@@ -2,7 +2,7 @@ import { AuthShell } from '@/components/auth/AuthShell';
 import { Done } from '@/components/setup/Done';
 import { requireFinished } from '@/lib/setup/guard';
 
-export const metadata = { title: 'You’re set up · X REP' };
+export const metadata = { title: 'You’re set up · InclineYou' };
 
 /**
  * Frame 6a · `/setup/done`.
@@ -19,7 +19,11 @@ export const metadata = { title: 'You’re set up · X REP' };
 export default async function Page() {
   const state = await requireFinished();
   return (
-    <AuthShell quote="No confetti. The celebration belongs to the first booking and the first payment.">
+    <AuthShell
+      eyebrow="Trainer console"
+      lead="Set up. Go coach."
+      quote="The first booking and the first payment are the things worth celebrating. Both are one screen away."
+    >
       <Done state={state} />
     </AuthShell>
   );

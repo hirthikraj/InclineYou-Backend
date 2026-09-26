@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InclineYou later schema</title>
+<style>
+:root{
+  --bg:#f6f7f9; --surface:#ffffff; --surface-2:#f1f3f6; --line:#e3e6eb;
+  --text:#1b1f24; --muted:#6b7380; --accent:#2f6fed; --accent-soft:#e8f0fe;
+  --pk:#b7791f; --pk-soft:#fdf3e1; --fk:#2f6fed; --fk-soft:#e8f0fe;
+  --ok:#2b8a57; --warn:#b54708; --bad:#c0281e; --code:#0f3d8a; --shadow:0 1px 2px rgba(16,24,40,.05),0 1px 3px rgba(16,24,40,.06);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0f1115; --surface:#171a20; --surface-2:#1e222a; --line:#2a2f38;
+    --text:#e6e8ec; --muted:#8b93a1; --accent:#6ea0ff; --accent-soft:#1c2a45;
+    --pk:#f0b35a; --pk-soft:#3a2c14; --fk:#6ea0ff; --fk-soft:#1c2a45;
+    --ok:#5cc990; --warn:#f39a5b; --bad:#ff8a80; --code:#a9c5ff; --shadow:none;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0f1115; --surface:#171a20; --surface-2:#1e222a; --line:#2a2f38;
+  --text:#e6e8ec; --muted:#8b93a1; --accent:#6ea0ff; --accent-soft:#1c2a45;
+  --pk:#f0b35a; --pk-soft:#3a2c14; --fk:#6ea0ff; --fk-soft:#1c2a45;
+  --ok:#5cc990; --warn:#f39a5b; --bad:#ff8a80; --code:#a9c5ff; --shadow:none;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth; scroll-padding-top:16px}
+body{margin:0; background:var(--bg); color:var(--text);
+  font:14px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+code{font:12.5px/1.4 ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace; color:var(--code)}
+a{color:var(--accent); text-decoration:none}
+a:hover{text-decoration:underline}
+.layout{display:grid; grid-template-columns:272px minmax(0,1fr); min-height:100vh}
+
+/* ---- sidebar ---- */
+.side{position:sticky; top:0; height:100vh; overflow:auto; background:var(--surface);
+  border-right:1px solid var(--line); padding:20px 14px 40px}
+.brand{font-weight:700; font-size:15px; margin:0 6px 2px}
+.brand-sub{color:var(--muted); font-size:12px; margin:0 6px 14px}
+.search{width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px;
+  background:var(--surface-2); color:var(--text); font:inherit; outline:none}
+.search:focus{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+.nav-group{margin-top:18px}
+.nav-group h4{margin:0 6px 6px; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted)}
+.nav a{display:flex; justify-content:space-between; gap:8px; padding:5px 8px; border-radius:6px;
+  color:var(--text); font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.nav a:hover{background:var(--surface-2); text-decoration:none}
+.nav a.active{background:var(--accent-soft); color:var(--accent)}
+.nav-group h4 .n{font-weight:500; letter-spacing:0}
+.nav a .n{color:var(--muted); font-size:11px}
+.nav-empty{display:none; color:var(--muted); font-size:12px; margin:14px 6px}
+.theme{margin-top:22px; display:flex; gap:4px; padding:0 6px}
+.theme button{flex:1; padding:5px; border:1px solid var(--line); background:var(--surface-2); color:var(--muted);
+  border-radius:6px; font:inherit; font-size:12px; cursor:pointer}
+.theme button[aria-pressed="true"]{color:var(--accent); border-color:var(--accent)}
+
+/* ---- main ---- */
+.main{padding:28px 36px 80px; max-width:1240px}
+.page-head h1{margin:0 0 4px; font-size:24px}
+.page-head p{margin:0; color:var(--muted)}
+.meta{display:flex; flex-wrap:wrap; gap:8px; margin-top:12px}
+.meta span{background:var(--surface); border:1px solid var(--line); border-radius:999px; padding:3px 10px; font-size:12px; color:var(--muted)}
+.meta b{color:var(--text)}
+.conv{margin:22px 0 8px; background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:4px 18px; box-shadow:var(--shadow)}
+.conv summary{cursor:pointer; padding:12px 0; font-weight:600}
+.conv dl{margin:0 0 14px; display:grid; grid-template-columns:140px 1fr; gap:8px 16px}
+.conv dt{font-weight:600; color:var(--muted); font-size:12.5px}
+.conv dd{margin:0}
+
+.tbl{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:22px 24px 10px;
+  margin-top:24px; box-shadow:var(--shadow)}
+.tbl:target{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+.tbl-head{display:flex; justify-content:space-between; align-items:flex-end; gap:16px; flex-wrap:wrap;
+  border-bottom:1px solid var(--line); padding-bottom:12px}
+.eyebrow{margin:0; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted)}
+.tbl h2{margin:2px 0 0; font:600 20px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.tbl h2 .anchor{color:var(--text)}
+.rls{margin-left:10px; vertical-align:middle; font:700 10px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.04em;
+  padding:3px 6px; border-radius:4px; color:var(--ok); background:color-mix(in srgb,var(--ok) 14%,transparent)}
+.stats{display:flex; gap:14px; color:var(--muted); font-size:12.5px}
+.stats b{color:var(--text)}
+.lede{margin:14px 0 4px; max-width:78ch}
+.tbl h3{margin:22px 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)}
+.scroll{overflow-x:auto}
+.grid{width:100%; border-collapse:collapse; font-size:13px}
+.grid th{text-align:left; font-weight:600; font-size:11.5px; color:var(--muted); background:var(--surface-2);
+  padding:7px 10px; border-bottom:1px solid var(--line); white-space:nowrap}
+.grid th:first-child{border-top-left-radius:8px} .grid th:last-child{border-top-right-radius:8px}
+.grid td{padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:top}
+.grid tbody tr:hover td{background:var(--surface-2)}
+.grid tbody tr:last-child td{border-bottom:0}
+.cols .col-name{white-space:nowrap; min-width:190px}
+.cols .col-name code{font-weight:600; color:var(--text)}
+.cols .col-type,.cols .col-null,.cols .col-default{white-space:nowrap}
+.cols .col-note{min-width:280px}
+.badges{display:flex; flex-wrap:wrap; gap:4px; align-items:center; margin-top:4px}
+.badge{font:700 10px/1 ui-sans-serif,system-ui,sans-serif; padding:3px 5px; border-radius:4px; letter-spacing:.03em}
+.badge--pk{color:var(--pk); background:var(--pk-soft)}
+.badge--fk{color:var(--fk); background:var(--fk-soft)}
+.fk-target{font-size:12px; color:var(--muted)}
+.notnull{color:var(--text); font-size:12px}
+.nullable{color:var(--muted); font-size:12px; font-style:italic}
+.muted{color:var(--muted)}
+.chips{display:flex; flex-wrap:wrap; gap:4px; margin-top:6px}
+.chip{font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; padding:1px 7px; border-radius:999px;
+  border:1px solid var(--line); background:var(--surface-2)}
+.tref{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-weight:600}
+.tref--pending{color:var(--muted); font-weight:500; border-bottom:1px dashed var(--line); cursor:help}
+.kind{font-size:11px; font-weight:600; padding:2px 7px; border-radius:999px; background:var(--surface-2); color:var(--muted)}
+.kind--primary{color:var(--pk); background:var(--pk-soft)}
+.kind--unique{color:var(--ok); background:color-mix(in srgb,var(--ok) 14%,transparent)}
+.more summary{list-style:none; cursor:pointer}
+.more summary::-webkit-details-marker{display:none}
+.more summary h3{display:inline-flex; align-items:center; gap:8px}
+.more summary h3::before{content:"▸"; transition:transform .15s}
+.more[open] summary h3::before{transform:rotate(90deg)}
+.count{background:var(--surface-2); border:1px solid var(--line); border-radius:999px; padding:0 7px; font-size:11px; color:var(--text)}
+.refs{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:6px}
+.ref{padding:3px 9px; border:1px solid var(--line); border-radius:999px; font-size:12.5px; background:var(--surface-2)}
+.ref-col{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; color:var(--muted); font-size:12px}
+.top{position:fixed; right:20px; bottom:20px; width:38px; height:38px; border-radius:50%; display:grid; place-items:center;
+  background:var(--surface); border:1px solid var(--line); box-shadow:var(--shadow); color:var(--text); font-size:16px}
+.top:hover{text-decoration:none; border-color:var(--accent)}
+
+/* ---- tabs ---- */
+.tabs{display:flex; gap:4px; margin:20px 0 4px; border-bottom:1px solid var(--line); flex-wrap:wrap}
+.tabs a{padding:9px 14px; border:1px solid transparent; border-bottom:0; border-radius:8px 8px 0 0; color:var(--muted);
+  font-weight:600; font-size:13.5px; margin-bottom:-1px}
+.tabs a:hover{text-decoration:none; color:var(--text)}
+.tabs a[aria-selected="true"]{color:var(--text); background:var(--surface); border-color:var(--line)}
+.tabs .n{font-weight:500; color:var(--muted); font-size:12px; margin-left:4px}
+.panel[hidden]{display:none}
+.panel-note{margin:14px 0 0; color:var(--muted); max-width:80ch}
+.rel{margin-left:8px; font:600 10.5px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.03em; text-transform:none;
+  padding:3px 7px; border-radius:999px; color:var(--warn); background:color-mix(in srgb,var(--warn) 13%,transparent)}
+.rel--inline{margin-left:0; white-space:nowrap}
+.held{margin:10px 0 0; font-size:12.5px; color:var(--muted); display:flex; flex-wrap:wrap; gap:6px; align-items:center}
+.held code{font-size:12px}
+.tbl--thin{padding-bottom:14px}
+.sev{font:700 10.5px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.04em; text-transform:uppercase; padding:4px 8px; border-radius:999px}
+.meta .sev{text-transform:none; letter-spacing:0; font-weight:500; font-size:12px; border:0}
+.sev--critical{color:#fff; background:#c0281e}
+.sev--high{color:var(--warn); background:color-mix(in srgb,var(--warn) 16%,transparent)}
+.sev--medium{color:var(--accent); background:var(--accent-soft)}
+.sev--low,.sev--info{color:var(--muted); background:var(--surface-2)}
+.area{margin:28px 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); display:flex; gap:8px; align-items:center}
+.findings{list-style:none; margin:0; padding:0; display:grid; gap:10px}
+.finding{background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:14px 18px; box-shadow:var(--shadow)}
+.finding:target{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+.finding__head{display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center}
+.finding__head b{flex:1 1 320px; font-size:14.5px}
+.finding p{margin:8px 0 0; max-width:88ch}
+.fid{color:var(--muted); font-size:11.5px}
+.fix span{font:700 10.5px/1 ui-sans-serif,system-ui,sans-serif; text-transform:uppercase; letter-spacing:.05em; color:var(--ok); margin-right:6px}
+.where code{font-size:11.5px; color:var(--muted)}
+.st{font:600 11px/1 ui-sans-serif,system-ui,sans-serif; padding:4px 8px; border-radius:999px; white-space:nowrap}
+.st--fixed{color:var(--ok); background:color-mix(in srgb,var(--ok) 14%,transparent)}
+.st--open{color:var(--muted); background:var(--surface-2)}
+
+
+/* ---- proposals ---- */
+.pbadge{display:inline-block; font:700 10px/1 ui-sans-serif,system-ui,sans-serif; letter-spacing:.03em; padding:3px 6px;
+  border-radius:4px; white-space:nowrap; vertical-align:middle; text-transform:none}
+a.pbadge:hover{text-decoration:none; filter:brightness(1.1)}
+.eyebrow .pbadge{margin-left:8px}
+.pbadge--add{color:var(--ok); background:color-mix(in srgb,var(--ok) 15%,transparent)}
+.pbadge--drop{color:var(--bad); background:color-mix(in srgb,var(--bad) 13%,transparent)}
+.pbadge--change{color:var(--warn); background:color-mix(in srgb,var(--warn) 14%,transparent)}
+.grid tr.pc td:first-child{box-shadow:inset 3px 0 0 var(--line)}
+.grid tr.pc--add td{background:color-mix(in srgb,var(--ok) 6%,transparent)}
+.grid tr.pc--add td:first-child{box-shadow:inset 3px 0 0 var(--ok)}
+.grid tr.pc--drop td{background:color-mix(in srgb,var(--bad) 5%,transparent)}
+.grid tr.pc--drop td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
+.grid tr.pc--drop td:first-child > code, .grid tr.pc--drop .col-type code{text-decoration:line-through; opacity:.65}
+.grid tr.pc--change td:first-child{box-shadow:inset 3px 0 0 var(--warn)}
+.preason,.pwas{margin-top:6px; font-size:12.5px; color:var(--muted)}
+.preason b,.pwas b{font:700 10px/1 ui-sans-serif,system-ui,sans-serif; text-transform:uppercase; letter-spacing:.05em; margin-right:6px}
+.preason b{color:var(--bad)} .pwas b{color:var(--warn)}
+.pwas-plain{margin-top:4px; font-size:12.5px; color:var(--muted)}
+.ref.pc--add{border-color:var(--ok)}
+.ref.pc--drop{text-decoration:line-through; opacity:.6}
+.ref .pbadge{margin-left:6px}
+.held code.pc--drop{text-decoration:line-through; opacity:.65}
+.tbl--proposed{border-style:dashed; border-color:color-mix(in srgb,var(--ok) 55%,var(--line))}
+.grid--narrow{width:auto; min-width:260px}
+.pdot{margin-left:6px; font:700 9.5px/1 ui-sans-serif,system-ui,sans-serif; padding:2px 4px; border-radius:3px}
+.pdot--add{color:var(--ok); background:color-mix(in srgb,var(--ok) 15%,transparent)}
+.pdot--change{color:var(--warn); background:color-mix(in srgb,var(--warn) 14%,transparent)}
+.prop{background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:18px 22px; margin-top:18px; box-shadow:var(--shadow)}
+.prop:target{border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft)}
+.prop__head{display:flex; flex-wrap:wrap; gap:8px 10px; align-items:center}
+.prop__head b{flex:1 1 320px; font-size:15.5px}
+.prop p{max-width:88ch}
+.prop h3{margin:20px 0 8px; font-size:13px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted)}
+.prop__finds{display:flex; flex-wrap:wrap; gap:6px; align-items:center}
+.prop__finds span{font:700 10.5px/1 ui-sans-serif,system-ui,sans-serif; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin-right:4px}
+.prop__finds .fid{border:1px solid var(--line); border-radius:999px; padding:1px 8px; background:var(--surface-2)}
+.prop__tables{margin:0; padding-left:18px; display:grid; gap:10px}
+.ops{list-style:none; margin:6px 0 0; padding:0; display:grid; gap:5px}
+.ops li{display:flex; flex-wrap:wrap; gap:6px; align-items:baseline; font-size:13px}
+.op-detail{color:var(--muted); min-width:0; overflow-wrap:anywhere}
+.fn{border:1px solid var(--line); border-radius:10px; padding:10px 14px; margin-top:8px; background:var(--surface-2)}
+.fn__head{display:flex; gap:8px; align-items:center}
+.fn p{margin:6px 0 0; font-size:13px}
+.fn summary{cursor:pointer; font-size:12.5px; color:var(--accent); margin-top:6px}
+.sql{margin:8px 0 0; padding:12px; overflow:auto; background:var(--surface); border:1px solid var(--line); border-radius:8px; max-width:100%}
+.sql code{font-size:12px; white-space:pre}
+.prop__list{margin:0; padding-left:18px; display:grid; gap:6px; font-size:13.5px}
+
+@media (max-width: 860px){
+  .layout{grid-template-columns:1fr}
+  .side{position:static; height:auto; border-right:0; border-bottom:1px solid var(--line); padding:16px}
+  .main{padding:18px 16px 60px}
+  .tbl{padding:16px 14px 6px}
+  .conv dl{grid-template-columns:1fr}
+  .main{min-width:0}
+  .tabs{flex-wrap:nowrap; overflow-x:auto; max-width:100%}
+  .tabs a{white-space:nowrap; padding:9px 12px}
+  .tabs .n{display:none}
+}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="side">
+    <p class="brand">InclineYou schema</p>
+    <p class="brand-sub">later · 18 tables</p>
+    <input id="q" class="search" type="search" placeholder="Filter tables…  ( / )" autocomplete="off">
+    <nav class="nav"><div class="nav-group" data-tab="v1"><h4>Deferred in review <span class="n">1</span></h4><a href="#t-deferred" data-name="deferred"><span>deferred</span><span class="n">·</span></a></div><div class="nav-group" data-tab="v1"><h4>Later columns on v1 tables <span class="n">8</span></h4><a href="#l-tenant_member" data-name="tenant_member"><span>tenant_member</span><span class="n">2</span></a><a href="#l-trainer" data-name="trainer"><span>trainer</span><span class="n">2</span></a><a href="#l-client" data-name="client"><span>client</span><span class="n">14</span></a><a href="#l-assessment" data-name="assessment"><span>assessment</span><span class="n">2</span></a><a href="#l-client_note" data-name="client_note"><span>client_note</span><span class="n">1</span></a><a href="#l-exercise" data-name="exercise"><span>exercise</span><span class="n">2</span></a><a href="#l-scheduled_session" data-name="scheduled_session"><span>scheduled_session</span><span class="n">5</span></a><a href="#l-payment" data-name="payment"><span>payment</span><span class="n">1</span></a></div><div class="nav-group" data-tab="v1"><h4>Team coaching <span class="n">3</span></h4><a href="#t-team" data-name="team"><span>team</span><span class="n">11</span></a><a href="#t-team_member" data-name="team_member"><span>team_member</span><span class="n">15</span></a><a href="#t-team_activity" data-name="team_activity"><span>team_activity</span><span class="n">11</span></a></div><div class="nav-group" data-tab="v1"><h4>Client portal <span class="n">6</span></h4><a href="#t-trainer_notification" data-name="trainer_notification"><span>trainer_notification</span><span class="n">12</span></a><a href="#t-client_message" data-name="client_message"><span>client_message</span><span class="n">11</span></a><a href="#t-milestone" data-name="milestone"><span>milestone</span><span class="n">9</span></a><a href="#t-workout_feedback" data-name="workout_feedback"><span>workout_feedback</span><span class="n">10</span></a><a href="#t-client_prefs" data-name="client_prefs"><span>client_prefs</span><span class="n">13</span></a><a href="#t-client_notification" data-name="client_notification"><span>client_notification</span><span class="n">12</span></a></div><div class="nav-group" data-tab="v1"><h4>Phone app &amp; offline <span class="n">5</span></h4><a href="#t-exercise_favourite" data-name="exercise_favourite"><span>exercise_favourite</span><span class="n">7</span></a><a href="#t-time_block" data-name="time_block"><span>time_block</span><span class="n">11</span></a><a href="#t-batch" data-name="batch"><span>batch</span><span class="n">9</span></a><a href="#t-nudge_rule" data-name="nudge_rule"><span>nudge_rule</span><span class="n">12</span></a><a href="#t-weekly_report" data-name="weekly_report"><span>weekly_report</span><span class="n">18</span></a></div><div class="nav-group" data-tab="v1"><h4>Gym platform &amp; workspaces <span class="n">3</span></h4><a href="#t-gym" data-name="gym"><span>gym</span><span class="n">8</span></a><a href="#t-gym_branch" data-name="gym_branch"><span>gym_branch</span><span class="n">8</span></a><a href="#t-tenant_member_terms" data-name="tenant_member_terms"><span>tenant_member_terms</span><span class="n">9</span></a></div><div class="nav-group" data-tab="v1"><h4>Money <span class="n">1</span></h4><a href="#t-invoice_counter" data-name="invoice_counter"><span>invoice_counter</span><span class="n">5</span></a></div></nav>
+    <p class="nav-empty">No table matches.</p>
+    <div class="theme"><button data-t="auto">Auto</button><button data-t="light">Light</button><button data-t="dark">Dark</button></div>
+  </aside>
+  <main class="main" id="top">
+    <header class="page-head">
+      <h1>Later schema</h1>
+      <p>Everything held back from v1: the tables no v1 screen reaches, the later-release columns on v1 tables, and what the v1 review deferred. The v1 migration builds <a href="proposed-schema.html">the agreed schema</a> only.</p>
+      <div class="meta"><span><b>18</b> tables</span><span><b>191</b> columns</span><span><b>29</b> later columns on v1 tables</span></div>
+<p class="muted" style="font-size:13px;margin:8px 0 0"><b>Copied as the current schema has them, not reviewed.</b> These sections predate the v1 review and still point at what it replaced — <code>workout_session</code>, <code>program_exercise</code>, <code>template</code>, <code>gym_settlement</code>, <code>client.payment_mode</code>. Each one is reviewed against the agreed schema before its release, the way the v1 tables were.</p>
+    </header>
+    <section class="panel" id="v1" data-panel="v1">
+      <details class="conv">
+        <summary>Conventions that hold on every table</summary>
+        <dl><dt>primary-key</dt><dd>Every table has <code>id uuid PRIMARY KEY DEFAULT gen_random_uuid()</code>. Ids are normally generated client-side (UUID v4); the default is a fallback.</dd><dt>ownership</dt><dd>Trainer-scoped tables carry <code>trainer_id</code> and every query filters on it, so a wrong id answers 404, not 403.</dd><dt>soft-delete</dt><dd><code>deleted_at</code> NULL means alive. Nothing is hard-deleted; every read filters <code>deleted_at IS NULL</code>. Log tables (<code>otp_request</code>, <code>client_assignment</code>, <code>team_activity</code>) have no <code>deleted_at</code> — a mistake is corrected by writing another row. Since V21 the request role holds no DELETE except on <code>attention_dismissal</code>, <code>web_session</code> and <code>otp_request</code>, and no UPDATE on the three logs.</dd><dt>erasure</dt><dd>Deleting an account is an erasure (P2), not a soft delete. <code>erase_account()</code> sets the personal columns of <code>app_user</code>, <code>trainer</code> and <code>client</code> to NULL under a CHECK that lists them, and deletes the trainer&#x27;s <code>trainer_business</code> row and each erased client&#x27;s <code>client_schedule</code> row with its slots, which are personal from end to end, so the rows stay as tombstones, and the phone number is released. It also deletes the person&#x27;s <code>web_session</code> rows and empties <code>billing_event.payload</code> on their subscription; <code>otp_request</code> rows age out on their own 30 days, never early, because a running lock is an abuse control. A trainer deleting one client is the same erasure at client scale: <code>erase_client(id)</code>, granted to the request role and refused unless the caller coaches that client, runs <code>erase_clients()</code> and writes an <code>erasure_log</code> row of kind <code>client</code>; the ledger stays as a nameless former client. <code>purge_tenant()</code> is the one hard delete: it empties a closed workspace once <code>purge_after</code> has passed. What survives is <code>erasure_log</code>, which holds counts only, and nameless amounts and dates in workspaces the person did not own.</dd><dt>updated-at</dt><dd><code>updated_at</code> is maintained by the <code>set_updated_at()</code> trigger on every table that has it, and is the sync cursor. Since V21 there is no exception: <code>working_hours</code>, <code>time_block</code> and <code>batch</code> used to take the device&#x27;s own value on sync push, which a wrong clock turned into an edit no other device ever pulled.</dd><dt>tenant-id</dt><dd><code>tenant_id</code> is the workspace a row belongs to. It is stamped on insert by <code>stamp_tenant_id()</code>, refused any change by <code>freeze_tenant_id()</code>, and row-level security filters on it.</dd><dt>money</dt><dd>Money is <code>numeric(10,2)</code>, percentages <code>numeric(5,2)</code>. <b>One currency per workspace</b>: <code>tenant.currency</code> (ISO 4217, default INR) is the only currency that workspace&#x27;s money rows may carry. Each one has a composite foreign key <code>(tenant_id, currency) → tenant(id, currency)</code>, so no <code>SUM</code> ever adds two currencies, and a workspace&#x27;s currency cannot change once a money row points at it. Only currencies with at most two decimal places are offered (<code>Currency.getDefaultFractionDigits() ≤ 2</code>, checked in code); the three-decimal Kuwaiti and Bahraini dinars and the Omani rial are refused rather than rounded. The one exception is <code>subscription</code>, whose price and currency come from its <code>plan_price</code> row — the price of the trainer&#x27;s billing region — not from a workspace.</dd><dt>phone</dt><dd>Every phone column is <b>E.164</b> (<code>+919841022119</code>), <code>varchar(16)</code>, under the same format CHECK: <code>+</code> and 7–15 digits, and a <code>+91</code> number must still be a ten-digit Indian mobile. One column, never a country code and a number split in two. Parsing, validation and display go through libphonenumber on the backend and the web; a number typed without <code>+</code> is read in the region of the workspace&#x27;s <code>tenant.country</code>. The display grouping and the <code>wa.me</code> link (the digits after <code>+</code>) are derived, never stored.</dd><dt>time</dt><dd>An instant is <code>timestamptz</code>, always UTC. A <code>date</code> or a wall-clock time is a calendar day or a time in the <b>trainer&#x27;s</b> timezone (<code>trainer.timezone</code>, IANA), never the server&#x27;s and never the client&#x27;s — one diary has one clock. <code>client.timezone</code> only converts what the client is shown.</dd><dt>enumerations</dt><dd>Enumerated columns are plain varchar, never a Postgres ENUM. Vocabularies (profile lists, nudge kinds, <code>payment.method</code>) are validated in application code; since V21 state machines and money columns also carry a CHECK, so a new state is a code change plus one DROP / ADD CONSTRAINT in a migration. Legal values are listed per column under allowedValues.</dd><dt>foreign-keys</dt><dd>Unless stated otherwise a foreign key is ON UPDATE NO ACTION, ON DELETE NO ACTION — rows are soft-deleted, so nothing cascades.</dd></dl>
+      </details>
+      
+<section class="tbl" id="t-deferred" data-name="deferred" data-tab="v1">
+  <header class="tbl-head"><div><p class="eyebrow">Decided 25 Sep 2026</p><h2><a href="#t-deferred" class="anchor">Deferred in the v1 review</a></h2></div></header>
+  <div class="lede">What the review of the agreed schema set aside for a later release, beyond the tables below — so it can be picked up
+  without re-reading the whole conversation. Each item is additive to bring back.</div>
+  <h3>Money book</h3><ul class="prop__list"><li><b>Client bills</b> — <a class="tref" href="#t-invoice_counter">invoice_counter</a>, <code>payment.invoice_no</code>, <code>payment.invoiced_at</code>, <code>freeze_invoiced_payment()</code>, the <code>payment_invoice</code> check, <code>uq_payment_invoice_no</code> and <code>POST /v1/payments/{id}/invoice</code>. Not tax invoices; additive to bring back, numbered from 0001. The web&#x27;s invoice screens are hidden (MUST-19). <i>Not</i> MUST-18, InclineYou&#x27;s own GST invoice to trainers, which stays in v1.</li><li><b><code>payment.receipt_no</code></b> — held, as before the review (below).</li><li><b>Clients outside India</b> — <code>trainer_business.payment_link</code> and a <code>payment_link</code> method on <a class="tref" href="proposed-schema.html#t-payment">payment</a>. InclineYou is India-only for now. The international work already on the agreed page (E.164 phones, one currency per workspace, priced by region) stays as defaults and needs no change to switch on.</li></ul><h3>Reminders</h3><ul class="prop__list"><li><b><a class="tref" href="#t-trainer_notification">trainer_notification</a></b> — the trainer&#x27;s bell. Nothing writes it without the portal, teams or gyms; it returns with the portal.</li><li><b>Automated and portal channels</b> — <a class="tref" href="proposed-schema.html#t-nudge_log">nudge_log</a><code>.channel</code> already allows <code>whatsapp_auto</code> (WhatsApp Business API, v2) and <code>portal</code>; v1 writes only <code>whatsapp_manual</code>. Still to design when they ship: a <b>delivery-events</b> table for delivered / read / failed (so <code>nudge_log</code> stays append-only), and the per-message channel setting, most likely a column on <a class="tref" href="proposed-schema.html#t-nudge_template">nudge_template</a>.</li></ul><h3>Client portal</h3><ul class="prop__list"><li>The portal&#x27;s row-level security policies were dropped from the agreed tables and return with it: the client read on <a class="tref" href="proposed-schema.html#t-scheduled_session">scheduled_session</a> (<code>scheduled_session_client</code>), on <a class="tref" href="proposed-schema.html#t-set_log">set_log</a>, and on templates / <a class="tref" href="proposed-schema.html#t-assessment_template">assessment_template</a>.</li><li>Columns kept on agreed tables but unused until then, marked <i>Client portal · next release</i> there: <a class="tref" href="proposed-schema.html#t-client">client</a> (<code>activity_level</code>, <code>timezone</code>, <code>membership_status</code> and its dates), <a class="tref" href="proposed-schema.html#t-client_note">client_note</a><code>.shared_with_client</code>, and who logged a session (<code>logged_by</code>, held when <code>workout_session</code> merged into <code>scheduled_session</code>).</li></ul><h3>Diary</h3><ul class="prop__list"><li><a class="tref" href="proposed-schema.html#t-scheduled_session">scheduled_session</a>: <code>series_id</code>, <code>cancelled_by</code>, <code>moved_from_at</code>, <code>client_confirmed_at</code>, <code>batch_id</code> — with <a class="tref" href="#t-time_block">time_block</a> and <a class="tref" href="#t-batch">batch</a>.</li></ul>
+</section>
+<section class="tbl tbl--thin" id="l-tenant_member" data-name="tenant_member" data-tab="v1">
+  <header class="tbl-head"><div><p class="eyebrow">Tenancy · a v1 table</p>
+    <h2><a href="proposed-schema.html#t-tenant_member" class="anchor">tenant_member</a></h2></div>
+    <div class="stats"><span><b>2</b> later columns</span></div></header>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Waits for</th><th>Note</th></tr></thead>
+    <tbody><tr class="pc pc--drop"><td class="col-name"><code>revenue_share_percent</code><div class="badges"><a class="pbadge pbadge--drop" href="schema.html#p-P1" title="Dropped by proposal P1">− P1</a></div></td><td class="col-type"><code>numeric(5,2)</code></td><td><span class="rel rel--inline">Workspaces</span></td><td class="col-note">What this member keeps of what they collect in this workspace. NULL = 100%, the correct default for a solo tenant.<div class="preason"><b>Drop</b>A percentage edited in place: <code>TenantRevenueService</code> applies today&#x27;s value to every past payment, so changing a coach&#x27;s share from 60% to 70% rewrites last quarter. Moves to <code>tenant_member_terms</code>, which is dated.</div></td></tr><tr class="pc pc--drop"><td class="col-name"><code>assignment_margin_percent</code><div class="badges"><a class="pbadge pbadge--drop" href="schema.html#p-P1" title="Dropped by proposal P1">− P1</a></div></td><td class="col-type"><code>numeric(5,2)</code></td><td><span class="rel rel--inline">Workspaces</span></td><td class="col-note">An admin&#x27;s cut of revenue from clients they assigned to somebody else. NULL = none. Frozen per handover onto <code>client_assignment.actor_margin_percent</code>.<div class="preason"><b>Drop</b>The same problem as <code>revenue_share_percent</code>; moves to <code>tenant_member_terms</code>.</div></td></tr></tbody></table></div>
+</section>
+<section class="tbl tbl--thin" id="l-trainer" data-name="trainer" data-tab="v1">
+  <header class="tbl-head"><div><p class="eyebrow">Identity &amp; auth · a v1 table</p>
+    <h2><a href="proposed-schema.html#t-trainer" class="anchor">trainer</a></h2></div>
+    <div class="stats"><span><b>2</b> later columns</span></div></header>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Waits for</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>fcm_token</code><div class="badges"></div></td><td class="col-type"><code>text</code></td><td><span class="rel rel--inline">Phone app &amp; offline sync</span></td><td class="col-note">Push token, written by <code>POST /v1/devices/token</code>. One token per trainer, overwritten on refresh.</td></tr><tr><td class="col-name"><code>metadata</code><div class="badges"></div></td><td class="col-type"><code>jsonb</code></td><td><span class="rel rel--inline">Phone app &amp; offline sync</span></td><td class="col-note">Holds <code>metadata.prefs</code> — notification switches, appearance, language, chase window, reminder tone. Preferences live here rather than in columns.</td></tr></tbody></table></div>
+</section>
+<section class="tbl tbl--thin" id="l-client" data-name="client" data-tab="v1">
+  <header class="tbl-head"><div><p class="eyebrow">Roster · a v1 table</p>
+    <h2><a href="proposed-schema.html#t-client" class="anchor">client</a></h2></div>
+    <div class="stats"><span><b>14</b> later columns</span></div></header>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Waits for</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>payment_mode</code><div class="badges"></div></td><td class="col-type"><code>varchar(20)</code></td><td><span class="rel rel--inline">Phone app &amp; offline sync</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>activity_level</code><div class="badges"></div></td><td class="col-type"><code>varchar(20)</code></td><td><span class="rel rel--inline">Client portal · next release</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>paused_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td><span class="rel rel--inline">Phone app &amp; offline sync</span></td><td class="col-note"><code>status</code> already carries <code>paused</code>; this carries when, so the client&#x27;s wall can name the date.</td></tr><tr><td class="col-name"><code>membership_status</code><div class="badges"></div></td><td class="col-type"><code>varchar(20)</code></td><td><span class="rel rel--inline">Client portal · next release</span></td><td class="col-note">The client&#x27;s consent, kept separate from <code>status</code> because the two answer to different people and can disagree. New rows are written <code>invited</code> explicitly.</td></tr><tr><td class="col-name"><code>invited_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td><span class="rel rel--inline">Client portal · next release</span></td><td class="col-note">When the invite was sent. It still answers &quot;how long has this been going on&quot; after a removal.</td></tr><tr><td class="col-name"><code>accepted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td><span class="rel rel--inline">Client portal · next release</span></td><td class="col-note">When the client accepted the invite.</td></tr><tr><td class="col-name"><code>declined_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td><span class="rel rel--inline">Client portal · next release</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>removed_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td><span class="rel rel--inline">Client portal · next release</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>removed_ack_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td><span class="rel rel--inline">Client portal · next release</span></td><td class="col-note">When the client acknowledged the removal on their own phone. Without it the notice is permanent, because the row is kept forever for the trainer&#x27;s books.</td></tr><tr><td class="col-name"><code>stale_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td><span class="rel rel--inline">Workspaces</span></td><td class="col-note">Set when this client&#x27;s coach has left or become unavailable in this workspace; cleared when an admin assigns a new coach. A column rather than a status, so every <code>status = &#x27;active&#x27;</code> read keeps counting the client.</td></tr><tr><td class="col-name"><code>stale_reason</code><div class="badges"></div></td><td class="col-type"><code>varchar(40)</code></td><td><span class="rel rel--inline">Workspaces</span></td><td class="col-note">Why the client needs a new coach.</td></tr><tr><td class="col-name"><code>assigned_by_app_user_id</code><div class="badges"></div></td><td class="col-type"><code>uuid</code></td><td><span class="rel rel--inline">Workspaces</span></td><td class="col-note">The admin who placed this client with their current coach, when it was a handover.</td></tr><tr><td class="col-name"><code>assignment_margin_percent</code><div class="badges"></div></td><td class="col-type"><code>numeric(5,2)</code></td><td><span class="rel rel--inline">Workspaces</span></td><td class="col-note">That admin&#x27;s cut of revenue from this client, frozen at handover. NULL = none.</td></tr><tr><td class="col-name"><code>assigned_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td><span class="rel rel--inline">Workspaces</span></td><td class="col-note">When the current coach was assigned.</td></tr></tbody></table></div>
+</section>
+<section class="tbl tbl--thin" id="l-assessment" data-name="assessment" data-tab="v1">
+  <header class="tbl-head"><div><p class="eyebrow">Roster · a v1 table</p>
+    <h2><a href="proposed-schema.html#t-assessment" class="anchor">assessment</a></h2></div>
+    <div class="stats"><span><b>2</b> later columns</span></div></header>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Waits for</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>sent_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td><span class="rel rel--inline">Client portal · next release</span></td><td class="col-note">NULL = booked: on the board, the client has no idea.</td></tr><tr><td class="col-name"><code>read_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td><span class="rel rel--inline">Client portal · next release</span></td><td class="col-note">The trainer opened it; can be cleared to un-read.</td></tr></tbody></table></div>
+</section>
+<section class="tbl tbl--thin" id="l-client_note" data-name="client_note" data-tab="v1">
+  <header class="tbl-head"><div><p class="eyebrow">Roster · a v1 table</p>
+    <h2><a href="proposed-schema.html#t-client_note" class="anchor">client_note</a></h2></div>
+    <div class="stats"><span><b>1</b> later columns</span></div></header>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Waits for</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>shared_with_client</code><div class="badges"></div></td><td class="col-type"><code>boolean</code></td><td><span class="rel rel--inline">Client portal · next release</span></td><td class="col-note">The client the note is about may read it in the portal. Teammates still never see it. Defaults to false.</td></tr></tbody></table></div>
+</section>
+<section class="tbl tbl--thin" id="l-exercise" data-name="exercise" data-tab="v1">
+  <header class="tbl-head"><div><p class="eyebrow">Exercise library · a v1 table</p>
+    <h2><a href="proposed-schema.html#t-exercise" class="anchor">exercise</a></h2></div>
+    <div class="stats"><span><b>2</b> later columns</span></div></header>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Waits for</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>image_url</code><div class="badges"></div></td><td class="col-type"><code>text</code></td><td><span class="rel rel--inline">Deprecated — kept by the additive law</span></td><td class="col-note">Always NULL — the library is text-only.</td></tr><tr><td class="col-name"><code>video_url</code><div class="badges"></div></td><td class="col-type"><code>text</code></td><td><span class="rel rel--inline">Deprecated — kept by the additive law</span></td><td class="col-note">Always NULL — the library is text-only.</td></tr></tbody></table></div>
+</section>
+<section class="tbl tbl--thin" id="l-scheduled_session" data-name="scheduled_session" data-tab="v1">
+  <header class="tbl-head"><div><p class="eyebrow">Diary · a v1 table</p>
+    <h2><a href="proposed-schema.html#t-scheduled_session" class="anchor">scheduled_session</a></h2></div>
+    <div class="stats"><span><b>5</b> later columns</span></div></header>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Waits for</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>series_id</code><div class="badges"></div></td><td class="col-type"><code>uuid</code></td><td><span class="rel rel--inline">Phone app &amp; offline sync</span></td><td class="col-note">Recurrence. No FK — this is not a table: the occurrences are real rows created together, not a rule evaluated at read time, and this is what lets &quot;cancel the rest of these&quot; find them. NULL for a one-off.</td></tr><tr><td class="col-name"><code>cancelled_by</code><div class="badges"></div></td><td class="col-type"><code>varchar(16)</code></td><td><span class="rel rel--inline">Phone app &amp; offline sync</span></td><td class="col-note">The two kinds of cancellation differ in who apologises, not in what the diary shows.</td></tr><tr><td class="col-name"><code>moved_from_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td><span class="rel rel--inline">Phone app &amp; offline sync</span></td><td class="col-note">Set when the trainer moves a booking, cleared never. A timestamp rather than a boolean so the client&#x27;s notice can strike the old time through — a client shown only the new time cannot tell what changed and will ask, which is the WhatsApp exchange the notice exists to replace.</td></tr><tr><td class="col-name"><code>client_confirmed_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td><span class="rel rel--inline">Client portal · next release</span></td><td class="col-note">The client&#x27;s one-tap confirm. A confirmed session is still <code>scheduled</code>. This is the only thing a client may write to this table — they cannot move, cancel or no-show, because all three change somebody else&#x27;s working day.</td></tr><tr><td class="col-name"><code>batch_id</code><div class="badges"></div></td><td class="col-type"><code>uuid</code></td><td><span class="rel rel--inline">Phone app &amp; offline sync</span></td><td class="col-note">Every attendee keeps their own row and they share a batch.</td></tr></tbody></table></div>
+</section>
+<section class="tbl tbl--thin" id="l-payment" data-name="payment" data-tab="v1">
+  <header class="tbl-head"><div><p class="eyebrow">Money book · a v1 table</p>
+    <h2><a href="proposed-schema.html#t-payment" class="anchor">payment</a></h2></div>
+    <div class="stats"><span><b>1</b> later columns</span></div></header>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Waits for</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>receipt_no</code><div class="badges"></div></td><td class="col-type"><code>varchar(30)</code></td><td><span class="rel rel--inline">Phone app &amp; offline sync</span></td><td class="col-note">Issued on the device, from a device-scoped range, because cash arrives in basements with no signal. Two phones must never mint the same number.</td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-team" data-name="team" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Team coaching<span class="rel">Team coaching</span><a class="pbadge pbadge--change" href="schema.html#p-P1">Changes · P1</a></p>
+      <h2><a href="#t-team" class="anchor">team</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>11</b> columns</span>
+      <span><b>2</b> FKs out</span>
+      <span><b>3</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">A team of coaches. A team widens who may read a coach&#x27;s clients; it never moves ownership of any row.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr class="pc pc--change"><td class="col-name"><code>owner_trainer_id</code><div class="badges"><a class="pbadge pbadge--change" href="schema.html#p-P1" title="Changed by proposal P1">~ P1</a><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Still a second record of the owner, kept while <code>team_member</code> is separate. It goes when <code>team_member</code> folds into <code>tenant_member</code> + <code>tenant_invite</code> — a later pass, since teams are out of v1. Until then <code>ensure_team_tenant()</code> writes the owner&#x27;s <code>tenant_member</code> row from it.<div class="pwas"><b>Was</b>Denormalised: the same fact is also a <code>team_member</code> row with <code>role=&#x27;owner&#x27;</code>. Two representations bought deliberately — it answers &quot;is this caller the owner&quot; without a join, and it changes only inside the single transaction that transfers ownership and updates both.</div></td></tr><tr><td class="col-name"><code>name</code><div class="badges"></div></td><td class="col-type"><code>varchar(120)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>logo_url</code><div class="badges"></div></td><td class="col-type"><code>varchar(500)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Nothing writes it yet — there is no file upload in the product.</td></tr><tr><td class="col-name"><code>seat_limit</code><div class="badges"></div></td><td class="col-type"><code>integer</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">NULL = unlimited. Enforced when an invite is accepted, not when it is sent: seats are consumed by people, not intentions.</td></tr><tr><td class="col-name"><code>metadata</code><div class="badges"></div></td><td class="col-type"><code>jsonb</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>&#x27;{}&#x27;</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr class="pc pc--add"><td class="col-name"><code>tenant_type</code><div class="badges"><a class="pbadge pbadge--add" href="schema.html#p-P1" title="Added by proposal P1">+ P1</a><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id, type</span></div></td><td class="col-type"><code>varchar(20)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>&#x27;team&#x27;</code></td><td class="col-note">Always <code>team</code>. Exists for the composite key that proves this is a team workspace.</td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id, type</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>owner_trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">team_owner_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr class="pc pc--drop"><td><code>tenant_id</code> <a class="pbadge pbadge--drop" href="schema.html#p-P1" title="Dropped by proposal P1">− P1</a></td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">team_tenant_id_fkey</code><div class="preason"><b>Drop</b>Replaced by <code>team_tenant_kind_fkey</code>.</div></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr class="pc pc--add"><td><code>tenant_id, tenant_type</code> <a class="pbadge pbadge--add" href="schema.html#p-P1" title="Added by proposal P1">+ P1</a></td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id, type</code></td><td><code class="muted">team_tenant_kind_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">3</span></h3></summary>
+    <div class="refs"><span class="ref"><a class="tref" href="#t-team_member">team_member</a><span class="ref-col">.team_id</span></span><span class="ref"><a class="tref" href="proposed-schema.html#t-client_assignment">client_assignment</a><span class="ref-col">.team_id</span></span><span class="ref"><a class="tref" href="#t-team_activity">team_activity</a><span class="ref-col">.team_id</span></span></div>
+  </details>
+
+  <h3>Check constraints</h3><div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Condition</th></tr></thead><tbody><tr><td><code>team_metadata_object</code> </td><td><code>(jsonb_typeof(metadata) = &#x27;object&#x27;::text)</code></td></tr><tr class="pc pc--add"><td><code>team_tenant_type</code> <a class="pbadge pbadge--add" href="schema.html#p-P1" title="Added by proposal P1">+ P1</a></td><td><code>tenant_type = &#x27;team&#x27;</code></td></tr></tbody></table></div>
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>team_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_team_owner</code> </td><td><span class="kind kind--index">index</span></td><td><code>owner_trainer_id</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr><tr class="pc pc--add"><td><code>uq_team_tenant</code> <a class="pbadge pbadge--add" href="schema.html#p-P1" title="Added by proposal P1">+ P1</a></td><td><span class="kind kind--unique">unique</span></td><td><code>tenant_id</code></td><td><span class=muted>—</span></td><td>One team per team workspace. Nothing enforced it, so two <code>team</code> rows could share one tenant.</td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_team_tenant</code> </td><td>BEFORE INSERT</td><td><code>ensure_team_tenant()</code></td></tr><tr><td><code>trg_team_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-team_member" data-name="team_member" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Team coaching<span class="rel">Team coaching</span><a class="pbadge pbadge--change" href="schema.html#p-P3">Changes · P3</a></p>
+      <h2><a href="#t-team_member" class="anchor">team_member</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>15</b> columns</span>
+      <span><b>4</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">Team membership and pending invite in one row: an invite is a membership that has not been agreed to yet.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>team_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="#t-team">team</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>trainer_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Nullable, and that is the point: an invite can precede the account. A gym owner invites a coach who has never heard of InclineYou; the row is written against the phone and bound to a trainer id the first time that number signs in. This is what makes the invite an acquisition channel and not just a permission grant.</td></tr><tr class="pc pc--change"><td class="col-name"><code>invited_phone</code><div class="badges"><a class="pbadge pbadge--change" href="schema.html#p-P3" title="Changed by proposal P3">~ P3</a></div></td><td class="col-type"><code>varchar(16)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Kept after binding rather than cleared — it is the evidence of who was invited, and a person&#x27;s number can change afterwards. E.164, like <code>app_user.phone</code>.<div class="pwas"><b>Was</b>type <code>varchar(15)</code> · Kept after binding rather than cleared — it is the evidence of who was invited, and a phone on a trainer row can change afterwards.</div></td></tr><tr><td class="col-name"><code>role</code><div class="badges"></div></td><td class="col-type"><code>varchar(20)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The owner is not a fourth kind of admin; it is the admin who cannot be removed.<div class="chips"><span class="chip">owner</span><span class="chip">admin</span><span class="chip">coach</span></div></td></tr><tr><td class="col-name"><code>status</code><div class="badges"></div></td><td class="col-type"><code>varchar(20)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><div class="chips"><span class="chip">invited</span><span class="chip">active</span><span class="chip">declined</span><span class="chip">removed</span></div></td></tr><tr><td class="col-name"><code>invited_by_trainer_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>invited_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">When the invite was sent.</td></tr><tr><td class="col-name"><code>joined_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>declined_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>removed_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>team_id</code> </td><td><a class="tref" href="#t-team">team</a>.<code>id</code></td><td><code class="muted">team_member_team_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">team_member_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>invited_by_trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">team_member_invited_by_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">team_member_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  <h3>Check constraints</h3><div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Condition</th></tr></thead><tbody><tr><td><code>team_member_identifies_somebody</code> </td><td><code>((trainer_id IS NOT NULL) OR (invited_phone IS NOT NULL))</code></td></tr><tr><td><code>team_member_role</code> </td><td><code>((role)::text = ANY ((ARRAY[&#x27;owner&#x27;::character varying, &#x27;admin&#x27;::character varying, &#x27;coach&#x27;::character varying])::text[]))</code></td></tr><tr><td><code>team_member_status</code> </td><td><code>((status)::text = ANY ((ARRAY[&#x27;invited&#x27;::character varying, &#x27;active&#x27;::character varying, &#x27;declined&#x27;::character varying, &#x27;removed&#x27;::character varying])::text[]))</code></td></tr><tr class="pc pc--add"><td><code>team_member_invited_phone_format</code> <a class="pbadge pbadge--add" href="schema.html#p-P3" title="Added by proposal P3">+ P3</a></td><td><code>invited_phone IS NULL OR (invited_phone ~ &#x27;^\+[1-9][0-9]{6,14}$&#x27; AND (invited_phone !~ &#x27;^\+91&#x27; OR invited_phone ~ &#x27;^\+91[6-9][0-9]{9}$&#x27;))</code></td></tr></tbody></table></div>
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>team_member_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_team_member_invited_phone</code> </td><td><span class="kind kind--index">index</span></td><td><code>invited_phone, status</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_team_member_team</code> </td><td><span class="kind kind--index">index</span></td><td><code>team_id</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_team_member_tenant</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_team_member_trainer</code> </td><td><span class="kind kind--index">index</span></td><td><code>trainer_id</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr><tr><td><code>uq_team_member_active_trainer</code> </td><td><span class="kind kind--unique">unique</span></td><td><code>trainer_id</code></td><td><code>WHERE ((status)::text = &#x27;active&#x27;::text) AND (deleted_at IS NULL) AND (trainer_id IS NOT NULL)</code></td><td><span class=muted>—</span></td></tr><tr><td><code>uq_team_member_one_owner</code> </td><td><span class="kind kind--unique">unique</span></td><td><code>team_id</code></td><td><code>WHERE ((role)::text = &#x27;owner&#x27;::text) AND ((status)::text = &#x27;active&#x27;::text) AND (deleted_at IS NULL)</code></td><td><span class=muted>—</span></td></tr><tr><td><code>uq_team_member_pending_invite</code> </td><td><span class="kind kind--unique">unique</span></td><td><code>team_id, invited_phone</code></td><td><code>WHERE ((status)::text = &#x27;invited&#x27;::text) AND (deleted_at IS NULL) AND (invited_phone IS NOT NULL)</code></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_team_member_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_team_member_mirror</code> </td><td>AFTER INSERT OR UPDATE</td><td><code>mirror_team_member()</code></td></tr><tr><td><code>trg_team_member_stamp_tenant</code> </td><td>BEFORE INSERT</td><td><code>stamp_tenant_id()</code></td></tr><tr><td><code>trg_team_member_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-team_activity" data-name="team_activity" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Team coaching<span class="rel">Team coaching</span></p>
+      <h2><a href="#t-team_activity" class="anchor">team_activity</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>11</b> columns</span>
+      <span><b>5</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">What an admin changed on a teammate&#x27;s client or on the team&#x27;s shared exercises. Append-only and readable by the owning coach — the trace that makes editing somebody else&#x27;s plan acceptable.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>team_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="#t-team">team</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>actor_trainer_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Who made the change.</td></tr><tr><td class="col-name"><code>subject_trainer_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Whose data it was.</td></tr><tr><td class="col-name"><code>client_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-client">client</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">NULL for a shared custom exercise, which belongs to the team rather than to anybody&#x27;s roster.</td></tr><tr><td class="col-name"><code>entity_type</code><div class="badges"></div></td><td class="col-type"><code>varchar(30)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><div class="chips"><span class="chip">program</span><span class="chip">program_exercise</span><span class="chip">exercise</span></div></td></tr><tr><td class="col-name"><code>entity_id</code><div class="badges"></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Polymorphic — no FK, because the target is one of three tables.</td></tr><tr><td class="col-name"><code>action</code><div class="badges"></div></td><td class="col-type"><code>varchar(20)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><div class="chips"><span class="chip">added</span><span class="chip">updated</span><span class="chip">removed</span></div></td></tr><tr><td class="col-name"><code>summary</code><div class="badges"></div></td><td class="col-type"><code>varchar(300)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The sentence, written at the time, in the words the coach will read: &quot;Changed Barbell Squat to 4 × 6 on day 2&quot;. Stored rather than derived for the same reason <code>weekly_report</code> stores its sentences — rebuilding it later would produce a different sentence every time the program changed again, which is the one thing an account of a change must not do.</td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>team_id</code> </td><td><a class="tref" href="#t-team">team</a>.<code>id</code></td><td><code class="muted">team_activity_team_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>actor_trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">team_activity_actor_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>subject_trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">team_activity_subject_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>client_id</code> </td><td><a class="tref" href="proposed-schema.html#t-client">client</a>.<code>id</code></td><td><code class="muted">team_activity_client_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">team_activity_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  <h3>Check constraints</h3><div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Condition</th></tr></thead><tbody><tr><td><code>team_activity_is_a_crossing</code> </td><td><code>(actor_trainer_id &lt;&gt; subject_trainer_id)</code></td></tr></tbody></table></div>
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>team_activity_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_team_activity_client</code> </td><td><span class="kind kind--index">index</span></td><td><code>client_id, created_at DESC</code></td><td><code>WHERE client_id IS NOT NULL</code></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_team_activity_subject</code> </td><td><span class="kind kind--index">index</span></td><td><code>subject_trainer_id, created_at DESC</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_team_activity_team</code> </td><td><span class="kind kind--index">index</span></td><td><code>team_id, created_at DESC</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_team_activity_tenant</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_team_activity_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_team_activity_stamp_tenant</code> </td><td>BEFORE INSERT</td><td><code>stamp_tenant_id()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-trainer_notification" data-name="trainer_notification" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Comms &amp; reports<a class="pbadge pbadge--change" href="schema.html#p-P3">Changes · P3</a></p>
+      <h2><a href="#t-trainer_notification" class="anchor">trainer_notification</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>12</b> columns</span>
+      <span><b>4</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">The trainer&#x27;s notification bell: things somebody else did to the trainer&#x27;s book — a client logged a weight, a client moved to another coach. Never the trainer&#x27;s own writes.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>trainer_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The recipient.</td></tr><tr><td class="col-name"><code>kind</code><div class="badges"></div></td><td class="col-type"><code>varchar(16)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Checked in the mint function and in Java, not a CHECK.<div class="chips"><span class="chip">payment</span><span class="chip">cancelled</span><span class="chip">metric</span><span class="chip">team</span></div></td></tr><tr><td class="col-name"><code>client_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-client">client</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Who it is about.</td></tr><tr><td class="col-name"><code>amount</code><div class="badges"></div></td><td class="col-type"><code>numeric(10,2)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><code>payment</code> only. Never on a <code>team</code> row.</td></tr><tr class="pc pc--add"><td class="col-name"><code>currency</code><div class="badges"><a class="pbadge pbadge--add" href="schema.html#p-P3" title="Added by proposal P3">+ P3</a><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id, currency</span></div></td><td class="col-type"><code>varchar(3)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The currency of <code>amount</code>, set together with it (<code>trainer_notification_amount_currency</code>). The workspace&#x27;s currency, by the same <code>(tenant_id, currency)</code> key as the money book.</td></tr><tr><td class="col-name"><code>subject_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">For <code>cancelled</code>: the session&#x27;s slot.</td></tr><tr><td class="col-name"><code>text</code><div class="badges"></div></td><td class="col-type"><code>varchar(120)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Per kind: method or <code>gym</code>; a day label; <code>&quot;&lt;value&gt; &lt;unit&gt;&quot;</code>; the coach moved to.</td></tr><tr><td class="col-name"><code>at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note">When it happened. The feed shows 90 days.</td></tr><tr><td class="col-name"><code>read_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">First seen. Never un-set by any route.</td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">trainer_notification_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>client_id</code> </td><td><a class="tref" href="proposed-schema.html#t-client">client</a>.<code>id</code></td><td><code class="muted">trainer_notification_client_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">trainer_notification_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr class="pc pc--add"><td><code>tenant_id, currency</code> <a class="pbadge pbadge--add" href="schema.html#p-P3" title="Added by proposal P3">+ P3</a></td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id, currency</code></td><td><code class="muted">trainer_notification_tenant_currency_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  <h3>Check constraints</h3><div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Condition</th></tr></thead><tbody><tr class="pc pc--add"><td><code>trainer_notification_amount_currency</code> <a class="pbadge pbadge--add" href="schema.html#p-P3" title="Added by proposal P3">+ P3</a></td><td><code>(amount IS NULL) = (currency IS NULL)</code></td></tr></tbody></table></div>
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>trainer_notification_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_trainer_notification_feed</code> </td><td><span class="kind kind--index">index</span></td><td><code>trainer_id, at DESC, id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_trainer_notification_tenant</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_trainer_notification_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-client_message" data-name="client_message" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Comms &amp; reports<span class="rel">Client portal · next release</span></p>
+      <h2><a href="#t-client_message" class="anchor">client_message</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>11</b> columns</span>
+      <span><b>3</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">A line from the trainer to one client, shown in the portal beside shared notes.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>client_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-client">client</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>trainer_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Who wrote it.</td></tr><tr><td class="col-name"><code>body</code><div class="badges"></div></td><td class="col-type"><code>text</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>kind</code><div class="badges"></div></td><td class="col-type"><code>varchar(12)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>&#x27;note&#x27;</code></td><td class="col-note">Validated in code, not a CHECK.<div class="chips"><span class="chip">note</span></div></td></tr><tr><td class="col-name"><code>at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>read_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The only column the client may write.</td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>client_id</code> </td><td><a class="tref" href="proposed-schema.html#t-client">client</a>.<code>id</code></td><td><code class="muted">client_message_client_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">client_message_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">client_message_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>client_message_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_client_message_client</code> </td><td><span class="kind kind--index">index</span></td><td><code>client_id, at DESC</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_client_message_tenant</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_client_message_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_client_message_stamp_tenant</code> </td><td>BEFORE INSERT</td><td><code>stamp_tenant_id()</code></td></tr><tr><td><code>trg_client_message_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-milestone" data-name="milestone" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Comms &amp; reports<span class="rel">Client portal · next release</span></p>
+      <h2><a href="#t-milestone" class="anchor">milestone</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>9</b> columns</span>
+      <span><b>2</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">Something that happened on a day — &quot;25th session with Asha&quot;. Stored, not derived, because it fired on a particular day and a recomputation would move it.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>client_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-client">client</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>kind</code><div class="badges"></div></td><td class="col-type"><code>varchar(20)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">What is being counted, e.g. <code>sessions</code>.</td></tr><tr><td class="col-name"><code>label</code><div class="badges"></div></td><td class="col-type"><code>text</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>value</code><div class="badges"></div></td><td class="col-type"><code>numeric</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The count reached, e.g. 25.</td></tr><tr><td class="col-name"><code>at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note">When it fired.</td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>client_id</code> </td><td><a class="tref" href="proposed-schema.html#t-client">client</a>.<code>id</code></td><td><code class="muted">milestone_client_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">milestone_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>milestone_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_milestone_client</code> </td><td><span class="kind kind--index">index</span></td><td><code>client_id, at DESC</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_milestone_tenant</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>uq_milestone_once</code> </td><td><span class="kind kind--unique">unique</span></td><td><code>client_id, kind, value</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_milestone_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_milestone_stamp_tenant</code> </td><td>BEFORE INSERT</td><td><code>stamp_tenant_id()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-workout_feedback" data-name="workout_feedback" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Comms &amp; reports<span class="rel">Client portal · next release</span></p>
+      <h2><a href="#t-workout_feedback" class="anchor">workout_feedback</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>10</b> columns</span>
+      <span><b>3</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">How a workout felt, in the client&#x27;s own words. One row per workout session.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>workout_session_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="schema.html#t-workout_session">workout_session</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Unique — one feedback row per workout, upserted on every finish.</td></tr><tr><td class="col-name"><code>client_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-client">client</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>effort</code><div class="badges"></div></td><td class="col-type"><code>varchar(8)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Enforced by a CHECK.<div class="chips"><span class="chip">easy</span><span class="chip">right</span><span class="chip">hard</span></div></td></tr><tr><td class="col-name"><code>note</code><div class="badges"></div></td><td class="col-type"><code>text</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Up to 1,000 characters, enforced in the service.</td></tr><tr><td class="col-name"><code>at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note">Last given.</td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>workout_session_id</code> </td><td><a class="tref" href="schema.html#t-workout_session">workout_session</a>.<code>id</code></td><td><code class="muted">workout_feedback_workout_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>client_id</code> </td><td><a class="tref" href="proposed-schema.html#t-client">client</a>.<code>id</code></td><td><code class="muted">workout_feedback_client_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">workout_feedback_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  <h3>Check constraints</h3><div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Condition</th></tr></thead><tbody><tr><td><code>workout_feedback_effort</code> </td><td><code>((effort IS NULL) OR ((effort)::text = ANY ((ARRAY[&#x27;easy&#x27;::character varying, &#x27;right&#x27;::character varying, &#x27;hard&#x27;::character varying])::text[])))</code></td></tr></tbody></table></div>
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>workout_feedback_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_workout_feedback_client</code> </td><td><span class="kind kind--index">index</span></td><td><code>client_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_workout_feedback_tenant</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>workout_feedback_one_per_workout</code> </td><td><span class="kind kind--unique">unique</span></td><td><code>workout_session_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_workout_feedback_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_workout_feedback_stamp_tenant</code> </td><td>BEFORE INSERT</td><td><code>stamp_tenant_id()</code></td></tr><tr><td><code>trg_workout_feedback_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-client_prefs" data-name="client_prefs" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Comms &amp; reports<span class="rel">Client portal · next release</span><a class="pbadge pbadge--change" href="schema.html#p-P3">Changes · P3</a></p>
+      <h2><a href="#t-client_prefs" class="anchor">client_prefs</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>13</b> columns</span>
+      <span><b>2</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">The client&#x27;s own settings: display switches, notification gates and a nominee. The trainer&#x27;s half never reads it.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>client_id</code><div class="badges"><span class="badge badge--pk">PK</span><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-client">client</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">One row per client row, created on the first write.</td></tr><tr><td class="col-name"><code>hide_weight</code><div class="badges"></div></td><td class="col-type"><code>boolean</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>false</code></td><td class="col-note">A display switch.</td></tr><tr><td class="col-name"><code>notify_program_updated</code><div class="badges"></div></td><td class="col-type"><code>boolean</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>true</code></td><td class="col-note">Gates <code>plan</code> notifications. No row = every switch on.</td></tr><tr><td class="col-name"><code>notify_session_reminder</code><div class="badges"></div></td><td class="col-type"><code>boolean</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>true</code></td><td class="col-note">Gates <code>session</code> notifications. No row = every switch on.</td></tr><tr><td class="col-name"><code>notify_trainer_note</code><div class="badges"></div></td><td class="col-type"><code>boolean</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>true</code></td><td class="col-note">Gates <code>note</code> notifications. No row = every switch on.</td></tr><tr><td class="col-name"><code>notify_personal_best</code><div class="badges"></div></td><td class="col-type"><code>boolean</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>true</code></td><td class="col-note">Gates <code>best</code> notifications. No row = every switch on.</td></tr><tr><td class="col-name"><code>notify_pack_changed</code><div class="badges"></div></td><td class="col-type"><code>boolean</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>true</code></td><td class="col-note">Gates <code>pack</code> notifications. No row = every switch on.</td></tr><tr><td class="col-name"><code>nominee_name</code><div class="badges"></div></td><td class="col-type"><code>varchar(80)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">A nominee&#x27;s name under DPDP §14. Removed with the row when the client leaves; never contacted.</td></tr><tr class="pc pc--change"><td class="col-name"><code>nominee_phone</code><div class="badges"><a class="pbadge pbadge--change" href="schema.html#p-P3" title="Changed by proposal P3">~ P3</a></div></td><td class="col-type"><code>varchar(16)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The nominee&#x27;s number, in E.164 like every phone column — a client abroad may well name somebody at home. Removed with the row when the client leaves; never contacted.<div class="pwas"><b>Was</b>type <code>varchar(15)</code> · The nominee&#x27;s 10-digit number. Removed with the row when the client leaves; never contacted.</div></td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>client_id</code> </td><td><a class="tref" href="proposed-schema.html#t-client">client</a>.<code>id</code></td><td><code class="muted">client_prefs_client_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">client_prefs_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  <h3>Check constraints</h3><div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Condition</th></tr></thead><tbody><tr class="pc pc--add"><td><code>client_prefs_nominee_phone_format</code> <a class="pbadge pbadge--add" href="schema.html#p-P3" title="Added by proposal P3">+ P3</a></td><td><code>nominee_phone IS NULL OR (nominee_phone ~ &#x27;^\+[1-9][0-9]{6,14}$&#x27; AND (nominee_phone !~ &#x27;^\+91&#x27; OR nominee_phone ~ &#x27;^\+91[6-9][0-9]{9}$&#x27;))</code></td></tr></tbody></table></div>
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>client_prefs_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>client_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_client_prefs_tenant</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_client_prefs_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_client_prefs_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-client_notification" data-name="client_notification" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Comms &amp; reports<span class="rel">Client portal · next release</span><a class="pbadge pbadge--change" href="schema.html#p-P3">Changes · P3</a></p>
+      <h2><a href="#t-client_notification" class="anchor">client_notification</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>12</b> columns</span>
+      <span><b>3</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">Facts for the client&#x27;s notification bell. Written only by <code>mint_client_notification()</code>, which checks the client&#x27;s own switch for that kind first.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>client_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-client">client</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>kind</code><div class="badges"></div></td><td class="col-type"><code>varchar(12)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Enforced by a CHECK.<div class="chips"><span class="chip">note</span><span class="chip">plan</span><span class="chip">session</span><span class="chip">pack</span><span class="chip">best</span></div></td></tr><tr><td class="col-name"><code>amount</code><div class="badges"></div></td><td class="col-type"><code>numeric(10,2)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Set on <code>pack</code> rows.</td></tr><tr class="pc pc--add"><td class="col-name"><code>currency</code><div class="badges"><a class="pbadge pbadge--add" href="schema.html#p-P3" title="Added by proposal P3">+ P3</a><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id, currency</span></div></td><td class="col-type"><code>varchar(3)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The currency of <code>amount</code>, set together with it (<code>client_notification_amount_currency</code>), so &quot;paid 2,000&quot; can say of what. The workspace&#x27;s currency, by the same <code>(tenant_id, currency)</code> key as the money book.</td></tr><tr><td class="col-name"><code>subject_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">A session&#x27;s slot; a plan&#x27;s creation time for a new plan.</td></tr><tr><td class="col-name"><code>text</code><div class="badges"></div></td><td class="col-type"><code>varchar(160)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Per kind: a verb, a method, a plan&#x27;s name, a milestone&#x27;s label.</td></tr><tr><td class="col-name"><code>at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note">When it happened. The feed shows 21 days.</td></tr><tr><td class="col-name"><code>read_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Never un-set.</td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>client_id</code> </td><td><a class="tref" href="proposed-schema.html#t-client">client</a>.<code>id</code></td><td><code class="muted">client_notification_client_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">client_notification_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr class="pc pc--add"><td><code>tenant_id, currency</code> <a class="pbadge pbadge--add" href="schema.html#p-P3" title="Added by proposal P3">+ P3</a></td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id, currency</code></td><td><code class="muted">client_notification_tenant_currency_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  <h3>Check constraints</h3><div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Condition</th></tr></thead><tbody><tr><td><code>client_notification_kind</code> </td><td><code>((kind)::text = ANY ((ARRAY[&#x27;note&#x27;::character varying, &#x27;plan&#x27;::character varying, &#x27;session&#x27;::character varying, &#x27;pack&#x27;::character varying, &#x27;best&#x27;::character varying])::text[]))</code></td></tr><tr class="pc pc--add"><td><code>client_notification_amount_currency</code> <a class="pbadge pbadge--add" href="schema.html#p-P3" title="Added by proposal P3">+ P3</a></td><td><code>(amount IS NULL) = (currency IS NULL)</code></td></tr></tbody></table></div>
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>client_notification_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_client_notification_feed</code> </td><td><span class="kind kind--index">index</span></td><td><code>client_id, at DESC, id</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_client_notification_tenant</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_client_notification_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-exercise_favourite" data-name="exercise_favourite" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Exercise library<span class="rel">Phone app &amp; offline sync</span></p>
+      <h2><a href="#t-exercise_favourite" class="anchor">exercise_favourite</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>7</b> columns</span>
+      <span><b>3</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">A trainer&#x27;s star on an exercise. A join table rather than a column, because most exercises are shared library rows and one trainer&#x27;s star must not appear in another&#x27;s list.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>trainer_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>exercise_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-exercise">exercise</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">exercise_favourite_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>exercise_id</code> </td><td><a class="tref" href="proposed-schema.html#t-exercise">exercise</a>.<code>id</code></td><td><code class="muted">exercise_favourite_exercise_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">exercise_favourite_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>exercise_favourite_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_exercise_favourite_pair</code> </td><td><span class="kind kind--unique">unique</span></td><td><code>trainer_id, exercise_id</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_exercise_favourite_tenant_trainer</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id, trainer_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_exercise_favourite_trainer_id</code> </td><td><span class="kind kind--index">index</span></td><td><code>trainer_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_exercise_favourite_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_exercise_favourite_stamp_tenant</code> </td><td>BEFORE INSERT</td><td><code>stamp_tenant_id()</code></td></tr><tr><td><code>trg_exercise_favourite_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-time_block" data-name="time_block" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Diary<span class="rel">Phone app &amp; offline sync</span></p>
+      <h2><a href="#t-time_block" class="anchor">time_block</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>11</b> columns</span>
+      <span><b>2</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">A dated hole in the diary — an afternoon off or a fortnight away. It stops new bookings and nothing else; sessions already inside it stay where they are.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>trainer_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>starts_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>ends_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>all_day</code><div class="badges"></div></td><td class="col-type"><code>boolean</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>false</code></td><td class="col-note">Explicit, so a viewer never has to infer it from 00:00–23:59.</td></tr><tr><td class="col-name"><code>reason</code><div class="badges"></div></td><td class="col-type"><code>varchar(120)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>metadata</code><div class="badges"></div></td><td class="col-type"><code>jsonb</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>&#x27;{}&#x27;</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">time_block_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">time_block_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  <h3>Check constraints</h3><div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Condition</th></tr></thead><tbody><tr><td><code>time_block_metadata_object</code> </td><td><code>(jsonb_typeof(metadata) = &#x27;object&#x27;::text)</code></td></tr><tr><td><code>time_block_window</code> </td><td><code>(ends_at &gt; starts_at)</code></td></tr></tbody></table></div>
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>time_block_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_time_block_tenant_trainer</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id, trainer_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_time_block_trainer_range</code> </td><td><span class="kind kind--index">index</span></td><td><code>trainer_id, starts_at, ends_at</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_time_block_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_time_block_stamp_tenant</code> </td><td>BEFORE INSERT</td><td><code>stamp_tenant_id()</code></td></tr><tr><td><code>trg_time_block_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-batch" data-name="batch" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Diary<span class="rel">Phone app &amp; offline sync</span></p>
+      <h2><a href="#t-batch" class="anchor">batch</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>9</b> columns</span>
+      <span><b>2</b> FKs out</span>
+      <span><b>1</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">A group session on the floor: several clients in one slot. Each attendee keeps their own <code>scheduled_session</code> row pointing here.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>trainer_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>name</code><div class="badges"></div></td><td class="col-type"><code>varchar(120)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>capacity</code><div class="badges"></div></td><td class="col-type"><code>integer</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>10</code></td><td class="col-note">What the floor holds; the diary&#x27;s &quot;8/10&quot; is booked over this.</td></tr><tr><td class="col-name"><code>min_size</code><div class="badges"></div></td><td class="col-type"><code>integer</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>4</code></td><td class="col-note">Below this it is not worth running, and the agenda row says so in advance while there is still time to fill it.</td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">batch_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">batch_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">1</span></h3></summary>
+    <div class="refs"><span class="ref"><a class="tref" href="proposed-schema.html#t-scheduled_session">scheduled_session</a><span class="ref-col">.batch_id</span></span></div>
+  </details>
+
+  
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>batch_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_batch_tenant_trainer</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id, trainer_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_batch_trainer</code> </td><td><span class="kind kind--index">index</span></td><td><code>trainer_id</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_batch_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_batch_stamp_tenant</code> </td><td>BEFORE INSERT</td><td><code>stamp_tenant_id()</code></td></tr><tr><td><code>trg_batch_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-nudge_rule" data-name="nudge_rule" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Comms &amp; reports<span class="rel">Phone app &amp; offline sync</span></p>
+      <h2><a href="#t-nudge_rule" class="anchor">nudge_rule</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>12</b> columns</span>
+      <span><b>2</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">A trainer&#x27;s &quot;when to raise a nudge&quot; rule. A synced record rather than settings JSON, because rules are edited on a gym floor with no signal.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>trainer_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">No <code>client_id</code> — which is why a nudge rule never moves on reassignment.</td></tr><tr><td class="col-name"><code>kind</code><div class="badges"></div></td><td class="col-type"><code>varchar(30)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><div class="chips"><span class="chip">quiet</span><span class="chip">pack_low</span><span class="chip">overdue</span><span class="chip">well_done</span><span class="chip">birthday</span></div></td></tr><tr><td class="col-name"><code>threshold</code><div class="badges"></div></td><td class="col-type"><code>integer</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The unit depends on the kind: days without a workout for <code>quiet</code>, sessions left for <code>pack_low</code>, days past due for <code>overdue</code>. NULL for the two with no threshold — a birthday is on the day, and a record is when it happens.</td></tr><tr><td class="col-name"><code>action</code><div class="badges"></div></td><td class="col-type"><code>varchar(10)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>&#x27;ask&#x27;</code></td><td class="col-note"><code>ask</code> (draft it and queue it for one tap — the default, always) | <code>auto</code>.</td></tr><tr><td class="col-name"><code>message</code><div class="badges"></div></td><td class="col-type"><code>text</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The draft, with <code>{name}</code>, <code>{lastdate}</code>, <code>{days}</code>, <code>{amount}</code> substituted at send time. NULL falls back to the built-in wording for that kind.</td></tr><tr><td class="col-name"><code>enabled</code><div class="badges"></div></td><td class="col-type"><code>boolean</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>true</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>order_index</code><div class="badges"></div></td><td class="col-type"><code>integer</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>0</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">nudge_rule_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">nudge_rule_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>nudge_rule_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_nudge_rule_kind</code> </td><td><span class="kind kind--unique">unique</span></td><td><code>trainer_id, kind</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_nudge_rule_tenant_trainer</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id, trainer_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_nudge_rule_trainer_id</code> </td><td><span class="kind kind--index">index</span></td><td><code>trainer_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_nudge_rule_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_nudge_rule_stamp_tenant</code> </td><td>BEFORE INSERT</td><td><code>stamp_tenant_id()</code></td></tr><tr><td><code>trg_nudge_rule_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-weekly_report" data-name="weekly_report" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Comms &amp; reports<span class="rel">Phone app &amp; offline sync</span><a class="pbadge pbadge--change" href="schema.html#p-P3">Changes · P3</a></p>
+      <h2><a href="#t-weekly_report" class="anchor">weekly_report</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>18</b> columns</span>
+      <span><b>3</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">The weekly report sent to a client, written once on Sunday night and never updated. Stored rather than derived because it was sent: both people read those figures.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>trainer_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>client_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-client">client</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr class="pc pc--change"><td class="col-name"><code>week_start</code><div class="badges"><a class="pbadge pbadge--change" href="schema.html#p-P3" title="Changed by proposal P3">~ P3</a></div></td><td class="col-type"><code>date</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Monday, everywhere — the ISO week, as the day strip draws it. A <code>DATE</code>, because a week is a week in the trainer&#x27;s timezone and not an instant.<div class="pwas"><b>Was</b>Monday. A <code>DATE</code>, because a week is a week in the trainer&#x27;s timezone and not an instant.</div></td></tr><tr><td class="col-name"><code>week_end</code><div class="badges"></div></td><td class="col-type"><code>date</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Sunday.</td></tr><tr><td class="col-name"><code>sessions_kept</code><div class="badges"></div></td><td class="col-type"><code>integer</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>0</code></td><td class="col-note">Kept before planned, in that order, because the report opens with what the client kept and not with what they missed.</td></tr><tr><td class="col-name"><code>sessions_planned</code><div class="badges"></div></td><td class="col-type"><code>integer</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>0</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>trained_days</code><div class="badges"></div></td><td class="col-type"><code>varchar(20)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">ISO weekday numbers that carry a logged workout, e.g. <code>&#x27;2,7&#x27;</code>. A string rather than an array because it is drawn as seven cells and never queried.</td></tr><tr><td class="col-name"><code>volume_kg</code><div class="badges"></div></td><td class="col-type"><code>numeric(12,2)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>0</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>sets_done</code><div class="badges"></div></td><td class="col-type"><code>integer</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>0</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>new_bests</code><div class="badges"></div></td><td class="col-type"><code>integer</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>0</code></td><td class="col-note">Counted the same way the log counts them, so the two never disagree.</td></tr><tr><td class="col-name"><code>best_line</code><div class="badges"></div></td><td class="col-type"><code>text</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">&quot;Back squat · 57.5 kg × 5&quot;. Text, because the sentence is part of what was sent — reconstructing it from live data would let the report change after it landed.</td></tr><tr><td class="col-name"><code>best_previous</code><div class="badges"></div></td><td class="col-type"><code>text</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">&quot;Was 55 kg on 22 July&quot;.</td></tr><tr><td class="col-name"><code>sent_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The workspace this row belongs to.</td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">weekly_report_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>client_id</code> </td><td><a class="tref" href="proposed-schema.html#t-client">client</a>.<code>id</code></td><td><code class="muted">weekly_report_client_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">weekly_report_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>weekly_report_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_weekly_report_tenant_trainer</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id, trainer_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_weekly_report_trainer</code> </td><td><span class="kind kind--index">index</span></td><td><code>trainer_id, week_start DESC</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_weekly_report_week</code> </td><td><span class="kind kind--unique">unique</span></td><td><code>client_id, week_start</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_weekly_report_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_weekly_report_stamp_tenant</code> </td><td>BEFORE INSERT</td><td><code>stamp_tenant_id()</code></td></tr><tr><td><code>trg_weekly_report_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl tbl--proposed" id="t-gym" data-name="gym" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Gym platform<span class="rel">Gym platform</span><a class="pbadge pbadge--add" href="schema.html#p-P1">Proposed · P1</a></p>
+      <h2><a href="#t-gym" class="anchor">gym</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>8</b> columns</span>
+      <span><b>1</b> FKs out</span>
+      <span><b>1</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">What only a gym has, one row per gym workspace, keyed by its <code>tenant_id</code>. Supersedes the gym PRD&#x27;s standalone <code>gym</code> table, whose <code>owner_app_user_id</code> would have been another record of the owner, and its <code>gym_staff</code>, which is <code>tenant_member</code> with <code>role = &#x27;admin&#x27;</code> or <code>&#x27;staff&#x27;</code>. The composite key to <code>tenant (id, type)</code> makes a gym row on a solo workspace impossible. Read by the workspace&#x27;s members; written by its owner.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--pk">PK</span><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id, type</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The gym&#x27;s workspace — the gym is that tenant, not a separate thing it points at.</td></tr><tr><td class="col-name"><code>tenant_type</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id, type</span></div></td><td class="col-type"><code>varchar(20)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>&#x27;gym&#x27;</code></td><td class="col-note">Always <code>gym</code>, for the composite key.</td></tr><tr><td class="col-name"><code>legal_name</code><div class="badges"></div></td><td class="col-type"><code>varchar(160)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The name on its invoices, when it differs from <code>tenant.name</code>.</td></tr><tr class="pc pc--change"><td class="col-name"><code>gstin</code><div class="badges"><a class="pbadge pbadge--change" href="schema.html#p-P3" title="Changed by proposal P3">~ P3</a></div></td><td class="col-type"><code>varchar(15)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The gym&#x27;s GST number. Asked only when the workspace&#x27;s <code>tenant.country</code> is <code>IN</code>, and NULL elsewhere: GST is India&#x27;s, and a gym abroad invoices under its own regime, which gets a column when a gym there needs one.<div class="pwas"><b>Was</b>Its GST number, for the invoices a gym client receives.</div></td></tr><tr><td class="col-name"><code>city</code><div class="badges"></div></td><td class="col-type"><code>varchar(80)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>address</code><div class="badges"></div></td><td class="col-type"><code>text</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>tenant_id, tenant_type</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id, type</code></td><td><code class="muted">gym_tenant_kind_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">1</span></h3></summary>
+    <div class="refs"><span class="ref pc pc--add"><a class="tref" href="#t-gym_branch">gym_branch</a><span class="ref-col">.tenant_id</span><a class="pbadge pbadge--add" href="schema.html#p-P1" title="Added by proposal P1">+ P1</a></span></div>
+  </details>
+
+  <h3>Check constraints</h3><div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Condition</th></tr></thead><tbody><tr><td><code>gym_tenant_type</code> </td><td><code>tenant_type = &#x27;gym&#x27;</code></td></tr><tr><td><code>gym_gstin_format</code> </td><td><code>gstin IS NULL OR gstin ~ &#x27;^[0-9]{2}[A-Z0-9]{13}$&#x27;</code></td></tr></tbody></table></div>
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>gym_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>tenant_id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_gym_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl tbl--proposed" id="t-gym_branch" data-name="gym_branch" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Gym platform<span class="rel">Gym platform</span><a class="pbadge pbadge--add" href="schema.html#p-P1">Proposed · P1</a></p>
+      <h2><a href="#t-gym_branch" class="anchor">gym_branch</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>8</b> columns</span>
+      <span><b>1</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">A gym&#x27;s locations. There from the start for the reason the gym PRD gives: a branch added later is a nullable column on every gym-owned table and a back-fill that has to guess. Hangs off <code>gym</code>, so only a gym workspace can have one.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="#t-gym">gym</a>.tenant_id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The gym it belongs to.</td></tr><tr><td class="col-name"><code>name</code><div class="badges"></div></td><td class="col-type"><code>varchar(120)</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>address</code><div class="badges"></div></td><td class="col-type"><code>text</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr class="pc pc--add"><td class="col-name"><code>timezone</code><div class="badges"><a class="pbadge pbadge--add" href="schema.html#p-P3" title="Added by proposal P3">+ P3</a></div></td><td class="col-type"><code>varchar(64)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The branch&#x27;s IANA zone when it differs from the gym&#x27;s <code>tenant.timezone</code> — one chain across Dubai and London. NULL = the gym&#x27;s. Validated with <code>ZoneId.of</code> in code.</td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>deleted_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>tenant_id</code> </td><td><a class="tref" href="#t-gym">gym</a>.<code>tenant_id</code></td><td><code class="muted">gym_branch_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>gym_branch_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>idx_gym_branch_tenant</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_id</code></td><td><code>WHERE deleted_at IS NULL</code></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_gym_branch_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_gym_branch_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl tbl--proposed" id="t-tenant_member_terms" data-name="tenant_member_terms" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Tenancy<span class="rel">Workspaces</span><a class="pbadge pbadge--add" href="schema.html#p-P1">Proposed · P1</a></p>
+      <h2><a href="#t-tenant_member_terms" class="anchor">tenant_member_terms</a><span class="rls" title="Row-level security is enabled on this table">RLS</span></h2>
+    </div>
+    <div class="stats">
+      <span><b>9</b> columns</span>
+      <span><b>3</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">The commercial terms of one membership, dated. Replaces the two percentages that sat on <code>tenant_member</code>, where an edit silently rewrote every past period <code>TenantRevenueService</code> computes. Revenue for a payment uses the row in force on the payment&#x27;s date. Append-only: a change closes the open row and writes another in the same transaction, so there is at most one open row per member. Terms end with the stint: leaving closes the open row on the day they leave, so a rejoin — which reuses the <code>tenant_member</code> row — starts with no terms in force and never inherits the earlier stint&#x27;s share. Money tier: the active workspace only, and owners and admins only in code.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>id</code><div class="badges"><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>gen_random_uuid()</code></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note"><span class=muted>—</span></td></tr><tr><td class="col-name"><code>tenant_member_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-tenant_member">tenant_member</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The membership these terms belong to.</td></tr><tr><td class="col-name"><code>revenue_share_percent</code><div class="badges"></div></td><td class="col-type"><code>numeric(5,2)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">What this member keeps of what they collect in this workspace. NULL = 100%, the right answer for a solo workspace.</td></tr><tr><td class="col-name"><code>assignment_margin_percent</code><div class="badges"></div></td><td class="col-type"><code>numeric(5,2)</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">An admin&#x27;s cut of revenue from clients they placed with somebody else. NULL = none. Still frozen per handover onto <code>client_assignment.actor_margin_percent</code>.</td></tr><tr><td class="col-name"><code>effective_from</code><div class="badges"></div></td><td class="col-type"><code>date</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The first day these terms apply.</td></tr><tr><td class="col-name"><code>effective_to</code><div class="badges"></div></td><td class="col-type"><code>date</code></td><td class="col-null"><span class=nullable>null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The first day they no longer apply. NULL on the terms in force now.</td></tr><tr><td class="col-name"><code>set_by_app_user_id</code><div class="badges"><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-app_user">app_user</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">Who agreed them — a coach&#x27;s pay is the one number on this table somebody will ask about.</td></tr><tr><td class="col-name"><code>created_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>tenant_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant">tenant</a>.<code>id</code></td><td><code class="muted">tenant_member_terms_tenant_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>tenant_member_id</code> </td><td><a class="tref" href="proposed-schema.html#t-tenant_member">tenant_member</a>.<code>id</code></td><td><code class="muted">tenant_member_terms_member_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr><tr><td><code>set_by_app_user_id</code> </td><td><a class="tref" href="proposed-schema.html#t-app_user">app_user</a>.<code>id</code></td><td><code class="muted">tenant_member_terms_set_by_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  <h3>Check constraints</h3><div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Condition</th></tr></thead><tbody><tr><td><code>tenant_member_terms_percent_range</code> </td><td><code>(revenue_share_percent IS NULL OR revenue_share_percent BETWEEN 0 AND 100) AND (assignment_margin_percent IS NULL OR assignment_margin_percent BETWEEN 0 AND 100)</code></td></tr><tr><td><code>tenant_member_terms_window</code> </td><td><code>effective_to IS NULL OR effective_to &gt; effective_from</code></td></tr></tbody></table></div>
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>tenant_member_terms_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>id</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr><tr><td><code>uq_tenant_member_terms_open</code> </td><td><span class="kind kind--unique">unique</span></td><td><code>tenant_member_id</code></td><td><code>WHERE effective_to IS NULL</code></td><td>At most one set of terms in force per member.</td></tr><tr><td><code>idx_tenant_member_terms_member</code> </td><td><span class="kind kind--index">index</span></td><td><code>tenant_member_id, effective_from</code></td><td><span class=muted>—</span></td><td>The revenue read: which terms were in force on a payment&#x27;s date.</td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_tenant_member_terms_freeze_tenant</code> </td><td>BEFORE UPDATE</td><td><code>freeze_tenant_id()</code></td></tr><tr><td><code>trg_tenant_member_terms_stamp_tenant</code> </td><td>BEFORE INSERT</td><td><code>stamp_tenant_id()</code></td></tr></tbody></table></div>
+</section>
+<section class="tbl" id="t-invoice_counter" data-name="invoice_counter" data-tab="v1">
+  <header class="tbl-head">
+    <div>
+      <p class="eyebrow">Money book<a class="pbadge pbadge--change" href="schema.html#p-P3">Changes · P3</a></p>
+      <h2><a href="#t-invoice_counter" class="anchor">invoice_counter</a></h2>
+    </div>
+    <div class="stats">
+      <span><b>5</b> columns</span>
+      <span><b>1</b> FKs out</span>
+      <span><b>0</b> FKs in</span>
+    </div>
+  </header>
+  <div class="lede">The last bill number used, one row per trainer per financial year. Advanced with a locking upsert inside the invoicing transaction, so numbers are consecutive and gap-free.</div>
+
+  <h3>Columns</h3>
+  <div class="scroll"><table class="grid cols">
+    <thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Note</th></tr></thead>
+    <tbody><tr><td class="col-name"><code>trainer_id</code><div class="badges"><span class="badge badge--pk">PK</span><span class="badge badge--fk">FK</span><span class="fk-target">→ <a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.id</span></div></td><td class="col-type"><code>uuid</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The issuer.</td></tr><tr class="pc pc--change"><td class="col-name"><code>fy</code><div class="badges"><a class="pbadge pbadge--change" href="schema.html#p-P3" title="Changed by proposal P3">~ P3</a><span class="badge badge--pk">PK</span></div></td><td class="col-type"><code>smallint</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The calendar year the numbering year starts in — <code>2026</code> for April 2026 – March 2027 in India, and for January–December 2026 elsewhere. One encoding for both, so the column never has to be read against the country; the label on the bill is derived (<code>2627</code> when <code>year_start_month = 4</code>, <code>2026</code> when it is 1).<div class="pwas"><b>Was</b><code>2627</code> = April 2026 – March 2027 (the two years&#x27; last two digits).</div></td></tr><tr class="pc pc--add"><td class="col-name"><code>year_start_month</code><div class="badges"><a class="pbadge pbadge--add" href="schema.html#p-P3" title="Added by proposal P3">+ P3</a></div></td><td class="col-type"><code>smallint</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>4</code></td><td class="col-note">Which month this numbering year began in: 4 (April) when the trainer&#x27;s solo workspace is in India, 1 (January) everywhere else. Frozen on the row, so a bill&#x27;s number can always be re-read. A trainer who changes country keeps the running year to its end and starts the other kind at the next boundary — never mid-year, which is the one way two rows could claim the same bill.</td></tr><tr><td class="col-name"><code>last_seq</code><div class="badges"></div></td><td class="col-type"><code>integer</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><span class=muted>—</span></td><td class="col-note">The last number minted; always positive.</td></tr><tr><td class="col-name"><code>updated_at</code><div class="badges"></div></td><td class="col-type"><code>timestamptz</code></td><td class="col-null"><span class=notnull>not null</span></td><td class="col-default"><code>now()</code></td><td class="col-note"><span class=muted>—</span></td></tr></tbody>
+  </table></div>
+  
+
+  
+
+  <h3>Foreign keys</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Column</th><th>References</th><th>Constraint</th><th>On update</th><th>On delete</th></tr></thead><tbody><tr><td><code>trainer_id</code> </td><td><a class="tref" href="proposed-schema.html#t-trainer">trainer</a>.<code>id</code></td><td><code class="muted">invoice_counter_trainer_id_fkey</code></td><td>NO ACTION</td><td>NO ACTION</td></tr></tbody></table></div>
+
+  <details class="more" open>
+    <summary><h3>Referenced by <span class="count">0</span></h3></summary>
+    <p class="muted">Nothing points at this table.</p>
+  </details>
+
+  <h3>Check constraints</h3><div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Condition</th></tr></thead><tbody><tr><td><code>invoice_counter_seq_positive</code> </td><td><code>(last_seq &gt; 0)</code></td></tr><tr class="pc pc--add"><td><code>invoice_counter_year_start</code> <a class="pbadge pbadge--add" href="schema.html#p-P3" title="Added by proposal P3">+ P3</a></td><td><code>year_start_month IN (1, 4)</code></td></tr></tbody></table></div>
+
+  <h3>Indexes</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>Kind</th><th>Columns</th><th>Partial</th><th>Note</th></tr></thead><tbody><tr><td><code>invoice_counter_pkey</code> </td><td><span class="kind kind--primary">primary</span></td><td><code>trainer_id, fy</code></td><td><span class=muted>—</span></td><td><span class=muted>—</span></td></tr></tbody></table></div>
+
+  <h3>Triggers</h3>
+  <div class="scroll"><table class="grid"><thead><tr><th>Name</th><th>When</th><th>Function</th></tr></thead><tbody><tr><td><code>trg_invoice_counter_updated_at</code> </td><td>BEFORE UPDATE</td><td><code>set_updated_at()</code></td></tr></tbody></table></div>
+</section>
+</section>
+  </main>
+</div>
+<a class="top" href="#top" aria-label="Back to top">↑</a>
+<script>
+(function(){
+  var root=document.documentElement, btns=document.querySelectorAll('.theme button');
+  function setTheme(t){ if(t==='auto'){root.removeAttribute('data-theme')} else {root.setAttribute('data-theme',t)}
+    btns.forEach(function(b){b.setAttribute('aria-pressed', String(b.dataset.t===t))});
+    try{localStorage.setItem('schema-theme',t)}catch(e){} }
+  var saved='auto'; try{saved=localStorage.getItem('schema-theme')||'auto'}catch(e){}
+  setTheme(saved); btns.forEach(function(b){b.addEventListener('click',function(){setTheme(b.dataset.t)})});
+
+  var tabs=[].slice.call(document.querySelectorAll('.tabs a')), panels=[].slice.call(document.querySelectorAll('.panel')),
+      groups=[].slice.call(document.querySelectorAll('.nav-group')), current='v1';
+  function show(tab){
+    current=tab;
+    tabs.forEach(function(a){a.setAttribute('aria-selected', String(a.dataset.tab===tab))});
+    panels.forEach(function(p){p.hidden=p.dataset.panel!==tab});
+    groups.forEach(function(g){g.hidden=g.dataset.tab!==tab});
+    document.querySelector('.side').hidden = (tab==='review'||tab==='proposals') && window.innerWidth<=860;
+    filter();
+  }
+  function route(){
+    var id=(location.hash||'#v1').slice(1), el=document.getElementById(id);
+    if(!el){ show('v1'); return; }
+    var tab=el.dataset.panel || el.dataset.tab || (el.closest('[data-panel]')||{dataset:{panel:'v1'}}).dataset.panel;
+    show(tab);
+    if(!el.dataset.panel){ requestAnimationFrame(function(){ el.scrollIntoView(); }); }
+  }
+  window.addEventListener('hashchange', route);
+
+  var q=document.getElementById('q'), links=[].slice.call(document.querySelectorAll('.nav a')),
+      empty=document.querySelector('.nav-empty');
+  function filter(){
+    var s=q.value.trim().toLowerCase(), any=false;
+    groups.forEach(function(g){
+      if(g.dataset.tab!==current){ g.hidden=true; return; }
+      var hit=false;
+      [].forEach.call(g.querySelectorAll('a'),function(a){var h=a.dataset.name.indexOf(s)>-1; a.style.display=h?'':'none'; hit=hit||h});
+      g.hidden=!hit; any=any||hit;
+    });
+    empty.style.display=any||current==='review'||current==='proposals'?'none':'block';
+  }
+  q.addEventListener('input',filter);
+  document.addEventListener('keydown',function(e){ if(e.key==='/'&&document.activeElement!==q){e.preventDefault();q.focus()} });
+  route();
+
+  var byName={}; links.forEach(function(a){byName[a.dataset.name]=a});
+  if('IntersectionObserver' in window){
+    var io=new IntersectionObserver(function(es){es.forEach(function(en){ if(en.isIntersecting){
+      links.forEach(function(a){a.classList.remove('active')}); var a=byName[en.target.dataset.name]; if(a)a.classList.add('active'); }})},
+      {rootMargin:'-10% 0px -75% 0px'});
+    document.querySelectorAll('.tbl').forEach(function(s){io.observe(s)});
+  }
+})();
+</script>
+</body>
+</html>

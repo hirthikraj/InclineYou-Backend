@@ -10,7 +10,7 @@ import type { NudgeTemplateName } from '@/lib/nudges/types';
 /**
  * THE BUTTON. One component, every surface that knows about a client.
  *
- * Today's session rows, the attention queue's neighbours, the roster, the dues
+ * Today's session rows, the attention queue's neighbours, the roster, the pending
  * list, the packs that are ending, the sessions nobody turned up to, the client
  * file. That is the whole feature: **a nudge belongs next to the thing that
  * triggered it**, and a trainer who has to navigate somewhere to follow up does
@@ -108,6 +108,18 @@ export interface NudgeButtonProps {
   now?: number;
   /** Drawn under the button rather than beside it. Table cells want `false`. */
   showContactedNote?: boolean;
+  /**
+   * An ARIA role for the control itself — `'menuitem'` and nothing else so far.
+   *
+   * The roster's row menu is a `role="menu"` whose arrow keys walk
+   * `[role="menuitem"]:not([disabled])`, so a nudge dropped into it without one
+   * is a row the keyboard silently steps over. Passing the role rather than
+   * rebuilding the send here is the whole point of this component existing once:
+   * the popup-block recovery, the cooldown note and the error sentence come with
+   * it. It lands on the SENT state's anchor too, because that anchor is the same
+   * row in the same list a moment later.
+   */
+  role?: string;
 }
 
 export function NudgeButton({
@@ -120,6 +132,7 @@ export function NudgeButton({
   lastNudgedAt = null,
   now,
   showContactedNote = true,
+  role,
 }: NudgeButtonProps) {
   const [state, setState] = useState<State>({ kind: 'idle' });
   const [pending, startTransition] = useTransition();
@@ -163,6 +176,7 @@ export function NudgeButton({
           href={state.whatsappUrl}
           target="_blank"
           rel="noopener noreferrer"
+          role={role}
         >
           {WHATSAPP_GLYPH}
           {!iconOnly && 'Open WhatsApp'}
@@ -179,6 +193,7 @@ export function NudgeButton({
       <button
         className={className}
         type="button"
+        role={role}
         onClick={press}
         disabled={pending}
         title={`${verb} — ${clientName} on WhatsApp`}

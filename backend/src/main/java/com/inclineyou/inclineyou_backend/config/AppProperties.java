@@ -192,6 +192,14 @@ public class AppProperties {
 
         private int lockMinutes = 10;
 
+        /**
+         * How long an {@code otp_request} row is kept (V21). The send ceiling
+         * reads a day and the lock ten minutes, so a month is evidence rather
+         * than state — and the row is a phone number, which the DPDP Act says
+         * we keep no longer than its purpose needs.
+         */
+        private int purgeAfterDays = 30;
+
         /* ── send rate, per number ──────────────────────────────────────────
          * Wrong codes are capped by maxAttempts above. This is the other
          * direction: how many codes a number may ASK for. Without it, one

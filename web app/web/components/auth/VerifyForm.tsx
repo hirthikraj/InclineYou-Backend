@@ -18,6 +18,8 @@ import { IconCall, IconWhatsApp } from './Icons';
 import { MessageSlot } from './MessageSlot';
 import { OtpInput } from './OtpInput';
 import { TrustLine } from './TrustLine';
+import { Button } from '@/web-components/ui/Button';
+import { Tag } from '@/web-components/ui/Tag';
 
 /**
  * Frames 1b and 1c · the code.
@@ -167,6 +169,7 @@ export function VerifyForm({ phone }: { phone: string }) {
       <p className="stp__sub" style={{ marginTop: 8 }}>
         Sent by SMS to {formatPhone(phone)} ·{' '}
         <a
+          className="authwrap__lnk"
           href="/sign-in"
           onClick={(e) => {
             e.preventDefault();
@@ -201,20 +204,20 @@ export function VerifyForm({ phone }: { phone: string }) {
         <span className="small" style={{ color: 'var(--tx-ink-3)' }}>
           Didn&rsquo;t get it?
         </span>
-        <button
-          className="btn btn--sm btn--ghost"
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={resend}
           disabled={cooldown > 0 || pending}
         >
           {cooldown > 0 ? `Resend in ${mmss(cooldown)}` : 'Resend the code'}
-        </button>
+        </Button>
       </div>
 
       <div style={{ marginTop: 16 }}>
-        <button
-          className="btn btn--primary btn--lg"
-          type="button"
+        <Button
+          variant="primary"
+          size="lg"
           style={{ width: '100%' }}
           onClick={submit}
           // Verify STAYS LIVE after a wrong code — the digits are still there
@@ -223,13 +226,13 @@ export function VerifyForm({ phone }: { phone: string }) {
           disabled={code.length !== CODE_LENGTH || pending || locked}
         >
           {pending ? 'Checking…' : 'Verify'}
-        </button>
+        </Button>
       </div>
 
       {secondPathOpen ? <SecondPaths /> : null}
 
       <TrustLine>
-        Nobody from X&nbsp;REP will ever ring you and ask for this code. If somebody does, it is
+        Nobody from InclineYou will ever ring you and ask for this code. If somebody does, it is
         not us.
       </TrustLine>
     </>
@@ -266,44 +269,44 @@ function SecondPaths() {
         Still nothing after two resends. Here is every other way in.
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 11 }}>
-        <button className="btn btn--secondary" type="button" style={{ width: '100%' }} disabled>
+        <Button variant="secondary" style={{ width: '100%' }} disabled>
           <IconWhatsApp size={15} />
           Send the code on WhatsApp
-          <span className="tag tag--warn" style={{ marginLeft: 'auto' }}>
+          <Tag tone="warn" style={{ marginLeft: 'auto' }}>
             not wired
-          </span>
-        </button>
-        <button className="btn btn--secondary" type="button" style={{ width: '100%' }} disabled>
+          </Tag>
+        </Button>
+        <Button variant="secondary" style={{ width: '100%' }} disabled>
           <IconCall size={15} />
           Call me with the code
-          <span className="tag tag--danger" style={{ marginLeft: 'auto' }}>
+          <Tag tone="danger" style={{ marginLeft: 'auto' }}>
             no endpoint
-          </span>
-        </button>
+          </Tag>
+        </Button>
         {/* An anchor when it can go somewhere, a dead button when it cannot.
             An <a> with no href is not focusable and not announced as a
             control, so an unconfigured support number would leave the ONE
             working route here invisible to a keyboard — worse than the two
             above it, which at least say why they are dead. */}
         {support ? (
-          <a
-            className="btn btn--primary"
-            style={{ width: '100%' }}
+          <Button
             href={`https://wa.me/${support}`}
+            variant="primary"
+            style={{ width: '100%' }}
             target="_blank"
             rel="noreferrer"
           >
             <IconWhatsApp size={15} />
             Message us and we&rsquo;ll sign you in by hand
-          </a>
+          </Button>
         ) : (
-          <button className="btn btn--primary" type="button" style={{ width: '100%' }} disabled>
+          <Button variant="primary" style={{ width: '100%' }} disabled>
             <IconWhatsApp size={15} />
             Message us and we&rsquo;ll sign you in by hand
-            <span className="tag tag--warn" style={{ marginLeft: 'auto' }}>
+            <Tag tone="warn" style={{ marginLeft: 'auto' }}>
               no number set
-            </span>
-          </button>
+            </Tag>
+          </Button>
         )}
       </div>
       <p className="small" style={{ marginTop: 11, color: 'var(--tx-ink-3)' }}>

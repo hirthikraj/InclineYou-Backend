@@ -13,7 +13,8 @@ import {
   type Entry,
   type Part,
 } from '@/lib/programs/blueprint';
-import { AltIcon, ArrowDown, ArrowUp, CopyIcon, DotsIcon, LinkIcon, PlusIcon, TrashIcon } from './Icons';
+import { AltIcon, ArrowDown, ArrowUp, CopyIcon, DotsIcon, InfoIcon, LinkIcon, PlusIcon, TrashIcon } from './Icons';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * ONE DAY, AS COLUMNS — the plane the whole builder sits on.
@@ -48,6 +49,9 @@ export interface DayColumnProps {
   readOnly?: boolean;
   onToggle: (uid: string, additive: boolean) => void;
   onOpenRow: (uid: string) => void;
+  /** Opens the exercise panel for a row. Absent on a read-only preview, which
+   *  has no builder behind it to open one into. */
+  onInfoRow?: (uid: string) => void;
   onAdd: () => void;
   onNudge: (uid: string, direction: -1 | 1) => void;
   onLink: (uid: string) => void;
@@ -173,13 +177,15 @@ export function DayColumn(props: DayColumnProps) {
           <div className="dayc__f">
             Nothing of its own — repeats week 1.
             {props.onMakeOwn && (
-              <button
-                className="btn btn--sm btn--secondary pg__wide pg__gap"
-                type="button"
+              <Button
+                variant="secondary"
+                size="sm"
+                wide
+                className="pg__gap"
                 onClick={props.onMakeOwn}
               >
                 Make this week its own
-              </button>
+              </Button>
             )}
           </div>
         ) : (
@@ -284,6 +290,7 @@ function BlockView({
   dragUid,
   onToggle,
   onOpenRow,
+  onInfoRow,
   onNudge,
   onLink,
   onUnlink,
@@ -314,6 +321,7 @@ function BlockView({
       readOnly={readOnly}
       onToggle={additive => onToggle(entry.uid, additive)}
       onOpen={() => onOpenRow(entry.uid)}
+      onInfo={onInfoRow ? () => onInfoRow(entry.uid) : undefined}
       onNudge={d => onNudge(entry.uid, d)}
       onLink={() => onLink(entry.uid)}
       onUnlink={entry.groupId ? () => onUnlink(entry.groupId!) : undefined}
@@ -378,6 +386,7 @@ function Row({
   readOnly,
   onToggle,
   onOpen,
+  onInfo,
   onNudge,
   onLink,
   onUnlink,
@@ -398,6 +407,7 @@ function Row({
   readOnly?: boolean;
   onToggle: (additive: boolean) => void;
   onOpen: () => void;
+  onInfo?: () => void;
   onNudge: (d: -1 | 1) => void;
   onLink: () => void;
   onUnlink?: () => void;
@@ -489,13 +499,30 @@ function Row({
       }}
       onDoubleClick={() => !readOnly && onOpen()}
     >
+      {/*
+       * THE GRIP IS DRAWN ONLY WHERE IT WORKS.
+       *
+       * FOUND BY RENDERING the certified preview: the glyph and its
+       * `cursor:grab` were unconditional, so a read-only column offered a
+       * handle on every row and moved none of them. That is verbatim the defect
+       * this component was fixed for once already — *"a grab cursor over a row
+       * that will not move reads as a broken feature rather than as a missing
+       * one, which is how it was reported"* — reintroduced from the other side,
+       * by a caller that suppresses the drag rather than by a handler that was
+       * never attached.
+       *
+       * The SPAN stays either way, because `.dayc__ex` is a three-track grid and
+       * dropping the first track would shift every ordinal and name a few pixels
+       * left of where the editable view puts them — so a trainer comparing a
+       * preview against their own copy would see two different columns.
+       */}
       <span
-        className="dayc__h"
+        className={drag ? 'dayc__h' : 'dayc__h dayc__h--static'}
         aria-hidden="true"
         title={drag ? 'Drag to reorder' : undefined}
         onMouseDown={() => drag && setArmed(true)}
       >
-        <Grip />
+        {drag && <Grip />}
       </span>
       <span className="dayc__o">{ordinal}</span>
       <span className="dayc__m">
@@ -526,6 +553,7 @@ function Row({
           onDuplicate={onDuplicate}
           onRemove={onRemove}
           onNudge={onNudge}
+          onInfo={onInfo}
         />
       )}
     </div>
@@ -571,6 +599,7 @@ function RowMenu({
   onDuplicate,
   onRemove,
   onNudge,
+  onInfo,
 }: {
   open: boolean;
   setOpen: (v: boolean) => void;
@@ -581,6 +610,8 @@ function RowMenu({
   onDuplicate: () => void;
   onRemove: () => void;
   onNudge: (d: -1 | 1) => void;
+  /** Absent on a read-only preview, which has no library panel to open into. */
+  onInfo?: () => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
 
@@ -610,24 +641,31 @@ function RowMenu({
 
   return (
     <div className="dayc__menu" ref={box}>
-      <button
-        className="btn btn--icon btn--ghost dayc__more"
-        type="button"
-        aria-label="More actions for this exercise"
+      <Button
+        variant="ghost"
+        iconOnly
+        label="More actions for this exercise"
+        className="dayc__more"
         aria-expanded={open}
         onClick={e => {
           e.stopPropagation();
           setOpen(!open);
         }}
-      >
-        <DotsIcon size={15} />
-      </button>
+        title={undefined}
+        icon={<DotsIcon size={15} />}
+      />
 
       {open && (
         <div className="menu" role="menu">
           <button className="menu__i" role="menuitem" type="button" onClick={run(onOpenRow)}>
             Edit the numbers <kbd>↵</kbd>
           </button>
+          {onInfo && (
+            <button className="menu__i" role="menuitem" type="button" onClick={run(onInfo)}>
+              <InfoIcon size={13} />
+              What this exercise is
+            </button>
+          )}
           {canUnlink && onUnlink ? (
             <button className="menu__i" role="menuitem" type="button" onClick={run(onUnlink)}>
               <LinkIcon size={13} />

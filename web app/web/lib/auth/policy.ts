@@ -43,6 +43,24 @@ export const PHONE_PATTERN = /^[6-9]\d{9}$/;
  */
 export const WHATSAPP_OTP_ENABLED = false;
 
+/**
+ * The second IDENTITY, and it is further off than the second delivery path.
+ *
+ * WhatsApp above needs a BSP wired to an endpoint that already exists. This
+ * needs an endpoint that does not: there is no `/v1/auth/google`, no OAuth
+ * client, and — the part that is a product decision rather than a task — no
+ * answer to what a Google identity IS here. The account in this system is the
+ * mobile number. The roster, the two books, `inclineyou_client` and every check
+ * the sync controller makes against the token all key off it, so an email
+ * arriving from Google maps to no trainer until the backend can exchange one
+ * for a phone and say what happens when it cannot.
+ *
+ * The control is drawn on `/sign-in` behind this flag. Flip it the day the
+ * exchange exists, and not before: a button that starts a flow with no other
+ * end than a 404 is worse than one that says it is not ready.
+ */
+export const GOOGLE_SIGN_IN_ENABLED = false;
+
 /** After this many resends, the screen stops offering only "resend". */
 export const SECOND_PATH_AFTER_RESENDS = 2;
 

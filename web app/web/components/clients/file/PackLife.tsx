@@ -6,6 +6,8 @@ import type { ClientPackageWire, PackageAdjustmentWire } from '@/lib/clients/cli
 import { extendPack, pausePack, resumePack } from '@/lib/clients/package-actions';
 
 import { longDateStr } from './shared';
+import { Button } from '@/web-components/ui/Button';
+import { TextField } from '@/web-components/ui/Field';
 
 /**
  * THE THREE MESSY REALITIES — pause, resume, extend.
@@ -114,36 +116,36 @@ export function PackLife({
       {mode === null && (
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {paused ? (
-            <button
-              className="btn btn--sm btn--secondary"
-              type="button"
+            <Button
+              variant="secondary"
+              size="sm"
               onClick={() => {
                 setEffective(todayISO());
                 setMode('resume');
               }}
             >
               Start it again
-            </button>
+            </Button>
           ) : (
-            <button
-              className="btn btn--sm btn--ghost"
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => {
                 setEffective(todayISO());
                 setMode('pause');
               }}
             >
               Pause it
-            </button>
+            </Button>
           )}
           {!paused && (
-            <button
-              className="btn btn--sm btn--ghost"
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setMode('extend')}
             >
               Give more time
-            </button>
+            </Button>
           )}
         </div>
       )}
@@ -172,29 +174,25 @@ export function PackLife({
               should not cost anybody three days.
             </p>
           </div>
-          <div className="fld mt3">
-            <label className="fld__l" htmlFor="pl-reason">
-              Why <span className="ink3">· optional</span>
-            </label>
-            <input
-              className="ctl"
-              id="pl-reason"
-              type="text"
-              value={reason}
-              maxLength={200}
-              placeholder={mode === 'pause' ? 'Kerala till the 20th' : 'Back in town'}
-              onChange={(e) => setReason(e.target.value)}
-            />
-          </div>
+          <TextField
+            label={<>Why <span className="ink3">· optional</span></>}
+            id="pl-reason"
+            className="mt3"
+            type="text"
+            value={reason}
+            maxLength={200}
+            placeholder={mode === 'pause' ? 'Kerala till the 20th' : 'Back in town'}
+            onChange={(e) => setReason(e.target.value)}
+          />
           {error && (
             <p className="msg msg--warn mt3" role="alert">
               <span>{error}</span>
             </p>
           )}
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <button
-              className="btn btn--sm btn--primary"
-              type="button"
+            <Button
+              variant="primary"
+              size="sm"
               disabled={pending}
               onClick={() =>
                 run(() =>
@@ -205,10 +203,10 @@ export function PackLife({
               }
             >
               {pending ? 'Saving…' : mode === 'pause' ? 'Pause it' : 'Start it again'}
-            </button>
-            <button className="btn btn--sm btn--ghost" type="button" disabled={pending} onClick={close}>
+            </Button>
+            <Button variant="ghost" size="sm" disabled={pending} onClick={close}>
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -220,21 +218,17 @@ export function PackLife({
             Pushes the end date out. The sessions do not change — this is time, not
             sessions.
           </p>
-          <div className="fld">
-            <label className="fld__l" htmlFor="pl-days">
-              How many days
-            </label>
-            <input
-              className="ctl ctl--num"
-              id="pl-days"
-              type="number"
-              min="1"
-              max="365"
-              step="1"
-              value={days}
-              onChange={(e) => setDays(e.target.value)}
-            />
-          </div>
+          <TextField
+            label="How many days"
+            id="pl-days"
+            numeric
+            type="number"
+            min="1"
+            max="365"
+            step="1"
+            value={days}
+            onChange={(e) => setDays(e.target.value)}
+          />
           <div className="fld mt3">
             <label className="fld__l" htmlFor="pl-why">
               Why <span className="ink3">· optional</span>
@@ -259,17 +253,17 @@ export function PackLife({
             </p>
           )}
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <button
-              className="btn btn--sm btn--primary"
-              type="button"
+            <Button
+              variant="primary"
+              size="sm"
               disabled={pending}
               onClick={() => run(() => extendPack(clientId, pkg.id, Number(days), reason))}
             >
               {pending ? 'Saving…' : `Give ${Number(days) || 0} days`}
-            </button>
-            <button className="btn btn--sm btn--ghost" type="button" disabled={pending} onClick={close}>
+            </Button>
+            <Button variant="ghost" size="sm" disabled={pending} onClick={close}>
               Cancel
-            </button>
+            </Button>
           </div>
         </div>
       )}

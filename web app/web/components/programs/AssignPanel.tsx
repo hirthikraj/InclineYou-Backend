@@ -5,6 +5,13 @@ import { useMemo, useState } from 'react';
 import type { ClientWire, ScheduleEntryPayload } from '@/lib/programs/api';
 import { WEEKDAYS } from '@/lib/programs/blueprint';
 import { CloseIcon, SearchIcon } from './Icons';
+import { TimeField } from '@/components/shell/TimeField';
+import { formatMinuteValue, parseMinuteValue } from '@/lib/today/time';
+import { Button } from '@/web-components/ui/Button';
+import { Chip } from '@/web-components/ui/Chip';
+import { Message } from '@/web-components/ui/Message';
+import { Why } from '@/web-components/ui/Why';
+import { DockPanel } from '@/web-components/ui/DockPanel';
 
 /**
  * ASSIGN — where an ordinal slot becomes a real Tuesday.
@@ -84,24 +91,90 @@ export function AssignPanel({
   const client = clients.find(c => c.id === clientId) ?? null;
   const taken = new Set(Object.values(slots).map(s => s.weekday));
 
+  /**
+   * Choosing a client RE-SEEDS the grid from the days they already train.
+   *
+   * Their standing week is set when their pack is sold — that is the same
+   * conversation, and it is where the money and the mornings are agreed
+   * together — so by the time a plan is being assigned, most clients already
+   * have four mornings that are theirs. Opening on Mon/Tue/Thu/Fri at 6am for
+   * somebody who comes Tue/Wed/Fri/Sat at 7pm asks the trainer to re-type an
+   * arrangement the product already knows, and the version they forget to
+   * re-type is the one that moves a client's week without telling them.
+   *
+   * In the handler and not an effect, for the reason `AddClientFlow` gives about
+   * its pack picker: an effect would paint one frame of the old seed under the
+   * new name.
+   *
+   * The template's ordinal days take the client's weekdays IN ORDER — Day 1 is
+   * their first morning of the week — and a template with more days than they
+   * train keeps the seeded pattern for the rest, which is the case the mismatch
+   * note below is about. Both sides are 1 = Monday here, so nothing translates:
+   * `client.weeklySchedule` and `program.schedule` are the same convention and
+   * `TemplateService.validateSchedule` enforces it.
+   */
+  function chooseClient(next: ClientWire): void {
+    setClientId(next.id);
+    const week = [...(next.weeklySchedule ?? [])]
+      .filter(slot => slot.weekday >= 1 && slot.weekday <= 7)
+      .sort((a, b) => a.weekday - b.weekday);
+    if (week.length === 0) return;
+    setSlots(() => {
+      const seeded = seedSchedule(days);
+      const used = new Set<number>();
+      days.forEach((day, i) => {
+        const slot = week[i];
+        if (!slot || used.has(slot.weekday)) return;
+        used.add(slot.weekday);
+        seeded[day] = { weekday: slot.weekday, time: slot.time };
+      });
+      /* A day that kept its seeded weekday must not collide with one that took
+         the client's — two sessions on one morning is what the picker refuses,
+         and a seed is not allowed to produce the state a click cannot. */
+      const free = [1, 2, 3, 4, 5, 6, 7].filter(wd => !used.has(wd));
+      days.forEach(day => {
+        if (used.has(seeded[day].weekday)) {
+          const spare = free.shift();
+          if (spare !== undefined) seeded[day] = { ...seeded[day], weekday: spare };
+        }
+        used.add(seeded[day].weekday);
+      });
+      return seeded;
+    });
+  }
+
+  /**
+   * This plan trains four days; this client bought three. A NOTE, never a
+   * refusal.
+   *
+   * The count that matters to the server is one weekday per ordinal day, which
+   * `validateSchedule` enforces and the grid cannot get wrong. This is the other
+   * count — what the client is paying for — and the two disagreeing is a real
+   * thing a trainer does on purpose (a four-day split run over five weeks of
+   * three) as often as it is a mistake. So it is said out loud, beside the thing
+   * that can be changed, and the button stays live.
+   */
+  const agreed = client?.sessionsPerWeek ?? null;
+  const mismatch = agreed !== null && days.length > 0 && agreed !== days.length;
+
   const missing = days.filter(d => !slots[d]?.time);
   const ready = Boolean(clientId) && missing.length === 0 && days.length > 0;
 
   return (
-    <aside className="pg__panel" aria-label={`Assign ${templateName}`}>
-      <header className="pg__panelhd">
-        <div>
-          <p className="pg__panelt">Assign {templateName}</p>
-          <p className="small">
-            {days.length} day{days.length === 1 ? '' : 's'} a week to place
-          </p>
-        </div>
-        <button className="btn btn--icon btn--ghost" type="button" aria-label="Close" onClick={onClose}>
-          <CloseIcon />
-        </button>
-      </header>
+    <DockPanel label={`Assign ${templateName}`}>
+      <DockPanel.Head
+        title={<>Assign {templateName}</>}
+        sub={
+            <>
+              {days.length} day{days.length === 1 ? '' : 's'} a week to place
+            </>
+          }
+        actions={
+          <Button variant="ghost" iconOnly label="Close" onClick={onClose} title={undefined} icon={<CloseIcon />} />
+        }
+      />
 
-      <div className="pg__panelb">
+      <DockPanel.Body>
         <section className="card">
           <div className="card__hd">
             <span className="card__t">Who</span>
@@ -110,13 +183,13 @@ export function AssignPanel({
             {client ? (
               <p className="kv">
                 <span className="kv__v">{client.name}</span>
-                <button
-                  className="btn btn--sm btn--ghost"
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onClick={() => setClientId(null)}
                 >
                   Change
-                </button>
+                </Button>
               </p>
             ) : (
               <>
@@ -139,7 +212,7 @@ export function AssignPanel({
                         key={c.id}
                         className="rowpick"
                         type="button"
-                        onClick={() => setClientId(c.id)}
+                        onClick={() => chooseClient(c)}
                       >
                         <span>{c.name}</span>
                         <span className="small">
@@ -179,11 +252,9 @@ export function AssignPanel({
                         const weekday = i + 1;
                         const mine = slot?.weekday === weekday;
                         return (
-                          <button
+                          <Chip
+                            pressed={mine}
                             key={weekday}
-                            className="chip"
-                            type="button"
-                            aria-pressed={mine}
                             /* A weekday already spoken for is `aria-disabled`,
                                never `disabled` — the setup flow's rule, and for
                                its reason: a real `disabled` tabs a screen-reader
@@ -199,18 +270,30 @@ export function AssignPanel({
                             }}
                           >
                             {name}
-                          </button>
+                          </Chip>
                         );
                       })}
-                      <input
-                        className="ctl pg__slottime"
-                        type="time"
-                        value={slot?.time ?? ''}
-                        aria-label={`Time for day ${day}`}
-                        onChange={e =>
+                      {/* The last `<input type="time">` in the app, and it went for
+                          the same reason as the other two: it drew a 24-hour field
+                          from the browser's own locale, beside a screen that now
+                          says `6:00 AM` everywhere else.
+
+                          Slots are STORED as a 24-hour `HH:MM` string and handed
+                          on in that shape, so this adapts rather than changing the
+                          model — `parseMinuteValue` in, `formatMinuteValue` out.
+                          An unparseable slot falls back to 6am, which is what
+                          `seedSchedule` seeds and so cannot surprise anyone. */}
+                      <TimeField
+                        className="pg__slottime"
+                        label={`Time for day ${day}`}
+                        value={parseMinuteValue(slot?.time ?? '') ?? 6 * 60}
+                        onChange={minute =>
                           setSlots(s => ({
                             ...s,
-                            [day]: { weekday: s[day]?.weekday ?? 1, time: e.target.value },
+                            [day]: {
+                              weekday: s[day]?.weekday ?? 1,
+                              time: formatMinuteValue(minute),
+                            },
                           }))
                         }
                       />
@@ -218,6 +301,14 @@ export function AssignPanel({
                   </div>
                 );
               })
+            )}
+            {mismatch && (
+              <Message tone="warn">
+                {client?.name} trains {agreed} {agreed === 1 ? 'day' : 'days'} a week and
+                this plan has {days.length}. Assigning it is fine — their week is what
+                these weekdays say, and the sessions already booked against their pack
+                follow it.
+              </Message>
             )}
             <p className="small pg__gap">
               Each day needs its own weekday — the same one twice would put two sessions on one
@@ -243,30 +334,27 @@ export function AssignPanel({
           </div>
         </section>
 
-        <div className="why">
-          <p className="why__k">What this does</p>
+        <Why heading="What this does">
           <p>
             {client ? client.name : 'Your client'} gets their <b>own copy</b> of this program. Editing{' '}
             {templateName} afterwards will not touch it — you push a change onto a client only when
             you choose to, from the list of who is on this.
           </p>
-        </div>
+        </Why>
 
         {error && (
-          <div className="why why--warn">
-            <p className="why__k">Not assigned</p>
+          <Why heading="Not assigned" tone="warn">
             <p>{error}</p>
-          </div>
+          </Why>
         )}
-      </div>
+      </DockPanel.Body>
 
-      <footer className="pg__panelft">
-        <button className="btn btn--secondary" type="button" onClick={onClose} disabled={busy}>
+      <DockPanel.Foot>
+        <Button variant="secondary" onClick={onClose} disabled={busy}>
           Cancel
-        </button>
-        <button
-          className="btn btn--primary"
-          type="button"
+        </Button>
+        <Button
+          variant="primary"
           disabled={!ready || busy}
           onClick={() =>
             onAssign({
@@ -290,9 +378,9 @@ export function AssignPanel({
               : missing.length > 0
                 ? `Give Day ${missing[0]} a time`
                 : `Assign to ${client?.name}`}
-        </button>
-      </footer>
-    </aside>
+        </Button>
+      </DockPanel.Foot>
+    </DockPanel>
   );
 }
 

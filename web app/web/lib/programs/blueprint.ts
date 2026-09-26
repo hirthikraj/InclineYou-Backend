@@ -7,7 +7,7 @@
  * a stack of arrays and what lets the whole hierarchy — Program → Week → Day →
  * Exercise → Sets — be derived rather than stored.
  *
- * ── FOUR LAWS, AND THREE OF THEM ARE OLDER THAN THIS FILE ────────────────────
+ * ── FIVE LAWS, AND THREE OF THEM ARE OLDER THAN THIS FILE ────────────────────
  *
  * 1 · **A DAY IS AN ORDINAL SLOT, NEVER A WEEKDAY.** "Day 1" is the first day
  *     this program trains, not Monday. Which weekday it lands on is the
@@ -36,9 +36,17 @@
  *     is nothing for "the last two" to attach to. `setDetail` is the list;
  *     `sets` and `reps` stay authoritative *while the sets agree*, which is what
  *     keeps a straight 4 × 12 readable by every build that predates V31.
+ *
+ * 5 · **EVERY ROW IS INSIDE A WORKOUT, AND A DAY MAY HOLD SEVERAL.** A day is
+ *     not a flat list of exercises any more: it is a run of named CONTAINERS —
+ *     *Upper A*, *Conditioning* — each one a session written once and droppable
+ *     onto any other day whole. `workoutId` is that container and the storage
+ *     contract is the one `groupId` already uses a level down: adjacent rows,
+ *     one key. `reindex` is where the invariant is kept, so a row moved into
+ *     the middle of a container joins it rather than splitting it in two.
  */
 
-import type { SetDetailWire, TemplateExerciseWire, TemplateWire } from './api';
+import type { SetDetailWire, TemplateExerciseWire } from './api';
 
 /* ══════════════════════════════════════════════════════════ goals ══ */
 
@@ -103,6 +111,23 @@ export interface Entry {
   altExerciseId: string | null;
   /** Shared by the members of one superset. Adjacent rows, one key. */
   groupId: string | null;
+  /**
+   * WHICH WORKOUT ON THIS DAY THIS ROW BELONGS TO — law 5.
+   *
+   * Adjacent rows, one key, exactly as `groupId` works one level down: a
+   * workout is a CONTAINER of blocks the way a block is a container of rows.
+   * Nullable only on the wire, where a blueprint written before the column
+   * existed has none; `toEntries` gives those rows the day's seed container, so
+   * nothing inside the builder ever holds a row that is in no workout.
+   */
+  workoutId: string | null;
+  /** What that container is CALLED — *Upper A*, *Home Full Body*. Carried on
+   *  every member rather than in a list beside the rows, so every write already
+   *  in this file (copy, drop, progression, reindex) moves the name with the
+   *  rows it belongs to and there is no second structure to keep in step. A
+   *  container whose rows are all deleted stops existing, which is the right
+   *  answer: an empty workout is not a thing a trainer can act on. */
+  workoutName: string | null;
   /** Per-set prescription. Null on the straight-sets majority. */
   setDetail: SetDetail[] | null;
 }
@@ -113,10 +138,66 @@ export interface SetDetail {
   toFailure: boolean;
 }
 
+/* ── UIDS: SEEDED ROWS DERIVE THEIRS, NEW ROWS ARE COUNTED ──────────────────
+ *
+ * A uid is a purely local handle. It is a React key, the thing `data-block`
+ * carries so a column can measure a drop, and the argument every row callback
+ * closes over. It is NEVER serialised — `Builder`'s save payload rebuilds each
+ * wire row field by field and no `uid` is among them — so its shape is ours to
+ * choose and changing it costs nothing on the server.
+ *
+ * ── WHY THIS IS NOT ONE COUNTER ANY MORE ───────────────────────────────────
+ *
+ * It was, and it produced a hydration mismatch on `.dayc__ex`:
+ *
+ *     data-block="e80"   (server)   vs   data-block="e1"   (client)
+ *
+ * `toEntries` is called during RENDER — `useMemo` in `Builder`, and again in
+ * `Shelf` for every template on the shelf. A module-level counter is process
+ * state, and the two processes do not agree: on the server this module is
+ * evaluated once and lives for the life of the worker, so the counter carries
+ * every row minted for every earlier request and is already at 79 when this
+ * page renders; in the browser the module is fresh and the same first row comes
+ * out `e1`. React compares the two `data-block` attributes, finds them
+ * different, and abandons the attribute — leaving a row whose drop target is
+ * whatever the server happened to say, which is the drag bug behind the noise.
+ *
+ * Seeding was never the counter's job. The rows in a template arrive in a fixed
+ * order and their identity IS that order, so a seeded uid is derived from it and
+ * is the same value in both processes by construction — no counter to desync, no
+ * `useId`, no suppressed warning.
+ *
+ * The counter stays for rows that genuinely come into being at runtime — "add
+ * exercise", duplicate, `copyDay`, `copyWeek`, the progression plan. Every one
+ * of those runs in an event handler, on the client, after hydration, so there is
+ * no server to disagree with.
+ *
+ * The two live in SEPARATE NAMESPACES and that is load-bearing: `e0…eN` is
+ * dense from zero, so a minted `e1` would collide with the second seeded row and
+ * two entries sharing a uid means selection, drag and remove all hit the wrong
+ * one. `n` cannot collide with `e` at any count. */
+const SEEDED_UID_PREFIX = 'e';
+
 let uidSeq = 0;
+/** A uid for a row created at runtime. Client-only — never call this during
+ *  render, or the mismatch above comes straight back. */
 export function newUid(): string {
   uidSeq += 1;
-  return `e${uidSeq}`;
+  return `n${uidSeq}`;
+}
+
+/**
+ * A workout container's local id — law 5.
+ *
+ * Minted like a superset's, and like a superset's it is re-minted whenever rows
+ * are COPIED: two days sharing one container id would make *this workout* a
+ * thing in two places, and one menu press would move or delete both.
+ *
+ * Runtime only, for `newUid`'s reason — every caller is an event handler.
+ */
+export function newWorkoutId(): string {
+  uidSeq += 1;
+  return `w${uidSeq}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
 /** A correlation id for a superset. `crypto.randomUUID` where it exists — the
@@ -132,8 +213,11 @@ export function newGroupId(): string {
 }
 
 export function toEntries(wire: TemplateExerciseWire[]): Entry[] {
-  return wire.map(w => ({
-    uid: newUid(),
+  /* Derived from position, NOT `newUid()` — this runs during render on both the
+     server and the client and the two have to produce the same string. See the
+     note on the uid namespaces above. */
+  return wire.map((w, i) => ({
+    uid: `${SEEDED_UID_PREFIX}${i}`,
     exerciseId: w.exerciseId,
     // An entry with no day is one no column can draw. Parked on Day 1, which is
     // where the trainer will find it, rather than dropped — losing a row nobody
@@ -150,8 +234,23 @@ export function toEntries(wire: TemplateExerciseWire[]): Entry[] {
     notes: w.notes,
     altExerciseId: w.altExerciseId,
     groupId: w.groupId,
+    /* A BLUEPRINT WRITTEN BEFORE LAW 5 IS ONE WORKOUT PER DAY, and it is given
+       one here rather than left null — every reader above this line would
+       otherwise need a branch for *the rows in no container*, and the first one
+       that forgets draws a day whose exercises are invisible. The id is derived
+       from the slot, not minted, for `SEEDED_UID_PREFIX`'s reason: this runs
+       during render on both halves and a counter does not agree across them.
+       The NAME stays null — the day already has one, and `DayCard` falls back
+       to it rather than writing the same string into every row. */
+    workoutId: w.workoutId ?? seedWorkoutId(w.week ?? 1, w.dayOfWeek ?? 1),
+    workoutName: w.workoutName ?? null,
     setDetail: w.setDetail ? w.setDetail.map(fromWireSet) : null,
   }));
+}
+
+/** The container a pre-law-5 day is read as. Derived, never minted. */
+export function seedWorkoutId(week: number, day: number): string {
+  return `w-seed-${week}-${day}`;
 }
 
 function fromWireSet(s: SetDetailWire): SetDetail {
@@ -165,6 +264,24 @@ function fromWireSet(s: SetDetailWire): SetDetail {
 /* ══════════════════════════════════════════════ shape of a template ══ */
 
 /**
+ * THE THREE SHAPE COLUMNS, AND WHOEVER HAS THEM.
+ *
+ * `daysOf` and `weekCountOf` used to take a `TemplateWire`, which was true
+ * while a blueprint was the only thing with a shape. A client's copy owns the
+ * same three — `ProgramRow`'s own note argues why it must, and it is the whole
+ * reason `/clients/:id/program/:pid` can add a fourth training day for one
+ * person — so the parameter is the three columns rather than the row that
+ * happened to hold them first. `TemplateWire` still satisfies it, structurally
+ * and without a cast; `ProgramWire`, whose three are optional on the wire,
+ * satisfies it too and falls through to the same derivation.
+ */
+export interface Shaped {
+  trainingDays?: number[];
+  dayLabels?: Record<string, string>;
+  weeks?: number | null;
+}
+
+/**
  * The day slots this template lays out.
  *
  * `trainingDays` wins — law 2. The union with wherever exercises sit is the
@@ -172,7 +289,7 @@ function fromWireSet(s: SetDetailWire): SetDetail {
  * which is every template the web has ever created, and for one authored on the
  * phone before V24.
  */
-export function daysOf(template: TemplateWire, entries: Entry[]): number[] {
+export function daysOf(template: Shaped, entries: Entry[]): number[] {
   if (template.trainingDays && template.trainingDays.length > 0) {
     return [...new Set(template.trainingDays)].filter(d => d >= 1 && d <= 7).sort((a, b) => a - b);
   }
@@ -185,9 +302,36 @@ export function daysOf(template: TemplateWire, entries: Entry[]): number[] {
   return [...used].sort((a, b) => a - b);
 }
 
+/**
+ * WHAT THE BLUEPRINT IS MADE OF, in slot order — *Upper A · Lower A · Upper B*.
+ *
+ * The one fact about a program that is neither a figure nor a picture, and the
+ * shelf drew neither it nor anything else in the 700px its name column had
+ * spare. `dayLabels` is on the wire for every template and has been since the
+ * builder could name a day.
+ *
+ * An UNNAMED slot is *Day 3* and not a gap: a trainer who named two of four
+ * days should read the two they named in the right places, and a joined string
+ * with a hole in it reads as a bug. The caller passes `days` rather than this
+ * function deriving them, so the labels and the shape strip beside them can
+ * never be computed off two different answers to *which slots does this train*.
+ */
+export function dayNamesOf(
+  template: { dayLabels?: Record<string, string> | null },
+  days: number[],
+): string {
+  const labels = template.dayLabels ?? {};
+  return days
+    .map(d => {
+      const named = labels[String(d)];
+      return named && named.trim() ? named.trim() : `Day ${d}`;
+    })
+    .join(' · ');
+}
+
 /** How long the program runs. `weeks` wins; the blueprint's own maximum is the
  *  floor, because a week with content in it exists whatever the column says. */
-export function weekCountOf(template: TemplateWire, entries: Entry[]): number {
+export function weekCountOf(template: Shaped, entries: Entry[]): number {
   const authored = entries.reduce((max, e) => Math.max(max, e.week), 1);
   return Math.max(template.weeks ?? 1, authored, 1);
 }
@@ -263,6 +407,66 @@ export function blocksOf(rows: Entry[]): Block[] {
 export function ordinalLabel(block: Block, index: number): string {
   if (block.entries.length === 1) return String(block.ordinal);
   return `${block.ordinal}${'abcdefgh'[index] ?? String(index + 1)}`;
+}
+
+/* ══════════════════════════════════════════════════ the containers ══ */
+
+/**
+ * A DAY, READ AS WORKOUTS — law 5, and the level above `blocksOf`.
+ *
+ * One run of adjacent rows sharing a `workoutId` is one container. Read exactly
+ * as `blocksOf` reads a superset, and for the same reason: the storage contract
+ * is *adjacent rows, one key*, so a non-adjacent run is drawn as two containers
+ * rather than silently gathered — except that here it cannot happen, because
+ * `reindex` settles the invariant on every write and every write goes through
+ * it. `blocksOf` runs INSIDE each container, so the superset ordinals (`3a` /
+ * `3b`) count within the workout, which is the number a trainer reads off the
+ * card while coaching it.
+ */
+export interface DayWorkout {
+  /** The container's id — what a menu action, a drag and a drop all address. */
+  id: string;
+  /** The trainer's name for it. Empty is legitimate: a day that predates law 5
+   *  has a container and no name, and the card falls back to the day's. */
+  name: string;
+  /** Its position in the day, 1-based — *Workout 2* when nothing names it. */
+  ordinal: number;
+  entries: Entry[];
+  blocks: Block[];
+}
+
+export function workoutsOf(rows: Entry[]): DayWorkout[] {
+  const out: DayWorkout[] = [];
+  for (const row of rows) {
+    const last = out[out.length - 1];
+    const id = row.workoutId ?? '';
+    if (last && last.id === id) last.entries.push(row);
+    else out.push({ id, name: row.workoutName ?? '', ordinal: out.length + 1, entries: [row], blocks: [] });
+  }
+  for (const w of out) w.blocks = blocksOf(w.entries);
+  return out;
+}
+
+/** One container out of a whole draft, with the lane it sits in. `null` when
+ *  nothing holds that id any more — every caller is a menu item on a container
+ *  that may have been removed by another tab's write in between. */
+export function workoutAt(
+  entries: Entry[],
+  workoutId: string,
+): { workout: DayWorkout; week: number; day: number } | null {
+  const rows = entries.filter(e => e.workoutId === workoutId);
+  if (rows.length === 0) return null;
+  const { week, day } = rows[0];
+  const found = workoutsOf(entriesFor(entries, week, day)).find(w => w.id === workoutId);
+  return found ? { workout: found, week, day } : null;
+}
+
+/** What a container says about itself — `6 ex · 20 sets`, the day header's own
+ *  figures one level down. Kept here rather than in `weeksheet.ts` so the card
+ *  and the phone cannot print two different counts of one workout. */
+export function workoutFigures(rows: Entry[]): string {
+  const sets = rows.reduce((n, e) => n + (e.setDetail?.length ?? e.sets ?? 0), 0);
+  return `${rows.length} ex · ${sets} sets`;
 }
 
 /* ═══════════════════════════════════════════════ the prescription ══ */
@@ -404,9 +608,49 @@ export function reindex(entries: Entry[]): Entry[] {
   const out: Entry[] = [];
   for (const list of byLane.values()) {
     list.sort((a, b) => a.order - b.order);
-    list.forEach((e, i) => out.push(e.order === i ? e : { ...e, order: i }));
+    settleWorkouts(list).forEach((e, i) => out.push(e.order === i ? e : { ...e, order: i }));
   }
   return out;
+}
+
+/**
+ * LAW 5'S INVARIANT, KEPT IN THE ONE PLACE EVERY WRITE PASSES THROUGH.
+ *
+ * A container is *adjacent rows, one key*, and a row-level write can break that
+ * from two directions: a row dragged out of *Upper A* into the middle of
+ * *Conditioning* would leave *Upper A* in two pieces, and a row nudged past a
+ * container boundary would be drawn inside a workout it does not belong to.
+ *
+ * **POSITION WINS, AND THAT IS THE DELIBERATE READING.** A row that has been
+ * put somewhere adopts the container it was put INTO: the trainer aimed at a
+ * gap between two movements of *Conditioning*, and the only answer that matches
+ * what they aimed at is that the row is now part of it. The alternative — refuse
+ * the drop, or split the container — either takes a gesture away or produces a
+ * second workout with the same name that the trainer never asked for.
+ *
+ * It is a no-op on the ordinary write: a day whose containers are already whole
+ * comes back with the same objects, so `commit` still sees *nothing changed*
+ * where nothing changed.
+ */
+function settleWorkouts(lane: Entry[]): Entry[] {
+  let current: string | null = null;
+  const closed = new Set<string>();
+  return lane.map(row => {
+    const id = row.workoutId;
+    if (current === null || id === current) {
+      current = id;
+      return row;
+    }
+    // A container that has already had its run and is being met again — the row
+    // was dropped inside somebody else's workout. It joins the one it is in.
+    if (id === null || closed.has(id)) {
+      const host = lane.find(e => e.workoutId === current);
+      return { ...row, workoutId: current, workoutName: host?.workoutName ?? row.workoutName };
+    }
+    closed.add(current);
+    current = id;
+    return row;
+  });
 }
 
 export function addEntries(entries: Entry[], additions: Entry[]): Entry[] {
@@ -483,6 +727,21 @@ export function dropEntries(
   beforeUid: string | null,
 ): Entry[] {
   const moving = expandToWholeGroups(entries, uids);
+  /* LAW 5 — THE ROW JOINS THE WORKOUT IT WAS DROPPED INTO, and it is decided
+     HERE rather than left to `settleWorkouts`.
+
+     FOUND BY RENDERING, and it is the case that proves a position-only rule
+     cannot work: dropping *Back Squat* between exercise 1 and 2 of a six-movement
+     session leaves the lane holding [A, foreign, A, A, A, A], and any rule that
+     reads only the sequence has to decide whether the run that resumes after the
+     intruder is the same container or a new one. It picked *new* and split a
+     workout in two — MEASURED: one row dropped, *Upper B* became *Workout 1* (one
+     exercise) and *Workout 2* (six).
+
+     The drop knows what the sequence cannot: the row was aimed AT a block, and
+     the container that block belongs to is the answer. `beforeUid` names it;
+     a drop at the tail joins the day's last container. */
+  entries = adoptWorkout(entries, moving, toWeek, toDay, beforeUid);
   if (moving.size === 0) return entries;
   // Landing on your own block is where a drag most often ends — the trainer
   // thought better of it — and it must not cost an undo step.
@@ -510,6 +769,43 @@ export function dropEntries(
       return orders.has(e.uid) ? { ...e, order: orders.get(e.uid)! } : e;
     }),
   );
+}
+
+/**
+ * Put the moving rows into the container they were aimed at — see the note in
+ * `dropEntries`, which is the only caller.
+ *
+ * Returns the SAME array when they are already in it, so a drag inside one
+ * workout still reports itself as having changed nothing.
+ */
+function adoptWorkout(
+  entries: Entry[],
+  moving: Set<string>,
+  toWeek: number,
+  toDay: number,
+  beforeUid: string | null,
+): Entry[] {
+  const lane = entriesFor(entries, toWeek, toDay).filter(e => !moving.has(e.uid));
+  const above = beforeUid === null ? null : lane.find(e => e.uid === beforeUid) ?? null;
+  /* A DAY WITH NOTHING ON IT gives the arriving rows a container of their own,
+     and it is a NEW one carrying the old name rather than the id they came
+     with: half a session dragged off Monday and the half left behind would
+     otherwise share an id across two days, and every menu item addresses a
+     container by that id — *Delete Upper A* would have taken both halves. */
+  const host =
+    lane.length === 0
+      ? {
+          workoutId: newWorkoutId(),
+          workoutName: entries.find(e => moving.has(e.uid))?.workoutName ?? null,
+        }
+      : hostWorkout(lane, above);
+  let touched = false;
+  const next = entries.map(e => {
+    if (!moving.has(e.uid) || e.workoutId === host.workoutId) return e;
+    touched = true;
+    return { ...e, workoutId: host.workoutId, workoutName: host.workoutName };
+  });
+  return touched ? next : entries;
 }
 
 /** A selection that touches one member of a superset touches all of them. */
@@ -594,13 +890,87 @@ export function copyWeek(entries: Entry[], from: number, to: number): Entry[] {
   if (from === to) return entries;
   const source = entries.filter(e => e.week === from);
   const groups = new Map<string, string>();
+  /* AND SO IS THE CONTAINER ID, which this function did not do and
+     `duplicateWeek` beside it always has. Every write addressed by container —
+     `workoutAt`, `rowsOfWorkout`, `removeWorkout`, `nudgeWorkout` — filters the
+     WHOLE draft by `workoutId` and takes the first week it finds, so two weeks
+     sharing one id is *Remove this workout* on week 3 emptying week 1 as well.
+     Latent for as long as a repeating week had to be made its own before it
+     could be touched; reachable the moment any week can be written in
+     directly. Same rule as the group id above it, and the same wording as
+     `duplicateWeek`'s. */
+  const workouts = new Map<string, string>();
   const copies = source.map(e => ({
     ...e,
     uid: newUid(),
     week: to,
+    workoutId: e.workoutId ? mapWorkout(workouts, e.workoutId) : null,
     groupId: e.groupId ? mapGroup(groups, e.groupId) : null,
   }));
   return reindex([...entries.filter(e => e.week !== to), ...copies]);
+}
+
+/**
+ * THE SAME WEEK, MADE ITS OWN ON THE WAY TO WRITING IN IT.
+ *
+ * ── LAW 3 IS A STORAGE RULE, AND IT HAD BECOME A PERMISSION ────────────────
+ *
+ * *A week with nothing of its own repeats week 1* is what lets an eight-week
+ * block exist without eight copies of one week on the wire, and it stays. What
+ * went with it was a GATE: the card on a repeating week drew its rows greyed
+ * into one blob, refused every drag and every row menu, and put *Make this week
+ * its own* where the numbers should have been. So writing week 4 was: notice
+ * the sentence, read it, press the button, wait for the board to redraw, then
+ * make the edit you came for. Four steps to reach the state week 1 is in
+ * permanently, and nothing about the model required any of them.
+ *
+ * This is that button, moved to where it belongs: a week becomes its own the
+ * instant somebody writes in it, and not one keystroke sooner. A week nobody
+ * has touched still repeats week 1 — the storage rule is intact, the toolbar's
+ * *weeks 2–8 repeat week 1* is still true, and the wire still carries one
+ * week's rows instead of eight.
+ *
+ * ── AND THE IDS IT HANDS BACK ──────────────────────────────────────────────
+ *
+ * The copies are new rows with new ids, so every id the CALLER is holding —
+ * the uid of the row it is about to nudge, the container it is about to
+ * remove, the group it is about to unlink — names week 1's copy of that thing
+ * and would write into week 1. `id` translates one: hand it whatever the click
+ * carried and it comes back pointing at this week's row. It is the identity
+ * function when nothing was copied, which is every call on an authored week,
+ * so the write sites read the same either way and there is no branch to forget.
+ */
+export function ownWeek(
+  entries: Entry[],
+  week: number,
+): { entries: Entry[]; id: (id: string) => string } {
+  const same = { entries, id: (id: string) => id };
+  /* Week 1 is authored by definition — `authoredWeeks` says so — and a week
+     that has anything of its own is already what this function makes. */
+  if (week === 1 || entries.some(e => e.week === week)) return same;
+  const source = entries.filter(e => e.week === 1);
+  /* NOTHING TO COPY is not the same as nothing to do, and it is still nothing
+     to do: the write that follows lands on an empty week, which is exactly
+     what week 1 would give it. */
+  if (source.length === 0) return same;
+
+  const map = new Map<string, string>();
+  const groups = new Map<string, string>();
+  const workouts = new Map<string, string>();
+  const copies = source.map(e => {
+    const uid = newUid();
+    map.set(e.uid, uid);
+    const groupId = e.groupId ? mapGroup(groups, e.groupId) : null;
+    const workoutId = e.workoutId ? mapWorkout(workouts, e.workoutId) : null;
+    if (e.groupId && groupId) map.set(e.groupId, groupId);
+    if (e.workoutId && workoutId) map.set(e.workoutId, workoutId);
+    return { ...e, uid, week, groupId, workoutId };
+  });
+  /* ONE MAP FOR ALL THREE KINDS OF ID. A uid, a group id and a container id are
+     three separate spaces of unique strings and a caller knows which one it is
+     holding, so a map that answers all three is one lookup rather than three
+     translators the call sites would have to pick between. */
+  return { entries: reindex([...entries, ...copies]), id: (id: string) => map.get(id) ?? id };
 }
 
 /** Copy one day onto another inside the same week. The second-most-used action
@@ -609,13 +979,199 @@ export function copyDay(entries: Entry[], week: number, from: number, to: number
   if (from === to) return entries;
   const source = entriesFor(entries, week, from);
   const groups = new Map<string, string>();
+  /* And the container id, for `copyWeek`'s reason one level down: a workout
+     names a container in one DAY, and two days sharing one id is *Remove this
+     workout* on Thursday emptying Monday. */
+  const workouts = new Map<string, string>();
   const copies = source.map(e => ({
     ...e,
     uid: newUid(),
     day: to,
+    workoutId: e.workoutId ? mapWorkout(workouts, e.workoutId) : null,
     groupId: e.groupId ? mapGroup(groups, e.groupId) : null,
   }));
   return reindex([...entries.filter(e => !(e.week === week && e.day === to)), ...copies]);
+}
+
+/* ═════════════════════════════════════════ the container's own writes ══
+
+   FIVE WRITES ON A WORKOUT, AND EVERY ONE OF THEM IS THE ROW-LEVEL WRITE ONE
+   LEVEL UP. `moveWorkout` is `dropEntries` with a container for a payload,
+   `copyWorkoutTo` is `copyDay` for one of a day's several workouts,
+   `nudgeWorkout` is `nudge` measured in containers rather than blocks. They are
+   separate functions rather than a `scope` argument because the UNIT differs:
+   *before* means *above this row* to one and *above this workout* to the other,
+   and a caller that got the two confused would drop a session into the middle
+   of another one — which `settleWorkouts` would then absorb, silently.        */
+
+/**
+ * WHICH CONTAINER A NEW ROW JOINS — the one question every *add* on this screen
+ * has to answer now that law 5 says there are no loose rows.
+ *
+ * `at` is the row it was aimed at: the block a drag was let go above, or the
+ * row a menu was opened on. Absent, it is the tail of the day, which is what a
+ * click on a library row means. An EMPTY day has no container to join, so one
+ * is minted — unnamed, drawn under the day's own name — because the alternative
+ * is a click that does nothing on the one day that most needs an exercise.
+ */
+export function hostWorkout(
+  lane: Entry[],
+  at?: Entry | null,
+): { workoutId: string; workoutName: string | null } {
+  const anchor = at ?? lane[lane.length - 1] ?? null;
+  if (anchor?.workoutId) {
+    return { workoutId: anchor.workoutId, workoutName: anchor.workoutName };
+  }
+  return { workoutId: newWorkoutId(), workoutName: null };
+}
+
+/** The rows of one container, in order. */
+function rowsOfWorkout(entries: Entry[], workoutId: string): Entry[] {
+  return entries.filter(e => e.workoutId === workoutId).sort((a, b) => a.order - b.order);
+}
+
+/**
+ * MOVE A WHOLE WORKOUT ONTO ANOTHER DAY — the container drag, and the menu's
+ * *Move up* / *Move down* when the target is the same day.
+ *
+ * `beforeWorkoutId` is the container it lands ABOVE, null for the tail. A move
+ * that changes nothing returns the same array, so a drag the trainer thought
+ * better of costs no undo step and no autosave — `dropEntries`' rule, kept.
+ */
+export function moveWorkout(
+  entries: Entry[],
+  workoutId: string,
+  toWeek: number,
+  toDay: number,
+  beforeWorkoutId: string | null = null,
+): Entry[] {
+  const moving = rowsOfWorkout(entries, workoutId);
+  if (moving.length === 0 || beforeWorkoutId === workoutId) return entries;
+
+  const lane = entriesFor(entries, toWeek, toDay).filter(e => e.workoutId !== workoutId);
+  const at = beforeWorkoutId === null ? -1 : lane.findIndex(e => e.workoutId === beforeWorkoutId);
+  const cut = at < 0 ? lane.length : at;
+  const next = [...lane.slice(0, cut), ...moving, ...lane.slice(cut)];
+
+  const before = entriesFor(entries, toWeek, toDay);
+  const settled =
+    moving.every(e => e.week === toWeek && e.day === toDay) &&
+    before.length === next.length &&
+    before.every((e, i) => e.uid === next[i].uid);
+  if (settled) return entries;
+
+  const orders = new Map(next.map((e, i) => [e.uid, i]));
+  return reindex(
+    entries.map(e => {
+      if (!orders.has(e.uid)) return e;
+      return { ...e, week: toWeek, day: toDay, order: orders.get(e.uid)! };
+    }),
+  );
+}
+
+/**
+ * THE SAME SESSION ON A SECOND DAY — *Copy to day…*, and the paste it arms.
+ *
+ * A COPY AND NOT A LINK. `apply`'s rule one level up — *a copy is a copy* — is
+ * the same here: Wednesday's version of Monday's session is going to be tuned
+ * for Wednesday, and a container that edited both days at once would make that
+ * tuning a thing the trainer has to undo somewhere they are not looking. Ids
+ * are re-minted (the container's and every superset's) for exactly that reason;
+ * the NAME is kept, because it is what the trainer recognises it by.
+ */
+export function copyWorkoutTo(
+  entries: Entry[],
+  workoutId: string,
+  toWeek: number,
+  toDay: number,
+  /** What to CALL the copy when the original has no name of its own — the
+   *  pre-law-5 container, whose name has always been the day's. Landed on
+   *  another day it would have nothing left to be called, and two boxes reading
+   *  *Workout 1* and *Workout 2* on one card is the one outcome worse than a
+   *  duplicated string. The caller passes the source day's label. */
+  name?: string,
+): Entry[] {
+  const source = rowsOfWorkout(entries, workoutId);
+  if (source.length === 0) return entries;
+  const groups = new Map<string, string>();
+  const minted = newWorkoutId();
+  const tail = Math.max(-1, ...entriesFor(entries, toWeek, toDay).map(e => e.order)) + 1;
+  const copies = source.map((e, i) => ({
+    ...e,
+    uid: newUid(),
+    week: toWeek,
+    day: toDay,
+    order: tail + i,
+    workoutId: minted,
+    workoutName: e.workoutName ?? name ?? null,
+    groupId: e.groupId ? mapGroup(groups, e.groupId) : null,
+  }));
+  return reindex([...entries, ...copies]);
+}
+
+/** Throw a whole container away. One write, so one ⌘Z brings the session back
+ *  — which is what lets the menu item not ask first. */
+export function removeWorkout(entries: Entry[], workoutId: string): Entry[] {
+  const uids = new Set(rowsOfWorkout(entries, workoutId).map(e => e.uid));
+  if (uids.size === 0) return entries;
+  return removeEntries(entries, uids);
+}
+
+/** Swap this container with its neighbour inside its own day — the pointer-free
+ *  reorder, `nudge` counted in workouts. */
+export function nudgeWorkout(entries: Entry[], workoutId: string, direction: -1 | 1): Entry[] {
+  const found = workoutAt(entries, workoutId);
+  if (!found) return entries;
+  const lane = workoutsOf(entriesFor(entries, found.week, found.day));
+  const at = lane.findIndex(w => w.id === workoutId);
+  const to = at + direction;
+  if (at < 0 || to < 0 || to >= lane.length) return entries;
+  /* Moving DOWN is landing above the one after the neighbour — there is no
+     *after* in `moveWorkout`'s vocabulary, and adding one would be a second way
+     to say every position. The tail is `null`, which is what `to` being the
+     last container means. */
+  const before = direction === -1 ? lane[to].id : (lane[to + 1]?.id ?? null);
+  return moveWorkout(entries, workoutId, found.week, found.day, before);
+}
+
+/** Rename one container, on every row that carries the name. */
+export function renameWorkout(entries: Entry[], workoutId: string, name: string): Entry[] {
+  return entries.map(e => (e.workoutId === workoutId ? { ...e, workoutName: name } : e));
+}
+
+/**
+ * WHAT THE DIALOG WROTE, PUT BACK WHERE THE CONTAINER WAS — *Edit workout*.
+ *
+ * The rows are REPLACED rather than diffed: the dialog is a whole session
+ * editor and what comes back out of it is the session, so matching movements up
+ * to preserve uids would be guessing at an identity the dialog does not carry.
+ * The container keeps its id and its position in the day, so a day's second
+ * workout stays its second workout after an edit.
+ */
+export function replaceWorkout(entries: Entry[], workoutId: string, rows: Entry[]): Entry[] {
+  const found = workoutAt(entries, workoutId);
+  if (!found) return entries;
+  const head = Math.min(...found.workout.entries.map(e => e.order));
+  const kept = entries.filter(e => e.workoutId !== workoutId);
+  const placed = rows.map((row, i) => ({
+    ...row,
+    week: found.week,
+    day: found.day,
+    /* `+ i / 1000` keeps the new rows between the row above and the one below —
+       `reindex` makes the fractions whole again, the trick `duplicateRow` and
+       the drag both already use. */
+    order: head + i / 1000,
+    workoutId,
+  }));
+  return reindex([...kept, ...placed]);
+}
+
+function mapWorkout(seen: Map<string, string>, id: string): string {
+  const found = seen.get(id);
+  if (found) return found;
+  const minted = newWorkoutId();
+  seen.set(id, minted);
+  return minted;
 }
 
 function mapGroup(seen: Map<string, string>, id: string): string {
@@ -730,19 +1286,117 @@ export function ladder(
 
 /* ══════════════════════════════════════════════════════ summaries ══ */
 
+/** "2–8", "3, 5–7" — a run of week numbers said as a range rather than a list.
+ *  Eight commas is a sentence a trainer has to parse; a dash is one they read. */
+export function weekRanges(weeks: number[]): string {
+  const ns = [...weeks].sort((a, b) => a - b);
+  const out: string[] = [];
+  for (let i = 0; i < ns.length; ) {
+    let j = i;
+    while (j + 1 < ns.length && ns[j + 1] === ns[j] + 1) j += 1;
+    out.push(j > i ? `${ns[i]}–${ns[j]}` : `${ns[i]}`);
+    i = j + 1;
+  }
+  return out.join(', ');
+}
+
+/**
+ * THE REPEATS, SAID ONCE — never eight identical chips explained eight times.
+ *
+ * Law 3's whole cost to a reader is that the week they are not looking at may
+ * be week 1 wearing a different number, so the strip states it in one sentence
+ * beside the chips rather than leaving it to be discovered a click at a time.
+ * Empty when nothing repeats, which is the honest answer for a fully authored
+ * block and the reason the caller renders nothing rather than "no repeats".
+ */
+export function repeatLine(entries: Entry[], weeks: number): string {
+  const repeats: number[] = [];
+  for (let w = 2; w <= weeks; w += 1) if (isRepeat(entries, w)) repeats.push(w);
+  if (repeats.length === 0) return '';
+  if (repeats.length === 1) return `week ${repeats[0]} repeats week 1`;
+  return `weeks ${weekRanges(repeats)} repeat week 1`;
+}
+
+/** `3 × 8`, `3 × 45s` — one row's shape, without its load or its rest. */
+function shapeOf(entry: Entry): string | null {
+  if (entry.sets == null) return null;
+  if (entry.durationSeconds != null) return `${entry.sets} × ${entry.durationSeconds}s`;
+  if (entry.reps != null) return `${entry.sets} × ${entry.reps}`;
+  return null;
+}
+
+/** The commonest value in a list — the week's shape, when its rows disagree.
+ *  A week is rarely uniform (the last accessory is 3 × 15 while the compounds
+ *  are 4 × 6), so the modal value is what "this week is 4 × 6" means. */
+function commonest<T>(values: (T | null)[]): T | null {
+  const counts = new Map<T, number>();
+  for (const v of values) if (v != null) counts.set(v, (counts.get(v) ?? 0) + 1);
+  let best: T | null = null;
+  let seen = 0;
+  for (const [value, n] of counts) if (n > seen) [best, seen] = [value, n];
+  return best;
+}
+
+/**
+ * THE LADDER THIS PROGRAM ACTUALLY CARRIES, read back off the rows.
+ *
+ * The prototype's `Overload` chips are a fixture switch — they GENERATE weeks
+ * 2–8 from `+2.5 kg / 2 wk`, which this model has no room for: law 3 says a
+ * week is rows somebody wrote or it is week 1, and `TemplateWire` has no rule
+ * column to hold one. So the strip states what is TRUE rather than what was
+ * set: the shape week 1 opens on, the shape the last authored week reaches,
+ * and the span between them.
+ *
+ * `null` when there is nothing to say — one authored week, or eight that all
+ * say the same thing — and the caller offers *Set a rule* in its place.
+ */
+export function overloadLine(entries: Entry[]): string | null {
+  const authored = [...authoredWeeks(entries)].sort((a, b) => a - b);
+  const last = authored[authored.length - 1];
+  if (last == null || last <= 1) return null;
+
+  const rowsIn = (week: number) => entries.filter(e => e.week === week);
+  const first = commonest(rowsIn(1).map(shapeOf));
+  const final = commonest(rowsIn(last).map(shapeOf));
+  const span = `wk 1–${last}`;
+
+  if (first && final && first !== final) return `${first} → ${final} · ${span}`;
+
+  // The shape held and the load moved — the other half of how a block is
+  // written, and the half the prototype's `+2.5 kg` chip was about.
+  const fromLoad = commonest(rowsIn(1).map(e => e.targetLoad));
+  const toLoad = commonest(rowsIn(last).map(e => e.targetLoad));
+  if (fromLoad != null && toLoad != null && fromLoad !== toLoad) {
+    return `${fromLoad} → ${toLoad} kg · ${span}`;
+  }
+  return null;
+}
+
 /** "3 days a week · 8 weeks · 9 clients on a copy" — the shelf row's subtitle
  *  and the builder's, written once so they cannot disagree. */
-export function shapeLine(days: number, weeks: number, clients: number): string {
-  const parts = [
+/**
+ * THE SHAPE, AS PARTS RATHER THAN A SENTENCE.
+ *
+ * `shapeLine` joins these and is still what the desk reads. The phone needs the
+ * third clause as its own ELEMENT, because a 360px header cannot hold all three
+ * and clipping a string mid-word produced *"13 clients on a c…"* — a figure with
+ * its unit cut off, which is worse than the clause being absent. A CSS rule can
+ * drop a span; it cannot drop the last clause of a string.
+ *
+ * The count is why this is structural and not a width tune: at 390px the line
+ * fits to the pixel, so a trainer whose roster reaches three digits, or whose
+ * block reaches ten weeks, breaks it again.
+ */
+export function shapeParts(days: number, weeks: number, clients: number): string[] {
+  return [
     `${days} day${days === 1 ? '' : 's'} a week`,
     `${weeks} week${weeks === 1 ? '' : 's'}`,
+    clients === 0 ? 'nobody on it yet' : `${clients} client${clients === 1 ? '' : 's'} on a copy`,
   ];
-  parts.push(
-    clients === 0
-      ? 'nobody on it yet'
-      : `${clients} client${clients === 1 ? '' : 's'} on a copy`,
-  );
-  return parts.join(' · ');
+}
+
+export function shapeLine(days: number, weeks: number, clients: number): string {
+  return shapeParts(days, weeks, clients).join(' · ');
 }
 
 export function relativeDay(ms: number, now = Date.now()): string {
@@ -756,3 +1410,144 @@ export function relativeDay(ms: number, now = Date.now()): string {
 
 /** ISO weekday → the short name the assign form prints. 1 = Monday. */
 export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
+
+/**
+ * WHAT A DAY IS CALLED ON THE THING THAT OWNS IT.
+ *
+ * Law 1 says a template's days are ORDINAL SLOTS — "Day 1" is the first day this
+ * program trains, never Monday — and the board has printed `DAY 1` since it
+ * existed because that is exactly right for a blueprint: it is written for
+ * nobody in particular and cannot know which weekday anybody will train on.
+ *
+ * **A client's COPY is the other case, and the backend has always known it.**
+ * `apply` translates every row through the schedule the trainer chose
+ * (`copyBlueprintInto`, since V24), so `program_exercise.day_of_week` is a
+ * concrete ISO weekday. On that screen `DAY 2` is not the second day of the
+ * plan — it is Tuesday, which on a Tue/Fri client is the FIRST session of their
+ * week. A number that reads as an ordinal and means a weekday is worse than
+ * either alone.
+ *
+ * So the two screens name days differently, from one function: the builder gets
+ * the ordinal and the copy gets the weekday. Nothing else about the board
+ * changes, because nothing else about a day differs between them.
+ */
+export function ordinalDayWord(day: number): string {
+  return `DAY ${day}`;
+}
+
+export function weekdayWord(day: number): string {
+  return day >= 1 && day <= 7 ? WEEKDAYS[day - 1].toUpperCase() : `DAY ${day}`;
+}
+
+/* ────────────────────────────────────────────────── duplicate a week ── */
+
+/**
+ * COPYING A WEEK FORWARD, WHICH IS HOW A BLOCK IS ACTUALLY WRITTEN.
+ *
+ * `copyWeek` moves one week onto one other week, and it is what the day menu's
+ * *Copy week to…* has always used. What a trainer means by "duplicate" is
+ * rarely one week: they mean *this, again, for the rest of the block* — and
+ * then, usually, *with a little more each time*. Three answers in one form:
+ *
+ * - **Which weeks.** The next one, every second one, or all of them. Nothing
+ *   past `weeks`, because a week the block does not have is not a destination.
+ * - **What happens to weeks that already have content.** `copyWeek` replaces,
+ *   which is the only honest answer when one exercise has two prescriptions —
+ *   but it is not the only useful one. *Keep both* appends, for a trainer
+ *   building a week out of two sources; *skip* leaves authored weeks alone, so
+ *   "fill the empty weeks" is one action rather than a survey of the strip.
+ * - **Whether the copies climb.** Same as `ladder`'s seeds, applied by DISTANCE
+ *   from the source week rather than by copy index: with *every 2 weeks*
+ *   selected, week 5 gets what week 5 would get whether or not week 3 was
+ *   written, so the ladder reads the same in the calendar either way.
+ *
+ * A stepped copy clears `setDetail` for the same reason `applyProgression`
+ * does: a per-set list left under a changed heading would draw `2 × 12, 2 × F`
+ * below a row that now says 3 × 12, and the list would win.
+ */
+export type DuplicateSpread = 'next' | 'alternate' | 'all';
+export type DuplicateConflict = 'replace' | 'keep' | 'skip';
+export type DuplicateStep = 'reps2' | 'reps1' | 'sets2' | 'same';
+
+/** The weeks a spread names, given where the copy starts and how long the block
+ *  is. Empty when the source is the last week — the caller says so rather than
+ *  offering a button that writes nothing. */
+export function duplicateTargets(from: number, weeks: number, spread: DuplicateSpread): number[] {
+  const out: number[] = [];
+  if (spread === 'next') {
+    if (from + 1 <= weeks) out.push(from + 1);
+    return out;
+  }
+  const stride = spread === 'alternate' ? 2 : 1;
+  for (let w = from + stride; w <= weeks; w += stride) out.push(w);
+  return out;
+}
+
+/** What one copied row carries in a week `distance` weeks after its source. */
+function stepped(row: Entry, distance: number, step: DuplicateStep): Entry {
+  if (step === 'same') return row;
+  const bump =
+    step === 'reps2' ? 2 * distance : step === 'reps1' ? 1 * distance : 0;
+  const sets = step === 'sets2' ? Math.floor(distance / 2) : 0;
+  return {
+    ...row,
+    sets: row.sets == null ? null : row.sets + sets,
+    reps: row.reps == null ? null : row.reps + bump,
+    durationSeconds: row.durationSeconds == null ? null : row.durationSeconds + bump,
+    setDetail: null,
+  };
+}
+
+export function duplicateWeek(
+  entries: Entry[],
+  from: number,
+  weeks: number,
+  opts: { spread: DuplicateSpread; conflict: DuplicateConflict; step: DuplicateStep },
+): Entry[] {
+  const source = entries.filter(e => e.week === from);
+  if (source.length === 0) return entries;
+
+  const authored = authoredWeeks(entries);
+  const targets = duplicateTargets(from, weeks, opts.spread).filter(
+    w => !(opts.conflict === 'skip' && authored.has(w)),
+  );
+  if (targets.length === 0) return entries;
+
+  const replaced = new Set(
+    opts.conflict === 'replace' ? targets : [],
+  );
+  const kept = entries.filter(e => !replaced.has(e.week));
+  const copies: Entry[] = [];
+
+  for (const to of targets) {
+    /* Group ids are re-minted per destination week, for `copyWeek`'s reason:
+       two weeks sharing one correlation id would make "the rows in this
+       superset" a question with an answer spanning both. */
+    const groups = new Map<string, string>();
+    /* A workout id names a container in ONE week, so each destination week gets
+       its own — minted per SOURCE container, so a day holding two workouts
+       still holds two after the copy. Same rule as the group id above it. */
+    const workouts = new Map<string, string>();
+    for (const row of source) {
+      copies.push(
+        stepped(
+          {
+            ...row,
+            uid: newUid(),
+            week: to,
+            /* *Keep both* appends: the copies land BELOW whatever the week
+               already holds, so the trainer reads their own week first and the
+               copy after it. `reindex` makes the numbers whole again. */
+            order: row.order + (opts.conflict === 'keep' ? 1000 : 0),
+            workoutId: row.workoutId ? mapWorkout(workouts, row.workoutId) : null,
+            groupId: row.groupId ? mapGroup(groups, row.groupId) : null,
+          },
+          to - from,
+          opts.step,
+        ),
+      );
+    }
+  }
+
+  return reindex([...kept, ...copies]);
+}

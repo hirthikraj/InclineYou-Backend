@@ -12,6 +12,7 @@ import {
   customId,
   labelFor,
 } from '@/lib/setup/options';
+import { Table, Row } from '@/web-components/ui/Table';
 
 /**
  * THE CERTIFICATION PICKER — the catalogue, the search and the escape hatch.
@@ -174,11 +175,15 @@ export function CertificationPicker({
               real certificate than the nearest one on our list.
             </p>
           ) : (
-            <table className="tbl" style={{ width: '100%' }}>
-              <tbody>
-                {matches.map((option) => (
-                  <tr key={option.id} aria-selected={value.includes(option.id)}>
-                    <td className="wrap">
+            <Table caption={`${matches.length} certifications matching your search`}>
+              {matches.map((option) => (
+                <Row
+                  key={option.id}
+                  selected={value.includes(option.id)}
+                  cells={[{
+                    key: 'option',
+                    className: 'wrap',
+                    content: (
                       <button
                         className="rowpick"
                         type="button"
@@ -202,11 +207,11 @@ export function CertificationPicker({
                           </span>
                         ) : null}
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    ),
+                  }]}
+                />
+              ))}
+            </Table>
           )}
         </div>
       ) : null}

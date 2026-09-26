@@ -1,6 +1,6 @@
 'use client';
 
-import { formatMinute, dayLong } from '@/lib/today/time';
+import { formatMinute, formatMinuteRange, dayLong } from '@/lib/today/time';
 import { laneStyle, type Placed } from '@/lib/schedule/grid';
 import { Check } from '@/components/shell/Icons';
 import { Cross, Remote, WarnTriangle } from './Icons';
@@ -150,44 +150,113 @@ export function SessionBlock({
   if (runsOn) classes.push('ev--runs-on');
 
   /*
-   * The end time is DRAWN as well as implied by the block's bottom edge, on any
-   * block tall enough to hold it. The design set's own table says why in one
-   * clause: "because an edge is not readable by a screen reader" — and it is
-   * barely readable by eye either, on a block whose neighbour starts at the same
-   * pixel.
+   * The end time is DRAWN as well as implied by the block's bottom edge. The
+   * design set's own table says why in one clause: "because an edge is not
+   * readable by a screen reader" and it is barely readable by eye either, on a
+   * block whose neighbour starts at the same pixel.
    *
-   * A split block loses it, because half a column cannot hold `07:00 – 08:00`.
-   * The `aria-label` still carries both, which is the point of building the
-   * sentence separately from the type.
+   * -- IT USED TO BE A HEIGHT TEST, AND HEIGHT WAS THE WRONG AXIS ------------
+   *
+   * `drawnPx >= 60 && !split` - so a 45-minute session got `7:00 AM` and an
+   * hour-long one got the range, on blocks the same width, for a label that
+   * occupies one line either way. Two thirds of a typical week is 30- and
+   * 45-minute sessions, so the fact a trainer opens a block to check was
+   * withheld from most of the grid by a test about the wrong dimension.
+   *
+   * A one-line label cannot be too short to fit VERTICALLY: every rung of the
+   * ladder gives `.ev__t` its own line or shares it with the name, and the
+   * shortest of them, `.ev--m30`, is 21px against a 15.5px line box. What the
+   * label can be is too NARROW - which is what `@container` measures, and what
+   * the fallback below is for.
+   *
+   * -- SO BOTH FORMS ARE RENDERED AND CSS PICKS ONE --------------------------
+   *
+   * Not a width guess in JavaScript. The block is already its own container
+   * query container, and which lane it lands in depends on how many sessions
+   * clash with it - something this component learns after layout, not before.
+   * So it emits the range AND the bare start, and app.css draws exactly one.
+   *
+   * Both spellings are complete: `.ev__t--s` is `7:00 AM`, not the range with
+   * its tail chopped off, because `formatMinuteRange` drops the FIRST meridiem
+   * when both halves share one - and `7:00` on its own is a time with no half
+   * of the day attached to it.
    */
-  /* Room for `07:00 – 08:00` rather than length: at 48px/hour an hour-long block
-     is 48px and holds one line, at 90px/hour a 40-minute one holds two. */
-  const wide = drawnPx >= 60 && !split;
-  const when = wide
-    ? `${formatMinute(startMinute)} – ${formatMinute(endMinute)}`
-    : formatMinute(startMinute);
+  const when = formatMinuteRange(startMinute, endMinute);
+  const whenShort = formatMinute(startMinute);
+
+  /* A range that straddles noon or midnight spells BOTH meridiems -
+     `11:30 AM - 12:15 PM` is 120px against the usual 89px - and the container
+     query that decides whether the range fits has to know which it is holding.
+     It cannot measure text, so the component says so in a class. The
+     alternative was one threshold sized for the worst case, which would have
+     dropped the range from every block on a 1024px screen to protect a form
+     that appears on a session crossing midday. */
+  if (when.length > 15) classes.push('ev--tspan');
 
   /*
-   * DELIVERY OUTRANKS THE CLASH, AND THE FIRST VERSION HAD IT THE OTHER WAY.
+   * ── AND ONE RUNG HOLDS ONE LINE, WHICH `rung()` CANNOT SAY ────────────────
    *
-   * FOUND BY RENDERING REAL ROWS. The clash sat above `remote` in this chain, so
-   * a remote session that happened to share a minute with a floor one lost its
-   * remote glyph to a warning triangle — and floor-against-remote is the single
-   * colour axis this whole design set is built on. A trainer looking at Thursday
-   * evening, which is five remote check-ins and one floor session at 19:00, saw
-   * six triangles and no way to tell which was which.
+   * `.ev--m30` is every block under 38px, and that band contains two different
+   * shapes. MEASURED on this grid: sixteen m30 blocks are 36px - 32px of content
+   * against two 15.2px line boxes, so the name drops to line two and fits - and
+   * one is 24px, which is 20px of content and holds exactly one line.
    *
-   * The trade is not close, because the clash is not being dropped — it is said
-   * three other times, each somewhere the triangle was not: the danger ring
-   * around this block, the bracket in the sticky gutter, and the underline on the
-   * day head. Delivery mode was said HERE and nowhere else.
+   * FOUND BY RENDERING Thursday 08:00, the 30-minute session in that band. The
+   * range plus the name plus the reserved glyph corner came to 196px in a 179px
+   * lane, so the flex row wrapped, and `Ishita Sharma` was drawn at y=17 in a
+   * box 24px tall - the name half-cut by the bottom edge. The block did not have
+   * a width problem. It had a second line it could not afford.
+   *
+   * So a block that holds one line says so, and app.css spends that line on the
+   * NAME - which is this file's own published rank, "the name identifies the
+   * session and the time places it". The start time comes with it in the short
+   * form and the end time is the one thing dropped, on the rung where it is
+   * least missed: the block's height IS its duration, and thirty minutes is the
+   * shortest thing on the grid.
+   *
+   * 35px is two 15.2px line boxes plus the rung's own 2px of padding top and
+   * bottom, rounded up. It is a HEIGHT test on a height problem - which is
+   * precisely what the width test in the ladder above could not be.
    */
-  const glyph = s.done ? (
+  if (drawnPx < 35) classes.push('ev--1l');
+  /*
+   * DELIVERY OUTRANKS THE CLASH — AND IT NO LONGER HAS TO OUTRANK ANYTHING.
+   *
+   * FOUND BY RENDERING REAL ROWS. This was one slot with a priority chain in
+   * front of it, and the chain was fought over twice. First the clash sat above
+   * `remote`, so a remote session sharing a minute with a floor one lost its
+   * remote glyph to a warning triangle — and floor-against-remote is the single
+   * colour axis this whole design set is built on. That was fixed by ranking
+   * delivery above the clash. The identical bug was still live one rung higher:
+   * `done` and `noShow` sat above `remote` too, so a COMPLETED remote session
+   * drew a check and forfeited its mark.
+   *
+   * MEASURED on the week of 31 August: 38 blocks, 35 of them done, all 35
+   * computing to the same fill and the same border — 32 floor and 3 remote,
+   * indistinguishable. The glyph was the last channel that could have told them
+   * apart and the chain had spent it on the state.
+   *
+   * So the chain is not re-ranked a third time, it is SPLIT. Two independent
+   * facts get two independent slots, and neither can evict the other:
+   *
+   *   mode   what this session IS.        Drawn on remote only — floor is the
+   *                                       default and reads as the unmarked
+   *                                       case, which is also what keeps 32 of
+   *                                       35 blocks free of a redundant mark.
+   *   state  where it has GOT to.         Still a ranked chain, because the
+   *                                       lifecycle states genuinely are
+   *                                       exclusive: a session cannot be both
+   *                                       done and a no-show.
+   *
+   * The clash keeps its place at the bottom of the state chain and keeps being
+   * said three other ways — the danger ring on this block, the bracket in the
+   * sticky gutter, the underline on the day head.
+   */
+  const modeGlyph = s.mode === 'remote' ? <Remote size={12} /> : null;
+  const stateGlyph = s.done ? (
     <Check size={12} />
   ) : s.noShow ? (
     <Cross size={12} />
-  ) : s.mode === 'remote' ? (
-    <Remote size={12} />
   ) : clash ? (
     <WarnTriangle size={12} />
   ) : null;
@@ -264,10 +333,20 @@ export function SessionBlock({
       }}
       onClick={() => onOpen(s.id)}
     >
-      <span className="ev__t">{when}</span>
+      {/* One of these two is drawn; see `.ev__t--r` / `.ev__t--s` in app.css.
+          Both sit in the DOM at every width, and neither needs `aria-hidden`:
+          the block's accessible name is built by `aria-label` above and nothing
+          inside it is ever read out. */}
+      <span className="ev__t ev__t--r">{when}</span>
+      <span className="ev__t ev__t--s">{whenShort}</span>
       <span className="ev__n">{s.clientName}</span>
       <span className="ev__p">{s.detail}</span>
-      {glyph && <span className="ev__g">{glyph}</span>}
+      {(modeGlyph || stateGlyph) && (
+        <span className="ev__g">
+          {modeGlyph && <i className="ev__g__m">{modeGlyph}</i>}
+          {stateGlyph && <i className="ev__g__s">{stateGlyph}</i>}
+        </span>
+      )}
     </button>
   );
 }

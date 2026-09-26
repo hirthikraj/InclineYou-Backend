@@ -8,8 +8,14 @@ import type { FinishData } from '@/lib/log/api';
 import { stampDate } from '@/lib/log/log';
 import { cancelSession, markDone, markNoShow } from '@/lib/schedule/actions';
 import { TopBar } from '@/components/shell/TopBar';
+import { Checkbox } from '@/web-components/ui/Checkbox';
 import { RecordCard } from './RecordCard';
 import { Back, Send, Tick, Warn } from './Icons';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
+import { Stat } from '@/web-components/ui/Stat';
+import { PageHeader } from '@/web-components/ui/PageHeader';
+import { Why } from '@/web-components/ui/Why';
 
 /**
  * FRAME 5b — LOGGED, AND THE PACK HAS NOT MOVED.
@@ -21,8 +27,8 @@ import { Back, Send, Tick, Warn } from './Icons';
  * this · 7 of 12" — which says the log does the moving, and was wrong about the
  * number twice over.
  *
- * So the sets happened, and whether the session counts against her money is a
- * **second, separate tap**. The strip says what her pack is NOW; the callout
+ * So the sets happened, and whether the session counts against the client's money is a
+ * **second, separate tap**. The strip says what the pack is NOW; the callout
  * says what marking it done will do to it.
  *
  * ── AND THE SECOND TAP IS NOT OPTIONAL ──────────────────────────────────────
@@ -47,9 +53,9 @@ import { Back, Send, Tick, Warn } from './Icons';
  * ── THE WHATSAPP IS OPENED, NEVER SENT ──────────────────────────────────────
  *
  * One message, composed here and handed to the trainer to send. The client's
- * number belongs to the trainer's relationship with her, and an app that posts
+ * number belongs to the trainer's relationship with them, and an app that posts
  * to it unasked has taken a liberty. Only the LOUD records are in it — a quiet
- * one stays in her history, because a trainer who forwards five records a week
+ * one stays in their history, because a trainer who forwards five records a week
  * has taught a client that records mean nothing.
  */
 
@@ -58,6 +64,12 @@ const WA = (message: string) => `https://wa.me/?text=${encodeURIComponent(messag
 export function Finish({ data }: { data: FinishData }) {
   const router = useRouter();
   const { view, finish, session } = data;
+  /* A name does not tell you somebody's pronouns, and this screen used to spell
+     out a gendered possessive four times over about whoever the
+     trainer happened to be finishing. The client's own first name is on the
+     wire and reads better than any pronoun would; where a sentence needs a
+     second reference, it takes *they*. */
+  const first = view.clientName.split(' ')[0];
   const [, startTransition] = useTransition();
   const [send, setSend] = useState(finish.announced > 0);
   const [notTrained, setNotTrained] = useState(false);
@@ -81,73 +93,74 @@ export function Finish({ data }: { data: FinishData }) {
 
   return (
     <>
-      <TopBar crumb="Sessions" onSearch={() => {}} />
+      <TopBar
+        crumb="Sessions"
+        /* Six screens in this flow pass the crumb *Sessions* — it names the
+           flow, and it is the wrong thing for a 390px header to say when the
+           one fact the trainer needs at the top is whose session this is.
+           `screenTitle` would derive *Sessions* from it, so the title is
+           stated. The `<h1>` under it keeps the plan head the bar has no room
+           for, which is why these screens are not `.ph--named`. */
+        title={view.clientName}
+      />
       <main className="main" id="main-content">
-        <div className="ph">
-          <div className="ph__row">
-            <div>
-              <nav className="crumbs" aria-label="Breadcrumb">
-                <Link href="/sessions">Sessions</Link>
-                <i aria-hidden="true">/</i>
-                <Link href={`/sessions/${data.routeId}/log`}>{view.clientName}</Link>
-                <i aria-hidden="true">/</i>
-                <b>Finish</b>
-              </nav>
-              <h1 className="ph__t">{finish.title}</h1>
-              <p className="ph__sub">
-                {view.clientName} &middot; {stampDate(view.sessionDate)}
-                {finish.line ? ` · ${finish.line}` : ''}
-              </p>
-            </div>
-            <div className="ph__acts">
-              <Link className="btn btn--secondary" href={`/sessions/${data.routeId}/log`}>
-                <Back /> Back to the log
-              </Link>
-              <Link className="btn btn--secondary" href={`/sessions/${data.routeId}/bests`}>
-                Every top set
-              </Link>
-            </div>
-          </div>
-        </div>
+        <PageHeader
+          title={finish.title}
+          sub={<>{view.clientName} &middot; {stampDate(view.sessionDate)}
+            {finish.line ? ` · ${finish.line}` : ''}</>}
+          crumbs={<nav className="crumbs" aria-label="Breadcrumb">
+              <Link href="/programs/workouts">Workouts</Link>
+              <i aria-hidden="true">/</i>
+              <Link href={`/sessions/${data.routeId}/log`}>{view.clientName}</Link>
+              <i aria-hidden="true">/</i>
+              <b>Finish</b>
+            </nav>}
+          actions={<><Button href={`/sessions/${data.routeId}/log`} variant="secondary">
+              <Back /> Back to the log
+            </Button>
+            <Button href={`/sessions/${data.routeId}/bests`} variant="secondary">
+              Every top set
+            </Button></>}
+        />
 
         <div className="body">
           <div className="wk2 wk2--even" style={{ maxWidth: 1100 }}>
             <div>
               <div className="stats stats--4">
-                <div className="stat">
-                  <p className="stat__k">Sets</p>
-                  <p className="stat__v">{finish.sets}</p>
-                  <p className="stat__d">
-                    {finish.setsPlanned ? `of ${finish.setsPlanned} planned` : 'logged'}
-                  </p>
-                </div>
-                <div className="stat">
-                  <p className="stat__k">Volume</p>
-                  <p className="stat__v">{finish.volumeKg.toLocaleString('en-IN')}</p>
-                  <p className="stat__d">kg moved</p>
-                </div>
-                <div className="stat">
-                  <p className="stat__k">Minutes</p>
-                  <p className="stat__v">{finish.minutes ?? '—'}</p>
-                  <p className="stat__d">
-                    {finish.span ?? (finish.minutes === null ? 'left open, so nobody knows' : 'still running')}
-                  </p>
-                </div>
-                <div className={`stat${finish.records.length ? ' stat--acc' : ''}`}>
-                  <p className="stat__k">Records</p>
-                  <p className="stat__v">{finish.records.length}</p>
-                  <p className="stat__d">{finish.announced} worth sending</p>
-                </div>
+                <Stat
+                  label="Sets"
+                  value={finish.sets}
+                  detail={finish.setsPlanned ? `of ${finish.setsPlanned} planned` : 'logged'}
+                />
+                <Stat
+                  label="Volume"
+                  value={finish.volumeKg.toLocaleString('en-IN')}
+                  detail="kg moved"
+                />
+                <Stat
+                  label="Minutes"
+                  value={finish.minutes ?? '—'}
+                  detail={finish.span ?? (finish.minutes === null ? 'left open, so nobody knows' : 'still running')}
+                />
+                <Stat
+                  label="Records"
+                  value={finish.records.length}
+                  detail={<>{finish.announced} worth sending</>}
+                  tone={finish.records.length ? 'acc' : undefined}
+                />
               </div>
 
-              <div className="why why--warn" style={{ marginTop: 14 }}>
-                <p className="why__k">This did not touch her pack</p>
+              <Why
+                heading={<>This did not touch {first}&rsquo;s pack</>}
+                tone="warn"
+                style={{ marginTop: 14 }}
+              >
                 <p>
-                  The sets happened. Whether the session counts against her money is a{' '}
+                  The sets happened. Whether the session counts against {first}&rsquo;s money is a{' '}
                   <b>second, separate tap</b> — and a pack moves on <i>done</i> or <i>no-show</i>,
                   never on <i>booked</i>. {finish.pack}
                 </p>
-              </div>
+              </Why>
 
               {finish.closed ? (
                 <div className="msg msg--ok" style={{ marginTop: 16 }}>
@@ -160,29 +173,29 @@ export function Finish({ data }: { data: FinishData }) {
               ) : session ? (
                 <>
                   <div className="row" style={{ marginTop: 16, gap: 9, flexWrap: 'wrap' }}>
-                    <button
-                      className="btn btn--primary btn--lg"
-                      type="button"
+                    <Button
+                      variant="primary"
+                      size="lg"
                       disabled={busy}
                       onClick={() => close(() => markDone(session.id))}
                     >
                       <Tick /> Mark the session done
-                    </button>
-                    <button
-                      className="btn btn--secondary btn--lg"
-                      type="button"
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="lg"
                       disabled={busy}
                       onClick={() => setNotTrained(true)}
                     >
                       They didn&rsquo;t train
-                    </button>
+                    </Button>
                   </div>
                   <p className="small" style={{ marginTop: 8 }}>
                     <b className="ink">One of these two has to happen.</b> The mark is what moves
-                    her balance, and the balance is what warns you before her pack runs out — a
-                    session nobody closed is money the product cannot see. Not sure which?{' '}
-                    <b className="ink">They didn&rsquo;t train</b> carries cancel, and a cancel
-                    costs her nothing.
+                    {' '}{first}&rsquo;s balance, and the balance is what warns you before the pack
+                    runs out — a session nobody closed is money the product cannot see. Not sure
+                    which? <b className="ink">They didn&rsquo;t train</b> carries cancel, and a
+                    cancel costs {first} nothing.
                   </p>
                 </>
               ) : (
@@ -203,24 +216,19 @@ export function Finish({ data }: { data: FinishData }) {
 
             <div>
               {finish.records.length ? <RecordCard card={finish.records[0]} /> : (
-                <div className="card">
-                  <div className="card__b">
-                    <p className="small">
-                      No record today, and that is the ordinary case.{' '}
-                      <b className="ink">Matching is not beating</b>, and a first log is never a
-                      record — <Link href={`/sessions/${data.routeId}/bests`}>every top set</Link>{' '}
-                      says which of the four each one was.
-                    </p>
-                  </div>
-                </div>
+                <Card>
+                  <p className="small">
+                    No record today, and that is the ordinary case.{' '}
+                    <b className="ink">Matching is not beating</b>, and a first log is never a
+                    record — <Link href={`/sessions/${data.routeId}/bests`}>every top set</Link>{' '}
+                    says which of the four each one was.
+                  </p>
+                </Card>
               )}
 
-              <div className="card" style={{ marginTop: 12 }}>
-                <div className="card__hd">
-                  <h2 className="card__t">
-                    Send {view.clientName.split(' ')[0]} the {finish.announced > 1 ? 'records' : 'record'}
-                  </h2>
-                  <button
+              <Card
+                title={<>Send {view.clientName.split(' ')[0]} the {finish.announced > 1 ? 'records' : 'record'}</>}
+                aside={<><button
                     className="switch"
                     type="button"
                     role="switch"
@@ -228,41 +236,41 @@ export function Finish({ data }: { data: FinishData }) {
                     aria-label="Open WhatsApp with this message"
                     style={{ marginLeft: 'auto' }}
                     onClick={() => setSend(!send)}
-                  />
-                </div>
-                <div className="card__b">
-                  <p
-                    className="ctl ctl--said"
-                    style={{
-                      height: 'auto', padding: '10px 12px', whiteSpace: 'normal',
-                      lineHeight: 1.55, textAlign: 'left',
-                    }}
+                  /></>}
+                style={{ marginTop: 12 }}
+              >
+                <p
+                  className="ctl ctl--said"
+                  style={{
+                    height: 'auto', padding: '10px 12px', whiteSpace: 'normal',
+                    lineHeight: 1.55, textAlign: 'left',
+                  }}
+                >
+                  {finish.message}
+                </p>
+                <p className="small" style={{ marginTop: 9 }}>
+                  One WhatsApp, <b className="ink">opened for you to send</b> and never sent on
+                  your behalf. {first}&rsquo;s number belongs to your relationship with them,
+                  and an app that posts to it unasked has taken a liberty.
+                </p>
+                <p className="small" style={{ marginTop: 9 }}>
+                  {finish.announced > 0
+                    ? `Only the ${finish.announced} loud record${finish.announced === 1 ? '' : 's'} ${finish.announced === 1 ? 'is' : 'are'} in it — a quiet one stays in the history.`
+                    : 'No record loud enough to send, so this is the session, not a boast.'}
+                </p>
+                {send ? (
+                  <Button
+                    href={WA(finish.message)}
+                    variant="secondary"
+                    size="sm"
+                    style={{ marginTop: 10 }}
+                    target="_blank"
+                    rel="noreferrer"
                   >
-                    {finish.message}
-                  </p>
-                  <p className="small" style={{ marginTop: 9 }}>
-                    One WhatsApp, <b className="ink">opened for you to send</b> and never sent on
-                    your behalf. The client&rsquo;s number belongs to your relationship with her,
-                    and an app that posts to it unasked has taken a liberty.
-                  </p>
-                  <p className="small" style={{ marginTop: 9 }}>
-                    {finish.announced > 0
-                      ? `Only the ${finish.announced} loud record${finish.announced === 1 ? '' : 's'} ${finish.announced === 1 ? 'is' : 'are'} in it — a quiet one stays in her history.`
-                      : 'No record loud enough to send, so this is the session, not a boast.'}
-                  </p>
-                  {send ? (
-                    <a
-                      className="btn btn--secondary btn--sm"
-                      style={{ marginTop: 10 }}
-                      href={WA(finish.message)}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      <Send /> Open WhatsApp
-                    </a>
-                  ) : null}
-                </div>
-              </div>
+                    <Send /> Open WhatsApp
+                  </Button>
+                ) : null}
+              </Card>
             </div>
           </div>
         </div>
@@ -342,6 +350,7 @@ function NotTrained({
   onClose: () => void;
 }) {
   const [choice, setChoice] = useState<'no_show' | 'client_cancelled' | 'trainer_cancelled' | null>(null);
+  const first = clientName.split(' ')[0];
   /* On by default: the design's rule, and what the phone has always done. It
      only means anything for a no-show — a cancellation charges nothing at all,
      which is the one thing all three outcomes have always agreed on. */
@@ -359,7 +368,7 @@ function NotTrained({
     {
       key: 'no_show' as const,
       title: 'They didn’t turn up',
-      body: 'The slot was held and nobody released it. Recorded as a no-show against the booking, and it stays on her file.',
+      body: 'The slot was held and nobody released it. Recorded as a no-show against the booking, and it stays on their file.',
       note: costs ? '−1 session' : 'no change',
       wide: true,
     },
@@ -388,8 +397,8 @@ function NotTrained({
         </div>
         <div className="modal__body" style={{ paddingBottom: 8 }}>
           <p style={{ margin: 0 }}>
-            Three outcomes, and the difference is what happens to her pack. A cancellation costs
-            nothing either way; <b>a no-show is the one you decide</b>.
+            Three outcomes, and the difference is what happens to {first}&rsquo;s pack. A
+            cancellation costs nothing either way; <b>a no-show is the one you decide</b>.
           </p>
 
           {rows.map((r) => (
@@ -413,22 +422,24 @@ function NotTrained({
           {/* Under the no-show row and only under it, because it is the only
               outcome the answer changes anything for. */}
           {choice === 'no_show' ? (
-            <label
-              className="small"
-              style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 10 }}
-            >
-              <input
-                type="checkbox"
-                checked={costs}
-                onChange={(e) => setCosts(e.target.checked)}
-                style={{ marginTop: 2 }}
-              />
-              <span>
-                <b>Take a session off her pack.</b> On by default, because the slot was held and
-                nobody released it. Turn it off for the client who rang at 5am — it is a commercial
-                decision between the two of you, and this is where you make it.
-              </span>
-            </label>
+            /* `ui/Checkbox`. Same defect as the money panel's: a bare
+               `<input type="checkbox">` with no class, so `.check` never
+               applied and this drew the browser's blue box on a screen whose
+               every other control is the design system's. `mt2` is 8px where
+               this was an ad-hoc 10. */
+            <Checkbox
+              className="mt2"
+              align="start"
+              checked={costs}
+              onChange={(e) => setCosts(e.target.checked)}
+              label={
+                <>
+                  <b>Take a session off {first}&rsquo;s pack.</b> On by default, because the slot was held and
+                  nobody released it. Turn it off for the client who rang at 5am — it is a commercial
+                  decision between the two of you, and this is where you make it.
+                </>
+              }
+            />
           ) : null}
 
           <p className="small" style={{ marginTop: 12 }}>
@@ -440,15 +451,14 @@ function NotTrained({
           </p>
         </div>
         <div className="modal__foot">
-          <button className="btn btn--ghost" type="button" onClick={onClose}>Cancel</button>
-          <button
-            className="btn btn--primary"
-            type="button"
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
             disabled={!choice || busy}
             onClick={() => choice && onPick(choice, choice === 'no_show' && costs)}
           >
             {busy ? 'Saving…' : 'Save'}
-          </button>
+          </Button>
         </div>
       </div>
     </>

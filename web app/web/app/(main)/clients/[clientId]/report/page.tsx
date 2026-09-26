@@ -30,7 +30,7 @@ import { requireClientReport } from '@/lib/reports/guard';
  */
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: 'Progress report · X REP' };
+export const metadata = { title: 'Progress report · InclineYou' };
 
 export default async function Page({
   params,

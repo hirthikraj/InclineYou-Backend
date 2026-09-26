@@ -7,5 +7,5 @@ import { permanentRedirect } from 'next/navigation';
  * that is not a cosmetic difference.
  */
 export default function Page() {
-  permanentRedirect('/business?tab=reports');
+  permanentRedirect('/business/reports');
 }

@@ -1,5 +1,7 @@
-import { isoWeekday, minuteOfDay, startOfDay } from '@/lib/today/time';
-import type { ScheduleClient, ScheduleSession } from './api';
+import { DAY_MS, isoWeekday, minuteOfDay, startOfDay } from '@/lib/today/time';
+import { SNAP_MINUTES } from './result';
+import type { BookSession, ScheduleClient } from './session';
+import { gridStart, type ScheduleView } from './view';
 
 /**
  * WHO TO OFFER FIRST — AND WHY THE WEB CAN DO THIS AND THE PHONE CANNOT.
@@ -40,7 +42,7 @@ export interface Suggestion {
 
 export function suggestClients(
   clients: ScheduleClient[],
-  sessions: ScheduleSession[],
+  sessions: BookSession[],
   at: number,
 ): Suggestion[] {
   const weekday = isoWeekday(at);
@@ -90,10 +92,10 @@ export function suggestClients(
  * is not a clash.
  */
 export function collisionsAt(
-  sessions: ScheduleSession[],
+  sessions: BookSession[],
   at: number,
   minutes: number,
-): ScheduleSession[] {
+): BookSession[] {
   const day = startOfDay(at);
   const from = minuteOfDay(at);
   const to = from + minutes;
@@ -119,4 +121,99 @@ export function insideHours(
   const from = minuteOfDay(at);
   const to = from + minutes;
   return windows.some((w) => from >= w.startMinute && to <= w.endMinute);
+}
+
+/* ------------------------------------------------------------- the slot ── */
+
+/**
+ * WHERE *NEW SESSION* LANDS WHEN IT WAS NOT OPENED FROM A CLICK ON THE GRID.
+ *
+ * The next whole hour, on the anchor's own day — not 09:00, and not now. A form
+ * that opens at 14:37 asks the trainer to fix a time they did not choose, and one
+ * that opens at a fixed hour asks them to fix it every single time.
+ *
+ * It lived in `Schedule.tsx` while the schedule was the only screen that could
+ * open the form. Today opens it in place now, and a second copy of this rule is a
+ * second answer to *what time did you mean* — the two screens' + would drift
+ * apart the first time either was touched. Today calls it with `'day'` and
+ * today's midnight, which is the only slot that screen can mean.
+ */
+export function defaultSlot(anchor: number, view: ScheduleView, now: number) {
+  const day = view === 'week' ? pickDay(anchor, now) : startOfDay(anchor);
+  const isToday = day === startOfDay(now);
+  const minute = isToday
+    ? Math.min(23 * 60, Math.ceil(minuteOfDay(now) / 60) * 60)
+    : 9 * 60;
+  return { dayAt: day, minute: Math.round(minute / SNAP_MINUTES) * SNAP_MINUTES };
+}
+
+/**
+ * WHAT TIME *THIS CLIENT* MEANS, ON A SURFACE WITH NO MINUTE AXIS.
+ *
+ * `defaultSlot` answers *what time did you mean* for a button that was pressed
+ * from nowhere in particular. This answers it for a cell in the week-by-client
+ * pivot, where the click has named a person and a day and cannot name a minute:
+ * the row is a client and the column is a whole day, and `ClientWeek` is right
+ * that no y-coordinate in it stands for an hour.
+ *
+ * So the minute comes from the client instead of from the pointer, and it is
+ * the same fact `suggestClients` ranks band 1 on, read the other way round:
+ * that function asks *who trains at this hour on Thursdays* and this asks
+ * *which hour does this person train at on Thursdays*. One rule, two
+ * directions — a second, cleverer rule here would put a different answer in the
+ * form than the one the ranked list is built on.
+ *
+ * Four bands, in order, and the ladder stops at the first that can speak:
+ *
+ *   1. **Their own sessions on this weekday.** Somebody who trains Thursdays at
+ *      06:00 gets 06:00. This is the answer nearly every time on this book —
+ *      measured, 15 of 21 clients are on exactly two standing slots a week.
+ *   2. **Their own sessions on any day**, for a client whose Thursday is new
+ *      but whose hour is not.
+ *   3. **The day's first working window**, for a client with no history at all.
+ *      The trainer's own morning is a better guess than a constant.
+ *   4. **09:00**, which is `defaultSlot`'s own fallback and is only reached when
+ *      nobody has answered the hours either.
+ *
+ * Ties go to the EARLIER minute rather than to whichever row the array happened
+ * to hold first, so the same client and the same day give the same answer on
+ * every render. Nothing here is a commitment: the form opens with a time field
+ * the trainer can change, which is the difference between a default and a rule.
+ */
+export function usualMinuteFor(
+  sessions: BookSession[],
+  clientId: string,
+  dayAt: number,
+  windows: { startMinute: number; endMinute: number }[],
+): number {
+  const weekday = isoWeekday(dayAt);
+
+  const tally = (sameDay: boolean) => {
+    const counts = new Map<number, number>();
+    for (const s of sessions) {
+      if (s.dead || s.clientId !== clientId) continue;
+      if (sameDay && isoWeekday(s.at) !== weekday) continue;
+      const minute = minuteOfDay(s.at);
+      counts.set(minute, (counts.get(minute) ?? 0) + 1);
+    }
+    let best: number | null = null;
+    let bestN = 0;
+    for (const [minute, n] of counts) {
+      if (n > bestN || (n === bestN && best !== null && minute < best)) {
+        best = minute;
+        bestN = n;
+      }
+    }
+    return best;
+  };
+
+  const minute = tally(true) ?? tally(false) ?? windows[0]?.startMinute ?? 9 * 60;
+  return Math.round(minute / SNAP_MINUTES) * SNAP_MINUTES;
+}
+
+/** Today if the week contains it, otherwise the Monday the trainer is looking at. */
+function pickDay(anchor: number, now: number) {
+  const start = gridStart('week', anchor);
+  const today = startOfDay(now);
+  return today >= start && today < start + 7 * DAY_MS ? today : start;
 }

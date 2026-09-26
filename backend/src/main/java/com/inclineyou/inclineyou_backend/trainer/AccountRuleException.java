@@ -98,6 +98,18 @@ public class AccountRuleException extends RuntimeException {
                 "That doesn’t look like an email address.");
     }
 
+    /**
+     * A gender id the product does not have — V6.
+     *
+     * <p>Typed rather than a bare 400 for the reason the block above gives: it
+     * is the one answer setup step 1 now refuses to go on without, and a step
+     * that silently will not advance is the failure that made the column.
+     */
+    public static AccountRuleException genderUnknown() {
+        return new AccountRuleException(HttpStatus.BAD_REQUEST, "VALIDATION",
+                "gender: must be one of woman, man, nonbinary, undisclosed");
+    }
+
     /* ── the proof ─────────────────────────────────────────────────────────── */
 
     /**

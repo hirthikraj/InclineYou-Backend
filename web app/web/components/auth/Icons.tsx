@@ -208,15 +208,51 @@ export function IconChevronLeft(p: IconProps) {
   );
 }
 
-/** The mark. A different viewBox from the rest — it is a logo, not a glyph. */
-export function BrandMark({ size = 19 }: { size?: number }) {
+/* `BrandMark` — an X drawn as two crossed strokes — is GONE. It was the old
+   brand's initial, and a logo does not belong in an icon file: it has its own
+   grid, its own two inks and its own clear-space rule, none of which a 24-unit
+   glyph sheet can express. The mark is `web-components/ui/Logo.tsx`, from
+   `identity.html`. Deleted rather than left unused, because dead artwork of a
+   retired brand is how a rebrand comes back one call-site at a time. */
+
+/**
+ * The Google G — the one glyph in this file that is not a `Glyph`.
+ *
+ * Google's identity guidelines do not permit the mark to be redrawn, recoloured
+ * or set in `currentColor`, so it cannot go through the 24×24 stroke wrapper
+ * every other icon here uses: it is four filled paths in four fixed brand
+ * colours, and those four hex values are the only hard-coded colours on this
+ * screen. That is not a hole in `New colours: 0` — they are somebody else's
+ * trademark reproduced verbatim, which is the opposite of inventing a colour.
+ *
+ * `aria-hidden` on the same reasoning as the rest of the file: the button it
+ * sits in already says *Continue with Google*.
+ */
+export function IconGoogle({ size = 18, className }: IconProps) {
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" aria-hidden="true">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+      className={className}
+    >
       <path
-        d="M18 18 82 82M82 18 18 82"
-        stroke="currentColor"
-        strokeWidth="13"
-        strokeLinecap="round"
+        fill="#4285F4"
+        d="M23.52 12.27c0-.85-.08-1.67-.22-2.45H12v4.64h6.46a5.52 5.52 0 0 1-2.4 3.62v3.01h3.88c2.27-2.09 3.58-5.17 3.58-8.82Z"
+      />
+      <path
+        fill="#34A853"
+        d="M12 24c3.24 0 5.96-1.08 7.94-2.91l-3.88-3.01c-1.08.72-2.45 1.15-4.06 1.15-3.13 0-5.78-2.11-6.73-4.95H1.27v3.11A12 12 0 0 0 12 24Z"
+      />
+      <path
+        fill="#FBBC05"
+        d="M5.27 14.28a7.2 7.2 0 0 1 0-4.56V6.61H1.27a12 12 0 0 0 0 10.78l4-3.11Z"
+      />
+      <path
+        fill="#EA4335"
+        d="M12 4.77c1.76 0 3.35.61 4.6 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0 7.31 0 3.26 2.69 1.27 6.61l4 3.11C6.22 6.88 8.87 4.77 12 4.77Z"
       />
     </svg>
   );

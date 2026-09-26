@@ -284,19 +284,203 @@ class ProgramAuthoringTest {
                 .andExpect(jsonPath("$[0].clientName").value("Meera"))
                 .andExpect(jsonPath("$[0].behindTemplate").value(false));
 
-        /* Age the copy by an hour, which is what a real edit does the other way
-           round. It has to be done with the trigger off and it cannot be done
-           with NOW(): `set_updated_at` forces `NEW.updated_at = NOW()` on every
-           UPDATE, and inside this one test transaction `NOW()` is a constant —
-           so template and program stamp to the identical instant and `<` ties.
-           In production each request is its own transaction and they differ. */
-        jdbc.getJdbcTemplate().execute("ALTER TABLE program DISABLE TRIGGER trg_program_updated_at");
-        jdbc.update("UPDATE program SET updated_at = NOW() - INTERVAL '1 hour' WHERE template_id = :id::uuid",
+        /* Age the moment the copy last TOOK the blueprint. V2 moved this read
+           off `updated_at`, and the next test is why: a trainer editing the copy
+           moves that column and has taken nothing.
+
+           It cannot be done with NOW(): inside one test transaction `NOW()` is a
+           constant, so template and program would stamp to the identical instant
+           and `<` ties. In production each request is its own transaction. The
+           `updated_at` trigger is irrelevant to this column and is left alone. */
+        jdbc.update("UPDATE program SET synced_at = NOW() - INTERVAL '1 hour' WHERE template_id = :id::uuid",
                 Map.of("id", id));
-        jdbc.getJdbcTemplate().execute("ALTER TABLE program ENABLE TRIGGER trg_program_updated_at");
 
         mvc.perform(get("/v1/templates/%s/assignments".formatted(id)))
                 .andExpect(jsonPath("$[0].behindTemplate").value(true));
+    }
+
+    /* ----------------------------------------------------------------- V2 */
+
+    @Test
+    @DisplayName("editing a client's copy does not make it behind — that is `synced_at`'s whole job")
+    void editingACopyIsNotTakingTheBlueprint() throws Exception {
+        var id = createTemplate("""
+                {"name":"Full body","weeks":4,"trainingDays":[1],
+                 "exercises":[{"exerciseId":"%s","dayOfWeek":1,"week":1,"orderIndex":0,"sets":3,"reps":8}]}
+                """.formatted(bench));
+        String programId = applyTo(id, """
+                {"clientId":"%s","schedule":[{"day":1,"weekday":3,"time":"06:30"}]}
+                """.formatted(client));
+
+        /* The builder's save: the whole prescription, one PUT. Note the day is
+           the client's WEEKDAY — Wednesday, which is where apply put the rows —
+           and not the template's ordinal slot. */
+        mvc.perform(put("/v1/programs/%s/exercises".formatted(programId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                        {"weeks":9,"trainingDays":[3],"dayLabels":{"3":"Meera's Wednesday"},
+                         "exercises":[{"exerciseId":"%s","dayOfWeek":3,"week":1,"orderIndex":0,
+                                       "sets":5,"reps":5,"notes":"Chest up."}]}
+                        """.formatted(bench)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.length()").value(1))
+                .andExpect(jsonPath("$[0].sets").value(5))
+                .andExpect(jsonPath("$[0].notes").value("Chest up."));
+
+        /* The copy owns its own shape now, and it is NOT the blueprint's. */
+        mvc.perform(get("/v1/programs/" + programId))
+                .andExpect(jsonPath("$.weeks").value(9))
+                .andExpect(jsonPath("$.trainingDays[0]").value(3))
+                .andExpect(jsonPath("$.dayLabels['3']").value("Meera's Wednesday"));
+
+        /* The blueprint is untouched — the two-table rule, from the new side. */
+        mvc.perform(get("/v1/templates/" + id))
+                .andExpect(jsonPath("$.weeks").value(4))
+                .andExpect(jsonPath("$.exercises[0].sets").value(3));
+
+        /* AND THE COPY IS NOT BEHIND. `updated_at` moved; `synced_at` did not. */
+        mvc.perform(get("/v1/templates/%s/assignments".formatted(id)))
+                .andExpect(jsonPath("$[0].behindTemplate").value(false));
+    }
+
+    @Test
+    @DisplayName("the assignment says what the copy changed, and a swap is one finding")
+    void assignmentsCarryTheDivergence() throws Exception {
+        var id = createTemplate("""
+                {"name":"Full body","weeks":4,"trainingDays":[1],
+                 "exercises":[{"exerciseId":"%s","dayOfWeek":1,"week":1,"orderIndex":0,"sets":3,"reps":8}]}
+                """.formatted(bench));
+        String programId = applyTo(id, """
+                {"clientId":"%s","schedule":[{"day":1,"weekday":3,"time":"06:30"}]}
+                """.formatted(client));
+
+        /* A fresh copy agrees with its blueprint about everything. */
+        mvc.perform(get("/v1/templates/%s/assignments".formatted(id)))
+                .andExpect(jsonPath("$[0].divergence.total").value(0));
+
+        /* A CUE ON A ROW THAT OTHERWISE MATCHES is its own kind. Folding it
+           into the prescription — which is what `prescribe` does on a board,
+           correctly — reported every copy in the book as *re-prescribed*
+           against a blueprint it agreed with on every set, rep and rest. */
+        mvc.perform(put("/v1/programs/%s/exercises".formatted(programId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                        {"exercises":[{"exerciseId":"%s","dayOfWeek":3,"week":1,"orderIndex":0,
+                                       "sets":3,"reps":8,"notes":"Chest up, and slow on the way down."}]}
+                        """.formatted(bench)))
+                .andExpect(status().isOk());
+
+        mvc.perform(get("/v1/templates/%s/assignments".formatted(id)))
+                .andExpect(jsonPath("$[0].divergence.noted").value(1))
+                .andExpect(jsonPath("$[0].divergence.changed").value(0))
+                .andExpect(jsonPath("$[0].divergence.total").value(1))
+                .andExpect(jsonPath("$[0].divergence.lines[0].kind").value("note"));
+
+        /* AND ONE MOVEMENT OUT, ONE IN, SAME LANE IS ONE FINDING — the injury
+           swap, the commonest per-client edit there is. Reported as a removal
+           plus an addition it reads as two changes and loses the fact that one
+           replaced the other. The cue goes with the row it was written on: the
+           blueprint has no counterpart to a movement it does not carry, so
+           there is no *cue changed* to report about it. */
+        mvc.perform(put("/v1/programs/%s/exercises".formatted(programId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                        {"exercises":[{"exerciseId":"%s","dayOfWeek":3,"week":1,"orderIndex":0,
+                                       "sets":3,"reps":8,"notes":"Shoulder — row instead."}]}
+                        """.formatted(row)))
+                .andExpect(status().isOk());
+
+        mvc.perform(get("/v1/templates/%s/assignments".formatted(id)))
+                .andExpect(jsonPath("$[0].divergence.swapped").value(1))
+                .andExpect(jsonPath("$[0].divergence.added").value(0))
+                .andExpect(jsonPath("$[0].divergence.removed").value(0))
+                .andExpect(jsonPath("$[0].divergence.noted").value(0))
+                .andExpect(jsonPath("$[0].divergence.total").value(1))
+                /* The sentence names the client's WEEKDAY, because a copy's days
+                   are their real week — and names both movements, so the trainer
+                   can see what the push would undo. */
+                .andExpect(jsonPath("$[0].divergence.lines[0].kind").value("swapped"))
+                .andExpect(jsonPath("$[0].divergence.lines[0].text",
+                        org.hamcrest.Matchers.containsString("Wednesday")))
+                .andExpect(jsonPath("$[0].divergence.lines[0].text",
+                        org.hamcrest.Matchers.containsString("Bench press → Barbell row")));
+    }
+
+    @Test
+    @DisplayName("apply translates the shape into the client's week, and resync takes it again")
+    void theShapeIsTranslatedAndResynced() throws Exception {
+        /* Slots 1 and 2 of the blueprint, landing on Tuesday and Friday. The
+           labels have to travel with the rows: copied verbatim, "Pull" would sit
+           on a Tuesday the client trains and "Push" on a Monday they do not. */
+        var id = createTemplate("""
+                {"name":"Upper / Lower","weeks":6,"trainingDays":[1,2],
+                 "dayLabels":{"1":"Push","2":"Pull"},
+                 "exercises":[{"exerciseId":"%s","dayOfWeek":1,"week":1,"orderIndex":0,"sets":3,"reps":8},
+                              {"exerciseId":"%s","dayOfWeek":2,"week":1,"orderIndex":0,"sets":3,"reps":10}]}
+                """.formatted(bench, row));
+
+        String programId = applyTo(id, """
+                {"clientId":"%s","schedule":[{"day":1,"weekday":2,"time":"06:30"},
+                                             {"day":2,"weekday":5,"time":"06:30"}]}
+                """.formatted(client));
+
+        mvc.perform(get("/v1/programs/" + programId))
+                .andExpect(jsonPath("$.weeks").value(6))
+                .andExpect(jsonPath("$.trainingDays[0]").value(2))
+                .andExpect(jsonPath("$.trainingDays[1]").value(5))
+                .andExpect(jsonPath("$.dayLabels['2']").value("Push"))
+                .andExpect(jsonPath("$.dayLabels['5']").value("Pull"))
+                .andExpect(jsonPath("$.syncedAt").isNotEmpty());
+
+        /* Tune the copy, then take the blueprint again: the shape comes back
+           with the rows, because a push that left the client on nine weeks of a
+           six-week block would be a resync that did not resync. */
+        mvc.perform(put("/v1/programs/%s/exercises".formatted(programId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                        {"weeks":9,"dayLabels":{"2":"Mine"},"exercises":[]}
+                        """))
+                .andExpect(status().isOk());
+        mvc.perform(get("/v1/programs/" + programId))
+                .andExpect(jsonPath("$.weeks").value(9));
+
+        mvc.perform(post("/v1/programs/%s/resync".formatted(programId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.added").value(2));
+
+        mvc.perform(get("/v1/programs/" + programId))
+                .andExpect(jsonPath("$.weeks").value(6))
+                .andExpect(jsonPath("$.dayLabels['2']").value("Push"))
+                .andExpect(jsonPath("$.dayLabels['5']").value("Pull"));
+
+        /* And the client's weekday and time are still theirs — the one promise
+           the push panel makes on every confirm. */
+        mvc.perform(get("/v1/programs/%s/exercises".formatted(programId)))
+                .andExpect(jsonPath("$[0].dayOfWeek").value(2))
+                .andExpect(jsonPath("$[1].dayOfWeek").value(5));
+    }
+
+    @Test
+    @DisplayName("another trainer cannot replace a program's exercises")
+    void bulkSaveIsOwned() throws Exception {
+        var id = createTemplate("""
+                {"name":"Mine","weeks":1,"trainingDays":[1],
+                 "exercises":[{"exerciseId":"%s","dayOfWeek":1,"week":1,"orderIndex":0,"sets":3,"reps":8}]}
+                """.formatted(bench));
+        String programId = applyTo(id, """
+                {"clientId":"%s","schedule":[{"day":1,"weekday":3,"time":"06:30"}]}
+                """.formatted(client));
+
+        signedInAs(other);
+        mvc.perform(put("/v1/programs/%s/exercises".formatted(programId))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"exercises\":[]}"))
+                .andExpect(status().isNotFound());
+
+        /* 404 and not 403, per the standing rule — and the rows are still there. */
+        signedInAs(owner);
+        mvc.perform(get("/v1/programs/%s/exercises".formatted(programId)))
+                .andExpect(jsonPath("$.length()").value(1));
     }
 
     @Test

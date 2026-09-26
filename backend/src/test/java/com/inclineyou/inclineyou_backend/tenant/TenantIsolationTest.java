@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 
 import java.sql.Connection;
@@ -185,6 +186,275 @@ class TenantIsolationTest {
     }
 
     @Test
+    @DisplayName("V19–V20 · a client can ask whether a number is taken, and can only ever move its OWN number")
+    void portalPhoneFunctions() throws SQLException {
+        String meerasPhone = jdbc.queryForObject("SELECT phone FROM client WHERE id = :id::uuid",
+                Map.of("id", meeraPrivate.toString()), String.class);
+        String priyasPhone = phoneOf(trainerPriya);
+        try (Connection c = asAppRole()) {
+            set(c, "app.actor", "client");
+            set(c, "app.phone", meerasPhone);
+            set(c, "app.tenant_ids", TenantContext.array(List.of(tenantA, tenantB)));
+            set(c, "app.client_ids", "{" + meeraPrivate + "," + meeraGym + "}");
+            // The lens cannot see Priya's trainer row; the function answers anyway, yes or no.
+            assertThat(strings(c, "SELECT portal_phone_in_use('" + priyasPhone + "')::text")).containsExactly("true");
+            assertThatThrownBy(() -> exec(c, "SELECT portal_change_client_phone('" + priyasPhone + "', '6000000001')"))
+                    .isInstanceOf(SQLException.class);
+        }
+    }
+
+    @Test
+    @DisplayName("V18 · client_prefs is the client's alone — its own trainer reads nothing; the bell is minted only by the gate")
+    void clientPrefsAreTheClientsAlone() throws SQLException {
+        try (Connection c = asAppRole()) {
+            set(c, "app.actor", "client");
+            set(c, "app.tenant_ids", TenantContext.array(List.of(tenantA, tenantB)));
+            set(c, "app.client_ids", "{" + meeraPrivate + "," + meeraGym + "}");
+            exec(c, "INSERT INTO client_prefs (client_id, notify_session_reminder, nominee_name, nominee_phone, tenant_id) "
+                    + "VALUES ('" + meeraPrivate + "', false, 'Ravi', '9845012345', '" + tenantA + "')");
+            assertThat(count(c, "SELECT count(*) FROM client_prefs")).isOne();
+            assertThatThrownBy(() -> exec(c, "INSERT INTO client_notification (client_id, kind, tenant_id) VALUES ('"
+                    + meeraPrivate + "', 'note', '" + tenantA + "')")).isInstanceOf(SQLException.class);
+        }
+        try (Connection c = asAppRole()) {
+            // Her own trainer, standing in her own workspace: nothing.
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            assertThat(count(c, "SELECT count(*) FROM client_prefs WHERE client_id = '" + meeraPrivate + "'")).isZero();
+            assertThat(count(c, "SELECT count(*) FROM client_notification WHERE client_id = '" + meeraPrivate + "'")).isZero();
+            // …and yet the gate, run from a trainer request, reads the switch she set.
+            assertThat(strings(c, "SELECT mint_client_notification('" + meeraPrivate + "', 'session', NULL, now(), 'booked')::text"))
+                    .containsExactly((String) null);
+            assertThat(strings(c, "SELECT mint_client_notification('" + meeraPrivate + "', 'pack', 100, NULL, 'sold') IS NOT NULL"))
+                    .containsExactly("t");
+        }
+    }
+
+    @Test
+    @DisplayName("11c · a client answers its own assessment, cannot touch another's, and can ring its trainer's bell")
+    void portalClientAnswers() throws SQLException {
+        UUID mine = UUID.randomUUID();
+        UUID theirs = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO assessment (id, client_id, trainer_id, tenant_id, name, due_at, sent_at)
+                VALUES (:m::uuid, :c::uuid, :t::uuid, :tid::uuid, 'mine', now(), now()),
+                       (:o::uuid, :s::uuid, :a::uuid, :tb::uuid, 'theirs', now(), now())
+                """, Map.of("m", mine.toString(), "c", meeraPrivate.toString(), "t", trainerPriya.toString(),
+                            "tid", tenantA.toString(), "o", theirs.toString(), "s", sanjay.toString(),
+                            "a", trainerArun.toString(), "tb", tenantB.toString()));
+        try (Connection c = asAppRole()) {
+            set(c, "app.actor", "client");
+            set(c, "app.tenant_ids", TenantContext.array(List.of(tenantA, tenantB)));
+            set(c, "app.client_ids", "{" + meeraPrivate + "," + meeraGym + "}");
+            assertThat(c.createStatement().executeUpdate(
+                    "UPDATE assessment SET answers = '[{\"questionId\":\"q\"}]' WHERE id = '" + mine + "'")).isOne();
+            assertThat(c.createStatement().executeUpdate(
+                    "UPDATE assessment SET answers = '[]' WHERE id = '" + theirs + "'")).isZero();
+            exec(c, "SELECT mint_trainer_notification('" + trainerPriya + "', 'metric', '" + meeraPrivate + "', NULL, NULL, 'from portal')");
+        }
+        assertThat(jdbc.queryForObject(
+                "SELECT tenant_id::text FROM trainer_notification WHERE text = 'from portal' AND trainer_id = :t::uuid",
+                Map.of("t", trainerPriya.toString()), String.class)).isEqualTo(tenantA.toString());
+    }
+
+    @Test
+    @DisplayName("V17 · a client writes its own log, feedback and milestone; never another's; staff read feedback and never write it")
+    void portalClientWrites() throws SQLException {
+        UUID workout = UUID.randomUUID();
+        try (Connection c = asAppRole()) {
+            set(c, "app.actor", "client");
+            set(c, "app.tenant_ids", TenantContext.array(List.of(tenantA, tenantB)));
+            set(c, "app.tenant_id", tenantB.toString());           // standing in the OTHER roster's workspace
+            set(c, "app.client_ids", "{" + meeraPrivate + "," + meeraGym + "}");
+            exec(c, """
+                    INSERT INTO workout_session (id, trainer_id, client_id, session_date, logged_by, tenant_id)
+                    VALUES ('%s', '%s', '%s', CURRENT_DATE, 'client', '%s')
+                    """.formatted(workout, trainerPriya, meeraPrivate, tenantA));
+            exec(c, """
+                    INSERT INTO workout_feedback (workout_session_id, client_id, effort, tenant_id)
+                    VALUES ('%s', '%s', 'hard', '%s')
+                    """.formatted(workout, meeraPrivate, tenantA));
+            exec(c, """
+                    INSERT INTO milestone (client_id, kind, label, value, tenant_id)
+                    VALUES ('%s', 'sessions', 'x', 999999, '%s')
+                    """.formatted(meeraPrivate, tenantA));
+            assertThatThrownBy(() -> exec(c, """
+                    INSERT INTO milestone (client_id, kind, label, value, tenant_id)
+                    VALUES ('%s', 'sessions', 'forged', 1, '%s')
+                    """.formatted(sanjay, tenantB))).isInstanceOf(SQLException.class);
+        }
+        // The explicit tenant held: the row is in Meera's private book, not the workspace the request stood in.
+        assertThat(jdbc.queryForObject("SELECT tenant_id::text FROM workout_session WHERE id = :id::uuid",
+                Map.of("id", workout.toString()), String.class)).isEqualTo(tenantA.toString());
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            assertThat(count(c, "SELECT count(*) FROM workout_feedback WHERE workout_session_id = '" + workout + "'")).isOne();
+            assertThat(c.createStatement().executeUpdate(
+                    "UPDATE workout_feedback SET effort = 'easy' WHERE workout_session_id = '" + workout + "'")).isZero();
+        }
+    }
+
+    @Test
+    @DisplayName("V16 · the portal's client lens: shared notes, its own pack, a SENT assessment's template, its own messages")
+    void portalClientLens() throws SQLException {
+        String tag = UUID.randomUUID().toString().substring(0, 8);
+        // Notes about Meera (private practice): one shared, one private; one about Sanjay, shared.
+        note(meeraPrivate, trainerPriya, "shared " + tag, true);
+        note(meeraPrivate, trainerPriya, "private " + tag, false);
+        note(sanjay, trainerArun, "sanjay " + tag, true);
+        // A pack Meera bought from, and one nobody sold her.
+        UUID bought = pack(trainerPriya, tenantA, "bought " + tag);
+        pack(trainerPriya, tenantA, "unsold " + tag);
+        jdbc.update("""
+                INSERT INTO package (trainer_id, client_id, pack_id, tenant_id, type, amount, status)
+                VALUES (:t::uuid, :c::uuid, :p::uuid, :tid::uuid, 'session_pack', 1000, 'active')
+                """, Map.of("t", trainerPriya.toString(), "c", meeraPrivate.toString(), "p", bought.toString(),
+                            "tid", tenantA.toString()));
+        // Two templates: one sent to her, one only BOOKED for her.
+        UUID sent = template(trainerPriya, tenantA, "sent " + tag);
+        UUID booked = template(trainerPriya, tenantA, "booked " + tag);
+        assessmentFor(meeraPrivate, trainerPriya, tenantA, sent, true);
+        assessmentFor(meeraPrivate, trainerPriya, tenantA, booked, false);
+        jdbc.update("""
+                INSERT INTO client_message (client_id, trainer_id, tenant_id, body)
+                VALUES (:c::uuid, :t::uuid, :tid::uuid, :b), (:s::uuid, :a::uuid, :tb::uuid, :b2)
+                """, Map.of("c", meeraPrivate.toString(), "t", trainerPriya.toString(), "tid", tenantA.toString(),
+                            "b", "for meera " + tag, "s", sanjay.toString(), "a", trainerArun.toString(),
+                            "tb", tenantB.toString(), "b2", "for sanjay " + tag));
+
+        try (Connection c = asAppRole()) {
+            set(c, "app.actor", "client");
+            set(c, "app.tenant_ids", TenantContext.array(List.of(tenantA, tenantB)));
+            set(c, "app.client_ids", "{" + meeraPrivate + "," + meeraGym + "}");
+            assertThat(strings(c, "SELECT body FROM client_note WHERE body LIKE '%" + tag + "'"))
+                    .containsExactly("shared " + tag);
+            assertThat(strings(c, "SELECT name FROM pack WHERE name LIKE '%" + tag + "'"))
+                    .containsExactly("bought " + tag);
+            assertThat(strings(c, "SELECT name FROM assessment_template WHERE name LIKE '%" + tag + "'"))
+                    .containsExactly("sent " + tag);
+            assertThat(strings(c, "SELECT body FROM client_message WHERE body LIKE '%" + tag + "'"))
+                    .containsExactly("for meera " + tag);
+            // Read, never write: a client cannot post a message to themselves.
+            assertThatThrownBy(() -> exec(c, """
+                    INSERT INTO client_message (client_id, trainer_id, tenant_id, body)
+                    VALUES ('%s', '%s', '%s', 'forged')
+                    """.formatted(meeraPrivate, trainerPriya, tenantA))).isInstanceOf(SQLException.class);
+        }
+    }
+
+    private void note(UUID clientId, UUID trainerId, String body, boolean shared) {
+        jdbc.update("""
+                INSERT INTO client_note (client_id, trainer_id, body, shared_with_client)
+                VALUES (:c::uuid, :t::uuid, :b, :s)
+                """, Map.of("c", clientId.toString(), "t", trainerId.toString(), "b", body, "s", shared));
+    }
+
+    private UUID pack(UUID trainerId, UUID tenantId, String name) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO pack (id, trainer_id, tenant_id, name, amount) VALUES (:id::uuid, :t::uuid, :tid::uuid, :n, 1000)
+                """, Map.of("id", id.toString(), "t", trainerId.toString(), "tid", tenantId.toString(), "n", name));
+        return id;
+    }
+
+    private UUID template(UUID trainerId, UUID tenantId, String name) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO assessment_template (id, trainer_id, tenant_id, name) VALUES (:id::uuid, :t::uuid, :tid::uuid, :n)
+                """, Map.of("id", id.toString(), "t", trainerId.toString(), "tid", tenantId.toString(), "n", name));
+        return id;
+    }
+
+    private void assessmentFor(UUID clientId, UUID trainerId, UUID tenantId, UUID templateId, boolean sent) {
+        jdbc.update("""
+                INSERT INTO assessment (client_id, trainer_id, tenant_id, template_id, name, due_at, sent_at)
+                VALUES (:c::uuid, :t::uuid, :tid::uuid, :tpl::uuid, 'x', now(), %s)
+                """.formatted(sent ? "now()" : "NULL"), Map.of("c", clientId.toString(), "t", trainerId.toString(),
+                "tid", tenantId.toString(), "tpl", templateId.toString()));
+    }
+
+    @Test
+    @DisplayName("V15 · the bell is read through the policy and written only through the mint function")
+    void bellIsMintOnly() throws SQLException {
+        UUID clientA = insertClient(tenantA, trainerPriya, "Bela", null);
+        jdbc.queryForObject("""
+                SELECT mint_trainer_notification(:t::uuid, 'metric', :c::uuid, NULL, NULL, '74 kg')::text
+                """, Map.of("t", trainerPriya.toString(), "c", clientA.toString()), String.class);
+
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            assertThat(count(c, "SELECT count(*) FROM trainer_notification WHERE text = '74 kg'")).isOne();
+            assertThatThrownBy(() -> exec(c, """
+                    INSERT INTO trainer_notification (trainer_id, kind, tenant_id)
+                    VALUES ('%s', 'metric', '%s')
+                    """.formatted(trainerPriya, tenantA))).isInstanceOf(SQLException.class);
+        }
+        try (Connection c = asAppRole()) {
+            staff(c, tenantB, List.of(tenantB), trainerArun);
+            assertThat(count(c, "SELECT count(*) FROM trainer_notification WHERE text = '74 kg'")).isZero();
+        }
+    }
+
+    @Test
+    @DisplayName("V14 · an assessment template and a sent assessment are their workspace's")
+    void assessmentIsTierOne() throws SQLException {
+        UUID clientA = insertClient(tenantA, trainerPriya, "Asha", null);
+        UUID tpl = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO assessment_template (id, trainer_id, tenant_id, name)
+                VALUES (:id::uuid, :t::uuid, :tid::uuid, 'Priya monthly')
+                """, Map.of("id", tpl.toString(), "t", trainerPriya.toString(), "tid", tenantA.toString()));
+        jdbc.update("""
+                INSERT INTO assessment (client_id, trainer_id, tenant_id, template_id, name, due_at)
+                VALUES (:c::uuid, :t::uuid, :tid::uuid, :tpl::uuid, 'Priya monthly', now())
+                """, Map.of("c", clientA.toString(), "t", trainerPriya.toString(), "tid", tenantA.toString(),
+                            "tpl", tpl.toString()));
+
+        try (Connection c = asAppRole()) {
+            staff(c, tenantB, List.of(tenantB), trainerArun);
+            assertThat(count(c, "SELECT count(*) FROM assessment_template WHERE name = 'Priya monthly'")).isZero();
+            assertThat(count(c, "SELECT count(*) FROM assessment WHERE name = 'Priya monthly'")).isZero();
+        }
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            assertThat(count(c, "SELECT count(*) FROM assessment WHERE name = 'Priya monthly'")).isOne();
+        }
+    }
+
+    @Test
+    @DisplayName("V13 · a saved workout is its workspace's: invisible from another, and cannot be written into one")
+    void workoutTemplateIsTierOne() throws SQLException {
+        jdbc.update("""
+                INSERT INTO workout_template (trainer_id, tenant_id, name)
+                VALUES (:t::uuid, :tid::uuid, 'Priya upper A')
+                """, Map.of("t", trainerPriya.toString(), "tid", tenantA.toString()));
+
+        try (Connection c = asAppRole()) {
+            staff(c, tenantB, List.of(tenantB), trainerArun);
+            assertThat(count(c, "SELECT count(*) FROM workout_template WHERE name = 'Priya upper A'")).isZero();
+            assertThatThrownBy(() -> exec(c, """
+                    INSERT INTO workout_template (trainer_id, tenant_id, name)
+                    VALUES ('%s', '%s', 'Planted')
+                    """.formatted(trainerArun, tenantA))).isInstanceOf(SQLException.class);
+        }
+    }
+
+    @Test
+    @DisplayName("V11 · certified programs are readable from any workspace and writable from none")
+    void certifiedIsReadOnlyCatalogue() throws SQLException {
+        try (Connection c = asAppRole()) {
+            staff(c, tenantB, List.of(tenantB), trainerArun);
+            assertThat(count(c, "SELECT count(*) FROM certified_template")).isGreaterThanOrEqualTo(2);
+            // No UPDATE policy: the row is invisible to the UPDATE, so nothing changes.
+            assertThat(c.createStatement().executeUpdate(
+                    "UPDATE certified_template SET used_count = 999")).isZero();
+            assertThatThrownBy(() -> exec(c, """
+                    INSERT INTO certified_template (name, summary, level, equipment)
+                    VALUES ('Injected', 'x', 'beginner', 'full-gym')
+                    """)).isInstanceOf(SQLException.class);
+        }
+    }
+
+    @Test
     @DisplayName("the shared catalogue is readable everywhere, a custom exercise is not")
     void catalogueIsSharedAndCustomIsNot() throws SQLException {
         jdbc.update("INSERT INTO exercise (name, is_custom) VALUES ('Barbell Squat " + tenantA + "', false)",
@@ -289,7 +559,173 @@ class TenantIsolationTest {
         assertThat(members).isEqualTo(1);
     }
 
+    /* ------------------------------------------------ V21 · the schema review */
+
+    @Test
+    @DisplayName("V21 · no request writes the global library; only the system actor seeds it")
+    void globalLibraryIsSeededNotWritten() throws SQLException {
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            inRolledBackTransaction(c, () -> {
+                // The hole V21 closed: a NULL tenant used to satisfy the write check.
+                assertThatThrownBy(() -> exec(c,
+                        "INSERT INTO exercise (name, is_custom) VALUES ('Injected global', false)"))
+                        .hasMessageContaining("row-level security");
+            });
+            inRolledBackTransaction(c, () -> {
+                assertThat(update(c, "UPDATE exercise SET name = name WHERE NOT is_custom")).isZero();
+                // Their own custom movement is still theirs to write.
+                exec(c, "INSERT INTO exercise (name, is_custom, trainer_id) VALUES ('Priya V21', true, '"
+                        + trainerPriya + "'::uuid)");
+            });
+        }
+        try (Connection c = asAppRole()) {
+            set(c, "app.actor", "client");
+            set(c, "app.client_ids", "{" + meeraPrivate + "}");
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> exec(c,
+                    "INSERT INTO exercise (name, is_custom) VALUES ('Client global', false)"))
+                    .hasMessageContaining("row-level security"));
+        }
+        try (Connection c = asAppRole()) {
+            // What ExerciseSeeder declares at boot, and nothing else can.
+            set(c, "app.actor", "system");
+            inRolledBackTransaction(c, () -> exec(c,
+                    "INSERT INTO exercise (name, is_custom) VALUES ('Seeded V21', false)"));
+        }
+    }
+
+    @Test
+    @DisplayName("V21 · the request role cannot hard-delete, nor rewrite an append-only log")
+    void noHardDeleteAndLogsAreAppendOnly() throws SQLException {
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> exec(c, "DELETE FROM payment"))
+                    .hasMessageContaining("permission denied"));
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> exec(c,
+                    "UPDATE package_adjustment SET reason = 'rewritten'"))
+                    .hasMessageContaining("permission denied"));
+        }
+    }
+
+    @Test
+    @DisplayName("V21 · only its owner renames a workspace, and no request mints an owner")
+    void workspaceRootIsOwnerOnly() throws SQLException {
+        String priyaUser = jdbc.queryForObject(
+                "SELECT id::text FROM app_user WHERE phone = :p", Map.of("p", phoneOf(trainerPriya)), String.class);
+        try (Connection c = asAppRole()) {
+            // Priya coaches at Iron House; Arun owns it.
+            staff(c, tenantB, List.of(tenantB), trainerPriya);
+            inRolledBackTransaction(c, () -> {
+                assertThat(update(c, "UPDATE tenant SET name = 'Renamed' WHERE id = '" + tenantB + "'")).isZero();
+                assertThatThrownBy(() -> exec(c, "INSERT INTO tenant_member (tenant_id, app_user_id, role) VALUES ('"
+                        + tenantB + "'::uuid, '" + priyaUser + "'::uuid, 'owner')"))
+                        .hasMessageContaining("row-level security");
+            });
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> exec(c,
+                    "UPDATE tenant_member SET role = 'owner' WHERE tenant_id = '" + tenantB
+                            + "' AND app_user_id = '" + priyaUser + "'"))
+                    .hasMessageContaining("may not make a workspace member an owner"));
+        }
+        try (Connection c = asAppRole()) {
+            staff(c, tenantB, List.of(tenantB), trainerArun);
+            inRolledBackTransaction(c, () ->
+                    assertThat(update(c, "UPDATE tenant SET name = 'Iron House Gym' WHERE id = '" + tenantB + "'")).isOne());
+        }
+    }
+
+    @Test
+    @DisplayName("V21 · the portal's number move refuses a request that has not proved the old number")
+    void phoneMoveNeedsTheCallersOwnNumber() throws SQLException {
+        String meera = jdbc.queryForObject("SELECT phone FROM client WHERE id = :id::uuid",
+                Map.of("id", meeraPrivate.toString()), String.class);
+        try (Connection c = asAppRole()) {
+            // No context at all: V20 read this as "no phone, so no check".
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> exec(c,
+                    "SELECT portal_change_client_phone('" + meera + "', '9999900001')"))
+                    .hasMessageContaining("own number"));
+        }
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> exec(c,
+                    "SELECT portal_change_client_phone('" + meera + "', '9999900001')"))
+                    .hasMessageContaining("own number"));
+        }
+    }
+
+    @Test
+    @DisplayName("V21 · a notification cannot be minted into a bell with no claim on the client")
+    void bellNeedsAClaimOnTheClient() throws SQLException {
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            inRolledBackTransaction(c, () -> {
+                assertThat(strings(c, "SELECT mint_trainer_notification('" + trainerArun
+                        + "'::uuid, 'metric', '" + meeraPrivate + "'::uuid, NULL, NULL, 'not yours')"))
+                        .containsExactly((String) null);
+                assertThat(strings(c, "SELECT mint_trainer_notification('" + trainerPriya
+                        + "'::uuid, 'metric', '" + meeraPrivate + "'::uuid, NULL, NULL, 'yours')"))
+                        .doesNotContainNull();
+            });
+        }
+    }
+
+    @Test
+    @DisplayName("V21 · a child row cannot sit in a different workspace from its parent")
+    void childFollowsParentWorkspace() {
+        // Written as the owner, which bypasses every policy — so this is the
+        // foreign key alone doing the refusing.
+        assertThatThrownBy(() -> payment(tenantB, meeraPrivate, trainerPriya, 100))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("payment_client_same_tenant");
+    }
+
+    @Test
+    @DisplayName("V21 · every trainer starts a trial, and no request can create or remove one")
+    void everyTrainerHasATrialClock() throws SQLException {
+        var row = jdbc.queryForMap("""
+                SELECT state, plan, trial_ends_at - trial_started_at AS len
+                FROM subscription WHERE trainer_id = :t::uuid
+                """, Map.of("t", trainerPriya.toString()));
+        assertThat(row.get("state")).isEqualTo("trialing");
+        assertThat(row.get("plan")).isEqualTo("pro");
+        assertThat(row.get("len").toString()).contains("30 days");
+
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            assertThat(count(c, "SELECT count(*) FROM subscription WHERE trainer_id = '" + trainerPriya + "'")).isOne();
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> exec(c,
+                    "DELETE FROM subscription WHERE trainer_id = '" + trainerPriya + "'"))
+                    .hasMessageContaining("permission denied"));
+        }
+    }
+
     /* ----------------------------------------------------------- machinery */
+
+    @FunctionalInterface
+    private interface SqlBlock { void run() throws Exception; }
+
+    /**
+     * Runs a block and rolls it back, so a V21 probe that succeeds leaves no row
+     * behind in the shared development database. The session settings are
+     * written BEFORE this opens — set_config inside a rolled-back transaction
+     * is rolled back with it.
+     */
+    private static void inRolledBackTransaction(Connection c, SqlBlock block) throws SQLException {
+        c.setAutoCommit(false);
+        try {
+            block.run();
+        } catch (SQLException | RuntimeException | Error e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            c.rollback();
+            c.setAutoCommit(true);
+        }
+    }
+
+    private static int update(Connection c, String sql) throws SQLException {
+        try (Statement st = c.createStatement()) { return st.executeUpdate(sql); }
+    }
 
     /**
      * A connection as the role the policies apply to. Not the pooled one — that

@@ -18,6 +18,9 @@ import java.util.ArrayList;
 public class ExerciseService {
 
     private final NamedParameterJdbcTemplate jdbc;
+    /** Static, not injected — see WorkingHoursService on why a mapper bean is not assumed. */
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+            new com.fasterxml.jackson.databind.ObjectMapper();
 
     // ── DTOs ──────────────────────────────────────────────────────────────────
 
@@ -54,10 +57,33 @@ public class ExerciseService {
              *
              * APPENDED LAST — the additive-only contract, not tidiness.
              */
-            String logType
+            String logType,
+            /*
+             * ── APPENDED BY V9 ───────────────────────────────────────────────
+             * 'published' | 'draft'. Drafts exist only on custom rows.
+             */
+            String status,
+            /** Muscles worked besides {@code target}. Never null — [] until authored. */
+            List<String> secondaryTargets,
+            /**
+             * Short coaching cues. Never null — [] until authored, and
+             * deliberately unseeded: see V9 on why a generated cue must not be
+             * served as a real one.
+             */
+            List<String> formCues
     ) {}
 
     public record SearchResult(List<ExerciseResponse> exercises, int total) {}
+
+    /** One card on the library's *By categories* view. */
+    public record Category(String muscleGroup, int count) {}
+
+    /**
+     * The *By categories* view — V9. {@code total} is every non-draft row the
+     * caller can see; {@code uncategorised} is the part of it with no muscle
+     * group, which gets no card of its own.
+     */
+    public record CategoriesResponse(List<Category> categories, int total, int uncategorised) {}
 
     /**
      * The filter vocabularies, read off the library rather than hard-coded.
@@ -93,7 +119,16 @@ public class ExerciseService {
              * REST could only ever be a weight exercise, so the web had no way to
              * add a chin-up — which the phone has been able to do since V12.
              */
-            String logType
+            String logType,
+            /* ---- V9 ---- */
+            /** The primary muscle. Optional; the library's filter reads it. */
+            String target,
+            /**
+             * Only the literal 'draft' makes a draft; anything else — null, a
+             * typo — is published, because a movement silently filed as a draft
+             * is one that vanishes from the library its author is looking at.
+             */
+            String status
     ) {}
 
     // ── Search ────────────────────────────────────────────────────────────────
@@ -110,8 +145,9 @@ public class ExerciseService {
      */
     private static final int MAX_IDS = 600;
 
-    public SearchResult search(UUID trainerId, String ids, String q, String muscleGroup, String bodyPart,
-                               String target, String equipment, String level, int page, int size) {
+    public SearchResult search(UUID trainerId, String ids, String q, String source, String muscleGroup,
+                               String bodyPart, String target, String equipment, String level,
+                               int page, int size) {
         size = Math.min(size, 100);
 
         var params = new HashMap<String, Object>();
@@ -156,9 +192,22 @@ public class ExerciseService {
             conditions.add("id IN (:ids)");
         }
 
+        /*
+         * ?source= — V9. Not applied to an `ids` read: a caller that named its
+         * rows is resolving names for a log or a plan, and a draft that is
+         * already in one must still come back with its name.
+         */
+        if (!byIds) conditions.add(sourcePredicate(source));
+
+        /*
+         * `q` matches the four columns a trainer actually searches by — "quads"
+         * and "hinge" find movements whose names say neither. Not `description`:
+         * prose matches everything and ranks nothing.
+         */
         if (q != null && !q.isBlank()) {
             params.put("q", q.strip());
-            conditions.add("name ILIKE '%' || :q || '%'");
+            conditions.add("(name ILIKE '%' || :q || '%' OR target ILIKE '%' || :q || '%'"
+                    + " OR movement_pattern ILIKE '%' || :q || '%' OR body_part ILIKE '%' || :q || '%')");
         }
         if (muscleGroup != null && !muscleGroup.isBlank()) {
             params.put("muscleGroup", muscleGroup);
@@ -203,10 +252,100 @@ public class ExerciseService {
         return new SearchResult(exercises, total == null ? 0 : total);
     }
 
+    /**
+     * The library a trainer is browsing, by where a row came from.
+     *
+     * <ul>
+     *   <li>{@code incline} — the catalogue ({@code is_custom = false});</li>
+     *   <li>{@code mine} — their own finished movements;</li>
+     *   <li>{@code draft} — their own unfinished ones (drafts exist only on
+     *       custom rows, so this cannot surface anybody else's);</li>
+     *   <li>anything else, including absent — everything but drafts. An unknown
+     *       value falls through to the default rather than answering an empty
+     *       library, which would read as "you have no exercises".</li>
+     * </ul>
+     * Always inside the caller-visibility predicate above, so {@code mine} and
+     * {@code draft} can never reach another trainer's rows.
+     */
+    private static String sourcePredicate(String source) {
+        String s = source == null ? "" : source.strip().toLowerCase();
+        return switch (s) {
+            case "incline" -> "is_custom = false AND status <> 'draft'";
+            case "mine"    -> "is_custom = true AND status <> 'draft'";
+            case "draft"   -> "is_custom = true AND status = 'draft'";
+            default        -> "status <> 'draft'";
+        };
+    }
+
     /** The one row of columns every read of this table selects. */
     private static final String EXERCISE_COLUMNS =
             "id::text, name, muscle_group, body_part, target, equipment, movement_pattern, " +
-            "description, image_url, video_url, level, is_custom, created_at, log_type";
+            "description, image_url, video_url, level, is_custom, created_at, log_type, " +
+            "status, secondary_targets::text, form_cues::text";
+
+    // ── One exercise ──────────────────────────────────────────────────────────
+
+    /**
+     * One row, whole — V9, for the exercise info panel. Visible means what the
+     * list means (the catalogue, or the caller's own custom rows, drafts
+     * included); anything else is a 404, not a 403, so the route cannot confirm
+     * that somebody else's private movement exists.
+     */
+    public ExerciseResponse get(UUID trainerId, UUID id) {
+        var rows = jdbc.queryForList(
+                "SELECT " + EXERCISE_COLUMNS + " FROM exercise" +
+                " WHERE id = :id::uuid AND deleted_at IS NULL" +
+                " AND (is_custom = false OR trainer_id = :tid::uuid)",
+                Map.of("id", id.toString(), "tid", trainerId.toString()));
+        if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Exercise not found");
+        return toResponse(rows.get(0));
+    }
+
+    // ── Categories ────────────────────────────────────────────────────────────
+
+    /**
+     * The *By categories* view — V9.
+     *
+     * <p>Counts the CALLER's library: the catalogue plus their own custom rows,
+     * drafts excluded, which is exactly what the default list read shows — so a
+     * card saying 34 opens a list of 34.
+     *
+     * <p>Ordered by the catalogue's muscle-group list ({@code /v1/exercises/meta}'s
+     * order), <b>never by count</b>: a grid that reshuffles every time a trainer
+     * adds a movement is one nobody can find their way around by position. A
+     * group only a custom row uses comes after the catalogue's, alphabetically.
+     * Empty groups get no card, and rows with no group are counted in
+     * {@code uncategorised} rather than drawn as a card called "null".
+     */
+    public CategoriesResponse categories(UUID trainerId) {
+        var rows = jdbc.queryForList("""
+                SELECT muscle_group, count(*) AS n,
+                       bool_or(NOT is_custom) AS in_catalogue
+                FROM exercise
+                WHERE deleted_at IS NULL AND status <> 'draft'
+                  AND (is_custom = false OR trainer_id = :tid::uuid)
+                GROUP BY muscle_group
+                """, Map.of("tid", trainerId.toString()));
+
+        var catalogueOrder = meta().muscleGroups();
+        int total = 0;
+        int uncategorised = 0;
+        var cards = new ArrayList<Category>();
+        for (var r : rows) {
+            int n = ((Number) r.get("n")).intValue();
+            total += n;
+            String group = str(r.get("muscle_group"));
+            if (group == null || group.isBlank()) uncategorised += n;
+            else if (n > 0) cards.add(new Category(group, n));
+        }
+        cards.sort(Comparator
+                .comparingInt((Category c) -> {
+                    int i = catalogueOrder.indexOf(c.muscleGroup());
+                    return i < 0 ? Integer.MAX_VALUE : i;
+                })
+                .thenComparing(Category::muscleGroup, String.CASE_INSENSITIVE_ORDER));
+        return new CategoriesResponse(cards, total, uncategorised);
+    }
 
     private ExerciseResponse toResponse(Map<String, Object> r) {
         return new ExerciseResponse(
@@ -223,7 +362,28 @@ public class ExerciseService {
                 str(r.get("level")),
                 Boolean.TRUE.equals(r.get("is_custom")),
                 toEpochMilli(r.get("created_at")),
-                str(r.get("log_type")));
+                str(r.get("log_type")),
+                r.get("status") == null ? "published" : str(r.get("status")),
+                stringList(r.get("secondary_targets")),
+                stringList(r.get("form_cues")));
+    }
+
+    /**
+     * A JSONB list of strings, or [] — never null, because the web types both
+     * lists as present arrays. A value that is not a list of strings (a
+     * hand-edited row) also reads as [] rather than failing the whole page.
+     */
+    private List<String> stringList(Object raw) {
+        if (raw == null) return List.of();
+        try {
+            var parsed = JSON.readValue(raw.toString(), Object.class);
+            if (!(parsed instanceof List<?> list)) return List.of();
+            var out = new ArrayList<String>();
+            for (Object o : list) if (o instanceof String s && !s.isBlank()) out.add(s);
+            return out;
+        } catch (Exception e) {
+            return List.of();
+        }
     }
 
     /**
@@ -305,23 +465,31 @@ public class ExerciseService {
         params.put("imageUrl",        req.imageUrl());
         params.put("videoUrl",        req.videoUrl());
         params.put("logType",         logType(req.logType()));
+        params.put("target",          target(req.target()));
+        params.put("status",          "draft".equals(req.status()) ? "draft" : "published");
         params.put("now",             Timestamp.from(now));
 
         jdbc.update("""
                 INSERT INTO exercise (id, name, muscle_group, equipment, movement_pattern,
-                    description, image_url, video_url, log_type, is_custom, trainer_id, created_at, updated_at)
+                    description, image_url, video_url, log_type, target, status,
+                    is_custom, trainer_id, created_at, updated_at)
                 VALUES (:id::uuid, :name, :muscleGroup, :equipment, :movementPattern,
-                    :description, :imageUrl, :videoUrl, :logType, true, :tid::uuid, :now, :now)
+                    :description, :imageUrl, :videoUrl, :logType, :target, :status,
+                    true, :tid::uuid, :now, :now)
                 """, params);
 
-        // bodyPart and target stay null: they are the seeded library's taxonomy, and
-        // asking a trainer inventing "Ananya's shoulder rehab" to place it in a
-        // ten-way body-part split is a form to fill in for the library's benefit,
-        // not theirs. The app groups custom exercises under "Yours" regardless.
+        // bodyPart stays null: it is the seeded library's ten-way taxonomy, and
+        // asking a trainer inventing "Ananya's shoulder rehab" to place it there
+        // is a form to fill in for the library's benefit, not theirs. `target` is
+        // different since V9 — the redesigned form asks for it as the primary
+        // muscle, and it is what the library's filter reads. A custom movement
+        // gets no generated cues or secondary targets: [] until somebody writes
+        // them.
         return new ExerciseResponse(
-                id.toString(), req.name(), req.muscleGroup(), null, null, req.equipment(),
+                id.toString(), req.name(), req.muscleGroup(), null, target(req.target()), req.equipment(),
                 req.movementPattern(), req.description(), req.imageUrl(), req.videoUrl(),
-                null, true, now.toEpochMilli(), logType(req.logType())
+                null, true, now.toEpochMilli(), logType(req.logType()),
+                (String) params.get("status"), List.of(), List.of()
         );
     }
 
@@ -336,6 +504,13 @@ public class ExerciseService {
         if (raw == null) return "weight_reps";
         String value = raw.trim().toLowerCase();
         return value.equals("reps") ? "reps" : "weight_reps";
+    }
+
+    /** Trimmed, blank as null, cut at the column's 50 like the other short fields. */
+    private static String target(String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        String value = raw.strip();
+        return value.length() > 50 ? value.substring(0, 50) : value;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

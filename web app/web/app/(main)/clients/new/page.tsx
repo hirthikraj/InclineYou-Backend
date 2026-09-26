@@ -2,7 +2,7 @@ import { NewClient } from '@/components/clients/NewClient';
 import { Unavailable } from '@/components/today/Unavailable';
 import { requireNewClient } from '@/lib/clients/new-guard';
 
-export const metadata = { title: 'Add a client · X REP' };
+export const metadata = { title: 'Add a client · InclineYou' };
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {

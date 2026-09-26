@@ -8,6 +8,9 @@ import { startLog } from '@/lib/log/actions';
 import { isoDay, stampDate } from '@/lib/log/log';
 import { TopBar } from '@/components/shell/TopBar';
 import { Play } from '@/components/shell/Icons';
+import { Button } from '@/web-components/ui/Button';
+import { PageHeader } from '@/web-components/ui/PageHeader';
+import { Why } from '@/web-components/ui/Why';
 
 /**
  * A BOOKING WITH NO LOG BEHIND IT, WHICH IS NOT AN ERROR.
@@ -16,7 +19,7 @@ import { Play } from '@/components/shell/Icons';
  * 404 here would be the ordinary case rendered as a bug. `/sessions/:id/log` is
  * a place; arriving before the log exists just means the place is empty.
  *
- * **Starting one does not move her pack.** `POST /v1/workouts` and never
+ * **Starting one does not move the pack.** `POST /v1/workouts` and never
  * `POST /v1/sessions/{id}/done` — the second creates the same log AND
  * decrements the pack, and §09's rule is that a pack moves on *done* or
  * *no-show*, never on *booked*. The tap that moves it is on the finish screen,
@@ -63,26 +66,27 @@ export function StartLog({
 
   return (
     <>
-      <TopBar crumb="Sessions" onSearch={() => {}} />
+      <TopBar
+        crumb="Sessions"
+        /* Six screens in this flow pass the crumb *Sessions* — it names the
+           flow, and it is the wrong thing for a 390px header to say when the
+           one fact the trainer needs at the top is whose session this is.
+           `screenTitle` would derive *Sessions* from it, so the title is
+           stated. The `<h1>` under it keeps the plan head the bar has no room
+           for, which is why these screens are not `.ph--named`. */
+        title={clientName}
+      />
       <main className="main" id="main-content">
-        <div className="ph">
-          <div className="ph__row">
-            <div>
-              <nav className="crumbs" aria-label="Breadcrumb">
-                <Link href="/sessions">Sessions</Link>
-                <i aria-hidden="true">/</i>
-                <b>{clientName}</b>
-              </nav>
-              <h1 className="ph__t">
-                {clientName}
-                {session.dayLabel ? <> &middot; {session.dayLabel}</> : null}
-              </h1>
-              <p className="ph__sub">
-                {stampDate(isoDay(session.scheduledAt))} {time} &middot; booked, not started
-              </p>
-            </div>
-          </div>
-        </div>
+        <PageHeader
+          title={<>{clientName}
+            {session.dayLabel ? <> &middot; {session.dayLabel}</> : null}</>}
+          sub={<>{stampDate(isoDay(session.scheduledAt))} {time} &middot; booked, not started</>}
+          crumbs={<nav className="crumbs" aria-label="Breadcrumb">
+              <Link href="/programs/workouts">Workouts</Link>
+              <i aria-hidden="true">/</i>
+              <b>{clientName}</b>
+            </nav>}
+        />
 
         <div className="body">
           <div className="wk2 wk2--pick" style={{ maxWidth: 1040 }}>
@@ -92,18 +96,20 @@ export function StartLog({
                 <p className="empty__b" style={{ maxWidth: '48ch' }}>
                   The booking is there and the log is not, which is where every session sits until
                   somebody starts it. Starting one seeds the grid from{' '}
-                  {programId ? 'her program' : 'nothing — she has no live plan'}, and writes a set
-                  the moment you tick one.
+                  {programId
+                    ? `${clientName.split(' ')[0]}’s program`
+                    : `nothing — ${clientName.split(' ')[0]} has no live plan`}
+                  , and writes a set the moment you tick one.
                 </p>
               </div>
 
               <div className="row" style={{ gap: 9, flexWrap: 'wrap' }}>
-                <button className="btn btn--primary btn--lg" type="button" disabled={busy} onClick={begin}>
+                <Button variant="primary" size="lg" disabled={busy} onClick={begin}>
                   <Play size={16} /> {busy ? 'Starting…' : 'Start the log'}
-                </button>
-                <Link className="btn btn--secondary btn--lg" href={`/sessions/${session.id}`}>
+                </Button>
+                <Button href={`/sessions/${session.id}`} variant="secondary" size="lg">
                   The booking
-                </Link>
+                </Button>
               </div>
 
               {message ? (
@@ -111,14 +117,13 @@ export function StartLog({
               ) : null}
             </div>
 
-            <div className="why">
-              <p className="why__k">Starting a log does not move her pack</p>
+            <Why heading="Starting a log does not move the pack">
               <p>
                 A pack moves on <i>done</i> or <i>no-show</i>, never on <i>booked</i> — and the tap
                 that moves it is on the finish screen, after the sets are in. This creates the log
                 and nothing else.
               </p>
-            </div>
+            </Why>
           </div>
         </div>
       </main>

@@ -4,7 +4,7 @@ import { countClients } from '@/lib/account/clients';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: 'Account · X REP' };
+export const metadata = { title: 'Account · InclineYou' };
 
 /**
  * ACCOUNT — Settings' first tab, and its root.

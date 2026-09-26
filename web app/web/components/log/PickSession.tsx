@@ -7,6 +7,10 @@ import { useRouter } from 'next/navigation';
 import { startLog } from '@/lib/log/actions';
 import { isoDay, type PickRow, type PickView } from '@/lib/log/log';
 import { TopBar } from '@/components/shell/TopBar';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
+import { PageHeader } from '@/web-components/ui/PageHeader';
+import { Why } from '@/web-components/ui/Why';
 
 /**
  * FRAME 5a — WHO IS THIS FOR?
@@ -21,7 +25,7 @@ import { TopBar } from '@/components/shell/TopBar';
  * routine. **ABC Trainerize is the only one of them that lets a trainer log on
  * the web at all, and it requires the session to be on the client's calendar
  * first.** In a gym where the trainer is on the floor, a client turning up on a
- * day she does not normally train is a Tuesday — and logging is allowed to
+ * day they do not normally train is a Tuesday — and logging is allowed to
  * happen before programming exists. Before booking, too.
  *
  * ── AND WHY *STILL OPEN* IS FIRST ───────────────────────────────────────────
@@ -90,16 +94,16 @@ export function PickSession({ data }: { data: PickView }) {
                 <span className="lrow__s">{row.meta}</span>
               </span>
               {kind === 'open' ? (
-                <Link className="btn btn--secondary btn--sm" href={row.href}>{row.verb}</Link>
+                <Button href={row.href} variant="secondary" size="sm">{row.verb}</Button>
               ) : (
-                <button
-                  className="btn btn--secondary btn--sm"
-                  type="button"
+                <Button
+                  variant="secondary"
+                  size="sm"
                   disabled={busy !== null}
                   onClick={() => start(row)}
                 >
                   {busy === row.clientId ? 'Starting…' : row.verb}
-                </button>
+                </Button>
               )}
             </div>
           ))}
@@ -111,21 +115,19 @@ export function PickSession({ data }: { data: PickView }) {
 
   return (
     <>
-      <TopBar crumb="Sessions" onSearch={() => {}} />
+      {/* No client chosen yet — this screen is where one is. The heading is the
+          screen, so the bar says it and the `<h1>` stands down. */}
+      <TopBar crumb="Sessions" title="Who is this for?" />
       <main className="main" id="main-content">
-        <div className="ph">
-          <div className="ph__row">
-            <div>
-              <nav className="crumbs" aria-label="Breadcrumb">
-                <Link href="/sessions">Sessions</Link>
-                <i aria-hidden="true">/</i>
-                <b>New log</b>
-              </nav>
-              <h1 className="ph__t">Who is this for?</h1>
-              <p className="ph__sub">One question, and it decides everything else</p>
-            </div>
-          </div>
-        </div>
+        <PageHeader
+          title="Who is this for?"
+          sub="One question, and it decides everything else"
+          crumbs={<nav className="crumbs" aria-label="Breadcrumb">
+              <Link href="/programs/workouts">Workouts</Link>
+              <i aria-hidden="true">/</i>
+              <b>New log</b>
+            </nav>}
+        />
 
         <div className="body">
           <div className="wk2 wk2--pick" style={{ maxWidth: 1060 }}>
@@ -159,34 +161,31 @@ export function PickSession({ data }: { data: PickView }) {
             </div>
 
             <div>
-              <div className="why">
-                <p className="why__k">The third group is the finding</p>
+              <Why heading="The third group is the finding">
                 <p>
                   Every logger in the teardown assumes a workout belongs to a booking or a saved
                   routine. <b>ABC Trainerize is the only one that lets a trainer log on the web at
                   all, and it requires the session to be on the client&rsquo;s calendar first.</b>{' '}
-                  In a gym where the trainer is on the floor, a client turning up on a day she does
+                  In a gym where the trainer is on the floor, a client turning up on a day they do
                   not normally train is a Tuesday — and logging is allowed to happen before
                   programming exists. Before booking, too.
                 </p>
-              </div>
+              </Why>
 
-              <div className="card" style={{ marginTop: 12 }}>
-                <div className="card__hd">
-                  <h2 className="card__t">Why <i>Still open</i> is first</h2>
-                </div>
-                <div className="card__b">
-                  <p className="small">
-                    A trainer who logs four clients a morning has logs on the go, and coming back to
-                    one is the commonest reason to press this at all. Nothing is started from that
-                    group — it goes straight back in, at the set it was left on.
-                  </p>
-                  <p className="small" style={{ marginTop: 9 }}>
-                    Two logs open at once is a supported state, not a warning. One phone, one desk,
-                    four clients between six and nine.
-                  </p>
-                </div>
-              </div>
+              <Card
+                title={<>Why <i>Still open</i> is first</>}
+                style={{ marginTop: 12 }}
+              >
+                <p className="small">
+                  A trainer who logs four clients a morning has logs on the go, and coming back to
+                  one is the commonest reason to press this at all. Nothing is started from that
+                  group — it goes straight back in, at the set it was left on.
+                </p>
+                <p className="small" style={{ marginTop: 9 }}>
+                  Two logs open at once is a supported state, not a warning. One phone, one desk,
+                  four clients between six and nine.
+                </p>
+              </Card>
 
               <p className="small" style={{ marginTop: 12 }}>
                 Starting a log does not touch anybody&rsquo;s pack.{' '}

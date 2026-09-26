@@ -1,5 +1,5 @@
 import {
-  DAY_MS, formatMinute, isoWeekday, minuteOfDay, startOfDay,
+  DAY_MS, formatHourMark, formatMinuteRange, isoWeekday, minuteOfDay, startOfDay,
 } from '@/lib/today/time';
 import {
   findGaps, mergeWindows, type Gap, type WorkWindow,
@@ -628,15 +628,20 @@ export function buildGrid(input: GridInput): ScheduleGrid {
 export function ticksFor(seg: Segment): { minute: number; label: string; last: boolean }[] {
   const out: { minute: number; label: string; last: boolean }[] = [];
   for (let m = seg.from - (seg.from % 60) + 60; m <= seg.to; m += 60) {
-    out.push({ minute: m, label: formatMinute(m), last: m === seg.to });
+    /* The axis form - `6 AM`, not `6:00 AM`. This is a vertical ruling of
+       hour marks in a 58px gutter where `:00` is the same on every row; the
+       hour is the only part that varies and so the only part drawn. The
+       meridiem stays on all of them, because a gutter that says `PM` once at
+       noon makes every label below it depend on having seen that one. */
+    out.push({ minute: m, label: formatHourMark(m), last: m === seg.to });
   }
   return out;
 }
 
-/** `06:00–10:00 · 16:30–20:30`, or the honest absence of an answer. */
+/** `6:00 - 10:00 AM · 4:30 - 8:30 PM`, or the honest absence of an answer. */
 export function windowsSentence(windows: { startMinute: number; endMinute: number }[]): string {
   if (!windows.length) return 'No working hours set';
-  return windows.map((w) => `${formatMinute(w.startMinute)}–${formatMinute(w.endMinute)}`).join(' · ');
+  return windows.map((w) => formatMinuteRange(w.startMinute, w.endMinute)).join(' · ');
 }
 
 /** How many hours a run of minutes is, in the words a band row uses. */

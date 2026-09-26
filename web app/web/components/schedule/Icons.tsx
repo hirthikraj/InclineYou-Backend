@@ -65,3 +65,34 @@ export const WarnTriangle = ({ size }: IconProps) => (
 export const Cross = ({ size }: IconProps) => (
   <Glyph size={size} d="M6 6l12 12M18 6L6 18" />
 );
+
+/**
+ * The two arrangements of the week, for the toolbar's toggle below 1120px where
+ * their labels no longer fit beside four other groups.
+ *
+ * NOT from the design set — it has no such control — so they are drawn to the
+ * shell's own 24-box and 1.6 stroke, the terms `Wallet` was added on. Each one
+ * is a picture of the thing it switches to rather than a metaphor for it:
+ * `HoursView` is a day column with two blocks at different heights on it, which
+ * is what `.cw` draws; `ClientsView` is rows with marks in different columns,
+ * which is what `.cwk` draws. A trainer who has seen either screen once can
+ * read them, and one who has not is at a width where the label is one step away.
+ */
+export const HoursView = ({ size }: IconProps) => (
+  <Glyph size={size}>
+    <path d="M3.5 4.5h17v15h-17z" />
+    <path d="M9 4.5v15M15 4.5v15" />
+    <rect x="4.8" y="7" width="2.9" height="5" rx=".8" fill="currentColor" stroke="none" />
+    <rect x="16.3" y="12" width="2.9" height="4" rx=".8" fill="currentColor" stroke="none" />
+  </Glyph>
+);
+
+export const ClientsView = ({ size }: IconProps) => (
+  <Glyph size={size}>
+    <path d="M3.5 4.5h17v15h-17z" />
+    <path d="M3.5 9.5h17M3.5 14.5h17" />
+    <rect x="5" y="5.9" width="4.4" height="2.2" rx=".8" fill="currentColor" stroke="none" />
+    <rect x="11.4" y="10.9" width="4.4" height="2.2" rx=".8" fill="currentColor" stroke="none" />
+    <rect x="5" y="15.9" width="4.4" height="2.2" rx=".8" fill="currentColor" stroke="none" />
+  </Glyph>
+);

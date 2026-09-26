@@ -194,17 +194,79 @@ export interface Roster {
   firstRun: boolean;
 }
 
+/**
+ * WHAT THE SUMMARY STRIP COUNTS — one key per tile, and the reason it is here.
+ *
+ * The six figures above the table each name a subset of the rows underneath
+ * them: *₹6,400 overdue > 7d · 1* is one client, *2 gone quiet* is two. Before
+ * this axis existed the trainer read the number and then went and found those
+ * rows by eye in a list of twenty-three, which is exactly the work the figure
+ * was supposed to have already done.
+ *
+ * These are NOT the same cut as `money`. `owes` is "any rupee outstanding" and
+ * is a question about the client; `overdue` is "outstanding past seven days"
+ * and is a question about the debt. The strip already drew both separately and
+ * has since the screen shipped — this only lets you press them.
+ */
+export type Focus = 'overdue' | 'due' | 'quiet' | 'ending' | 'missed' | 'setup';
+
 export interface Filters {
   mode: DeliveryMode[];
   money: ('owes' | 'paid' | 'ending')[];
   batch: Batch[];
+  /**
+   * At most one at a time, unlike every other axis here.
+   *
+   * The tiles are alternative readings of one roster, not facets that compose:
+   * *gone quiet* and *not set up* are disjoint by construction, so a pair of
+   * them selected together can only ever mean the union — which is what `all`
+   * already is, one row up. A second press clears it.
+   */
+  focus: Focus | null;
 }
 
-export const NO_FILTERS: Filters = { mode: [], money: [], batch: [] };
+export const NO_FILTERS: Filters = { mode: [], money: [], batch: [], focus: null };
 
 export function filterCount(f: Filters): number {
-  return f.mode.length + f.money.length + f.batch.length;
+  return f.mode.length + f.money.length + f.batch.length + (f.focus ? 1 : 0);
 }
+
+/**
+ * The predicate behind each tile, written against the SAME expressions
+ * `buildRoster` tallies with.
+ *
+ * That is the whole contract of this function: a tile that says 2 and selects
+ * three rows is worse than a tile that does nothing, so the count and the
+ * filter must not be able to drift. `overdue`/`due` split on `severity` here
+ * because that is how `overdueLateRows`/`dueSoonRows` split there, and the
+ * other four read `attention.kind` because that is what the tally counts.
+ */
+export function matchesFocus(r: RosterRow, focus: Focus): boolean {
+  switch (focus) {
+    case 'overdue':
+      return r.attention?.kind === 'overdue' && r.severity === 'critical';
+    case 'due':
+      return r.attention?.kind === 'overdue' && r.severity !== 'critical';
+    case 'quiet':
+      return r.attention?.kind === 'quiet';
+    case 'ending':
+      return r.attention?.kind === 'pack';
+    case 'missed':
+      return r.attention?.kind === 'missed';
+    case 'setup':
+      return r.attention?.kind === 'setup';
+  }
+}
+
+/** The tile labels, in the strip's own order. Used by the removable chip row. */
+export const FOCUS_LABEL: Record<Focus, string> = {
+  overdue: 'Overdue',
+  due: 'Due soon',
+  quiet: 'Gone quiet',
+  ending: 'Pack ending',
+  missed: 'Missed 2+',
+  setup: 'Not set up',
+};
 
 /**
  * The tags, in the order they are drawn — worst first, so the filter row reads
@@ -243,7 +305,7 @@ export const TAG_TONE: Record<ClientTag, string> = TAGS.reduce(
  * already what the default sort and the group header say; *Invited* became
  * *Prospect*, which is the same set of clients under the name the product uses
  * for them. Money is deliberately NOT a chip here: it is not a tag, it has its
- * own axis in the filter panel (*Owes me* / *Paid up*), and it is a column on
+ * own axis in the filter panel (*Pending* / *Paid up*), and it is a column on
  * every row.
  */
 export const SEGMENTS: { key: Segment; label: string }[] = [
@@ -252,11 +314,11 @@ export const SEGMENTS: { key: Segment; label: string }[] = [
 ];
 
 export const SORTS: { key: SortKey; label: string; hint?: string }[] = [
-  { key: 'attention', label: 'Needs attention first', hint: 'At risk, then expiring, then dues' },
+  { key: 'attention', label: 'Needs attention first', hint: 'At risk, then expiring, then pending' },
   { key: 'name', label: 'Name A–Z' },
   { key: 'recent', label: 'Last attended', hint: 'Most recent first' },
   { key: 'left', label: 'Sessions left', hint: 'Fewest first' },
-  { key: 'owed', label: 'Amount owed', hint: 'Highest first' },
+  { key: 'owed', label: 'Amount pending', hint: 'Highest first' },
 ];
 
 /* -------------------------------------------------------------------- input */
@@ -590,9 +652,22 @@ function buildRow(
       kind: 'setup',
       action: 'Set up',
       magnitude: 0,
+      /* *Not in your week yet — pick their training days* until this pass, and
+         the clause was the only one of its kind on the screen. Every other line
+         this function writes is a STATE and nothing else — *Pack is empty*,
+         *Missed the last 2 sessions*, *Week picked, no plan on it yet*, which is
+         this band's own sibling two characters below — and the verb lives in
+         `action`, which the roster draws as a button on the same row. This one
+         said the state AND the instruction, so the row read *Not in your week
+         yet — pick their training days · Set up*.
+
+         It was also, at 324px, the widest line in the table by 50px, and the
+         roster's What's-up track is sized off the widest line: one row's extra
+         clause was setting a column width for all twenty-three. Cutting it to
+         the state alone is 130px and matches the sibling. */
       line:
         setupStep === 'schedule'
-          ? 'Not in your week yet — pick their training days'
+          ? 'Not in your week yet'
           : 'Week picked, no plan on it yet',
     });
   }
@@ -704,7 +779,7 @@ function buildRow(
   if (!line) {
     line =
       programLine(livePrograms[0], now) ??
-      (lastLoggedAt ? `Last session ${shortDate(lastLoggedAt)}` : 'No program yet');
+      (lastLoggedAt ? `Last session ${shortDate(lastLoggedAt)}` : 'No plan yet');
   }
 
   const letter = (name[0] ?? '#').toUpperCase();
@@ -927,6 +1002,11 @@ export function filterRows(rows: RosterRow[], filters: Filters, segment: Segment
   }
 
   if (filters.batch.length > 0) result = result.filter((r) => filters.batch.includes(r.batch));
+
+  /* Last, so it narrows whatever the other three left rather than competing
+     with them — a trainer who has pressed *Gone quiet* and then typed a name
+     means both. */
+  if (filters.focus) result = result.filter((r) => matchesFocus(r, filters.focus!));
 
   return result;
 }

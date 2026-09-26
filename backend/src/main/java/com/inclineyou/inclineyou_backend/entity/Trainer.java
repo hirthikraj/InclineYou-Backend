@@ -176,9 +176,27 @@ public class Trainer {
     @Column(name = "email", length = 254)
     private String email;
 
+    /**
+     * {@code woman} · {@code man} · {@code nonbinary} · {@code undisclosed}, or
+     * NULL for never asked — V6. Asked because clients filter on it, and
+     * {@code undisclosed} is an answer rather than an absence.
+     */
+    @Column(name = "gender", length = 24)
+    private String gender;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> metadata = new HashMap<>();
+
+    /* ------------------------------------------------- V5 · measuring defaults */
+
+    /** Offered to every new client on the add flow's baseline step. */
+    @Column(name = "assessment_interval_days")
+    private Short assessmentIntervalDays;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "assessment_metrics", columnDefinition = "jsonb")
+    private List<String> assessmentMetrics;
 
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;

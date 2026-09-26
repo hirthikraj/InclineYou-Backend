@@ -41,21 +41,26 @@
  * whole point of the card is that everything on it is true.
  */
 
-import type { ClientReport } from './build';
+import type { ClientReport, Reading } from './build';
 import { dateRange, longDate, shortDate, signed, trim } from './build';
 
 const W = 1080;
 const H = 1350;
 
-/* The dark tokens, verbatim from webapp.css's `[data-theme="dark"]` block. */
-const CANVAS = '#08090B';
-const SURFACE = '#101216';
-const LINE = '#2A2F39';
-const INK = '#F2F4F6';
-const INK_2 = '#A2A9B4';
-const INK_3 = '#8B939F';
-const ACCENT = '#C6F24E';
-const ACCENT_INK = '#0A0B0D';
+/* The dark tokens, verbatim from webapp.css's `[data-theme="dark"]` block.
+ *
+ * EXPORTED, since `report-pdf.ts` paints the same report onto A4 sheets and a
+ * second copy of these eight hex values is a second card identity waiting to
+ * drift — the whole reason `resolveStacks` reads the font stacks off the
+ * document rather than writing them down. */
+export const CANVAS = '#08090B';
+export const SURFACE = '#101216';
+export const LINE = '#2A2F39';
+export const INK = '#F2F4F6';
+export const INK_2 = '#A2A9B4';
+export const INK_3 = '#8B939F';
+export const ACCENT = '#C6F24E';
+export const ACCENT_INK = '#0A0B0D';
 
 /**
  * THE FONT STACKS ARE READ OFF THE DOCUMENT, NOT WRITTEN DOWN.
@@ -78,7 +83,7 @@ let SANS = FALLBACK_SANS;
 let BRAND = FALLBACK_BRAND;
 let MONO = FALLBACK_MONO;
 
-function resolveStacks(): void {
+export function resolveStacks(): void {
   if (typeof document === 'undefined') return;
   const css = getComputedStyle(document.documentElement);
   const read = (name: string, fallback: string) => {
@@ -96,15 +101,23 @@ const FOOTER_TOP = H - 132;
  *  layout note in `paintReportCard`. */
 const BASE_GAP = 26;
 
-type Ctx = CanvasRenderingContext2D;
+export type Ctx = CanvasRenderingContext2D;
+
+/** The three resolved stacks, for a painter in another file. Read AFTER
+ *  `resolveStacks()` — they are module state, not constants. */
+export const stacks = {
+  get sans() { return SANS; },
+  get brand() { return BRAND; },
+  get mono() { return MONO; },
+};
 
 /* ------------------------------------------------------------------ helpers */
 
-function font(weight: number, size: number, family = SANS): string {
+export function font(weight: number, size: number, family = SANS): string {
   return `${weight} ${size}px ${family}`;
 }
 
-function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number): void {
+export function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: number): void {
   ctx.beginPath();
   ctx.moveTo(x + r, y);
   ctx.arcTo(x + w, y, x + w, y + h, r);
@@ -116,14 +129,14 @@ function roundRect(ctx: Ctx, x: number, y: number, w: number, h: number, r: numb
 
 /** Truncates to `max` px with a real ellipsis. Names get long and a card that
  *  runs a name off its own edge is a card nobody sends. */
-function fit(ctx: Ctx, text: string, max: number): string {
+export function fit(ctx: Ctx, text: string, max: number): string {
   if (ctx.measureText(text).width <= max) return text;
   let s = text;
   while (s.length > 1 && ctx.measureText(`${s}…`).width > max) s = s.slice(0, -1);
   return `${s}…`;
 }
 
-function label(ctx: Ctx, text: string, x: number, y: number, color = INK_3): void {
+export function label(ctx: Ctx, text: string, x: number, y: number, color = INK_3): void {
   ctx.fillStyle = color;
   ctx.font = font(500, 20, MONO);
   ctx.letterSpacing = '2.2px';
@@ -131,19 +144,145 @@ function label(ctx: Ctx, text: string, x: number, y: number, color = INK_3): voi
   ctx.letterSpacing = '0px';
 }
 
-interface Block {
+export interface Block {
   height: number;
   draw: (ctx: Ctx, y: number) => void;
 }
 
+/**
+ * THE TRAJECTORY, IN 190 PIXELS.
+ *
+ * What replaced the proportion bar the lift rows used to carry. That bar was
+ * *"a ranking made visible"* — each lift's gain against the biggest gain on the
+ * card — and it was honest but nearly content-free: the ordering already says
+ * the ranking, and the bar restated it in a second alphabet. What a client
+ * cannot get from anywhere else on the card is the SHAPE, and it is the thing
+ * they actually want: 40 → 55 in a straight line and 40 → 55 with a month of
+ * nothing in the middle are the same pair of numbers and two different stories
+ * about how they trained.
+ *
+ * ── SPACED BY DATE WHERE THE DATES ARE IRREGULAR ────────────────────────────
+ *
+ * `at` is optional and the difference matters. A lift's series is one point per
+ * TRAINING DAY, which is close enough to even that spacing by index draws the
+ * truth. A measurement's is one point per time somebody got the tape out, which
+ * is not even at all: a client weighed in week 1, week 2 and week 11 plotted at
+ * thirds draws a gentle slope where the truth is a plateau and then a drop. So
+ * measurements pass their dates and are positioned on them.
+ *
+ * ── AND A FLAT SERIES IS CENTRED ────────────────────────────────────────────
+ *
+ * `span` floored at a small positive number, and the flat case handled
+ * explicitly rather than falling out of the arithmetic — which is the exact
+ * defect `ui/TrendChart.tsx` carries a measured note about: with `hi === lo`
+ * the numerator is zero and the line lands on the BOTTOM of the box, reading as
+ * *at your minimum* on the one row that means *held steady*.
+ */
+export function sparkline(
+  ctx: Ctx,
+  series: Reading[],
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+): void {
+  if (series.length < 2) return;
+
+  const values = series.map((p) => p.value);
+  const lo = Math.min(...values);
+  const hi = Math.max(...values);
+  const flat = hi - lo < 1e-6;
+
+  const t0 = series[0].at;
+  const tSpan = series[series.length - 1].at - t0;
+  /* Falls back to index spacing when every reading shares a date — two sets on
+     one day, which `metricChange` deliberately does not merge. */
+  const px = (i: number) =>
+    tSpan > 0 ? x + ((series[i].at - t0) / tSpan) * w : x + (i * w) / (series.length - 1);
+  const py = (v: number) => (flat ? y + h / 2 : y + h - ((v - lo) / (hi - lo)) * h);
+
+  /* The floor rule the bar had, kept: an empty stretch is drawn, not skipped.
+     A hairline under the series is what makes a mostly-flat line read as flat
+     rather than as a rendering that failed. */
+  ctx.strokeStyle = LINE;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(x, y + h);
+  ctx.lineTo(x + w, y + h);
+  ctx.stroke();
+
+  ctx.strokeStyle = ACCENT;
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  series.forEach((p, i) => {
+    const cx = px(i);
+    const cy = py(p.value);
+    if (i === 0) ctx.moveTo(cx, cy);
+    else ctx.lineTo(cx, cy);
+  });
+  ctx.stroke();
+
+  /* The last point, marked. It is the number printed beside the line, and
+     without it a reader has to guess which end of the line is now. */
+  ctx.fillStyle = ACCENT;
+  ctx.beginPath();
+  ctx.arc(px(series.length - 1), py(values[values.length - 1]), 5, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 /* --------------------------------------------------------------- the blocks */
 
-/** Weight, and any measurement that moved. One row each: `72.4 → 68.9 kg`. */
+/**
+ * ONE ROW'S GEOMETRY, MEASURED RATHER THAN TABULATED.
+ *
+ * The first version put the name, the spark and the figure on fixed x
+ * positions, and it collided: `100.2 → 100.7 cm` at 32px mono is 320px and
+ * `25 → 27.5 kg` is 190, so a track wide enough for the first left 130px of
+ * air in the second, and a track sized for the second ran the first straight
+ * through the sparkline beside it. A canvas has no `1fr`.
+ *
+ * So the row is laid out from the RIGHT, which is the edge everything on it
+ * shares: the delta sits on the margin, the figure is measured and placed
+ * against it, the spark takes a FIXED width to the left of that — fixed,
+ * because six sparks at six widths cannot be compared with one another, which
+ * is the one thing a column of them is for — and the name gets whatever is
+ * left and ellipses inside it.
+ */
+interface RowGeometry {
+  nameMax: number;
+  sparkX: number;
+  sparkW: number;
+  figureRight: number;
+  deltaRight: number;
+}
+
+const SPARK_W = 186;
+
+/** Call with `ctx.font` already set to the FIGURE's face — the measurement is
+ *  of the figure, and a stale font makes every position on the row wrong. */
+function rowGeometry(ctx: Ctx, figure: string, deltaWidth: number): RowGeometry {
+  const deltaRight = W - PAD;
+  const figureRight = deltaRight - deltaWidth - 26;
+  const sparkX = figureRight - ctx.measureText(figure).width - SPARK_W - 26;
+  return {
+    deltaRight,
+    figureRight,
+    sparkX,
+    sparkW: SPARK_W,
+    /* 150px is the floor at which a movement name is still a name rather than
+       two letters and an ellipsis. */
+    nameMax: Math.max(150, sparkX - PAD - 24),
+  };
+}
+
+/** Weight, and any measurement that moved: `Weight ▁▂▃ 73.6 → 73.4 kg −0.2`. */
 function measurementBlock(r: ClientReport, cap: number): Block | null {
   const rows = [r.weight, ...r.measurements].filter((m) => m !== null).slice(0, cap);
   if (rows.length === 0) return null;
 
-  const ROW = 66;
+  const ROW = 70;
   const height = 48 + rows.length * ROW;
 
   return {
@@ -152,80 +291,115 @@ function measurementBlock(r: ClientReport, cap: number): Block | null {
       label(ctx, 'Measurements', PAD, top + 20);
       let y = top + 46;
       for (const m of rows) {
+        const figure = `${trim(m.from)} → ${trim(m.to)} ${m.unit}`.trim();
+        ctx.font = font(700, 32, MONO);
+        const g = rowGeometry(ctx, figure, ctx.measureText(signed(m.delta)).width);
+
         ctx.fillStyle = INK_2;
         ctx.font = font(600, 30);
         ctx.textAlign = 'left';
-        ctx.fillText(fit(ctx, m.label, 300), PAD, y + 34);
+        ctx.fillText(fit(ctx, m.label, g.nameMax), PAD, y + 34);
+
+        /* The shape between the two numbers, and it is the reason this block
+           stopped being two columns. `−0.2` over twelve weeks is a client who
+           held steady and a client who put on two kilos and took them back
+           off, and only one of those is worth the conversation the card exists
+           to start. Three readings is the floor — two points draw a slope with
+           no shape in it, which invites exactly the trend-reading the series
+           was added to prevent. */
+        if (m.series.length >= 3) {
+          sparkline(ctx, m.series, g.sparkX, y + 8, g.sparkW, 30);
+        }
 
         /* The change is written out rather than encoded. `ProgressTab.tsx`
            states the rule and it is at its sharpest here: the app has NO
            opinion about which way a client's numbers should go, and a green
            arrow on a card the client keeps is the product taking a side in a
-           conversation it was not in. So no colour, and no arrow — the sign is
-           the whole statement. */
+           conversation it was not in. So no colour on the pair, and the sign
+           is the whole statement. The spark IS accent, because a shape is not
+           a verdict — the same call `.trend__l` makes for every series it
+           draws, whichever way that series points. */
         ctx.textAlign = 'right';
         ctx.fillStyle = INK;
-        ctx.font = font(700, 34, MONO);
-        const value = `${trim(m.from)} → ${trim(m.to)} ${m.unit}`.trim();
-        ctx.fillText(value, W - PAD - 150, y + 34);
+        ctx.font = font(700, 32, MONO);
+        ctx.fillText(figure, g.figureRight, y + 34);
 
         ctx.fillStyle = INK_3;
-        ctx.font = font(600, 30, MONO);
-        ctx.fillText(signed(m.delta), W - PAD, y + 34);
+        ctx.font = font(600, 29, MONO);
+        ctx.fillText(signed(m.delta), g.deltaRight, y + 34);
         ctx.textAlign = 'left';
 
         y += ROW;
         if (m !== rows[rows.length - 1]) {
           ctx.fillStyle = LINE;
-          ctx.fillRect(PAD, y - 18, W - PAD * 2, 1);
+          ctx.fillRect(PAD, y - 20, W - PAD * 2, 1);
         }
       }
     },
   };
 }
 
-/** The lifts that moved, with a bar showing the proportion gained. */
+/**
+ * THE LIFTS THAT MOVED, EACH WITH THE SHAPE OF HOW IT MOVED.
+ *
+ * It was a full-width proportion bar under every row — each lift's gain against
+ * the biggest gain on the card. Honest, and nearly content-free: the rows are
+ * already sorted by that proportion, so the bar restated the ordering in a
+ * second alphabet and spent 36px per row doing it.
+ *
+ * The series in its place answers the question the pair cannot. *40 → 55* in a
+ * straight climb and *40 → 55* with six weeks of 40 and one good Tuesday are
+ * the same two numbers and two different accounts of how somebody trained, and
+ * the second one is a conversation the trainer wants to be having.
+ *
+ * The row lost 6px in the trade, which is what buys a fourth lift on a card
+ * that used to fit three.
+ */
 function liftBlock(r: ClientReport, cap: number): Block | null {
   const lifts = r.lifts.slice(0, cap);
   if (lifts.length === 0) return null;
 
-  const ROW = 76;
+  const ROW = 70;
   const height = 48 + lifts.length * ROW;
-  const best = Math.max(...lifts.map((l) => l.percent), 1);
 
   return {
     height,
     draw(ctx, top) {
       label(ctx, 'Getting stronger', PAD, top + 20);
-      let y = top + 50;
+      let y = top + 46;
       for (const l of lifts) {
+        const figure = `${trim(l.from)} → ${trim(l.to)} ${l.unit}`;
+        const gain = `+${l.percent}%`;
+        ctx.font = font(700, 30, MONO);
+        const g = rowGeometry(ctx, figure, ctx.measureText(gain).width);
+
         ctx.fillStyle = INK;
         ctx.font = font(600, 30);
         ctx.textAlign = 'left';
-        ctx.fillText(fit(ctx, l.name, 480), PAD, y + 22);
+        ctx.fillText(fit(ctx, l.name, g.nameMax), PAD, y + 34);
+
+        if (l.series.length >= 3) {
+          sparkline(ctx, l.series, g.sparkX, y + 8, g.sparkW, 30);
+        }
 
         ctx.textAlign = 'right';
         ctx.fillStyle = INK_2;
         ctx.font = font(600, 30, MONO);
-        ctx.fillText(`${trim(l.from)} → ${trim(l.to)} ${l.unit}`, W - PAD - 128, y + 22);
+        ctx.fillText(figure, g.figureRight, y + 34);
 
+        /* The one accent on the card that is a verdict rather than a shape, and
+           it is allowed for the reason `c-change`'s `delta` prop is: a lift
+           going up is unambiguous in a way a waist going up is not. */
         ctx.fillStyle = ACCENT;
         ctx.font = font(700, 30, MONO);
-        ctx.fillText(`+${l.percent}%`, W - PAD, y + 22);
+        ctx.fillText(gain, g.deltaRight, y + 34);
         ctx.textAlign = 'left';
 
-        /* The bar is relative to the biggest gain on the card, not to an
-           absolute scale — there isn't one. It is a ranking made visible, which
-           is all a client needs from it. */
-        const track = W - PAD * 2;
-        ctx.fillStyle = SURFACE;
-        roundRect(ctx, PAD, y + 40, track, 10, 5);
-        ctx.fill();
-        ctx.fillStyle = ACCENT;
-        roundRect(ctx, PAD, y + 40, Math.max(12, (l.percent / best) * track), 10, 5);
-        ctx.fill();
-
         y += ROW;
+        if (l !== lifts[lifts.length - 1]) {
+          ctx.fillStyle = LINE;
+          ctx.fillRect(PAD, y - 20, W - PAD * 2, 1);
+        }
       }
     },
   };
@@ -275,6 +449,43 @@ function weeksBlock(r: ClientReport): Block | null {
       ctx.textAlign = 'left';
     },
   };
+}
+
+/**
+ * THE BRAND MARK, DRAWN RATHER THAN SET.
+ *
+ * This used to be the letter `X` in the brand face on a lime tile — the old
+ * mark, and not a letter the identity contains. Canvas cannot `<use>` an SVG
+ * symbol, so the geometry is transcribed from `identity.html`: the same 48-unit
+ * grid, the same 6.5 stroke, the same 24% / 48% / 100% ladder, laid on the tile
+ * at 58%, which is what `.ic svg` does for every other app-icon size.
+ *
+ * Exported because the A4 sheets foot every page with it. Two transcriptions of
+ * a logo is the one duplication that is never caught by review, because both
+ * look like a logo.
+ */
+export function drawMark(ctx: Ctx, x: number, y: number, tile: number): void {
+  ctx.fillStyle = ACCENT;
+  roundRect(ctx, x, y, tile, tile, tile * 0.27);
+  ctx.fill();
+
+  const MK = tile * 0.58;
+  const k = MK / 48;
+  const ox = x + (tile - MK) / 2;
+  const oy = y + (tile - MK) / 2;
+  ctx.strokeStyle = ACCENT_INK;
+  ctx.lineWidth = 6.5 * k;
+  ctx.lineJoin = 'miter';
+  ctx.lineCap = 'butt';
+  for (const [topY, alpha] of [[30, 0.24], [20, 0.48], [10, 1]] as const) {
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.moveTo(ox + 10 * k, oy + (topY + 12) * k);
+    ctx.lineTo(ox + 24 * k, oy + topY * k);
+    ctx.lineTo(ox + 38 * k, oy + (topY + 12) * k);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
 }
 
 /* --------------------------------------------------------------- the canvas */
@@ -452,18 +663,11 @@ export function paintReportCard(r: ClientReport): HTMLCanvasElement {
   ctx.fillStyle = LINE;
   ctx.fillRect(PAD, FOOTER_TOP, W - PAD * 2, 1);
 
-  ctx.fillStyle = ACCENT;
-  roundRect(ctx, PAD, FOOTER_TOP + 40, 30, 30, 8);
-  ctx.fill();
-  ctx.fillStyle = ACCENT_INK;
-  ctx.font = font(800, 20, BRAND);
-  ctx.textAlign = 'center';
-  ctx.fillText('X', PAD + 15, FOOTER_TOP + 62);
-  ctx.textAlign = 'left';
+  drawMark(ctx, PAD, FOOTER_TOP + 40, 30);
 
   ctx.fillStyle = INK_2;
   ctx.font = font(600, 24);
-  ctx.fillText('Tracked on X REP', PAD + 46, FOOTER_TOP + 64);
+  ctx.fillText('Tracked on InclineYou', PAD + 46, FOOTER_TOP + 64);
 
   ctx.fillStyle = INK_3;
   ctx.font = font(500, 21, MONO);

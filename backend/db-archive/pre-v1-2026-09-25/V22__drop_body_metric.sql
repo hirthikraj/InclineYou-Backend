@@ -1,0 +1,31 @@
+-- V22 · A BODY IS MEASURED IN AN ASSESSMENT, AND NOWHERE ELSE
+--
+-- Decided by the product owner on 24 Sep 2026: the product takes body
+-- measurements only through assessments (V14) — a trainer runs the template
+-- with the client in the session (MUST-21), and every reading lands on
+-- `assessment.readings`. There is no loose weigh-in, no standalone tape
+-- reading, and so no second place for the same number to live.
+--
+-- `body_metric` was that second place. Its writers were the phone's offline
+-- sync (`body_metrics`), the trainer's `POST /v1/clients/{id}/body-metrics` and
+-- its correction routes, and the portal's `POST /v1/me/metrics` weigh-in. The
+-- web writes the first three nowhere, the phone build is out of v1 and so is
+-- sync with it, and the portal weigh-in is withdrawn by the same decision. With
+-- no writer left, the table would only ever be empty — and every screen that
+-- read it (measurement history, the report's latest weight, the team file, the
+-- portal's progress) now reads the six V5 metric ids out of completed
+-- assessments instead, which is where the numbers are.
+--
+-- THE ONE DROP UNDER THE ADDITIVE-ONLY LAW, AND WHY IT IS ALLOWED. The law
+-- exists because trainers' phones carry rows the server cannot refetch and old
+-- builds must keep syncing. Neither holds here: no phone build ships in v1, the
+-- sync surface is out of v1 scope, and nothing is in production — there is no
+-- row anywhere to lose. `CLAUDE.md` records the exception by name; it is not a
+-- precedent for dropping anything else.
+--
+-- DROP TABLE takes its two policies, three triggers, indexes and four foreign
+-- keys (client, tenant, and V21's same-workspace pair) with it. Nothing points
+-- AT `body_metric`, so no CASCADE is needed — and none is used, so that if
+-- something ever does, this fails loudly instead of taking it along.
+
+DROP TABLE public.body_metric;

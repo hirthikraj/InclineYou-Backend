@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react';
 import { AddChip, Chip, ChipRow } from '@/components/setup/Chips';
 import { AddOwn } from '@/components/setup/AddOwn';
 import { SPECIALITIES, SPECIALITY_CAP, customId, labelFor } from '@/lib/setup/options';
+import { Tag } from '@/web-components/ui/Tag';
 
 /**
  * THE SPECIALITY PICKER — twelve chips, a cap of five, and an escape hatch.
@@ -90,9 +91,9 @@ export function SpecialityPicker({
   return (
     <>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
-        <span className={`tag${atCap ? ' tag--acc' : ''}`}>
+        <Tag tone={atCap ? 'acc' : undefined}>
           {value.length}/{SPECIALITY_CAP}
-        </span>
+        </Tag>
         {atCap ? (
           <span className="small" style={{ color: 'var(--tx-warn)' }}>
             That’s {SPECIALITY_CAP}. Click one of the chosen to swap it out.

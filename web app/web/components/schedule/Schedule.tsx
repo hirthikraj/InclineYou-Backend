@@ -1,30 +1,51 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
-import Link from 'next/link';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { ScheduleData } from '@/lib/schedule/api';
 import { buildGrid, MAX_WEEK_LANES } from '@/lib/schedule/grid';
 import { buildMonth } from '@/lib/schedule/month';
+import { buildWeekPivot } from '@/lib/schedule/pivot';
 import { updateSession } from '@/lib/schedule/actions';
 import { MOVE_HOLD_SECONDS, SNAP_MINUTES } from '@/lib/schedule/result';
 import {
   crumbFor, gridDays, gridStart, hrefFor, labelFor, stepAnchor, type ScheduleView,
 } from '@/lib/schedule/view';
-import { DAY_MS, dayLong, formatMinute, minuteOfDay, startOfDay } from '@/lib/today/time';
+/* `defaultSlot` lived in this file until Today grew its own *New session*. It is
+   in `lib/schedule/book.ts` now so both screens open the form on the same slot. */
+import { defaultSlot, usualMinuteFor } from '@/lib/schedule/book';
+import { dayLong, formatMinute, minuteOfDay, startOfDay } from '@/lib/today/time';
 import { TopBar } from '@/components/shell/TopBar';
 import { Clock, Plus } from '@/components/shell/Icons';
 import { useHeartbeat, useNow } from '@/components/today/Clock';
-import { Palette, usePaletteKey } from '@/components/today/Palette';
+import { usePaletteRows } from '@/components/shell/PaletteHost';
+import type { AttentionItem } from '@/lib/today/deck';
 import { MonthGrid } from './MonthGrid';
 import { TimeGrid } from './TimeGrid';
 import { DayAgenda } from './DayAgenda';
 import { WeekPips } from './WeekPips';
+import { ClientWeek } from './ClientWeek';
+import { useWeekLayout } from './weekLayout';
+import { ScheduleStats } from './ScheduleStats';
 import { Toolbar } from './Toolbar';
 import { SessionPanel } from './SessionPanel';
 import { BookPanel } from './BookPanel';
 import { WarnTriangle } from './Icons';
+import { Button } from '@/web-components/ui/Button';
+import { NoticeBar } from '@/web-components/ui/NoticeBar';
+
+/**
+ * One figure in the page header's band. `figure` is the `<b>`, `label` the words
+ * after it, and `tone` is set only on a figure that is a FINDING rather than a
+ * readout — see §26.7 in app.css for why the tone never reaches the label.
+ */
+interface HeaderFact {
+  key: string;
+  figure: string;
+  label: string;
+  tone?: 'warn' | 'crit';
+}
 
 /**
  * THE SCHEDULE — THREE VIEWS OF ONE ROUTE, AND ONE PLACE THE STATE LIVES.
@@ -84,15 +105,36 @@ interface PendingMove {
   since: number;
 }
 
+
+/* A module constant, not `[]` at the call site: a new empty array every render is
+   a new identity, and `usePaletteRows` would re-register on every one of them. */
+const EMPTY_ATTENTION: AttentionItem[] = [];
+
 export function Schedule({ data }: { data: ScheduleData }) {
   const router = useRouter();
   const { view, anchor, sessions, clients, hours, rates, trainer, now: serverNow } = data;
+
+  /* Both memoised, because `usePaletteRows` depends on them by IDENTITY: a fresh
+     array every render would re-register the rows every render, and the effect
+     that does it would never settle. */
+  const paletteClients = useMemo(
+    () => clients.map((c) => ({ id: c.id, name: c.name })),
+    [clients],
+  );
+  const todaysSessions = useMemo(() => {
+    const day = startOfDay(serverNow);
+    return sessions.filter((s) => !s.dead && startOfDay(s.at) === day);
+  }, [sessions, serverNow]);
 
   const now = useNow(serverNow);
   const refresh = useCallback(() => router.refresh(), [router]);
   useHeartbeat(refresh);
 
   /* ------------------------------------------------------------ view state */
+
+  /* Remembered per device rather than held for the visit — `weekLayout.ts`
+     carries why that differs from the mode filters directly below it. */
+  const [layout, setLayout] = useWeekLayout();
 
   const [modes, setModes] = useState({ floor: true, remote: true });
   const [showGaps, setShowGaps] = useState(false);
@@ -134,9 +176,13 @@ export function Schedule({ data }: { data: ScheduleData }) {
     return { dayAt: slot.dayAt, minute: Math.round(minute / SNAP_MINUTES) * SNAP_MINUTES };
   };
 
-  const [booking, setBooking] = useState<{ dayAt: number; minute: number } | null>(() =>
-    slotAsked(serverNow),
-  );
+  /* `clientId` is the pivot's own contribution to a booking and nothing else
+     sets it: a click on the hours track knows a minute and has to ask WHO, and a
+     click on a client's row knows who and has to be told the minute. See
+     `onCell` below and `usualMinuteFor`. */
+  const [booking, setBooking] = useState<
+    { dayAt: number; minute: number; clientId?: string } | null
+  >(() => slotAsked(serverNow));
 
   /*
    * AND IT HAS TO SURVIVE ARRIVING HERE FROM HERE.
@@ -176,20 +222,6 @@ export function Schedule({ data }: { data: ScheduleData }) {
     if (asked !== null) router.replace(hrefFor(view, anchor), { scroll: false });
   }, [asked, view, anchor, router]);
   const [moving, setMoving] = useState<string | null>(null);
-  /*
-   * THE PALETTE IS THE SAME ONE, AND IT IS NOT DECORATION HERE.
-   *
-   * `TopBar` draws a search box promising ⌘K on every screen it appears on, and a
-   * promise in print that nothing binds is the defect this half already records
-   * for the rail's accelerators. So the palette is mounted, with the roster and
-   * this range's sessions.
-   *
-   * `attention` is empty and that is correct rather than a gap: the queue is
-   * derived from payments and workout logs, which this screen deliberately does
-   * not fetch (`lib/schedule/api.ts` says why). An empty list draws no group —
-   * checked — so the palette is short here rather than wrong.
-   */
-  const [paletteOpen, setPaletteOpen] = useState(false);
   const [pending, setPending] = useState<PendingMove | null>(null);
   const [, startWrite] = useTransition();
 
@@ -239,6 +271,30 @@ export function Schedule({ data }: { data: ScheduleData }) {
   const month = useMemo(
     () => (view === 'month' ? buildMonth(grid.days, anchor) : null),
     [view, grid.days, anchor],
+  );
+
+  /*
+   * The week by client. Built from the SAME `grid` the hours view draws, so the
+   * two arrangements cannot disagree about what the week holds and the mode
+   * filters reach both — see `buildWeekPivot`.
+   *
+   * `pivoting` and not just `layout === 'clients'`: the layout is remembered per
+   * device, so a trainer who left it on Clients and then opened the day view
+   * must not have the pivot computed for a one-day "week". The toggle is drawn
+   * on the week only for the same reason.
+   */
+  /* Whether the trainer has told us when they work, asked ONCE and handed to
+     both arrangements. Two surfaces now draw a rest day — the grid hatches the
+     column, the pivot writes *Day off* over it — and each deriving the answer
+     from the rows it happens to hold is how the week and the day view end up
+     disagreeing about the same Sunday. `hours` is the working_hours list
+     itself, which is the only copy that cannot be wrong. */
+  const hoursSet = hours.length > 0;
+
+  const pivoting = view === 'week' && layout === 'clients';
+  const pivot = useMemo(
+    () => (pivoting ? buildWeekPivot(grid, clients, hoursSet) : null),
+    [pivoting, grid, clients, hoursSet],
   );
 
   /* ---------------------------------------------------------------- moving */
@@ -314,6 +370,38 @@ export function Schedule({ data }: { data: ScheduleData }) {
     [moving, placeAt],
   );
 
+  /*
+   * THE SAME CLICK, ON THE ARRANGEMENT THAT HAS A PERSON INSTEAD OF A MINUTE.
+   *
+   * `onSlot` above is the hours grid's: the pointer's y-coordinate IS the
+   * minute and the form asks who. A cell in the pivot is the other way round —
+   * it names a client and a whole day — so the two missing halves are supplied
+   * from the two places that hold them honestly:
+   *
+   *   moving   the session's OWN minute. A move through this table is *the same
+   *            time, on a different day*, which is the only move a surface with
+   *            no minute axis can promise. `ClientWeek` offers it on the moving
+   *            client's row alone.
+   *   booking  `usualMinuteFor`, which is `suggestClients`' band-1 rule read in
+   *            the other direction — the hour this client already trains at on
+   *            this weekday.
+   *
+   * The windows are that day's own, so a client with no history at all lands on
+   * the trainer's first working hour rather than on a constant.
+   */
+  const onCell = useCallback(
+    (clientId: string, dayAt: number) => {
+      if (moving) {
+        const s = sessions.find((x) => x.id === moving);
+        if (s) placeAt(dayAt, minuteOfDay(s.at));
+        return;
+      }
+      const windows = grid.days.find((d) => d.at === dayAt)?.windows ?? [];
+      setBooking({ dayAt, minute: usualMinuteFor(sessions, clientId, dayAt, windows), clientId });
+    },
+    [moving, placeAt, sessions, grid.days],
+  );
+
   const goTo = useCallback(
     (nextView: ScheduleView, nextAnchor: number) => {
       // `push`, not `replace`: stepping through weeks is navigation, and the back
@@ -347,7 +435,25 @@ export function Schedule({ data }: { data: ScheduleData }) {
     [view, anchor, goTo],
   );
 
-  usePaletteKey(useCallback(() => setPaletteOpen(true), []));
+  /*
+   * THE PALETTE IS THE SAME ONE, AND IT IS NOT DECORATION HERE.
+   *
+   * `TopBar` draws a search box promising ⌘K on every screen it appears on, and
+   * a promise in print that nothing binds is the defect this half already
+   * records for the rail's accelerators. This screen was one of the five that
+   * kept the promise; fifteen others did not, so the mounting moved to the shell
+   * and what stays here is the DATA — the roster and this range's sessions.
+   *
+   * `attention` is empty and that is correct rather than a gap: the queue is
+   * derived from payments and workout logs, which this screen deliberately does
+   * not fetch (`lib/schedule/api.ts` says why). An empty list draws no group —
+   * checked — so the palette is short here rather than wrong.
+   */
+  usePaletteRows({
+    clients: paletteClients,
+    attention: EMPTY_ATTENTION,
+    today: todaysSessions,
+  });
 
   /* ------------------------------------------------------- the accelerators */
 
@@ -392,8 +498,44 @@ export function Schedule({ data }: { data: ScheduleData }) {
     remote: live.filter((s) => s.mode === 'remote').length,
   };
 
-  const today = startOfDay(now);
-  const onToday = today >= data.from && today < data.to;
+  /**
+   * How many sessions the mode chips are currently hiding, IN THIS RANGE.
+   *
+   * `counts` above is the whole fetched set and is what the chips print, which
+   * is right for them — a chip says what un-ticking it would remove. This is a
+   * different question: the empty-range bar has to tell a trainer looking at a
+   * blank week whether the week is empty or whether they have filtered it
+   * blank, and only the second one has a way out.
+   *
+   * It is answered by building the SAME grid with both modes on and reading its
+   * total, rather than by counting `drawn` against a date window written here.
+   * `gridStart` and `gridDays` own which days a range covers and `buildGrid`
+   * owns which sessions land in them — a second copy of either, written to
+   * answer a sentence in a notice bar, is the thing that is wrong the first time
+   * a month's leading week or a DST day moves. The filter it is measuring is one
+   * line (`grid.ts`: `sessions.filter(s => s.mode === 'remote' ? …)`), so the
+   * only honest way to ask how much it removed is to run it both ways.
+   *
+   * Both guards mean the second build is only ever paid for on a range that is
+   * already drawing nothing, which is the one moment the answer is wanted:
+   * a full grid returns at the first line and never touches `buildGrid`.
+   *
+   * `withRows: false` because nothing reads the rows — this needs one integer,
+   * and the row geometry is the expensive half.
+   */
+  const hiddenByFilter = useMemo(() => {
+    if (grid.totals.sessions > 0) return 0;
+    if (modes.floor && modes.remote) return 0;
+    return buildGrid({
+      start: gridStart(view, anchor),
+      dayCount: gridDays(view),
+      hours,
+      sessions: drawn,
+      now,
+      modes: { floor: true, remote: true },
+      withRows: false,
+    }).totals.sessions;
+  }, [grid, modes, view, anchor, hours, drawn, now]);
 
   /**
    * WHAT A CLICK ON A BLOCK DOES, AND IT DEPENDS ON WHICH SIDE OF NOW IT IS.
@@ -449,31 +591,175 @@ export function Schedule({ data }: { data: ScheduleData }) {
    */
   const over = grid.totals.utilisation !== null && grid.totals.utilisation > 100;
 
-  const subtitle = [
-    `${grid.totals.sessions} ${grid.totals.sessions === 1 ? 'session' : 'sessions'}`,
+  /**
+   * THE SAME FOUR FACTS, WITH THE TWO THAT MEAN SOMETHING VISIBLE.
+   *
+   * This was one joined string in `--tx-ink-3` at 13px: *43 sessions · 63% of
+   * your hours · 2 days with a clash · 24 sellable hours free*. Every figure the
+   * same weight and the same grey as every word around it, so the one that is a
+   * FINDING — two days where a client is double-booked — reads exactly like the
+   * three that are readouts, and 294% reads exactly like 63%.
+   *
+   * `ScheduleStats` solved this on the phone and gave the answer a vocabulary:
+   * the figure is `<b>`, and a figure that is a problem carries `data-tone`,
+   * `warn` for a clash and `crit` for over 100%. This is that vocabulary, in the
+   * band the desk already draws.
+   *
+   * ── WHY NOT JUST RENDER `ScheduleStats` HERE ────────────────────────────
+   *
+   * Because it is 47px and this is 18.9px, and the 28 it would cost comes
+   * straight out of the calendar. MEASURED at 1536×695: `.cw__scroll` is 478px
+   * of a 752px track, so a 47px strip is ~10% of the grid handed back to say
+   * what the band above it was already saying — and `useCwScale` divides the
+   * real height by the trainer's own track, so it is a shorter hour on every
+   * screen, not just a shorter page. app.css records the same finding twice
+   * already, once about a duplicated date and once about `.sch__key`'s wrap.
+   *
+   * So the strip stays the phone's, where `.sch__ph` has stood down and the
+   * 47px is buying the only copy of these numbers on the screen, and the desk
+   * gets the treatment rather than the component. Exactly one of the two is
+   * ever drawn, which was already the contract.
+   *
+   * The separators are rendered rather than joined so a tone can end at the
+   * figure it belongs to: a `·` inside a `data-tone="warn"` span is a red dot
+   * between two facts that are not warnings.
+   */
+  /**
+   * AND WHEN THE WEEK IS ARRANGED BY CLIENT, THE FOUR FACTS ARE DIFFERENT ONES.
+   *
+   * MEASURED, and it is the same defect as the lane's head standing over the
+   * wrong column: the pivot drew *63% of your hours · 2 days with a clash · 24
+   * sellable hours free* over a table with **no minute axis at all**. Two of
+   * those three are statements about a track this arrangement does not draw,
+   * and the fourth — `Show gaps`, in the toolbar — was a control with nothing
+   * to toggle. A header that answers the other view's question is a header a
+   * trainer has to translate.
+   *
+   * Meanwhile the one sentence that IS about this arrangement was written for
+   * screen readers only: `<caption class="vh">` on the table says *21 of 23
+   * clients on the book*, which is the whole reason somebody presses `Clients`,
+   * and the eye never got it.
+   *
+   * So the pivot states its own four, in the same vocabulary §26.7 gave the
+   * band — figure bold, unit quiet, a tone only on a figure that is a finding:
+   *
+   *   on the book   how much of the roster this week actually holds
+   *   sessions      the same count the hours view leads with, unchanged
+   *   short         booked under their own usual rhythm — `warn`
+   *   drifting      active clients with nothing at all — `warn`, and the row
+   *                 `deck.ts` would raise a week later
+   *
+   * `late` is deliberately NOT a fifth: it is drawn on the chip and said again
+   * in the row, which is where a trainer can act on it, and a fifth figure
+   * would wrap the band onto a second line at 1280.
+   */
+  const pivotSubtitle: HeaderFact[] | null = pivot ? [
+    {
+      key: 'roster',
+      figure: `${pivot.totals.onBook} of ${pivot.totals.clients}`,
+      label: 'clients on the book',
+    },
+    {
+      key: 'sessions',
+      figure: String(pivot.totals.sessions),
+      label: pivot.totals.sessions === 1 ? 'session' : 'sessions',
+    },
+    pivot.totals.short
+      ? {
+        key: 'short',
+        figure: String(pivot.totals.short),
+        label: 'under their usual',
+        tone: 'warn' as const,
+      }
+      : null,
+    pivot.totals.drifting
+      ? {
+        key: 'drift',
+        figure: String(pivot.totals.drifting),
+        label: 'with nothing booked',
+        tone: 'warn' as const,
+      }
+      : null,
+  ].filter((x) => x !== null) : null;
+
+  const subtitle: HeaderFact[] = [
+    {
+      key: 'sessions',
+      figure: String(grid.totals.sessions),
+      label: grid.totals.sessions === 1 ? 'session' : 'sessions',
+    },
     grid.totals.utilisation !== null
-      ? `${grid.totals.utilisation}% of your hours${over ? ' — overbooked' : ''}`
-      : 'no working hours set',
+      ? {
+        key: 'util',
+        figure: `${grid.totals.utilisation}%`,
+        label: over ? 'of your hours — overbooked' : 'of your hours',
+        tone: over ? 'crit' as const : undefined,
+      }
+      /*
+       * A NULL UTILISATION IS TWO DIFFERENT SENTENCES, AND IT ONLY EVER SAID
+       * THE ONE THAT ACCUSES.
+       *
+       * `utilisation` is null when the range holds no working minutes, and this
+       * read that as *you have never told us when you work* — the same conflation
+       * `offRunsIn` was just fixed for, one band up. FOUND BY RENDERING the day
+       * view of a Sunday on a trainer who works Monday to Saturday: the header
+       * said **0 sessions · no working hours set** over a column the grid was
+       * correctly drawing as a day off, and the notice bar offering to set hours
+       * that are already set is two lines below it.
+       *
+       * The week and the month cannot reach this branch while any hours exist —
+       * a 7- or 42-day range contains a working day — so the second sentence is
+       * the day view's, which is the only view that can be entirely a rest day.
+       */
+      : {
+        key: 'util',
+        figure: '',
+        label: hoursSet ? 'a day off' : 'no working hours set',
+      },
     grid.totals.clashDays
-      ? `${grid.totals.clashDays} ${grid.totals.clashDays === 1 ? 'day' : 'days'} with a clash`
+      ? {
+        key: 'clash',
+        figure: String(grid.totals.clashDays),
+        label: `${grid.totals.clashDays === 1 ? 'day' : 'days'} with a clash`,
+        tone: 'warn' as const,
+      }
       : null,
     view !== 'month' && grid.totals.gapSlots
-      ? `${grid.totals.gapSlots} sellable ${grid.totals.gapSlots === 1 ? 'hour' : 'hours'} free`
+      ? {
+        key: 'gaps',
+        figure: String(grid.totals.gapSlots),
+        label: `sellable ${grid.totals.gapSlots === 1 ? 'hour' : 'hours'} free`,
+      }
       : null,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  ].filter((x) => x !== null);
 
   return (
     <>
-      <TopBar crumb={crumbFor(view, anchor)} onSearch={() => setPaletteOpen(true)} />
+      <TopBar crumb={crumbFor(view, anchor)} />
 
       <main className="main" id="main-content">
         <div className="ph sch__ph">
           <div className="ph__row">
             <div className="ph__id">
               <h1 className="ph__t">{labelFor(view, anchor)}</h1>
-              <p className="ph__sub">{subtitle}</p>
+              <p className="ph__sub sch__sub">
+                {/* The separator is a SIBLING of the two facts it divides, never a
+                    child of either — inside a toned span it would tint the gap
+                    between two facts rather than a fact, and which of the two it
+                    took would depend on the order they happened to be in. */}
+                {(pivotSubtitle ?? subtitle).map((part, i) => (
+                  <Fragment key={part.key}>
+                    {i > 0 ? <i aria-hidden="true">·</i> : null}
+                    <span data-tone={part.tone}>
+                      {/* The space is a real character and not the `<b>`'s margin.
+                          A reader announces `43sessions` for the margin version —
+                          the gap is 4px of layout and nothing in the string. */}
+                      {part.figure ? <><b>{part.figure}</b>{' '}</> : null}
+                      {part.label}
+                    </span>
+                  </Fragment>
+                ))}
+              </p>
             </div>
             {/*
               THE TWO VERBS SHARE A ROW, WHICH `.ph__acts--pair` DOES NOT DO.
@@ -485,22 +771,22 @@ export function Schedule({ data }: { data: ScheduleData }) {
               260px down. It keeps its icon and drops its label instead.
             */}
             <div className="ph__acts ph__acts--pair sch__acts">
-              <Link
-                className="btn btn--secondary sch__hours"
+              <Button
                 href="/settings/hours"
+                variant="secondary"
+                className="sch__hours"
                 aria-label="Working hours"
               >
                 <Clock size={15} />
                 <span className="sch__lbl">Working hours</span>
-              </Link>
-              <button
-                className="btn btn--primary"
-                type="button"
+              </Button>
+              <Button
+                variant="primary"
                 onClick={() => setBooking(defaultSlot(anchor, view, now))}
               >
                 <Plus size={15} />
                 New session
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -508,19 +794,39 @@ export function Schedule({ data }: { data: ScheduleData }) {
         <div className="body body--flush sch__body" onTouchStart={onSwipeStart} onTouchEnd={onSwipeEnd}>
           <Toolbar
             view={view}
+            layout={layout}
             label={labelFor(view, anchor)}
-            onToday={onToday}
             counts={counts}
             modes={modes}
-            gaps={showGaps}
+            /* Both of these describe the HOURS track, and the pivot has none.
+               `showGaps` is not cleared — a trainer who toggled it on the hours
+               view finds it still on when they come back — it is simply not
+               offered, and not drawn in the key, while the table is up. */
+            gaps={showGaps && !pivoting}
             gapSlots={grid.totals.gapSlots}
+            pivoting={pivoting}
             hoursHref="/settings/hours"
             onView={(v) => goTo(v, anchor)}
+            onLayout={setLayout}
             onStep={(d) => goTo(view, stepAnchor(view, anchor, d))}
-            onJumpToday={() => goTo(view, startOfDay(Date.now()))}
             onMode={(m) => setModes((s) => ({ ...s, [m]: !s[m] }))}
             onGaps={() => setShowGaps((g) => !g)}
           />
+
+          {/*
+            THE RANGE'S NUMBERS ON A PHONE, WHERE THE HEADER NO LONGER SAYS THEM.
+            `.sch__ph` stands down under 900px — see app.css under *the schedule
+            header on a phone* — and this 44px strip is what carries the four
+            facts that were in its subtitle. Above 900px it is hidden and the
+            subtitle is back, so exactly one of the two is ever drawn.
+
+            It sits below the toolbar and not above it because the toolbar is
+            controls and this is readout: a trainer stepping to next week is
+            reaching for `›`, and putting a row they cannot press between the
+            view switcher and the thing it switches is 44px of interruption in
+            the one path off this screen.
+          */}
+          <ScheduleStats grid={grid} view={view} />
 
           {/*
             THE MOVE BAR. It is a live region and it is the only thing on the
@@ -529,27 +835,95 @@ export function Schedule({ data }: { data: ScheduleData }) {
             and is not announced anywhere.
           */}
           {movingSession && (
-            <div className="sch__moving" role="status">
-              <WarnTriangle size={14} />
-              <span>
-                Moving <b>{movingSession.clientName}</b> — tap or click where it should go.
-              </span>
-              <button className="btn btn--ghost btn--sm" type="button" onClick={() => setMoving(null)}>
-                Cancel
-              </button>
-            </div>
+            <NoticeBar
+              tone="accent"
+              live
+              icon={<WarnTriangle size={14} />}
+              action={(
+                <Button variant="ghost" size="sm" onClick={() => setMoving(null)}>
+                  Cancel
+                </Button>
+              )}
+            >
+              Moving <b>{movingSession.clientName}</b> — tap or click where it should go.
+            </NoticeBar>
           )}
 
           {hours.length === 0 && (
-            <div className="sch__nohours">
-              <span>
-                You have not told us when you work, so nothing is hatched and no gap is
-                priced. The grid still draws every session.
-              </span>
-              <Link className="btn btn--secondary btn--sm" href="/settings/hours">
-                Set your hours
-              </Link>
-            </div>
+            <NoticeBar
+              action={(
+                <Button href="/settings/hours" variant="secondary" size="sm">
+                  Set your hours
+                </Button>
+              )}
+            >
+              You have not told us when you work, so nothing is hatched and no gap is
+              priced. The grid still draws every session.
+            </NoticeBar>
+          )}
+
+          {/*
+            AND THE THIRD CONDITION, WHICH WAS DRAWING NOTHING AT ALL.
+
+            MEASURED on `?d=2027-06-07`: a range with no sessions in it rendered
+            seven empty columns and no sentence anywhere on the screen. Not a
+            bug in any gate — the grid is correct, it is just that a correct
+            drawing of nothing looks identical to a screen that has failed to
+            load, and this one also has `In Person 0` and `Online 0` sitting in
+            the toolbar as two pressed lime chips saying nothing.
+
+            It is a bar and NOT an `EmptyState` for the reason `NoticeBar`'s own
+            file gives: the grid under it is still seven columns of bookable
+            track, and since §26.4 that track finally says so. Replacing it with
+            a centred illustration would remove the fastest way to book at the
+            exact moment booking is the only thing left to do here.
+
+            THE TWO CASES ARE DIFFERENT SENTENCES, which is the distinction
+            `EmptyState`'s three kinds exist to force and which a single "nothing
+            here" would lose. `grid.totals.sessions` is the count AFTER the mode
+            filters — `buildGrid` takes `modes` — and `counts` is taken from the
+            unfiltered list, so the two together say which of the two it is:
+
+              nothing booked   the range is genuinely empty. Offer the way in.
+              filtered out     there ARE sessions here and the chips are hiding
+                               them. Offering *New session* would be answering a
+                               question nobody asked; the way back is the chips,
+                               so the bar says what is hidden and how many.
+
+            A trainer who has un-ticked both chips and forgotten is otherwise
+            looking at an empty week in a book that is full.
+          */}
+          {grid.totals.sessions === 0 && (
+            hiddenByFilter > 0 ? (
+              <NoticeBar>
+                No sessions match the filters — {hiddenByFilter}{' '}
+                {hiddenByFilter === 1 ? 'session is' : 'sessions are'} hidden in this{' '}
+                {view}. Turn a filter back on to see {hiddenByFilter === 1 ? 'it' : 'them'}.
+              </NoticeBar>
+            ) : (
+              <NoticeBar
+                action={(
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => setBooking(defaultSlot(anchor, view, now))}
+                  >
+                    Book a session
+                  </Button>
+                )}
+              >
+                {/* The way in is different on the two arrangements and the
+                    sentence has to name the real one. *That time* is the hours
+                    track's promise — the click IS the minute — and a pivot cell
+                    is a whole day, where what the click names is the PERSON and
+                    the minute comes off their own rhythm. One sentence for both
+                    would be wrong on whichever is on the screen. */}
+                Nothing booked this {view}.{' '}
+                {pivoting
+                  ? <>Click a client&rsquo;s day to book them at their usual hour, or press <b>N</b>.</>
+                  : <>Click any empty slot on the grid to book at that time, or press <b>N</b>.</>}
+              </NoticeBar>
+            )
           )}
 
           {view === 'month' && month ? (
@@ -585,7 +959,36 @@ export function Schedule({ data }: { data: ScheduleData }) {
                   onGoToDay={(at) => goTo('day', at)}
                 />
               )}
+              {/*
+                THE PIVOT SITS INSIDE `.sch__tg`, WHICH IS NOT AN IMPLEMENTATION
+                DETAIL.
+
+                That wrapper is what the 900px rule hides, so putting this
+                arrangement inside it makes it stand down on a phone with the
+                grid it replaces — and `WeekPips`, which is drawn beside both, is
+                already a per-day summary a thumb can read. An 8-column table at
+                390px would be seven columns of about 38px, which is under the
+                target floor before a chip is drawn in one.
+
+                It REPLACES the grid rather than being a third mounted sibling:
+                the two are the same week and `useCwScale` measures its own
+                container, so leaving the grid mounted behind `display:none`
+                would have it fitting a track it is not being drawn in.
+              */}
               <div className="sch__tg">
+                {pivot ? (
+                  <ClientWeek
+                    pivot={pivot}
+                    /* The client, not just the id: the table has to know WHOSE
+                       row can take the placement, and a session's client is the
+                       one thing a move may never change. */
+                    moving={movingSession
+                      ? { sessionId: movingSession.id, clientId: movingSession.clientId }
+                      : null}
+                    onOpenSession={openSessionById}
+                    onCell={onCell}
+                  />
+                ) : (
                 <TimeGrid
                   grid={grid}
                   rates={rates}
@@ -593,6 +996,7 @@ export function Schedule({ data }: { data: ScheduleData }) {
                   now={now}
                   showGaps={showGaps}
                   lane={view === 'day'}
+                  hoursSet={hoursSet}
                   justMovedId={pending?.sessionId ?? null}
                   placing={Boolean(moving)}
                   onToggleBand={(from) =>
@@ -607,6 +1011,7 @@ export function Schedule({ data }: { data: ScheduleData }) {
                   onOpenDay={(at) => goTo('day', at)}
                   onBook={onSlot}
                 />
+                )}
               </div>
             </>
           )}
@@ -657,6 +1062,7 @@ export function Schedule({ data }: { data: ScheduleData }) {
             grid.days.find((d) => d.at === booking.dayAt)?.windows ?? []
           }
           rates={rates}
+          clientId={booking.clientId ?? null}
           onClose={() => setBooking(null)}
           onBooked={() => {
             setBooking(null);
@@ -665,13 +1071,6 @@ export function Schedule({ data }: { data: ScheduleData }) {
         />
       )}
 
-      <Palette
-        open={paletteOpen}
-        onClose={() => setPaletteOpen(false)}
-        clients={clients.map((c) => ({ id: c.id, name: c.name }))}
-        attention={[]}
-        today={live.filter((s) => startOfDay(s.at) === today)}
-      />
 
     </>
   );
@@ -742,27 +1141,3 @@ function UndoBar({
   );
 }
 
-/* ------------------------------------------------------------------ bits ── */
-
-/**
- * Where *New session* lands when it was not opened from a click on the grid.
- *
- * The next whole hour, on the anchor's own day — not 09:00, and not now. A form
- * that opens at 14:37 asks the trainer to fix a time they did not choose, and one
- * that opens at a fixed hour asks them to fix it every single time.
- */
-function defaultSlot(anchor: number, view: ScheduleView, now: number) {
-  const day = view === 'week' ? pickDay(anchor, now) : startOfDay(anchor);
-  const isToday = day === startOfDay(now);
-  const minute = isToday
-    ? Math.min(23 * 60, Math.ceil(minuteOfDay(now) / 60) * 60)
-    : 9 * 60;
-  return { dayAt: day, minute: Math.round(minute / SNAP_MINUTES) * SNAP_MINUTES };
-}
-
-/** Today if the week contains it, otherwise the Monday the trainer is looking at. */
-function pickDay(anchor: number, now: number) {
-  const start = gridStart('week', anchor);
-  const today = startOfDay(now);
-  return today >= start && today < start + 7 * DAY_MS ? today : start;
-}

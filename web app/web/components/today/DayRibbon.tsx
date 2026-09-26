@@ -6,10 +6,11 @@ import type { DayMoney, DayRibbon as Ribbon, Gap } from '@/lib/today/day';
 import { dayFooting, gapWorth, windowsLabel } from '@/lib/today/day';
 import type { DeckSession } from '@/lib/today/deck';
 import { MODE_LABELS } from '@/lib/today/mode';
-import {
-  avatarToken, dayLong, formatMinute, formatSpan, initials, minuteOfDay, rupees,
-} from '@/lib/today/time';
+import { dayLong, formatMinute, formatSpan, minuteOfDay, rupees } from '@/lib/today/time';
 import { NowMarker } from './Clock';
+import { Card } from '@/web-components/ui/Card';
+import { Tag } from '@/web-components/ui/Tag';
+import { Avatar } from '@/web-components/ui/Avatar';
 
 /**
  * THE DAY, TO SCALE. One minute is one pixel — OR WIDER, NEVER NARROWER.
@@ -105,13 +106,7 @@ function Block({ session, left, width }: { session: DeckSession; left: string; w
       href={`/sessions/${session.id}`}
       aria-label={`${session.clientName}, ${formatMinute(start)} to ${formatMinute(start + session.minutes)}, ${session.detail}, ${MODE_LABELS[session.mode].toLowerCase()}, ${state}`}
     >
-      <span
-        className="av av--sm"
-        style={{ background: `var(${avatarToken(session.clientId)})` }}
-        aria-hidden="true"
-      >
-        {initials(session.clientName)}
-      </span>
+      <Avatar name={session.clientName} id={session.clientId} size="sm" />
     </Link>
   );
 }
@@ -168,7 +163,7 @@ export function DayRibbon({
   const pct = (minutes: number) => `${(minutes / ribbon.span) * 100}%`;
 
   return (
-    <div className="card">
+    <Card>
       {/*
         `.card__hd--wrap`, and the reason is arithmetic rather than taste. This
         head carries a long date, two tags, the day's footing and two money
@@ -179,14 +174,7 @@ export function DayRibbon({
         figures want, since the head's left half says what the day IS and its
         right half says what it came to.
       */}
-      <div className="card__hd card__hd--wrap">
-        <h2 className="card__t">{dayLong(serverNow)}</h2>
-        <span className="tag">
-          {live.length} session{live.length === 1 ? '' : 's'}
-        </span>
-        {windows.length > 0 && <span className="tag tag--info">{windowsLabel(windows)}</span>}
-        <span className="card__acts">
-          {/*
+      <Card.Head title={<>{dayLong(serverNow)}</>} actions={<>{/*
             MONEY APPEARS TWICE ON THIS SCREEN, AT TWO SCOPES, AND EACH CARRIES
             ITS SCOPE IN ITS OWN LABEL. The DAY's figures sit here, beside the day
             they are about; the MONTH's sit in the third column with all four of
@@ -205,9 +193,14 @@ export function DayRibbon({
                 )}
               </>
             )}
-          </span>
-        </span>
-      </div>
+          </span></>} className="card__hd--wrap">
+        
+        <Tag>
+          {live.length} session{live.length === 1 ? '' : 's'}
+        </Tag>
+        {windows.length > 0 && <Tag tone="info">{windowsLabel(windows)}</Tag>}
+        
+      </Card.Head>
 
       {/*
         THE SCROLLER IS A CLASS NOW, AND IT SAYS THAT IT SCROLLS.
@@ -225,7 +218,7 @@ export function DayRibbon({
         out of ribbon must not become the browser's back gesture on the one screen
         a trainer swipes across while standing on a gym floor.
       */}
-      <div className="card__b dr__wrap">
+      <Card.Body className="dr__wrap">
         <div className="dr dr--fluid" style={{ minWidth: ribbon.span }}>
           {ribbon.windows.map((w, i) => (
             <div key={`w${i}`} className="dr__win" aria-hidden="true" style={{ left: pct(w.left), width: pct(w.width) }} />
@@ -307,7 +300,7 @@ export function DayRibbon({
             variant="chip"
           />
         </div>
-      </div>
+      </Card.Body>
 
       {/*
         Outside the scroller, so it does not scroll away from the thing it is
@@ -328,6 +321,6 @@ export function DayRibbon({
         Drawn to scale — {formatMinute(ribbon.fromMinute)} to {formatMinute(ribbon.toMinute)},
         every block as wide as it is long. Scroll sideways if the day runs past the edge.
       </p>
-    </div>
+    </Card>
   );
 }

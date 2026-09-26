@@ -2,7 +2,7 @@ import { Today } from '@/components/today/Today';
 import { Unavailable } from '@/components/today/Unavailable';
 import { requireToday } from '@/lib/today/guard';
 
-export const metadata = { title: 'Today · X REP' };
+export const metadata = { title: 'Today · InclineYou' };
 
 /**
  * Frames 1a–1d of `webapp-dashboard.html`, which are four STATES of one route

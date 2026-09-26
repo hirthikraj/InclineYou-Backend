@@ -6,11 +6,13 @@ import { useState } from 'react';
 /* The auth folder holds the glyph set for this whole document — `webapp-auth.html`
    is one file covering sign-in (§04–§08) and setup (§09–§11), so the icons are
    in one place rather than copied into a second. */
-import { BrandMark, IconCheck, IconChevronDown } from '@/components/auth/Icons';
+import { IconCheck, IconChevronDown } from '@/components/auth/Icons';
+import { Logo } from '@/web-components/ui/Logo';
 import { RAIL_FOOT } from '@/lib/setup/copy';
 import {
   CERTIFICATIONS,
   EXPERIENCE_BANDS,
+  GENDERS,
   LANGUAGES,
   SPECIALITIES,
   labelFor,
@@ -21,13 +23,14 @@ import {
   STEP_HINTS,
   STEP_LABELS,
   isAnswered,
-  isOptional,
+  isRequired,
   isSettled,
   settledCount,
   stepHref,
   type SetupState,
   type SetupStep,
 } from '@/lib/setup/steps';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * The rail — frames 4a, 4b, 5a–5e — and the bar it becomes on a phone.
@@ -69,21 +72,7 @@ export function Rail({ current, state }: { current: SetupStep | null; state: Set
 
   return (
     <div className="stp__l">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-        <span className="rail__mark" style={{ width: 30, height: 30 }}>
-          <BrandMark />
-        </span>
-        <span
-          style={{
-            fontFamily: 'var(--tx-brand)',
-            fontWeight: 800,
-            fontSize: 16,
-            letterSpacing: '-.02em',
-          }}
-        >
-          X&nbsp;REP
-        </span>
-      </div>
+      <Logo cap={18} />
 
       {/* The bar. In the markup at every width and shown only under 900px — see
           the class comment. */}
@@ -92,16 +81,16 @@ export function Rail({ current, state }: { current: SetupStep | null; state: Set
           <span className="micro">
             {current ? `STEP ${index + 1} OF ${SETUP_STEPS.length}` : 'SETTING UP'}
           </span>
-          <button
-            className="btn btn--sm btn--ghost"
-            type="button"
+          <Button
+            variant="ghost"
+            size="sm"
             aria-expanded={open}
             aria-controls="stp-record"
             onClick={() => setOpen((v) => !v)}
           >
             {open ? 'Hide steps' : 'All steps'}
             <IconChevronDown size={13} />
-          </button>
+          </Button>
         </div>
         <p className="stp__mobt">
           {current ? (
@@ -129,7 +118,12 @@ export function Rail({ current, state }: { current: SetupStep | null; state: Set
 
       {/* The record: the rail on a desk, a disclosure panel on a phone. */}
       <div className="stp__rec" id="stp-record" data-open={open}>
-        <p className="micro stp__cnt" style={{ margin: '26px 0 10px' }}>
+        {/* No inline margin. It was `26px 0 10px`, and those 26px were the last
+            6 pixels standing between the eight-row record and a rail that fits
+            without scrolling on a 1366×768 laptop — a number worth having in
+            the stylesheet next to the row height it has to agree with, rather
+            than in a style attribute that no rule can see. See `.stp__cnt`. */}
+        <p className="micro stp__cnt">
           SETTING UP · STEP {index >= 0 ? index + 1 : 1} OF {SETUP_STEPS.length}
         </p>
 
@@ -194,9 +188,16 @@ function RailRow({
           <span className="wiz__s">{STEP_HINTS[step]}</span>
         )}
       </span>
-      {/* Marked optional BEFORE the step is reached, not on arrival. The
-          most-named onboarding complaint in the teardown was surprise. */}
-      {isOptional(step) ? <span className="wiz__opt">optional</span> : null}
+      {/* Marked BEFORE the step is reached, not on arrival — the most-named
+          onboarding complaint in the teardown was surprise.
+
+          It marks the REQUIRED step now, not the optional ones, and the switch
+          is the same rule pointed the other way. When four of eight were
+          optional the marker carried information on half the rows; with seven
+          of eight optional it would sit on seven, which is furniture rather
+          than a marker, and the one row a trainer actually has to notice would
+          be the only one with nothing on it. See `.wiz__req` in §10. */}
+      {isRequired(step) ? <span className="wiz__req">required</span> : null}
     </Link>
   );
 }
@@ -213,7 +214,12 @@ function answerFor(step: SetupStep, state: SetupState): string {
 
   switch (step) {
     case 'name':
-      return state.name;
+      /* Both halves, because both are what settled the row. A rail that showed
+         only the name would be a record of half an answer on the one step that
+         refuses to accept half an answer. `undisclosed` is printed as given:
+         this is the trainer's own record of what they said, not the card a
+         client reads — `NameForm`'s preview is the one that stays quiet. */
+      return state.gender ? `${state.name} · ${labelFor(state.gender, GENDERS)}` : state.name;
     case 'experience':
       return state.experience ? labelFor(state.experience, EXPERIENCE_BANDS) : '';
     case 'specialities':

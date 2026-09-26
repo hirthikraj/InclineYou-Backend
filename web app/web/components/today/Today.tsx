@@ -1,22 +1,25 @@
 'use client';
 
 import { useCallback, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import type { TodayData } from '@/lib/today/api';
 import { dayMoney, findClash, findGaps, windowsFor } from '@/lib/today/day';
 import { sessions } from '@/lib/today/copy';
-import { dayLong, dayStamp, minuteOfDay } from '@/lib/today/time';
+import { dayLong, dayStamp, minuteOfDay, startOfDay } from '@/lib/today/time';
+import { defaultSlot } from '@/lib/schedule/book';
+import { SNAP_MINUTES } from '@/lib/schedule/result';
+import { BookPanel } from '@/components/schedule/BookPanel';
 import { TopBar } from '@/components/shell/TopBar';
 import { Calendar, Plus } from '@/components/shell/Icons';
 import { AttentionQueue } from './AttentionQueue';
 import { useHeartbeat, useNow } from './Clock';
 import { FirstRun } from './FirstRun';
 import { Hero } from './Hero';
-import { Palette, usePaletteKey } from './Palette';
+import { usePaletteRows } from '@/components/shell/PaletteHost';
 import { Glance, PhoneStack, TodayList } from './PhoneStack';
 import { LastContactProvider } from '@/components/nudge/LastContact';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * THREE BLOCKS, IN THE ORDER OF WHAT IT COSTS TO IGNORE THEM.
@@ -79,14 +82,58 @@ import { LastContactProvider } from '@/components/nudge/LastContact';
  */
 export function Today({ data }: { data: TodayData }) {
   const router = useRouter();
-  const { deck, trainer, hours, rates, renewTerms, openLogs, now: serverNow } = data;
+  const { deck, trainer, hours, rates, book, renewTerms, openLogs, now: serverNow } = data;
 
   const now = useNow(serverNow);
   const refresh = useCallback(() => router.refresh(), [router]);
   useHeartbeat(refresh);
 
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  usePaletteKey(useCallback(() => setPaletteOpen(true), []));
+  /*
+   * ── BOOKING HAPPENS HERE NOW, NOT ON THE SCHEDULE ──────────────────────────
+   *
+   * *New session* was a `<Link>` to `/schedule?new=1`. It worked — `Schedule.tsx`
+   * reads that parameter and opens `BookPanel` on the same default slot — but the
+   * route it took to get there was the whole cost: a page transition, a week grid
+   * fetched and drawn, and then a panel over the top of it, to book an hour on
+   * the day the trainer was already looking at. Every one of those is a thing
+   * they then have to come back from, and coming back is a second navigation
+   * that loses the queue's scroll position.
+   *
+   * The panel is the same component and books through the same server action, so
+   * this is not a second booking form — it is the one form, opened where the verb
+   * was pressed. What is deliberately NOT copied over is the grid: this screen
+   * has no slots to click, so the day is always today and the time is a field in
+   * the form. `defaultSlot` supplies the same next-whole-hour the schedule's own
+   * + does, from `lib/schedule/book.ts` so the two cannot drift.
+   *
+   * `/schedule?new=1` still works and still has three callers — the bar's add
+   * sheet, the roster's empty state, and anybody's bookmark. Nothing about this
+   * screen's shortcut takes that route away; it only stops being the way to book
+   * from the screen that already knows which day is meant.
+   */
+  const [booking, setBooking] = useState<{ dayAt: number; minute: number } | null>(null);
+
+  /** The next whole hour today — the schedule's own rule, on today's midnight. */
+  const openBooking = useCallback(
+    () => setBooking(defaultSlot(startOfDay(now), 'day', now)),
+    [now],
+  );
+
+  /* The hero's sellable-gap chip means a particular hour rather than the next
+     one, so it names the minute. Snapped for the same reason `?book=` was. */
+  const openBookingAt = useCallback(
+    (minute: number) => setBooking({
+      dayAt: startOfDay(now),
+      minute: Math.round(minute / SNAP_MINUTES) * SNAP_MINUTES,
+    }),
+    [now],
+  );
+
+  /* The palette is the shell's now — mounted once for every screen instead of
+     by whichever screen remembered to. Today still hands up the rows only Today
+     has, which is what makes ⌘K here offer *Renew Rohan's pack* and not just a
+     list of names. See `PaletteHost`. */
+  usePaletteRows({ clients: deck.roster, attention: deck.attention, today: deck.today });
 
   // The day's shape. Derived from the SERVER's instant for the parts that must
   // not move — the day's extent and its gaps are facts about the day, not about
@@ -131,23 +178,27 @@ export function Today({ data }: { data: TodayData }) {
 
   return (
     <LastContactProvider map={data.lastContact} now={data.now}>
-      <TopBar crumb="Today" onSearch={() => setPaletteOpen(true)} />
+      <TopBar crumb="Today" />
 
       <main className="main" id="main-content">
         {/*
           `.ph--today` IS A SCOPE, NOT A STYLE.
 
-          Under 900px this header keeps only its subtitle: the date stands down
-          and both verbs go with it, because the bar now says both — *The week* is
-          the Schedule tab and *New session* is the +. `/schedule` uses the same
-          `.ph` and must NOT inherit that, since its own secondary is a link into
-          Settings that nothing else on the screen reaches. app.css carries the
-          argument under *the page header on a phone*.
+          Under 900px this header draws NOTHING and its padding goes to zero: the
+          date stands down, both verbs go with it because the bar now says both —
+          *The week* is the Schedule tab and *New session* is the + — and the
+          subtitle goes too, because the hero card directly under it opens with the
+          same client, the same status and the same tally in type a reader can
+          actually use. `/schedule` uses the same `.ph` and must NOT inherit any of
+          it, since its own secondary is a link into Settings that nothing else on
+          the screen reaches. app.css carries the argument under *the page header
+          on a phone*.
 
-          The h1 and the two links are still RENDERED at every width. CSS decides
-          which are drawn — the shell's rule on this half, and here it also keeps
-          the document's heading outline intact on a phone: the date remains in the
-          accessibility tree exactly as the schedule's title does.
+          The h1, the subtitle and the two links are still RENDERED at every width.
+          CSS decides which are drawn — the shell's rule on this half, and here it
+          also keeps the document's heading outline intact on a phone: the date is
+          clipped rather than dropped and remains in the accessibility tree exactly
+          as the schedule's title does.
         */}
         <div className="ph ph--today">
           <div className="ph__row">
@@ -172,14 +223,17 @@ export function Today({ data }: { data: TodayData }) {
                 the note on `.ph--today` above. */}
             {!deck.firstRun && (
               <div className="ph__acts ph__acts--pair">
-                <Link className="btn btn--secondary" href="/schedule">
+                <Button href="/schedule" variant="secondary">
                   <Calendar size={15} />
                   The week
-                </Link>
-                <Link className="btn btn--primary" href="/schedule?new=1">
+                </Button>
+                {/* A button, not a link — see the note in the body. The panel
+                    opens over this screen instead of over a week grid two
+                    navigations away. */}
+                <Button variant="primary" onClick={openBooking}>
                   <Plus size={15} />
                   New session
-                </Link>
+                </Button>
               </div>
             )}
           </div>
@@ -203,14 +257,13 @@ export function Today({ data }: { data: TodayData }) {
                 gymName={trainer.gymName}
                 clash={clash}
                 hasAnyHours={hours.length > 0}
+                onBook={openBookingAt}
               />
 
               {/* …and below it, the rest of the day as compact rows. One
                   component at every width, where the ribbon and the phone's own
                   list used to be two. */}
-              <div className="today__row">
-                <TodayList deck={deck} heroIds={heroIds} />
-              </div>
+              <TodayList deck={deck} heroIds={heroIds} />
 
               {/*
                 BLOCK 2 — the ranked queue, full width.
@@ -229,8 +282,7 @@ export function Today({ data }: { data: TodayData }) {
                 and the four columns have room to spare at every width above the
                 620px reflow.
               */}
-              <div className="today__row">
-                <AttentionQueue
+              <AttentionQueue
                   items={deck.attention}
                   silenced={deck.silenced}
                   renewTerms={renewTerms}
@@ -238,14 +290,11 @@ export function Today({ data }: { data: TodayData }) {
                   todayCount={deck.today.length}
                   now={now}
                 />
-              </div>
 
               {/* BLOCK 3 — three numbers, no more. At the FOOT, after the work:
                   they are what a trainer checks once the list is clear, not the
                   thing that greets them. */}
-              <div className="today__row">
-                <Glance deck={deck} />
-              </div>
+              <Glance deck={deck} />
 
               {/* What happened — the one module that is still phone-only, and the
                   reason is in `PhoneStack`: a desk has `/reports` in the rail. */}
@@ -256,16 +305,30 @@ export function Today({ data }: { data: TodayData }) {
         </div>
       </main>
 
-      {/* Mounted only while open, so every ⌘K starts from a blank field rather
-          than the last search — see the note in Palette.tsx about why that is a
-          mounting decision and not a reset effect. */}
-      {paletteOpen && (
-        <Palette
-          open
-          onClose={() => setPaletteOpen(false)}
-          clients={deck.roster}
-          attention={deck.attention}
-          today={deck.today}
+      {/*
+        THE SAME PANEL THE SCHEDULE DRAWS, AND IN THE SAME PLACE IN THE TREE —
+        a sibling of `<main>`, because `.panel` is `position:absolute` against the
+        shell and would be clipped by the body's own scroller otherwise.
+
+        `windows` is today's merged working hours, which is the right list at
+        every width: this screen can only ever book today, so there is no other
+        day's hours to be wrong about. Under 900px `.sch__panel` turns it into a
+        bottom sheet — that rule is keyed on the class and not on the route, so it
+        applies here unchanged.
+      */}
+      {booking && (
+        <BookPanel
+          dayAt={booking.dayAt}
+          minute={booking.minute}
+          clients={book.clients}
+          sessions={book.sessions}
+          windows={windows}
+          rates={rates}
+          onClose={() => setBooking(null)}
+          onBooked={() => {
+            setBooking(null);
+            refresh();
+          }}
         />
       )}
     </LastContactProvider>

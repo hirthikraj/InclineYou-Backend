@@ -5,6 +5,9 @@ import { useState } from 'react';
 import { NudgeButton } from '@/components/nudge/NudgeButton';
 import { contactedLabel } from '@/lib/nudges/cooldown';
 import type { NudgeLogEntry, NudgeTemplateName } from '@/lib/nudges/types';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
+import { Tag } from '@/web-components/ui/Tag';
 
 /**
  * FOLLOW-UPS — what has been sent to this client, and one way to send the next.
@@ -77,86 +80,81 @@ export function FollowUps({
   const last = entries[0] ?? null;
 
   return (
-    <div className="card mt3">
-      <div className="card__hd">
-        <h2 className="card__t">Follow-ups</h2>
-        {last && <span className="tag">Last {contactedLabel(last.sentAt, now)}</span>}
-        <span className="card__acts">
-          <button
-            className="btn btn--sm btn--secondary"
-            type="button"
+    <Card
+      title="Follow-ups"
+      aside={<>{last && <Tag>Last {contactedLabel(last.sentAt, now)}</Tag>}</>}
+      actions={<><Button
+            variant="secondary"
+            size="sm"
             aria-expanded={open}
             onClick={() => setOpen((v) => !v)}
           >
             {open ? 'Close' : 'Send a message'}
-          </button>
-        </span>
-      </div>
-
-      <div className="card__b">
-        {open && (
-          <div className="fup__pick">
-            {OFFERED.map((row) => (
-              <div className="fup__opt" key={row.template}>
-                <span className="fup__optl">
-                  <b>{row.label}</b>
-                  <span className="small">{row.hint}</span>
-                </span>
-                <NudgeButton
-                  clientId={clientId}
-                  clientName={clientName}
-                  template={row.template}
-                  label="Draft"
-                  className="btn btn--sm btn--secondary"
-                  showContactedNote={false}
-                />
-              </div>
-            ))}
-            <p className="small" style={{ marginTop: 10, color: 'var(--tx-ink-3)' }}>
-              Every one of these opens your own WhatsApp with the message typed in — nothing
-              is sent until you press send there. The wording is yours to change in{' '}
-              <a href="/settings/nudges">Settings → Nudge messages</a>.
-            </p>
-          </div>
-        )}
-
-        {entries.length === 0 ? (
-          <p className="small" style={{ color: 'var(--tx-ink-3)' }}>
-            Nothing has been sent to {clientName.split(' ')[0]} from InclineYou yet.
+          </Button></>}
+      className="mt3 cffup"
+    >
+      {open && (
+        <div className="fup__pick">
+          {OFFERED.map((row) => (
+            <div className="fup__opt" key={row.template}>
+              <span className="fup__optl">
+                <b>{row.label}</b>
+                <span className="small">{row.hint}</span>
+              </span>
+              <NudgeButton
+                clientId={clientId}
+                clientName={clientName}
+                template={row.template}
+                label="Draft"
+                className="btn btn--sm btn--secondary"
+                showContactedNote={false}
+              />
+            </div>
+          ))}
+          <p className="small" style={{ marginTop: 10, color: 'var(--tx-ink-3)' }}>
+            Every one of these opens your own WhatsApp with the message typed in — nothing
+            is sent until you press send there. The wording is yours to change in{' '}
+            <a href="/settings/nudges">Settings → Nudge messages</a>.
           </p>
-        ) : (
-          <ol className="fup">
-            {entries.slice(0, 12).map((entry) => (
-              <li className="fup__row" key={entry.id}>
-                <span className="fup__when">{contactedLabel(entry.sentAt, now)}</span>
-                <span className="fup__body">
-                  <b>{entry.templateLabel}</b>
-                  {/*
-                    `message` is null on every row written before V32 added the
-                    column, and it is left as an absence rather than re-rendered
-                    from the template. The wording belongs to the trainer now, so
-                    re-rendering March's reminder in August's words would put a
-                    sentence in the history that was never sent.
-                  */}
-                  {entry.message ? (
-                    <span className="fup__msg">{entry.message}</span>
-                  ) : (
-                    <span className="fup__msg ink3">
-                      Sent before InclineYou started keeping the wording.
-                    </span>
-                  )}
-                </span>
-              </li>
-            ))}
-          </ol>
-        )}
+        </div>
+      )}
 
-        {entries.length > 12 && (
-          <p className="small" style={{ marginTop: 8, color: 'var(--tx-ink-3)' }}>
-            {entries.length - 12} more in the last year.
-          </p>
-        )}
-      </div>
-    </div>
+      {entries.length === 0 ? (
+        <p className="small" style={{ color: 'var(--tx-ink-3)' }}>
+          Nothing has been sent to {clientName.split(' ')[0]} from InclineYou yet.
+        </p>
+      ) : (
+        <ol className="fup">
+          {entries.slice(0, 12).map((entry) => (
+            <li className="fup__row" key={entry.id}>
+              <span className="fup__when">{contactedLabel(entry.sentAt, now)}</span>
+              <span className="fup__body">
+                <b>{entry.templateLabel}</b>
+                {/*
+                  `message` is null on every row written before V32 added the
+                  column, and it is left as an absence rather than re-rendered
+                  from the template. The wording belongs to the trainer now, so
+                  re-rendering March's reminder in August's words would put a
+                  sentence in the history that was never sent.
+                */}
+                {entry.message ? (
+                  <span className="fup__msg">{entry.message}</span>
+                ) : (
+                  <span className="fup__msg ink3">
+                    Sent before InclineYou started keeping the wording.
+                  </span>
+                )}
+              </span>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {entries.length > 12 && (
+        <p className="small" style={{ marginTop: 8, color: 'var(--tx-ink-3)' }}>
+          {entries.length - 12} more in the last year.
+        </p>
+      )}
+    </Card>
   );
 }

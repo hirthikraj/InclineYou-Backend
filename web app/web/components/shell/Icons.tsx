@@ -54,6 +54,30 @@ export const Calendar = ({ size }: IconProps) => (
 );
 
 /**
+ * Three bars on an axis — the CLIENT portal's *Progress*.
+ *
+ * Copied verbatim from `webapp-client-portal.html`'s own rail, which is this
+ * file's rule: the design set drew the client role's four rows, and its second
+ * glyph is this one. It is the only icon here that comes from that frame rather
+ * than from `gen_rail.py`, because it is the only destination the trainer's five
+ * do not have — `Grid` is *Programs*, the top page of *Fitness*, which is what a
+ * trainer BUILDS, and this is what a client has ACHIEVED.
+ *
+ * The rects inherit `fill:none` from `STROKE`, so they draw as outlines rather
+ * than as a filled chart. That is the frame's own rendering and it is also §01's
+ * rule holding: a filled bar here would be a lime FILL on a nav row, where every
+ * other glyph in the rail is a 1.6px stroke.
+ */
+export const Chart = ({ size }: IconProps) => (
+  <Glyph size={size}>
+    <path d="M4 20V4M4 20h16" />
+    <rect x="7.5" y="12" width="3" height="5" />
+    <rect x="12.5" y="8.5" width="3" height="8.5" />
+    <rect x="17" y="6" width="3" height="11" />
+  </Glyph>
+);
+
+/**
  * One person — the account menu's *Your profile* row.
  *
  * Deliberately not `Users`, which is the roster's icon and means *the people you
@@ -170,7 +194,51 @@ export const UserAdd = ({ size }: IconProps) => (
 );
 export const Check = ({ size }: IconProps) => <Glyph size={size} d="M4.5 12.5l5 5 10-11" />;
 export const Chevron = ({ size }: IconProps) => <Glyph size={size} d="M9 6l6 6-6 6" />;
+/* `Chevron` mirrored, for the top bar's back link. A rotated `Chevron` would
+   have done the same job and is the wrong tool for the same reason
+   `ChevronDown` is its own export rather than a flipped `ChevronUp`: the four
+   directions are four glyphs in this set, and a transform on an inline SVG
+   inside a flex line moves its optical centre off the text baseline. */
+export const ChevronLeft = ({ size }: IconProps) => <Glyph size={size} d="M15 6l-6 6 6 6" />;
 export const ChevronUp = ({ size }: IconProps) => <Glyph size={size} d="M6 15l6-6 6 6" />;
+/* The switcher's caret. `ChevronUp` mirrored: the account menu opens UPWARD out
+   of the rail's foot, the workspace menu opens DOWN out of the top bar, and a
+   caret that points the wrong way is a small lie about where the panel will be. */
+export const ChevronDown = ({ size }: IconProps) => <Glyph size={size} d="M6 9l6 6 6-6" />;
+
+/**
+ * The default workspace's mark.
+ *
+ * A STAR rather than this file's own `Pin`, and the collision is the reason: the
+ * rail already calls today's sessions *pins*, so a pin in the workspace menu
+ * would be the same glyph meaning two unrelated things in one shell. A star is
+ * the convention every product uses for *this is the one*, and it reads at 15px,
+ * which a house glyph does not.
+ *
+ * `filled` is the state and it is the whole affordance — outline is *make this
+ * the default*, solid is *this IS the default*. The fill is written on the path
+ * rather than on the svg because `Glyph`'s shared stroke object sets `fill:none`
+ * for every icon in this table, and a child's own attribute is what beats it.
+ */
+export const Star = ({ size, filled = false }: IconProps & { filled?: boolean }) => (
+  <Glyph size={size}>
+    <path
+      d="M12 3.9l2.55 5.17 5.7.83-4.12 4.02.97 5.68L12 16.9l-5.1 2.7.97-5.68L3.75 9.9l5.7-.83Z"
+      fill={filled ? 'currentColor' : 'none'}
+    />
+  </Glyph>
+);
+
+/** The gym. A building with a door — the one workspace kind that is a PLACE
+ *  rather than a person or a group of them. */
+export const Building = ({ size }: IconProps) => (
+  <Glyph size={size}>
+    <path d="M4 21V6.2l8-3.2 8 3.2V21" />
+    <path d="M2.5 21h19" />
+    <path d="M10 21v-4.5h4V21" />
+    <path d="M8.4 9.4h1.2M14.4 9.4h1.2M8.4 13h1.2M14.4 13h1.2" />
+  </Glyph>
+);
 export const Panel = ({ size }: IconProps) => (
   <Glyph size={size}>
     <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
@@ -249,6 +317,41 @@ export const Pin = ({ size }: IconProps) => (
 );
 
 /**
+ * A THUMBTACK — *keep this one in front of me*.
+ *
+ * ── IT IS A SECOND PIN, AND THAT IS THE POINT ───────────────────────────────
+ *
+ * `Pin` above is a MAP pin: a teardrop with a hole in it, drawn for the Today
+ * hero's *where is this* chip, and it is right there. It was also what the
+ * client file drew beside a pinned note and what `PinnedStrip` drew in its
+ * header — so the one gesture the strip exists for was signed with a location
+ * marker. FOUND BY RENDERING the notes tab at 1:1: at 14px the teardrop reads
+ * as a map drop and nothing else, and a trainer looking for *pin this* has to
+ * be told by the tooltip.
+ *
+ * The two are kept apart rather than one renamed, because they are two
+ * different words that happen to share a spelling. `Pin` means *a place*;
+ * this means *stuck to the top*. `Star`'s note above settled the same
+ * question the other way round — there, one glyph could not mean two things,
+ * and here two glyphs must not be collapsed into one.
+ *
+ * `filled` follows `Star`'s grammar exactly, and for the same reason: the
+ * resting control is *pin this* and the pressed one is *this IS pinned*, which
+ * is a state a `aria-pressed` alone does not draw. The fill is written on the
+ * path, not the svg, because `Glyph`'s shared stroke object sets `fill:none`
+ * for every icon in this table.
+ */
+export const Tack = ({ size, filled = false }: IconProps & { filled?: boolean }) => (
+  <Glyph size={size}>
+    <path
+      d="M9 3.5h6l-.8 5.1 3 2.6v1.6H6.8v-1.6l3-2.6L9 3.5Z"
+      fill={filled ? 'currentColor' : 'none'}
+    />
+    <path d="M12 12.8V20.5" />
+  </Glyph>
+);
+
+/**
  * A page with lines on it — *there is something written here*.
  *
  * Deliberately the plainest possible glyph. Anything more specific would start to
@@ -259,6 +362,23 @@ export const Note = ({ size }: IconProps) => (
   <Glyph size={size}>
     <path d="M6 3.5h8.5L19 8v12.5H6V3.5Z" />
     <path d="M14 3.5V8h5M9 12.5h6M9 16h4" />
+  </Glyph>
+);
+
+/**
+ * A TAPE MEASURE, for Assessments.
+ *
+ * A ruler laid on the diagonal with its ticks on the inside edge. Not a
+ * clipboard, which is the obvious glyph for a form and is wrong here: the thing
+ * a trainer opens this screen to do is put a tape round somebody, and a
+ * clipboard would be the second icon in this set to mean *a page with writing
+ * on it* — `Note` already does, and its own docstring says it is deliberately
+ * the plainest possible one.
+ */
+export const Ruler = ({ size }: IconProps) => (
+  <Glyph size={size}>
+    <path d="M3.4 9.6 9.6 3.4 20.6 14.4 14.4 20.6Z" />
+    <path d="M7.6 7.4 9.3 9.1M10.4 4.6l1.7 1.7M11.4 11.2l1.7 1.7M8.6 14l1.7 1.7" />
   </Glyph>
 );
 
@@ -285,27 +405,32 @@ export const Out = ({ size }: IconProps) => (
   </Glyph>
 );
 
+/* `Mark` — the barbell over a figure — is GONE, and with it the last copy of
+   the old brand's artwork in the application. It was hard-coded to `#0A0B0D`
+   because it could only ever sit on the lime `.rail__mark` plate; the new mark
+   takes the ink of wherever it is put, which is why the rail no longer needs a
+   coloured chip behind it at all. See `web-components/ui/Logo.tsx`, transcribed
+   from `identity.html`. */
+
 /**
- * The wordmark. A barbell over a figure — the same 100×100 artwork the design set
- * inlines, in `#0A0B0D` because it always sits on the lime `.rail__mark` plate
- * and the mark is a FILL. That is the stylesheet's opening rule and the reason
- * this is not `currentColor`: inheriting ink here would put the mark's own colour
- * on lime and break it in the light theme.
+ * PACKAGES — three cards in a stack, seen from the side.
+ *
+ * The second glyph in this file that is not from the design set, and it arrived
+ * for the same reason `Wallet` did: the set draws packages as a TAB of the money
+ * screen, and this half gave them a page in the Business pane, which needs a
+ * row icon the set never had to draw.
+ *
+ * Not `Wallet` — which this file's own docstring calls the packages glyph —
+ * because `Wallet` is the Business rail row two inches to the left, and a pane
+ * row repeating the icon of the section it is inside says *you are here* about
+ * the wrong thing. Not `Note` either: the price list is a set of OFFERS, not a
+ * document, and `Note` is already spoken for by GST, which genuinely is a form.
+ *
+ * Same 24-box and same 1.6 stroke as the other eleven.
  */
-export function Mark({ size = 17 }: IconProps) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" aria-hidden="true">
-      <rect x="4" y="16" width="92" height="8" rx="3" fill="#0A0B0D" />
-      <rect x="4" y="13" width="7" height="14" fill="#0A0B0D" />
-      <rect x="89" y="13" width="7" height="14" fill="#0A0B0D" />
-      <rect x="16" y="7" width="10" height="26" fill="#0A0B0D" />
-      <rect x="74" y="7" width="10" height="26" fill="#0A0B0D" />
-      <path d="M28 93 C28 60 72 60 72 93" stroke="#0A0B0D" strokeWidth="11" />
-      <circle cx="50" cy="35" r="9" fill="#0A0B0D" />
-      <g stroke="#0A0B0D" strokeWidth="11">
-        <path d="M50 43 L50 64" />
-        <path d="M33 22 C34 56 66 56 67 22" />
-      </g>
-    </svg>
-  );
-}
+export const Stack = ({ size }: IconProps) => (
+  <Glyph size={size}>
+    <rect x="3.5" y="12.5" width="17" height="7" rx="2" />
+    <path d="M6 9.5h12M8.5 6.5h7" />
+  </Glyph>
+);

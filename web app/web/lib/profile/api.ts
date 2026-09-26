@@ -1,5 +1,7 @@
 import 'server-only';
 
+import { cache } from 'react';
+
 import { getToken } from '@/lib/auth/session';
 
 /**
@@ -280,9 +282,24 @@ function toIdentity(t: TrainerWire): Identity {
   };
 }
 
-export async function getIdentity(): Promise<Identity> {
+/**
+ * The whole trainer, for whichever profile tab is open.
+ *
+ * `cache()`d, and that is not a performance nicety — it is what makes the
+ * preview card affordable. `/settings/profile/layout.tsx` draws the card on all
+ * seven tabs and therefore needs the profile, and the page under it needs the
+ * same profile to draw its panel. React's per-render memo means those are one
+ * `/v1/trainers/me` and not two; without it, moving the card up into the layout
+ * would have doubled every profile page's wire cost to fetch something the page
+ * already had in hand.
+ *
+ * It is a memo for ONE render pass and nothing more: `request` still sends
+ * `cache:'no-store'`, so a second navigation reads the server again and a save
+ * on one tab is visible on the next.
+ */
+export const getIdentity = cache(async function getIdentity(): Promise<Identity> {
   return toIdentity(await request<TrainerWire>('/v1/trainers/me'));
-}
+});
 
 /**
  * The trainer's working week.

@@ -6,7 +6,7 @@ import { loadRosters } from '@/lib/auth/actions';
 import { readClaims } from '@/lib/auth/claims';
 import { getToken } from '@/lib/auth/session';
 
-export const metadata = { title: 'Whose book · X REP' };
+export const metadata = { title: 'Whose book · InclineYou' };
 
 /**
  * Frame 2a · `/sign-in/role`.
@@ -65,7 +65,11 @@ export default async function Page() {
   if (rosters.memberships.length === 1) redirect('/me/today');
 
   return (
-    <AuthShell quote="One number, two trainers. Both books are yours and neither can see the other.">
+    <AuthShell
+      eyebrow="Two trainers"
+      lead="Both books are yours."
+      quote="You train with more than one trainer, and neither of them can see the other’s."
+    >
       <RosterPicker memberships={rosters.memberships} name={rosters.name} />
     </AuthShell>
   );

@@ -20,6 +20,8 @@ import java.util.*;
 public class ScheduledSessionService {
 
     private final NamedParameterJdbcTemplate jdbc;
+    /** V18 · facts for the client's bell, gated by their own switches. */
+    private final com.inclineyou.inclineyou_backend.notification.ClientNotificationService clientBell;
 
     // ── DTOs ──────────────────────────────────────────────────────────────────
 
@@ -167,6 +169,11 @@ public class ScheduledSessionService {
                     :durationMinutes, :notes, :dayLabel, :templateDay, :deliveryMode, :now, :now)
                 """, p);
 
+        // V18 · a session booked for the future is news to the client; one logged after the fact is not.
+        if (scheduledAt.toInstant().isAfter(now)) {
+            clientBell.mint(req.clientId(), "session", null, scheduledAt.toInstant(), "booked");
+        }
+
         return new SessionResponse(id.toString(), req.clientId(), req.programId(),
                 req.scheduledAt(), req.durationMinutes(), "scheduled", req.notes(),
                 req.dayLabel(), req.templateDay(), deliveryMode(req.deliveryMode()),
@@ -195,6 +202,21 @@ public class ScheduledSessionService {
         if (req.scheduledAt() != null) {
             p.put("scheduledAt", Timestamp.from(Instant.ofEpochMilli(req.scheduledAt())));
             setClauses.add("scheduled_at = :scheduledAt");
+            /*
+             * A MOVED SESSION IS NO LONGER THE RHYTHM · V3.
+             *
+             * `DiaryService` may delete and re-lay the rows it wrote from the
+             * client's standing week. A trainer who has deliberately dragged
+             * Thursday's 6am to 7pm must not have that undone the next time
+             * anything else about the client changes — the next pack sold, the
+             * next plan assigned, a fourth training day added. The move is what
+             * makes the session theirs rather than the pattern's.
+             *
+             * Only on a MOVE. A status flip, a note, a duration change and a
+             * delivery-mode switch all leave the row on its standing slot, so it
+             * stays the rhythm's and stays maintained by it.
+             */
+            setClauses.add("from_schedule = FALSE");
         }
         if (req.durationMinutes() != null) { p.put("durationMinutes", req.durationMinutes()); setClauses.add("duration_minutes = :durationMinutes"); }
         if (req.status() != null)          { p.put("status",           req.status());          setClauses.add("status = :status"); }
@@ -224,6 +246,16 @@ public class ScheduledSessionService {
 
         jdbc.update("UPDATE scheduled_session SET " + String.join(", ", setClauses) +
                 " WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL", p);
+
+        /* V18 · the two changes a client needs to hear about: the slot moved, or
+           it was called off. A note, a duration or a status marked after the
+           fact is the trainer's bookkeeping, not the client's news. */
+        Instant was = current.get("scheduled_at") instanceof Timestamp ts ? ts.toInstant() : null;
+        if (req.scheduledAt() != null && (was == null || was.toEpochMilli() != req.scheduledAt())) {
+            clientBell.mint(str(current.get("client_id")), "session", null, Instant.ofEpochMilli(req.scheduledAt()), "moved");
+        } else if ("cancelled".equals(req.status()) && !"cancelled".equals(str(current.get("status")))) {
+            clientBell.mint(str(current.get("client_id")), "session", null, was, "cancelled");
+        }
 
         return toResponse(findOwned(id, trainerId));
     }
@@ -364,7 +396,12 @@ public class ScheduledSessionService {
 
     @Transactional
     public void delete(UUID id, UUID trainerId) {
-        findOwned(id, trainerId);
+        var current = findOwned(id, trainerId);
+        // V18 · deleting a session still to come is calling it off, as far as the client can tell.
+        Instant at = current.get("scheduled_at") instanceof Timestamp ts ? ts.toInstant() : null;
+        if (at != null && at.isAfter(Instant.now()) && "scheduled".equals(str(current.get("status")))) {
+            clientBell.mint(str(current.get("client_id")), "session", null, at, "cancelled");
+        }
         jdbc.update("""
                 UPDATE scheduled_session SET deleted_at = NOW(), updated_at = NOW()
                 WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL

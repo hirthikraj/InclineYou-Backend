@@ -469,7 +469,7 @@ trainer's own `solo` tenant**. Teams and gyms start empty and fill from new work
 | Table | Tier | Backfill |
 | --- | --- | --- |
 | `client` **+ `tenant_id`** | 1 | `trainer.home_tenant_id` via `trainer_id` |
-| `body_metric` **+ `tenant_id`** | 1 **+ 4** | via `client_id → client.tenant_id` |
+| ~~`body_metric`~~ | — | **Dropped by `V22__drop_body_metric.sql`** (24 Sep 2026); readings live on `assessment` |
 | `client_note` **+ `tenant_id`** | **2** | via `trainer_id` |
 
 The same human on two rosters is **two `client` rows in two tenants**, with

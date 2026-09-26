@@ -1,71 +1,83 @@
-import { Business } from '@/components/business/Business';
-import { parseTab } from '@/components/business/tabs';
+import { permanentRedirect, redirect } from 'next/navigation';
+
+import { Overview } from '@/components/business/Overview';
 import { Unavailable } from '@/components/today/Unavailable';
 import { requireMoney } from '@/lib/money/guard';
-import { requirePacks } from '@/lib/packs/guard';
-import { requireReports } from '@/lib/business/report-guard';
-import { listRecentNudges } from '@/lib/nudges/api';
-import { COOLDOWN_DAYS, lastContactMap } from '@/lib/nudges/cooldown';
 
 /**
- * BUSINESS — the fifth destination, and the route three others fold into.
+ * BUSINESS — the section's front page, and it is no longer a seven-tab screen.
  *
- * This was `/money/[month]`, then `/business/[month]`, and it is `/business`
- * flat. The month came out of the URL because the URL was making a claim the
- * code did not honour: the old docstring here said the month "decides what is
- * FETCHED", and `getMoney()` has always pulled the whole book unwindowed —
- * `/v1/payments` with no `from`/`to`, on purpose, because a full book is a couple
- * of hundred rows — with `computeLedger` slicing it in the browser. The segment
- * named a filter, not a resource, and it cost a redirect on every visit to
- * `/business` plus a `YYYY-MM` slug to parse and validate on every render.
+ * ── WHAT THIS ROUTE USED TO BE ───────────────────────────────────────────────
  *
- * Taking it out is also what let the screen offer a SPAN. A path segment can hold
- * one calendar month; "the last 3 months" is a moving window with no date of its
- * own, and it belongs in the same place the ledger's stat filter already lives.
- * `lib/money/period.ts` carries that argument in full.
+ * It was the whole of Business: one component drawing seven tabs off a `?tab=`
+ * param, fetching the money book on every one of them and conditionally fetching
+ * two more payloads depending on which tab the param named. `tabs.ts` argued
+ * that the seven were "views of one screen" and that a `?tab=` which changes what
+ * is FETCHED — *Packages* and *Reports* both did — cannot be component state.
  *
- * ── SO WHAT IS STILL IN THE URL, AND WHY ─────────────────────────────────────
+ * Both halves of that were right, and they were the argument for splitting the
+ * strip rather than for keeping it. A tab that changes what the server fetches
+ * is a PAGE. Five of the seven became one, the other two became chips on the
+ * ledger, and the section's pages moved into the column beside the rail where
+ * `components/shell/nav.tsx` says a list of places belongs.
  *
- * `?tab=` stays, and it is the exception that shows the rule. Five of the seven
- * tabs are views of `requireMoney()`. *Packages* is not: the price list is the
- * `pack` table, a different four calls, and it is loaded only when the param asks
- * for it. *Reports* is not either, and it is the more expensive of the two — a
- * year of the diary plus every workout log, which is the largest read on this
- * half after the exercise library. Both are loaded only when the param asks. A
- * tab that changes what the server fetches cannot be a `useState`; a month that
- * changes nothing the server fetches should not be a path segment.
+ * What is left here is the page that did not exist: the Overview.
  *
- * If either call is refused we draw `Unavailable` rather than the strip with an
- * empty tab, because the refusals mean different things and only the component
- * that knows which call failed can say so.
+ * ── THE OLD `?tab=` LINKS STILL WORK, AND THEY REDIRECT ──────────────────────
  *
- * `force-dynamic` because the ledger is a snapshot of a moment and both guards
- * read a cookie; without it Next would try to prerender a page whose subject is
- * this month's billing.
+ * This param was live for the whole of this half's life and is in bookmarks, in
+ * `/money`'s permanent redirect, in `/packages`' and `/reports`', and in the
+ * `/business/[month]` one. Rather than teach five callers a new URL, they all
+ * keep pointing here and the table below forwards them. `?record=` goes with
+ * them: it opens the record panel, which lives on Transactions now.
+ *
+ * `permanentRedirect` for the five that name a page, because those URLs will
+ * never mean anything else again. The two folded tabs get a temporary `redirect`
+ * with the filter pre-selected — `owed` and `writeoffs` are not gone, they are
+ * chips, and a 308 would teach a browser to cache a mapping that a later pass
+ * could reasonably change.
  */
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: 'Business · X REP' };
+export const metadata = { title: 'Business · InclineYou' };
+
+/** The five old tabs that became pages. */
+const MOVED: Record<string, string> = {
+  ledger: '/business/transactions',
+  packages: '/business/packages',
+  gymshare: '/business/gym',
+  gst: '/business/gst',
+  reports: '/business/reports',
+};
+
+/** The two that became chips on the ledger. `LedgerFilter`'s own spellings. */
+const FOLDED: Record<string, string> = {
+  owed: '/business/transactions?filter=owed',
+  writeoffs: '/business/transactions?filter=writeoff',
+};
 
 export default async function Page(props: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const q = await props.searchParams;
-  const tab = parseTab(q.tab);
+  const tab = typeof q.tab === 'string' ? q.tab : null;
 
-  const [money, packs, reports, nudges] = await Promise.all([
-    requireMoney(),
-    tab === 'packages' ? requirePacks() : Promise.resolve(null),
-    tab === 'reports' ? requireReports() : Promise.resolve(null),
-    /*
-     * Fetched on every tab rather than only on Owed, because two of them draw a
-     * nudge button — the dues list and the price list's *Ending soon* — and a
-     * cheap read whose answer the trainer switches between tabs to see is a read
-     * that belongs with the page, not with one of its views. It cannot fail the
-     * screen: `listRecentNudges` answers `[]`.
-     */
-    listRecentNudges(COOLDOWN_DAYS),
-  ]);
+  if (tab !== null && MOVED[tab]) {
+    /* `?from=new-client` is the price list's detour flag and is the one param
+       worth carrying across — it is what draws the way back to `/clients/new`.
+       Nothing else in this URL survives a move to a page that does not read it. */
+    const from = q.from === 'new-client' ? '?from=new-client' : '';
+    permanentRedirect(`${MOVED[tab]}${from}`);
+  }
+  if (tab !== null && FOLDED[tab]) redirect(FOLDED[tab]);
+
+  /* The tab bar's + and the client file's *Sell a pack* both point at
+     `/business?record=<id>`. The panel is on Transactions now. */
+  if (typeof q.record === 'string') {
+    redirect(`/business/transactions?record=${encodeURIComponent(q.record)}`);
+  }
+
+  const money = await requireMoney();
 
   if (!money.ok) {
     return (
@@ -75,31 +87,6 @@ export default async function Page(props: {
       />
     );
   }
-  if (packs && !packs.ok) {
-    return (
-      <Unavailable
-        kind={packs.kind}
-        status={packs.kind === 'refused' ? packs.status : undefined}
-      />
-    );
-  }
-  if (reports && !reports.ok) {
-    return (
-      <Unavailable
-        kind={reports.kind}
-        status={reports.kind === 'refused' ? reports.status : undefined}
-      />
-    );
-  }
 
-  return (
-    <Business
-      data={money.data}
-      packs={packs?.ok ? packs.data : null}
-      reports={reports?.ok ? reports.data : null}
-      tab={tab}
-      recordFor={typeof q.record === 'string' ? q.record : null}
-      lastContact={Object.fromEntries(lastContactMap(nudges))}
-    />
-  );
+  return <Overview data={money.data} />;
 }

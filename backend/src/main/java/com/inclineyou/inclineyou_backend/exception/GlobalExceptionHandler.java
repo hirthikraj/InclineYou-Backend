@@ -4,8 +4,13 @@ import com.inclineyou.inclineyou_backend.auth.InvalidOtpException;
 import com.inclineyou.inclineyou_backend.auth.OtpExpiredException;
 import com.inclineyou.inclineyou_backend.auth.OtpLockedException;
 import com.inclineyou.inclineyou_backend.auth.OtpThrottledException;
+import com.inclineyou.inclineyou_backend.client.ClientRuleException;
+import com.inclineyou.inclineyou_backend.portal.PortalRuleException;
+import com.inclineyou.inclineyou_backend.program.ProgramRuleException;
+import com.inclineyou.inclineyou_backend.workout.WorkoutRuleException;
 import com.inclineyou.inclineyou_backend.client.PhoneUnavailableException;
 import com.inclineyou.inclineyou_backend.nudge.NudgeRuleException;
+import com.inclineyou.inclineyou_backend.assessment.AssessmentRuleException;
 import com.inclineyou.inclineyou_backend.payment.PackRuleException;
 import com.inclineyou.inclineyou_backend.trainer.AccountRuleException;
 import com.inclineyou.inclineyou_backend.payment.PackageRuleException;
@@ -122,6 +127,18 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * V5 · measuring rules. Same shape as the two above: the status varies (400
+     * for a request that cannot be carried out, 404 for a reading this trainer
+     * cannot see) and `code` is what the screen branches on.
+     */
+    @ExceptionHandler(AssessmentRuleException.class)
+    ResponseEntity<ProblemDetail> handleAssessmentRule(AssessmentRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
+
+    /**
      * A price-list rule said no. Same shape as the team handler above and for the
      * same reason: the `code` is what a screen branches on, and `detail` is a
      * sentence written for the trainer rather than for the log.
@@ -144,6 +161,38 @@ public class GlobalExceptionHandler {
      * because every refusal here names something the trainer must act on and
      * cannot guess. See {@code AccountRuleException}.
      */
+    /** A client-portal rule said no. See {@code PortalRuleException}. */
+    @ExceptionHandler(PortalRuleException.class)
+    ResponseEntity<ProblemDetail> handlePortalRule(PortalRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
+
+    /** A saved workout was refused. See {@code WorkoutRuleException}. */
+    @ExceptionHandler(WorkoutRuleException.class)
+    ResponseEntity<ProblemDetail> handleWorkoutRule(WorkoutRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
+
+    /** Applying or editing a plan said no. See {@code ProgramRuleException}. */
+    @ExceptionHandler(ProgramRuleException.class)
+    ResponseEntity<ProblemDetail> handleProgramRule(ProgramRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
+
+    /** A rule about a client's file said no. See {@code ClientRuleException}. */
+    @ExceptionHandler(ClientRuleException.class)
+    ResponseEntity<ProblemDetail> handleClientRule(ClientRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
+
     @ExceptionHandler(AccountRuleException.class)
     ResponseEntity<ProblemDetail> handleAccountRule(AccountRuleException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());

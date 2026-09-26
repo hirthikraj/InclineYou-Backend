@@ -287,7 +287,7 @@ export interface ConsoleData {
   recents: { exerciseId: string; name: string; meta: string; isCustom: boolean }[];
   /** Frame 3b's third scope: how many clients are on this program's template. */
   templateReach: number | null;
-  /** Frame 3b's second scope: how much of her plan is left to change. */
+  /** Frame 3b's second scope: how much of the plan is left to change. */
   programWeeksLeft: number | null;
   /**
    * The fourth figure in the strip, and the one it is hardest to remember to
@@ -297,12 +297,12 @@ export interface ConsoleData {
    * marking it done will do to it.
    */
   pack: { remaining: number; total: number } | null;
-  /** Frame 6b's offer: the last whole session she did, as a place to go. */
+  /** Frame 6b's offer: the last whole session they did, as a place to go. */
   repeatHref: string | null;
   templateId: string | null;
   programId: string | null;
   /**
-   * exerciseId → her last few sessions on it, judged at the time.
+   * exerciseId → the last few sessions on it, judged at the time.
    *
    * The right column of frame 1a, and the half a 390px phone cannot do: **the
    * reason to look at history is to decide today's load, so it sits beside the
@@ -391,7 +391,7 @@ export const getConsole = cache(
 
     /* The plan. The log's own `programId` wins OUTRIGHT; only when it has none
        does the client's live program stand in, which is what a trainer means by
-       "her program" when nobody chose. Two steps rather than one `find` with an
+       "their program" when nobody chose. Two steps rather than one `find` with an
        `||` in it — that version would take whichever program came first in the
        list and satisfied either half, so a log explicitly attached to an old
        block would silently draw the new one's exercises. */
@@ -462,7 +462,7 @@ export const getConsole = cache(
     if (!view) return null;
 
     /* Recents, for frame 3a. The answer to a busy rack is nearly always
-       something she has already done, and every row carries what she last
+       something already done, and every row carries what was last
        lifted on it — so the choice is made on numbers rather than on a name.
        That is the difference between this and a search box over 1,324 rows. */
     const nameOf = new Map((exercises ?? []).map((e) => [e.id, e] as const));
@@ -507,7 +507,7 @@ export const getConsole = cache(
       ).size;
     }
 
-    /* Frame 3b's second scope says how much of her plan the change would carry
+    /* Frame 3b's second scope says how much of the plan the change would carry
        through. `endDate` is the only thing on the wire that bounds a program, so
        a plan without one says "from now on" and does not invent a number. */
     const programWeeksLeft = live?.endDate

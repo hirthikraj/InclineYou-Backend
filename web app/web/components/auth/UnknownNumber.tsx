@@ -12,6 +12,7 @@ import {
   IconWarn,
 } from './Icons';
 import { TrustLine } from './TrustLine';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * Frame 3a · we don't know this number yet.
@@ -84,7 +85,7 @@ export function UnknownNumber({ phone }: { phone: string | null }) {
       */}
       <h2 className="stp__hd">We don’t know this number yet</h2>
       <p className="stp__sub" style={{ marginTop: 8 }}>
-        {phone ? <>{phone} isn’t on X&nbsp;REP.</> : <>That number isn’t on X&nbsp;REP.</>} Which
+        {phone ? <>{phone} isn’t on InclineYou.</> : <>That number isn’t on InclineYou.</>} Which
         are you?
       </p>
 
@@ -149,9 +150,8 @@ export function UnknownNumber({ phone }: { phone: string | null }) {
         </span>
       </div>
 
-      <button
-        className="btn btn--secondary"
-        type="button"
+      <Button
+        variant="secondary"
         /* The design's 4px reads as 22px in the frame because `.msg`'s 38px
            min-height is mostly empty under one line of text. This message is two
            lines at every width the screen is used at, so the slack is gone and
@@ -162,7 +162,7 @@ export function UnknownNumber({ phone }: { phone: string | null }) {
         disabled={pending}
       >
         Use a different number
-      </button>
+      </Button>
 
       <TrustLine>
         This question comes <b>after</b> the code, never before. Telling you which numbers exist
@@ -267,7 +267,7 @@ function HowSheet({ phone, onClose }: { phone: string | null; onClose: () => voi
         </div>
         <div className="modal__body">
           <p>
-            X&nbsp;REP works from your trainer’s roster, so they add you with the number you just
+            InclineYou works from your trainer’s roster, so they add you with the number you just
             typed — there is nothing for you to set up.
           </p>
           <p style={{ marginTop: 12 }}>
@@ -285,9 +285,9 @@ function HowSheet({ phone, onClose }: { phone: string | null; onClose: () => voi
           </p>
         </div>
         <div className="modal__foot">
-          <button ref={close} className="btn btn--primary" type="button" onClick={onClose}>
+          <Button variant="primary" ref={close} onClick={onClose}>
             Got it
-          </button>
+          </Button>
         </div>
       </div>
     </>

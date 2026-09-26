@@ -1,6 +1,8 @@
-import Link from 'next/link';
 
 import { Plus, Users } from '@/components/shell/Icons';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
+import { EmptyState } from '@/web-components/ui/EmptyState';
 
 /**
  * ONE CARD, AND NOTHING ELSE ON THE SCREEN.
@@ -25,7 +27,7 @@ import { Plus, Users } from '@/components/shell/Icons';
  */
 export function FirstRun() {
   return (
-    <div className="card">
+    <Card bare>
       {/*
         `.empty--tall`, not `minHeight:400` inline. §04 already pads `.empty` at
         `64px 24px` with a 280px floor, and 400px of that on a 390px screen is the
@@ -33,23 +35,18 @@ export function FirstRun() {
         only button the screen has. The class carries the desk's height and gives
         it back on a phone.
       */}
-      <div className="empty empty--tall">
-        <span className="empty__ic">
-          <Users size={22} />
-        </span>
-        <p className="empty__t">Add your first client</p>
-        <p className="empty__b">
-          Name and number is all it takes. A roster of one is enough to book a session, log a set
-          and take a payment — and every other module on this screen is derived from clients,
-          sessions and payments, so until there is one there is nothing for them to say.
-        </p>
-        <div className="row gap2 mt2">
-          <Link className="btn btn--primary" href="/clients/new">
+      <EmptyState
+        icon={<><Users size={22} /></>}
+        title="Add your first client"
+        body="Name and number is all it takes. A roster of one is enough to book a session, log a set and take a payment, and every other module on this screen is derived from clients, sessions and payments, so until there is one there is nothing for them to say."
+        action={<><div className="row gap2 mt2">
+          <Button href="/clients/new" variant="primary">
             <Plus size={15} />
             Add a client
-          </Link>
-        </div>
-      </div>
-    </div>
+          </Button>
+        </div></>}
+        className="empty--tall"
+      />
+    </Card>
   );
 }

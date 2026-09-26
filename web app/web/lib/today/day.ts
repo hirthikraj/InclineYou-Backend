@@ -33,6 +33,8 @@ import type { Deck, DeckSession } from './deck';
 import {
   DAY_MS,
   formatMinute,
+  formatHourMark,
+  formatMinuteRange,
   formatSpan,
   isoWeekday,
   minuteOfDay,
@@ -273,7 +275,10 @@ export function buildRibbon(
   }
   const ticks = [...tickMinutes]
     .sort((a, b) => a - b)
-    .map((m) => ({ left: x(m), label: formatMinute(m) }));
+    /* The ribbon's ticks are every two hours across a day drawn at one pixel
+       per minute, so they carry the axis form for the same reason the
+       schedule's gutter does. */
+    .map((m) => ({ left: x(m), label: formatHourMark(m) }));
 
   // Between shifts, not merely outside hours. The band before the first window
   // and after the last one is the trainer's own morning and evening and is not
@@ -288,7 +293,7 @@ export function buildRibbon(
     holes.push({
       left: x(from) + (x(to) - x(from)) / 2,
       minutes,
-      range: `${formatMinute(from)} – ${formatMinute(to)}`,
+      range: formatMinuteRange(from, to),
       note: `between shifts, ${spanInWords(minutes)} — not sellable`,
     });
   }
@@ -460,7 +465,7 @@ export function dayFooting(sessions: DeckSession[]): string {
 /** `06:00–10:00 · 16:30–20:30` — the tag in the day card's head. */
 export function windowsLabel(windows: { startMinute: number; endMinute: number }[]): string {
   return windows
-    .map((w) => `${formatMinute(w.startMinute)}–${formatMinute(w.endMinute)}`)
+    .map((w) => formatMinuteRange(w.startMinute, w.endMinute))
     .join(' · ');
 }
 
@@ -498,7 +503,7 @@ export function gapWorth(gap: Gap, money: DayMoney, gymSharePercent: number | nu
 }
 
 /** Re-exported so components take one import for the day's vocabulary. */
-export { formatMinute, formatSpan, minuteOfDay, startOfDay, DAY_MS };
+export { formatMinute, formatHourMark, formatMinuteRange, formatSpan, minuteOfDay, startOfDay, DAY_MS };
 export type { Deck };
 
 /* --------------------------------------------------------------- the clash */

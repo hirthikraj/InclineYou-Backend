@@ -120,7 +120,7 @@ export async function startLog(input: {
       notes: null,
     });
     revalidatePath('/today');
-    revalidatePath('/sessions');
+    revalidatePath('/programs/workouts');
     return { ok: true, id: res?.id };
   } catch (error) {
     return readFailure(error, 'Starting the log');
@@ -440,13 +440,13 @@ export async function swapExercise(input: {
 
   try {
     if (input.scope === 'program') {
-      if (!input.programId) return { ok: false, message: 'She has no live program to change.' };
+      if (!input.programId) return { ok: false, message: 'This client has no live program to change.' };
       const rows = await send<{ id: string; exerciseId: string; sets: number | null; reps: number | null; restSeconds: number | null; targetLoad: number | null; notes: string | null; dayOfWeek: number | null; week: number | null; orderIndex: number }[]>(
         'GET',
         `/v1/programs/${input.programId}/exercises`,
       );
       const row = (rows ?? []).find((r) => r.exerciseId === input.fromExerciseId);
-      if (!row) return { ok: false, message: 'That exercise is not on her program.' };
+      if (!row) return { ok: false, message: 'That exercise is not on the program.' };
       await send('PUT', `/v1/programs/${input.programId}/exercises/${row.id}`, {
         exerciseId: input.toExerciseId,
         sets: row.sets,
@@ -459,9 +459,11 @@ export async function swapExercise(input: {
         orderIndex: row.orderIndex,
       });
       revalidatePath(`/clients`);
+      /* The COPY was rewritten, so it is the list of copies that is stale —
+         `/programs` since 22 Sep 2026. The blueprint was not touched. */
       revalidatePath('/programs');
     } else {
-      if (!input.templateId) return { ok: false, message: 'Her program did not come from a template.' };
+      if (!input.templateId) return { ok: false, message: 'The program did not come from a template.' };
       const template = await send<{ name: string; goal: string | null; description: string | null; exercises: TemplateExercise[]; dayLabels: Record<string, string> }>(
         'GET',
         `/v1/templates/${input.templateId}`,
@@ -475,7 +477,9 @@ export async function swapExercise(input: {
           e.exerciseId === input.fromExerciseId ? { ...e, exerciseId: input.toExerciseId } : e,
         ),
       });
-      revalidatePath('/programs');
+      /* The BLUEPRINT was rewritten here, which is the other branch's mirror:
+         the shelf is at `/programs/templates` now. */
+      revalidatePath('/programs/templates');
     }
 
     refresh(input.routeId);
@@ -493,7 +497,7 @@ export async function swapExercise(input: {
  * number people turn off.
  *
  * **Two places it can live, and which one is not a preference.** The program row
- * is where a planned exercise keeps it, and that is an edit to her plan: it is
+ * is where a planned exercise keeps it, and that is an edit to the plan: it is
  * still 90 seconds next Tuesday. `workout_exercise.rest_seconds` is TODAY's, and
  * V13 put it there precisely so a card that is not on the plan can hold one.
  * Until that table had a route, an off-plan exercise had nowhere to keep a rest
@@ -534,7 +538,7 @@ export async function setRest(input: {
       `/v1/programs/${input.programId}/exercises`,
     );
     const row = (rows ?? []).find((r) => r.exerciseId === input.exerciseId);
-    if (!row) return { ok: false, message: 'That exercise is not on her program.' };
+    if (!row) return { ok: false, message: 'That exercise is not on the program.' };
     await send('PUT', `/v1/programs/${input.programId}/exercises/${row.id}`, {
       exerciseId: row.exerciseId,
       sets: row.sets,

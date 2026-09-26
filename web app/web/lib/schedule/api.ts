@@ -7,6 +7,7 @@ import type { RateSource, WorkWindow } from '@/lib/today/day';
 import { clockParts, startOfDay, DAY_MS } from '@/lib/today/time';
 import { readMode } from '@/lib/today/mode';
 import { rangeFor, type ScheduleView } from './view';
+import { bookableClients, DEAD_SESSION, sessionMinutes } from './roster';
 import type { ScheduleClient, ScheduleSession } from './session';
 
 /* The shapes live in `./session`, which carries no `server-only`, so the client
@@ -43,7 +44,7 @@ export type { ScheduleClient, ScheduleSession };
  *
  * Deliberately NOT fetched, and this is the difference from Today that matters
  * most: `/v1/workouts` and `/v1/payments`. Today needs them for the attention
- * queue — *gone quiet* and *still owed* — and both are unwindowed reads over a
+ * queue — *gone quiet* and *still pending* — and both are unwindowed reads over a
  * whole account. This screen has no queue. It draws what is PLANNED, which is
  * `scheduled_session` and nothing else, so a month view costs six bounded reads
  * rather than a full history.
@@ -119,6 +120,8 @@ interface ClientWire {
   id: string;
   name: string;
   status: string;
+  /** The roster relationship. See the note on `ScheduleClient.membership`. */
+  membershipStatus?: string | null;
   deliveryMode: string | null;
   metadata: Record<string, unknown> | null;
   /** On `ClientResponse` since the create body carried it; the booking form's
@@ -186,8 +189,9 @@ function num(v: number | string | null | undefined): number {
 
 /* ------------------------------------------------------------ the screen ── */
 
-const DEFAULT_DURATION = 60;
-const DEAD_SESSION = new Set(['cancelled', 'canceled', 'no_show', 'noshow', 'skipped']);
+/* The default length and the dead-status set are `./roster`'s — Today's booking form
+   reads the same two rules now, and one of them deciding a session is dead while
+   the other does not is a clash warning that appears on one screen only. */
 const DONE_SESSION = new Set(['done', 'completed']);
 
 export interface ScheduleData {
@@ -245,12 +249,7 @@ function toSession(
   const dead = DEAD_SESSION.has(status);
   const { time, meridiem } = clockParts(s.scheduledAt);
 
-  const minutes =
-    s.durationMinutes && s.durationMinutes > 0
-      ? s.durationMinutes
-      : client?.sessionDurationMinutes && client.sessionDurationMinutes > 0
-        ? client.sessionDurationMinutes
-        : DEFAULT_DURATION;
+  const minutes = sessionMinutes(s.durationMinutes, client?.sessionDurationMinutes);
 
   return {
     id: s.id,
@@ -310,9 +309,6 @@ function planLine(s: SessionWire, program: ProgramWire | undefined, at: number):
   return `${label} · Week ${Math.min(week, total)}/${total}`;
 }
 
-const LIVE_PROGRAM = (p: ProgramWire) =>
-  !['cancelled', 'canceled', 'completed', 'archived'].includes((p.status ?? '').toLowerCase());
-
 /**
  * `cache()` for the same reason `lib/today/api.ts` uses it: the page and its
  * metadata both want the week, and React's per-request cache makes that one round
@@ -359,8 +355,6 @@ export const getSchedule = cache(
       if (amount > 0 && count > 0) perSession.set(clientId, Math.round(amount / count));
     }
 
-    const livePrograms = (programs ?? []).filter(LIVE_PROGRAM);
-
     return {
       view,
       anchor,
@@ -369,28 +363,7 @@ export const getSchedule = cache(
       sessions: (sessions ?? []).map((s) =>
         toSession(s, clientById.get(s.clientId), programById.get(s.programId ?? ''), now),
       ),
-      clients: (clients ?? [])
-        .filter((c) => (c.status ?? '').toLowerCase() !== 'removed')
-        .map((c) => {
-          const plan = livePrograms.find((p) => p.clientId === c.id);
-          const pack = newest.get(c.id);
-          return {
-            id: c.id,
-            name: c.name?.trim() || 'Client',
-            status: c.status ?? 'active',
-            mode: readMode({ session: null, client: c.deliveryMode, metadata: c.metadata }),
-            minutes:
-              c.sessionDurationMinutes && c.sessionDurationMinutes > 0
-                ? c.sessionDurationMinutes
-                : DEFAULT_DURATION,
-            sessionsPerWeek: c.sessionsPerWeek ?? null,
-            programId: plan?.id ?? null,
-            programName: plan?.name ?? null,
-            packLeft: pack?.sessionsRemaining ?? null,
-            packTotal: pack?.sessionsTotal ?? null,
-          };
-        })
-        .sort((a, b) => a.name.localeCompare(b.name)),
+      clients: bookableClients(clients ?? [], programs ?? [], newest),
       hours: (hours ?? []).map((h) => ({
         weekday: h.weekday,
         startMinute: h.startMinute,

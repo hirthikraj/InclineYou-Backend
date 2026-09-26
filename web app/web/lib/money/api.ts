@@ -7,7 +7,7 @@ import { getToken } from '@/lib/auth/session';
 /**
  * THE MONEY SCREEN'S DATA LAYER.
  *
- * Four requests, all parallel, no sync/pull. The ledger, the owed tab and the
+ * Four requests, all parallel, no sync/pull. Payments, the Pending tab and the
  * GST tab all read from a single unwindowed payments fetch, which is the right
  * tool here: the API.md note on `GET /v1/payments` says "a payment row is one
  * per invoice — a couple of hundred rows for a full book", and the money book is
@@ -24,9 +24,42 @@ const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
 
 export class MoneyApiError extends Error {
-  constructor(readonly status: number | null) {
+  constructor(
+    readonly status: number | null,
+    /**
+     * The server's own sentence, from RFC 7807's `detail`, where it sent one.
+     *
+     * Every refusal in this module used to become one of four generic lines in
+     * `actions.ts` — *"did not go through. Nothing changed."* — and that is the
+     * right copy for a 500, because there is nothing true to say. It is the
+     * wrong copy for a **409**, where the server knows exactly why and has
+     * written it down: *the gym collected this one and raises its own receipt*
+     * tells a trainer to stop clicking; *did not go through* tells them to try
+     * again.
+     *
+     * Only read on a refusal, and only used where a caller opts into it. A
+     * generic message stays generic — see `fail` in `actions.ts`.
+     */
+    readonly detail?: string,
+  ) {
     super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'MoneyApiError';
+  }
+}
+
+/**
+ * The problem body, read off a failed response.
+ *
+ * Swallows everything: a server that answers a 409 with HTML, or with nothing,
+ * must not turn a refusal into a parse crash on the way to being reported.
+ */
+async function refusal(res: Response): Promise<MoneyApiError> {
+  try {
+    const body = (await res.json()) as { detail?: unknown };
+    const detail = typeof body?.detail === 'string' ? body.detail : undefined;
+    return new MoneyApiError(res.status, detail);
+  } catch {
+    return new MoneyApiError(res.status);
   }
 }
 
@@ -69,7 +102,48 @@ export async function post<T>(path: string, body: unknown): Promise<T> {
   } catch {
     throw new MoneyApiError(null);
   }
-  if (!res.ok) throw new MoneyApiError(res.status);
+  if (!res.ok) throw await refusal(res);
+
+  const text = await res.text();
+  return (text ? JSON.parse(text) : null) as T;
+}
+
+/**
+ * `PATCH`, for the two things that happen to a payment AFTER it is written.
+ *
+ * The book is append-only in the sense that matters — nothing is ever deleted —
+ * but a row's STATUS is not part of that promise. A payment recorded `pending`
+ * becomes `paid` when the money turns up, and becomes `write_off` when the
+ * trainer decides it never will. Both are `PATCH` on the row's own sub-paths
+ * (`/confirm`, `/write-off`) rather than a status field on the row, because the
+ * server does more than set a word: confirming stamps `paidAt` and the gym's
+ * percentage AT THAT INSTANT, which is the whole reason a renegotiation in
+ * October cannot move September's split.
+ *
+ * `POST` above and this differ only in the verb, and they stay two functions
+ * rather than one with a `method` argument for the reason `get` is separate:
+ * the call sites read as what they do.
+ */
+export async function patch<T>(path: string, body: unknown): Promise<T> {
+  const token = await getToken();
+  if (!token) throw new MoneyApiError(401);
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+  } catch {
+    throw new MoneyApiError(null);
+  }
+  if (!res.ok) throw await refusal(res);
 
   const text = await res.text();
   return (text ? JSON.parse(text) : null) as T;

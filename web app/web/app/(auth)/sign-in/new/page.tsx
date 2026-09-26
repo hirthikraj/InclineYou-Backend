@@ -5,7 +5,7 @@ import { UnknownNumber } from '@/components/auth/UnknownNumber';
 import { formatPhone, readClaims } from '@/lib/auth/claims';
 import { getPendingPhone, getToken } from '@/lib/auth/session';
 
-export const metadata = { title: 'We don’t know this number · X REP' };
+export const metadata = { title: 'We don’t know this number · InclineYou' };
 
 /**
  * Frame 3a · `/sign-in/new`.
@@ -59,7 +59,11 @@ export default async function Page() {
   const phone = formatPhone((await getPendingPhone()) ?? claims.phone);
 
   return (
-    <AuthShell quote="Trainers create clients. So the likeliest first launch is a client whose trainer has not added them yet.">
+    <AuthShell
+      eyebrow="New number"
+      lead="Everyone starts here."
+      quote="Clients are added by their trainer; trainers open their own account. Either way it begins with this number."
+    >
       <UnknownNumber phone={phone} />
     </AuthShell>
   );

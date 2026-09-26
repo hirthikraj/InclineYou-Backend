@@ -1,8 +1,8 @@
 'use client';
 
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * The API did not give us a day — said in the terms that change what to do next.
@@ -51,7 +51,7 @@ export function Unavailable({
   const unreachable = kind === 'unreachable';
 
   return (
-    <div className="app app--noshell" data-theme="dark">
+    <div className="app app--noshell">
       {/*
         Two inline blocks became `.midcol`, and one of them was a live bug at any
         width. `fontSize: 26` on the headline pinned the longest sentence on the
@@ -70,7 +70,7 @@ export function Unavailable({
             {unreachable ? (
               <>
                 Nothing reached it at all, which usually means it is restarting. This normally
-                clears in a few seconds — try again.
+                clears in a few seconds. Try again.
               </>
             ) : (
               <>
@@ -81,25 +81,25 @@ export function Unavailable({
             )}
           </p>
           <p className="stp__sub midcol__sub mt2">
-            <b style={{ color: 'var(--tx-ink)' }}>Nothing is lost.</b> This screen only reads —
+            <b style={{ color: 'var(--tx-ink)' }}>Nothing is lost.</b> This screen only reads,
             your sessions, payments and packs are on the server exactly as they were, and nothing
             was left half-written.
           </p>
           <div className="row gap2 mt6 actrow actrow--mid">
-            <button
-              className="btn btn--primary btn--lg"
-              type="button"
+            <Button
+              variant="primary"
+              size="lg"
               onClick={retry}
               disabled={retrying}
             >
               {retrying ? 'Trying…' : 'Try again'}
-            </button>
+            </Button>
             {/* The roster is one request rather than eight, so it is the thing
-                most likely to work when this one did not — and it is where a
+                most likely to work when this one did not, and it is where a
                 trainer can still look someone up. */}
-            <Link className="btn btn--secondary btn--lg" href="/clients">
+            <Button href="/clients" variant="secondary" size="lg">
               Open the roster
-            </Link>
+            </Button>
           </div>
         </div>
       </div>

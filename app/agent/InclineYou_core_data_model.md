@@ -213,7 +213,7 @@ Types shown are Postgres. Every table also has the standard `id`, `created_at`, 
 | trainer_split_percent | numeric(5,2) | yes | trainer's revenue share for this client; null or 100 = trainer keeps all (freelance); e.g. 60 for a gym client on a 60/40 split. Drives the dashboard split view |
 | ~~note~~ | — | — | **never built.** Listed here from the first draft and absent from `V1__init_schema.sql`; trainer notes live in `client_note` (§3.14), one row per note, from V29 |
 
-> Weight and other changing measurements are **not** stored here — they go in `body_metric` (§3.13) as append-only time-series so progress can be charted. Extra intake questions beyond the structured fields above live in `metadata` (JSONB) until one is common enough to promote to its own column.
+> Weight and other changing measurements are **not** stored here — they are readings on an `assessment` (V14), the only place a body is measured since `body_metric` (§3.13) was dropped on 24 Sep 2026. Extra intake questions beyond the structured fields above live in `metadata` (JSONB) until one is common enough to promote to its own column.
 
 ### 3.3 `exercise` (shared library + custom)
 | Column | Type | Null | Notes |
@@ -473,115 +473,28 @@ Types shown are Postgres. Every table also has the standard `id`, `created_at`, 
 > inside the sync envelope, which is why the once-per-client-per-7-days cooldown
 > was a rule only the phone could keep.
 
-### 3.13 `body_metric` (append-only time-series)
-| Column | Type | Null | Notes |
-|---|---|---|---|
-| client_id | uuid (FK→client) | no | |
-| type | varchar | no | `weight` \| `waist` \| `chest` \| etc. (string; extensible) |
-| value | numeric(8,2) | no | numeric (charted over time) |
-| unit | varchar | no | e.g. `kg`, `cm` |
-| recorded_at | timestamptz | no | |
-| recorded_by | varchar | yes | `trainer` \| `client` |
+### 3.13 ~~`body_metric`~~ — dropped (24 Sep 2026)
 
-> Powers weight/measurement progress charts. Append-only: log a new row each time; never mutate history. Height lives on `client` (static); weight lives here (changes over time).
+**A body is measured in an assessment and nowhere else** — decided 24 Sep 2026,
+and the table went in backend migration `V22__drop_body_metric.sql`. It was an
+append-only time-series of loose readings (a weigh-in, a tape reading, anything
+the phone wrote); every one of those write paths is gone with it. Readings now
+live only on `assessment.readings` (V14), taken by the trainer in the session
+(MUST-21) or answered by the client in the portal.
 
-### 3.14 `client_note` (V29)
-| Column | Type | Null | Notes |
-|---|---|---|---|
-| client_id | uuid (FK→client) | no | who the note is about |
-| trainer_id | uuid (FK→trainer) | no | who **wrote** it, and the privacy rule — see below |
-| body | text | no | free text; **no medical fields** |
-| pinned | boolean | no | default false; a pinned note is drawn in the always-visible strip at the top of the client's file rather than in the notes list |
+What survives from it:
 
-> The relationship layer — "prefers mornings, hates burpees, wife Priya, getting
-> married in Nov". None of that fits `client.goal`, and it is what a trainer
-> carries in their head about forty people.
->
-> **`trainer_id` is the privacy rule, not bookkeeping.** A team widens reads over a
-> teammate's client (V26) and must not widen this, for the same reason no role sees
-> a teammate's money book. Every read narrows by the author, so a coach holding a
-> client somebody else wrote notes on gets an empty list — not a refusal.
->
-> **Free text and a pin, and it must stay that way.** There is no injury column, no
-> condition column and no PAR-Q flag, and adding one would make this a health
-> record whatever it was called — see §5. Plain text today; encryption at rest is
-> the deployment's job (NFR-8) and does not need this shape to differ.
->
-> Not in the sync envelope. REST only, per V26's and V28's argument: the web is
-> online-only, and the phone will read these over REST when it adopts them.
+- **The six metric ids** — `weight` · `body_fat` · `chest` · `waist` · `hip` ·
+  `arm`. The assessment catalogue uses the same six ids for the measurements it
+  shares, and they are what the progress charts draw. Free text is how one
+  measurement ends up with two spellings, so a seventh is a deploy.
+- **The history routes** — `GET /v1/clients/{id}/body-metrics` and
+  `GET /v1/me/metrics` keep their shape and read those six ids out of completed
+  assessments. There is no write route.
+- **Corrections** are an edit to the assessment's readings, which every chart
+  reflects on the next read because nothing was copied.
 
-### 3.15 `package_adjustment` (V30, append-only)
-| Column | Type | Null | Notes |
-|---|---|---|---|
-| package_id | uuid (FK→package) | no | |
-| trainer_id | uuid (FK→trainer) | no | denormalised, as V29's author is — see below |
-| kind | varchar | no | `pause` \| `resume` \| `extend` (validated in code, per V19's note) |
-| days | int | no | **signed.** `extend` → the goodwill given; `resume` → the days the pause cost and gave back; `pause` → `0`, an open pause has no length yet |
-| reason | text | yes | "Kerala till the 20th." "Rough month, on me." Free text, never parsed |
-| effective_at | timestamptz | no | when it took effect, which is not always when it was recorded |
-
-> **Why a table and not two more columns.** The columns on `package` answer *what
-> is true now*; this answers *how it got that way*, and only the second survives a
-> disagreement. A client looking at a December expiry on a pack they bought in
-> September wants to know why; a trainer who gave away a fortnight in July wants
-> to remember before giving away another in August. Same argument V11 made for
-> `gym_settlement.sessions_counted` — a figure you cannot show the working for is
-> a figure the other party has to take on trust.
->
-> It is also what keeps goodwill from being invisible. An extension is the
-> cheapest thing a trainer gives away and the easiest to forget giving.
->
-> **Append-only.** No UPDATE, no soft delete, no `deleted_at` — a pause that
-> happened happened, and a log that can be edited is not a log. Reversing an
-> adjustment is another row, which is why `days` is signed.
->
-> **`effective_at` is separate from `created_at` because trainers catch up on
-> Sundays.** A pause back-dated to the Thursday the client actually left gives back
-> the right number of days on resume; one stamped when it was typed gives back
-> three too few.
->
-> `trainer_id` is denormalised for V29's reason: it makes "mine and nobody else's"
-> a predicate the query can state rather than a join it has to be trusted to
-> remember. A team widens reads and never widens the money book.
->
-> Not in the sync envelope, per V26's, V28's and V29's argument: the web is
-> online-only, and the phone will read these over REST if it adopts them. The three
-> V30 columns on `package` are likewise absent from `pushPackages`' upsert, so an
-> old build's push cannot touch them.
-
----
-
-### 3.16 `nudge_template` (V32)
-| Column | Type | Null | Notes |
-|---|---|---|---|
-| trainer_id | uuid (FK→trainer) | no | whose wording it is |
-| name | varchar(50) | no | the template name the nudge endpoint speaks — `renewal`, `payment_reminder`, `missed_session`, `well_done`, `session_summary`, `re_engagement`, `check_in`, `session_reminder`. Unique per trainer |
-| body | text | no | the message, with `{name}`, `{count}`, `{nth}`, `{amount}`, `{package}`, `{days}` and `{trainer}` substituted at send time |
-
-> The trainer's own wording for each nudge, and **an OVERRIDE table rather than a
-> seeded one**: a trainer who has never opened the library has no rows at all and
-> gets `NudgeTemplateCatalog`'s built-in sentence. Seeding eight rows per trainer
-> would freeze today's copy into every account, so improving a default would reach
-> nobody who had ever signed up — and reset is a soft delete for the same reason,
-> putting them back on the live default rather than on a copy of it.
->
-> **Not `nudge_rule.message`, and the distinction is the point.** `nudge_rule`
-> (V12) is one row per trainer per KIND — `quiet`, `pack_low`, `overdue`,
-> `well_done`, `birthday` — and answers *when should a nudge be raised, and should
-> it go automatically*: a threshold, an action, an enabled flag. This answers *what
-> does the message say*, keyed by template name, and covers three templates that
-> have no rule and never will (nothing schedules a post-session summary). Writing
-> template names into `nudge_rule.kind` would put rows the phone's rule editor
-> cannot label into a table it iterates.
->
-> The honest cost, stated rather than hidden: a trainer who edits a rule's draft on
-> the phone and the same template's body on the web has two strings. They do not
-> fight — the phone's automation reads its rule, REST reads this table — and
-> closing the overlap means the phone adopting this table, in a commit that moves
-> both halves.
->
-> Not in the sync envelope. REST only, per V26's, V28's, V29's and V30's argument.
-
+Height still lives on `client` (static).
 
 ## 4. Relationships (summary)
 
@@ -591,7 +504,7 @@ trainer 1─* client 1─* program 1─* program_exercise *─1 exercise
    │            ├─* workout_session 1─* set_log *─1 exercise
    │            ├─* package 1─* payment
    │            ├─* scheduled_session ─(fulfilled by)→ workout_session
-   │            ├─* body_metric
+   │            ├─* assessment   (readings — the only body measurements)
    │            └─* nudge_log
    ├─* template ─(applied to)→ program
    └─* exercise   (custom; owner_trainer_id null = shared library)
@@ -603,7 +516,7 @@ trainer 1─* client 1─* program 1─* program_exercise *─1 exercise
 
 **Add nutrition / diet plans:** create a new `diet_plan` table with `client_id` FK. Core tables untouched. No migration to `client`.
 
-**Body metrics (done):** `body_metric` (§3.13) was added exactly this way — a new append-only table with a `client_id` FK, zero change to existing tables. This is the additive pattern working on its first real feature. Wearable/device *auto-sync* stays a future add-on that would write into the same table.
+**Body metrics (added, then folded into assessments):** `body_metric` (§3.13) was added exactly this way — a new append-only table with a `client_id` FK, zero change to existing tables. It was dropped on 24 Sep 2026 when measurements became assessment-only; wearable/device *auto-sync*, if it ever comes, needs its own design rather than a revived loose-reading table.
 
 **Add health-issue notes (when DPDP-ready):** create a new `health_note` table with its own access controls and consent, `client_id` FK. Kept out of `client` precisely so sensitive data is isolated and addable later. **And out of `client_note` (§3.14) for the same reason** — that table is the trainer's own free text with no consent story behind it, so widening it with an injury or condition field would put health data in a table that was never designed to hold it. A trainer typing "left knee — no deep squats" into a free-text note is doing what they would do on a paper card; a field that tells that note apart from any other note is the line this must not cross.
 

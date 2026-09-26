@@ -1,25 +1,27 @@
 'use client';
 
-import { DAY_MS, formatMinute, minuteOfDay, startOfDay } from '@/lib/today/time';
+import { DAY_MS, avatarToken, formatMinute, formatMinuteRange, initials, minuteOfDay, startOfDay } from '@/lib/today/time';
 import { gridStart } from '@/lib/schedule/view';
 import type { ScheduleGrid, Placed } from '@/lib/schedule/grid';
 import type { Gap } from '@/lib/today/day';
+import { Button } from '@/web-components/ui/Button';
 
 /** 0 = Monday … 6 = Sunday — matches `working_hours.weekday` convention. */
 const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
-/** Stable avatar hue from a client name — cycles through 12 color tokens. */
-function avIndex(name: string): number {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return (h % 12) + 1;
-}
-
-/** Up to two initials from a display name. */
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase();
-}
+/*
+ * `avIndex` and `initials` were LOCAL HERE, and both disagreed with the rest of
+ * the product about the same client.
+ *
+ * `avIndex` hashed the client's NAME where every other screen hashes their ID,
+ * so Meera Reddy was one colour in the week grid and a different one in the day
+ * agenda beside it — which defeats the only thing an avatar colour is for. And
+ * the local `initials` took the first letter of the first two WORDS, where the
+ * shared one takes the first and the LAST: `Arjun Subramanian Iyer` read as `AS`
+ * here and `AI` everywhere else.
+ *
+ * Both now come from `lib/today/time.ts`, which is where the answer already was.
+ */
 
 interface DayAgendaProps {
   grid: ScheduleGrid;
@@ -128,13 +130,12 @@ export function DayAgenda({
       {isEmpty ? (
         <div className="dag__empty">
           <p>Nothing booked</p>
-          <button
-            type="button"
-            className="btn btn--primary"
+          <Button
+            variant="primary"
             onClick={() => onBook(day.at, 9 * 60)}
           >
             New session
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="dag__agenda">
@@ -153,7 +154,7 @@ export function DayAgenda({
             if (item.kind === 'gap') {
               const { gap } = item;
               const h = Math.round(gap.minutes / 60);
-              const label = `${h > 0 ? `${h}h` : `${gap.minutes}m`} free · ${formatMinute(gap.startMinute)} – ${formatMinute(gap.endMinute)}`;
+              const label = `${h > 0 ? `${h}h` : `${gap.minutes}m`} free · ${formatMinuteRange(gap.startMinute, gap.endMinute)}`;
               return (
                 <div key={`g${gap.startMinute}`} className="dag__row">
                   <button
@@ -163,7 +164,7 @@ export function DayAgenda({
                     aria-label={`${label}. Tap to book.`}
                   >
                     <b>{h > 0 ? `${h}h` : `${gap.minutes}m`}</b>
-                    <span>{`free · ${formatMinute(gap.startMinute)} – ${formatMinute(gap.endMinute)}`}</span>
+                    <span>{`free · ${formatMinuteRange(gap.startMinute, gap.endMinute)}`}</span>
                     <em>Book</em>
                   </button>
                 </div>
@@ -210,7 +211,7 @@ export function DayAgenda({
                 >
                   <span
                     className="dag__av"
-                    style={{ background: `var(--tx-av-${avIndex(session.clientName)})` }}
+                    style={{ background: avatarToken(session.clientId) }}
                     aria-hidden="true"
                   >
                     {initials(session.clientName)}
@@ -220,7 +221,7 @@ export function DayAgenda({
                     <span>{session.programName ?? `${session.minutes} min`}</span>
                   </span>
                   <span className={`dag__tag dag__tag--${session.mode}`} aria-hidden="true">
-                    {session.mode === 'remote' ? 'Remote' : 'Floor'}
+                    {session.mode === 'remote' ? 'Online' : 'In Person'}
                   </span>
                 </button>
               </div>

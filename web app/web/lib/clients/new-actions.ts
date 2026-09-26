@@ -80,6 +80,35 @@ export async function updateClientSchedule(
   revalidatePath('/clients');
 }
 
+/**
+ * WHAT STEPS 1 AND 2 WROTE, WRITTEN AGAIN.
+ *
+ * `PUT /v1/clients/{id}` is a PARTIAL update — `updateClientSchedule` above has
+ * relied on that since it was written, sending `weeklySchedule` and nothing
+ * else — and `UpdateClientRequest` carries every field those two steps collect.
+ * So going back to them after the row exists is a real edit rather than a
+ * refusal, which is what the flow used to give: the rungs for *Who* and *Money*
+ * were simply not clickable once `createdClientId` was set.
+ *
+ * Every field is optional and an omitted field is left alone, so a trainer who
+ * goes back to fix a name cannot disturb the split they set on the next step.
+ */
+export interface ClientDetailsPatch {
+  name?: string;
+  phone?: string;
+  deliveryMode?: 'floor' | 'remote';
+  trainerSplitPercent?: number;
+}
+
+export async function updateClientDetails(
+  clientId: string,
+  patch: ClientDetailsPatch,
+): Promise<void> {
+  await authed(`/v1/clients/${clientId}`, 'PUT', patch);
+  revalidatePath('/clients');
+  revalidatePath(`/clients/${clientId}`);
+}
+
 export interface ApplyTemplateInput {
   clientId: string;
   startDate?: string;

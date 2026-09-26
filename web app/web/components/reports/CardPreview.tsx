@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import type { ClientReport } from '@/lib/reports/build';
 import { reportMessage } from '@/lib/reports/build';
 import { reportCardBlob } from '@/lib/reports/card-image';
+import { Card } from '@/web-components/ui/Card';
 
 /**
  * THE PREVIEW IS THE ARTEFACT.
@@ -60,15 +61,13 @@ export function CardPreview({ report }: { report: ClientReport }) {
 
   if (failed) {
     return (
-      <div className="card">
-        <div className="card__b">
-          <p className="small">
-            This browser would not draw the card. Everything below is still
-            correct, and <b>Send on WhatsApp</b> still works — it sends the
-            summary as text.
-          </p>
-        </div>
-      </div>
+      <Card>
+        <p className="small">
+          This browser would not draw the card. Everything below is still
+          correct, and <b>Send on WhatsApp</b> still works — it sends the
+          summary as text.
+        </p>
+      </Card>
     );
   }
 

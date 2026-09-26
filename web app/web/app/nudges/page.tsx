@@ -7,7 +7,7 @@ import { permanentRedirect } from 'next/navigation';
  * triggered it.** Making a trainer navigate somewhere else to follow up is
  * exactly the friction that stops the follow-up happening — so the buttons are on
  * the rows of the people they are about (Today's day list, the attention queue,
- * the roster, the dues list, the packs that are ending, the sessions nobody
+ * the roster, the pending list, the packs that are ending, the sessions nobody
  * turned up to, the client's own file) and there is no Nudges screen at all.
  *
  * What is left when the sending moves onto the rows is the TEMPLATE LIBRARY,

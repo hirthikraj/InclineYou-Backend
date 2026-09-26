@@ -56,7 +56,7 @@ function fail(error: unknown, subject: string): NudgeSendResult {
  * rhythm is a message to the wrong person.
  *
  * These buttons are the opposite act. A trainer pressing *Remind* on Meera's row
- * in the dues list, or *Send summary* under a session they have just finished,
+ * in the pending list, or *Send summary* under a session they have just finished,
  * has arrived at one person and pressed one button about them. And the review
  * step is already built into the delivery: nothing leaves this product — the
  * WhatsApp composer opens with the draft in it and the trainer reads it before
@@ -69,7 +69,7 @@ function fail(error: unknown, subject: string): NudgeSendResult {
  *
  * ── AND IT REVALIDATES /today ────────────────────────────────────────────────
  *
- * Because the queue's ranking reads the log now. A reminder sent from the dues
+ * Because the queue's ranking reads the log now. A reminder sent from the pending
  * list has to take that client's row out of tomorrow morning's top six, and
  * without this it would not until the five-minute heartbeat.
  */

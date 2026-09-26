@@ -11,7 +11,7 @@
  *
  * So this file is a string builder and nothing else. It runs in the browser, it
  * touches no server and it invents no figures — every column is a column of the
- * ledger the trainer has been looking at, which is what makes the export
+ * payments list the trainer has been looking at, which is what makes the export
  * argue-with-able against the screen it came from.
  *
  * ── TWO DECISIONS THAT LOOK LIKE FUSSINESS AND ARE NOT ───────────────────────
@@ -101,7 +101,7 @@ export function downloadCsv(filename: string, csv: string): void {
   requestAnimationFrame(() => URL.revokeObjectURL(url));
 }
 
-/** `inclineyou-ledger-aug-2026.csv` — lands in a Downloads folder that has others. */
+/** `inclineyou-payments-aug-2026.csv` — lands in a Downloads folder that has others. */
 export function csvFilename(kind: string, periodLabel: string): string {
   const slug = periodLabel.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   return `inclineyou-${kind}-${slug}.csv`;

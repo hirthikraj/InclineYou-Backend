@@ -39,9 +39,14 @@ export function DayRibbon({ days, windows }: { days: number[]; windows: HourWind
   return (
     // The band is a fixed 960px because it is a MEASUREMENT, not a layout: one
     // pixel is one minute, so it cannot flex with the window without the scale
-    // becoming a lie. A narrow window scrolls it instead.
+    // becoming a lie. A narrow window scrolls it instead — in `.dr__scroll`,
+    // which is the band's own scrollport in §22 rather than the inline
+    // `overflowX:'auto'` this carried. See the class: the inline version left
+    // `overflow-y` computing to `auto` and grew a vertical scrollbar beside a
+    // 52px band, and it had no edge shading, so a clipped day read as a whole
+    // one.
     <>
-    <div style={{ overflowX: 'auto', overscrollBehaviorX: 'contain' }}>
+    <div className="dr__scroll">
       <div className="dr" style={{ width: RIBBON_MINUTES }} role="img" aria-label={spoken}>
         {bands.off.map((seg) => (
           <div

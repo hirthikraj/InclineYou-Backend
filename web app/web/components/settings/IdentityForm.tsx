@@ -1,23 +1,12 @@
 'use client';
 
-import { useRef, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 
 import { MessageSlot } from '@/components/auth/MessageSlot';
+import { usePublishDraft } from '@/components/settings/ProfileDraft';
 import type { Message } from '@/lib/auth/copy';
-import {
-  CERTIFICATIONS,
-  EXPERIENCE_BANDS,
-  LANGUAGES,
-  NOT_CERTIFIED,
-  SPECIALITIES,
-  avatarTint,
-  initialsOf,
-  labelFor,
-  labelList,
-} from '@/lib/setup/options';
 import { saveIdentity } from '@/lib/profile/actions';
 import type { Identity } from '@/lib/profile/api';
-import { modeLabel } from '@/lib/profile/work';
 import {
   BIO_CHARS_WARN_FROM,
   BIO_WORDS_MAX,
@@ -29,6 +18,9 @@ import {
   canonicalVideoId,
   wordCount,
 } from '@/lib/profile/identity';
+import { Button } from '@/web-components/ui/Button';
+import { Field, TextField } from '@/web-components/ui/Field';
+import { FormGroup } from '@/web-components/ui/FormGroup';
 
 /**
  * IDENTITY — the profile's first tab, and the four fields a CLIENT reads.
@@ -66,21 +58,21 @@ import {
  * uptime. What it does show is that the server understood it — the canonical URL
  * comes back on save, and it is a different string from the paste.
  *
- * ## The preview belongs to this tab, and it shows more than this tab edits
+ * ## THE PREVIEW IS NO LONGER THIS FILE'S, AND THAT IS THE POINT
  *
- * The card is live: it redraws as the name and the headline are typed, which is
- * the whole reason it sits inside the form rather than in the layout above the
- * tabs. It also draws **every other tab's answer** — the experience band, the
- * languages, the specialities and the certifications — all read-only here,
- * because the card answers *how clients see you* and a client sees all of it.
- * The alternative is a preview that quietly omits five-sixths of the profile,
- * which is a preview that cannot be trusted, and the one thing a preview has to
- * be.
+ * *How clients see you* was drawn here, inside this form, and it was in the
+ * wrong place in both directions. It showed **every other tab's answer** — the
+ * experience band, the languages, the specialities, the certificates, the work,
+ * the links — while living inside the one tab that edits none of them, so the
+ * six tabs whose answers it draws could not see it. And MEASURED at 1536×695 it
+ * was the first thing to scroll off the screen: 1046px of content in a 510px
+ * window, with the card gone by the time the bio it previews was being typed.
  *
- * It is read-only rather than a set of shortcuts into the other tabs on
- * purpose. A chip that both previewed an answer and edited it would make this
- * tab able to write four columns it does not own, which is exactly the
- * cross-tab clobber `lib/profile/actions.ts` splits the save to prevent.
+ * It is `ProfileAside` now — in `layout.tsx`, sticky, on all seven tabs. This
+ * form's part of the arrangement is one effect: it publishes the name and the
+ * headline into `ProfileDraftProvider` as they are typed, which is what keeps
+ * the card live. Nothing else on this tab is drawn on the card — the bio and the
+ * video are not on it — so nothing else is published.
  *
  * ## And one about the save
  *
@@ -100,12 +92,20 @@ export function IdentityForm({ initial }: { initial: Identity }) {
   const [message, setMessage] = useState<Message | null>(null);
   const [pending, start] = useTransition();
   const nameInput = useRef<HTMLInputElement>(null);
+  const publish = usePublishDraft();
+
+  /* The two fields the preview card draws. From an EFFECT and not from the
+     change handlers: setting state in an ancestor from a keystroke handler
+     re-renders this whole subtree synchronously with the keypress, and the
+     field being typed in is inside it. */
+  useEffect(() => {
+    publish({ name, headline });
+  }, [publish, name, headline]);
 
   const trimmedName = name.trim();
-  const initials = initialsOf(name);
   const words = wordCount(bio);
   const charsLeft = MAX_BIO - bio.length;
-  // The live preview reads the canonical URL, which only exists after a save —
+  // The saved-as line reads the canonical URL, which only exists after a save —
   // see `canonicalVideoId`. An unsaved paste honestly shows nothing rather than
   // this file guessing at the six shapes `YouTubeLink.java` already reduces.
   const videoId = canonicalVideoId(video) ?? (video === saved.introVideoUrl ? saved.introVideoId : null);
@@ -114,48 +114,6 @@ export function IdentityForm({ initial }: { initial: Identity }) {
     headline !== saved.headline ||
     bio !== saved.bio ||
     video !== saved.introVideoUrl;
-
-  // "Not certified yet" is a real answer and it belongs on the preview, but not
-  // as a credential chip: a tag reading *Not certified yet* beside somebody's
-  // name renders an honest answer as a badge of failure. Certificates get tags;
-  // that one gets a quiet line.
-  const badges = saved.certifications.filter((id) => id !== NOT_CERTIFIED);
-  const declaredNone = saved.certifications.includes(NOT_CERTIFIED);
-
-  // The other tabs' answers, as one line. Absent parts are dropped rather than
-  // drawn as a placeholder: an unanswered field on a PREVIEW would be telling
-  // the trainer a client sees something that is not there.
-  const band = EXPERIENCE_BANDS.find((b) => b.id === saved.experienceBand)?.label ?? '';
-  const meta = [band, saved.languages.length > 0 ? labelList(saved.languages, LANGUAGES, 4) : '']
-    .filter(Boolean)
-    .join(' · ');
-
-  // The Work & hours tab's answers, as one more line. How you coach comes
-  // before where, because a client who cannot get to a gym has already decided
-  // by the time they read the neighbourhood.
-  // The Social links tab's answers, as the card's last line. Handles rather
-  // than URLs — `@ravi.trains` is what a client would recognise, and the server
-  // derives it so this half never parses the URL. A `/channel/UC…` link has no
-  // handle, so it falls back to the platform's name rather than printing 40
-  // characters of channel id on a preview card.
-  const socials: { label: string; url: string }[] = [
-    saved.instagramUrl
-      ? { label: saved.instagramHandle ?? 'Instagram', url: saved.instagramUrl }
-      : null,
-    saved.youtubeUrl ? { label: saved.youtubeHandle ?? 'YouTube', url: saved.youtubeUrl } : null,
-  ].filter((s): s is { label: string; url: string } => s !== null);
-
-  const how = saved.trainingModes.map(modeLabel).join(' · ');
-  const where = [
-    saved.gymName,
-    // Three, then a count. A tag row of ten neighbourhoods is a paragraph
-    // wearing chips, and the preview's job is to show the shape of the profile.
-    saved.serviceAreas.length > 3
-      ? `${saved.serviceAreas.slice(0, 3).join(', ')} +${saved.serviceAreas.length - 3}`
-      : saved.serviceAreas.join(', '),
-  ]
-    .filter(Boolean)
-    .join(' · ');
 
   function submit() {
     if (trimmedName.length === 0) {
@@ -199,116 +157,21 @@ export function IdentityForm({ initial }: { initial: Identity }) {
         submit();
       }}
     >
-      {/* The card is the preview, and it is the same object `NameForm` draws in
-          setup — same `.av`, same tint function, so the trainer meets one idea
-          of themselves in both places. */}
-      <div className="card" style={{ maxWidth: 560 }}>
-        <div className="card__hd">
-          <span className="card__t">How clients see you</span>
-        </div>
-        <div className="card__b">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
-            <span className="av av--lg" style={{ background: avatarTint(name || saved.phone) }}>
-              {initials || '—'}
-            </span>
-            {/* `minWidth:0` so a long headline ellipses instead of pushing the
-                avatar out — a flex item's min-width is `auto`. */}
-            <span style={{ minWidth: 0 }}>
-              <b style={{ display: 'block' }}>{trimmedName || 'Your name'}</b>
-              <span
-                className="small"
-                style={{
-                  display: 'block',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {headline.trim() || 'Your one line goes here.'}
-              </span>
-            </span>
-          </div>
+      {/* ONE STACK AT ONE SPACING, rather than a `marginTop` on each field.
+          The four carried 22, 18, 18 and 18 inline — the same decision made
+          four times and made differently once — and an inline style is the one
+          form no rung can release (trap 2).
 
-          {meta ? (
-            <p className="small" style={{ marginTop: 10 }}>
-              {meta}
-            </p>
-          ) : null}
-
-          {/* Specialities lead, because they are the first thing a client reads
-              after a name. Plain tags and no qualifier — unlike the row below,
-              nobody is claiming these were checked by anyone. */}
-          {saved.specialities.length > 0 ? (
-            <div className="row" style={{ flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
-              {saved.specialities.map((id) => (
-                <span className="tag" key={id}>
-                  {labelFor(id, SPECIALITIES)}
-                </span>
-              ))}
-            </div>
-          ) : null}
-
-          {/* The Certifications tab's callout promises we say *self-declared* on
-              the profile too. This is the profile — so it says it, and the
-              promise stops being a claim with nothing behind it. */}
-          {badges.length > 0 ? (
-            <div
-              className="row"
-              style={{ flexWrap: 'wrap', gap: 6, marginTop: 10, alignItems: 'center' }}
-            >
-              {badges.map((id) => (
-                <span className="tag" key={id}>
-                  {labelFor(id, CERTIFICATIONS)}
-                </span>
-              ))}
-              <span className="small">Self-declared</span>
-            </div>
-          ) : declaredNone ? (
-            <p className="small" style={{ marginTop: 10 }}>
-              No certifications listed — which plenty of excellent trainers don’t have.
-            </p>
-          ) : null}
-
-          {/* Read-only, like every other borrowed answer on this card — the
-              Work & hours tab owns these and this one draws them. A tag here
-              that opened another tab would be a shortcut out of a half-typed
-              bio, which is what the unsaved marker exists to warn about. */}
-          {how || where ? (
-            <p className="small" style={{ marginTop: 10 }}>
-              {[how, where].filter(Boolean).join(' — ')}
-            </p>
-          ) : null}
-
-          {/* Real links, unlike every other borrowed answer on this card. A
-              trainer checking their own preview is exactly the person who should
-              find out that the handle they typed opens the wrong account, and
-              the only way to find that out is to follow it. */}
-          {socials.length > 0 ? (
-            <p className="small" style={{ marginTop: 10 }}>
-              {socials.map((s, i) => (
-                <span key={s.url}>
-                  {i > 0 ? ' · ' : ''}
-                  <a href={s.url} target="_blank" rel="noreferrer noopener">
-                    {s.label}
-                  </a>
-                </span>
-              ))}
-            </p>
-          ) : null}
-        </div>
-      </div>
-
-      <p className="small" style={{ marginTop: 8, maxWidth: 560 }}>
-        Your initials stand in until profile photos arrive.
-      </p>
-
-      {/* ── name ─────────────────────────────────────────────────────────── */}
-      <div className="fld" style={{ marginTop: 22, maxWidth: 560 }}>
-        <label className="fld__l" htmlFor="pf-name">
-          Name
-        </label>
-        <input
-          className="ctl"
+          The column's WIDTH is the sidecar's now. `.sdc__main` caps the measure
+          at 600, so `maxWidth:560` is gone from every field here, and the
+          message slot and the save row below finally share that edge: MEASURED
+          before, both of them ran to 1409px while every field above them
+          stopped at 560, which drew a ragged step across the bottom of the
+          form. */}
+      <FormGroup gap={4}>
+        <TextField
+          label="Name"
+          hint="Personal or the name you trade under — whichever your clients already know. It is on every invite and receipt you send."
           id="pf-name"
           ref={nameInput}
           value={name}
@@ -321,21 +184,17 @@ export function IdentityForm({ initial }: { initial: Identity }) {
             setName(e.target.value);
             if (message) setMessage(null);
           }}
-          aria-describedby="pf-name-h"
         />
-        <span className="fld__h" id="pf-name-h">
-          Personal or the name you trade under — whichever your clients already know. It is on
-          every invite and receipt you send.
-        </span>
-      </div>
 
-      {/* ── headline ─────────────────────────────────────────────────────── */}
-      <div className="fld" style={{ marginTop: 18, maxWidth: 560 }}>
-        <label className="fld__l" htmlFor="pf-headline">
-          Headline <Optional />
-        </label>
-        <input
-          className="ctl"
+        <TextField
+          label={<>Headline <Optional /></>}
+          hint={<>What you coach, and where. One line, under your name.
+            {headline.length >= HEADLINE_COUNTER_FROM ? (
+              <>
+                {' '}
+                <b className="tnum">{MAX_HEADLINE - headline.length}</b> characters left.
+              </>
+            ) : null}</>}
           id="pf-headline"
           value={headline}
           maxLength={MAX_HEADLINE}
@@ -347,67 +206,55 @@ export function IdentityForm({ initial }: { initial: Identity }) {
             setHeadline(e.target.value);
             if (message) setMessage(null);
           }}
-          aria-describedby="pf-headline-h"
         />
-        <span className="fld__h" id="pf-headline-h">
-          What you coach, and where. One line, under your name.
-          {headline.length >= HEADLINE_COUNTER_FROM ? (
-            <>
-              {' '}
-              <b className="mono">{MAX_HEADLINE - headline.length}</b> characters left.
-            </>
-          ) : null}
-        </span>
-      </div>
 
-      {/* ── bio ──────────────────────────────────────────────────────────── */}
-      <div className="fld" style={{ marginTop: 18, maxWidth: 560 }}>
-        <label className="fld__l" htmlFor="pf-bio">
-          About you <Optional />
-        </label>
-        <textarea
-          className="ctl"
+        <Field
+          label={<>About you <Optional /></>}
+          hint={<>{/* Never a warning below the guidance — nothing here is refused for
+                being brief, and "too short" on an optional field is an accusation
+                for answering it. */}
+            {bio.length >= BIO_CHARS_WARN_FROM ? (
+              <>
+                <b className="tnum">{charsLeft}</b> characters left.
+              </>
+            ) : words === 0 ? (
+              <>
+                How you coach, who you coach, and what a client can expect. Aim for{' '}
+                {BIO_WORDS_MIN}–{BIO_WORDS_MAX} words.
+              </>
+            ) : (
+              <>
+                <b className="tnum">{words}</b> {words === 1 ? 'word' : 'words'} — aim for{' '}
+                {BIO_WORDS_MIN}–{BIO_WORDS_MAX}.
+              </>
+            )}</>}
           id="pf-bio"
-          rows={8}
-          value={bio}
-          maxLength={MAX_BIO}
-          disabled={pending}
-          placeholder={BIO_PLACEHOLDER}
-          onChange={(e) => {
-            setBio(e.target.value);
-            if (message) setMessage(null);
-          }}
-          aria-describedby="pf-bio-h"
-        />
-        <span className="fld__h" id="pf-bio-h">
-          {/* Never a warning below the guidance — nothing here is refused for
-              being brief, and "too short" on an optional field is an accusation
-              for answering it. */}
-          {bio.length >= BIO_CHARS_WARN_FROM ? (
-            <>
-              <b className="mono">{charsLeft}</b> characters left.
-            </>
-          ) : words === 0 ? (
-            <>
-              How you coach, who you coach, and what a client can expect. Aim for{' '}
-              {BIO_WORDS_MIN}–{BIO_WORDS_MAX} words.
-            </>
-          ) : (
-            <>
-              <b className="mono">{words}</b> {words === 1 ? 'word' : 'words'} — aim for{' '}
-              {BIO_WORDS_MIN}–{BIO_WORDS_MAX}.
-            </>
+        >
+          {(a) => (
+            <textarea className="ctl" {...a} rows={8} value={bio} maxLength={MAX_BIO} disabled={pending} placeholder={BIO_PLACEHOLDER} onChange={(e) => {
+              setBio(e.target.value);
+              if (message) setMessage(null);
+            }} />
           )}
-        </span>
-      </div>
+        </Field>
 
-      {/* ── intro video ──────────────────────────────────────────────────── */}
-      <div className="fld" style={{ marginTop: 18, maxWidth: 560 }}>
-        <label className="fld__l" htmlFor="pf-video">
-          Intro video <Optional />
-        </label>
-        <input
-          className="ctl"
+        <TextField
+          label={<>Intro video <Optional /></>}
+          hint={<>A YouTube link, if you have one. Paste it from the video’s Share button — we tidy it up.
+            {videoId ? (
+              <>
+                {' '}
+                Saved as{' '}
+                <a
+                  href={`https://www.youtube.com/watch?v=${videoId}`}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                >
+                  youtube.com/watch?v={videoId}
+                </a>
+                .
+              </>
+            ) : null}</>}
           id="pf-video"
           type="url"
           inputMode="url"
@@ -422,26 +269,8 @@ export function IdentityForm({ initial }: { initial: Identity }) {
             setVideo(e.target.value);
             if (message) setMessage(null);
           }}
-          aria-describedby="pf-video-h"
         />
-        <span className="fld__h" id="pf-video-h">
-          A YouTube link, if you have one. Paste it from the video’s Share button — we tidy it up.
-          {videoId ? (
-            <>
-              {' '}
-              Saved as{' '}
-              <a
-                href={`https://www.youtube.com/watch?v=${videoId}`}
-                target="_blank"
-                rel="noreferrer noopener"
-              >
-                youtube.com/watch?v={videoId}
-              </a>
-              .
-            </>
-          ) : null}
-        </span>
-      </div>
+      </FormGroup>
 
       <MessageSlot message={message} />
 
@@ -474,6 +303,20 @@ export function IdentityForm({ initial }: { initial: Identity }) {
  * and nowhere to go with edits in hand. Now every tab is a route, so
  * *Certifications* is a navigation away from a half-typed bio, and the only
  * honest thing is to say so before the click rather than after it.
+ *
+ * The preview card is the second reason it earns its place, and it is a NEW
+ * one. The card beside the form redraws as the name is typed, which is exactly
+ * the arrangement that could read as *already saved* — so the row saying it is
+ * not sits under the fields, in the column doing the typing, rather than beside
+ * the card that is telling the comfortable half of the story.
+ *
+ * ── THE 16px ABOVE IT IS THE STACK'S STEP ───────────────────────────────────
+ *
+ * It was 4. That was right while every field above carried its own 18px
+ * `marginTop` and the row was a footnote to the last of them; with the fields
+ * in one `FormGroup` at 16, a 4px gap made the save row look like part of the
+ * video field. Both branches carry it, or the row jumps 12px the moment the
+ * first character is typed.
  */
 export function SaveRow({
   pending,
@@ -496,17 +339,17 @@ export function SaveRow({
   // by then — the row must not vanish out from under the "Saving…" it is showing.
   if (!dirty && !pending) {
     return (
-      <p className="small" style={{ marginTop: 4 }}>
+      <p className="small" style={{ marginTop: 16 }}>
         {note}
       </p>
     );
   }
 
   return (
-    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 4, flexWrap: 'wrap' }}>
-      <button className="btn btn--primary btn--lg" type="submit" disabled={pending}>
+    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+      <Button variant="primary" size="lg" type="submit" disabled={pending}>
         {pending ? 'Saving…' : 'Save'}
-      </button>
+      </Button>
       {!pending ? (
         <span className="small">
           {unsaved ?? (

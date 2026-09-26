@@ -8,7 +8,7 @@ import { getToken } from '@/lib/auth/session';
  *
  * ## Why it is here and not in `lib/clients/api.ts`
  *
- * That module returns the whole roster with its packages, sessions and dues,
+ * That module returns the whole roster with its packages, sessions and pending amounts,
  * because the roster screen draws all of it. This wants one integer. Importing
  * the roster's reader would pull four requests' worth of a screen the trainer is
  * not looking at, on a page whose other request is a single profile row.

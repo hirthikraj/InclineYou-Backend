@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { LogExerciseView, LogSetRow } from '@/lib/log/log';
 import { Trash } from './Icons';
+import { useDismiss } from '@/lib/ui/dismiss';
+import { Button } from '@/web-components/ui/Button';
+import { Tag } from '@/web-components/ui/Tag';
+import { Chip } from '@/web-components/ui/Chip';
+import { TextField } from '@/web-components/ui/Field';
 
 /**
  * FRAME 1b — ONE SET, IN FULL.
@@ -18,7 +23,7 @@ import { Trash } from './Icons';
  * **A panel and not a modal**, which is `webapp.css`'s own rule for the two: the
  * row it is about stays on screen behind it, and a 26% scrim keeps the grid at
  * 6.4:1 rather than the 1.8:1 a modal scrim measured. A payment is decided while
- * looking at the ledger; a set is corrected while looking at the set.
+ * looking at the payments list; a set is corrected while looking at the set.
  *
  * **Delete goes straight through.** §09: *undo after, never confirm before* —
  * a trainer logs twenty sets a session and twenty confirmations is a different
@@ -54,13 +59,17 @@ export function SetPanel({
     first.current?.select();
   }, []);
 
+  /* Every way out goes through `dismiss` so the panel leaves the way it
+     arrived — `lib/ui/dismiss.ts`. `onClose` is the unmount at the end of it. */
+  const { closing, dismiss, dismissThen, ref: panelRef } = useDismiss<HTMLDivElement>(onClose);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') dismiss();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [dismiss]);
 
   const number = (raw: string) => {
     const value = Number.parseFloat(raw.replace(',', '.'));
@@ -69,27 +78,35 @@ export function SetPanel({
 
   return (
     <>
-      <div className="scrim scrim--soft" onClick={onClose} aria-hidden="true" />
-      <div className="panel" style={{ width: 380 }} role="dialog" aria-label={`${view.name}, set ${row.number}`}>
+      <div
+        className={`scrim scrim--soft${closing ? ' scrim--out' : ''}`}
+        onClick={dismiss}
+        aria-hidden="true"
+      />
+      <div
+        ref={panelRef}
+        className={`panel${closing ? ' panel--out' : ''}`}
+        style={{ width: 380 }}
+        role="dialog"
+        aria-label={`${view.name}, set ${row.number}`}
+      >
         <div className="panel__hd">
           <span className="panel__t">{view.name} · set {row.number}</span>
-          {row.pr ? <span className="tag tag--pr" style={{ marginLeft: 'auto' }}>Record</span> : null}
+          {row.pr ? <Tag tone="pr" style={{ marginLeft: 'auto' }}>Record</Tag> : null}
         </div>
 
         <div className="panel__body">
           <div className="grid2">
             {view.logType === 'weight_reps' ? (
-              <div className="fld">
-                <label className="fld__l" htmlFor="set-load">Load kg</label>
-                <input
-                  id="set-load"
-                  className="ctl ctl--num"
-                  ref={first}
-                  inputMode="decimal"
-                  value={load}
-                  onChange={(e) => setLoad(e.target.value)}
-                />
-              </div>
+              <TextField
+                label="Load kg"
+                id="set-load"
+                numeric
+                ref={first}
+                inputMode="decimal"
+                value={load}
+                onChange={(e) => setLoad(e.target.value)}
+              />
             ) : (
               <div className="fld">
                 <span className="fld__l">Load</span>
@@ -98,31 +115,27 @@ export function SetPanel({
                 </p>
               </div>
             )}
-            <div className="fld">
-              <label className="fld__l" htmlFor="set-reps">Reps</label>
-              <input
-                id="set-reps"
-                className="ctl ctl--num"
-                ref={view.logType === 'weight_reps' ? undefined : first}
-                inputMode="numeric"
-                value={reps}
-                onChange={(e) => setReps(e.target.value)}
-              />
-            </div>
+            <TextField
+              label="Reps"
+              id="set-reps"
+              numeric
+              ref={view.logType === 'weight_reps' ? undefined : first}
+              inputMode="numeric"
+              value={reps}
+              onChange={(e) => setReps(e.target.value)}
+            />
           </div>
 
           <p className="micro" style={{ margin: '18px 0 8px' }}>Effort · RPE</p>
           <div className="wk" role="group" aria-label="RPE">
             {[6, 7, 8, 9, 10].map((n) => (
-              <button
-                className="chip"
-                type="button"
+              <Chip
+                pressed={rpe === n}
                 key={n}
-                aria-pressed={rpe === n}
                 onClick={() => setRpe(rpe === n ? null : n)}
               >
                 {n}
-              </button>
+              </Chip>
             ))}
           </div>
           <p className="small" style={{ marginTop: 7 }}>
@@ -150,15 +163,18 @@ export function SetPanel({
           ) : null}
 
           <div style={{ marginTop: 22, borderTop: '1px solid var(--tx-line)', paddingTop: 14 }}>
-            <button
-              className="btn btn--ghost"
-              type="button"
+            <Button
+              variant="ghost"
               style={{ color: 'var(--tx-danger)' }}
-              onClick={onDelete}
+              /* Delete closes the panel in `Console` the moment it is pressed,
+                 so it leaves through the same wait as Cancel. Save does NOT —
+                 it is async and can come back with a message and stay open, so
+                 wrapping it would dismiss a panel that failed. */
+              onClick={() => dismissThen(onDelete)}
               disabled={busy || !row.setId}
             >
               <Trash /> Delete this set
-            </button>
+            </Button>
             <p className="small" style={{ marginTop: 6 }}>
               Goes straight through, with an undo behind it.{' '}
               <b className="ink">Undo after, never confirm before</b> — the one exception in this
@@ -168,10 +184,9 @@ export function SetPanel({
         </div>
 
         <div className="panel__foot">
-          <button className="btn btn--ghost" type="button" onClick={onClose}>Cancel</button>
-          <button
-            className="btn btn--primary"
-            type="button"
+          <Button variant="ghost" onClick={dismiss}>Cancel</Button>
+          <Button
+            variant="primary"
             disabled={busy}
             onClick={() =>
               onSave({
@@ -183,7 +198,7 @@ export function SetPanel({
             }
           >
             {busy ? 'Saving…' : 'Save the set'}
-          </button>
+          </Button>
         </div>
       </div>
     </>

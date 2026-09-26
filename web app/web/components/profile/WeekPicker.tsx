@@ -4,12 +4,12 @@ import { IconPlus, IconTrash } from '@/components/auth/Icons';
 import { Chip, ChipRow } from '@/components/setup/Chips';
 import { DayRibbon } from '@/components/setup/DayRibbon';
 import { GroupLabel } from '@/components/setup/SetupShell';
+import { TimeField } from '@/components/shell/TimeField';
 import {
   MIN_WINDOW_MINUTES,
   WEEKDAY_SHORT,
   WINDOW_PRESETS,
   formatDuration,
-  formatMinute,
   formatWindow,
   mergeWindows,
   minutesPerDay,
@@ -17,6 +17,7 @@ import {
   nextWindowAfter,
   type HourWindow,
 } from '@/lib/setup/hours';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * THE WORKING-WEEK PICKER — days, windows, and the band that shows the shape.
@@ -101,7 +102,10 @@ export function WeekPicker({
 
   return (
     <>
-      <GroupLabel top={22}>THE DAYS YOU WORK</GroupLabel>
+      {/* No `top={22}`. The step's three group labels were 22, 24 and 24 — one
+          rhythm written three times and got wrong once. `GroupLabel`'s own
+          default is 24 and it is the only value any of them wanted. */}
+      <GroupLabel>THE DAYS YOU WORK</GroupLabel>
       <ChipRow top={0} className="chiprow--days">
         {WEEKDAY_SHORT.map((label, i) => (
           <Chip
@@ -119,7 +123,11 @@ export function WeekPicker({
         {WINDOW_PRESETS.map((preset) => (
           <Chip
             key={preset.key}
-            label={preset.label}
+            /* Formatted here rather than carried on the preset, so the chip
+               and the window rows below it are the same string from the same
+               function — the labels used to be literals and would have gone on
+               saying `17:00 – 21:00` under a 12-hour clock. */
+            label={formatWindow(preset.window)}
             pressed={windows.some(
               (w) =>
                 w.startMinute === preset.window.startMinute &&
@@ -182,16 +190,15 @@ export function WeekPicker({
             </div>
           </div>
         ))}
-        <button
-          className="btn btn--ghost"
-          type="button"
+        <Button
+          variant="ghost"
           disabled={disabled}
           style={{ flex: '0 0 auto' }}
           onClick={() => setWindows([...windows, nextWindowAfter(windows)])}
         >
           <IconPlus size={14} />
           {windows.length === 0 ? 'Add hours' : 'Another window'}
-        </button>
+        </Button>
       </div>
 
       <GroupLabel>EVERY DAY YOU PICKED, AT ONE PIXEL PER MINUTE</GroupLabel>
@@ -218,49 +225,5 @@ export function WeekPicker({
         </p>
       ) : null}
     </>
-  );
-}
-
-/**
- * `HH:MM`, as a native time input.
- *
- * The phone builds a wheel because a phone has to. A browser already has a time
- * control that speaks the platform's own locale, handles the keyboard, and
- * cannot produce `25:70` — reimplementing it would be a worse version of
- * something every trainer already knows how to use. It is styled as `.ctl mono`
- * so it sits in the row with the design's fields rather than beside them.
- */
-function TimeField({
-  label,
-  value,
-  disabled,
-  onChange,
-}: {
-  label: string;
-  value: number;
-  disabled: boolean;
-  onChange: (minute: number) => void;
-}) {
-  return (
-    <input
-      className="ctl mono"
-      type="time"
-      aria-label={label}
-      disabled={disabled}
-      /* Not a fixed width. `.ctl` is 13.5px on a desk and 16px on a phone
-         (app.css, for iOS's focus zoom), and a `type="time"` control's
-         intrinsic width tracks its font — 84px clipped the colon at 16px. The
-         UA sizes it, bounded, and `flex:0 0 auto` stops the row shrinking it
-         back to the same clip. */
-      style={{ textAlign: 'center', width: 'auto', minWidth: 92, maxWidth: 132, flex: '0 0 auto' }}
-      value={formatMinute(value)}
-      // Clearing the field gives an empty string, which must not read as
-      // midnight — a half-typed value is not an answer, so it is ignored until
-      // the control has both halves.
-      onChange={(e) => {
-        const [h, m] = e.target.value.split(':').map(Number);
-        if (Number.isFinite(h) && Number.isFinite(m)) onChange(h * 60 + m);
-      }}
-    />
   );
 }

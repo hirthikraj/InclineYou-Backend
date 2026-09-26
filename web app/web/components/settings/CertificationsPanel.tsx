@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 
 import { MessageSlot } from '@/components/auth/MessageSlot';
 import { CertificationPicker } from '@/components/profile/CertificationPicker';
 import { SaveRow } from '@/components/settings/IdentityForm';
+import { usePublishDraft } from '@/components/settings/ProfileDraft';
 import type { Message } from '@/lib/auth/copy';
 import { saveCertifications } from '@/lib/profile/actions';
 import type { Identity } from '@/lib/profile/api';
@@ -42,6 +43,15 @@ export function CertificationsPanel({ initial }: { initial: Identity }) {
   const [chosen, setChosen] = useState<string[]>(initial.certifications);
   const [message, setMessage] = useState<Message | null>(null);
   const [pending, start] = useTransition();
+  const publish = usePublishDraft();
+
+  /* The preview card is in the layout and this tab is one of the six that feed
+     it. From an EFFECT rather than the picker's own handler: publishing from a
+     change handler re-renders the provider's whole subtree synchronously with
+     the click, and the chips being pressed are inside it. */
+  useEffect(() => {
+    publish({ certifications: chosen });
+  }, [publish, chosen]);
 
   // Order is not meaningful here — the catalogue's order is — so a reorder is
   // not an edit. Comparing as sets stops the unsaved marker appearing after a

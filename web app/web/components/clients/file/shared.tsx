@@ -13,7 +13,7 @@ import { formatMinute, minuteOfDay } from '@/lib/today/time';
 /* ──────────────────────────────────────────────────────────────── tabs ── */
 
 /**
- * The six, in the order they are drawn.
+ * The eight, in the order they are drawn.
  *
  * `progress` and `payments` were not tabs before this pass: progress was a route
  * of its own off the workout console and body metrics was a ghost button beside
@@ -21,15 +21,52 @@ import { formatMinute, minuteOfDay } from '@/lib/today/time';
  * live one. Both are folded in, which is what makes the strip the whole file
  * rather than most of it.
  */
-export type Tab = 'overview' | 'progress' | 'sessions' | 'program' | 'payments' | 'notes';
+export type Tab =
+  | 'overview'
+  | 'calendar'
+  | 'progress'
+  | 'assessments'
+  | 'sessions'
+  | 'program'
+  | 'payments'
+  | 'notes';
 
 export const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
+  /* SEVENTH, AND IT SITS SECOND. Asked for on 14 Sep 2026 and placed beside
+     Overview rather than beside Sessions, which is where the same rows already
+     live: the two are ordered by what a trainer opens the file TO DO. Overview
+     is *how is this going*, the calendar is *when are they in*, and the history
+     — with what each session did to the pack — is the one you go to when a
+     figure on one of the first two needs explaining. */
+  { key: 'calendar', label: 'Calendar' },
   { key: 'progress', label: 'Progress' },
+  /* EIGHTH, AND IT SITS BESIDE PROGRESS because the two are the same subject
+     read two ways: Progress is what the TRAINER recorded — their own tape,
+     their own set logs — and an assessment is what the CLIENT sent back, on a
+     date, against questions somebody wrote in advance. Half of one of them is
+     not a number at all, which is also why it is not folded into the other.
+     `ChecksTab` carries the rest of that argument.
+
+     THE LABEL IS THE DESTINATION'S NAME AND THE PROSE IS THE PRODUCT'S WORD,
+     which is the split `/clients/assessments` already runs on: that screen is
+     titled *Assessments*, its own column head reads *Assessment*, and every
+     sentence on it says *check-in*. One is what a trainer clicks and the other
+     is what the thing is called out loud, and this tab follows both.
+
+     The component and its class family stay `Checks` / `.cfchk` for the reason
+     the `notes` key two rows down stays `notes`: an internal name is not worth
+     a rename, and *check-in* is still exactly what the rows are. */
+  { key: 'assessments', label: 'Assessments' },
   { key: 'sessions', label: 'Sessions' },
-  { key: 'program', label: 'Program' },
+  { key: 'program', label: 'Plan' },
   { key: 'payments', label: 'Payments' },
-  { key: 'notes', label: 'Notes' },
+  /* THE KEY IS STILL `notes` AND THE ROUTE IS STILL `/notes`. The tab grew a
+     contact form on 14 Sep 2026 and took the name of the thing it now is, but a
+     trainer with `/clients/abc/notes` open in a second window — or bookmarked —
+     should not meet a 404 over a rename, and nothing about the label is worth
+     that. */
+  { key: 'notes', label: 'Personal information' },
 ];
 
 /** Every tab is a real route, so the strip works with the back button. */
@@ -82,6 +119,31 @@ export function longDateStr(ms: number): string {
   return `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]} ${d.getFullYear()}`;
 }
 
+/**
+ * `12 Jul – 23 Aug`, and `19 Aug 2025 – 17 May 2026` when it has to be.
+ *
+ * ── A RANGE THAT CROSSED A YEAR READ BACKWARDS ──────────────────────────────
+ *
+ * The plan tab's history ends on the stretch between the day a client joined
+ * and the day they were first given a program, and on `cli_008` — joined
+ * 19 Aug 2025, first block 17 May 2026 — that row printed **19 Aug – 17 May**.
+ * Nine months, drawn as a range running three months backwards. The rule above
+ * is right about the ordinary case (*everywhere else the reader is looking at
+ * this season*) and this is the case it does not cover: **a year is noise only
+ * while both ends are in the same one.**
+ *
+ * Decided per RANGE and not per date, so the two ends always match — `19 Aug
+ * 2025 – 17 May` is a fix that leaves the reader doing the same arithmetic.
+ */
+export function rangeStr(fromMs: number, toMs: number | null, openLabel = 'now'): string {
+  const from = new Date(fromMs);
+  if (toMs === null) return `${dateStr(fromMs)} – ${openLabel}`;
+  const to = new Date(toMs);
+  const withYear = from.getFullYear() !== to.getFullYear();
+  const one = withYear ? longDateStr : dateStr;
+  return `${one(fromMs)} – ${one(toMs)}`;
+}
+
 /* ────────────────────────────────────────────── session classification ── */
 
 export type SessionFilter = 'all' | 'done' | 'no_show' | 'cancelled' | 'booked' | 'not_marked';
@@ -95,18 +157,6 @@ export function classifySession(
   if (s.status === 'cancelled') return 'cancelled';
   if (s.status === 'scheduled') return s.scheduledAt > now ? 'booked' : 'not_marked';
   return 'booked';
-}
-
-/**
- * What each outcome did to the pack — the design's frame 3b, and the reason the
- * sessions tab is a history rather than a list. A cancelled session gave the
- * slot back; a no-show did not.
- */
-export function sessionPackLabel(cls: SessionFilter): string {
-  if (cls === 'done' || cls === 'no_show') return 'pack −1';
-  if (cls === 'cancelled') return 'pack kept';
-  if (cls === 'not_marked') return 'no outcome yet · pack untouched';
-  return 'pack untouched';
 }
 
 /* ───────────────────────────────────────────────────────── sub-components ── */

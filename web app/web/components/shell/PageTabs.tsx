@@ -42,7 +42,7 @@ export interface PageTab {
   label: string;
   href: string;
   /** A figure beside the label. Omitted, never drawn as a zero — a strip that
-   *  says *Owed 0* has spent a badge to say nothing happened. */
+   *  says *Pending 0* has spent a badge to say nothing happened. */
   count?: number | null;
 }
 

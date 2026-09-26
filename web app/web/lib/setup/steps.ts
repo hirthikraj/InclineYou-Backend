@@ -25,7 +25,7 @@
  *     banner. The copy in `copy.ts` says what is actually true instead.
  */
 
-import type { WorkMode } from './options';
+import type { Gender, WorkMode } from './options';
 
 /** Flow order. The rail, `nextStep` and every step page read this one array. */
 export const SETUP_STEPS = [
@@ -70,7 +70,7 @@ export const STEP_LABELS: Record<SetupStep, string> = {
  * trainer reaches it, not on arrival.
  */
 export const STEP_HINTS: Record<SetupStep, string> = {
-  name: "the only answer we can't skip",
+  name: "the only step we can't skip",
   experience: 'one tap',
   specialities: 'up to 5',
   certifications: 'skippable',
@@ -80,16 +80,37 @@ export const STEP_HINTS: Record<SetupStep, string> = {
   payment: 'one typed field',
 };
 
-/** Only `name` is mandatory — a client can't accept an invite from a blank name. */
-export const OPTIONAL_STEPS: readonly SetupStep[] = [
-  'certifications',
-  'hours',
-  'packs',
-  'payment',
-];
+/**
+ * Step 1 and nothing else — a client cannot accept an invite from a blank name,
+ * and cannot filter for a woman trainer against a blank gender.
+ *
+ * ── IT WAS FOUR OF EIGHT, AND SEVEN IS DERIVED RATHER THAN LISTED ───────────
+ *
+ * `experience`, `specialities` and `languages` used to be mandatory, each with
+ * a reason written on its own screen — *"this step has no Skip because it is
+ * the first thing a client reads about you"*, *"clients search on this field
+ * and nothing else"*. Those reasons are still true and they are arguments for
+ * asking WELL, not for refusing to move on: a trainer who will not pick a
+ * speciality today is not persuaded by a dead Continue, they abandon, and the
+ * product ends up with no profile at all rather than a partial one. The
+ * completion meter on `/setup/done` is the instrument for the rest, which is
+ * frame 6a's whole argument and why "Finish the rest later" already existed.
+ *
+ * The list is now **the required steps**, inverted at the door. That is not
+ * tidiness: with seven of eight optional, a hand-maintained `OPTIONAL_STEPS`
+ * silently omits any NEW step added to `SETUP_STEPS` — the new step would
+ * arrive mandatory, blocking a flow whose stated promise is that only step 1
+ * blocks. Listing the exception makes the default correct for steps nobody has
+ * written yet.
+ */
+export const REQUIRED_STEPS: readonly SetupStep[] = ['name'];
+
+export function isRequired(step: SetupStep): boolean {
+  return REQUIRED_STEPS.includes(step);
+}
 
 export function isOptional(step: SetupStep): boolean {
-  return OPTIONAL_STEPS.includes(step);
+  return !isRequired(step);
 }
 
 /** `/setup/name` … `/setup/payment`. A rail row is a link, so this is its href. */
@@ -127,6 +148,19 @@ export interface SetupState {
    * (`/settings/profile`), which is where a finished profile is edited anyway.
    */
   headline: string;
+  /**
+   * The other half of step 1, and unlike the headline it is **mandatory inside
+   * the mandatory step** — `isAnswered('name')` requires both. Clients filter on
+   * it, which is the same argument `languages` carries and the reason it is
+   * worth one chip row on a step already being paid for.
+   *
+   * `'undisclosed'` is a real stored answer and satisfies the requirement. A
+   * mandatory question with no way to decline would make disclosure the price of
+   * using the product; a stored decline lets the flow stop asking and lets the
+   * directory leave that trainer out of the filter rather than guess at them.
+   * Null is *not yet answered*, and only that.
+   */
+  gender: Gender | null;
   experience: string | null;
   specialities: string[];
   certifications: string[];
@@ -148,7 +182,12 @@ export interface SetupState {
 export function isAnswered(step: SetupStep, state: SetupState): boolean {
   switch (step) {
     case 'name':
-      return state.name.trim().length > 0;
+      /* BOTH, and the `&&` is the rule rather than a convenience. A rail row
+         that ticked on the name alone would tell a trainer who skipped past the
+         gender chips that step 1 was done, and `nextStep` would never send them
+         back — leaving the one step the flow refuses to skip half-answered and
+         nothing on the screen saying so. */
+      return state.name.trim().length > 0 && state.gender !== null;
     case 'experience':
       return state.experience !== null;
     case 'specialities':

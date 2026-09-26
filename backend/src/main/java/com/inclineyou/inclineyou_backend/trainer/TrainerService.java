@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.trainer;
 
+import com.inclineyou.inclineyou_backend.assessment.MeasurementService;
 import com.inclineyou.inclineyou_backend.entity.Trainer;
 import com.inclineyou.inclineyou_backend.repository.TrainerRepository;
 import lombok.RequiredArgsConstructor;
@@ -71,6 +72,15 @@ public class TrainerService {
     /** RFC 5321's ceiling on an address. V36 — refused over, never truncated. */
     private static final int MAX_EMAIL = 254;
 
+    /**
+     * The gender ids — V6. The same four as `GENDERS` in the web's
+     * `lib/setup/options.ts`; the ids are what the column holds, so they cannot
+     * change without changing every row already written. Refused rather than
+     * stored verbatim, because a free-text answer here is a filter that misses
+     * the trainer it was written by.
+     */
+    private static final List<String> GENDERS = List.of("woman", "man", "nonbinary", "undisclosed");
+
     private static final String PREFS_KEY = "prefs";
     private static final int MAX_PREFS = 60;
 
@@ -130,7 +140,17 @@ public class TrainerService {
              * before it, because a response field's position is part of the
              * additive contract every older build reads by name.
              */
-            String email
+            String email,
+            /*
+             * ── APPENDED BY V5 · MEASURING DEFAULTS ──────────────────────────
+             * What a new client is offered on the add flow's baseline step.
+             * Null where the trainer has never said, which the web reads as the
+             * product's own default rather than as "never measure".
+             */
+            Integer assessmentIntervalDays,
+            List<String> assessmentMetrics,
+            /* ---- V6. Null means never asked; "undisclosed" is an answer. ---- */
+            String gender
     ) {}
 
     public record UpdateRequest(
@@ -166,7 +186,12 @@ public class TrainerService {
              * could verify it, and a screen that claimed otherwise would be
              * making a promise the product cannot keep.
              */
-            String email
+            String email,
+            /* ---- how often clients are measured (V5). 0 / [] clears. ---- */
+            Integer assessmentIntervalDays,
+            List<String> assessmentMetrics,
+            /* ---- V6. Null leaves alone; "" clears; otherwise one of GENDERS. ---- */
+            String gender
     ) {}
 
     public TrainerResponse get(UUID trainerId) {
@@ -224,6 +249,16 @@ public class TrainerService {
         }
         if (req.email() != null) {
             t.setEmail(req.email().isBlank() ? null : email(req.email()));
+        }
+        if (req.assessmentIntervalDays() != null) {
+            t.setAssessmentIntervalDays(MeasurementService.validInterval(req.assessmentIntervalDays()));
+        }
+        if (req.assessmentMetrics() != null) {
+            var ids = MeasurementService.validMetrics(req.assessmentMetrics());
+            t.setAssessmentMetrics(ids == null || ids.isEmpty() ? null : ids);
+        }
+        if (req.gender() != null) {
+            t.setGender(req.gender().isBlank() ? null : gender(req.gender()));
         }
         if (req.trainingModes() != null) t.setTrainingModes(clean(req.trainingModes(), "trainingModes"));
         if (req.serviceAreas() != null) t.setServiceAreas(clean(req.serviceAreas(), "serviceAreas"));
@@ -411,8 +446,18 @@ public class TrainerService {
                 t.getYoutubeUrl(),
                 SocialLink.handleOf(t.getInstagramUrl()),
                 SocialLink.handleOf(t.getYoutubeUrl()),
-                t.getEmail()
+                t.getEmail(),
+                t.getAssessmentIntervalDays() == null ? null : (int) (short) t.getAssessmentIntervalDays(),
+                t.getAssessmentMetrics(),
+                t.getGender()
         );
+    }
+
+    /** One of {@link #GENDERS}, compared case-insensitively and stored lower-case. */
+    private String gender(String raw) {
+        String value = raw.trim().toLowerCase();
+        if (!GENDERS.contains(value)) throw AccountRuleException.genderUnknown();
+        return value;
     }
 
     @SuppressWarnings("unchecked")

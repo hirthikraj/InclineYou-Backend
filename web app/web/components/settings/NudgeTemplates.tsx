@@ -5,6 +5,11 @@ import { useRef, useState, useTransition } from 'react';
 import { resetNudgeTemplate, saveNudgeTemplate } from '@/lib/nudges/actions';
 import { previewOf, unknownTokens } from '@/lib/nudges/preview';
 import type { NudgeTemplate } from '@/lib/nudges/types';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
+import { Fold } from '@/web-components/ui/Fold';
+import { Tag } from '@/web-components/ui/Tag';
+import { Chip } from '@/web-components/ui/Chip';
 
 /**
  * THE TEMPLATE LIBRARY — the only nudge screen in the product.
@@ -46,38 +51,42 @@ import type { NudgeTemplate } from '@/lib/nudges/types';
 export function NudgeTemplates({ initial }: { initial: NudgeTemplate[] }) {
   return (
     <div className="ndgt">
-      <div className="card">
-        <div className="card__hd">
-          <h2 className="card__t">How the messages are sent</h2>
-        </div>
-        <div className="card__b">
-          <p className="small" style={{ lineHeight: 1.7 }}>
-            Nothing here sends on its own. Pressing a nudge button anywhere in InclineYou opens
-            <b> your own WhatsApp</b> with the message already typed — you read it, change
-            anything you like, and press send. It goes from your number, which is the one
-            your clients have saved.
-          </p>
-          <p className="small" style={{ lineHeight: 1.7, marginTop: 10 }}>
-            Two limits are fixed and are not settings: messages are meant for{' '}
-            <b>9am–8pm</b>, and InclineYou will stop asking you to chase somebody it knows you
-            messaged in the last <b>7 days</b>. A limit with a text field beside it is not a
-            limit.
-          </p>
-        </div>
-      </div>
+      <Card title="How the messages are sent" className="ndgt__intro">
+        <p className="small" style={{ lineHeight: 1.7 }}>
+          Nothing here sends on its own. Pressing a nudge button anywhere in InclineYou opens
+          <b> your own WhatsApp</b> with the message already typed — you read it, change
+          anything you like, and press send. It goes from your number, which is the one
+          your clients have saved.
+        </p>
+        {/* No `marginTop` — the two paragraphs are grid items now and the gap
+            does it. An inline style would have outranked the grid and ranged
+            this one 10px below its neighbour (trap 2). */}
+        <p className="small" style={{ lineHeight: 1.7 }}>
+          Two limits are fixed and are not settings: messages are meant for{' '}
+          <b>9am–8pm</b>, and InclineYou will stop asking you to chase somebody it knows you
+          messaged in the last <b>7 days</b>. A limit with a text field beside it is not a
+          limit.
+        </p>
+      </Card>
 
       {initial.map((template) => (
-        <TemplateCard key={template.name} initial={template} />
+        <NudgeCard key={template.name} initial={template} />
       ))}
     </div>
   );
 }
 
-function TemplateCard({ initial }: { initial: NudgeTemplate }) {
+function NudgeCard({ initial }: { initial: NudgeTemplate }) {
   const [template, setTemplate] = useState(initial);
   const [body, setBody] = useState(initial.body);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  /* Closed by default, all eight of them, and independent rather than an
+     accordion. Closed because the page's first job is *which of these eight do
+     I want* and eight open editors answer it with a wall; independent because
+     a trainer rewording the pack reminder and the renewal nudge to match is
+     comparing two sentences, and an accordion would take one away. */
+  const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
   const boxRef = useRef<HTMLTextAreaElement>(null);
 
@@ -141,82 +150,120 @@ function TemplateCard({ initial }: { initial: NudgeTemplate }) {
   const boxId = `ndgt-${template.name}`;
 
   return (
-    <div className="card mt3">
-      <div className="card__hd">
-        <h2 className="card__t">{template.label}</h2>
-        {!template.isDefault && <span className="tag tag--info">Yours</span>}
-        <span className="card__acts">
-          {!template.isDefault && (
-            <button className="btn btn--sm btn--ghost" type="button" onClick={reset} disabled={pending}>
-              Reset to default
-            </button>
+    <Fold
+      title={template.label}
+      /*
+        ── THE HEAD CARRIES THE WORDING, NOT THE PURPOSE ────────────────────
+
+        `.fold__s` is one ellipsised line, and there were two things that could
+        go in it. The purpose says WHEN the message is sent; the label above it
+        already answers that well enough to pick from a list of eight — *Pack
+        running out*, *Payment due*, *Gone quiet*. What a trainer cannot guess
+        from the label is what the sentence currently SAYS, which is the only
+        reason this screen exists and the only thing they came to change.
+
+        It reads the DRAFT, not the saved row, so a folded card shows the edit
+        that is sitting in it rather than the version it is about to replace.
+
+        OPEN, it swaps to the purpose — the message is in the textarea 40px
+        below by then, so the head would have been saying it twice, and the
+        purpose is the one thing the body no longer has to spend a line on.
+        Both are a single line, so the head does not change height on a press.
+      */
+      sub={open ? template.purpose : body}
+      open={open}
+      onOpenChange={setOpen}
+      control={
+        <>
+          {/*
+            Status only, and no control — the head is the fold's own target and
+            a button in it is a second thing to aim at in a 56px band. Save
+            lives at the foot of the body, beside what it saves.
+
+            `Unsaved` is here because the body UNMOUNTS when this closes (see
+            `ui/Fold.tsx`). The draft survives — it is held in this component,
+            above the fold, deliberately — but with nothing in the head a
+            trainer who typed and collapsed would have an invisible edit and no
+            sign that reopening was worth it.
+          */}
+          {dirty && <Tag tone="warn">Unsaved</Tag>}
+          {!template.isDefault && <Tag tone="info">Yours</Tag>}
+        </>
+      }
+    >
+      {/*
+        Two tracks: what the message IS on the left, what it comes out as on
+        the right. Folded, this screen is a list; open, one row has the width
+        of the page to spend, and spending it on a single 1375px-wide textarea
+        was the measurement this pass started from.
+      */}
+      <div className="ndgt__ed">
+        <div className="ndgt__w">
+          {/* The purpose is in the head while this is open — see `sub`. */}
+          <label className="fld__l" htmlFor={boxId} style={{ display: 'block', marginBottom: 6 }}>
+            The message
+          </label>
+          <textarea
+            id={boxId}
+            ref={boxRef}
+            className="ctl ndgt__box"
+            rows={3}
+            value={body}
+            onChange={(e) => {
+              setBody(e.target.value);
+              setSaved(false);
+            }}
+          />
+
+          <div className="ndgt__vars">
+            {template.variables.map((v) => (
+              <Chip
+                key={v.token}
+                onClick={() => insert(v.token)}
+                title={`Insert — ${v.meaning}`}
+              >
+                <code>{v.token}</code>
+                <span className="ndgt__mean">{v.meaning}</span>
+              </Chip>
+            ))}
+          </div>
+
+          {strays.length > 0 && (
+            <p className="msg msg--warn mt2">
+              <span>
+                {strays.join(', ')} {strays.length === 1 ? 'is not a' : 'are not'} variable this
+                message can fill — it will be sent exactly as written.
+              </span>
+            </p>
           )}
-          <button
-            className="btn btn--sm btn--primary"
-            type="button"
-            onClick={save}
-            disabled={pending || !dirty}
-          >
-            {pending ? 'Saving…' : !dirty && saved ? 'Saved' : 'Save'}
-          </button>
-        </span>
-      </div>
 
-      <div className="card__b">
-        <p className="small" style={{ color: 'var(--tx-ink-3)', marginBottom: 10 }}>
-          {template.purpose}
-        </p>
+          {error && (
+            <p className="msg msg--err mt2">
+              <span>{error}</span>
+            </p>
+          )}
 
-        <label className="fld__l" htmlFor={boxId} style={{ display: 'block', marginBottom: 6 }}>
-          The message
-        </label>
-        <textarea
-          id={boxId}
-          ref={boxRef}
-          className="ctl ndgt__box"
-          rows={3}
-          value={body}
-          onChange={(e) => {
-            setBody(e.target.value);
-            setSaved(false);
-          }}
-        />
-
-        <div className="ndgt__vars">
-          {template.variables.map((v) => (
-            <button
-              key={v.token}
-              className="chip"
-              type="button"
-              onClick={() => insert(v.token)}
-              title={`Insert — ${v.meaning}`}
-            >
-              <code>{v.token}</code>
-              <span className="ndgt__mean">{v.meaning}</span>
-            </button>
-          ))}
+          {/* Moved out of the card header. A Save 1,300px from the box it
+              writes was a control the trainer had to go and find; more to the
+              point, `Fold`'s head is the fold, and a button inside it is
+              interactive content inside interactive content. */}
+          <div className="ndgt__acts">
+            <Button variant="primary" size="sm" onClick={save} disabled={pending || !dirty}>
+              {pending ? 'Saving…' : !dirty && saved ? 'Saved' : 'Save'}
+            </Button>
+            {!template.isDefault && (
+              <Button variant="ghost" size="sm" onClick={reset} disabled={pending}>
+                Reset to default
+              </Button>
+            )}
+          </div>
         </div>
-
-        {strays.length > 0 && (
-          <p className="msg msg--warn mt2">
-            <span>
-              {strays.join(', ')} {strays.length === 1 ? 'is not a' : 'are not'} variable this
-              message can fill — it will be sent exactly as written.
-            </span>
-          </p>
-        )}
-
-        {error && (
-          <p className="msg msg--err mt2">
-            <span>{error}</span>
-          </p>
-        )}
 
         <div className="ndgt__prev">
           <p className="ndgt__prevk">For example</p>
           <p className="ndgt__prevb">{previewOf(body)}</p>
         </div>
       </div>
-    </div>
+    </Fold>
   );
 }

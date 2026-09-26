@@ -4,10 +4,10 @@ import { useState } from 'react';
 
 import { MessageSlot } from '@/components/auth/MessageSlot';
 import { ExperiencePicker } from '@/components/profile/ExperiencePicker';
-import { saveExperience } from '@/lib/setup/actions';
+import { saveExperience, skipStep } from '@/lib/setup/actions';
 import type { SetupState } from '@/lib/setup/steps';
 import { StepHead } from './SetupShell';
-import { StepFoot } from './StepFoot';
+import { StepFoot, skipHomeAction } from './StepFoot';
 import { useStepAction } from './useStepAction';
 
 /**
@@ -72,7 +72,13 @@ export function ExperienceForm({ state }: { state: SetupState }) {
         Stored as a band, not a number — so it stays true next year without you editing it.
       </p>
 
-      <StepFoot step="experience" pending={pending} onContinue={submit} />
+      <StepFoot
+        step="experience"
+        pending={pending}
+        onContinue={submit}
+        onSkip={() => run(() => skipStep('experience'))}
+        onSkipHome={skipHomeAction(state, run)}
+      />
     </>
   );
 }

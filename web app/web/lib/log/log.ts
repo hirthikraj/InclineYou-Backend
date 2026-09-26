@@ -427,7 +427,7 @@ export function volumeOf(sets: { loadKg?: number | null; reps?: number | null }[
  *
  * "Best" has two defensible meanings — heaviest, and most total weight moved.
  * This one is heaviest, because it is the set a record is judged on and a coach
- * saying "her best set" at the rack means the heaviest one.
+ * saying "their best set" at the rack means the heaviest one.
  */
 export function topSet<T extends { loadKg?: number | null; reps?: number | null }>(
   sets: T[],
@@ -505,7 +505,7 @@ export function judge(
   const reps = top.reps ?? 0;
 
   if (load > bestLoad) {
-    // Heavier than she has ever lifted. Gold, and loud enough to send — unless
+    // Heavier than they have ever lifted. Gold, and loud enough to send — unless
     // the jump is smaller than the smallest plate in the room, which is not a
     // session's worth of progress, it is a typo or a fractional plate.
     const by = load - bestLoad;
@@ -526,8 +526,8 @@ export function judge(
       .reduce((max, s) => Math.max(max, s.reps ?? 0), 0);
     // Test 2 — matching is not beating.
     if (reps > bestReps) {
-      // A real record, and a small one: one more rep at a weight she had already
-      // lifted. Kept in her history, kept off her phone.
+      // A real record, and a small one: one more rep at a weight they had already
+      // lifted. Kept in their history, kept off their phone.
       return { kind: 'quiet', setId: top.id, wasLoad: load, wasReps: bestReps, load, reps, by: reps - bestReps };
     }
     if (reps === bestReps) {
@@ -542,8 +542,8 @@ export function judge(
  * Last time's numbers for one slot.
  *
  * Set 3 against set 3, which is what a trainer is comparing. If last time was
- * shorter, the last set she did stands in — better the nearest true number than
- * a blank, and it is still a number she lifted.
+ * shorter, the last set they did stands in — better the nearest true number than
+ * a blank, and it is still a number they lifted.
  */
 export function previousFor(
   last: { date: string; sets: LogSet[] } | null,
@@ -681,7 +681,7 @@ function index(input: LogInput, workout: LogWorkout): Indexed {
  *
  * `removedAt` takes a card out of today. It is dropped here — except when sets
  * are logged against it, in which case it is kept whatever the row says. Sets
- * whose card is gone are orphaned: visible in her history, invisible in the
+ * whose card is gone are orphaned: visible in their history, invisible in the
  * session they belong to, and taking any record they held off the screen with
  * them. The phone refuses the same shape from the other end, by refusing to swap
  * out an exercise that has already been done.
@@ -959,7 +959,7 @@ function prCard(view: LogExerciseView, verdict: Judged | undefined): PrCard | nu
       reps: null,
       was: `was ${verdict.wasReps ?? 0}`,
       delta: `+${verdict.by} rep${verdict.by === 1 ? '' : 's'}`,
-      why: `Most reps she has logged on the ${view.name.toLowerCase()}. There is no plate step for reps, so every real record here is a loud one.`,
+      why: `Most reps they have logged on the ${view.name.toLowerCase()}. There is no plate step for reps, so every real record here is a loud one.`,
       announced,
     };
   }
@@ -981,10 +981,10 @@ function prCard(view: LogExerciseView, verdict: Judged | undefined): PrCard | nu
       : `was ${verdict.wasReps ?? 0} at ${trim1(verdict.wasLoad ?? 0)} kg`,
     delta: heavier ? `+${trim1(verdict.by)} kg` : `+${verdict.by} rep${verdict.by === 1 ? '' : 's'}`,
     why: announced
-      ? `Heavier than she has ever lifted, and the jump is a whole ${trim1(PLATE_STEP_KG)} kg plate — so this one is worth sending.`
+      ? `Heavier than they have ever lifted, and the jump is a whole ${trim1(PLATE_STEP_KG)} kg plate — so this one is worth sending.`
       : heavier
-        ? `Real, and smaller than the smallest plate in the room. In her history. Not on her phone.`
-        : `Real, and small: ${verdict.by} more rep${verdict.by === 1 ? '' : 's'} at a weight she had already lifted. In her history. Not on her phone.`,
+        ? `Real, and smaller than the smallest plate in the room. In their history. Not on their phone.`
+        : `Real, and small: ${verdict.by} more rep${verdict.by === 1 ? '' : 's'} at a weight they had already lifted. In their history. Not on their phone.`,
     announced,
   };
 }
@@ -1006,8 +1006,8 @@ function bestRow(view: LogExerciseView, verdict: Judged | undefined): BestRow | 
           ? `+${verdict.by} rep${verdict.by === 1 ? '' : 's'}`
           : `+${trim1(verdict.by)} kg`,
         why: view.logType === 'reps'
-          ? 'More reps than she has ever done. There is no plate step for reps, so it is a loud one.'
-          : 'Heavier than she has ever lifted, by at least the smallest plate in the room. Gold, and her phone buzzes.',
+          ? 'More reps than they have ever done. There is no plate step for reps, so it is a loud one.'
+          : 'Heavier than they have ever lifted, by at least the smallest plate in the room. Gold, and their phone buzzes.',
       };
     case 'quiet':
       return {
@@ -1016,7 +1016,7 @@ function bestRow(view: LogExerciseView, verdict: Judged | undefined): BestRow | 
           ? `was ${trim1(verdict.wasLoad ?? 0)} kg`
           : `was ${trim1(verdict.wasLoad ?? 0)} kg × ${verdict.wasReps ?? 0}`,
         delta: heavier ? `+${trim1(verdict.by)} kg` : `+${verdict.by} rep${verdict.by === 1 ? '' : 's'}`,
-        why: 'Real, and small — under the smallest plate, or one more rep at a weight she had already lifted. In her history. Not on her phone.',
+        why: 'Real, and small — under the smallest plate, or one more rep at a weight they had already lifted. In their history. Not on their phone.',
       };
     case 'matched':
       return {
@@ -1025,7 +1025,7 @@ function bestRow(view: LogExerciseView, verdict: Judged | undefined): BestRow | 
           ? `was ${verdict.wasReps ?? 0} reps`
           : `was ${trim1(verdict.wasLoad ?? 0)} kg × ${verdict.wasReps ?? 0}`,
         delta: null,
-        why: 'Exactly what she did last time. Matching is not beating — no gold, and nothing to send.',
+        why: 'Exactly what they did last time. Matching is not beating — no gold, and nothing to send.',
       };
     default:
       return {
@@ -1038,6 +1038,35 @@ function bestRow(view: LogExerciseView, verdict: Judged | undefined): BestRow | 
 }
 
 /* -------------------------------------------------------- 6b · no plan yet */
+
+/**
+ * HOW LONG THEY HAVE BEEN ON THE FLOOR, AS A PERSON WOULD SAY IT.
+ *
+ * `minutes` is the wall clock since `startedAt` and a live log is not always
+ * closed the minute the client leaves, so this figure is routinely in the
+ * hundreds — the strip read **349 min** on a seeded session, which is a number
+ * nobody converts at a glance and which reads at first as a typo. Anything
+ * past an hour is said in hours.
+ *
+ * The cut is at 90 rather than at 60: a session that ran `75 min` is a long
+ * session and the figure says that immediately, where `1h 15m` makes the
+ * reader do the arithmetic back the other way. Past an hour and a half the
+ * hours are the fact.
+ *
+ * Returned as a pair so the strip can set the unit in its own face —
+ * `c-strip`'s `unit` is a word about the figure and takes the UI type, which
+ * is the whole reason `349` and `min` stopped being one string.
+ *
+ * Here and not in a component because Top sets prints the same figure, and two
+ * screens formatting one number is how one session is 349 minutes on one and
+ * 5h 49m on the other.
+ */
+export function floorTime(minutes: number): { value: string; unit: string | null } {
+  if (minutes < 90) return { value: String(minutes), unit: 'min' };
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return { value: m === 0 ? `${h}h` : `${h}h ${m}m`, unit: null };
+}
 
 /** The last whole session this client did, as something to repeat. */
 function lastWholeSession(input: LogInput, workout: LogWorkout): LogView['repeat'] {
@@ -1183,7 +1212,7 @@ export function buildFinish(
     records: view.records,
     announced: loud.length,
     pack: pack
-      ? `Her pack is ${pack.remaining} of ${pack.total} right now and will be ${Math.max(0, pack.remaining - 1)} of ${pack.total} the moment somebody marks today done.`
+      ? `The pack is ${pack.remaining} of ${pack.total} right now and will be ${Math.max(0, pack.remaining - 1)} of ${pack.total} the moment somebody marks today done.`
       : 'There is no session pack to take one off. Marking it done records that it happened.',
     packMoves: pack !== null,
     packRemaining: pack?.remaining ?? null,
@@ -1215,6 +1244,20 @@ export interface HistorySession {
   volumeKg: number;
   verdict: Verdict;
   sets: HistorySet[];
+  /**
+   * THE SESSION'S TOP SET, AS A NUMBER — the same figure `sequence` writes out.
+   *
+   * `sequence` is the whole history in one array and the sessions are another,
+   * and they are pushed in one loop but not in step: a session with nothing in
+   * it adds a row and no figure. So a reader that wanted *the top set of the
+   * sessions in this range* had to zip two arrays by index and hope, which is
+   * a bug waiting for the first empty session. The figure rides on the row it
+   * belongs to instead.
+   *
+   * Null where there was no set to take a top of. In the logged unit — kilos
+   * for a loaded movement, reps for a bodyweight one.
+   */
+  topFigure: number | null;
 }
 
 export interface HistoryView {
@@ -1281,6 +1324,7 @@ export function walkForward(
     const verdict = judge(own, seen, logType, plateStep);
     const date = dateOf[workoutId] ?? '';
     const top = topSet(own, logType);
+    const figure = top ? (logType === 'reps' ? (top.reps ?? 0) : (top.loadKg ?? 0)) : null;
 
     sessions.push({
       workoutId,
@@ -1298,10 +1342,10 @@ export function walkForward(
         note: s.notes?.trim() || null,
         pr: verdict.kind !== 'none' && verdict.kind !== 'matched' && verdict.setId === s.id,
       })),
+      topFigure: figure,
     });
 
-    if (top) {
-      const figure = logType === 'reps' ? (top.reps ?? 0) : (top.loadKg ?? 0);
+    if (figure !== null) {
       sequence.push({ value: trim1(figure), best: figure > running });
       running = Math.max(running, figure);
     }
@@ -1384,6 +1428,16 @@ export interface ProgressWeek {
   /** 0…1 against the tallest week. */
   fraction: number;
   current: boolean;
+  /**
+   * THE MONDAY, AS A DATE A PERSON CAN SAY — "18 Aug".
+   *
+   * `label` is `w1…w7`, which is an index and not a time: a trainer looking at
+   * the fourth bar and asking *when was that* had nothing on the screen to
+   * answer with, and the bar carried no readout either. The ordinal is still
+   * what goes under the chart at seven bars and twenty-six, because a row of
+   * dates does not fit at either; this is what the bar says when it is asked.
+   */
+  weekOf: string;
 }
 
 export interface ProgressView {
@@ -1409,7 +1463,55 @@ export interface ProgressView {
   } | null;
   /** Every exercise with two or more sessions, so the trainer can pick. */
   choices: { exerciseId: string; name: string; sessions: number }[];
+  /**
+   * EVERY MOVEMENT IN THE RANGE, AS A LINE. See `ProgressMovement`.
+   *
+   * This screen counted ten exercises in a stat tile and then drew ONE of them,
+   * chosen by a chip. The nine others were a number. Every figure here was
+   * already being computed — `buildHistory` runs per exercise for the record
+   * count — and thrown away on the way out.
+   */
+  movements: ProgressMovement[];
   bodyweight: { value: string; delta: string | null } | null;
+}
+
+/**
+ * ONE EXERCISE OVER THE RANGE — the line of the movements table.
+ *
+ * Everything on it is read off the SAME walk forward the record count and the
+ * top-set sequence are read off, so a row cannot disagree with the card above
+ * it about what a client lifted.
+ */
+export interface ProgressMovement {
+  exerciseId: string;
+  name: string;
+  /** Sessions with a set of this movement logged in them. */
+  sessions: number;
+  /** The top set at the start of the range, and at the end of it. */
+  from: number | null;
+  to: number;
+  /** `kg` or `reps` — `readLogType`'s answer, said in the row's own unit. */
+  unit: string;
+  /**
+   * Signed, and null where there is nothing to compare against or where the
+   * movement did not move. `+0` on a lift that held is a claim about a change
+   * that never happened, which is `ProgressTab`'s own rule about a single
+   * reading applied one level up.
+   */
+  delta: number | null;
+  /** Records inside the range, by the same walk `records` counts. */
+  records: number;
+  /** Kilos moved on this movement, inside the range. The share of the work. */
+  volumeKg: number;
+  /**
+   * THE DAY IT WAS LAST DONE, `YYYY-MM-DD`.
+   *
+   * *When did they last squat* is the question a table of movements is opened
+   * with as often as *how much*, and a session count cannot answer it: six
+   * sessions spread over eight weeks and six in the last fortnight are the
+   * same 6.
+   */
+  lastOn: string;
 }
 
 function mondayOf(iso: string): string {
@@ -1476,6 +1578,7 @@ export function buildProgress(
         volumeKg: Math.round(volumeByWeek.get(key) ?? 0),
         fraction: 0,
         current: key === thisWeek,
+        weekOf: key,
       });
       cursor.setDate(cursor.getDate() + 7);
     }
@@ -1493,25 +1596,97 @@ export function buildProgress(
       ? `${current >= first ? '+' : '−'}${Math.abs(Math.round(((current - first) / first) * 100))}% on week one`
       : null;
 
-  /* Records: the same walk forward `buildHistory` does, per exercise, counted. */
+  /* ── ONE WALK PER EXERCISE, FOUR READERS ──────────────────────────────────
+     The record count, the picker, the movements table and the range filter all
+     come off the same `buildHistory`, because four walks is four chances to
+     disagree about what one client lifted.
+
+     ── AND THE WALK IS UNWINDOWED WHILE THE COUNT IS NOT ────────────────────
+
+     JUDGING has to see everything: a record is a claim about the whole history
+     and a bounded window hands out gold for beating a number that was never the
+     best — the console's own rule, and the reason `buildHistory` takes no
+     range. COUNTING is the opposite question. *Records: 14* sat under three
+     range chips and did not move when they were pressed, on all ten seeded
+     clients, because it counted every record the client had ever set; so did
+     *Sets*, *Sessions* and the volume chart beside it, all of which do window.
+     One tile in four ignoring the screen's only control reads as the control
+     being broken.
+
+     So: judged over everything, counted where the session falls inside the
+     range. `dateOf` is already the range's own set of workouts. */
   let records = 0;
   const sessionsPer = new Map<string, Set<string>>();
+  /* AND WHETHER THE EXERCISE HAS A FIGURE AT ALL — see `choices` below. */
+  const writable = new Set<string>();
+  const movements: ProgressMovement[] = [];
   for (const exerciseId of exerciseIds) {
     const view = buildHistory(input, clientId, exerciseId, now);
-    records += view.sessions.filter((s) => s.verdict === 'record' || s.verdict === 'quiet').length;
-    sessionsPer.set(exerciseId, new Set(view.sessions.map((s) => s.workoutId)));
+    /* Chronological — `buildHistory` reverses for reading, and a first-to-last
+       is the one question that cannot be asked of a reversed list. */
+    const here = view.sessions.filter((s) => dateOf.has(s.workoutId)).reverse();
+    if (here.length === 0) continue;
+
+    const own = here.filter((s) => s.verdict === 'record' || s.verdict === 'quiet').length;
+    records += own;
+    sessionsPer.set(exerciseId, new Set(here.map((s) => s.workoutId)));
+
+    const figures = here
+      .map((s) => s.topFigure)
+      .filter((n): n is number => n !== null && Number.isFinite(n));
+    if (figures.some((n) => n > 0)) writable.add(exerciseId);
+    const first = figures.length > 1 ? figures[0] : null;
+    const last = figures.length ? figures[figures.length - 1] : 0;
+    const moved = first === null ? null : Math.round((last - first) * 10) / 10;
+    movements.push({
+      exerciseId,
+      name: view.exerciseName,
+      sessions: here.length,
+      from: first,
+      to: last,
+      unit: view.logType === 'reps' ? 'reps' : 'kg',
+      delta: moved === null || Math.abs(moved) < 0.05 ? null : moved,
+      records: own,
+      volumeKg: here.reduce((sum, s) => sum + s.volumeKg, 0),
+      lastOn: here[here.length - 1].date,
+    });
   }
 
+  /* Ranked by the work, not by the name: a trainer reading this table is
+     asking what this client's training is MADE of, and the movement that ate
+     the most kilos is the answer. A movement with no load to sum — the timed
+     ones `writable` rejects — sorts on sessions, which is all it has. */
+  movements.sort(
+    (a, b) => b.volumeKg - a.volumeKg || b.sessions - a.sessions || a.name.localeCompare(b.name),
+  );
+
+  /* ── A CHOICE HAS TO HAVE A NUMBER IN IT ──────────────────────────────────
+     FOUND ON A REAL CLIENT, 20 Sep 2026. Priya Pillai's most-logged movement is
+     the **Assault Bike**, and the card drew *0 → 0 → 0 → 0 → 0 kg* — the
+     default state of her Progress tab, with a straight face.
+
+     `readLogType` has two members and the catalogue has three: a `duration`
+     exercise folds to `weight_reps`, and its sets carry `loadKg: null` and
+     `reps: null` because there is nowhere to put a time. So `topSet` returns a
+     row, `figure` falls to `?? 0`, and the sequence is a row of honest-looking
+     zeros. Nothing was broken enough to throw.
+
+     The filter is on the SEQUENCE and not on `logType === 'duration'`, because
+     the same hole opens for every type §14 still owes the enum — distance,
+     time, a held stretch. An exercise earns the picker by having written a
+     number down, whatever kind of exercise it is. */
   const choices = [...sessionsPer]
     .map(([exerciseId, seen]) => ({
       exerciseId,
       name: input.exercises.find((e) => e.id === exerciseId)?.name ?? 'Exercise',
       sessions: seen.size,
     }))
-    .filter((c) => c.sessions >= 2)
+    .filter((c) => c.sessions >= 2 && writable.has(c.exerciseId))
     .sort((a, b) => b.sessions - a.sessions || a.name.localeCompare(b.name));
 
-  const focusId = focusExerciseId && exerciseIds.has(focusExerciseId)
+  /* A LINK CAN NAME ONE TOO, and the same test applies — `?focus=` survives in
+     a shared URL long after the chip that wrote it stopped being offered. */
+  const focusId = focusExerciseId && writable.has(focusExerciseId)
     ? focusExerciseId
     : choices[0]?.exerciseId ?? null;
 
@@ -1542,6 +1717,7 @@ export function buildProgress(
     volumeDelta,
     focus,
     choices,
+    movements,
     bodyweight: bodyweight
       ? {
           value: trim1(bodyweight.value),
@@ -1591,7 +1767,7 @@ const DEAD_SESSION = new Set(['done', 'no_show', 'noshow', 'cancelled', 'cancele
  * workout belongs to a booking or a saved routine; ABC Trainerize is the only
  * one that lets a trainer log on the web at all and it requires the session to
  * be on the client's calendar first. In a gym where the trainer is on the floor,
- * a client turning up on a day she does not normally train is a Tuesday — and
+ * a client turning up on a day they do not normally train is a Tuesday — and
  * logging is allowed to happen before programming exists. Before booking, too.
  *
  * **Still open is first** because a trainer who logs four clients a morning has

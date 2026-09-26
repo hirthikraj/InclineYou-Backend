@@ -42,6 +42,46 @@ export const EXPERIENCE_BANDS: Option[] = [
   { id: '10_plus', label: '10+ years' },
 ];
 
+/**
+ * Gender — the second half of step 1, and the only other answer the flow keeps.
+ *
+ * ── WHY IT IS ASKED AT ALL, AND WHY HERE ────────────────────────────────────
+ *
+ * The same reason `languages` is asked and no competitor asks it: clients
+ * FILTER on it. A large share of this market is women who will only train with
+ * a woman, and a directory that cannot answer that question sends them to
+ * WhatsApp to ask it one trainer at a time. It rides on step 1 rather than
+ * taking a ninth rail row for the same reason V33's headline does — the flow
+ * promises about a minute over eight steps, and a ninth row is a broken
+ * promise where a second control on a step already being paid for is free.
+ *
+ * ── `undisclosed` IS AN ANSWER, NOT AN ABSENCE ──────────────────────────────
+ *
+ * Exactly the shape `NOT_CERTIFIED` has, and for a stronger reason. The step is
+ * mandatory, so without a way to decline, "required" would mean *disclose or do
+ * not use the product*. `undisclosed` is a stored value: the trainer has
+ * answered, the flow stops asking, and the directory knows not to place them on
+ * either side of the filter rather than guessing. It is last in the list
+ * because it is the option nobody should have to scan past to find their own.
+ *
+ * The ids are the wire values and are what `trainer.gender` holds. Labels can be
+ * translated; these cannot change without changing every row already written.
+ */
+export type Gender = 'woman' | 'man' | 'nonbinary' | 'undisclosed';
+
+export const GENDERS: Option[] = [
+  { id: 'woman', label: 'Woman' },
+  { id: 'man', label: 'Man' },
+  { id: 'nonbinary', label: 'Non-binary' },
+  { id: 'undisclosed', label: 'Prefer not to say' },
+];
+
+export function asGender(value: string | null | undefined): Gender | null {
+  return value === 'woman' || value === 'man' || value === 'nonbinary' || value === 'undisclosed'
+    ? value
+    : null;
+}
+
 /** The `workMode` vocabulary the server parses — `WorkMode.fromValue`. */
 export type WorkMode = 'independent' | 'gym' | 'both';
 
@@ -153,7 +193,8 @@ export const CERTIFICATIONS: Option[] = [
 /**
  * Zero of the eight platforms in the teardown ask this. In a market where a
  * client may specifically want a Tamil-speaking coach, it is one field no
- * competitor can match — which is why this step has no Skip.
+ * competitor can match — which is why it is asked at all, in a flow where only
+ * step 1 is mandatory.
  */
 export const LANGUAGES: Option[] = [
   { id: 'ta', label: 'Tamil' },
@@ -224,16 +265,13 @@ export function initialsOf(name: string): string {
   return (first + last).toUpperCase();
 }
 
-/** §03 defines twelve avatar tints, `--tx-av-1` … `--tx-av-12`. */
-const AV_TINTS = 12;
+/* `avatarTint` used to live here: a second hash over the trainer's NAME, with
+   the modulo taken inside the loop rather than at the end — so it was not the
+   same function as `avatarToken` with a different key, it was a different
+   function. Its two call-sites (the setup name step and the profile identity
+   form) now call `avatarToken` from `lib/today/time.ts`, which every other
+   avatar in the product already used. One hash, twelve tints, one answer.
 
-/**
- * Which tint a name gets. `.av` ships no default background, so one has to be
- * chosen — and it is derived from the name rather than assigned, so the same
- * trainer is the same colour on every screen and across a reload.
- */
-export function avatarTint(name: string): string {
-  let hash = 0;
-  for (const ch of name.trim()) hash = (hash * 31 + ch.codePointAt(0)!) % AV_TINTS;
-  return `var(--tx-av-${hash + 1})`;
-}
+   `initialsOf` above stays, and is NOT `initials` from `lib/today/time.ts`.
+   That difference is deliberate and documented on the function: it mirrors
+   what the phone shows for the field the trainer is typing into. */

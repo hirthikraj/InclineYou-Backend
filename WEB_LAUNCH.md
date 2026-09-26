@@ -1,6 +1,7 @@
 # InclineYou — Web Launch Book
 
-**Scope: the web app only — trainer half *and* client portal.** `web app/web/`
+**Scope: the web app only — the trainer half.** The client portal moved to the
+next release on 24 Sep 2026 (§3, *v1 scope*). `web app/web/`
 (Next.js 16, 62 routes) and the Spring backend behind it, from the current tree to a production deployment
 serving Indian personal trainers. The Expo app is deliberately out of scope —
 nothing here blocks it, nothing here needs it, and `notes/
@@ -70,11 +71,12 @@ eleven tests, an app that connects as a non-owning role, bcrypt-hashed OTPs,
 SHA-256 session tokens, `httpOnly` cookies, no card data anywhere, parameterised
 SQL throughout, and phone masking already standard in logs.
 
-**Must do before launch — 18 items.** Seven are hard blockers.
+**Must do before launch — 19 items, five of them hard blockers.** Three more
+(MUST-13…15) moved to the next release with the client portal.
 
 | | Item | Severity |
 | --- | --- | --- |
-| **MUST-1** | No SMS provider — nobody can sign in | ⛔ blocker |
+| **MUST-1** | No WhatsApp OTP delivery — nobody can sign in | ⛔ blocker |
 | **MUST-2** | Web never requests a revocable session — sign-out does not sign out | ⛔ blocker |
 | **MUST-3** | No Dockerfile exists anywhere | ⛔ blocker |
 | **MUST-4** | Web app has no CI at all | ⛔ blocker |
@@ -86,15 +88,43 @@ SQL throughout, and phone masking already standard in logs.
 | **MUST-10** | No refresh token — 7-day hard expiry | 🔷 launch week |
 | **MUST-11** | Route protection is per-page with no backstop | 🔷 launch week |
 | **MUST-12** | `otp_request` grows forever and holds phone numbers | 🔷 launch week |
-| **MUST-13** | **The client portal is four stub routes — it is not built** | ⛔ blocker |
-| **MUST-14** | **A client's only API surface is sync pull/push — the portal has no REST to read** | ⛔ blocker |
-| **MUST-15** | Clients never consented — the invite screen is where that happens | 🔶 high |
+| ~~MUST-13~~ | ~~Build the client portal~~ — mostly built; **moved to the next release** | ⏸ next release |
+| ~~MUST-14~~ | ~~Client-scoped REST reads~~ — built (V16–V19, `portal/`) | ✅ done |
+| ~~MUST-15~~ | ~~Consent at the invite~~ — goes with the portal | ⏸ next release |
 | **MUST-16** | **No billing of any kind — the 30-day trial has no clock** | ⛔ blocker |
 | **MUST-17** | No payment rail — no gateway picked, KYC and GSTIN unstarted | 🔶 day 31 |
 | **MUST-18** | No GST-compliant invoice, required from the first rupee | 🔶 day 31 |
+| **MUST-19** | Cut features are still reachable — team, workspaces, portal, GST page | 🔶 high |
+| **MUST-20** | A trainer cannot export their own data | 🔶 high |
+| **MUST-21** | A trainer cannot record an assessment — only a client can, in the portal | 🔶 high |
+| **MUST-22** | Clients' data is held without a stated basis — no processor terms, no adults-only rule, no notice on *Add client* | 🔶 high |
 
-**The client portal ships in v1** (decided 30 Aug 2026), which adds MUST-13…15
-and changes the threat model: see §5.13.
+**v1 scope, decided 24 Sep 2026.** The release is the **trainer web app
+alone**. The feature list lives in the *InclineYou v1 Scope* page; what it
+changed here:
+
+- **The client portal moves to the next release**, confirmed the same day on
+  security grounds: it adds a second class of user (a member of the public
+  whose number somebody else typed in), the consent wording waits on a lawyer's
+  answer about who is the Data Fiduciary, and the client walls need the same
+  test evidence the trainer walls have. The decision of 30 Aug 2026 that it
+  ships in v1 is reversed. Most of `/me` has been built since (and the
+  REST it reads, V16–V19), so MUST-14 is done; the invite + consent screen and
+  the paused/removed walls are still stubs, and they move with it. MUST-13 and
+  MUST-15 stay written in §5.13 for that release.
+- **Out of v1:** the Expo phone app, team coaching, the workspace switcher,
+  Google sign-in, the trainer's GST summary page, blood pressure and resting
+  heart rate in the assessment catalogue, and notes shared with the client. The
+  code exists for most of these; hiding it is MUST-19. Visceral fat and the *did
+  anything hurt* question stay — they are still health data the privacy policy
+  must name, kept out of logs and error reports.
+- **Assessments are taken by the trainer in the session**, not sent to the
+  client — MUST-21.
+- **OTP goes over WhatsApp only**, no SMS — MUST-1, rewritten for it.
+- **Added:** a *Plan & trial* screen (part of MUST-16), trainer data export
+  (MUST-20) and trainer-entered assessments (MUST-21).
+- **Logging speed is the v1 engineering priority.** Offline tolerance on the web
+  is deferred on the grounds that gyms have Wi-Fi for their own members.
 
 **Billing does not exist** (raised 30 Aug 2026), which adds MUST-16…18 — see
 §5.16. Only one of the three blocks the launch, and it is the small one: the
@@ -188,7 +218,7 @@ evidence.
 
 ## 5. What must be done
 
-### MUST-1 · Wire an SMS provider ⛔
+### MUST-1 · Wire WhatsApp OTP delivery ⛔
 
 **What.** `OtpSender` ships only `LoggingOtpSender`, which throws when
 `app.otp.sms-enabled` is true. No code can reach a phone.
@@ -196,22 +226,33 @@ evidence.
 **Why it is first.** Everything else in this book is refinement. This is the
 front door, and it does not open.
 
-**The fix.** Mostly not code:
+**Decided 24 Sep 2026: WhatsApp is the only channel, no SMS.** An earlier
+version of this item said not to launch on WhatsApp OTP as the primary; that
+advice is overruled. What it means:
 
-1. Choose a provider. **MSG91** is the usual India answer — it has DLT tooling
-   built in, which is the part that costs time. Twilio and AWS SNS work and leave
-   DLT to you.
-2. **DLT registration on a telco portal** — principal entity, header (sender ID),
-   OTP template approval. **Budget 1–2 weeks.** It is a regulatory queue, not an
-   engineering task, and it is the long pole of the entire launch.
-3. Implement behind the existing `OtpSender` seam. Nothing else changes.
-4. Set `sms-enabled: true` and `OTP_DEV_CODES_IN_LOG=false`.
+1. **Pick a WhatsApp Business provider** — Meta's Cloud API directly, or a BSP
+   (Gupshup, Interakt, MSG91's WhatsApp product). A BSP buys onboarding help and
+   a dashboard; Cloud API is one less party.
+2. **Meta business verification, a registered sender number, and an approved
+   *authentication* template.** These are Meta's queues, not engineering tasks,
+   and they are now the long pole of the launch — start them first. The template
+   category must be *authentication*; a *utility* or *marketing* template for a
+   code is refused or re-categorised.
+3. **Implement behind the existing `OtpSender` seam**, and keep it the only
+   place a channel is chosen, so an SMS sender can be added later as a fallback
+   without touching `OtpService`. The property name `sms-enabled` then lies;
+   rename it through an additive alias rather than breaking existing env files.
+4. Set the enable flag and `OTP_DEV_CODES_IN_LOG=false`.
 
-Do not launch on WhatsApp OTP as the primary — it needs a BSP, its own approval
-queue, and a trainer in a basement gym still gets SMS.
+**The risk to accept knowingly: a single channel has no fallback.** A template
+rejection, a paused sender number or a Meta outage means nobody can sign in, and
+a trainer without WhatsApp cannot sign up. Write down what happens on that day
+before launch. The open question of a second way in (Google, or an account with
+no phone number) is §10 question 1.
 
-**Verify.** A real code arrives on **Jio and Airtel** handsets. Delivery differs
-per carrier; one test on one SIM is not a test.
+**Verify.** A real code arrives on WhatsApp on **Jio and Airtel** numbers, on
+both Android and iOS, and a number with no WhatsApp account gets a clear error
+rather than a silent wait.
 
 ---
 
@@ -394,9 +435,11 @@ beside `SessionSweeper` — both a data-minimisation and a disk item.
 
 ---
 
-## 5.13 · The client portal — what shipping it in v1 means
+## 5.13 · The client portal — what shipping it means
 
-Decided 30 Aug 2026. It is not a checklist tick; it is scope, plus a change of
+**Moved to the next release on 24 Sep 2026** (§3). The section is kept as
+written for that release; MUST-14 has since been built. Originally decided
+30 Aug 2026. It is not a checklist tick; it is scope, plus a change of
 threat model.
 
 **The threat model changes because the users change.** Every user until now was
@@ -411,7 +454,7 @@ needs the same evidence tier 1 has.
 **What is already right, and it is a lot.** Tier 4 of the RLS model — *the
 client lens* — is built and live: a client is not staff of anything, gets no
 tier-1 or tier-2 access at all, and reads only their own rows across every
-roster they are on. `client`, `body_metric`, `program`, `scheduled_session`,
+roster they are on. `client`, `program`, `scheduled_session`,
 `workout_session`, `weekly_report`, `package`, `payment` all carry a
 `client_client` policy keyed on `app_client_ids()`, and the four tables with no
 `client_id` are covered by EXISTS subqueries. `SecurityConfig` gates
@@ -509,7 +552,7 @@ free, and it is why this is the web's problem.
   recorded against a schema with no trial start has no honest expiry, forever.
 - **The payment rail is not a launch blocker — it is a day-31 blocker**
   (MUST-17), because the trial is 30 days. Its *approval queues* are the launch
-  item: gateway KYC needs the GSTIN, and both are queues like DLT.
+  item: gateway KYC needs the GSTIN, and both are queues like Meta's WhatsApp verification.
 - **GST-compliant invoicing is due with the first rupee** (MUST-18), which is
   the same day-31 deadline, decided in `PRICING.md` §8.1.
 
@@ -520,6 +563,10 @@ free tier at three clients. Neither exists in code.
 
 What has to land before the first non-test signup:
 
+- **A *Plan & trial* screen in Settings** (added to v1 scope 24 Sep 2026): the
+  current plan, *trial ends on*, the client count against the free cap, and
+  where an upgrade will go. It shows state; the payment rail behind the button
+  is MUST-17.
 - **A trial start, an expiry, and a state.** `trialing → active → past_due →
   grace (read-only) → free`, and the *trial ends on* date visible to the trainer
   rather than only known to us.
@@ -562,7 +609,7 @@ applications.
   first cohort's trials expire in the same week, is not.
 - **Gateway KYC is a queue** (Razorpay or Cashfree): PAN, GSTIN, business bank
   account, incorporation proof, and public **Terms, Refund/Cancellation, Privacy
-  and Contact** pages the reviewer actually opens. Start it with DLT.
+  and Contact** pages the reviewer actually opens. Start it with the WhatsApp verification.
 - **The webhook is the source of truth**, never the browser redirect. It needs a
   public path rule in `SecurityConfig` (first match wins — above the authenticated
   patterns), **signature verification**, **idempotency on the provider's event
@@ -617,6 +664,142 @@ deriving them.
 
 *(The good half, already banked in §6.4a's arithmetic: registered, the 18% OIDAR
 GST on hosting becomes reclaimable input credit.)*
+
+---
+
+## 5.19 · v1 scope work
+
+Raised by the scope decisions of 24 Sep 2026 (§3).
+
+### MUST-19 · Hide what v1 does not ship 🔶
+
+**What.** Team coaching, the workspace switcher, the client portal and the GST
+summary are cut from v1 but their routes and entry points are live: `/team`,
+the workspace menu in the shell, the account menu's team rows, `/me/**`, the
+`/business/gst` tab, blood pressure and resting heart rate in the assessment
+catalogue, the *share with client* option on notes, and *send to client* on an
+assessment.
+
+**The fix.** Remove the entry points and make the routes answer 404 (or redirect)
+behind one flag per feature, so the next release turns each back on in one
+change. Do not delete the code, and do not change any endpoint — the backend
+keeps serving them. Two cases need a decision rather than a flag:
+
+- **A client number signing in.** With the portal off, `destinationFor` must
+  send a client to a plain *not available yet* screen, not into `/me`.
+- **Adding a client** must not send an invite nobody can accept.
+
+**Verify.** A fresh trainer account finds no link to any cut feature from the
+rail, the account menu, the palette or the Add sheet, and typing each route
+directly gets the not-found response.
+
+### MUST-20 · Trainer data export 🔶
+
+**What.** Nothing lets a trainer take their own books out. For a product whose
+pitch is *put your money book here*, the answer to "what if I leave?" has to
+exist on day one.
+
+**The fix.** A CSV export from Settings of clients, packages, payments and
+sessions — the trainer's own rows, filtered by `trainer_id` as every read is.
+Money columns in rupees with two decimals, dates in IST.
+
+**Verify.** Export on a seeded account; the payment total in the CSV matches the
+Business overview for the same range.
+
+### MUST-21 · Let the trainer take an assessment 🔶
+
+**What.** With the portal off, nobody can fill in an assessment. Readings and
+answers are written only by the client, through `PortalClientWriteService`;
+the trainer's `PATCH /v1/assessments/{id}` changes the due date, the read flag
+and *send*, never the contents.
+
+**The fix.** A trainer write for readings and answers on their own client's
+assessment, scoped by `trainer_id` like every trainer route, and a screen that
+runs the template with the client in the session. Keep V14's rules: status is
+derived, readings live on the assessment row and nowhere else (V22 dropped
+`body_metric` — a body is measured in an assessment and no other way),
+timestamps are ISO strings. Record who entered it, so that when
+the portal ships a trainer-entered answer is not presented as the client's
+own. The endpoint goes in `API.md` and takes `STANDARD`.
+
+**Verify.** Take an assessment on a seeded client over the web; it reads as
+done, its readings appear in the measurement history
+(`GET /v1/clients/{id}/body-metrics` reads completed assessments since V22), and
+another trainer's client id gets a 404.
+
+### MUST-22 · Client privacy in v1 — the trainer's basis, adults only, and the notice 🔶
+
+Raised 25 Sep 2026, during the review of `client` on the agreed-schema page.
+
+**What.** In v1 a trainer types in a client who has no account and has agreed to
+nothing with us. That is not a violation — it is what every gym register
+already does, and DPDP allows it — but the obligations it creates are real and
+nothing in the product carries them yet. The working position, **pending the
+lawyer's answer to open question 9**:
+
+- **The trainer is the Data Fiduciary** for their client records: they decide
+  why the data is held and what it is for. Their lawful basis is the client's
+  consent, usually given offline, or **legitimate use** under DPDP §7(a) — the
+  client handed over their details to be coached and billed, and has not
+  objected.
+- **InclineYou is the Data Processor**: we store and process on the trainer's
+  instruction, keep it secure, use it for nothing of our own, and delete it on
+  instruction. The one thing that would break this position is **us** using a
+  client's data for a purpose they never expected — messaging, marketing,
+  sharing. Nothing does today: the only message that reaches a client's number
+  is a `wa.me` link the trainer sends from their own phone (V32).
+
+**The fix — five parts, all small.**
+
+1. **Processor terms.** The Terms of Service carry a data-processing clause: the
+   trainer confirms a lawful basis for every client they add and is
+   responsible for their notice to them; InclineYou processes only on the
+   trainer's instruction and names its sub-processors (host, WhatsApp
+   provider, payment gateway).
+2. **The notice on *Add client*.** One line under the form — *"Only add people
+   who know you're recording their training and payments."* — plus a link to
+   what we hold. A line, not a checkbox: logging speed is the v1 priority, and a
+   checkbox ticked forty times proves nothing a line does not.
+3. **Adults only** (decided 25 Sep 2026). InclineYou does not accept a client
+   under 18, so DPDP §9's verifiable parental consent never arises and there is
+   **no guardian-consent flow** — deliberately, not as a gap. The rule is held
+   three ways: the Terms say the trainer adds adults only; the *Add client*
+   notice says it (*"Only add adults (18+) who know you're recording their
+   training and payments."*); and when a date of birth is entered, one under 18
+   is refused — in code with its own error `code` (add it to `API.md`'s
+   catalogue with the endpoint change), and by the `client_adult` CHECK on the
+   agreed-schema page as the backstop. The date of birth stays optional, so
+   *Add client* is no slower. When the portal returns it must not become a way
+   round the rule: a number that signs in is always one a trainer added.
+4. **Rights for a client with no account.** Correction and erasure requests
+   from a client reach the trainer, not us. The trainer needs *Correct* (the
+   profile edit, which exists) and *Erase this client* — `erase_clients()`
+   exists; the button and its confirmation do not. **Delete keeps the nameless
+   amounts** (decided 25 Sep 2026): the person's details, notes, assessments,
+   plan, schedule and future bookings go; logged sessions, packages, payments
+   and receipt numbers stay as a *Former client* with no name, so issued
+   invoices survive GST retention and past revenue does not move. The confirm
+   step says so. It is one of three actions — **pause** (temporary, reversible),
+   **archive** (left for a stated reason, every record kept, reversible) and
+   **delete** (irreversible) — whose schema is on the agreed-schema page. Support needs a written path
+   for the request that arrives at us because the trainer will not act.
+5. **Consent is recorded, never assumed.** `client.membership_status` defaults
+   to `not_invited` (agreed-schema page, 25 Sep 2026): a client the trainer
+   added has agreed to nothing with us, and `accepted` now requires an
+   `accepted_at`. When the portal ships, the invite screen is the first place a
+   client consents to anything, and a `not_invited` number that signs in sees
+   that screen, never their record.
+
+The assessment health items that stay in v1 — body fat, visceral fat, *did
+anything hurt* — are the data a client would least expect to travel. DPDP has
+no special category for health, so this is not a legal line, but the privacy
+policy names them and §8-H keeps them out of logs and error reports.
+
+**Verify.** The Terms carry the processing clause; *Add client* shows the notice;
+entering a date of birth under 18 is refused with its own error code and the
+row is not written; a trainer can erase a client from the client file and the
+row reads as a nameless former client afterwards; a new client row is
+`not_invited`.
 
 ---
 
@@ -876,7 +1059,7 @@ recommendation, these remain yours, and no provider removes them:
 | **A restore test — actually restoring a backup, once** | an hour, once. An untested backup is not a backup |
 | Approving dependency bumps (Dependabot raises them) | minutes a month |
 | Rotating secrets | an hour a year, and easier after M1 |
-| The SMS account, DLT templates, spend alarm | not a hosting concern at all |
+| The WhatsApp provider account, templates, spend alarm | not a hosting concern at all |
 
 Realistically **one to two hours a month**, not zero. Budget it as such; the
 alternative is discovering it during an incident. Everything else on this page is
@@ -899,23 +1082,24 @@ be accurate about:
   "delete my data" before a trainer asks** — and per MUST-15, before a *client*
   asks, which is the harder version.
 
-**The DPDP Rules were still being finalised as of this writing — verify current
-status and deadlines.** Get a lawyer on the privacy policy; none of this is legal
+**The DPDP Rules were notified in November 2025, with most obligations phasing
+in over roughly eighteen months — verify the current deadlines before relying
+on them.** What v1 owes on the client side is MUST-22. Get a lawyer on the privacy policy; none of this is legal
 advice.
 
 ## 7. Release sequence
 
 | Phase | Work | Depends on |
 | --- | --- | --- |
-| **0 · Start the clock** | MUST-1 DLT registration · **GST registration → payment-gateway KYC (MUST-17)** · the Data Fiduciary question (§5.13) | nothing — do these first, they are queues you do not control |
+| **0 · Start the clock** | MUST-1 WhatsApp provider, Meta business verification and authentication template · **GST registration → payment-gateway KYC (MUST-17)** · the Data Fiduciary question (§5.13) | nothing — do these first, they are queues you do not control |
 | **1 · Make it deployable** | MUST-3 Dockerfiles · MUST-4 web CI · MUST-6 API-URL module | nothing |
 | **2 · Close the gaps** | MUST-2 session header · MUST-5 `@Valid` · MUST-7 headers · MUST-8 origins · MUST-9 secret | nothing |
 | **2a · Trial clock** | **MUST-16** — trial start, expiry, states, read-only degrade, free-tier cap. Small, and it must precede the first real signup | nothing |
-| **2b · Client portal** | MUST-14 client REST endpoints → MUST-13 build the four screens → MUST-15 consent on the invite. **Start the Data Fiduciary question in parallel — it is a lawyer's queue, like DLT** | nothing; longest engineering item |
+| **2b · v1 scope** | MUST-19 hide cut features · MUST-20 data export · MUST-21 trainer-taken assessments · MUST-22 client privacy. *(The client portal — MUST-13, MUST-15 — moved to the next release.)* | nothing |
 | **3 · Provision** | Pick a stack from §6.4 — **default: DigitalOcean App Platform, all BLR1**. Bring up **staging first**, identically configured, deploying the same way production will | phase 1 |
 | **4 · Transport pass** | `sslmode=verify-full` · `REDIS_SSL` · `REQUIRE_HTTPS` **with** `FORWARD_HEADERS=framework` · `OTP_DEV_CODES_IN_LOG=false` | phase 3 |
 | **4b · Prove locality** | Measure both hops per §6.5. Cheap now, and the one thing that is expensive to discover after launch | phase 3 |
-| **5 · Wire SMS** | Implement the provider; test on two carriers | phase 0 clearing |
+| **5 · Wire WhatsApp OTP** | Implement the sender; test on two carriers and both platforms | phase 0 clearing |
 | **6 · Launch** | §8 signed off on staging then production; monitoring live; flip DNS | all above |
 | **7 · Launch week** | MUST-10 refresh · MUST-11 middleware · MUST-12 sweeper · M1 rotation · M3 toll-fraud tuning | launch |
 | **8 · Before day 31** | MUST-17 payment rail (or the decision to hand-invoice) · MUST-18 GST invoice. **The first cohort's trials all expire in the same week** | phase 0 clearing |
@@ -990,8 +1174,8 @@ are already built per §4 and only need confirming in the deployed environment.
 - [ ] If Redis is on: rate limiting **verified across two instances**, not assumed
 - [ ] `FORWARD_HEADERS=framework`, or every user shares one bucket keyed on the proxy
 - [ ] *(verify)* `MESSAGING` tier at 10/min — each call spends real money
-- [ ] Per-IP and per-prefix OTP ceilings added once SMS is live (M3 in `IDENTITY.md`)
-- [ ] Spend alarm on the SMS account, set below the amount that would hurt
+- [ ] Per-IP and per-prefix OTP ceilings added once WhatsApp OTP is live (M3 in `IDENTITY.md`)
+- [ ] Spend alarm on the WhatsApp provider account, set below the amount that would hurt
 - [ ] Rate limits verified **as a client**, keyed per client and not per trainer — clients are the untrusted population (§5.13)
 
 ### G · Web headers and browser posture
@@ -1028,7 +1212,7 @@ are already built per §4 and only need confirming in the deployed environment.
 - [ ] Uptime check on `/health` with alerting that **reaches a phone**. You are not watching a dashboard; you are being told
 - [ ] **Health check wired to automatic restart** so the common case needs no human at all
 - [ ] Error tracking (Sentry free tier) on both halves
-- [ ] Alerts on: auth-failure spikes, 5xx rate, DB connection saturation, SMS spend
+- [ ] Alerts on: auth-failure spikes, 5xx rate, DB connection saturation, WhatsApp OTP spend
 - [ ] **One-click rollback to the previous deploy verified** — with no on-call, this is your incident response
 - [ ] Written incident procedure — **including how to revoke every session**, which requires MUST-2
 - [ ] Both boot diagnostics checked after **every** deploy, not just the first
@@ -1039,10 +1223,15 @@ are already built per §4 and only need confirming in the deployed environment.
 - [ ] A real answer to a deletion request, given soft-delete-everything (§6.7)
 - [ ] Consent language at sign-up covering what is stored and why
 - [ ] **Two classes of data subject covered** — the trainer who signed up, and the client whose number a trainer typed in (§5.13)
-- [ ] **Consent captured on the invite screen** (MUST-15), not only in a policy page
+- [ ] *(next release)* **Consent captured on the invite screen** (MUST-15), not only in a policy page
 - [ ] **Answered: who is the Data Fiduciary for a client's record** — trainer, InclineYou, or both. A lawyer's question, needed before launch
 - [ ] A client's deletion request has an answer that survives their trainer still needing the books
 - [ ] A named contact for data questions
+- [ ] **Processor clause in the Terms** — the trainer confirms a lawful basis for every client they add; InclineYou processes on instruction and lists its sub-processors (MUST-22)
+- [ ] **The notice on *Add client*** is live (MUST-22)
+- [ ] **Adults only**: the Terms and the *Add client* notice say 18+, and a date of birth under 18 is refused with its own error code (MUST-22)
+- [ ] **A trainer can erase a client**, and support has a written path for a request the trainer will not act on (MUST-22)
+- [ ] **New client rows are `not_invited`** — nothing stores `accepted` without an `accepted_at` (MUST-22)
 
 ### M · Billing and entitlements (§5.16)
 - [ ] ⛔ **A trial start is recorded for every account**, an expiry computed, and the *trial ends on* date shown to the trainer
@@ -1080,8 +1269,12 @@ are already built per §4 and only need confirming in the deployed environment.
 
 ## 10. Open questions
 
-1. **Which SMS provider, and has DLT registration started?** The critical path.
-   Everything else parallelises; this cannot be compressed.
+1. **Which WhatsApp provider, and has Meta verification started?** The critical
+   path — WhatsApp is the only OTP channel (24 Sep 2026). Still open alongside
+   it: **is there a second way in?** Google sign-in was cut from v1 but may come
+   back as a fallback, with the phone number added later — or as a way to use
+   the product without giving a number at all. Either one runs into
+   `backend/IDENTITY.md`, because every account today is keyed on a phone.
 2. **Confirm DigitalOcean App Platform, all BLR1?** It is the only option in the
    intersection of *hands-off* and *Indian region* (§6.4). The alternative worth
    a moment is GCP Cloud Run in Mumbai — one day of setup, then quiet — if you
@@ -1094,10 +1287,9 @@ are already built per §4 and only need confirming in the deployed environment.
    for the HSTS `includeSubDomains` decision in §8-G.
 5. **Is there a launch date?** It decides whether MUST-10 and M1 are launch items
    or launch-week items.
-6. ~~Does the client portal ship in v1?~~ **Answered 30 Aug 2026: yes.** It is
-   four stub routes and has no REST surface to read from, so it is now MUST-13,
-   MUST-14 and MUST-15 — see §5.13. **This is the largest piece of engineering
-   left in this book**, and it likely sets the launch date rather than DLT.
+6. ~~Does the client portal ship in v1?~~ **Answered 30 Aug 2026: yes;
+   reversed 24 Sep 2026: next release.** Most of it is built; the invite and
+   consent screen is what is left (MUST-13, MUST-15, §5.13).
 7. **Autopay at launch, or hand-invoice the first cohort?** MUST-17, and
    `PRICING.md` §11.3 raises it too. Fifty invoices a month is hand-collectible
    and buys time to build the rail against real customers. Needs an answer
@@ -1106,4 +1298,9 @@ are already built per §4 and only need confirming in the deployed environment.
    form of collection, and it makes the hosting GST in §6.4a reclaimable.
 9. **Who is the Data Fiduciary for a client's record** — the trainer, InclineYou, or
    both? A lawyer's question, raised by MUST-15, and worth starting now because
-   it gates the copy on a screen that has to be built anyway.
+   it gates the copy on a screen that has to be built anyway. **Working position
+   (25 Sep 2026): the trainer is the fiduciary, InclineYou the processor** —
+   MUST-22 is built on it, and the lawyer is asked to confirm or correct it, not
+   to start from nothing. In the same conversation, confirm that *adults only* —
+   the trainer's word plus a refused under-18 birth date — is enough to keep
+   §9 out of scope.

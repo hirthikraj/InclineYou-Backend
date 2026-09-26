@@ -1,6 +1,6 @@
 'use client';
 
-import Link from 'next/link';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * Today failed to load.
@@ -16,7 +16,7 @@ import Link from 'next/link';
  */
 export default function Error({ reset }: { error: Error; reset: () => void }) {
   return (
-    <div className="app app--noshell" data-theme="dark">
+    <div className="app app--noshell">
       <div
         style={{
           height: '100%',
@@ -41,12 +41,12 @@ export default function Error({ reset }: { error: Error; reset: () => void }) {
             payments and packs are on the server exactly as they were.
           </p>
           <div className="row gap2" style={{ marginTop: 24, justifyContent: 'center' }}>
-            <button className="btn btn--primary btn--lg" type="button" onClick={reset}>
+            <Button variant="primary" size="lg" onClick={reset}>
               Try again
-            </button>
-            <Link className="btn btn--secondary btn--lg" href="/clients">
+            </Button>
+            <Button href="/clients" variant="secondary" size="lg">
               Open the roster
-            </Link>
+            </Button>
           </div>
         </div>
       </div>

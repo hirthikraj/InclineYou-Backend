@@ -4,9 +4,11 @@ import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 
 import { chooseRoster } from '@/lib/auth/actions';
+import { avatarToken, initials } from '@/lib/today/time';
 import type { Membership } from '@/lib/auth/types';
 import { IconChevronRight, IconWarn } from './Icons';
 import { TrustLine } from './TrustLine';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * Frame 2a · whose book to open.
@@ -121,15 +123,15 @@ export function RosterPicker({
         Switch any time from the menu. We’ll open here next time.
       </p>
 
-      <button
-        className="btn btn--primary btn--lg"
-        type="button"
+      <Button
+        variant="primary"
+        size="lg"
         style={{ marginTop: 12 }}
         onClick={go}
         disabled={!picked || pending}
       >
         {pending ? 'Opening…' : 'Continue'}
-      </button>
+      </Button>
 
       <TrustLine>
         Nothing here is a second account — it is the same sign-in, read from the other side.
@@ -144,24 +146,17 @@ function isPaused(m: Membership): boolean {
   return m.status?.toLowerCase() === 'paused';
 }
 
-/** `Meera Krishnan` → `MK`. Two letters, which is what the 48px avatar holds. */
-function initials(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-/**
+/*
+ * `initials` and `avatarToken` were WRITTEN OUT HERE, character for character
+ * the same as `lib/today/time.ts`'s pair. Two copies of a colour function is two
+ * answers to "what colour is this person", and the copy proved it: when the
+ * shared one was changed to return a finished `var(--tx-av-3)` this one still
+ * returned the bare property name, so the sign-in avatars would have gone blank
+ * while every other screen's stayed. Imported now, so there is one answer.
  * Keyed off the trainer's id rather than their position, so a roster keeps its
- * colour between two sign-ins — and the same colour the client portal will give
- * it afterwards. Twelve tokens, per §01.
+ * colour between two sign-ins — and the same colour the client portal gives it
+ * afterwards. Twelve tokens, per §01.
  */
-function avatarToken(id: string): string {
-  let hash = 0;
-  for (let i = 0; i < id.length; i += 1) hash = (hash * 31 + id.charCodeAt(i)) % 1_000_003;
-  return `--tx-av-${(hash % 12) + 1}`;
-}
 
 function RosterCard({
   membership,
@@ -212,7 +207,7 @@ function RosterCard({
         <span
           className="av av--lg"
           style={{
-            background: `var(${avatarToken(membership.trainerId)})`,
+            background: avatarToken(membership.trainerId),
             // A paused roster's avatar is dimmed for the same reason the rail's
             // done pin is: it is still there, and it is not where you are going.
             opacity: paused ? 0.55 : 1,

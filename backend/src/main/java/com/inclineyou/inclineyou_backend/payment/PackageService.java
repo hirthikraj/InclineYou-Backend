@@ -17,6 +17,9 @@ import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.inclineyou.inclineyou_backend.session.DiaryService;
+
 /**
  * `package` — WHAT ONE CLIENT BOUGHT. Its neighbour {@link PackService} owns
  * `pack`, the price list; one letter, two different things, and
@@ -75,11 +78,32 @@ import java.util.*;
 public class PackageService {
 
     private final NamedParameterJdbcTemplate jdbc;
+    /**
+     * V3 · a sale writes the diary it implies.
+     *
+     * <p>The rhythm lives on the client and the count lives on the pack, and
+     * until this field existed nothing joined the two — so a trainer who had
+     * just sold twelve sessions and agreed Mon/Wed/Fri opened the schedule and
+     * found it empty. {@link DiaryService} carries the whole argument.
+     */
+    private final DiaryService diary;
+    /** V18 · facts for the client's bell, gated by their own switches. */
+    private final com.inclineyou.inclineyou_backend.notification.ClientNotificationService clientBell;
+
+    private static final ObjectMapper STORE = new ObjectMapper();
 
     private static final Set<String> TYPES = Set.of("session_pack", "monthly", "single");
 
     /** A sanity bound on goodwill, not a policy. Ten years is a mistyped year. */
     private static final int MAX_EXTEND_DAYS = 365;
+
+    /**
+     * A sanity bound on a corrected session count, not a policy. Nobody sells a
+     * five-hundred-session personal-training pack; a number above it is a
+     * fat-fingered digit, and clamping it silently is how a client ends up with
+     * a pack nobody can explain.
+     */
+    private static final int MAX_SESSIONS = 500;
 
     // ── DTOs ──────────────────────────────────────────────────────────────────
 
@@ -129,7 +153,24 @@ public class PackageService {
             /** Sum of every collected payment against it. See the note above. */
             BigDecimal amountPaid,
             /** `amount − paid − writtenOff`, floored at zero. */
-            BigDecimal amountDue
+            BigDecimal amountDue,
+            /**
+             * How many sessions THIS REQUEST put in the diary. V3.
+             *
+             * <p>Not a {@code package} column and not pretending to be one — it is
+             * what the sale did, which is what lets the panel say "12 booked,
+             * first on Monday" instead of closing silently. Counting the diary
+             * afterwards would answer a different question: a client with four
+             * sessions already on the board comes back as sixteen.
+             *
+             * <p>Null on every read, because a read did not book anything. Zero is
+             * a real answer on a sale — a pack sold to somebody whose days are not
+             * agreed yet books nothing, and the panel says so rather than implying
+             * a diary that is not there.
+             *
+             * <p>APPENDED LAST.
+             */
+            Integer sessionsBooked
     ) {}
 
     /**
@@ -152,7 +193,26 @@ public class PackageService {
             /** What was knocked off the list price at the till. `amount` is already net. */
             BigDecimal discountAmount,
             /** When the money is owed by. Without it there is no such thing as "11 days late". */
-            String dueDate
+            String dueDate,
+            /* ── appended by V3 · the sale books the sessions ──────────────── */
+            /**
+             * The days and times agreed at the till. {@code weekday} 1 = Monday …
+             * 7 = Sunday, the convention {@code client.weekly_schedule} and
+             * {@code program.schedule} share — {@code SessionPlanner} states it.
+             *
+             * <p>This is what makes a sale produce a DIARY rather than a number.
+             * It is written onto the CLIENT, because it is their standing week and
+             * not this pack's: the next pack books on the same rhythm without
+             * anyone re-typing it, and the phone's {@code weekly_schedule} is the
+             * same field.
+             *
+             * <p>Omitted or empty means <b>leave their week alone</b>, which is the
+             * right default for a second pack sold to somebody who has been coming
+             * on Tuesdays for a year. It never means <i>book nothing</i>.
+             */
+            List<Map<String, Object>> weeklySchedule,
+            /** How long their sessions run, if the sale is the moment it was settled. */
+            Integer sessionDurationMinutes
     ) {}
 
     /**
@@ -180,12 +240,31 @@ public class PackageService {
     /** Goodwill, in days. */
     public record ExtendPackageRequest(@NotNull Integer days, String reason) {}
 
-    /** One entry in a package's history. Append-only; see V30. */
+    /**
+     * A correction, in sessions. V4.
+     *
+     * <p>{@code sessionsTotal} is the number the pack SHOULD have been sold
+     * with, absolute rather than a delta, because that is the number the trainer
+     * knows — "it was twelve, not ten". The delta is derived and it is the delta
+     * that is logged.
+     *
+     * <p>It never carries an amount. See {@link #correctSessions}.
+     */
+    public record CorrectSessionsRequest(@NotNull Integer sessionsTotal, String reason) {}
+
+    /**
+     * One entry in a package's history. Append-only; see V30.
+     *
+     * <p>{@code sessions} is V4 and is the signed change a correction made to
+     * the count. Zero on every pause, resume and extend — those move days — so
+     * a reader can take whichever of the two fields its {@code kind} is about.
+     */
     public record AdjustmentResponse(
             String id,
             String packageId,
             String kind,
             int days,
+            int sessions,
             String reason,
             long effectiveAt,
             long createdAt
@@ -226,7 +305,17 @@ public class PackageService {
              * nowhere to write one. Appended after `gymShareAmount` for the
              * reason that field is appended last.
              */
-            String note
+            String note,
+            /*
+             * ── APPENDED BY V8 · THE BILL ────────────────────────────────────
+             * `INV-<FY>-<NNNN>`, or null until somebody presses *Raise an
+             * invoice*. Minted on request and never on write, so null is the
+             * common case and not a gap. It is what decides between the button
+             * and the number on each row of the client file's Payments tab.
+             */
+            String invoiceNo,
+            /** Epoch ms the number was minted. Null with {@code invoiceNo}. */
+            Long invoicedAt
     ) {}
 
     /**
@@ -266,7 +355,24 @@ public class PackageService {
             String upiReference
     ) {}
 
-    public record ConfirmPaymentRequest(String upiReference) {}
+    /**
+     * The money arrived. Every field optional.
+     *
+     * <p>{@code method} and {@code paidAt} are V8's: a trainer settling Tuesday's
+     * cash on Thursday must be able to say Tuesday, and a pending row whose
+     * method was never known must be able to learn it at the moment it is
+     * settled. Absent means what it always meant — now, and the method already
+     * on the row.
+     */
+    public record ConfirmPaymentRequest(
+            String upiReference,
+            String method,
+            /** Epoch ms. Not in the future (a few minutes of clock skew are forgiven). */
+            Long paidAt
+    ) {}
+
+    /** Why it is being written off. Optional; appended to the row's note. */
+    public record WriteOffRequest(String reason) {}
 
     /**
      * The one row of columns every read of this table selects — the same device
@@ -276,7 +382,7 @@ public class PackageService {
     private static final String PAYMENT_COLUMNS =
             "id::text, client_id::text, package_id::text, amount, currency, method, " +
             "collected_by, status, upi_reference, paid_at, gym_share_amount, note, " +
-            "created_at, updated_at";
+            "created_at, updated_at, invoice_no, invoiced_at";
 
     /**
      * Likewise for `package`, and V30 is why it is a text block now.
@@ -443,7 +549,8 @@ public class PackageService {
         String tid = trainerId.toString();
         readPackage(packageId, tid);
         var rows = jdbc.queryForList("""
-                SELECT id::text, package_id::text, kind, days, reason, effective_at, created_at
+                SELECT id::text, package_id::text, kind, days, sessions, reason,
+                       effective_at, created_at
                 FROM package_adjustment
                 WHERE package_id = :pid::uuid AND trainer_id = :tid::uuid
                 ORDER BY effective_at, created_at
@@ -453,6 +560,7 @@ public class PackageService {
                 str(r.get("package_id")),
                 str(r.get("kind")),
                 toInt(r.get("days")) == null ? 0 : toInt(r.get("days")),
+                toInt(r.get("sessions")) == null ? 0 : toInt(r.get("sessions")),
                 str(r.get("reason")),
                 toEpochMilli(r.get("effective_at")),
                 toEpochMilli(r.get("created_at")))).toList();
@@ -485,6 +593,11 @@ public class PackageService {
      */
     @Transactional
     public PackageResponse createPackage(UUID trainerId, String clientId, CreatePackageRequest req) {
+        return sell(trainerId, clientId, req, "sold");
+    }
+
+    /** The sale itself, told whether it is a first sale or a renewal — the client's bell says which. */
+    private PackageResponse sell(UUID trainerId, String clientId, CreatePackageRequest req, String verb) {
         String tid = trainerId.toString();
         requireClientOwnership(clientId, tid);
 
@@ -569,10 +682,95 @@ public class PackageService {
                     :dueDate, :now, :now)
                 """, p);
 
+        /* ── AND NOW THE DIARY, WHICH IS THE HALF THAT WAS MISSING ────────────
+
+           A sale used to end one line above this: a package row, a pending
+           payment, and a trainer who had just agreed Mon/Wed/Fri at 7am with the
+           client in front of them opening the schedule to find it empty. The pack
+           said `12 of 12 left` and the diary said nothing was happening.
+
+           The days come in on the sale now, because that is the same
+           conversation as the price, and they are written onto the CLIENT rather
+           than onto this pack: it is their standing week, so the next pack books
+           on the same rhythm without anyone re-typing it, and the phone reads the
+           same column. `writeStandingWeek` answers false when the sale carried no
+           days, and the client's existing rhythm is then what gets booked.
+
+           Inside this method's transaction on purpose — a sale that books nothing
+           because the diary write failed is the shape nobody ever finds. */
+        writeStandingWeek(clientId, tid, req.weeklySchedule(), req.sessionDurationMinutes());
+        var booked = diary.reconcile(trainerId, clientId);
+
         // Re-read rather than reconstruct: `amountPaid` is a correlated sum and
         // is zero on a fresh row only until the panel that sold this records the
         // deposit against it. Reading is one query and cannot be wrong.
-        return getPackage(tid, id.toString());
+        var sold = withBooked(getPackage(tid, id.toString()), booked.booked());
+        clientBell.mint(clientId, "pack", sold.amount(), null, verb);
+        return sold;
+    }
+
+    /**
+     * The rhythm the sale carried, onto the client it belongs to.
+     *
+     * <p>{@code sessions_per_week} is kept in step here rather than anywhere
+     * else, because it is the same fact counted: the portal's progress screen
+     * reads it as <i>the agreed frequency</i> and draws "3 of 4 this week" from
+     * it, and a client who moved to four days while that column still said three
+     * would be told they are behind on a week they finished.
+     *
+     * <p>Returns false for an empty week, and writes nothing in that case — an
+     * absent schedule on a sale means <i>leave their week alone</i>, never
+     * <i>they train no days</i>. {@code PackageService} is not the only writer of
+     * this column and must not clear what {@code ClientService} put there.
+     */
+    private boolean writeStandingWeek(String clientId, String tid,
+                                      List<Map<String, Object>> schedule,
+                                      Integer durationMinutes) {
+        var slots = com.inclineyou.inclineyou_backend.session.SessionPlanner.parseSlots(schedule);
+        if (slots.isEmpty() && durationMinutes == null) return false;
+
+        var sets = new ArrayList<String>();
+        var p = new HashMap<String, Object>();
+        p.put("cid", clientId);
+        p.put("tid", tid);
+        if (!slots.isEmpty()) {
+            p.put("week", toJson(slots));
+            p.put("perWeek", slots.size());
+            sets.add("weekly_schedule = CAST(:week AS jsonb)");
+            sets.add("sessions_per_week = :perWeek");
+        }
+        if (durationMinutes != null) {
+            p.put("duration", durationMinutes);
+            sets.add("session_duration_minutes = :duration");
+        }
+        sets.add("updated_at = NOW()");
+        jdbc.update("UPDATE client SET " + String.join(", ", sets) +
+                " WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL", p);
+        return !slots.isEmpty();
+    }
+
+    /** The normalised week, as the jsonb the column and the phone both expect. */
+    private static String toJson(List<com.inclineyou.inclineyou_backend.session.SessionPlanner.Slot> slots) {
+        try {
+            return STORE.writeValueAsString(slots.stream()
+                    .map(s -> Map.of("templateDay", s.templateDay(),
+                                     "weekday", s.weekday(),
+                                     "time", s.time()))
+                    .toList());
+        } catch (Exception e) {
+            // Three ints and a string cannot fail to serialise; this exists so the
+            // checked exception does not leak into the sale's signature.
+            throw new IllegalStateException("weekly schedule would not serialise", e);
+        }
+    }
+
+    /** The read's response, told what this request booked. See {@code sessionsBooked}. */
+    private static PackageResponse withBooked(PackageResponse r, int booked) {
+        return new PackageResponse(r.id(), r.clientId(), r.type(), r.sessionsTotal(),
+                r.sessionsRemaining(), r.amount(), r.currency(), r.startDate(), r.endDate(),
+                r.status(), r.createdAt(), r.updatedAt(), r.packId(), r.pausedAt(),
+                r.pausedDays(), r.closedAt(), r.dueDate(), r.discountAmount(),
+                r.amountPaid(), r.amountDue(), booked);
     }
 
     /**
@@ -650,9 +848,16 @@ public class PackageService {
                 validityDays != null && validityDays > 0 ? startDate.plusDays(validityDays).toString() : null,
                 packId,
                 req.discountAmount(),
-                req.dueDate());
+                req.dueDate(),
+                /* A renewal never re-asks the days: the client has been coming on
+                   Tuesdays for six months, and a form between a trainer and a
+                   renewal is what `renewPackage`'s own note refuses. Null leaves
+                   their week exactly as it is, and `createPackage` then books the
+                   new count onto it. */
+                null,
+                null);
 
-        PackageResponse fresh = createPackage(trainerId, clientId, create);
+        PackageResponse fresh = sell(trainerId, clientId, create, "renewed");
         log.info("package renewed trainer={} client={} from={} to={}", tid, clientId, packageId, fresh.id());
         return fresh;
     }
@@ -775,6 +980,81 @@ public class PackageService {
                 """, Map.of("id", packageId, "tid", tid, "days", days));
 
         logAdjustment(tid, packageId, "extend", days, req.reason(), Instant.now());
+        return getPackage(tid, packageId);
+    }
+
+    /**
+     * CORRECT THE COUNT — V4, and the one write here that changes a sold pack's
+     * sessions without any money moving.
+     *
+     * <h2>What this is not</h2>
+     *
+     * <p>It is not how a client buys more. Selling six more sessions mid-pack
+     * writes a SECOND package row — {@code POST /v1/packages/{id}/renew} with a
+     * {@code startDate} of today, which the web labels <em>Add sessions</em> —
+     * because a package is what one client bought, at a price, off a price-list
+     * entry, inside a validity window. Adding sessions to that row would rewrite
+     * the agreement it records: the per-session price becomes a blend of two
+     * rates, the window covers sessions it was never sold with, and nothing is
+     * left that says what was agreed in August. {@code CLAUDE.md} states the
+     * rule as <em>changing a price must never rewrite a sale</em>.
+     *
+     * <p>So this touches {@code sessions_total} and {@code sessions_remaining}
+     * and <strong>never {@code amount}</strong>. It is the exact sibling of
+     * {@link #extendPackage}, which gives days away and leaves the price alone.
+     *
+     * <h2>Absolute in, delta out</h2>
+     *
+     * <p>The request carries the total the pack should have had, because that is
+     * what the trainer knows. What is stored in the log is the DELTA, which is
+     * the only part that is a fact about this correction rather than about the
+     * pack. {@code sessions_remaining} moves by the same delta, so the sessions
+     * already delivered are untouched — correcting ten to twelve on a pack with
+     * four used leaves four used and eight left, and never eight used.
+     *
+     * <h2>The three refusals</h2>
+     *
+     * <p>A monthly pack counts nothing, so there is nothing to correct. A total
+     * of zero or less is not a pack. And a total below what has already been
+     * delivered is refused by name rather than clamped: the trainer is either
+     * looking at the wrong pack or the diary is what is wrong, and silently
+     * making {@code sessions_remaining} zero would hide both.
+     */
+    public PackageResponse correctSessions(UUID trainerId, String packageId,
+                                           CorrectSessionsRequest req) {
+        String tid = trainerId.toString();
+        var pkg = readPackage(packageId, tid);
+        requireLive(pkg);
+
+        Integer currentTotal = toInt(pkg.get("sessions_total"));
+        if (currentTotal == null) throw PackageRuleException.notCounted();
+
+        Integer wanted = req == null ? null : req.sessionsTotal();
+        if (wanted == null || wanted <= 0 || wanted > MAX_SESSIONS) {
+            throw PackageRuleException.badSessionCount(MAX_SESSIONS);
+        }
+
+        int delta = wanted - currentTotal;
+        if (delta == 0) throw PackageRuleException.noChange();
+
+        int remaining = toInt(pkg.get("sessions_remaining")) == null
+                ? 0
+                : toInt(pkg.get("sessions_remaining"));
+        int used = currentTotal - remaining;
+        if (wanted < used) throw PackageRuleException.fewerThanDelivered(used);
+
+        jdbc.update("""
+                UPDATE package SET
+                    sessions_total     = :total,
+                    -- The delta, not the total: what has been delivered is a fact
+                    -- about the diary and this write has no business moving it.
+                    sessions_remaining = sessions_remaining + CAST(:delta AS INTEGER),
+                    updated_at         = NOW()
+                WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                """, Map.of("id", packageId, "tid", tid, "total", wanted, "delta", delta));
+
+        logAdjustment(tid, packageId, "sessions", 0, delta,
+                req.reason(), Instant.now());
         return getPackage(tid, packageId);
     }
 
@@ -908,6 +1188,9 @@ public class PackageService {
                     :share, :sharePercent, :now, :now)
                 """, p);
 
+        // V18 · money that has ARRIVED is news to the client; a pending row is not yet.
+        if (settled) clientBell.mint(clientId, "pack", req.amount(), null, req.method());
+
         // On a pending row gymShareAmount is null rather than 0: the split has not
         // been made yet, and zero would read as "the gym took nothing", which is a
         // different fact.
@@ -915,7 +1198,9 @@ public class PackageService {
                 req.method(), req.collectedBy(), settled ? "paid" : "pending",
                 blankToNull(req.upiReference()), settled ? paidAt.toEpochMilli() : null,
                 now.toEpochMilli(), now.toEpochMilli(),
-                split == null ? null : split.amount(), blankToNull(req.note()));
+                split == null ? null : split.amount(), blankToNull(req.note()),
+                // A fresh row has never been billed — see V8.
+                null, null);
     }
 
     /** The gym's cut and the percentage it was worked out from, both nullable. */
@@ -982,22 +1267,39 @@ public class PackageService {
     public PaymentResponse confirmPayment(UUID trainerId, String paymentId, ConfirmPaymentRequest req) {
         String tid = trainerId.toString();
         var rows = jdbc.queryForList("""
-                SELECT p.amount, p.collected_by
+                SELECT p.amount, p.collected_by, p.status
                 FROM payment p
                 WHERE p.id = :id::uuid AND p.trainer_id = :tid::uuid AND p.deleted_at IS NULL
+                FOR UPDATE
                 """, Map.of("id", paymentId, "tid", tid));
         if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Payment not found");
         var row = rows.get(0);
+        // A written-off row's amount is already in its package's
+        // `written_off_amount`; confirming it would count the same rupees as both
+        // collected and forgiven, and the pack would read as over-settled.
+        if ("write_off".equals(str(row.get("status")))) throw PackageRuleException.writtenOff();
 
         var split = gymSplitFor(tid, str(row.get("collected_by")), toDecimal(row.get("amount")));
         BigDecimal share = split.amount();
         BigDecimal sharePercent = split.percent();
 
         Instant now = Instant.now();
+        Instant paidAt = now;
+        if (req != null && req.paidAt() != null) {
+            Instant asked = Instant.ofEpochMilli(req.paidAt());
+            // Refused, not clamped as `createPayment` clamps: this is a date the
+            // trainer typed on purpose, and quietly replacing next week with
+            // today would store a day nobody chose. A few minutes' grace so a
+            // browser clock slightly ahead of ours is not an error.
+            if (asked.isAfter(now.plus(CLOCK_SKEW))) throw PackageRuleException.paidInFuture();
+            paidAt = asked.isAfter(now) ? now : asked;
+        }
         var p = new HashMap<String, Object>();
         p.put("id",           paymentId);
         p.put("tid",          tid);
         p.put("now",          Timestamp.from(now));
+        p.put("paidAt",       Timestamp.from(paidAt));
+        p.put("method",       req == null ? null : blankToNull(req.method()));
         // Null, not "", when none was sent. The UPDATE below COALESCEs onto what
         // is already there — `POST /v1/packages/{id}/payments` can write a
         // reference at record time now, and a confirmation that carries none must
@@ -1008,7 +1310,8 @@ public class PackageService {
         jdbc.update("""
                 UPDATE payment SET
                     status           = 'paid',
-                    paid_at          = :now,
+                    paid_at          = :paidAt,
+                    method           = COALESCE(:method, method),
                     upi_reference    = COALESCE(:ref, upi_reference),
                     -- COALESCE so re-confirming an already-split payment cannot
                     -- re-derive the cut from a percentage that has since changed.
@@ -1023,7 +1326,170 @@ public class PackageService {
         var updated = jdbc.queryForList("""
                 SELECT %s FROM payment WHERE id = :id::uuid
                 """.formatted(PAYMENT_COLUMNS), Map.of("id", paymentId));
-        return toPaymentResponse(updated.get(0));
+        var confirmed = toPaymentResponse(updated.get(0));
+        // V18 · only the first confirmation is news; a second press re-stamps nothing the client needs.
+        if (!"paid".equals(str(row.get("status"))) && !"confirmed".equals(str(row.get("status")))) {
+            clientBell.mint(confirmed.clientId(), "pack", confirmed.amount(), null, confirmed.method());
+        }
+        return confirmed;
+    }
+
+    /** The financial year turns over on an Indian calendar, not the server's. */
+    private static final java.time.ZoneId IST = java.time.ZoneId.of("Asia/Kolkata");
+
+    /** How far ahead of our clock a typed {@code paidAt} may be before it is "the future". */
+    private static final java.time.Duration CLOCK_SKEW = java.time.Duration.ofMinutes(5);
+
+    /** A write-off reason is a sentence, not an essay; refused over, never cut. */
+    private static final int MAX_WRITE_OFF_REASON = 500;
+
+    /**
+     * STOP CHASING IT — without pretending it was paid, and without deleting it.
+     *
+     * <p>A write-off is the trainer deciding a debt will not be collected: the
+     * client moved away owing for four sessions. The row keeps its amount, its
+     * client and its date, because "₹2,000 was forgiven in March" is a fact the
+     * books must still show; only its status changes, and it stops being
+     * {@code pending} so nothing chases it again.
+     *
+     * <h2>The amount moves onto the package, and that is what makes the debt drop</h2>
+     *
+     * <p>A package's debt is {@code amount − paid − written_off_amount}
+     * ({@link #PACKAGE_COLUMNS}); a pending payment row is a placeholder for money
+     * expected, not part of that sum. So writing the row off without touching the
+     * package would leave the pack owing exactly what it owed before. V11 already
+     * gave {@code package} a {@code written_off_amount} and the phone already
+     * draws it — the column is the one place a write-off has ever meant anything
+     * — so the row's amount is ADDED there, in the same transaction, and every
+     * reader of {@code amountDue} on either half sees the drop.
+     *
+     * <h2>Refusals</h2>
+     *
+     * <ul>
+     *   <li>Collected already ({@code paid} or {@code confirmed}) — {@code 409
+     *       ALREADY_COLLECTED}. Money that arrived cannot be forgiven; the
+     *       honest correction for a wrong entry is deleting it.</li>
+     *   <li>Written off already — returned unchanged. A second press must not
+     *       add the amount to the package a second time.</li>
+     *   <li>Not this trainer's, or not in the active workspace — 404, by the
+     *       ownership filter and the tier-2 policy together.</li>
+     * </ul>
+     */
+    @Transactional
+    public PaymentResponse writeOffPayment(UUID trainerId, String paymentId, WriteOffRequest req) {
+        String tid = trainerId.toString();
+        var row = lockPayment(paymentId, tid);
+        String status = str(row.get("status"));
+        if ("write_off".equals(status)) return toPaymentResponse(row);
+        if ("paid".equals(status) || "confirmed".equals(status)) throw PackageRuleException.alreadyCollected();
+
+        String reason = req == null ? null : blankToNull(req.reason());
+        if (reason != null) {
+            reason = reason.strip();
+            if (reason.length() > MAX_WRITE_OFF_REASON) throw PackageRuleException.reasonTooLong(MAX_WRITE_OFF_REASON);
+        }
+        String note = str(row.get("note"));
+        String merged = reason == null ? note : (note == null || note.isBlank() ? reason : note + " · " + reason);
+
+        Instant now = Instant.now();
+        var p = new HashMap<String, Object>();
+        p.put("id",   paymentId);
+        p.put("tid",  tid);
+        p.put("note", merged);
+        p.put("now",  Timestamp.from(now));
+        jdbc.update("""
+                UPDATE payment SET
+                    status           = 'write_off',
+                    paid_at          = NULL,
+                    gym_share_amount = NULL,
+                    share_percent    = NULL,
+                    note             = :note,
+                    updated_at       = :now
+                WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                """, p);
+
+        String packageId = str(row.get("package_id"));
+        if (packageId != null) {
+            p.put("pkg",    packageId);
+            p.put("amount", toDecimal(row.get("amount")));
+            jdbc.update("""
+                    UPDATE package SET
+                        written_off_amount = COALESCE(written_off_amount, 0) + :amount,
+                        written_off_at     = COALESCE(written_off_at, :now),
+                        updated_at         = :now
+                    WHERE id = :pkg::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                    """, p);
+        }
+        return toPaymentResponse(lockPayment(paymentId, tid));
+    }
+
+    /**
+     * GIVE A COLLECTED PAYMENT A BILL NUMBER — V8.
+     *
+     * <p>{@code INV-<FY>-<NNNN>}: the financial year runs April to March, so
+     * September 2026 is {@code 2627}, and the sequence is per trainer per year,
+     * across every workspace they coach in, because a series belongs to its
+     * issuer. The counter row is locked by the upsert that advances it, so two
+     * presses in the same second get consecutive numbers, and it advances inside
+     * this transaction, so a refusal after it rolls the number back and the
+     * series stays gap-free.
+     *
+     * <p>Idempotent: a row that already has a number returns it unchanged. The
+     * payment row is locked first, so two concurrent presses on the SAME row
+     * cannot mint it two numbers.
+     *
+     * <p>Refused, each with its sentence: a written-off row (nothing to bill), a
+     * gym-collected row (the gym raises its own receipt), and a row not yet
+     * collected (the bill prints <i>Paid on</i>). The number is the trainer's
+     * bill to their client — it computes no tax and is not a tax invoice.
+     */
+    @Transactional
+    public PaymentResponse issueInvoice(UUID trainerId, String paymentId) {
+        String tid = trainerId.toString();
+        var row = lockPayment(paymentId, tid);
+        if (str(row.get("invoice_no")) != null) return toPaymentResponse(row);
+
+        String status = str(row.get("status"));
+        if ("write_off".equals(status)) throw PackageRuleException.writtenOff();
+        if ("gym".equals(str(row.get("collected_by")))) throw PackageRuleException.gymCollected();
+        if (!"paid".equals(status) && !"confirmed".equals(status)) throw PackageRuleException.notPaid();
+
+        int fy = financialYear(LocalDate.now(IST));
+        Integer seq = jdbc.queryForObject("""
+                INSERT INTO invoice_counter (trainer_id, fy, last_seq) VALUES (:tid::uuid, :fy, 1)
+                ON CONFLICT (trainer_id, fy) DO UPDATE
+                    SET last_seq = invoice_counter.last_seq + 1, updated_at = now()
+                RETURNING last_seq
+                """, Map.of("tid", tid, "fy", fy), Integer.class);
+
+        Instant now = Instant.now();
+        jdbc.update("""
+                UPDATE payment SET invoice_no = :no, invoiced_at = :now, updated_at = :now
+                WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                """, Map.of("no", invoiceNumber(fy, seq), "now", Timestamp.from(now),
+                            "id", paymentId, "tid", tid));
+        return toPaymentResponse(lockPayment(paymentId, tid));
+    }
+
+    /** {@code 2627} for any date from 1 Apr 2026 to 31 Mar 2027. */
+    static int financialYear(LocalDate date) {
+        int start = date.getMonthValue() >= 4 ? date.getYear() : date.getYear() - 1;
+        return (start % 100) * 100 + (start + 1) % 100;
+    }
+
+    static String invoiceNumber(int fy, int seq) {
+        return "INV-%04d-%04d".formatted(fy, seq);
+    }
+
+    /** One of this trainer's live payments, locked for the rest of the transaction, or 404. */
+    private Map<String, Object> lockPayment(String paymentId, String tid) {
+        var rows = jdbc.queryForList("""
+                SELECT %s FROM payment
+                WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                FOR UPDATE
+                """.formatted(PAYMENT_COLUMNS), Map.of("id", paymentId, "tid", tid));
+        if (rows.isEmpty()) throw PackageRuleException.paymentNotFound();
+        return rows.get(0);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
@@ -1099,22 +1565,38 @@ public class PackageService {
     /** Append-only, per V30. Never updated, never soft-deleted. */
     private void logAdjustment(String tid, String packageId, String kind, int days,
                                String reason, Instant effectiveAt) {
+        logAdjustment(tid, packageId, kind, days, 0, reason, effectiveAt);
+    }
+
+    /**
+     * The V4 form, carrying the session delta as well as the day count.
+     *
+     * <p>The three-verb overload above is kept rather than every call site being
+     * rewritten to pass a zero: pause, resume and extend move days and move no
+     * sessions, and that is a fact about those verbs, not an argument they
+     * should have to supply.
+     */
+    private void logAdjustment(String tid, String packageId, String kind, int days, int sessions,
+                               String reason, Instant effectiveAt) {
         var p = new HashMap<String, Object>();
-        p.put("id",     UUID.randomUUID().toString());
-        p.put("pid",    packageId);
-        p.put("tid",    tid);
-        p.put("kind",   kind);
-        p.put("days",   days);
+        p.put("id",       UUID.randomUUID().toString());
+        p.put("pid",      packageId);
+        p.put("tid",      tid);
+        p.put("kind",     kind);
+        p.put("days",     days);
+        p.put("sessions", sessions);
         // Trimmed to null so an empty box is stored as "no reason given" rather
         // than as a reason that is the empty string.
         p.put("reason", reason == null || reason.isBlank() ? null : reason.trim());
         p.put("at",     Timestamp.from(effectiveAt));
         jdbc.update("""
-                INSERT INTO package_adjustment (id, package_id, trainer_id, kind, days, reason,
-                    effective_at, created_at)
-                VALUES (:id::uuid, :pid::uuid, :tid::uuid, :kind, :days, :reason, :at, NOW())
+                INSERT INTO package_adjustment (id, package_id, trainer_id, kind, days, sessions,
+                    reason, effective_at, created_at)
+                VALUES (:id::uuid, :pid::uuid, :tid::uuid, :kind, :days, :sessions, :reason,
+                    :at, NOW())
                 """, p);
-        log.info("package {} trainer={} package={} days={}", kind, tid, packageId, days);
+        log.info("package {} trainer={} package={} days={} sessions={}",
+                kind, tid, packageId, days, sessions);
     }
 
     private PackageResponse getPackage(String tid, String packageId) {
@@ -1167,7 +1649,10 @@ public class PackageService {
                 str(r.get("due_date")),
                 toDecimal(r.get("discount_amount")),
                 paid == null ? BigDecimal.ZERO : paid,
-                due);
+                due,
+                // A read booked nothing. Only the sale fills this in — see the
+                // field's own note on why counting the diary here would be wrong.
+                null);
     }
 
     private PaymentResponse toPaymentResponse(Map<String, Object> r) {
@@ -1185,7 +1670,9 @@ public class PackageService {
                 toEpochMilli(r.get("created_at")),
                 toEpochMilli(r.get("updated_at")),
                 toDecimal(r.get("gym_share_amount")),
-                str(r.get("note")));
+                str(r.get("note")),
+                str(r.get("invoice_no")),
+                toEpochMilliOrNull(r.get("invoiced_at")));
     }
 
     private String str(Object v) { return v == null ? null : v.toString(); }

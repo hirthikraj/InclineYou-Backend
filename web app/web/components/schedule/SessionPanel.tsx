@@ -1,11 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState, useTransition } from 'react';
-import Link from 'next/link';
 
-import {
-  avatarToken, dayLong, formatMinute, formatSpan, initials, minuteOfDay, rupees,
-} from '@/lib/today/time';
+import { dayLong, formatMinute, formatMinuteRange, formatSpan, minuteOfDay, rupees } from '@/lib/today/time';
 import type { ScheduleClient, ScheduleSession } from '@/lib/schedule/api';
 import { lengthChoices } from '@/lib/schedule/result';
 import {
@@ -13,6 +10,13 @@ import {
 } from '@/lib/schedule/actions';
 import { Calendar, Check, Chevron } from '@/components/shell/Icons';
 import { Cross, Remote, WarnTriangle } from './Icons';
+import { useToast } from '@/lib/toast/store';
+import { useDismiss } from '@/lib/ui/dismiss';
+import { Button } from '@/web-components/ui/Button';
+import { Chip } from '@/web-components/ui/Chip';
+import { Field } from '@/web-components/ui/Field';
+import { KeyValueRow } from '@/web-components/ui/KeyValue';
+import { Avatar } from '@/web-components/ui/Avatar';
 
 /**
  * ONE SESSION — AND ITS LENGTH.
@@ -114,16 +118,57 @@ export function SessionPanel({
   const [mode, setMode] = useState(session.mode);
   const [notes, setNotes] = useState(session.notes ?? '');
 
-  const panelRef = useRef<HTMLElement | null>(null);
   const returnTo = useRef<Element | null>(null);
 
+  /* ── CLOSING IS NOW TWO STEPS, AND THE PANEL OWNS THE FIRST ────────────────
+   *
+   * `onClose` unmounts this component. Called directly it did so between two
+   * frames, which left the panel with a 240ms arrival and no departure at all —
+   * `lib/ui/dismiss.ts` has the argument. `dismiss` puts webapp.css's closed
+   * state on the box, waits for the transition that state actually starts, and
+   * then calls `onClose`. Every way OUT of this panel goes through it: the
+   * header cross, Escape, the scrim, Close, and the last line of a cancel.
+   *
+   * It also retires this file's `closeRef`. That ref existed to keep the mount
+   * effect off `[onClose]` — an inline arrow from `Schedule`, which re-renders
+   * every thirty seconds — and `dismiss` is `useCallback([])`, so the effect can
+   * name its dependency and still mean `[]`. The hook keeps the same guard for
+   * the same reason, one level down. */
+  const { closing, dismiss, ref: panelRef } = useDismiss<HTMLElement>(onClose);
+
+  /*
+   * ── THE PANEL USED TO STEAL FOCUS EVERY THIRTY SECONDS ────────────────────
+   *
+   * This effect mounts the panel: it remembers what was focused, focuses the
+   * panel, and binds Escape. All three are once-per-open things, and it was
+   * keyed `[onClose]` — a prop `Schedule` passes as an inline arrow, so a NEW
+   * FUNCTION on every render of the parent.
+   *
+   * `Schedule` calls `useNow`, which `setNow`s on a 30-second interval. So
+   * every thirty seconds the parent re-rendered, `onClose` changed identity,
+   * this effect tore down and re-ran — and its cleanup calls
+   * `returnTo.current?.focus()`, which throws focus back to the control that
+   * opened the panel before the body focuses the panel again. Mid-sentence, in
+   * whatever field the trainer was typing into.
+   *
+   * FOUND BY TYPING INTO THE NEW TIME FIELD and watching `focusin
+   * INPUT.tfld__n` be followed immediately by `focusin ASIDE.panel` with no
+   * keystroke in between. It is not a new bug and not that field's: the roster
+   * search box here and the notes textarea in the sibling panel have been
+   * losing focus to it too. A segmented field only made it impossible to miss,
+   * because it takes four keystrokes where a text box takes one.
+   *
+   * The handler goes in a ref so the effect can key on `[]` and mean it.
+   * Escape still calls the LATEST `onClose` — the ref is kept current by its
+   * own effect above — which is the whole reason the dependency was there.
+   */
   useEffect(() => {
     returnTo.current = document.activeElement;
     panelRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        dismiss();
       }
     };
     document.addEventListener('keydown', onKey);
@@ -133,9 +178,10 @@ export function SessionPanel({
       // lands at the top of the document and re-walks the rail to get back.
       (returnTo.current as HTMLElement | null)?.focus?.();
     };
-  }, [onClose]);
+  }, [dismiss, panelRef]);
 
   const startMinute = minuteOfDay(session.at);
+  const { show } = useToast();
   const endMinute = startMinute + session.minutes;
 
   const run = (fn: () => Promise<{ ok: boolean; message?: string }>) => {
@@ -183,34 +229,36 @@ export function SessionPanel({
 
   return (
     <>
-      <div className="scrim scrim--soft" onClick={onClose} aria-hidden="true" />
+      <div
+        className={`scrim scrim--soft${closing ? ' scrim--out' : ''}`}
+        onClick={dismiss}
+        aria-hidden="true"
+      />
 
       <aside
         ref={panelRef}
         tabIndex={-1}
-        className="panel sch__panel"
+        className={`panel sch__panel${closing ? ' panel--out' : ''}`}
         role="region"
         aria-label={`${session.clientName}, ${dayLong(session.at)} at ${formatMinute(startMinute)}`}
       >
         <div className="panel__hd">
-          <span className="av" style={{ background: avatarToken(session.clientId) }} aria-hidden="true">
-            {initials(session.clientName)}
-          </span>
+          <Avatar name={session.clientName} id={session.clientId} />
           <div style={{ minWidth: 0 }}>
             <p className="panel__t">{session.clientName}</p>
             <p className="small">
-              {dayLong(session.at)} · {formatMinute(startMinute)} – {formatMinute(endMinute)}
+              {dayLong(session.at)} · {formatMinuteRange(startMinute, endMinute)}
             </p>
           </div>
-          <button
-            className="btn btn--icon btn--ghost"
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
+          <Button
+            variant="ghost"
+            iconOnly
+            label="Close"
+            onClick={dismiss}
             style={{ marginLeft: 'auto' }}
-          >
-            <Cross size={16} />
-          </button>
+            title={undefined}
+            icon={<Cross size={16} />}
+          />
         </div>
 
         <div className="panel__body">
@@ -258,25 +306,19 @@ export function SessionPanel({
             A past block goes straight there and never opens this panel at all.
           */}
           <div className="sect">
-            <Link className="btn btn--secondary btn--sm" href={`/sessions/${session.id}`}>
+            <Button href={`/sessions/${session.id}`} variant="secondary" size="sm">
               Open the session
               <Chevron size={14} />
-            </Link>
+            </Button>
           </div>
 
           <div className="sect">
-            <div className="kv">
-              <span className="kv__k">Plan</span>
-              <span className="kv__v">{session.detail}</span>
-            </div>
-            <div className="kv">
-              <span className="kv__k">Package</span>
-              <span className="kv__v">
-                {client?.packLeft != null && client.packTotal != null
-                  ? `${client.packLeft} of ${client.packTotal} left`
-                  : '—'}
-              </span>
-            </div>
+            <KeyValueRow k="Plan">{session.detail}</KeyValueRow>
+            <KeyValueRow k="Package">
+              {client?.packLeft != null && client.packTotal != null
+                ? `${client.packLeft} of ${client.packTotal} left`
+                : '—'}
+            </KeyValueRow>
             <div className="kv">
               <span className="kv__k">This session</span>
               {/* A rate, or the honest absence of one. `perSession` yields nothing
@@ -291,16 +333,14 @@ export function SessionPanel({
               <span className="fld__l">Length</span>
               <div className="row gap2 sch__wrap">
                 {lengthChoices(session.minutes).map((m) => (
-                  <button
+                  <Chip
+                    pressed={minutes === m}
                     key={m}
-                    className="chip"
-                    type="button"
-                    aria-pressed={minutes === m}
                     disabled={pending || settled}
                     onClick={() => setMinutes(m)}
                   >
                     {m} min
-                  </button>
+                  </Chip>
                 ))}
               </div>
               <p className="fld__h">
@@ -313,41 +353,32 @@ export function SessionPanel({
             <div className="fld">
               <span className="fld__l">Delivery</span>
               <div className="row gap2">
-                <button
-                  className="chip"
-                  type="button"
-                  aria-pressed={mode === 'floor'}
+                <Chip
+                  pressed={mode === 'floor'}
                   disabled={pending || settled}
                   onClick={() => setMode('floor')}
                 >
-                  Floor
-                </button>
-                <button
-                  className="chip"
-                  type="button"
-                  aria-pressed={mode === 'remote'}
+                  In Person
+                </Chip>
+                <Chip
+                  pressed={mode === 'remote'}
                   disabled={pending || settled}
                   onClick={() => setMode('remote')}
                 >
                   <Remote size={13} />
-                  Remote
-                </button>
+                  Online
+                </Chip>
               </div>
             </div>
 
-            <div className="fld">
-              <label className="fld__l" htmlFor="sch-notes">
-                Notes
-              </label>
-              <textarea
-                id="sch-notes"
-                className="ctl"
-                value={notes}
-                disabled={pending}
-                placeholder="Anything to remember about this one"
-                onChange={(e) => setNotes(e.target.value)}
-              />
-            </div>
+            <Field
+              label="Notes"
+              id="sch-notes"
+            >
+              {(a) => (
+                <textarea className="ctl" {...a} value={notes} disabled={pending} placeholder="Anything to remember about this one" onChange={(e) => setNotes(e.target.value)} />
+              )}
+            </Field>
 
             {/*
               THE SAVE, AND IT ONLY EXISTS WHEN THERE IS SOMETHING TO SAVE.
@@ -360,23 +391,23 @@ export function SessionPanel({
             {dirty && (
               <div className="fld">
                 <div className="row gap2">
-                  <button
-                    className="btn btn--primary btn--sm"
-                    type="button"
+                  <Button
+                    variant="primary"
+                    size="sm"
                     disabled={pending}
                     onClick={save}
                   >
                     <Check size={14} />
                     Save changes
-                  </button>
-                  <button
-                    className="btn btn--ghost btn--sm"
-                    type="button"
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
                     disabled={pending}
                     onClick={discard}
                   >
                     Discard
-                  </button>
+                  </Button>
                 </div>
                 <p className="fld__h">
                   {settled
@@ -400,15 +431,14 @@ export function SessionPanel({
           */}
           {!settled && onMove && (
             <div className="sect">
-              <button
-                className="btn btn--secondary"
-                type="button"
+              <Button
+                variant="secondary"
                 disabled={pending}
                 onClick={onMove}
               >
                 <Calendar size={15} />
                 Move this session
-              </button>
+              </Button>
               <p className="fld__h mt2">
                 Then pick the new slot on the grid. {session.clientName} is told
                 automatically, ten seconds after you place it.
@@ -417,10 +447,10 @@ export function SessionPanel({
           )}
 
           <div className="sect">
-            <Link className="btn btn--ghost btn--sm" href={`/clients/${session.clientId}`}>
+            <Button href={`/clients/${session.clientId}`} variant="ghost" size="sm">
               Open {session.clientName}
               <Chevron size={14} />
-            </Link>
+            </Button>
           </div>
 
           {error && (
@@ -447,36 +477,56 @@ export function SessionPanel({
                 Cancel this session? {session.clientName} is not told automatically, and
                 this cannot be undone.
               </p>
-              <button className="btn btn--ghost" type="button" onClick={() => setConfirming(false)}>
+              <Button variant="ghost" onClick={() => setConfirming(false)}>
                 Keep it
-              </button>
-              <button
-                className="btn btn--danger"
-                type="button"
+              </Button>
+              <Button
+                variant="danger"
                 disabled={pending}
                 onClick={() => run(async () => {
                   const res = await cancelSession(session.id);
-                  if (res.ok) onClose();
+                  if (res.ok) {
+                    /* THE BLOCK LEAVES THE GRID AND THE PANEL GOES WITH IT, so
+                       nothing is left on screen to say what happened — the one
+                       shape the deck is for. A receipt rather than a notice
+                       because it is a single fact about a moment, and with NO
+                       action on it: the confirm above says in as many words
+                       that this cannot be undone, and a card offering Undo
+                       five seconds later would contradict the sentence the
+                       trainer just agreed to. */
+                    show({
+                      tone: 'ok',
+                      variant: 'receipt',
+                      title: <>Session cancelled</>,
+                      body: (
+                        <>
+                          {session.clientName} &middot; {dayLong(session.at)} at{' '}
+                          {formatMinute(startMinute)} &mdash; they are not told
+                          automatically.
+                        </>
+                      ),
+                    });
+                    dismiss();
+                  }
                   return res;
                 })}
               >
                 Cancel session
-              </button>
+              </Button>
             </>
           ) : settled ? (
-            <button className="btn btn--secondary" type="button" onClick={onClose}>
+            <Button variant="secondary" onClick={dismiss}>
               Close
-            </button>
+            </Button>
           ) : (
             <>
-              <button
-                className="btn btn--ghost"
-                type="button"
+              <Button
+                variant="ghost"
                 disabled={pending}
                 onClick={() => setConfirming(true)}
               >
                 Cancel session
-              </button>
+              </Button>
               {/* One press, and it TAKES A SESSION — the design's rule and what
                   the phone's `markNotTrained` has always done. The considered
                   version of this decision lives on the finish screen, which
@@ -486,11 +536,10 @@ export function SessionPanel({
                   session has already taken, so re-marking it from the finish
                   screen with the box clear puts the session back. The label
                   says so rather than leaving it to be discovered. */}
-              <button
-                className="btn btn--secondary"
-                type="button"
+              <Button
+                variant="secondary"
                 disabled={pending}
-                title="Records a no-show and takes one off her pack. Change it on the finish screen."
+                title="Records a no-show and takes one off the client’s pack. Change it on the finish screen."
                 onClick={() => run(() => markNoShow({
                   id: session.id,
                   scheduledAt: session.at,
@@ -499,20 +548,19 @@ export function SessionPanel({
                 }))}
               >
                 No-show &middot; &minus;1
-              </button>
+              </Button>
               {/* `POST /v1/sessions/{id}/done`, never a status flip: the endpoint
                   also creates the workout row and decrements the pack, and a flip
                   would leave the money book and the calendar disagreeing about
                   how many sessions a client had used. */}
-              <button
-                className="btn btn--primary"
-                type="button"
+              <Button
+                variant="primary"
                 disabled={pending}
                 onClick={() => run(() => markDone(session.id))}
               >
                 <Check size={15} />
                 Mark done
-              </button>
+              </Button>
             </>
           )}
         </div>

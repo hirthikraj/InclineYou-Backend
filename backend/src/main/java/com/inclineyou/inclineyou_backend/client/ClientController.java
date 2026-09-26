@@ -50,16 +50,10 @@ public class ClientController {
         clientService.delete(trainerId(), id);
     }
 
+    /** Read-only since V22: a reading is written by taking an assessment. */
     @GetMapping("/{id}/body-metrics")
     public List<ClientService.BodyMetricResponse> listMetrics(@PathVariable UUID id) {
         return clientService.listMetrics(trainerId(), id);
-    }
-
-    @PostMapping("/{id}/body-metrics")
-    @ResponseStatus(HttpStatus.CREATED)
-    public ClientService.BodyMetricResponse addMetric(@PathVariable UUID id,
-                                                      @Valid @RequestBody ClientService.BodyMetricRequest req) {
-        return clientService.addMetric(trainerId(), id, req);
     }
 
     /* ── Notes (V29) ──────────────────────────────────────────────────────────

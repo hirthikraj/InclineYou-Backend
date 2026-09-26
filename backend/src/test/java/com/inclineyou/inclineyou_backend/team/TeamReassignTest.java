@@ -183,6 +183,26 @@ class TeamReassignTest {
     }
 
     @Test
+    @DisplayName("V15 · the coach who LOSES a client gets a bell row naming the new coach — unless they moved it themselves")
+    void theLosingCoachIsTold() {
+        // The owner moves their OWN client: they know, so no row for anybody.
+        teamClients.reassign(owner, clientId, new TeamClientService.ReassignRequest(coach, "keep", null));
+        assertThat(count("SELECT count(*) FROM trainer_notification WHERE client_id = :c::uuid",
+                Map.of("c", clientId.toString()))).isZero();
+
+        // The owner moves it back, off Priya: Priya did not do this, so her bell says so.
+        teamClients.reassign(owner, clientId, new TeamClientService.ReassignRequest(owner, "keep", null));
+        var rows = jdbc.queryForList("""
+                SELECT trainer_id::text AS who, kind, text FROM trainer_notification WHERE client_id = :c::uuid
+                """, Map.of("c", clientId.toString()));
+        assertThat(rows).singleElement().satisfies(r -> {
+            assertThat(r.get("who")).isEqualTo(coach.toString());
+            assertThat(r.get("kind")).isEqualTo("team");
+            assertThat(r.get("text")).isEqualTo("Ravi");
+        });
+    }
+
+    @Test
     @DisplayName("every move is written down, with who did it")
     void theAuditRow() {
         teamClients.reassign(owner, clientId,

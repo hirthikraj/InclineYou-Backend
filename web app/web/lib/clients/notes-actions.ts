@@ -61,16 +61,24 @@ function refresh(clientId: string): void {
   revalidatePath(`/clients/${clientId}`, 'layout');
 }
 
-/** Write a note. `pinned` puts it in the always-visible strip. */
+/**
+ * Write a note. `pinned` puts it in the always-visible strip; `shared` lets the
+ * client read it.
+ *
+ * Both default to `false`, and `shared` defaulting that way is the one that
+ * matters: a caller that forgets the argument writes a private note, which is
+ * the only direction this mistake is allowed to go.
+ */
 export async function addNote(
   clientId: string,
   body: string,
   pinned = false,
+  shared = false,
 ): Promise<NoteWriteResult> {
   const text = body.trim();
   if (!text) return { ok: false, message: 'A note needs some text.' };
   try {
-    await createNote(clientId, text, pinned);
+    await createNote(clientId, text, pinned, shared);
     refresh(clientId);
     return { ok: true };
   } catch (error) {
@@ -107,6 +115,33 @@ export async function setNotePinned(
     return { ok: true };
   } catch (error) {
     return fail(error, pinned ? 'Pinning it' : 'Unpinning it');
+  }
+}
+
+/**
+ * Show this note to the client, or take it back. The text is not sent.
+ *
+ * ── AND IT REVALIDATES THE PORTAL, WHICH THE OTHER THREE DO NOT ──────────────
+ *
+ * `addNote`, `saveNote` and `setNotePinned` change what the TRAINER sees, so
+ * `refresh` covers the client file and stops. This one changes what somebody
+ * else sees: a shared note joins `GET /v1/me/messages` beside the lines the
+ * trainer wrote to them, and un-sharing takes it off that screen again. A
+ * trainer who turns the switch off has retracted something, and the `/me` route
+ * has to agree before the client next loads it.
+ */
+export async function setNoteShared(
+  clientId: string,
+  noteId: string,
+  shared: boolean,
+): Promise<NoteWriteResult> {
+  try {
+    await editNote(clientId, noteId, { sharedWithClient: shared });
+    refresh(clientId);
+    revalidatePath('/me', 'layout');
+    return { ok: true };
+  } catch (error) {
+    return fail(error, shared ? 'Sharing it' : 'Making it private');
   }
 }
 

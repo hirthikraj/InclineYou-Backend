@@ -3,6 +3,8 @@ import Link from 'next/link';
 import { IconCheck, IconPlus } from '@/components/auth/Icons';
 import { METER_WHY, meterItems, meterPercent } from '@/lib/setup/meter';
 import type { SetupState } from '@/lib/setup/steps';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
 
 /**
  * Frame 6a · `/setup/done` — after setup.
@@ -12,16 +14,20 @@ import type { SetupState } from '@/lib/setup/steps';
  * actually earned something, and spending it here devalues both. The app's own
  * `DoneScreen` says exactly that in its first four words.
  *
- * **The meter opens at 70%, not at zero.** Anybody reaching this screen has
- * finished the flow, so the name / experience / specialities block is already
- * banked: the meter starts at the work done rather than at the work owed.
+ * **The meter never opens at zero.** Anybody reaching this screen has answered
+ * step 1 — the one the flow refuses to skip — so that block is already banked:
+ * the meter starts at the work done rather than at the work owed. It no longer
+ * opens at 70% for everyone, and that is the flow changing rather than this
+ * screen: with seven of the eight steps skippable, a trainer can arrive here
+ * having answered one of them, and a meter that read 70% over an otherwise
+ * empty profile would be the opposite of what this screen is for.
  * Identical real effort, and the original endowed-progress study measured a
  * visible head start roughly doubling completion — 34% against 19%.
  *
  * **The items are weighted by what they are worth, not counted.** A UPI ID is 2×
  * a certification, because it is the difference between getting paid through the
- * app and not. And the three core answers are ONE row rather than three, because
- * three ticks for one sitting's work makes the meter feel like it is counting
+ * app and not. And step 1's two answers are ONE row rather than two, because two
+ * ticks for one sitting's work makes the meter feel like it is counting
  * keystrokes.
  *
  * A route rather than a state, deliberately, so it survives a refresh and can be
@@ -43,14 +49,14 @@ export function Done({ state }: { state: SetupState }) {
         Your first client is the next thing worth doing.
       </p>
 
-      <div className="card" style={{ marginTop: 22, maxWidth: 520 }}>
+      <Card style={{ marginTop: 22, maxWidth: 520 }}>
         {/* A real `.card__hd`. The title and the figure were a `.row` inside the
             body, which put them on the body's ground with no rule under them —
             one of three different card headings in this flow. */}
-        <div className="card__hd">
-          <span className="card__t">Your profile</span>
+        <Card.Head title="Your profile">
+          
           <span
-            className="mono"
+            className="tnum"
             style={{
               marginLeft: 'auto',
               fontSize: 19,
@@ -60,8 +66,8 @@ export function Done({ state }: { state: SetupState }) {
           >
             {percent}%
           </span>
-        </div>
-        <div className="card__b">
+        </Card.Head>
+        <Card.Body>
           <div className="meter meter--lg">
             <i style={{ width: `${percent}%` }} />
           </div>
@@ -94,17 +100,17 @@ export function Done({ state }: { state: SetupState }) {
           <p className="small mt3" style={{ color: 'var(--tx-ink-3)' }}>
             {METER_WHY}
           </p>
-        </div>
-      </div>
+        </Card.Body>
+      </Card>
 
       <div className="actrow" style={{ marginTop: 20 }}>
-        <Link className="btn btn--primary btn--lg" href="/clients/new">
+        <Button href="/clients/new" variant="primary" size="lg">
           <IconPlus size={15} />
           Add your first client
-        </Link>
-        <Link className="btn btn--secondary btn--lg" href="/today">
+        </Button>
+        <Button href="/today" variant="secondary" size="lg">
           Go to today
-        </Link>
+        </Button>
       </div>
 
       {/* Two sentences, not five. The endowed-progress arithmetic and the

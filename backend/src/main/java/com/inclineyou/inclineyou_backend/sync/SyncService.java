@@ -95,7 +95,6 @@ public class SyncService {
 
         var changes = new LinkedHashMap<String, TableChanges>();
         changes.put("clients",              fetchClients(                                  tid, cursor));
-        changes.put("body_metrics",         fetchViaClient("body_metric",                  tid, cursor));
         changes.put("exercises",            fetchExercises(                 tid, cursor, libraryCursor));
         changes.put("templates",            fetchDirect("template",          "trainer_id", tid, cursor));
         // V26 Phase 2 · these three MOVE when a client is reassigned, so each one
@@ -317,38 +316,6 @@ public class SyncService {
                   AND deleted_at IS NOT NULL
                   AND updated_at > :cursor
                 """.formatted(table, fkCol);
-
-        return splitAlive(queryNormalized(aliveSql, params), cursor, queryIds(deadSql, params));
-    }
-
-    /**
-     * body_metric → client.
-     *
-     * Scoped to clients I hold rather than to clients I own, so a measurement
-     * series survives a handover on both phones: the new coach inherits the
-     * trend they are now responsible for, and the old coach's past reports keep
-     * the numbers they were written from.
-     */
-    private TableChanges fetchViaClient(String table, String tid, Timestamp cursor) {
-        var params = Map.of("tid", tid, "cursor", cursor);
-        String scope = clientInScope("c");
-
-        String aliveSql = """
-                SELECT bm.* FROM %s bm
-                JOIN client c ON c.id = bm.client_id
-                WHERE %s
-                  AND bm.deleted_at IS NULL
-                  AND bm.updated_at > :cursor
-                ORDER BY bm.updated_at ASC
-                """.formatted(table, scope);
-
-        String deadSql = """
-                SELECT bm.id::text FROM %s bm
-                JOIN client c ON c.id = bm.client_id
-                WHERE %s
-                  AND bm.deleted_at IS NOT NULL
-                  AND bm.updated_at > :cursor
-                """.formatted(table, scope);
 
         return splitAlive(queryNormalized(aliveSql, params), cursor, queryIds(deadSql, params));
     }
@@ -707,7 +674,6 @@ public class SyncService {
         String tid = trainerId.toString();
         var rejected = new ArrayList<Rejection>();
         pushClients(tid, changes, rejected);
-        pushBodyMetrics(tid, changes);
         // Before the sessions: `scheduled_session.batch_id` is a foreign key to
         // it, and a phone that created a batch and its four attendees offline
         // pushes all five in one round trip.
@@ -743,7 +709,7 @@ public class SyncService {
     }
 
     private static final Set<String> HANDLED_PUSH_TABLES = Set.of(
-            "clients", "body_metrics", "templates", "programs", "program_exercises",
+            "clients", "templates", "programs", "program_exercises",
             "scheduled_sessions", "workout_sessions", "workout_exercises", "set_logs",
             "packages", "payments", "nudge_logs",
             "working_hours", "time_blocks",
@@ -1033,59 +999,6 @@ public class SyncService {
             jdbc.update("""
                     UPDATE client SET deleted_at = NOW(), updated_at = NOW()
                     WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
-                    """, Map.of("id", id, "tid", tid));
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private void pushBodyMetrics(String tid, Map<String, Object> changes) {
-        var table = (Map<String, Object>) changes.get("body_metrics");
-        if (table == null) return;
-
-        for (var record : mergeCreatedUpdated(table)) {
-            String clientId = str(record.get("client_id"));
-            if (clientId == null) continue;
-
-            // Validate client ownership before upsert
-            Boolean owned = jdbc.queryForObject(
-                    "SELECT EXISTS(SELECT 1 FROM client WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)",
-                    Map.of("cid", clientId, "tid", tid), Boolean.class);
-            if (!Boolean.TRUE.equals(owned)) {
-                log.warn("push body_metric: client {} not owned by trainer {}, skipping", clientId, tid);
-                continue;
-            }
-
-            var p = new HashMap<String, Object>();
-            p.put("id",          str(record.get("id")));
-            p.put("client_id",   clientId);
-            p.put("metric_type", str(record.get("metric_type")));
-            p.put("value",       record.get("value"));
-            p.put("unit",        str(record.get("unit")));
-            p.put("notes",       record.get("notes"));
-            p.put("recorded_at", toTimestamp(record.get("recorded_at")));
-            p.put("created_at",  toTimestamp(record.get("created_at")));
-            p.put("updated_at",  toTimestamp(record.get("updated_at")));
-
-            jdbc.update("""
-                    INSERT INTO body_metric (id, client_id, metric_type, value, unit, notes, recorded_at, created_at, updated_at)
-                    VALUES (:id::uuid, :client_id::uuid, :metric_type, :value, :unit, :notes,
-                        :recorded_at, COALESCE(:created_at, NOW()), COALESCE(:updated_at, NOW()))
-                    ON CONFLICT (id) DO UPDATE SET
-                        metric_type = EXCLUDED.metric_type,
-                        value       = EXCLUDED.value,
-                        unit        = EXCLUDED.unit,
-                        notes       = EXCLUDED.notes,
-                        recorded_at = EXCLUDED.recorded_at,
-                        updated_at  = EXCLUDED.updated_at
-                    """, p);
-        }
-
-        for (String id : deletedIds(table)) {
-            jdbc.update("""
-                    UPDATE body_metric bm SET deleted_at = NOW(), updated_at = NOW()
-                    FROM client c
-                    WHERE bm.id = :id::uuid AND bm.client_id = c.id
-                      AND c.trainer_id = :tid::uuid AND bm.deleted_at IS NULL
                     """, Map.of("id", id, "tid", tid));
         }
     }

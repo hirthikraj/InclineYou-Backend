@@ -8,9 +8,11 @@ import { WeekPicker, weekProblem, type Week } from '@/components/profile/WeekPic
 import { saveHours, skipStep } from '@/lib/setup/actions';
 import type { StoredHour } from '@/lib/setup/api';
 import { DEFAULT_DAYS, DEFAULT_WINDOWS, mergeWindows } from '@/lib/setup/hours';
+import type { SetupState } from '@/lib/setup/steps';
 import { StepHead } from './SetupShell';
-import { StepFoot } from './StepFoot';
+import { StepFoot, skipHomeAction } from './StepFoot';
 import { useStepAction } from './useStepAction';
+import { Card } from '@/web-components/ui/Card';
 
 /**
  * Frame 5c · `/setup/hours` — step 6, the week the diary reads.
@@ -29,7 +31,7 @@ import { useStepAction } from './useStepAction';
  * here is what only setup has: the Skip, the seed promise, and the sentences
  * that can offer that Skip as a way out.
  */
-export function HoursForm({ stored }: { stored: StoredHour[] }) {
+export function HoursForm({ stored, state }: { stored: StoredHour[]; state: SetupState }) {
   const { run, pending, message } = useStepAction();
 
   // A resumed trainer sees the week they saved, not the default over it. The
@@ -82,22 +84,29 @@ export function HoursForm({ stored }: { stored: StoredHour[] }) {
           meter. This used to hand-roll its title as a `<p>` with §17's `.h5`
           values (13px / 700 / ink) copied inline — three cards in one flow, and
           three different ways of putting a heading on one. */}
-      <div className="card" style={{ marginTop: 22, maxWidth: 620 }}>
-        <div className="card__hd">
-          <span className="card__t">If you skip this</span>
-        </div>
-        <div className="card__b">
-          <p className="small">
-            A default week is seeded when the flow finishes, so the diary is never empty. The seed
-            stands down the moment any window exists — so answering here replaces it rather than
-            fighting it, and skipping is not a hole.
-          </p>
-        </div>
-      </div>
+      {/* No `maxWidth`. It was 620 — `--stp-measure`'s old value, copied here
+          as a literal, which meant this one card stayed 620 when the flow's
+          column went to 660 and read as a panel indented from everything above
+          it. The column caps it now, the way it caps the rest of the step. */}
+      <Card title="If you skip this" style={{ marginTop: 22 }}>
+        <p className="small">
+          A default week is seeded when the flow finishes, so the diary is never empty. The seed
+          stands down the moment any window exists — so answering here replaces it rather than
+          fighting it, and skipping is not a hole.
+        </p>
+      </Card>
 
-      <MessageSlot message={message} />
+      {/* The trust line ABOVE the message slot, which is the order every other
+          step uses and the one the slot's own job asks for: `.msg` is where a
+          refused save appears, it keeps its 38px whether or not it holds
+          anything, and it belongs directly over the dock that caused it. Below
+          the trust line it was instead a permanent 38px hole between the card
+          and the promise, with the message — when there was one — stranded two
+          blocks away from Continue.
 
-      <div className="trust" style={{ maxWidth: '66ch' }}>
+          No `maxWidth:'66ch'` either: 66ch is a tenth measure on a flow that
+          has one, and `.stp__r`'s column already caps it lower. */}
+      <div className="trust">
         <IconClock size={15} />
         <span>
           <b>These constrain what clients can book, never you.</b> One set of windows, applied to
@@ -106,11 +115,14 @@ export function HoursForm({ stored }: { stored: StoredHour[] }) {
         </span>
       </div>
 
+      <MessageSlot message={message} />
+
       <StepFoot
         step="hours"
         pending={pending}
         onContinue={submit}
         onSkip={() => run(() => skipStep('hours'))}
+        onSkipHome={skipHomeAction(state, run)}
       />
     </>
   );

@@ -4,12 +4,15 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { Plus } from './Icons';
 import { Search } from '@/components/shell/Icons';
+import { useDismiss } from '@/lib/ui/dismiss';
+import { Button } from '@/web-components/ui/Button';
+import { Chip } from '@/web-components/ui/Chip';
 
 /**
  * FRAME 3a — THE RACK WAS BUSY.
  *
  * **Recents first**, because the answer to a busy rack is nearly always
- * something she has already done — and every recent row carries what she last
+ * something already done — and every recent row carries what was last
  * lifted on it, so the choice is made on numbers rather than on a name. That is
  * the difference between this and a search box over 1,324 rows.
  *
@@ -30,7 +33,7 @@ import { Search } from '@/components/shell/Icons';
  * so a trainer who added three exercises and reloaded lost all three.
  *
  * The route landed on 28 Aug 2026 and the card is written on the press. The
- * foot still says *today's log only, her program does not change* and still
+ * foot still says *today's log only, the program does not change* and still
  * means it literally — `source: 'unplanned'` is a tag on today's session and
  * touches no plan.
  */
@@ -50,13 +53,18 @@ export function AddPanel({
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'recent' | 'yours' | 'all' | string>('recent');
 
+  /* `dismiss`, not `onClose`, on all three ways out. `lib/ui/dismiss.ts` has
+     the argument: `onClose` unmounts this box, and a panel that is already gone
+     has nothing left to animate away. */
+  const { closing, dismiss, dismissThen, ref: panelRef } = useDismiss<HTMLDivElement>(onClose);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') dismiss();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [dismiss]);
 
   const groups = useMemo(() => {
     const seen = new Set(library.map((e) => e.muscleGroup).filter(Boolean) as string[]);
@@ -84,8 +92,18 @@ export function AddPanel({
 
   return (
     <>
-      <div className="scrim scrim--soft" onClick={onClose} aria-hidden="true" />
-      <div className="panel" style={{ width: 420 }} role="dialog" aria-label="Add an exercise">
+      <div
+        className={`scrim scrim--soft${closing ? ' scrim--out' : ''}`}
+        onClick={dismiss}
+        aria-hidden="true"
+      />
+      <div
+        ref={panelRef}
+        className={`panel${closing ? ' panel--out' : ''}`}
+        style={{ width: 420 }}
+        role="dialog"
+        aria-label="Add an exercise"
+      >
         <div className="panel__hd">
           <span className="panel__t">Add an exercise</span>
           <span className="small mono" style={{ marginLeft: 'auto' }}>today only</span>
@@ -103,29 +121,29 @@ export function AddPanel({
           </label>
 
           <div className="wk" style={{ marginTop: 10 }} role="group" aria-label="Filter">
-            <button className="chip" type="button" aria-pressed={filter === 'recent' && !query} onClick={() => { setFilter('recent'); setQuery(''); }}>
+            <Chip pressed={filter === 'recent' && !query} onClick={() => { setFilter('recent'); setQuery(''); }}>
               Recent
-            </button>
-            <button className="chip" type="button" aria-pressed={filter === 'yours'} onClick={() => { setFilter('yours'); setQuery(''); }}>
+            </Chip>
+            <Chip pressed={filter === 'yours'} onClick={() => { setFilter('yours'); setQuery(''); }}>
               Yours<span className="rail__n">{mine.length}</span>
-            </button>
+            </Chip>
             {groups.map((g) => (
-              <button className="chip" type="button" key={g} aria-pressed={filter === g} onClick={() => { setFilter(g); setQuery(''); }}>
+              <Chip pressed={filter === g} key={g} onClick={() => { setFilter(g); setQuery(''); }}>
                 {g}
-              </button>
+              </Chip>
             ))}
-            <button className="chip" type="button" aria-pressed={filter === 'all'} onClick={() => { setFilter('all'); setQuery(''); }}>
+            <Chip pressed={filter === 'all'} onClick={() => { setFilter('all'); setQuery(''); }}>
               All
-            </button>
+            </Chip>
           </div>
 
           {results === null ? (
             <>
-              <p className="micro" style={{ margin: '18px 0 7px' }}>She has done these</p>
+              <p className="micro" style={{ margin: '18px 0 7px' }}>Done before</p>
               {recentRows.length ? (
                 <div className="lgl">
                   {recentRows.map((r) => (
-                    <button className="lrow" type="button" key={r.exerciseId} onClick={() => onPick(r.exerciseId)}>
+                    <button className="lrow" type="button" key={r.exerciseId} onClick={() => dismissThen(() => onPick(r.exerciseId))}>
                       <span className="lrow__m" style={{ flex: 1 }}>
                         <span className="lrow__t">{r.name}</span>
                         <span className="lrow__s">{r.meta}</span>
@@ -136,11 +154,11 @@ export function AddPanel({
                 </div>
               ) : (
                 <p className="small ink3">
-                  Nothing logged with her yet. Search, or pick from <b className="ink">Yours</b>.
+                  Nothing logged with this client yet. Search, or pick from <b className="ink">Yours</b>.
                 </p>
               )}
               <p className="small" style={{ marginTop: 7 }}>
-                Recents first, and every one carries what she last lifted on it — so the choice is
+                Recents first, and every one carries what was last lifted on it — so the choice is
                 made on numbers rather than on a name.
               </p>
 
@@ -149,7 +167,7 @@ export function AddPanel({
                   <p className="micro" style={{ margin: '18px 0 7px' }}>Yours</p>
                   <div className="lgl">
                     {mine.slice(0, 6).map((e) => (
-                      <button className="lrow" type="button" key={e.id} onClick={() => onPick(e.id)}>
+                      <button className="lrow" type="button" key={e.id} onClick={() => dismissThen(() => onPick(e.id))}>
                         <span className="lrow__m" style={{ flex: 1 }}>
                           <span className="lrow__t">{e.name}</span>
                           <span className="lrow__s">yours{e.muscleGroup ? ` · ${e.muscleGroup}` : ''}</span>
@@ -168,7 +186,7 @@ export function AddPanel({
           ) : (
             <div className="lgl" style={{ marginTop: 14 }}>
               {results.map((e) => (
-                <button className="lrow" type="button" key={e.id} onClick={() => onPick(e.id)}>
+                <button className="lrow" type="button" key={e.id} onClick={() => dismissThen(() => onPick(e.id))}>
                   <span className="lrow__m" style={{ flex: 1 }}>
                     <span className="lrow__t">{e.name}</span>
                     <span className="lrow__s">
@@ -187,9 +205,9 @@ export function AddPanel({
 
         <div className="panel__foot">
           <span className="small" style={{ marginRight: 'auto', maxWidth: '26ch' }}>
-            Goes into today&rsquo;s log only. Her program does not change.
+            Goes into today&rsquo;s log only. The program does not change.
           </span>
-          <button className="btn btn--ghost" type="button" onClick={onClose}>Cancel</button>
+          <Button variant="ghost" onClick={dismiss}>Cancel</Button>
         </div>
       </div>
     </>

@@ -4,12 +4,15 @@ import { useRef, useState } from 'react';
 
 import { MessageSlot } from '@/components/auth/MessageSlot';
 import { IconUser } from '@/components/auth/Icons';
-import { saveName } from '@/lib/setup/actions';
-import { avatarTint, initialsOf } from '@/lib/setup/options';
+import { finishFromName, saveName } from '@/lib/setup/actions';
+import { GENDERS, initialsOf, labelFor, type Gender } from '@/lib/setup/options';
+import { avatarToken } from '@/lib/today/time';
 import type { SetupState } from '@/lib/setup/steps';
-import { StepHead } from './SetupShell';
+import { Chip, ChipRow } from './Chips';
+import { GroupLabel, StepHead } from './SetupShell';
 import { StepFoot } from './StepFoot';
 import { useStepAction } from './useStepAction';
+import { Card } from '@/web-components/ui/Card';
 
 /** Long enough for a full South Indian name, short enough to fit an invite line. */
 const MAX_NAME = 60;
@@ -69,6 +72,7 @@ export function NameForm({ state }: { state: SetupState }) {
   const { run, pending, message, setMessage } = useStepAction();
   const [name, setName] = useState(state.name);
   const [headline, setHeadline] = useState(state.headline);
+  const [gender, setGender] = useState<Gender | null>(state.gender);
   const [touched, setTouched] = useState(false);
   const input = useRef<HTMLInputElement>(null);
 
@@ -77,18 +81,49 @@ export function NameForm({ state }: { state: SetupState }) {
   // Never on the first keystroke — an error that appears while you are still
   // typing your own name is an accusation.
   const showError = touched && empty;
+  /* The gender chips get NO equivalent of `showError`. Blur is what makes a
+     text field's error honest — you left it, so you are done with it — and a
+     chip row has no blur that means that: tabbing from the last chip to
+     Continue would fire it on somebody on their way to answer. The row is
+     checked on submit only, and the message says which half is missing. */
+  const missingGender = gender === null;
+  const complete = !empty && !missingGender;
   const initials = initialsOf(name);
 
-  function submit() {
+  /** Both halves, in the order the eye meets them. */
+  function check(): boolean {
     if (empty) {
       setTouched(true);
       // The message is at the top of a screen whose dock is at the bottom of it.
       // Moving focus takes the trainer to what the message is about rather than
       // leaving them looking at the button that appeared not to work.
       input.current?.focus();
-      return;
+      return false;
     }
-    run(() => saveName(trimmed, headline));
+    if (missingGender) {
+      setMessage({
+        tone: 'err',
+        icon: 'warn',
+        lead: 'Pick one under “How clients see you”.',
+        rest: '“Prefer not to say” is a real answer — it is stored as one, so we stop asking and nobody has to guess.',
+      });
+      return false;
+    }
+    return true;
+  }
+
+  function submit() {
+    if (!check()) return;
+    run(() => saveName(trimmed, headline, gender));
+  }
+
+  /* The name step's own *Skip to home*, and the reason it is a different action
+     from every other step's: here the answer is on the SCREEN and not on the
+     account yet. `finishFromName` writes it and stamps the flow in one call —
+     see the action for why that is not two calls from here. */
+  function skipHome() {
+    if (!check()) return;
+    run(() => finishFromName(trimmed, headline, gender));
   }
 
   return (
@@ -133,6 +168,44 @@ export function NameForm({ state }: { state: SetupState }) {
           <span className="fld__h">Use the name your clients already know you by.</span>
         </div>
 
+        {/*
+          THE SECOND MANDATORY ANSWER, AND THE ONLY OTHER ONE IN THE FLOW.
+
+          A chip row rather than a `Select`, matching the four other pick-one
+          answers in this flow — and a select would be worse here than
+          elsewhere: four options behind a closed control makes *Prefer not to
+          say* something a trainer has to open a menu to discover, which is the
+          opposite of what an opt-out is for.
+
+          `radiogroup` and not a list of toggle buttons. `Chip` emits
+          `aria-pressed`, which is right for the many-select rows (specialities,
+          languages) and wrong here — pressed/not-pressed on four independent
+          buttons says nothing about the four being ONE answer, so a reader gets
+          no "1 of 4" and arrowing does not move between them. The role goes on
+          the container, where it costs nothing and says the true thing.
+        */}
+        <GroupLabel top={22}>HOW CLIENTS SEE YOU</GroupLabel>
+        <p className="small" style={{ maxWidth: '62ch', marginTop: -2 }}>
+          Clients filter on this — a great many are looking for a woman trainer specifically, and
+          no other app lets them ask.
+        </p>
+        <div role="radiogroup" aria-label="Gender">
+          <ChipRow top={10}>
+            {GENDERS.map((option) => (
+              <Chip
+                key={option.id}
+                label={option.label}
+                pressed={gender === option.id}
+                disabled={pending}
+                onClick={() => {
+                  setGender(option.id as Gender);
+                  if (message) setMessage(null);
+                }}
+              />
+            ))}
+          </ChipRow>
+        </div>
+
         {/* The optional half of the step. No `Skip` beside it and none needed —
             leaving a field empty IS skipping it, and the step's own Continue
             already carries the name. */}
@@ -168,7 +241,7 @@ export function NameForm({ state }: { state: SetupState }) {
             {headline.length >= COUNTER_FROM ? (
               <>
                 {' '}
-                <b className="mono">{MAX_HEADLINE - headline.length}</b> left.
+                <b className="tnum">{MAX_HEADLINE - headline.length}</b> left.
               </>
             ) : null}
           </span>
@@ -179,9 +252,9 @@ export function NameForm({ state }: { state: SetupState }) {
             makes this the same object as the packs panel, the skip note and the
             completion meter, which are the only other boxes in the flow. */}
         {initials ? (
-          <div className="card" style={{ marginTop: 22, maxWidth: 420 }}>
-            <div className="card__b" style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
-              <span className="av av--lg" style={{ background: avatarTint(name) }}>
+          <Card style={{ marginTop: 22, maxWidth: 420 }}>
+            <Card.Body style={{ display: 'flex', alignItems: 'center', gap: 13 }}>
+              <span className="av av--lg" style={{ background: avatarToken(name) }}>
                 {initials}
               </span>
               {/* `minWidth:0` so a long headline ellipses instead of pushing the
@@ -207,9 +280,19 @@ export function NameForm({ state }: { state: SetupState }) {
                     This is how a client sees you on an invite.
                   </span>
                 )}
+                {/* The gender is on the card only once it has been answered,
+                    and `undisclosed` is deliberately NOT drawn: printing
+                    "Prefer not to say" on a trainer's own client-facing card
+                    publishes the decline as if it were the disclosure. It is
+                    stored, the filter honours it, and the card stays quiet. */}
+                {gender && gender !== 'undisclosed' ? (
+                  <span className="small ink3" style={{ display: 'block', marginTop: 2 }}>
+                    {labelFor(gender, GENDERS)}
+                  </span>
+                ) : null}
               </span>
-            </div>
-          </div>
+            </Card.Body>
+          </Card>
         ) : null}
 
         {/* The promise the card used to carry in its body, kept out of it now
@@ -228,7 +311,7 @@ export function NameForm({ state }: { state: SetupState }) {
             <div className="msg msg--err" aria-live="polite">
               <IconUser size={15} />
               <span>
-                <b>Your name is the one thing we can’t skip.</b> Everything else in this setup is
+                <b>Your name is the one thing we can’t skip.</b> Everything after this step is
                 optional. This isn’t, because a client receiving an invite has to see who it is from.
               </span>
             </div>
@@ -238,11 +321,23 @@ export function NameForm({ state }: { state: SetupState }) {
         </div>
 
         <p className="small" style={{ maxWidth: '62ch' }}>
-          Everything else can be skipped — four of the eight steps are marked optional before you
-          reach them.
+          This is the only step we keep. All seven after it can be skipped, and{' '}
+          <b>Skip to home</b> takes you straight into the app once these two are answered — the rest
+          moves to your profile, where you can finish it whenever you like.
         </p>
 
-        <StepFoot step="name" pending={pending} onContinue={submit} />
+        <StepFoot
+          step="name"
+          pending={pending}
+          onContinue={submit}
+          /* No `onSkip`: this is the step that cannot be passed on, and a Skip
+             here would be the one control the whole flow is built to refuse.
+             `onSkipHome` appears the moment BOTH answers are on the screen —
+             which is what "once name is filled" means on the screen that is
+             filling it. Before that it would be a button whose only possible
+             outcome is the error message already sitting above it. */
+          onSkipHome={complete ? skipHome : undefined}
+        />
       </form>
     </>
   );

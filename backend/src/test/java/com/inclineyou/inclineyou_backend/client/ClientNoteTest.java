@@ -120,6 +120,60 @@ class ClientNoteTest {
     }
 
     @Test
+    @DisplayName("V7 · a note is private unless the trainer says exactly true")
+    void privateByDefault() throws Exception {
+        mvc.perform(post("/v1/clients/%s/notes".formatted(client))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"prefers mornings\"}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sharedWithClient").value(false));
+
+        mvc.perform(post("/v1/clients/%s/notes".formatted(client))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"great week, keep it up\",\"sharedWithClient\":true}"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.sharedWithClient").value(true));
+    }
+
+    @Test
+    @DisplayName("V7 · sharing is its own toggle — the text and the pin survive it, and it retracts")
+    void shareToggleLeavesTheRestAlone() throws Exception {
+        var id = note("left knee - no deep squats", true);
+
+        mvc.perform(put("/v1/clients/%s/notes/%s".formatted(client, id))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sharedWithClient\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.body").value("left knee - no deep squats"))
+                .andExpect(jsonPath("$.pinned").value(true))
+                .andExpect(jsonPath("$.sharedWithClient").value(true));
+
+        // A body edit does not un-share it…
+        mvc.perform(put("/v1/clients/%s/notes/%s".formatted(client, id))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"left knee - box squats only\"}"))
+                .andExpect(jsonPath("$.sharedWithClient").value(true));
+
+        // …and false retracts it.
+        mvc.perform(put("/v1/clients/%s/notes/%s".formatted(client, id))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sharedWithClient\":false}"))
+                .andExpect(jsonPath("$.sharedWithClient").value(false));
+    }
+
+    @Test
+    @DisplayName("an empty note is a typed 400 whose sentence reaches the trainer")
+    void emptyNoteSaysWhy() throws Exception {
+        var id = note("hates burpees", false);
+        mvc.perform(put("/v1/clients/%s/notes/%s".formatted(client, id))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"   \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION"))
+                .andExpect(jsonPath("$.detail").value("A note needs some text"));
+    }
+
+    @Test
     @DisplayName("a deleted note leaves the list")
     void deleteRemovesItFromTheList() throws Exception {
         var id = note("hates burpees", false);

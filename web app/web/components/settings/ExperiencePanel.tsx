@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 
 import { MessageSlot } from '@/components/auth/MessageSlot';
 import { ExperiencePicker } from '@/components/profile/ExperiencePicker';
 import { SaveRow } from '@/components/settings/IdentityForm';
+import { usePublishDraft } from '@/components/settings/ProfileDraft';
 import type { Message } from '@/lib/auth/copy';
 import { saveExperienceBand } from '@/lib/profile/actions';
 import type { Identity } from '@/lib/profile/api';
@@ -29,6 +30,15 @@ export function ExperiencePanel({ initial }: { initial: Identity }) {
   const [picked, setPicked] = useState(initial.experienceBand);
   const [message, setMessage] = useState<Message | null>(null);
   const [pending, start] = useTransition();
+  const publish = usePublishDraft();
+
+  /* The preview card is in the layout and this tab is one of the six that feed
+     it. From an EFFECT rather than the picker's own handler: publishing from a
+     change handler re-renders the provider's whole subtree synchronously with
+     the click, and the chips being pressed are inside it. */
+  useEffect(() => {
+    publish({ experienceBand: picked });
+  }, [publish, picked]);
 
   const dirty = picked !== saved;
 

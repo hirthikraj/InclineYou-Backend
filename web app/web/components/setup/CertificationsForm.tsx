@@ -7,7 +7,7 @@ import { CertificationPicker } from '@/components/profile/CertificationPicker';
 import { saveList, skipStep } from '@/lib/setup/actions';
 import type { SetupState } from '@/lib/setup/steps';
 import { StepHead } from './SetupShell';
-import { StepFoot } from './StepFoot';
+import { StepFoot, skipHomeAction } from './StepFoot';
 import { useStepAction } from './useStepAction';
 
 /**
@@ -72,6 +72,7 @@ export function CertificationsForm({ state }: { state: SetupState }) {
         pending={pending}
         onContinue={submit}
         onSkip={() => run(() => skipStep('certifications'))}
+        onSkipHome={skipHomeAction(state, run)}
       />
     </>
   );

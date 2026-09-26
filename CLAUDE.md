@@ -21,23 +21,29 @@ rather than a static bundle.
 ## Shipping the web first
 
 `WEB_LAUNCH.md` at this level is the launch book for the web half — the
-eighteen must-do items standing between the current tree and a production
-deployment, seven of them hard blockers, an
+must-do items standing between the current tree and a production
+deployment, an
 India-first hosting analysis for all three layers with alternates, and the
 security checklist to sign off before release. **Read it before any deployment
 or infrastructure work.** Two of its blockers are worth knowing even if you
 never deploy: the web never sends `X-InclineYou-Client: web`, so it holds an
-unrevocable JWT rather than the session V41 built for it, and no SMS provider is
-wired, so nothing can sign in off a development machine.
+unrevocable JWT rather than the session V41 built for it, and no OTP delivery is
+wired, so nothing can sign in off a development machine. **OTP goes over
+WhatsApp only, no SMS** (decided 24 Sep 2026).
 
-**The client portal ships in v1** (30 Aug 2026) and is **four `NotBuilt` stubs**
-— `/me/today`, `/invite/[clientId]` and the paused/removed walls. Tier 4 of the
-RLS model is built and correct, but a client's entire API surface is
-`/v1/client/sync/{pull,push}`, the protocol written for the offline phone — so
-the online-only web needs **client-scoped REST reads that do not exist yet**, a
-gap `BACKEND_GAPS.md` does not list because it was assessed for the trainer
-half. `WEB_LAUNCH.md` §5.13 is the whole argument, including why the invite
-screen is where consent has to be captured.
+**v1 is the trainer web app alone** (decided 24 Sep 2026, `WEB_LAUNCH.md` §3).
+The client portal, which was to ship in v1, moved to the next release — most of
+`/me` and the client REST under it (V16–V19) are built since, and the invite +
+consent screen and the paused/removed walls are what remain (§5.13). Also out
+of v1: the phone app, team coaching, the workspace switcher, Google sign-in,
+the GST summary page, the assessment catalogue's blood pressure and resting
+heart rate, and notes shared with the client. Their code stays; hiding it is
+MUST-19. With no portal, **assessments are taken by the trainer in the
+session** — a write path that does not exist yet (MUST-21). **The v1 engineering
+priority is making session logging extremely fast.** **Clients are adults only** (decided 25 Sep
+2026): no client under 18 is accepted, so there is no guardian-consent flow —
+the Terms and the *Add client* notice say 18+, and a date of birth under 18 is
+refused (`WEB_LAUNCH.md` MUST-22).
 
 `PRICING.md` beside it is the pricing proposal built on that running cost:
 **flat on clients, per seat on trainers** — Free (3 clients) · **Pro ₹499/mo,
@@ -95,7 +101,7 @@ forty-two produced; the app's eighteen WatermelonDB steps are now schema v1 with
 an empty migrations list. Both sets of old files are in git history, and the
 V-numbers quoted throughout these notes (V26, V30, V33 …) are **historical
 labels for decisions, not files on disk** — they still name the argument, they
-no longer name a migration you can open. The next backend migration is `V2`.
+no longer name a migration you can open. **Rebuilt again on 25 Sep 2026 as a fresh v1.** The schema was redesigned table by table and approved in `release/proposed-schema.html` (41 tables); `backend/src/main/resources/db/migration/V1__init_schema.sql` now builds exactly those, and the previous baseline plus `V2`–`V22` are archived, never run, in `backend/db-archive/pre-v1-2026-09-25/`. Tables held for a later release are in `release/later-schema.html`. The local database was dropped and rebuilt from the new V1. **The next backend migration is `V2`.** The application code is being adapted to the new schema module by module, so until that is done `SCHEMA.md`, `API.md`, the seed scripts and much of the service code describe the OLD schema, `spring.jpa.hibernate.ddl-auto` is temporarily `none`, and the backend CI job is expected to fail.
 
 **From the baseline, schema evolution is additive-only, on both sides, in
 lockstep.** The backend's Flyway migrations
@@ -104,6 +110,17 @@ migrations (`app/src/db/migrations.ts`) follow the same law: append a new
 version, never edit one that has run, never drop or repurpose a column, never
 remove a response field. Trainers' phones carry data we cannot refetch, and old
 builds must keep working.
+
+**One recorded exception: `V22__drop_body_metric.sql` (24 Sep 2026).** Body
+measurements are taken **only through assessments** — no loose weigh-in, no
+standalone tape reading — so `body_metric` had no writer left and was dropped,
+along with `body_metrics` in both sync directions,
+`POST /v1/clients/{id}/body-metrics`, its `PUT` / `DELETE` correction routes and
+the portal's `POST /v1/me/metrics`. It was allowed because the phone build and
+sync are out of v1 scope and nothing was in production; it is **not** a
+precedent. The two history reads (`GET /v1/clients/{id}/body-metrics`,
+`GET /v1/me/metrics`) keep their shape and read V5's six ids out of completed
+assessments through `MetricReadings`.
 
 **Offline-first is the architecture, not a feature — on the phone.** `app/`
 writes to local SQLite and reconciles through `/v1/sync/pull` + `/v1/sync/push`.
@@ -261,6 +278,41 @@ Rules that touch both halves:
   before, because warning about it in `.fld__e` painted the app's validation red
   over a perfectly valid answer and left a red block where a whole section had
   just correctly disappeared.
+- **A client is measured on a cycle; an assessment is a questionnaire.** V5
+  gave the measuring cycle three columns on `client` (`assessment_interval_days`,
+  `next_assessment_on`, `assessment_metrics`) and two defaults on `trainer`.
+  **As first written it also created an `assessment` table for a trainer-taken
+  tape "sitting" and a `body_metric.assessment_id`; both were removed from V5
+  before it ever shipped (23 Sep 2026)**, the sitting routes with them, and the
+  one local database it had run on was reset. The name went to **V14**: an
+  `assessment_template` a trainer builds (catalogue measurements + questions) and
+  an `assessment` sent to one client, who answers it in the portal — called
+  *assessment* everywhere, never *check-in*. Rules that survive: **the cadence is
+  a COLUMN and not a derivation** — `/today` reads `GET /v1/clients`
+  trainer-wide, so a due-check from last-reading-per-client would be one request
+  per client on the screen a trainer opens every morning; **the prompt fires on
+  the SESSION, not on the date**, and Today's `assessment-due` band gets **no
+  nudge template**; **the six metric ids are fixed** — `weight` · `body_fat` ·
+  `chest` · `waist` · `hip` · `arm` — and V14's catalogue uses the same six ids
+  for the measurements it shares, because free text is how one measurement gets
+  two spellings (`acsm_cpt`, `fat_loss`); and **a body is measured in an
+  assessment and nowhere else** — `body_metric` was dropped in V22 (file), so a
+  correction is an edit to the assessment's readings. **Nothing
+  advances `next_assessment_on` automatically any more** — the removed sitting
+  route did; wiring a returned V14 assessment to it is an open product call.
+  V14's rules: status (`booked` · `waiting` · `missed` · `done`) is **derived,
+  never stored**; readings live on the assessment row and **nowhere else** — the
+  measurement history, the report's latest weight and the portal's progress all
+  read them from there (`MetricReadings`); a sent assessment **outlives its template**
+  (`template_id` nulled on delete); and its timestamps are **ISO strings**, the one
+  deliberate exception to epoch ms. **Its catalogue includes health items** —
+  Vitals (`resting_hr`, `bp`), visceral fat, a *did anything hurt* question —
+  **by the product owner's recorded decision (23 Sep 2026)**, an exception to the
+  no-health-data rule kept isolable in `AssessmentCatalogue` so it can be
+  withdrawn in one change. V5 and V14 are backend + web only: nothing enters sync.
+  There are **no progress photos** and there will not be: this backend has no
+  image store of any kind (V33 said so about the profile photo) and photographs of
+  a client's body are a different consent problem under the DPDP Act.
 - **Where a client goes to check — and it points off this product.** V35 added
   `trainer.instagram_url` and `trainer.youtube_url` and made *Social links* the
   profile's **seventh and last tab**. Six tabs are the trainer's own account of

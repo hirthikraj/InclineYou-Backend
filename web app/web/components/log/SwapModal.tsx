@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import type { SwapScope } from '@/lib/log/result';
 import { Search } from '@/components/shell/Icons';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * FRAME 3b — A SWAP THAT CAN REACH FIVE PEOPLE.
@@ -68,7 +69,11 @@ export function SwapModal({
   return (
     <>
       <div className="scrim scrim--top" onClick={onClose} aria-hidden="true" />
-      <div className="modal" style={{ width: 560 }} role="dialog" aria-modal="true" aria-label="Swap an exercise">
+      {/* `width:560` was INLINE, and an inline declaration outranks every
+          selector including a media query — the shape AGENTS.md attributes six
+          separate bugs to, and the reason the phone could not have docked this
+          without moving it first. `.swap-sheet` carries the 560 unchanged. */}
+      <div className="modal swap-sheet" role="dialog" aria-modal="true" aria-label="Swap an exercise">
         <div className="modal__hd">
           <p className="modal__t">
             {fromName} → {to?.name ?? 'pick a replacement'}
@@ -117,7 +122,7 @@ export function SwapModal({
             <span className="scp__m">
               <span className="scp__t">Today only</span>
               <span className="scp__b">
-                This log. Her program is untouched and next {"Tuesday"} is unchanged.
+                This log. The program is untouched and next {"Tuesday"} is unchanged.
               </span>
             </span>
             <span className="scp__n">this log</span>
@@ -133,14 +138,14 @@ export function SwapModal({
           >
             <span className={`rad${scope === 'program' ? ' rad--on' : ''}`} />
             <span className="scp__m">
-              <span className="scp__t">Her program</span>
+              <span className="scp__t">The program</span>
               <span className="scp__b">
                 {hasProgram
-                  ? `Every session on this plan from now on, for her alone.${programWeeksLeft ? ` ${programWeeksLeft} week${programWeeksLeft === 1 ? '' : 's'} of it left.` : ''}`
-                  : 'She has no live program, so there is nothing here to change.'}
+                  ? `Every session on this plan from now on, for this client alone.${programWeeksLeft ? ` ${programWeeksLeft} week${programWeeksLeft === 1 ? '' : 's'} of it left.` : ''}`
+                  : 'This client has no live program, so there is nothing here to change.'}
               </span>
             </span>
-            <span className="scp__n">{hasProgram ? 'her plan' : 'none'}</span>
+            <span className="scp__n">{hasProgram ? 'the plan' : 'none'}</span>
           </button>
 
           <button
@@ -157,7 +162,7 @@ export function SwapModal({
               <span className="scp__b">
                 {hasTemplate
                   ? `The template itself — so every client on it, which is ${templateReach ?? 'more than one'} ${templateReach === 1 ? 'person' : 'people'}. The one change that reaches somebody who is not in the room.`
-                  : 'Her program did not come from a template, so there is nothing wider than her plan.'}
+                  : 'The program did not come from a template, so there is nothing wider than the plan.'}
               </span>
             </span>
             <span className="scp__n">
@@ -174,10 +179,9 @@ export function SwapModal({
         </div>
 
         <div className="modal__foot">
-          <button className="btn btn--ghost" type="button" onClick={onClose}>Cancel</button>
-          <button
-            className="btn btn--primary"
-            type="button"
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button
+            variant="primary"
             disabled={!to || busy}
             onClick={() => to && onSwap(to.id, scope)}
           >
@@ -186,9 +190,9 @@ export function SwapModal({
               : scope === 'today'
                 ? 'Swap for today'
                 : scope === 'program'
-                  ? 'Swap on her program'
+                  ? 'Swap on the program'
                   : `Swap on the template`}
-          </button>
+          </Button>
         </div>
       </div>
     </>

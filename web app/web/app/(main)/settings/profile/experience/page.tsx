@@ -3,7 +3,7 @@ import { getIdentity } from '@/lib/profile/api';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: 'Experience · X REP' };
+export const metadata = { title: 'Experience · InclineYou' };
 
 /**
  * EXPERIENCE — the profile's third tab. One `/v1/trainers/me`, one field of it
@@ -13,9 +13,5 @@ export const metadata = { title: 'Experience · X REP' };
 export default async function Page() {
   const identity = await getIdentity();
 
-  return (
-    <div className="body">
-      <ExperiencePanel initial={identity} />
-    </div>
-  );
+  return <ExperiencePanel initial={identity} />;
 }

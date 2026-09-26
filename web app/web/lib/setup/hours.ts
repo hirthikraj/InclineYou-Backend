@@ -13,6 +13,17 @@
  * full per-day editor is one click from the diary.
  */
 
+import {
+  formatMinute as clock,
+  formatMinuteRange as clockRange,
+  formatHourMark as hourMark,
+} from '@/lib/today/time';
+
+/* Re-exported so this file stays the single import for everything the hours
+   screens format. The pickers need the machine form for `<input type="time">`;
+   see `formatMinuteValue`'s own note on what happens when they don't get it. */
+export { formatMinuteValue } from '@/lib/today/time';
+
 /** Minutes in a day. 1440 is a legal window end, so a shift can close at midnight. */
 export const MINUTES_IN_DAY = 1440;
 
@@ -58,22 +69,36 @@ export const DEFAULT_WINDOWS: HourWindow[] = [
 export const MIN_WINDOW_MINUTES = 30;
 
 /** The common shapes, as one click — the same five the phone offers. */
-export const WINDOW_PRESETS: { key: string; label: string; window: HourWindow }[] = [
-  { key: 'early', label: '05:00 – 09:00', window: { startMinute: 300, endMinute: 540 } },
-  { key: 'morning', label: '06:00 – 11:00', window: { startMinute: 360, endMinute: 660 } },
-  { key: 'midday', label: '11:00 – 15:00', window: { startMinute: 660, endMinute: 900 } },
-  { key: 'evening', label: '17:00 – 21:00', window: { startMinute: 1020, endMinute: 1260 } },
-  { key: 'late', label: '19:00 – 22:00', window: { startMinute: 1140, endMinute: 1320 } },
+export const WINDOW_PRESETS: { key: string; window: HourWindow }[] = [
+  /* The labels were five hard-coded 24-hour strings sitting beside the minutes
+     they describe — so they went on reading `17:00 – 21:00` after every other
+     clock in the app had moved, and nothing would have caught it. Derived from
+     the window now, which is the only copy that cannot drift. */
+  { key: 'early', window: { startMinute: 300, endMinute: 540 } },
+  { key: 'morning', window: { startMinute: 360, endMinute: 660 } },
+  { key: 'midday', window: { startMinute: 660, endMinute: 900 } },
+  { key: 'evening', window: { startMinute: 1020, endMinute: 1260 } },
+  { key: 'late', window: { startMinute: 1140, endMinute: 1320 } },
 ];
 
-/** `06:00`. Zero-padded and 24-hour, matching the app's `formatMinute`. */
+/**
+ * `6:00 AM`, clamped to the day. Re-exported from `lib/today/time` rather than
+ * re-derived — the old body was a second copy of the same four lines under a
+ * comment promising it matched, and a promise in a comment is how the two
+ * halves of a clock drift apart. The clamp is the only thing this file adds.
+ */
 export function formatMinute(minute: number): string {
-  const m = Math.max(0, Math.min(MINUTES_IN_DAY, Math.round(minute)));
-  return `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  return clock(Math.max(0, Math.min(MINUTES_IN_DAY, Math.round(minute))));
 }
 
 export function formatWindow(w: HourWindow): string {
-  return `${formatMinute(w.startMinute)} – ${formatMinute(w.endMinute)}`;
+  /* `clockRange` and not two `formatMinute`s joined by a dash: a window that
+     starts and ends in the same half of the day says its meridiem once, which
+     is what keeps `6:00 – 11:00 AM` the width `06:00 – 11:00` was. */
+  return clockRange(
+    Math.max(0, Math.min(MINUTES_IN_DAY, w.startMinute)),
+    Math.max(0, Math.min(MINUTES_IN_DAY, w.endMinute)),
+  );
 }
 
 /**
@@ -214,7 +239,10 @@ export function ribbon(windows: HourWindow[]): Ribbon {
   for (let left = 0; left <= RIBBON_MINUTES; left += 120) {
     ticks.push({
       left,
-      label: formatMinute(RIBBON_START + left),
+      /* The axis form. These ticks are every two hours across a 16-hour band in
+         a strip narrower than the schedule's gutter, so `5:30 AM` / `7:30 AM`
+         would be seven characters where the hour is the only one that moves. */
+      label: hourMark(RIBBON_START + left),
       // Both ends are pinned rather than centred: a centred label at 0 hangs
       // half of itself off the left of the band, and at the right edge the
       // last one is what gets clipped — the exact bug the range was narrowed

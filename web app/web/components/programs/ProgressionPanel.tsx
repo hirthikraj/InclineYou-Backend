@@ -9,6 +9,10 @@ import {
   type ProgressionStep,
 } from '@/lib/programs/blueprint';
 import { CloseIcon } from './Icons';
+import { Button } from '@/web-components/ui/Button';
+import { Chip } from '@/web-components/ui/Chip';
+import { Why } from '@/web-components/ui/Why';
+import { DockPanel } from '@/web-components/ui/DockPanel';
 
 /**
  * THE PROGRESSION RULE — thirty-six cells, stated once.
@@ -100,18 +104,16 @@ export function ProgressionPanel({
   const timed = base.durationSeconds != null;
 
   return (
-    <aside className="pg__panel" aria-label="Set a progression">
-      <header className="pg__panelhd">
-        <div>
-          <p className="pg__panelt">Progression</p>
-          <p className="small">Write the ladder once instead of every cell</p>
-        </div>
-        <button className="btn btn--icon btn--ghost" type="button" aria-label="Close" onClick={onClose}>
-          <CloseIcon />
-        </button>
-      </header>
+    <DockPanel label="Set a progression">
+      <DockPanel.Head
+        title={"Progression"}
+        sub={"Write the ladder once instead of every cell"}
+        actions={
+          <Button variant="ghost" iconOnly label="Close" onClick={onClose} title={undefined} icon={<CloseIcon />} />
+        }
+      />
 
-      <div className="pg__panelb">
+      <DockPanel.Body>
         <section className="card">
           <div className="card__hd">
             <span className="card__t">Which days</span>
@@ -119,11 +121,9 @@ export function ProgressionPanel({
           <div className="card__b">
             <div className="tools">
               {days.map(day => (
-                <button
+                <Chip
+                  pressed={scope.has(day)}
                   key={day}
-                  className="chip"
-                  type="button"
-                  aria-pressed={scope.has(day)}
                   onClick={() =>
                     setScope(prev => {
                       const next = new Set(prev);
@@ -135,7 +135,7 @@ export function ProgressionPanel({
                 >
                   Day {day}
                   {dayLabels[String(day)] ? ` · ${dayLabels[String(day)]}` : ''}
-                </button>
+                </Chip>
               ))}
             </div>
             <p className="small pg__gap">
@@ -153,18 +153,18 @@ export function ProgressionPanel({
           </div>
           <div className="card__b">
             <div className="tools">
-              <button className="chip" type="button" onClick={() => reseed(upto, { repsStep: 2 })}>
+              <Chip onClick={() => reseed(upto, { repsStep: 2 })}>
                 +2 {timed ? 'seconds' : 'reps'} a week
-              </button>
-              <button className="chip" type="button" onClick={() => reseed(upto, { repsStep: 1 })}>
+              </Chip>
+              <Chip onClick={() => reseed(upto, { repsStep: 1 })}>
                 +1 a week
-              </button>
-              <button className="chip" type="button" onClick={() => reseed(upto, { setsEvery: 2 })}>
+              </Chip>
+              <Chip onClick={() => reseed(upto, { setsEvery: 2 })}>
                 +1 set every 2 weeks
-              </button>
-              <button className="chip" type="button" onClick={() => reseed(upto, {})}>
+              </Chip>
+              <Chip onClick={() => reseed(upto, {})}>
                 Same every week
-              </button>
+              </Chip>
             </div>
 
             <label className="fld pg__gap">
@@ -239,33 +239,31 @@ export function ProgressionPanel({
         </section>
 
         {overwriting.length > 0 && (
-          <div className="why why--warn">
-            <p className="why__k">Heads up</p>
+          <Why heading="Heads up" tone="warn">
             <p>
               Week{overwriting.length === 1 ? '' : 's'} {overwriting.join(', ')} already{' '}
               {overwriting.length === 1 ? 'has' : 'have'} exercises of their own on these days. They
               will be <b>replaced</b> by week 1&rsquo;s, carrying the numbers above.
             </p>
-          </div>
+          </Why>
         )}
-      </div>
+      </DockPanel.Body>
 
-      <footer className="pg__panelft">
-        <button className="btn btn--secondary" type="button" onClick={onClose}>
+      <DockPanel.Foot>
+        <Button variant="secondary" onClick={onClose}>
           Cancel
-        </button>
-        <button
-          className="btn btn--primary"
-          type="button"
+        </Button>
+        <Button
+          variant="primary"
           disabled={inScope.length === 0 || rowsInScope === 0}
           onClick={() => onApply(plan, inScope)}
         >
           {rowsInScope === 0
             ? 'Week 1 is empty'
             : `Write ${rowsInScope * plan.length} rows`}
-        </button>
-      </footer>
-    </aside>
+        </Button>
+      </DockPanel.Foot>
+    </DockPanel>
   );
 }
 

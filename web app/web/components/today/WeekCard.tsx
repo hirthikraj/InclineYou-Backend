@@ -1,9 +1,11 @@
-import Link from 'next/link';
 
 import type { DeckMoney, DeckWeek } from '@/lib/today/deck';
 import { clients } from '@/lib/today/copy';
 import { rupees } from '@/lib/today/time';
 import { Chevron, Send } from '@/components/shell/Icons';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
+import { KeyValueRow } from '@/web-components/ui/KeyValue';
 
 /*
  * TWO CARDS IN ONE FILE, and named for the first — `MonthCard` is below.
@@ -44,87 +46,76 @@ export function WeekCard({ week }: { week: DeckWeek }) {
   const rest = Math.max(0, 100 - ok - no - open);
 
   return (
-    <div className="card">
-      <div className="card__hd">
-        <h2 className="card__t">This week · so far</h2>
-        <span className="card__acts">
-          <Link className="btn btn--sm btn--ghost" href="/reports">
+    <Card
+      title="This week · so far"
+      actions={<><Button href="/reports" variant="ghost" size="sm">
             <Send size={14} />
             Reports
-          </Link>
-        </span>
+          </Button></>}
+    >
+      <KeyValueRow k="Delivered">{week.delivered}</KeyValueRow>
+      <div className="kv">
+        <span className="kv__k">No-shows</span>
+        <span className={`kv__v${week.noShows > 0 ? ' warn' : ''}`}>{week.noShows}</span>
       </div>
-      <div className="card__b">
+      {week.unmarked > 0 && (
         <div className="kv">
-          <span className="kv__k">Delivered</span>
-          <span className="kv__v">{week.delivered}</span>
+          {/*
+            "Not marked", never "Running now". These are sessions whose hour has
+            passed with no outcome recorded — on real data eleven of them had
+            built up over one week, and calling them running claimed the trainer
+            was in eleven sessions at once. The `.acc` tone goes with the word:
+            this is a small debt to clear, not a live state, so it takes ink
+            rather than lime.
+          */}
+          <span className="kv__k">Not marked</span>
+          <span className="kv__v">{week.unmarked}</span>
         </div>
-        <div className="kv">
-          <span className="kv__k">No-shows</span>
-          <span className={`kv__v${week.noShows > 0 ? ' warn' : ''}`}>{week.noShows}</span>
-        </div>
-        {week.unmarked > 0 && (
-          <div className="kv">
+      )}
+      <KeyValueRow k="Still to come">{week.stillToCome}</KeyValueRow>
+
+      <div className="meter meter--lg mt3" aria-hidden="true">
+        <i className="ok" style={{ width: `${ok}%` }} />
+        <i className="warn" style={{ width: `${no}%` }} />
+        {/* `.open`, not `.dim` — a delta in app.css, added because these two
+            segments were adjacent and identical. See the note there. */}
+        <i className="open" style={{ width: `${open}%` }} />
+        <i className="dim" style={{ width: `${rest}%` }} />
+      </div>
+
+      <p className="small mt2">
+        {week.scheduled === 0 ? (
+          <>Nothing booked this week yet.</>
+        ) : week.delivered + week.noShows === 0 ? (
+          <>
+            <b>
+              {week.started} of {week.scheduled}
+            </b>{' '}
+            have started. Nothing has settled yet, so there is no rate to quote.
+          </>
+        ) : (
+          <>
+            <b>
+              {week.started} of {week.scheduled}
+            </b>{' '}
+            have started, and {week.percent}% of what settled was delivered.
             {/*
-              "Not marked", never "Running now". These are sessions whose hour has
-              passed with no outcome recorded — on real data eleven of them had
-              built up over one week, and calling them running claimed the trainer
-              was in eleven sessions at once. The `.acc` tone goes with the word:
-              this is a small debt to clear, not a live state, so it takes ink
-              rather than lime.
+              The unmarked count sits in neither side of that fraction, so
+              leaving it out of the sentence would let "100%" read as a clean
+              week when a third of it has no outcome recorded. Stated, with the
+              number — §06's rule: explicit beats vague.
             */}
-            <span className="kv__k">Not marked</span>
-            <span className="kv__v">{week.unmarked}</span>
-          </div>
+            {week.unmarked > 0 && (
+              <>
+                {' '}
+                <b>{week.unmarked}</b> {week.unmarked === 1 ? 'is' : 'are'} still unmarked and
+                counted in neither.
+              </>
+            )}
+          </>
         )}
-        <div className="kv">
-          <span className="kv__k">Still to come</span>
-          <span className="kv__v">{week.stillToCome}</span>
-        </div>
-
-        <div className="meter meter--lg mt3" aria-hidden="true">
-          <i className="ok" style={{ width: `${ok}%` }} />
-          <i className="warn" style={{ width: `${no}%` }} />
-          {/* `.open`, not `.dim` — a delta in app.css, added because these two
-              segments were adjacent and identical. See the note there. */}
-          <i className="open" style={{ width: `${open}%` }} />
-          <i className="dim" style={{ width: `${rest}%` }} />
-        </div>
-
-        <p className="small mt2">
-          {week.scheduled === 0 ? (
-            <>Nothing booked this week yet.</>
-          ) : week.delivered + week.noShows === 0 ? (
-            <>
-              <b>
-                {week.started} of {week.scheduled}
-              </b>{' '}
-              have started. Nothing has settled yet, so there is no rate to quote.
-            </>
-          ) : (
-            <>
-              <b>
-                {week.started} of {week.scheduled}
-              </b>{' '}
-              have started, and {week.percent}% of what settled was delivered.
-              {/*
-                The unmarked count sits in neither side of that fraction, so
-                leaving it out of the sentence would let "100%" read as a clean
-                week when a third of it has no outcome recorded. Stated, with the
-                number — §06's rule: explicit beats vague.
-              */}
-              {week.unmarked > 0 && (
-                <>
-                  {' '}
-                  <b>{week.unmarked}</b> {week.unmarked === 1 ? 'is' : 'are'} still unmarked and
-                  counted in neither.
-                </>
-              )}
-            </>
-          )}
-        </p>
-      </div>
-    </div>
+      </p>
+    </Card>
   );
 }
 
@@ -169,67 +160,56 @@ export function MonthCard({ money }: { money: DeckMoney }) {
   const sharePercent = money.billed > 0 ? Math.round((100 * money.cut) / money.billed) : 0;
 
   return (
-    <div className="card">
-      <div className="card__hd">
-        <h2 className="card__t">{money.monthLabel} · the month</h2>
-        <span className="card__acts">
-          <Link className="btn btn--sm btn--ghost" href="/business">
+    <Card
+      title={<>{money.monthLabel} · the month</>}
+      actions={<><Button href="/business" variant="ghost" size="sm">
             Open
             <Chevron size={14} />
-          </Link>
+          </Button></>}
+    >
+      <KeyValueRow k="Billed">
+        {rupees(money.billed)}{' '}
+        {money.trendPercent !== null && (
+          <span className="ink3" style={{ fontWeight: 400 }}>
+            {money.trendPercent >= 0 ? '+' : '−'}
+            {Math.abs(money.trendPercent)}%
+          </span>
+        )}
+      </KeyValueRow>
+      <KeyValueRow k="Collected">{rupees(money.collected)}</KeyValueRow>
+      <div className="kv">
+        <span className="kv__k">Still pending</span>
+        <span className="kv__v" style={{ color: 'var(--tx-danger)' }}>
+          {rupees(money.pending)}
         </span>
       </div>
-      <div className="card__b">
-        <div className="kv">
-          <span className="kv__k">Billed</span>
-          <span className="kv__v">
-            {rupees(money.billed)}{' '}
-            {money.trendPercent !== null && (
-              <span className="ink3" style={{ fontWeight: 400 }}>
-                {money.trendPercent >= 0 ? '+' : '−'}
-                {Math.abs(money.trendPercent)}%
-              </span>
-            )}
-          </span>
-        </div>
-        <div className="kv">
-          <span className="kv__k">Collected</span>
-          <span className="kv__v">{rupees(money.collected)}</span>
-        </div>
-        <div className="kv">
-          <span className="kv__k">Still owed</span>
-          <span className="kv__v" style={{ color: 'var(--tx-danger)' }}>
-            {rupees(money.pending)}
-          </span>
-        </div>
-        {/* No gym, no line. A 0% cut and no arrangement at all are different
-            facts, and drawing "−₹0 · 0% of floor" claims one the trainer never
-            made. `gymName` being null is what says so — see /v1/trainers/me. */}
-        {money.cut > 0 && (
-          <div className="kv">
-            <span className="kv__k">
-              The gym’s share <span className="ink3">· {sharePercent}% of billing</span>
-            </span>
-            <span className="kv__v" style={{ color: 'var(--tx-warn)' }}>
-              −{rupees(money.cut)}
-            </span>
-          </div>
-        )}
+      {/* No gym, no line. A 0% cut and no arrangement at all are different
+          facts, and drawing "−₹0 · 0% of floor" claims one the trainer never
+          made. `gymName` being null is what says so — see /v1/trainers/me. */}
+      {money.cut > 0 && (
         <div className="kv">
           <span className="kv__k">
-            <b style={{ color: 'var(--tx-ink)' }}>Yours</b>
+            The gym’s share <span className="ink3">· {sharePercent}% of billing</span>
           </span>
-          <span className="kv__v" style={{ color: 'var(--tx-accent-text)' }}>
-            {rupees(money.yours)}
+          <span className="kv__v" style={{ color: 'var(--tx-warn)' }}>
+            −{rupees(money.cut)}
           </span>
         </div>
-        {money.pending > 0 && (
-          <p className="small mt3">
-            <b>{clients(money.clientsOwing)}</b> still {money.clientsOwing === 1 ? 'owes' : 'owe'}{' '}
-            you {rupees(money.pending)}.
-          </p>
-        )}
+      )}
+      <div className="kv">
+        <span className="kv__k">
+          <b style={{ color: 'var(--tx-ink)' }}>Yours</b>
+        </span>
+        <span className="kv__v" style={{ color: 'var(--tx-accent-text)' }}>
+          {rupees(money.yours)}
+        </span>
       </div>
-    </div>
+      {money.pending > 0 && (
+        <p className="small mt3">
+          <b>{clients(money.clientsOwing)}</b> still {money.clientsOwing === 1 ? 'owes' : 'owe'}{' '}
+          you {rupees(money.pending)}.
+        </p>
+      )}
+    </Card>
   );
 }

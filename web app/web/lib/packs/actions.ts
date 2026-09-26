@@ -47,7 +47,7 @@ function fail(error: unknown, subject: string): PackResult {
 }
 
 /**
- * The price list lives on `/business?tab=packages` and the ledger beside it reads
+ * The price list lives on `/business/packages` and the ledger beside it reads
  * packages, not packs — but the roster's "pack running low" moves when a price
  * list does, and *Ending soon* on this screen is the same rows Today's queue is
  * built from.

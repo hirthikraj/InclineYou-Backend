@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 
 import { MessageSlot } from '@/components/auth/MessageSlot';
 import { weekProblem, type Week } from '@/components/profile/WeekPicker';
 import { SaveRow } from '@/components/settings/IdentityForm';
+import { usePublishDraft } from '@/components/settings/ProfileDraft';
 import { WorkPlaceFields, atGym, type PlaceDraft } from '@/components/settings/WorkPlaceFields';
 import { WorkingWeekFields, weekFrom } from '@/components/settings/WorkingWeekFields';
 import type { Message } from '@/lib/auth/copy';
@@ -83,6 +84,15 @@ export function WorkPanel({
   const [pressed, setPressed] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
   const [pending, start] = useTransition();
+  const publish = usePublishDraft();
+
+  /* Three of this tab's five place fields are on the preview card: how you
+     coach, the gym's name and the localities. `mapLink` and the working week
+     are not — a client is not shown either — so neither is published, and the
+     card does not redraw while a Tuesday window is being set. */
+  useEffect(() => {
+    publish({ trainingModes: place.modes, gymName: place.gymName, serviceAreas: place.areas });
+  }, [publish, place.modes, place.gymName, place.areas]);
 
   /**
    * A stored gym this save will clear.

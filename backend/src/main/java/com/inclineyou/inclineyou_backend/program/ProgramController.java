@@ -51,6 +51,21 @@ public class ProgramController {
         return programService.listExercises(id, trainerId());
     }
 
+    /**
+     * THE CLIENT PLAN BUILDER'S SAVE — the whole prescription in one PUT.
+     *
+     * `PUT /v1/templates/{id}` is its twin on the blueprint, and the two screens
+     * are the same board pointed at two tables. See
+     * {@link ProgramService#replaceExercises}: it writes the rows and the copy's
+     * own shape, and deliberately does not touch `synced_at`.
+     */
+    @PutMapping("/{id}/exercises")
+    public List<ProgramService.ProgramExerciseResponse> replaceExercises(
+            @PathVariable UUID id,
+            @RequestBody ProgramService.ReplaceExercisesRequest req) {
+        return programService.replaceExercises(id, trainerId(), req);
+    }
+
     @PostMapping("/{id}/exercises")
     @ResponseStatus(HttpStatus.CREATED)
     public ProgramService.ProgramExerciseResponse addExercise(
@@ -80,6 +95,12 @@ public class ProgramController {
      * which is the reason `template` and `program` are two tables. See
      * {@link ProgramService#resync} for what it does and does not touch.
      */
+    /** V18 · "Tell {client}" — `{sent: false}` when they switched plan notices off. */
+    @PostMapping("/{id}/notify")
+    public ProgramService.NotifyResult notifyClient(@PathVariable UUID id) {
+        return programService.notifyClient(id, trainerId());
+    }
+
     @PostMapping("/{id}/resync")
     public ProgramService.ResyncResult resync(@PathVariable UUID id) {
         return programService.resync(id, trainerId());

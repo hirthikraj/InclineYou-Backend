@@ -3,7 +3,7 @@ import { SetupShell } from '@/components/setup/SetupShell';
 import { getPacks } from '@/lib/setup/api';
 import { requireSetup } from '@/lib/setup/guard';
 
-export const metadata = { title: 'What you sell · X REP' };
+export const metadata = { title: 'What you sell · InclineYou' };
 
 /** Frame 5d · step 7 of 8 — the price before the pipe. */
 export default async function Page() {

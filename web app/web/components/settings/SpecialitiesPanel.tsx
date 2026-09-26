@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 
 import { MessageSlot } from '@/components/auth/MessageSlot';
 import { SpecialityPicker } from '@/components/profile/SpecialityPicker';
 import { SaveRow } from '@/components/settings/IdentityForm';
+import { usePublishDraft } from '@/components/settings/ProfileDraft';
 import type { Message } from '@/lib/auth/copy';
 import { saveSpecialities } from '@/lib/profile/actions';
 import type { Identity } from '@/lib/profile/api';
@@ -19,10 +20,10 @@ import { SPECIALITY_CAP } from '@/lib/setup/options';
  * is the product's argument and not this screen's: a trainer who "does
  * everything" tells a client nothing.
  *
- * **This tab can empty the list, and setup cannot.** Step 3 has no Skip and
- * refuses to continue on an empty answer, which leaves it unable to CLEAR an
- * answer already given — its own comment says so and names Settings as where
- * that belongs. This is Settings. Clearing every chip and pressing Save sends
+ * **This tab can empty the list, and setup cannot.** Step 3 refuses to CONTINUE
+ * on an empty answer — it has a Skip now, but a Skip records "not today" rather
+ * than clearing a list — which leaves it unable to remove an answer already
+ * given; its own comment says so and names Settings as where that belongs. This is Settings. Clearing every chip and pressing Save sends
  * `[]`, which the server reads as *clear it*, so the one thing the flow could
  * not do is the one thing this tab adds.
  */
@@ -31,6 +32,15 @@ export function SpecialitiesPanel({ initial }: { initial: Identity }) {
   const [chosen, setChosen] = useState<string[]>(initial.specialities);
   const [message, setMessage] = useState<Message | null>(null);
   const [pending, start] = useTransition();
+  const publish = usePublishDraft();
+
+  /* The preview card is in the layout and this tab is one of the six that feed
+     it. From an EFFECT rather than the picker's own handler: publishing from a
+     change handler re-renders the provider's whole subtree synchronously with
+     the click, and the chips being pressed are inside it. */
+  useEffect(() => {
+    publish({ specialities: chosen });
+  }, [publish, chosen]);
 
   // Compared as sets, like the certifications tab: the catalogue's order is the
   // meaningful one, so a toggle that put a chip back where it started is not an

@@ -12,7 +12,451 @@ Do not delete resolved entries — they record why the field exists.
 
 ## Open
 
-**None.** Every entry that was open on 28 Aug 2026 was closed in one REST pass,
+### Sign in with Google — the button is drawn, the exchange does not exist
+
+*Opened 22 Sep 2026 by the sign-in redesign. No endpoint.*
+
+`/sign-in` now offers **Continue with Google** under the number field. It is UI
+only: `GOOGLE_SIGN_IN_ENABLED` in `lib/auth/policy.ts` is `false`, the control
+answers a press with a sentence in the message slot, and nothing reaches the
+network. The flag is `WHATSAPP_OTP_ENABLED`'s pattern — flip one constant the
+day the backend can answer.
+
+**What is missing is not an OAuth endpoint; it is a decision.** The account in
+this product IS the mobile number. `client.phone`, `inclineyou_client`,
+`personaFor`, the roster, the two books and every check the sync controller
+makes against the token all key off it. Google returns an email and a `sub`,
+neither of which maps to a trainer. So the backend needs, in this order:
+
+1. **A verified-identity column** — `trainer.google_sub`, unique, nullable, plus
+   the same additive rule every other column here follows.
+2. **A LINK path, not just a sign-in path.** The only trainer a `google_sub` can
+   be attached to is one who has already proved a number, so the first Google
+   press by an existing trainer has to be *verify your number, then link* —
+   which is `PhoneChange`'s ladder with the roles swapped.
+3. **An answer for a `sub` with no row.** A Google identity cannot create a
+   trainer account: `/sign-in/new` is the only place one is minted, and it mints
+   against a phone. The honest destination is that screen, carrying nothing.
+4. **`POST /v1/auth/google`** taking the ID token, verifying it against Google's
+   JWKS server-side, and answering the shape `verifyOtp` already answers — a
+   destination and a session, never a token (see *Talking to the backend*).
+
+Until 1–3 are decided, an endpoint would be a flow whose only other end is a
+screen nobody has designed. The button says so out loud instead.
+
+### Remove a client — the copy says *permanent*, the endpoint archives
+
+*Opened 15 Sep 2026 by the client-file personal-information pass. `/clients/{id}`.*
+
+**This one is a live mismatch on a shipped screen, not a missing field.** The
+*Remove* card at the foot of the Personal information tab reads, verbatim from
+the reference design and as asked for:
+
+> Removing this client is permanent and cannot be undone.
+
+`DELETE /v1/clients/{id}` does not do that. It sets `status = 'archived'` and
+`membership_status = 'removed'`; the client row, their sessions, their payments,
+their packages and their notes all stay, and the roster's own archive confirm
+says so in as many words — *"Their sessions, payments and history all stay —
+nothing is deleted."* Two screens in this product now describe the same call in
+opposite terms.
+
+**This needs a decision, and either answer closes it.**
+
+1. **The sentence becomes true.** A real erasure endpoint — `DELETE
+   /v1/clients/{id}?erase=true`, or a distinct `POST /v1/clients/{id}/erase` —
+   that removes the client and their dependent rows. This is not only a
+   `DELETE ... CASCADE`: payments are books, and a business cannot generally
+   erase the record of money it took. The realistic shape is erase the person
+   (name, phone, notes, metrics, birth date) and keep the financial rows with
+   the identity stripped, which is the DPDP Act 2023 erasure shape the portal's
+   own `DataRights` screen already reasons about.
+2. **The copy changes.** One line, and the card matches the roster.
+
+Until one of them lands, **the button archives and the sentence overstates it.**
+`RemoveCard` in `components/clients/file/PersonalTab.tsx` carries this note at
+the call site so nobody reads the copy as a specification of the endpoint.
+
+**What the web does when (1) lands.** `archiveClient` in
+`lib/clients/status-actions.ts` gains a sibling; `RemoveCard` calls that instead
+and keeps the two-press confirm — which is currently sized for a recoverable
+action and should become a typed confirmation if the call ever really is
+irreversible.
+
+---
+
+### Physical information — `client.height_cm` and `date_of_birth`
+
+*Opened 15 Sep 2026 by the client-file personal-information pass. `/clients/{id}`.*
+
+The Personal information tab grew a *Physical information* card: height, weight,
+and birth day with age. Two of those are new columns the REST API does not have.
+
+```
+ALTER TABLE client ADD COLUMN height_cm     numeric(4,1) NULL;
+ALTER TABLE client ADD COLUMN date_of_birth date         NULL;
+```
+
+Both nullable, both accepted by the existing partial `PUT /v1/clients/{id}` —
+the request `savePhysical` already makes.
+
+**Why these are client columns and not `body_metric` rows.** A body metric is a
+READING taken on a day and charted against the ones before it. Neither of these
+is: height stops moving at about nineteen and a birth date never moves, and
+neither belongs on a line chart. Weight stays exactly where it is — the card
+reads the latest `body_metric` and links to Progress rather than storing a
+second copy that would go stale the next time somebody logged a weigh-in.
+
+**There was a third column in this entry, and it is gone.** `sex` was specified
+here alongside a *Resting metabolism* and an *Active metabolism* row, which were
+built and then cut the same week. Mifflin-St Jeor's two forms differ by a
+constant, `+5` against `−161`, and that constant was the only thing in the
+product that ever read the field — so the column went with the rows rather than
+being left as personal data held for no stated purpose. **Do not add
+`client.sex` on the strength of this entry.** If a future feature wants it, it
+has to make its own case.
+
+**And this overruled a standing rule, which stands rewritten.** `AGENTS.md`
+carried *"There is no date of birth in this schema… recorded in four places,
+still true."* That rule now records that the column landed, what it was
+originally for, that the metabolism rows it was added for were removed, and that
+none of it reopened health data — `body_metric` has held weight and body fat
+since the mock was written, and the sanctioned path to a medical record is still
+a separate `health_note` table with its own consent.
+
+---
+
+### Check-ins — the client answers one, and `/v1/me/assessments` does not exist
+
+*Opened 23 Sep 2026 by the portal check-in pass. `/me/assessments`,
+`/me/assessments/{id}`, `/me/assessments/{id}/answers`,
+`/me/assessments/{id}/submit`.*
+
+The trainer half of assessments is complete on both sides — templates, sending,
+and reading what came back. **Nothing on the wire let the person it was sent to
+answer it**, so a check-in dated next Tuesday was a row only the trainer could
+see. Four client-scoped routes close that, and the mock implements all four.
+
+**No schema change, and that is the point.** `assessment.readings` and
+`assessment.answers` have always been the storage for what came back; what is
+new is that something other than the seed writes them. `completedAt` is still
+the only thing that makes a row `done`, so a part-filled check-in is `waiting`
+to a trainer and `open` to its client with no third state and no new column.
+
+| route | what it is |
+| --- | --- |
+| `GET /v1/me/assessments` | the client's own list. **Sent rows only** — an unsent one is the trainer's planning and the client may not know it exists. Readings and answers stripped, exactly as `assessmentView` strips them for the trainer's list. |
+| `GET /v1/me/assessments/{id}` | what it asks (the template's two blocks, resolved against the catalogue) **plus what is in it so far**, which is what makes the flow resumable. A screen endpoint, for the reason `GET /v1/me/workouts/{id}` is one. |
+| `POST …/answers` | one ask. `{kind:'measurement',key,value}` or `{kind:'question',questionId,…}`, and `{clear:true}` to take one back out. Answers with the whole row. |
+| `POST …/submit` | sets `completedAt`. Refuses an empty check-in; everything short of that may be sent. |
+
+**Three rules the real implementation has to keep, because the web is built on
+them.**
+
+- **A refused write must not destroy the stored answer.** MEASURED as a live
+  defect in the mock on the day it was written: the handler removed the old
+  value and *then* validated, so a client who typed `885` for `88.5`, was told
+  no and pressed Back found the step empty and their earlier reading gone. The
+  row is touched once, after the request has passed.
+- **Everything validates against the TEMPLATE, never against the catalogue.** A
+  reading for a tape this check-in did not ask for is a number with no question
+  behind it, and it would reach a chart.
+- **A returned check-in is closed — 409, not 403.** The row is not forbidden,
+  its state is, and that is what the screen has to say. Both write routes
+  refuse it; the client's own screen refuses it too, and neither is trusted to
+  be the only one that does.
+
+**And the flow is skippable, which is a product decision the wire has to
+support.** `got` of `asked` per block already exists precisely to find the
+client who answered the questions and skipped the tape — `mock/seed.ts` says so
+— so a submit with four of fifteen readings is a valid check-in and not a
+partial write to be rejected.
+
+**No notification is minted.** `lib/notifications/types.ts` draws the line the
+other way from `me/metrics`: the bell is the record of something that happened
+once, and a returned check-in is a row with an unread state of its own on a
+screen built to list it (`assessmentView.unread`, and the *Read status ·
+Unread* filter). Two homes for one fact is the thing that file says the bell
+must never become.
+
+**`DELETE /v1/me` now drops them.** They hold a year of tape readings and
+eleven sentences a block about how somebody felt, they are addressed to the
+client the way `client_message` is, and `assessmentDetail`'s history is
+assembled from them — so an erased client left behind would still be drawing a
+line on the trainer's chart. `GET /v1/me/export` carries them for the same
+reason: an export that omits the one table the client wrote themselves is a
+copy of the blank form.
+
+---
+
+### Notes — `note.shared_with_client`, and the portal list that has to read it
+
+*Opened 15 Sep 2026 by the client-file personal-information pass. `/clients/{id}/notes`, `/me/messages`.*
+
+Every note row now carries a switch: **on** means the client can read it, **off**
+means it stays the trainer's own. The web writes `sharedWithClient` on create and
+on `PUT /v1/clients/{id}/notes/{noteId}`; the column does not exist.
+
+**What the backend change looks like.** `ALTER TABLE client_note ADD COLUMN
+shared_with_client boolean NOT NULL DEFAULT false`. The default is the whole
+safety argument and it must be `false` in the DDL and not only in the app: every
+note written before this field existed was written on the promise that nobody
+else would read it, and a migration that defaulted them to shared would publish
+twenty-four people's private files at once. For the same reason the web coerces
+with `=== true` at every read rather than trusting the value.
+
+**And `GET /v1/me/messages` has to return them.** A shared note is useless if the
+client has nowhere to see it, and the portal should not grow a second inbox for
+the same kind of sentence — so the endpoint returns the union of
+`client_message` and `client_note WHERE shared_with_client`, newest first. The
+mock does exactly this in `mock/portal.ts` and it is the shape the web is built
+against.
+
+A shared note is **not** a `client_message`, and three fields say so:
+
+- **No `read_at`.** Nothing marks it off. It is not a line that landed, it is one
+  the trainer is leaving up. `POST /v1/me/messages/{id}/read` will not find it,
+  which is correct rather than a gap.
+- **It can be retracted.** Turning the switch off takes it off the client's
+  screen. No sent message may do that; this is not a sent message.
+- **Its timestamp is `updated_at`, not `created_at`.** A note written in June and
+  shared today is not a line from June.
+
+`mock/types.ts` carries the same argument beside `NoteRow`, and the comment on
+`ClientMessageRow` — *"a note is candid because it is not addressed to
+anybody"* — still governs every note whose switch is off.
+
+**One consequence already absorbed on the web.** Notes are written with
+`MarkupField` and so must be printed with `Markup` everywhere, which now includes
+the client's own screen: `components/portal/AccountMe.tsx` was rendering
+`{m.body}` as a bare string and would have shown the client `**landmine press**`
+with the asterisks in it. `PinnedStrip.tsx` had the same defect. Both fixed.
+
+**What is still missing on the web, and is a decision rather than a fix.** The
+trainer cannot see whether a shared note has actually been looked at, because
+there is deliberately nothing to read — see *no `read_at`* above. If the product
+wants "they have seen this", it wants a message, and the trainer already has one.
+
+---
+
+### Personal information — a client has no e-mail, and one `name` where the design wants two
+
+*Opened 14 Sep 2026 by the client-file personal-information pass. `/clients/{id}`.*
+
+The Notes tab became **Personal information** and grew a *Contact information* card
+beside the notes. The reference design for that card draws three fields — *First
+name*, *Last name*, *E-mail* — and the client record has none of them. `client` is
+`name` and `phone`, and `ClientDetailWire` says so:
+
+```ts
+export interface ClientDetailWire {
+  id: string;
+  name: string;          // one column, one string
+  phone: string | null;  // and this is the credential, not a contact detail
+  …
+}
+```
+
+So the card ships with **Full name** and **Mobile number**, which is what the API
+can actually save. (The record gained `height_cm` and `date_of_birth` on
+15 Sep 2026 for the physical card — see the entry above — but still no e-mail
+and still one `name`.) Neither omission is a layout decision:
+
+**`first_name` / `last_name`.** Splitting the stored `name` in the web would invent
+a surname for everybody filed under one word — which on this roster is a real
+shape, not an edge case — and would have to re-join them on every write, so the two
+boxes would disagree with the one column the moment anybody typed a middle name.
+If the product wants the two fields it wants the two columns, with `name` kept as a
+generated display value so nothing that renders a client has to change.
+
+**`email`.** There is no column at all. A box on this card with nowhere to save to
+is a field a trainer types into once and never sees again, so it was left off
+rather than drawn dead. Note this is a genuinely new contact channel and not a
+second login: the client signs in by OTP to `phone`, and adding an e-mail must not
+quietly become an alternative credential — `POST /v1/auth/request-otp` should keep
+matching on `phone` alone.
+
+**What the backend change looks like.** `ALTER TABLE client ADD COLUMN email
+varchar(255) NULL`, optionally `first_name` / `last_name` alongside a `name` that
+stays authoritative for display, and all three accepted by the existing partial
+`PUT /v1/clients/{id}` — which is the request `saveContact` already makes with
+`{ name, phone }`.
+
+**What the web does when it lands.** `ContactCard` in
+`components/clients/file/PersonalTab.tsx` grows the fields and `saveContact` in
+`lib/clients/contact-actions.ts` sends them; both are already the single place
+either would be added. Nothing else on the file reads them.
+
+**One thing this pass did NOT ask for.** A uniqueness check on the phone at
+**update** time. `POST /v1/clients` refuses a number already on the roster and
+`PUT` does not, so editing a client onto a colleague's number currently succeeds.
+The action handles a `409` and says *"That number is already on somebody else on
+your roster"* — the sentence is in place for whenever the constraint is.
+
+---
+
+### The sessions table — `session.updated_at`, and a count on the workout
+
+*Opened 14 Sep 2026 by the client-file sessions pass. `/clients/{id}/sessions`.*
+
+The Sessions tab is a table whose columns follow the status being read, and two
+of its cells are facts the REST API does not send.
+
+| | State |
+|---|---|
+| `session.updatedAt` | **does not exist.** Additive `updated_at TIMESTAMP`, set on every write to the row |
+| `workout.scheduledSessionId` | exists on the entity; **not on `WorkoutResponse`** |
+| `workout.programId` | the same — on the row, off the response |
+| `workout.exerciseCount` | **does not exist.** `COUNT(*)` over `workout_exercise WHERE removed_at IS NULL` |
+
+**`updated_at` cannot be derived on this side, in either direction.**
+`scheduled_at` is when the session *is*; the *Edited on* column is when the row
+last *became* that. A session booked in March for April was written months before
+it happened, and one marked `no_show` on the Monday morning was written after —
+so neither timestamp bounds the other and no arithmetic over `scheduled_at`,
+`status` and `pack_applied_at` recovers it. It is one column and one `@PreUpdate`.
+
+Until it lands the web treats the field as optional and draws a dash, which is
+the honest reading of *we were not told*. It must never fall back to
+`scheduled_at`: a column that silently prints the session's own date would say
+every booking in the diary was edited on the day it is due, and a trainer
+settling *I never agreed to that time* would be reading the wrong number without
+knowing it.
+
+**The workout join is what makes the completed view worth having.** The diary row
+says a 07:00 slot for an hour; the log kept against it says it started 07:04,
+ended 08:09, and held eleven exercises. Without `scheduled_session_id` on the
+response the two cannot be lined up at all, and the table falls back to the
+booking form's planned figures — which are what a trainer typed weeks ago, not
+what happened.
+
+**The count is a count, not a list.** The only reader is one column, and a client
+that fetched `/v1/workouts/{id}/exercises` per row to take its length is twenty
+requests for twenty numbers. Absent, the cell draws a dash rather than a zero:
+zero would say the trainer logged a session with nothing in it.
+
+`mock/router.ts` serves all four today — `withExerciseCount` for the count,
+`SessionRow.updatedAt` stamped on every write — so the tab is exercisable against
+the mock while Spring catches up.
+
+---
+
+### The exercise library counted, and filtered to the trainer's own
+
+*Opened 14 Sep 2026 by the two-views pass. `/programs/exercises`.*
+
+The library is two views now — a grid of muscle groups with a count on each, and
+the flat list with numbered pages under it. Both need something Spring does not
+serve.
+
+| | State |
+|---|---|
+| `GET /v1/exercises/categories` | **does not exist.** `{ categories: [{ muscleGroup, count }], total, uncategorised }` |
+| `GET /v1/exercises?source=` | **does not exist.** `all` \| `incline` \| `mine` \| `draft` |
+| `exercise.status` | **does not exist.** Additive column, `'published' \| 'draft'`, default `published` |
+
+**Why the counts cannot be derived on this side.** The obvious shortcut is to
+read the library and tally it in the browser, and it is wrong for the reason
+paging always makes it wrong: the client holds twenty-five rows, so it would
+count twenty-five and call that the library. The tally has to happen wherever the
+rows are. It is a `GROUP BY muscle_group` with a `COUNT(*)` and it must be scoped
+to the account, because a trainer's own custom movements belong in their group's
+figure the moment they are saved — which is also why this is not `.../meta` with
+numbers attached. `meta` is the set of values a filter can take and is the same
+for everybody; this is a measurement of one account. **It must also exclude
+drafts**, for the reason the next section gives.
+
+**`?source=` is not cosmetic, and it replaced something broken.** The web had
+*Yours* as `list.filter(ex => ex.isCustom)` over the page it happened to be
+holding. With a paged list that is not a filter at all: it hid every custom
+movement past the first page and still reported the unfiltered `total`
+underneath. It is one predicate on the existing search now, with four values —
+and `mine` and `draft` are not independent of each other, they are `is_custom`
+split on `status`.
+
+**`status` is the additive column, and the default matters.** `published` for
+every row that exists today, including every catalogue row — InclineYou does not
+ship half a movement. It exists for the trainer's own: a custom exercise is
+written in one sitting, so a trainer three steps in and interrupted either
+invents a name to get past the form or loses the lot. `POST /v1/exercises` takes
+`status` and anything that is not the literal `draft` lands as published, which
+is the safe end — **a movement silently filed as a draft is a movement that
+vanishes from the library.** A status rather than an `is_draft` boolean because
+the next value is already visible: `archived`, for a movement a trainer stops
+programming but cannot delete without orphaning the sessions that reference it.
+
+**A draft is excluded from `all`, not just from `incline`.** *All exercises* is
+the list of movements that can go into a program tomorrow, and the category
+counts are doors onto the same thing. Until Spring takes `status`, every draft a
+trainer saves will appear in the main library — **which is the failure mode to
+watch for, because it typechecks, renders and looks deliberate.** The same is
+true one step earlier: until Spring takes `?source=`, it silently ignores the
+parameter and all four options draw the identical list.
+
+**Ordering.** The mock returns the categories in `MUSCLE_GROUPS` order, not by
+count. A grid whose cards re-order themselves as a trainer adds movements is a
+grid whose cards are somewhere new every visit. Spring should order by a fixed
+key too, not by `COUNT(*) DESC`.
+
+---
+
+### What an exercise IS — four fields the builder needs and one it must project
+
+*Opened 2 Sep 2026 by the exercise-detail pass. `/programs/:id` and
+`/programs/exercises`.*
+
+The builder can now say what a movement targets, what else it works, how it is
+performed and what it would do to the week in front of the trainer. Three of
+those four are already columns; one is a projection the backend must not narrow;
+two do not exist at all.
+
+| | State |
+|---|---|
+| `target`, `bodyPart`, `movementPattern`, `level` on `ExerciseNameWire` | **columns already, and already in the response** — see the projection warning below |
+| `secondaryTargets: string[]` | **does not exist.** Additive column |
+| `formCues: string[]` | **does not exist.** Additive column |
+| `description` as real instructions | column exists, holds a generated one-liner |
+
+**The projection is the part that will break silently.** `GET /v1/exercises?ids=`
+narrows the SEARCH route, so it answers with whole `exercise` rows and those four
+fields were in the body all along — `ExerciseNameWire` simply did not declare
+them. It declares them now. A Spring projection or a DTO that selects only
+`id, name, muscle_group, equipment` will answer `undefined` for the rest, the
+rows will quietly go back to printing *Chest · Barbell*, and **nothing will
+fail**: it typechecks on both sides, because a TypeScript interface is a claim
+the JSON never has to satisfy. That is defect 1 of the programs pass, recorded in
+`AGENTS.md`, arriving from the other direction.
+
+**Why the web needs them.** *Barbell Bench Press* and *Close-Grip Bench Press*
+printed the identical meta line — same muscle group, same kit, same level — on
+every row of every column, and the catalogue knew one targets the pectoralis
+major and the other the triceps brachii. A detail panel does not fix that,
+because a panel is opened one row at a time while a list is read all at once.
+
+**What the web does today.** The mock serves all six; `mock/exercise-info.ts`
+generates `secondaryTargets`, `formCues` and the instructions per **movement
+pattern** — seventeen of them, covering all 77 rows — with eight movements
+written by hand. It is honest filler and says so in its own header. The real
+fields want real content, and the place a trainer edits it is the exercise
+library, not the builder.
+
+**Search widened with them.** `GET /v1/exercises?q=` matched `name` and `target`.
+The mock now also matches `movement_pattern` and `body_part`, because a trainer
+who knows what they want by SHAPE — *horizontal push*, *hinge* — got nothing, and
+the exercise panel's *show the others that share this pattern* has no search to
+hand off to without it. Same widening needed server-side; it is one `OR` per
+column against columns that already exist.
+
+**Additive, all of it.** Two nullable JSONB columns and a longer `description`.
+Nothing in sync changes and no phone build notices.
+
+**One thing deliberately not asked for: media.** The panel is text-only by
+decision, not by omission — no video column, no image column, no CDN.
+
+---
+## Previously closed, and still closed
+
+Every entry that was open on 28 Aug 2026 was closed in one REST pass,
 the four the program builder found on 29 Aug were closed in a second (V31), the
 money book's three were closed in a third the same day — that one needed no
 migration at all — and the nudge feature's three were closed in a fourth (V32).

@@ -137,7 +137,7 @@ interface NudgeWire {
 /**
  * Money owed. `payment_reminder` is the one template the backend fills with live
  * figures — it looks the outstanding amount up itself rather than trusting a
- * number the caller passes, which is what keeps the message and the ledger from
+ * number the caller passes, which is what keeps the message and the payments list from
  * disagreeing.
  */
 export async function remind(clientId: string): Promise<ActionResult> {

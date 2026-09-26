@@ -4,7 +4,7 @@ import { AuthShell } from '@/components/auth/AuthShell';
 import { SignInForm } from '@/components/auth/SignInForm';
 import { getToken } from '@/lib/auth/session';
 
-export const metadata = { title: 'Sign in · X REP' };
+export const metadata = { title: 'Sign in · InclineYou' };
 
 /**
  * Frame 1a · `/sign-in`.
@@ -18,7 +18,7 @@ export default async function SignInPage() {
   if (await getToken()) redirect('/today');
 
   return (
-    <AuthShell quote="Two books, one login. Your own training never touches a client’s.">
+    <AuthShell>
       <SignInForm />
     </AuthShell>
   );

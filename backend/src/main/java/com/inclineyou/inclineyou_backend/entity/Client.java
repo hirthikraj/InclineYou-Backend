@@ -9,6 +9,7 @@ import org.hibernate.type.SqlTypes;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -127,6 +128,36 @@ public class Client {
      */
     @Column(name = "removed_ack_at")
     private Instant removedAckAt;
+
+    /* ------------------------------------------------ V5 · the measuring cycle */
+
+    /** Days between sittings. Null means this client is not on a cycle. */
+    @Column(name = "assessment_interval_days")
+    private Short assessmentIntervalDays;
+
+    /**
+     * When the next sitting is owed.
+     *
+     * Stored rather than computed from the last reading plus the interval, so a
+     * trainer can push one week without rewriting when the last one happened.
+     */
+    @Column(name = "next_assessment_on")
+    private LocalDate nextAssessmentOn;
+
+    /** Which metric ids are on this client's sheet. Null means the trainer's default. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "assessment_metrics", columnDefinition = "jsonb")
+    private List<String> assessmentMetrics;
+
+    /* ------------------------------------------------ V7 · physical information */
+
+    /**
+     * A date, never an age — an age stored in September is wrong by March. Personal
+     * data and not health data; {@code client.sex} must not arrive beside it. Not in
+     * the phone's push upsert, so an old build cannot null it. See V7.
+     */
+    @Column(name = "date_of_birth")
+    private LocalDate dateOfBirth;
 
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;

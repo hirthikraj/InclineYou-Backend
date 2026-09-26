@@ -1,9 +1,10 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { Markup } from '@/web-components/ui/Markup';
 import Link from 'next/link';
 
-import { Pin } from '@/components/shell/Icons';
+import { Tack } from '@/components/shell/Icons';
 import type { ClientNoteWire } from '@/lib/clients/client-api';
 import { setNotePinned } from '@/lib/clients/notes-actions';
 
@@ -62,13 +63,27 @@ export function PinnedStrip({
 
   if (pinned.length === 0) {
     return (
-      <p className="small" style={{ marginTop: 12, color: 'var(--tx-ink-3)' }}>
+      /* ONE LINE, AND NOT ON A PHONE AT ALL — `.cfpin--none` in app.css.
+         This was three lines of prose teaching a feature, drawn above all six
+         tabs of every client, for as long as the trainer chooses not to use it:
+         58px on a 844px screen, permanently, for an invitation. The Personal information tab
+         already extends it twice — a *Pin to the strip* checkbox beside the
+         composer, and a paragraph under the list saying where pinned notes go —
+         so the teaching is not lost, it is where the pinning happens.
+
+         What survives on a desk is the one clause that is news rather than
+         instruction: nothing is pinned, and here is where you would. When a note
+         IS pinned the strip below is a live constraint and draws at every width;
+         only the empty case is quiet. */
+      <p className="small cfpin--none">
         Nothing pinned.{' '}
-        <Link href={`/clients/${clientId}/notes`}>
+        <Link
+          href={`/clients/${clientId}/notes`}
+          title="Pinned notes stay above the tabs on every tab of this file"
+        >
           Pin a note
         </Link>{' '}
-        to keep it in front of you on every tab — how they train, what to avoid,
-        what they told you last week.
+        to keep it above every tab.
       </p>
     );
   }
@@ -84,13 +99,22 @@ export function PinnedStrip({
   return (
     <div className="cfpin" style={pending ? { opacity: 0.6 } : undefined}>
       <p className="cfpin__k">
-        <Pin size={12} />
+        {/* `Tack` and not `Pin`. `Pin` is the MAP pin Today's hero uses for
+            *where is this*; the strip's whole subject is *stuck to the top*,
+            and at 12px a teardrop reads as a location marker. Solid, because
+            the glyph here is a statement and not a control — there IS something
+            pinned or this paragraph would not be drawn. */}
+        <Tack size={12} filled />
         Before every session
       </p>
       <div className="cfpin__l">
         {pinned.map((note) => (
           <p key={note.id} className="cfpin__i">
-            <span style={{ flex: 1, minWidth: 0 }}>{note.body}</span>
+            {/* Through `Markup`, like every other place a note is printed.
+                The strip draws the same rows the list below it does, and a
+                note that came out formatted in one and asterisked in the
+                other would be the same bug wearing two faces. */}
+            <Markup value={note.body} className="cfpin__b" />
             <button
               className="cfpin__x"
               type="button"

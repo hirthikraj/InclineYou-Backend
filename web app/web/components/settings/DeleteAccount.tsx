@@ -6,6 +6,7 @@ import { MessageSlot } from '@/components/auth/MessageSlot';
 import type { Message } from '@/lib/auth/copy';
 import { formatPhone } from '@/lib/auth/policy';
 import { closeAccount } from '@/lib/account/actions';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * DELETING THE ACCOUNT.
@@ -84,9 +85,8 @@ export function DeleteAccount({ phone, clientCount }: { phone: string; clientCou
           and your money book all stop being reachable, and{' '}
           <b>the number you sign in with cannot be used to start again.</b>
         </p>
-        <button
-          className="btn btn--secondary"
-          type="button"
+        <Button
+          variant="secondary"
           style={{ marginTop: 12, color: 'var(--tx-danger)' }}
           onClick={() => {
             setOpen(true);
@@ -94,7 +94,7 @@ export function DeleteAccount({ phone, clientCount }: { phone: string; clientCou
           }}
         >
           Delete my account
-        </button>
+        </Button>
       </>
     );
   }
@@ -174,18 +174,17 @@ export function DeleteAccount({ phone, clientCount }: { phone: string; clientCou
           destructive control on the screen the most eye-catching thing on it.
           It carries the danger ink and the verb, and Keep it is the primary.
         */}
-        <button className="btn btn--primary" type="button" disabled={pending} onClick={() => setOpen(false)}>
+        <Button variant="primary" disabled={pending} onClick={() => setOpen(false)}>
           Keep my account
-        </button>
-        <button
-          className="btn btn--secondary"
-          type="button"
+        </Button>
+        <Button
+          variant="secondary"
           style={{ color: 'var(--tx-danger)' }}
           disabled={pending || !matches}
           onClick={submit}
         >
           {pending ? 'Deleting…' : 'Delete it'}
-        </button>
+        </Button>
       </div>
     </div>
   );

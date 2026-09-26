@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * "Add your own" — the escape hatch behind every dashed chip.
@@ -88,12 +89,12 @@ export function AddOwn({
             if (e.key === 'Escape') onCancel();
           }}
         />
-        <button className="btn btn--secondary" type="button" disabled={!trimmed} onClick={submit}>
+        <Button variant="secondary" disabled={!trimmed} onClick={submit}>
           Add
-        </button>
-        <button className="btn btn--ghost" type="button" onClick={onCancel}>
+        </Button>
+        <Button variant="ghost" onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
       </div>
       <span className="fld__h">{hint}</span>
     </div>

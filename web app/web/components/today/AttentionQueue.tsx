@@ -12,8 +12,12 @@ import {
 import { HELD_VERBS, HOLD_SECONDS } from '@/lib/today/hold';
 import { contactedLabel } from '@/lib/nudges/cooldown';
 import { clientsNeedYou, sessionsToday } from '@/lib/today/copy';
-import { DAY_MS, avatarToken, initials } from '@/lib/today/time';
+import { DAY_MS } from '@/lib/today/time';
 import { BellOff, Check, Ellipsis } from '@/components/shell/Icons';
+import { Button } from '@/web-components/ui/Button';
+import { Tag } from '@/web-components/ui/Tag';
+import { Avatar } from '@/web-components/ui/Avatar';
+import { Slab } from '@/web-components/ui/Slab';
 
 /**
  * NEEDS YOU TODAY — the ranked queue, and the three things it can do to a row.
@@ -253,11 +257,8 @@ export function AttentionQueue({
 
   if (items.length === 0) {
     return (
-      <div className="card">
-        <div className="card__hd">
-          <h2 className="card__t">Needs you today</h2>
-        </div>
-        <div className="card__b">
+      <Slab title="Needs you today">
+        <div>
           <div className="empty empty--card">
             <span className="empty__ic">
               <Check size={22} />
@@ -287,7 +288,7 @@ export function AttentionQueue({
           states={states}
           onRestore={unsilence}
         />
-      </div>
+      </Slab>
     );
   }
 
@@ -295,17 +296,11 @@ export function AttentionQueue({
   const folded = items.length - visible.length;
 
   return (
-    <div className="card">
-      <div className="card__hd">
-        <h2 className="card__t">Needs you today</h2>
-        <span
-          className="rail__n rail__n--alert"
-          aria-label={clientsNeedYou(items.length)}
-        >
-          {items.length}
-        </span>
-      </div>
-      <div className="card__b card__b--flush q__scroll">
+    <Slab title="Needs you today" count={items.length}>
+      <span className="vh">
+        {clientsNeedYou(items.length)}
+      </span>
+      <div className="q__scroll">
         {/*
           `.tbl--stack`, WHICH IS THE WHOLE PHONE STORY FOR THIS COMPONENT.
 
@@ -331,7 +326,45 @@ export function AttentionQueue({
           list of rows rather than as a table. It costs nothing here, because the
           table has no `<thead>`: there are no column names to lose.
         */}
-        <table className="tbl tbl--stack">
+        {/*
+          THE MEASURE, WHICH IS WHAT WAS ACTUALLY WRONG WITH THIS TABLE.
+
+          Rendered at 1536px the four columns came out `.q__who` 550px around a
+          ~110px name and `.q__why` 703px around an ~80px reason: 1060px of a
+          1407px row was air, and the eye travelled 550px from a client's name to
+          the reason they need a decision about them. Nothing was overflowing, so
+          nothing looked broken.
+
+          `atn` fixes it with `table-layout:fixed` and three widths rather than by
+          becoming a different element, and the widths live in the `<colgroup>`
+          below — scoped, in §25, to 621px and up.
+
+          BOTH HALVES OF THAT ARE A BUG THIS TABLE ACTUALLY HAD. The widths were
+          on the CELLS first, because a colgroup that applied at every width shrank
+          the phone row to 320px inside a 350px table (below 620px `.tbl--stack`
+          makes each row a grid, and the column widths go on sizing the anonymous
+          cell around it) and wrapped every reason to four lines. But cell widths
+          under `table-layout:fixed` are read off the FIRST ROW, and the first row
+          is not always four cells: open the confirm on the TOP row and it becomes
+          `.q__who` + `.q__why[colspan=3]`, no width is declared anywhere, and
+          Chrome splits the table three ways — measured at 1440, that dragged
+          `Renew` and `Check in` on every row BELOW the open confirm 383px to the
+          left. A colgroup's widths belong to the table, so no row state can move
+          them.
+
+          The cell classes below are UNCHANGED on purpose: `.tbl--stack` keys its
+          whole phone layout on `.q__why`, `.q__act` and `.q__x`, and the six row
+          states re-span those cells through real `colSpan` attributes. Renaming
+          them would take all of that with it for a change that is about column
+          widths.
+        */}
+        <table className="tbl tbl--stack atn">
+          <colgroup>
+            <col className="atn__c-who" />
+            <col className="atn__c-why" />
+            <col className="atn__c-act" />
+            <col className="atn__c-x" />
+          </colgroup>
           <tbody>
             {visible.map((item) => (
               <Row
@@ -360,12 +393,12 @@ export function AttentionQueue({
           wants the six back.
         */}
         {folded > 0 && (
-          <button className="q__more" type="button" onClick={() => setExpanded(true)}>
+          <button className="atn__more" type="button" onClick={() => setExpanded(true)}>
             Show {folded} more {folded === 1 ? 'row' : 'rows'}
           </button>
         )}
         {expanded && items.length > QUEUE_CAP && (
-          <button className="q__more" type="button" onClick={() => setExpanded(false)}>
+          <button className="atn__more" type="button" onClick={() => setExpanded(false)}>
             Show the top {QUEUE_CAP} only
           </button>
         )}
@@ -378,7 +411,7 @@ export function AttentionQueue({
         states={states}
         onRestore={unsilence}
       />
-    </div>
+    </Slab>
   );
 }
 
@@ -468,14 +501,14 @@ function SilencedFoot({
                 {state?.kind === 'rest' ? (
                   <span className="ok">Back in the list</span>
                 ) : (
-                  <button
-                    className="btn btn--sm btn--ghost"
-                    type="button"
+                  <Button
+                    size="sm"
+                    variant="ghost"
                     disabled={state?.kind === 'working'}
                     onClick={() => item.dismissalId && onRestore(item, item.dismissalId)}
                   >
                     {state?.kind === 'working' ? '…' : 'Restore'}
-                  </button>
+                  </Button>
                 )}
               </li>
             );
@@ -532,13 +565,7 @@ function Row({
   const who = (
     <td className="q__who">
       <Link className="who" href={`/clients/${item.clientId}`}>
-        <span
-          className="av av--sm"
-          style={{ background: `var(${avatarToken(item.clientId)})` }}
-          aria-hidden="true"
-        >
-          {initials(item.clientName)}
-        </span>
+        <Avatar name={item.clientName} id={item.clientId} size="sm" />
         <b>{item.clientName}</b>
       </Link>
     </td>
@@ -559,8 +586,8 @@ function Row({
             the eye that can read it; the sentence is announced ONCE, below,
             without the number in it, so nothing re-fires while it ticks.
           */}
-          <span className="acc">Held</span> — {first} is told in{' '}
-          <b className="mono">{state.secondsLeft}s</b>
+          <span className="acc">Held</span>: {first} is told in{' '}
+          <b className="tnum">{state.secondsLeft}s</b>
           <span className="vh" aria-live="polite">
             Held. {first} is told in {HOLD_SECONDS} seconds unless you undo it.
           </span>
@@ -611,15 +638,15 @@ function Row({
         <td className="q__why" colSpan={3}>
           <div className="q__ask">
             <span>Stop raising this?</span>
-            <button className="btn btn--sm btn--secondary" type="button" onClick={() => onSilence(false)}>
+            <Button size="sm" onClick={() => onSilence(false)}>
               Snooze a week
-            </button>
-            <button className="btn btn--sm btn--secondary" type="button" onClick={() => onSilence(true)}>
+            </Button>
+            <Button size="sm" onClick={() => onSilence(true)}>
               Dismiss
-            </button>
-            <button className="btn btn--sm btn--ghost" type="button" onClick={onCancel}>
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onCancel}>
               Keep it
-            </button>
+            </Button>
           </div>
         </td>
       </tr>
@@ -631,7 +658,7 @@ function Row({
       <tr className={rowClass}>
         {who}
         <td className="q__why" aria-live="polite">
-          <span className="acc">{state.permanent ? 'Dismissed' : 'Snoozed'}</span> —{' '}
+          <span className="acc">{state.permanent ? 'Dismissed' : 'Snoozed'}</span>:{' '}
           {state.permanent
             ? 'this will not be raised again unless it gets worse.'
             : `back in ${SNOOZE_DAYS} days, sooner if it gets worse.`}
@@ -643,14 +670,14 @@ function Row({
             reversal rather than a ten-second window before one. It is offered
             without a countdown for that reason — there is nothing expiring.
           */}
-          <button
-            className="btn btn--sm btn--ghost"
-            type="button"
+          <Button
+            size="sm"
+            variant="ghost"
             disabled={!state.dismissalId}
             onClick={() => state.dismissalId && onUnsilence(state.dismissalId)}
           >
             Undo
-          </button>
+          </Button>
         </td>
       </tr>
     );
@@ -675,30 +702,31 @@ function Row({
         <td className="q__why" aria-live="polite">
           {state.whatsappUrl ? (
             <>
-              <span className="acc">Written</span> — {first} hears nothing until you
+              <span className="acc">Written</span>: {first} hears nothing until you
               open it.
             </>
           ) : (
             <>
-              <span className="ok">{DONE_WORDS[item.action] ?? 'Done'}</span> — {item.line}
+              <span className="ok">{DONE_WORDS[item.action] ?? 'Done'}</span>: {item.line}
             </>
           )}
         </td>
         <td className="q__act" colSpan={2}>
           {state.whatsappUrl ? (
-            <a
-              className="btn btn--sm btn--primary"
+            <Button
+              size="sm"
+              variant="primary"
               href={state.whatsappUrl}
               target="_blank"
               rel="noopener noreferrer"
             >
               Open
-            </a>
+            </Button>
           ) : (
-            <span className="tag tag--ok">
+            <Tag tone="ok">
               <Check size={12} />
               Done
-            </span>
+            </Tag>
           )}
         </td>
       </tr>
@@ -713,9 +741,9 @@ function Row({
           {state.message}
         </td>
         <td className="q__act" colSpan={2}>
-          <button className="btn btn--sm btn--secondary" type="button" onClick={onAct}>
+          <Button size="sm" onClick={onAct}>
             Retry
-          </button>
+          </Button>
         </td>
       </tr>
     );
@@ -754,13 +782,12 @@ function Row({
           middle-click, the back button and the status bar all break.
         */}
         {item.href ? (
-          <Link className="btn btn--sm btn--secondary" href={item.href}>
+          <Button size="sm" href={item.href}>
             {item.action}
-          </Link>
+          </Button>
         ) : (
-          <button
-            className="btn btn--sm btn--secondary"
-            type="button"
+          <Button
+            size="sm"
             onClick={renewable ? onAct : undefined}
             disabled={state.kind === 'working'}
             /*
@@ -779,7 +806,7 @@ function Row({
             aria-describedby={renewable ? undefined : whyId}
           >
             {state.kind === 'working' ? '…' : item.action}
-          </button>
+          </Button>
         )}
         {!renewable && (
           <span className="vh" id={whyId}>

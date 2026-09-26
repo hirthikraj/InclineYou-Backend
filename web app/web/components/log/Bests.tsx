@@ -13,10 +13,16 @@
 import Link from 'next/link';
 
 import type { ConsoleData } from '@/lib/log/api';
-import { PLATE_STEP_KG, stampDate, trim1 } from '@/lib/log/log';
+import { PLATE_STEP_KG, floorTime, stampDate, trim1 } from '@/lib/log/log';
 import { TopBar } from '@/components/shell/TopBar';
 import { FinishLog } from './FinishLog';
 import { Back } from './Icons';
+import { Button } from '@/web-components/ui/Button';
+import { Strip } from '@/web-components/ui/Strip';
+import { Card } from '@/web-components/ui/Card';
+import { PageHeader } from '@/web-components/ui/PageHeader';
+import { Table, Row } from '@/web-components/ui/Table';
+import { Why } from '@/web-components/ui/Why';
 
 /**
  * FRAME 2a — FOUR TOP SETS, FOUR DIFFERENT ANSWERS.
@@ -50,64 +56,55 @@ export function Bests({ data }: { data: ConsoleData }) {
 
   return (
     <>
-      <TopBar crumb="Sessions" onSearch={() => {}} />
+      <TopBar
+        crumb="Sessions"
+        /* Six screens in this flow pass the crumb *Sessions* — it names the
+           flow, and it is the wrong thing for a 390px header to say when the
+           one fact the trainer needs at the top is whose session this is.
+           `screenTitle` would derive *Sessions* from it, so the title is
+           stated. The `<h1>` under it keeps the plan head the bar has no room
+           for, which is why these screens are not `.ph--named`. */
+        title={view.clientName}
+      />
       <main className="main" id="main-content">
-        <div className="ph">
-          <div className="ph__row">
-            <div>
-              <nav className="crumbs" aria-label="Breadcrumb">
-                <Link href="/sessions">Sessions</Link>
-                <i aria-hidden="true">/</i>
-                <Link href={`/sessions/${data.routeId}/log`}>{view.clientName}</Link>
-                <i aria-hidden="true">/</i>
-                <b>Top sets</b>
-              </nav>
-              <h1 className="ph__t">
-                {view.clientName}
-                {view.planHead ? <> &middot; {view.planHead}</> : null}
-              </h1>
-              <p className="ph__sub">
-                {stampDate(view.sessionDate)} &middot;{' '}
-                {view.endedAt ? 'logged and closed' : 'logged, not yet closed'}
-              </p>
-            </div>
-            <div className="ph__acts">
-              <Link className="btn btn--secondary" href={`/sessions/${data.routeId}/log`}>
-                <Back /> Back to the log
-              </Link>
-              <FinishLog routeId={data.routeId} workoutId={data.view.workoutId} />
-            </div>
-          </div>
-        </div>
+        <PageHeader
+          title={<>{view.clientName}
+            {view.planHead ? <> &middot; {view.planHead}</> : null}</>}
+          sub={<>{stampDate(view.sessionDate)} &middot;{' '}
+            {view.endedAt ? 'logged and closed' : 'logged, not yet closed'}</>}
+          crumbs={<nav className="crumbs" aria-label="Breadcrumb">
+              <Link href="/programs/workouts">Workouts</Link>
+              <i aria-hidden="true">/</i>
+              <Link href={`/sessions/${data.routeId}/log`}>{view.clientName}</Link>
+              <i aria-hidden="true">/</i>
+              <b>Top sets</b>
+            </nav>}
+          actions={<><Button href={`/sessions/${data.routeId}/log`} variant="secondary">
+              <Back /> Back to the log
+            </Button>
+            <FinishLog routeId={data.routeId} workoutId={data.view.workoutId} /></>}
+        />
 
         <div className="body">
-          <div className="strip">
-            <div>
-              <b>{view.setsLogged}<span className="ink3" style={{ fontSize: 14 }}>/{view.setsPlanned}</span></b>
-              <i>sets logged</i>
-            </div>
-            <div>
-              <b>{view.volumeKg.toLocaleString('en-IN')}</b>
-              <i>kg moved</i>
-            </div>
-            <div>
-              <b>
-                {view.minutes === null ? '—' : view.minutes}
-                {view.minutes === null ? null : (
-                  <span className="ink3" style={{ fontSize: 14 }}> min</span>
-                )}
-              </b>
-              <i>{view.minutes === null ? 'left open' : 'on the floor'}</i>
-            </div>
-            <div>
-              <b>
-                {data.pack
-                  ? <>{data.pack.remaining}<span className="ink3" style={{ fontSize: 14 }}>/{data.pack.total}</span></>
-                  : '—'}
-              </b>
-              <i>{data.pack ? 'pack, unchanged' : 'no session pack'}</i>
-            </div>
-          </div>
+          {/* The console's own strip, and it has to be the SAME four cells:
+              this page is one click from it and a figure that changed on the
+              way would read as a different session. `c-strip` plus `floorTime`
+              is what makes that structural rather than a promise — it was two
+              copies of the markup, and the minutes were formatted twice. */}
+          <Strip>
+            <Strip.Cell value={view.setsLogged} of={view.setsPlanned} label="sets logged" />
+            <Strip.Cell value={view.volumeKg.toLocaleString('en-IN')} unit="kg" label="moved" />
+            {view.minutes === null ? (
+              <Strip.Cell value="—" label="left open" />
+            ) : (
+              <Strip.Cell {...floorTime(view.minutes)} label="on the floor" />
+            )}
+            {data.pack ? (
+              <Strip.Cell value={data.pack.remaining} of={data.pack.total} label="pack, unchanged" />
+            ) : (
+              <Strip.Cell value="—" label="no session pack" />
+            )}
+          </Strip>
 
           <h2 className="micro" style={{ margin: '14px 0 8px' }}>
             {cells.length} top set{cells.length === 1 ? '' : 's'} checked &middot; {real} genuine
@@ -150,54 +147,78 @@ export function Bests({ data }: { data: ConsoleData }) {
           )}
 
           <div className="wk2 wk2--wide" style={{ marginTop: 14 }}>
-            <div className="card">
-              <div className="card__hd">
-                <h2 className="card__t">The three tests, in order</h2>
-              </div>
-              <div className="card__b card__b--flush">
-                <table className="tbl" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <tbody>
-                    <tr>
-                      <td style={{ width: 44 }} className="mono">1</td>
-                      <td className="strong">There has to be an earlier session</td>
-                      <td className="wrap">
-                        A first log is never a record. It is the number to beat, not a number
-                        beaten.
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="mono">2</td>
-                      <td className="strong">It has to beat the old number</td>
-                      <td className="wrap">
-                        Matching is not beating. A top set that equals the old best gets nothing at
-                        all.
-                      </td>
-                    </tr>
-                    <tr>
-                      <td className="mono">3</td>
-                      <td className="strong">Only the top set is checked</td>
-                      <td className="wrap">
-                        So a warm-up can never make one — and the gold sits on the heaviest set, not
-                        on the last set she did.
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
+            <Card
+              title="The three tests, in order"
+              flush
+            >
+              {/* No `columns`: the three tests are read in order, not compared
+                  down a column, so there is no header row to invent. */}
+              <Table
+                caption="The three tests a top set has to pass to count as a record"
+                style={{ width: '100%', borderCollapse: 'collapse' }}
+              >
+                <Row
+                  cells={[
+                    { key: 'n', content: '1', className: 'mono', style: { width: 44 } },
+                    { key: 'test', content: 'There has to be an earlier session', className: 'strong' },
+                    {
+                      key: 'why',
+                      className: 'wrap',
+                      content: (
+                        <>
+                          A first log is never a record. It is the number to beat, not a number
+                          beaten.
+                        </>
+                      ),
+                    },
+                  ]}
+                />
+                <Row
+                  cells={[
+                    { key: 'n', content: '2', className: 'mono' },
+                    { key: 'test', content: 'It has to beat the old number', className: 'strong' },
+                    {
+                      key: 'why',
+                      className: 'wrap',
+                      content: (
+                        <>
+                          Matching is not beating. A top set that equals the old best gets nothing at
+                          all.
+                        </>
+                      ),
+                    },
+                  ]}
+                />
+                <Row
+                  cells={[
+                    { key: 'n', content: '3', className: 'mono' },
+                    { key: 'test', content: 'Only the top set is checked', className: 'strong' },
+                    {
+                      key: 'why',
+                      className: 'wrap',
+                      content: (
+                        <>
+                          So a warm-up can never make one — and the gold sits on the heaviest set, not
+                          on the last set they did.
+                        </>
+                      ),
+                    },
+                  ]}
+                />
+              </Table>
+            </Card>
 
             <div>
-              <div className="why why--warn">
-                <p className="why__k">And then the plate</p>
+              <Why heading="And then the plate" tone="warn">
                 <p>
-                  A fourth test, and it decides whether her phone buzzes rather than whether the
+                  A fourth test, and it decides whether the client’s phone buzzes rather than whether the
                   record is real: a jump smaller than the <b>smallest plate in the room</b> is not a
                   session&rsquo;s worth of progress, it is a typo or a half plate.{' '}
                   <code>plateStepKg</code> is {trim1(PLATE_STEP_KG)} kg here and{' '}
                   <b>1.25 in some gyms</b>, so it is per-gym — the one number on this screen that
                   changes when the trainer changes building.
                 </p>
-              </div>
+              </Why>
               <p className="small" style={{ marginTop: 12 }}>
                 A trainer who forwards five records a week has taught a client that records mean
                 nothing. Of {cells.length} candidate{cells.length === 1 ? '' : 's'} today,{' '}

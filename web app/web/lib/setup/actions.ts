@@ -12,9 +12,9 @@ import {
   type PackInput,
 } from './api';
 import { type HourWindow, mergeWindows, sameWindows } from './hours';
-import { asWorkMode } from './options';
+import { asGender, asWorkMode } from './options';
 import { clearSkipped, dropSkipped, markSkipped } from './skipped';
-import { destinationAfter, isOptional, type SetupStep } from './steps';
+import { destinationAfter, isAnswered, isOptional, type SetupStep } from './steps';
 
 /**
  * One action per step, and every one of them writes before it returns a
@@ -64,19 +64,28 @@ async function answered(step: SetupStep): Promise<void> {
 /* ───────────────────────────────────────────────────────────── the steps ── */
 
 /**
- * Step 1 — the name, and V33's headline beside it.
+ * Step 1 — the name, the gender, and V33's headline.
  *
- * **Two fields, one write.** They are one screen and one Continue, so sending
- * them as two PATCHes would mean a headline that saved while the name did not,
+ * **Three fields, one write.** They are one screen and one Continue, so sending
+ * them as three PATCHes would mean a headline that saved while the name did not,
  * on a step whose entire promise is that it is the one thing we keep.
  *
- * **The headline is optional inside the mandatory step**, which is why it is a
- * separate argument with an empty default rather than a required one: a trainer
- * who types a name and presses Continue has answered step 1. `''` is sent
- * deliberately and clears the column — the correct meaning of emptying the field
+ * **Two of the three are mandatory and one is not**, which is why the signature
+ * reads the way it does. `name` and `gender` are both refused when absent — the
+ * flow keeps exactly one step and this is all of it. `headline` is optional
+ * inside the mandatory step and keeps its empty default; `''` is sent
+ * deliberately and clears the column, the correct meaning of emptying the field
  * and saving, and the same rule the list steps follow.
+ *
+ * **`gender` is validated against the vocabulary rather than passed through.**
+ * The column is filtered on, so an id the catalogue does not contain is a
+ * trainer who will never appear in a search and will never be told why.
  */
-export async function saveName(name: string, headline = ''): Promise<StepResult> {
+export async function saveName(
+  name: string,
+  headline = '',
+  gender: string | null = null,
+): Promise<StepResult> {
   const trimmed = name.trim().slice(0, 60);
   // A client cannot accept an invite from a blank name, and the server ignores a
   // blank `name` rather than clearing it — so an empty value here would look
@@ -84,11 +93,22 @@ export async function saveName(name: string, headline = ''): Promise<StepResult>
   if (trimmed.length === 0) {
     return { ok: false, error: { status: 400, detail: 'Your name is the one thing we can’t skip.' } };
   }
+  const parsedGender = asGender(gender);
+  if (!parsedGender) {
+    return {
+      ok: false,
+      error: { status: 400, detail: 'Pick one — “Prefer not to say” is a real answer.' },
+    };
+  }
   try {
     // 80 is `TrainerService.MAX_HEADLINE`, and over it the server refuses the
     // WHOLE patch — which on this step would take the name down with it. Cut
     // here so a pasted headline can never cost a trainer their name.
-    await patchProfile({ name: trimmed, headline: headline.trim().slice(0, 80) });
+    await patchProfile({
+      name: trimmed,
+      gender: parsedGender,
+      headline: headline.trim().slice(0, 80),
+    });
     await answered('name');
     return { ok: true, next: destinationAfter('name', await getSetupState()) };
   } catch (error) {
@@ -272,10 +292,10 @@ export async function finishWithUpi(upiId: string): Promise<StepResult> {
 /**
  * Passing on a step.
  *
- * Only the four the rail marks optional, and the guard is not defensive: a
- * `Skip` on `languages` would be a control the design deliberately does not
- * draw — that step has no Skip precisely because it is the one field no
- * competitor has.
+ * Seven of the eight now, and the one refusal left is step 1. The guard is not
+ * defensive — `isOptional` is the same predicate the rail and the foot read, so
+ * a Skip that reached here for `name` would mean a button was drawn that should
+ * not have been, and answering 400 is how that gets noticed.
  */
 export async function skipStep(step: SetupStep): Promise<StepResult> {
   if (!isOptional(step)) {
@@ -311,4 +331,58 @@ export async function finishSetup(next = '/setup/done'): Promise<StepResult> {
   } catch (error) {
     return failure(error);
   }
+}
+
+/**
+ * *Skip to home* — leave the flow from wherever you are and open the app.
+ *
+ * The same write "Finish the rest later" makes on 4b, from the seven steps
+ * instead of from the pre-flight, and it lands on `/today` rather than
+ * `/setup/done`: a trainer who pressed *Skip to home* asked for the app, and
+ * showing them a completion meter first is answering a different request. The
+ * meter is still where they arrive from Continue, and the profile card on
+ * `/today` carries the remainder from then on.
+ *
+ * ── THE GUARD IS THE WHOLE FLOW'S ONE RULE, ENFORCED ONCE ────────────────────
+ *
+ * `completeSetup` is what stops the server asking for setup again, so this is
+ * the only door out of the flow — and a trainer who walked through it without a
+ * name would have an account that can never send an invite and would never be
+ * asked for one again. Every caller already hides the button until step 1 is
+ * answered; this is the copy of that rule that cannot be forgotten at a
+ * call-site, and it re-reads the state from the server rather than trusting a
+ * prop.
+ */
+export async function skipToHome(): Promise<StepResult> {
+  try {
+    if (!isAnswered('name', await getSetupState())) {
+      return {
+        ok: false,
+        error: { status: 400, detail: 'Your name and gender first — everything after that can wait.' },
+      };
+    }
+    return await finishSetup('/today');
+  } catch (error) {
+    return failure(error);
+  }
+}
+
+/**
+ * *Skip to home* from step 1 itself, where the answer is on the screen rather
+ * than on the account yet.
+ *
+ * One action and not two calls from the browser: a `saveName` followed by a
+ * `skipToHome` is two round trips with a window between them where the name has
+ * landed and the flow has not been stamped, and a tab closed in that window
+ * leaves the trainer being asked for setup again on their next sign-in — which
+ * is the one thing this flow must not do to somebody who has already answered.
+ */
+export async function finishFromName(
+  name: string,
+  headline = '',
+  gender: string | null = null,
+): Promise<StepResult> {
+  const saved = await saveName(name, headline, gender);
+  if (!saved.ok) return saved;
+  return finishSetup('/today');
 }

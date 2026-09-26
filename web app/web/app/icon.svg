@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- The app icon, from identity.html: the mark on the lime tile, at 58% and
+       centred, with the identity's 22.4% corner radius. Dark ink on lime, which
+       is the one lockup that is a single colour in the identity too. -->
+  <rect width="32" height="32" rx="7.2" fill="#C6F24E"/>
+  <g transform="translate(6.72 6.72) scale(0.3867)" fill="none" stroke="#0A0B0D"
+     stroke-width="6.5" stroke-linejoin="miter" stroke-linecap="butt">
+    <path d="M10 42 L24 30 L38 42" opacity=".24"/>
+    <path d="M10 32 L24 20 L38 32" opacity=".48"/>
+    <path d="M10 22 L24 10 L38 22"/>
+  </g>
+</svg>

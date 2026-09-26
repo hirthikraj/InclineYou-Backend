@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { Button } from '@/web-components/ui/Button';
 
 /**
  * A destination the sign-in flow can reach that has not been built yet.
@@ -18,7 +18,7 @@ export function NotBuilt({
   what: string;
 }) {
   return (
-    <div className="app app--noshell" data-theme="dark">
+    <div className="app app--noshell">
       <div
         style={{
           height: '100%',
@@ -43,9 +43,9 @@ export function NotBuilt({
             <b>{frame}</b> in the design set.
           </p>
           <p style={{ marginTop: 24 }}>
-            <Link className="btn btn--secondary btn--lg" href="/sign-in">
+            <Button href="/sign-in" variant="secondary" size="lg">
               Back to sign in
-            </Link>
+            </Button>
           </p>
         </div>
       </div>

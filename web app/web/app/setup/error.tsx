@@ -1,5 +1,7 @@
 'use client';
 
+import { Button } from '@/web-components/ui/Button';
+
 /**
  * When the profile will not load.
  *
@@ -15,7 +17,7 @@
  */
 export default function SetupError({ reset }: { error: Error; reset: () => void }) {
   return (
-    <div className="app app--noshell" data-theme="dark">
+    <div className="app app--noshell">
       <div
         style={{
           height: '100%',
@@ -37,9 +39,9 @@ export default function SetupError({ reset }: { error: Error; reset: () => void 
             server did not answer just now.
           </p>
           <p style={{ marginTop: 24 }}>
-            <button className="btn btn--primary btn--lg" type="button" onClick={reset}>
+            <Button variant="primary" size="lg" onClick={reset}>
               Try again
-            </button>
+            </Button>
           </p>
         </div>
       </div>

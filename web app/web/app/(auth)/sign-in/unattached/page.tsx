@@ -5,7 +5,7 @@ import { Unattached } from '@/components/auth/Unattached';
 import { formatPhone, readClaims } from '@/lib/auth/claims';
 import { getPendingPhone, getToken, getWall } from '@/lib/auth/session';
 
-export const metadata = { title: 'Nobody is coaching you · X REP' };
+export const metadata = { title: 'Nobody is coaching you · InclineYou' };
 
 /**
  * §08 · 7e · `/sign-in/unattached`.
@@ -57,7 +57,11 @@ export default async function Page() {
        screen. Repeating the subtitle here — which the first version did — spends
        the one sentence the product gets read before anything is asked on
        something the reader is about to read anyway. */
-    <AuthShell quote="X REP works from a trainer's roster. Nobody is a client until somebody adds them.">
+    <AuthShell
+      eyebrow="Nothing live"
+      lead="Your trainer opens the door."
+      quote="InclineYou works from a trainer’s roster. The moment somebody adds this number, everything is here waiting."
+    >
       {/* Null at a cold sign-in: the unattached response carries no memberships
           and no `trainerName`. The decline and acknowledge flows will have one to
           pass when they are built. */}

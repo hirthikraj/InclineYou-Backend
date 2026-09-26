@@ -2039,6 +2039,63 @@ button.ev--late{border-left-color:var(--tx-warn)}
 .tl__t{font-size:13px;font-weight:600;color:var(--tx-ink);margin-top:2px}
 .tl__b{font-size:12.5px;color:var(--tx-ink-3);margin-top:2px;line-height:1.5}
 
+/* ── brief — what a flow is about to ask, named before anything is asked ────
+   The pre-flight's list, and the one thing §10 draws that had no class. It is
+   NOT a timeline and it is not a `.lrow`, which is the reason it exists:
+
+     · `.tl` is what HAPPENED, newest first, hung off a rule. This is what is
+       ABOUT TO happen, in the order it will be asked. Borrowing the timeline
+       would also borrow its dot's `box-shadow:0 0 0 3px var(--tx-canvas)`,
+       which is a halo cut out of the canvas — and this list sits on
+       `--tx-surface`, where that ring draws as a dark outline round every dot.
+     · `.lrow` ellipsises `__t` and `__s` on one line, because it is the finding
+       pane of a split. Every subtitle here is a sentence that has to wrap.
+
+   The tile recipe is `.stat`'s, one surface up: `--tx-surface-2`, so it still
+   reads as raised when the panel under it is `--tx-surface`. The count is a
+   RANGE (`2–4`) rather than a number, because five rows cover eight steps —
+   which is what ties the body to the rail without drawing the rail twice.
+   §10 forbids two progress systems; a range is a contents entry, not a state,
+   and nothing here is ever lit. */
+.brf{display:flex;flex-direction:column;gap:8px;list-style:none;margin:0;padding:0}
+.brf__i{
+  display:flex;align-items:flex-start;gap:12px;
+  padding:13px 14px;border:1px solid var(--tx-line);border-radius:var(--tx-r3);
+  background:var(--tx-surface-2);
+}
+/* A pill, not the rail's circle. `2–4` does not fit in 24px, and a row of
+   circles beside a row of pills reads as two different kinds of thing. */
+.brf__n{
+  flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;
+  min-width:34px;height:22px;padding:0 7px;border-radius:var(--tx-r1);
+  background:var(--tx-surface-3);
+  font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.06em;
+  color:var(--tx-ink-3);
+}
+.brf__m{flex:1;min-width:0}
+.brf__t{display:block;font-size:13.5px;font-weight:600;color:var(--tx-ink)}
+.brf__s{display:block;font-size:12.5px;color:var(--tx-ink-3);margin-top:3px;
+  line-height:1.5}
+/* The right slot holds a `.tag`, so it is aligned to the title's line rather
+   than to the middle of a block whose height depends on how far the subtitle
+   wrapped. */
+.brf__r{flex:0 0 auto;margin-top:1px}
+/* On a phone the tag was taking about 90px off a 300px row and breaking every
+   marked title across two lines — *When you work and what you* / *sell* — so
+   the one row that says a question can be skipped is the one hardest to read.
+   It goes under instead, indented past the count (34px pill + 12px gap) so it
+   still hangs off the entry rather than off the tile's edge.
+
+   `flex:0 1 100%` and NOT `width:100%`: the base rule is `flex:0 0 auto`, so a
+   percentage width plus the 46px indent could not shrink back and pushed the
+   row 31px past the tile — which `.stp__r` is `overflow-y:auto` enough to
+   notice, so the whole step grew a horizontal scrollbar. A basis of 100% with
+   shrink left on takes the indent out of its own width instead. */
+@media (max-width:560px){
+  .brf__i{flex-wrap:wrap}
+  .brf__r{order:3;flex:0 1 100%;margin:8px 0 0 46px}
+}
+
 /* ── keyboard hint strip, bottom of a screen ──────────────────────────────── */
 .keys{
   display:flex;align-items:center;gap:16px;flex-wrap:wrap;
@@ -3190,6 +3247,24 @@ button.lrow,label.lrow{
 .wiz__opt{font-family:var(--tx-mono);font-size:9.5px;letter-spacing:.09em;
   text-transform:uppercase;color:var(--tx-ink-3);margin-left:auto;
   flex:0 0 auto;padding-top:3px}
+/* THE SAME SLOT, MARKING THE OTHER CASE — and which one a flow draws depends on
+   which is the exception.
+
+   Setup was four optional steps out of eight and marked those. It is now ONE
+   required step out of eight, and marking the other seven would put an
+   identical grey word down seven of the eight rows: a marker on almost every
+   row is furniture, and the eye stops reading it exactly where it matters. So
+   the rail marks the exception, and the exception changed sides.
+
+   `--tx-ink-2` rather than `--tx-ink-3`, and no accent. It has to out-rank the
+   row's own hint line, which is `ink-3` — but *required* is a fact about the
+   step, not a warning about the trainer, and a lime or a danger tone on the
+   first row of a flow that has not been used yet reads as something already
+   going wrong. */
+.wiz__req{font-family:var(--tx-mono);font-size:9.5px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--tx-ink-2);margin-left:auto;
+  flex:0 0 auto;padding-top:3px}
+
 
 /* ══════════════════════════════════════════════════════════════════════════
    11 · THE ROSTER, AS A TABLE

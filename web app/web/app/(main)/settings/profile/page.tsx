@@ -3,7 +3,7 @@ import { getIdentity } from '@/lib/profile/api';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: 'Your profile · X REP' };
+export const metadata = { title: 'Your profile · InclineYou' };
 
 /**
  * IDENTITY — the profile's first tab, and its root: `/settings/profile` is
@@ -22,9 +22,5 @@ export const metadata = { title: 'Your profile · X REP' };
 export default async function Page() {
   const identity = await getIdentity();
 
-  return (
-    <div className="body">
-      <IdentityForm initial={identity} />
-    </div>
-  );
+  return <IdentityForm initial={identity} />;
 }

@@ -8,10 +8,21 @@ const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 /**
  * How many pips a column shows before the rest collapse into a +N chip.
- * Six keeps columns at a scan-able height on a 390px screen without hiding
- * workload a trainer might need to see at a glance.
+ *
+ * Was six, and six was the number that fitted UNDER two bands of duplicated
+ * counts. Those are one 44px strip now, so the column has ~100px more to work
+ * with on an 844px phone — reclaimed height that would otherwise have become
+ * whitespace under the legend, since `.wkp__grid` is `flex:0 0 auto` and a pip
+ * is a fixed 44px. Space given back to a screen has to land on something or it
+ * was not given back.
+ *
+ * Seven at 47px a row (44 plus the 3px column gap) is what an 844px phone clears
+ * with the top bar, toolbar, strip and tab bar in place, and it is chosen to fit
+ * rather than to fill: eight was measured at 16px over, and a grid that scrolls
+ * by 16px reads as broken in a way that one fewer pip does not. A shorter phone
+ * scrolls `.wkp`, which is what it already did at six.
  */
-const MAX_PIPS = 6;
+const MAX_PIPS = 7;
 
 interface WeekPipsProps {
   grid: ScheduleGrid;
@@ -31,30 +42,20 @@ interface WeekPipsProps {
  * time grid takes over; the time grid is hidden at ≤900px in week view.
  */
 export function WeekPips({ grid, onOpenDay }: WeekPipsProps) {
-  const { days, totals } = grid;
-
-  const done = days.reduce(
-    (n, d) => n + d.placed.filter((p) => p.session.done).length,
-    0,
-  );
-  const freeHours = Math.round(totals.gapMinutes / 60);
+  const { days } = grid;
 
   return (
     <div className="wkp">
-      {/* Tally bar: booked · done · free */}
-      <div className="wkp__tally" aria-label="Week summary">
-        <span>
-          <b>{totals.sessions}</b>booked
-        </span>
-        <hr aria-hidden="true" />
-        <span data-tone="ok">
-          <b>{done}</b>done
-        </span>
-        <hr aria-hidden="true" />
-        <span data-tone={freeHours > 0 ? 'warn' : undefined}>
-          <b>{freeHours}h</b>free
-        </span>
-      </div>
+      {/*
+        THE TALLY PILL THAT WAS HERE IS NOW `ScheduleStats`, ONE LEVEL UP.
+        It said *42 booked · 22 done · 25h free* and it was drawn only on the
+        week, below a header subtitle that was already saying *42 sessions* and
+        *23 sellable hours free* — the same numbers, twice, in 119px. The strip
+        that replaced it is 44px, sits on all three views, and carries each fact
+        once. Nothing was lost from this component except the duplication: `done`
+        moved with it, and the free hours went to the `Show gaps · N` chip that
+        was always the better place for them.
+      */}
 
       {/* Seven-column pip grid */}
       <div className="wkp__grid" role="group" aria-label="Sessions this week by day">
@@ -126,11 +127,11 @@ export function WeekPips({ grid, onOpenDay }: WeekPipsProps) {
       <div className="wkp__leg" aria-hidden="true">
         <span>
           <s style={{ background: 'var(--tx-accent)' }} />
-          Floor
+          In Person
         </span>
         <span>
           <s style={{ background: 'var(--tx-remote)' }} />
-          Remote
+          Online
         </span>
       </div>
     </div>

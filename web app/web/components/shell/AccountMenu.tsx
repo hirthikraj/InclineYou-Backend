@@ -7,7 +7,10 @@ import { useFormStatus } from 'react-dom';
 import { signOut } from '@/lib/auth/actions';
 import { formatPhone } from '@/lib/auth/policy';
 import { initials } from '@/lib/today/time';
-import { ChevronUp, Gear, Out, Team, User } from './Icons';
+import { ChevronUp, Out } from './Icons';
+import { ACCOUNT, type Destination } from './nav';
+
+import { ThemeSwitch } from '@/web-components/ui/ThemeSwitch';
 
 /**
  * The rail's foot — `webapp-rail.html` frame 2b, "the account menu".
@@ -19,26 +22,26 @@ import { ChevronUp, Gear, Out, Team, User } from './Icons';
  * trainer on a shared gym desktop had no way to leave except clearing cookies.
  *
  * ═══════════════════════════════════════════════════════════════════════════
- * WHAT THE ELLIPSIS MEANS HERE, WHICH IS NOT WHAT IT MEANS IN THE DESIGN
+ * THE ROW IS *Sign out*, WITH NO ELLIPSIS
  *
- * §2b is emphatic about the punctuation: *Sign out…* "with an ellipsis, because
- * it leads to a screen that lists what is still queued rather than to a dialog
- * that cannot name it. There are six entries waiting on this device." The phone
- * builds precisely that screen and `SignOutScreen.tsx` gives the same reason.
+ * §2b sets the label as *Sign out…* "with an ellipsis, because it leads to a
+ * screen that lists what is still queued rather than to a dialog that cannot name
+ * it. There are six entries waiting on this device." The phone builds precisely
+ * that screen and `SignOutScreen.tsx` gives the same reason.
  *
  * **On this half there is no queue, so there is no such screen** — the
  * online-only rule in `AGENTS.md`, the same call that drops the dashboard's
- * offline banner and the top bar's sync pill. The tempting conclusion is that the
- * ellipsis goes with it and the row signs out on click.
+ * offline banner and the top bar's sync pill. With nothing to enumerate, the
+ * ellipsis would be promising a listing the web shell never shows, so the row
+ * reads plainly: **Sign out**.
  *
- * It does not, because signing out here is still not free and the cost is simply
- * a different one: **getting back in costs an SMS code**, against a ceiling of
- * ten a day (`MAX_SENDS_PER_DAY`), plus the wait for it. A one-click row at the
- * bottom of a navigation column that is on screen on every screen, two rows below
- * a client's name, is a misclick that ends the session. So the ellipsis is kept
- * and it leads to a confirm step whose whole job is to name the real cost — which
- * is the same promise the design's screen was making, about the thing that is
- * actually at stake here.
+ * The click still does not sign out on the spot, because signing out here is not
+ * free: **getting back in costs an SMS code**, against a ceiling of ten a day
+ * (`MAX_SENDS_PER_DAY`), plus the wait for it. A one-click row at the bottom of a
+ * navigation column that is on screen on every screen, two rows below a client's
+ * name, is a misclick that ends the session. So the row leads to a confirm step
+ * whose whole job is to name that cost — the same promise the design's screen was
+ * making, about the thing that is actually at stake here.
  *
  * ═══════════════════════════════════════════════════════════════════════════
  * THE CONFIRM REPLACES THE MENU RATHER THAN OPENING OVER IT
@@ -81,11 +84,31 @@ import { ChevronUp, Gear, Out, Team, User } from './Icons';
 export function AccountMenu({
   trainerName,
   trainerPhone,
+  rows = ACCOUNT,
+  role = 'Trainer',
 }: {
   trainerName: string;
   /** From `/v1/trainers/me`. Null on a profile that has none, and on an older
    *  backend — the header drops the line rather than printing a blank one. */
   trainerPhone: string | null;
+  /**
+   * The shelf's rows, from `nav.tsx`. Two for a trainer, one for a client —
+   * `CLIENT_ACCOUNT` carries why the client's split is not the trainer's.
+   *
+   * A parameter and not a fork, for the reason the rows were moved into
+   * `nav.tsx` in the first place: this menu and the phone's *More* sheet both
+   * map the same array, and two copies of it is how a screen ends up reachable
+   * from one surface and not the other. The client portal has no sheet, but it
+   * has a rail foot and a tab bar, which is the same trap with different names.
+   */
+  rows?: Destination[];
+  /**
+   * The second line under the name. *Trainer* on the trainer's own shelf; the
+   * client portal passes *with Arun*, because on that half the useful fact is
+   * not which role you are — you only have one — but whose book is open, which
+   * is the question a client on two rosters actually has.
+   */
+  role?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -195,7 +218,7 @@ export function AccountMenu({
         </span>
         <span className="rail__acct__n">
           {name}
-          <i>Trainer</i>
+          <i>{role}</i>
         </span>
         <ChevronUp size={15} />
       </button>
@@ -220,46 +243,69 @@ export function AccountMenu({
               machinery every screen reads — hours, nudge wording — and this is the
               trainer themselves, so it goes above rather than inside it.
             */}
-            <Link
-              className="menu__i"
-              role="menuitem"
-              href="/settings/profile"
-              onClick={() => close(false)}
-            >
-              <User size={15} />
-              Your profile
-            </Link>
-            <Link
-              className="menu__i"
-              role="menuitem"
-              href="/settings"
-              onClick={() => close(false)}
-            >
-              <Gear size={15} />
-              Settings
-            </Link>
+            {rows.map((row) => (
+              <Link
+                key={row.key}
+                className="menu__i"
+                role="menuitem"
+                href={row.href}
+                title={row.purpose}
+                onClick={() => close(false)}
+              >
+                {row.icon}
+                {row.label}
+              </Link>
+            ))}
             {/*
-              TEAM, HERE RATHER THAN IN THE RAIL, and it is a demotion on purpose.
+              TEAM IS NOT HERE ANY MORE, AND THE ROW WAS NOT DELETED — IT MOVED.
 
-              It was a rail row in the GROW group until the five-destination pass.
-              V26's law is that "a team widens reads; it never moves ownership", so
-              nothing on that screen changes a trainer's day — it changes who else
-              can see it. That is a permissions surface, and permissions live with
-              the account, next to Settings, which is the other thing on this menu
-              a trainer opens about once a month.
+              It sat between Settings and the theme for one pass, demoted out of
+              the rail on the argument that "a team widens reads; it never moves
+              ownership", so nothing on that screen changes a trainer's day and
+              it belongs on the shelf a trainer reads once a month.
 
-              It is a real route and it keeps every screen it had; what it loses is
-              a permanent 40px of a column that has five things to say.
+              That filing was the mistake. A team is not a permissions surface
+              filed beside Settings — it is a DIFFERENT BOOK: different clients,
+              a different money book, a different roster. Which one is open scopes
+              every figure on every screen, and a question that scopes the whole
+              app cannot live three clicks inside a menu about the account.
+
+              So it is the top bar's workspace switcher now, in the slot the
+              breadcrumb held (`WorkspaceMenu.tsx` carries the whole argument),
+              and `/team` is reached from that menu's foot — which is what stops
+              this being the deletion it looks like. `nav.tsx`'s `ACCOUNT` lost
+              the row in the same commit, so the phone's sheet lost it too and
+              the two widths still cannot disagree about what is on this shelf.
             */}
-            <Link
-              className="menu__i"
-              role="menuitem"
-              href="/team"
-              onClick={() => close(false)}
-            >
-              <Team size={15} />
-              Team
-            </Link>
+            {/*
+              THE THEME, HERE RATHER THAN IN SETTINGS.
+
+              §01 has carried a complete light palette from the beginning and the
+              product never had a way to reach it — the server wrote
+              `data-theme="dark"` and nothing ever wrote that attribute again.
+              This is the way.
+
+              On the account menu rather than in Settings because it is the
+              trainer's own preference and not the business's: Settings is the
+              machinery every screen reads — hours, the gym's share, nudge
+              wording — and changing any of it changes what the product SAYS.
+              This changes only how it looks, to this person, on this device.
+
+              A row rather than a `menuitem`: an item that neither navigates nor
+              closes the menu would lie to a reader about what Enter does. The
+              group inside carries its own label and its own two buttons.
+            */}
+            {/*
+              ONLY WHEN THERE ARE ROWS ABOVE IT. `.menu__hd` already draws a
+              `border-bottom`, so on the client's shelf — which is empty, see
+              `CLIENT_ACCOUNT` — an unconditional rule here would put two
+              hairlines 9px apart under the name.
+            */}
+            {rows.length > 0 && <div className="menu__sep" />}
+            <div className="menu__row">
+              <span>Theme</span>
+              <ThemeSwitch />
+            </div>
             <div className="menu__sep" />
             <button
               className="menu__i menu__i--danger"
@@ -268,7 +314,7 @@ export function AccountMenu({
               onClick={() => setConfirming(true)}
             >
               <Out size={15} />
-              Sign out&hellip;
+              Sign out
             </button>
           </div>
         ))}

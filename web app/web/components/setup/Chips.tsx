@@ -1,6 +1,7 @@
 'use client';
 
 import { IconPlus } from '@/components/auth/Icons';
+import { Chip as UiChip } from '@/web-components/ui/Chip';
 
 /**
  * The chip row every pick-one and pick-many step uses — §11's `.chip`.
@@ -49,16 +50,14 @@ export function Chip({
   onClick: () => void;
 }) {
   return (
-    <button
-      className="chip"
-      type="button"
-      aria-pressed={pressed}
+    <UiChip
+      pressed={pressed}
       aria-disabled={dimmed || undefined}
       disabled={disabled}
       onClick={onClick}
     >
       {mono ? <span className="mono">{label}</span> : label}
-    </button>
+    </UiChip>
   );
 }
 
@@ -87,16 +86,10 @@ export function AddChip({
   onClick: () => void;
 }) {
   return (
-    <button
-      className="chip chip--ghost"
-      type="button"
-      aria-pressed={pressed || undefined}
-      disabled={disabled}
-      onClick={onClick}
-    >
+    <UiChip ghost pressed={pressed || undefined} disabled={disabled} onClick={onClick}>
       {icon ? <IconPlus size={12} /> : null}
       {label}
-    </button>
+    </UiChip>
   );
 }
 

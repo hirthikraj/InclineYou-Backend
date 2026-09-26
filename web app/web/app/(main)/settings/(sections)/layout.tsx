@@ -45,7 +45,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       <SettingsBar crumb="Settings" />
 
       <main className="main" id="main-content">
-        <div className="ph">
+        <div className="ph ph--named">
           <div className="ph__row">
             <div className="ph__id">
               <h1 className="ph__t">Settings</h1>

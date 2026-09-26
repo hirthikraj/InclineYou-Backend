@@ -2,7 +2,7 @@ import { Team } from '@/components/team/Team';
 import { Unavailable } from '@/components/today/Unavailable';
 import { requireTeam } from '@/lib/team/guard';
 
-export const metadata = { title: 'Team · X REP' };
+export const metadata = { title: 'Team · InclineYou' };
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
@@ -16,7 +16,8 @@ export default async function Page() {
     );
   }
 
-  const { now, team, members, invitations, clients, templates, activity } = result.data;
+  const { team, members, invitations, clients, templates, activity } = result.data;
+  const { now } = result;
 
   return (
     <Team

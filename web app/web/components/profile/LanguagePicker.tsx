@@ -14,8 +14,8 @@ import { LANGUAGES, customId, labelFor } from '@/lib/setup/options';
  *
  * **Zero of the eight platforms in the teardown ask this.** In a market where a
  * client may specifically want a Tamil- or Marathi-speaking coach, it is one
- * field no competitor can match — which is why the setup step that renders this
- * has no Skip while the two around it do.
+ * field no competitor can match, and the reason the rail's hint for the setup
+ * step that renders this is "nobody else asks".
  *
  * **No cap, deliberately.** Someone who genuinely coaches in five languages
  * should be able to say so; the argument that caps specialities — "does

@@ -2,6 +2,7 @@
 
 import type { TrendBar } from '@/lib/money/compute';
 import { rupees, rupeesShort } from '@/lib/today/time';
+import { Tag } from '@/web-components/ui/Tag';
 
 /**
  * THE MONTHLY TREND — six bars, and the restraint is the feature.
@@ -13,7 +14,7 @@ import { rupees, rupeesShort } from '@/lib/today/time';
  * answer the only question being asked here, which is *better or worse than
  * lately*, and the average line is the answer's yardstick.
  *
- * ── WHY IT LIVES ON THE LEDGER AND NOT IN REPORTS ────────────────────────────
+ * ── WHY IT LIVES ON PAYMENTS AND NOT IN REPORTS ────────────────────────────
  *
  * *Reports* is a stub, and putting the one chart a trainer wants behind an unbuilt
  * tab is how it stays unread. It also belongs beside the tiles it explains: the
@@ -55,9 +56,12 @@ export function TrendChart({
 
   return (
     <div className="card">
-      <div className="card__hd">
+      {/* `.mny__hd` — see `OwedTab`. A title, a tag and the average is 56px past
+          the card's right edge at 320px, and `.main` is `overflow:hidden`, so
+          the average was clipped rather than reachable. */}
+      <div className="card__hd mny__hd">
         <h2 className="card__t">Last {n} months</h2>
-        <span className="tag">Your share, as it landed</span>
+        <Tag>Your share, as it landed</Tag>
         {averagePerMonth > 0 && (
           <span className="card__acts small" style={{ color: 'var(--tx-ink-3)' }}>
             {rupees(averagePerMonth)}/month average
@@ -115,7 +119,12 @@ export function TrendChart({
                 left: `calc(${(i / n) * 100}% + 16px)`,
                 width: `calc(${(1 / n) * 100}% - 10px)`,
                 textAlign: 'center',
-                ...(bar.isCurrent ? { color: 'var(--tx-accent)' } : {}),
+                /* `--tx-accent-text` and NOT `--tx-accent`. The raw accent is a
+                   FILL — the rule §04 states in one line — and as ink on the
+                   card it measured 1.3:1 in light, which is the current month's
+                   label, the one a trainer is looking for, drawn invisibly.
+                   `MonthBars` beside it had this right; this one did not. */
+                ...(bar.isCurrent ? { color: 'var(--tx-accent-text)' } : {}),
               }}
             >
               {bar.label}
@@ -124,8 +133,13 @@ export function TrendChart({
         </div>
 
         <p className="small" style={{ color: 'var(--tx-ink-3)', marginTop: 12, lineHeight: 1.6 }}>
+          {/* *The payments list ABOVE* until 20 Sep 2026, when this chart moved
+              off the ledger and onto the Overview — where there is no payments
+              list above it, or anywhere on the page. The distinction it draws is
+              the one thing on this card a trainer can get wrong, so it is kept
+              and pointed at the page that now owns those rows. */}
           Money that <b>arrived</b>, by the month it arrived in — the gym&#8217;s cut already
-          taken out. The ledger above counts what was <b>billed</b> in the period you picked,
+          taken out. <b>Transactions</b> counts what was <b>billed</b> in the period you picked,
           which is a different question and can be a different number.
           {bars[n - 1]?.isCurrent && ' The last bar is this month so far, and is not in the average.'}
         </p>

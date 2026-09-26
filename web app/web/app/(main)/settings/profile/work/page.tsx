@@ -3,7 +3,7 @@ import { getIdentity, getWorkingWeek } from '@/lib/profile/api';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: 'Work & hours · X REP' };
+export const metadata = { title: 'Work & hours · InclineYou' };
 
 /**
  * WORK & HOURS — the profile's sixth tab, and the only one that reads two
@@ -28,9 +28,5 @@ export const metadata = { title: 'Work & hours · X REP' };
 export default async function Page() {
   const [identity, hours] = await Promise.all([getIdentity(), getWorkingWeek()]);
 
-  return (
-    <div className="body">
-      <WorkPanel identity={identity} hours={hours} />
-    </div>
-  );
+  return <WorkPanel identity={identity} hours={hours} />;
 }

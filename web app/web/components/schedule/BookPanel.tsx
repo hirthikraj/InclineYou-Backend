@@ -2,16 +2,22 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 
-import {
-  avatarToken, dayLong, formatMinute, initials, rupees,
-} from '@/lib/today/time';
+import { dayLong, formatMinute, formatMinuteRange, rupees } from '@/lib/today/time';
 import type { RateSource } from '@/lib/today/day';
-import type { ScheduleClient, ScheduleSession } from '@/lib/schedule/api';
-import { bookSession } from '@/lib/schedule/actions';
+import type { BookSession, ScheduleClient } from '@/lib/schedule/session';
+import { bookSession, cancelSession } from '@/lib/schedule/actions';
+import { useToast } from '@/lib/toast/store';
 import { lengthChoices, SNAP_MINUTES } from '@/lib/schedule/result';
+import { TimeField } from '@/components/shell/TimeField';
 import { collisionsAt, insideHours, suggestClients } from '@/lib/schedule/book';
 import { Check, Search } from '@/components/shell/Icons';
 import { Cross, Remote, WarnTriangle } from './Icons';
+import { useDismiss } from '@/lib/ui/dismiss';
+import { Button } from '@/web-components/ui/Button';
+import { Tag } from '@/web-components/ui/Tag';
+import { Chip } from '@/web-components/ui/Chip';
+import { KeyValueRow } from '@/web-components/ui/KeyValue';
+import { Avatar } from '@/web-components/ui/Avatar';
 
 /**
  * NEW SESSION — AND THE CLICK ANSWERED THREE OF THE FIVE QUESTIONS.
@@ -50,7 +56,28 @@ interface BookPanelProps {
   /** Minutes from midnight, already snapped to fifteen. */
   minute: number;
   clients: ScheduleClient[];
-  sessions: ScheduleSession[];
+  /**
+   * Who the click already named, or null.
+   *
+   * Only the week-by-client pivot sets it: a cell there is the intersection of a
+   * person and a day, so the form opens with three of its five questions
+   * answered instead of two. Everything downstream still derives from the
+   * picked client the way it always did — the length, the delivery mode, the
+   * rate and the pack warning are all read off `clientId` — so seeding the state
+   * is the whole change, and the roster below stays open and re-pickable rather
+   * than collapsing into a fact. A default that cannot be overridden is a rule
+   * wearing a control's clothes.
+   */
+  clientId?: string | null;
+  /**
+   * Every session the opening screen holds, in the five fields this form reads.
+   *
+   * The schedule passes its own window; Today passes the thirty days it already
+   * fetched. Wider than the day being booked on purpose — `suggestClients` ranks
+   * on *trains around this hour on Thursdays*, and one day's rows cannot say
+   * that about anybody. `collisionsAt` narrows to the slot's own day itself.
+   */
+  sessions: BookSession[];
   windows: { startMinute: number; endMinute: number }[];
   rates: RateSource;
   onClose: () => void;
@@ -58,26 +85,63 @@ interface BookPanelProps {
 }
 
 export function BookPanel({
-  dayAt, minute, clients, sessions, windows, rates, onClose, onBooked,
+  dayAt, minute, clients, clientId: asked = null, sessions, windows, rates, onClose, onBooked,
 }: BookPanelProps) {
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const { show } = useToast();
   const [query, setQuery] = useState('');
-  const [clientId, setClientId] = useState<string | null>(null);
+  const [clientId, setClientId] = useState<string | null>(asked);
   const [minutes, setMinutes] = useState<number | null>(null);
   const [mode, setMode] = useState<'floor' | 'remote' | null>(null);
   const [startMinute, setStartMinute] = useState(minute);
 
-  const panelRef = useRef<HTMLElement | null>(null);
   const returnTo = useRef<Element | null>(null);
 
+  /* ── CLOSING IS TWO STEPS, AND THE PANEL OWNS THE FIRST ────────────────────
+   *
+   * The same split `SessionPanel` takes, for the same reason and out of the same
+   * hook: `onClose` unmounts this box, so calling it directly gave the panel a
+   * 240ms arrival and no departure. `dismiss` applies webapp.css's closed state,
+   * waits for the transition it starts, and then unmounts. It also retires the
+   * `closeRef` below, because `dismiss` is stable and the mount effect can now
+   * name its dependency honestly — `lib/ui/dismiss.ts` keeps that same guard one
+   * level down, where the inline arrow from `Schedule` actually lands. */
+  const { closing, dismiss, dismissThen, ref: panelRef } = useDismiss<HTMLElement>(onClose);
+
+  /*
+   * ── THE PANEL USED TO STEAL FOCUS EVERY THIRTY SECONDS ────────────────────
+   *
+   * This effect mounts the panel: it remembers what was focused, focuses the
+   * panel, and binds Escape. All three are once-per-open things, and it was
+   * keyed `[onClose]` — a prop `Schedule` passes as an inline arrow, so a NEW
+   * FUNCTION on every render of the parent.
+   *
+   * `Schedule` calls `useNow`, which `setNow`s on a 30-second interval. So
+   * every thirty seconds the parent re-rendered, `onClose` changed identity,
+   * this effect tore down and re-ran — and its cleanup calls
+   * `returnTo.current?.focus()`, which throws focus back to the control that
+   * opened the panel before the body focuses the panel again. Mid-sentence, in
+   * whatever field the trainer was typing into.
+   *
+   * FOUND BY TYPING INTO THE NEW TIME FIELD and watching `focusin
+   * INPUT.tfld__n` be followed immediately by `focusin ASIDE.panel` with no
+   * keystroke in between. It is not a new bug and not that field's: the roster
+   * search box here and the notes textarea in the sibling panel have been
+   * losing focus to it too. A segmented field only made it impossible to miss,
+   * because it takes four keystrokes where a text box takes one.
+   *
+   * The handler goes in a ref so the effect can key on `[]` and mean it.
+   * Escape still calls the LATEST `onClose` — the ref is kept current by its
+   * own effect above — which is the whole reason the dependency was there.
+   */
   useEffect(() => {
     returnTo.current = document.activeElement;
     panelRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose();
+        dismiss();
       }
     };
     document.addEventListener('keydown', onKey);
@@ -85,7 +149,7 @@ export function BookPanel({
       document.removeEventListener('keydown', onKey);
       (returnTo.current as HTMLElement | null)?.focus?.();
     };
-  }, [onClose]);
+  }, [dismiss, panelRef]);
 
   const at = dayAt + startMinute * 60_000;
   const client = clients.find((c) => c.id === clientId) ?? null;
@@ -135,19 +199,53 @@ export function BookPanel({
         // drawing them on the floor forever after they switch to remote.
         deliveryMode: mode,
       });
-      if (!res.ok) setError(res.message ?? 'The booking did not go through.');
-      else onBooked();
+      if (!res.ok) {
+        setError(res.message ?? 'The booking did not go through.');
+        return;
+      }
+      /* A RECEIPT, NOT A NOTICE, and the difference is the deadline.
+         The panel closes over the grid it just wrote to, and on the day and
+         week views the new block is usually below the fold or behind the
+         scroller — so there is no row on screen for the write to land on. What
+         makes it the other motion is `sessionId`: `cancelSession` is a real
+         inverse, so this confirm can carry an Undo, and an Undo is only honest
+         while the card is up. Five seconds, then it is a booking like any
+         other and the way back is the block's own panel.
+
+         The trainer is not messaged either way — `cancelSession` says so — so
+         undoing inside the window costs nobody an explanation. */
+      const id = res.sessionId;
+      show({
+        tone: 'ok',
+        variant: 'receipt',
+        title: <>Booked</>,
+        body: (
+          <>
+            {client?.name ?? 'Session'} &middot; {dayLong(dayAt)} at {formatMinute(startMinute)}
+          </>
+        ),
+        action: id ? { label: 'Undo', onClick: () => void cancelSession(id) } : undefined,
+      });
+      /* A booking that lands leaves the same way a cancelled one does. `onBooked`
+         unmounts this panel AND refreshes the grid behind it, so calling it
+         straight made the successful path the only one that snapped shut — the
+         reward and the retreat with their motion the wrong way round. */
+      dismissThen(onBooked);
     });
   };
 
   return (
     <>
-      <div className="scrim scrim--soft" onClick={onClose} aria-hidden="true" />
+      <div
+        className={`scrim scrim--soft${closing ? ' scrim--out' : ''}`}
+        onClick={dismiss}
+        aria-hidden="true"
+      />
 
       <aside
         ref={panelRef}
         tabIndex={-1}
-        className="panel sch__panel"
+        className={`panel sch__panel${closing ? ' panel--out' : ''}`}
         role="region"
         aria-label={`New session, ${dayLong(dayAt)} at ${formatMinute(startMinute)}`}
       >
@@ -155,18 +253,18 @@ export function BookPanel({
           <div style={{ minWidth: 0 }}>
             <p className="panel__t">New session</p>
             <p className="small">
-              {dayLong(dayAt)} · {formatMinute(startMinute)} – {formatMinute(startMinute + length)}
+              {dayLong(dayAt)} · {formatMinuteRange(startMinute, startMinute + length)}
             </p>
           </div>
-          <button
-            className="btn btn--icon btn--ghost"
-            type="button"
-            aria-label="Close"
-            onClick={onClose}
+          <Button
+            variant="ghost"
+            iconOnly
+            label="Close"
+            onClick={dismiss}
             style={{ marginLeft: 'auto' }}
-          >
-            <Cross size={16} />
-          </button>
+            title={undefined}
+            icon={<Cross size={16} />}
+          />
         </div>
 
         <div className="panel__body">
@@ -178,19 +276,27 @@ export function BookPanel({
             ends up at 07:15 because the pointer was low.
           */}
           <div className="fld">
-            <label className="fld__l" htmlFor="bk-time">
+            {/* A `<span>`, not a `<label htmlFor>`. `TimeField` is three
+                controls, and `for` names exactly one — it would have pointed at
+                whichever segment happened to carry the id and left the other
+                two anonymous. The group takes the name instead, by id, which is
+                the same fix the two windows in `WeekPicker` needed for the same
+                reason and got in the opposite direction. */}
+            <span className="fld__l" id="bk-time-l">
               Starts
-            </label>
-            <input
-              id="bk-time"
-              className="ctl"
-              type="time"
-              step={SNAP_MINUTES * 60}
-              value={formatMinute(startMinute)}
-              onChange={(e) => {
-                const [h, m] = e.target.value.split(':').map(Number);
-                if (Number.isFinite(h) && Number.isFinite(m)) setStartMinute(h * 60 + m);
-              }}
+            </span>
+            <TimeField
+              /* Both: `labelledBy` ties the group to the visible `Starts`
+                 above it, and `label` is what each segment prefixes its own
+                 name with — "Starts, hour", not "Time, hour". */
+              labelledBy="bk-time-l"
+              label="Starts"
+              value={startMinute}
+              onChange={setStartMinute}
+              /* The arrows land on the quarter-hours the grid snaps a drag to —
+                 this was `step={SNAP_MINUTES * 60}` on the native control, in
+                 seconds because that is the unit `type="time"` counts in. */
+              step={SNAP_MINUTES}
             />
           </div>
 
@@ -228,14 +334,12 @@ export function BookPanel({
                     setMode(null);
                   }}
                 >
-                  <span className="av av--sm" style={{ background: avatarToken(c.id) }} aria-hidden="true">
-                    {initials(c.name)}
-                  </span>
+                  <Avatar name={c.name} id={c.id} size="sm" />
                   <span className="sch__pickt">
                     <b>{c.name}</b>
                     {because && <i>{because}</i>}
                   </span>
-                  {band === 1 && <span className="tag tag--acc">This hour</span>}
+                  {band === 1 && <Tag tone="acc">This hour</Tag>}
                   {c.id === clientId && <Check size={15} />}
                 </button>
               ))}
@@ -248,15 +352,13 @@ export function BookPanel({
                 <span className="fld__l">Length</span>
                 <div className="row gap2 sch__wrap">
                   {lengthChoices(length).map((m) => (
-                    <button
+                    <Chip
+                      pressed={length === m}
                       key={m}
-                      className="chip"
-                      type="button"
-                      aria-pressed={length === m}
                       onClick={() => setMinutes(m)}
                     >
                       {m} min
-                    </button>
+                    </Chip>
                   ))}
                 </div>
                 <p className="fld__h">
@@ -269,43 +371,30 @@ export function BookPanel({
               <div className="sect fld">
                 <span className="fld__l">Delivery</span>
                 <div className="row gap2">
-                  <button
-                    className="chip"
-                    type="button"
-                    aria-pressed={delivery === 'floor'}
+                  <Chip
+                    pressed={delivery === 'floor'}
                     onClick={() => setMode('floor')}
                   >
-                    Floor
-                  </button>
-                  <button
-                    className="chip"
-                    type="button"
-                    aria-pressed={delivery === 'remote'}
+                    In Person
+                  </Chip>
+                  <Chip
+                    pressed={delivery === 'remote'}
                     onClick={() => setMode('remote')}
                   >
                     <Remote size={13} />
-                    Remote
-                  </button>
+                    Online
+                  </Chip>
                 </div>
               </div>
 
               <div className="sect">
-                <div className="kv">
-                  <span className="kv__k">Plan</span>
-                  <span className="kv__v">{client.programName ?? 'No live plan'}</span>
-                </div>
-                <div className="kv">
-                  <span className="kv__k">Package</span>
-                  <span className="kv__v">
-                    {client.packLeft != null && client.packTotal != null
-                      ? `${client.packLeft} of ${client.packTotal} left`
-                      : '—'}
-                  </span>
-                </div>
-                <div className="kv">
-                  <span className="kv__k">Worth</span>
-                  <span className="kv__v">{rate ? rupees(rate) : 'No per-session rate'}</span>
-                </div>
+                <KeyValueRow k="Plan">{client.programName ?? 'No live plan'}</KeyValueRow>
+                <KeyValueRow k="Package">
+                  {client.packLeft != null && client.packTotal != null
+                    ? `${client.packLeft} of ${client.packTotal} left`
+                    : '—'}
+                </KeyValueRow>
+                <KeyValueRow k="Worth">{rate ? rupees(rate) : 'No per-session rate'}</KeyValueRow>
               </div>
             </>
           )}
@@ -366,9 +455,9 @@ export function BookPanel({
         </div>
 
         <div className="panel__foot">
-          <button className="btn btn--ghost" type="button" onClick={onClose}>
+          <Button variant="ghost" onClick={dismiss}>
             Cancel
-          </button>
+          </Button>
           <button
             className={collisions.length ? 'btn btn--secondary' : 'btn btn--primary'}
             type="button"

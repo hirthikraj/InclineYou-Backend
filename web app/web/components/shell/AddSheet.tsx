@@ -1,56 +1,99 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import Link from 'next/link';
 
-import { Calendar, Dumbbell, Rupee, Users } from './Icons';
+import { useDismiss } from '@/lib/ui/dismiss';
+
+import { Calendar, Dumbbell, Grid, Rupee, Users } from './Icons';
 
 /**
  * THE + SHEET — the phone's 3d, on the web's bar.
  *
  * A port of `app/src/screens/main/home/AddSheet.tsx`, including the test that
- * decided its four rows: *something a trainer does between sessions, on a phone,
- * and at least three taps deep in every competitor we tore down*. Anything that
- * fails it belongs in the rail or on a client's screen, and this sheet has no
- * fifth row for that reason rather than for want of ideas.
+ * decided its rows: *something a trainer does between sessions, on a phone, and
+ * at least three taps deep in every competitor we tore down*. Anything that
+ * fails it belongs in the rail or on a client's screen, and the test is still
+ * what a sixth row has to pass — the fifth arrived because the product owner's
+ * brief for the phone shell named it, and it passes: writing a movement is four
+ * taps deep here and behind a desktop-only builder everywhere else.
  *
  * It asks **"What are you doing?"** rather than listing nouns, which is the app's
  * wording and its argument: the + is pressed with an intention already formed, so
  * the sheet's job is to route one, not to offer a menu of objects.
  *
- * ── WHY THREE ROWS SAY *SOON* ────────────────────────────────────────────────
+ * ── NO ROW SAYS *SOON* ANY MORE, AND THAT IS FIVE SCREENS ARRIVING ──────────
  *
- * `/clients`, `/clients/new`, `/money` and `/sessions` are all `NotBuilt` on this
- * half. Three of the four actions therefore have nowhere real to land, and there
- * were three ways to handle that: draw one row and call it a sheet, draw four rows
- * that navigate — three of them into a placeholder — or draw four rows and mark
- * which ones are not there yet.
+ * This file used to draw four rows with three of them `<button disabled>` and the
+ * word *Soon* beside them, because `/clients/new`, `/money` and `/sessions` were
+ * all `NotBuilt`. The argument for marking them was right — "a row that looks
+ * live and lands on *not built yet* spends a tap to teach nothing" — and it has
+ * expired: every destination the sheet wants now exists. So the rows are `<Link>`s
+ * and the `disabled` branch is gone with the last of them.
  *
- * The third shipped. A one-row sheet is the thing `NavBar.tsx` names as the reason
- * the client role has no + at all ("a global + would open a sheet with one item in
- * it"), and a row that looks live and lands on *not built yet* spends a tap to
- * teach nothing — the trainer already knows what they wanted. A row marked *Soon*
- * spends no tap and says the same thing, and the sheet's shape is final: when the
- * money book lands, the row stops being a `<button disabled>` and nothing else
- * about this file changes.
+ * Two of the five needed nothing but the href, and three needed a reader for a
+ * parameter that was already the screen's own way in:
  *
- * `disabled` rather than an `aria-disabled` link, deliberately: it leaves the row
- * in the accessibility tree — a reader still finds it and hears it is unavailable
- * — while taking it out of the tab order, so a keyboard walking the sheet lands on
- * the one row that works.
+ * | Row | Lands on | What made it live |
+ * | --- | --- | --- |
+ * | Add a client | `/clients/new` | the screen shipped; this row was stale |
+ * | Book a session | `/schedule?new=1` | already read by `Schedule.tsx` |
+ * | Log a workout | `/sessions/new` | already live |
+ * | Add an exercise | `/programs/exercises?new=1` | `ExerciseLibrary` reads it now |
+ * | Record a payment | `/business/transactions?record=` | Transactions already reads `?record=<id>` |
+ *
+ * The last one is the one worth knowing: `?record=` with nothing after it is a
+ * STRING, not a missing parameter, so `recordFor` is `''` — truthy enough to open
+ * the panel and falsy enough that no client and no pack are seeded. That is the
+ * right shape for this caller, because the + is pressed with an amount in mind and
+ * not a client: `/clients/[id]` is where a payment starts from a person.
+ *
+ * ── AND THE ROW SET IS THE PRODUCT OWNER'S THREE, PLUS THE TWO IT HAD ───────
+ *
+ * The brief for the phone shell asks the + for *clients, sessions, exercises*.
+ * Those are the first, second and fourth rows, and the two that were already here
+ * are kept rather than cut: *Log a workout* is the app's own first row and the one
+ * action a trainer takes on the floor rather than at a desk, and *Record a
+ * payment* is the only way into the money book from a screen that is not it.
+ *
+ * The order is the brief's, with the two floor actions interleaved by when they
+ * happen rather than appended: a client is added before they are booked, a booking
+ * is logged after it happens, and an exercise is written while a program is being
+ * built. Money is last because it is the one that can wait until the shift ends.
  */
 
 export interface AddAction {
-  key: 'workout' | 'session' | 'client' | 'payment';
+  key: 'client' | 'session' | 'workout' | 'exercise' | 'payment';
   icon: React.ReactNode;
   title: string;
   /** The line under it. States what the next screen will ask for. */
   hint: string;
-  /** Null until that half of the app exists — see the docstring. */
-  href: string | null;
+  href: string;
 }
 
 export const ADD_ACTIONS: AddAction[] = [
+  {
+    key: 'client',
+    icon: <Users size={19} />,
+    title: 'Add a client',
+    // The screen's own promise, and it is literal: `NewClient`'s first step asks
+    // for a name and a number and nothing else, and every other field on that
+    // flow is skippable. A hint that over-promised here would be read at the one
+    // moment a trainer has decided to do the thing.
+    hint: 'Name and number is enough',
+    href: '/clients/new',
+  },
+  {
+    key: 'session',
+    icon: <Calendar size={19} />,
+    title: 'Book a session',
+    hint: 'One-off or repeating',
+    // It opens the booking FORM rather than the schedule: `?new=1` is read in
+    // `Schedule.tsx`, which calls the same `defaultSlot` its own *New session*
+    // button does. Landing on a grid with nothing open would make the + a
+    // navigation, and the + is an action.
+    href: '/schedule?new=1',
+  },
   {
     key: 'workout',
     icon: <Dumbbell size={19} />,
@@ -60,40 +103,60 @@ export const ADD_ACTIONS: AddAction[] = [
     // the worst place in the product to promise something the next screen cannot
     // keep.
     hint: 'Booked or not — pick who',
-    // Live since the console shipped, and the hint was already the promise this
-    // route keeps: frame 5a's third group is "everybody else · no booking
-    // needed", so "booked or not" is literal rather than aspirational.
+    // The hint was already the promise this route keeps: frame 5a's third group
+    // is "everybody else · no booking needed", so "booked or not" is literal
+    // rather than aspirational.
     href: '/sessions/new',
   },
   {
-    key: 'session',
-    icon: <Calendar size={19} />,
-    title: 'Book a session',
-    hint: 'One-off or repeating',
-    // The only live row, and it opens the booking form rather than the schedule:
-    // `?new=1` is read in `Schedule.tsx`, which calls the same `defaultSlot` its
-    // own *New session* button does. Landing on a grid with nothing open would
-    // make the + a navigation, and the + is an action.
-    href: '/schedule?new=1',
-  },
-  {
-    key: 'client',
-    icon: <Users size={19} />,
-    title: 'Add a client',
-    hint: 'Name and number is enough',
-    href: null,
+    key: 'exercise',
+    // `Grid` and not a second `Dumbbell`: the library is a tab of Programs and
+    // this is the glyph the *Programs* row carries in the sheet directly behind
+    // this one, so the row points at a place a trainer has already seen named.
+    // Two identical dumbbells in a five-row sheet would make the two rows a
+    // trainer is most likely to confuse — logging a movement and writing one —
+    // look like the same action twice.
+    icon: <Grid size={19} />,
+    title: 'Add an exercise',
+    // What the create form actually asks for, in its own order. It is a CUSTOM
+    // exercise — the 1,324 in the library are the dataset's and are not editable
+    // — and the hint says "your own" so the row cannot be read as a way to
+    // correct one of those.
+    hint: 'Your own movement, with its steps',
+    // `?new=1`, the same parameter name and the same three-part reader as
+    // `/schedule` — an initialiser, a render-time adjustment for arriving here
+    // from here, and then the parameter is stripped. `ExerciseLibrary` carries
+    // the argument; it is one pattern in this app and not two.
+    href: '/programs/exercises?new=1',
   },
   {
     key: 'payment',
     icon: <Rupee size={19} />,
     title: 'Record a payment',
     hint: 'UPI, cash or gym-collected',
-    href: null,
+    // `?record=` with nothing after it — see the docstring. An empty STRING
+    // opens the panel with nothing seeded, which is what the + wants: pressed
+    // from the bar there is no client in context, and `RecordPanel` asks for one
+    // as its first field.
+    href: '/business/transactions?record=',
   },
 ];
 
-export function AddSheet({ id, onClose }: { id: string; onClose: () => void }) {
-  const panel = useRef<HTMLDivElement>(null);
+export function AddSheet({
+  id,
+  onClose,
+  onReady,
+}: {
+  id: string;
+  onClose: () => void;
+  /** See `MoreSheet`'s copy of this prop — the bar's own + has to dismiss too. */
+  onReady?: (dismiss: () => void) => void;
+}) {
+  /* `panel` and the hook's `ref` were two refs on one box. One now: the focus
+     call below and the exit both want the same element. */
+  const { closing, dismiss, ref: panel } = useDismiss<HTMLDivElement>(onClose);
+
+  useEffect(() => { onReady?.(dismiss); }, [onReady, dismiss]);
 
   // Escape, and focus into the sheet on the render that created it — the same two
   // obligations `MoreSheet` carries, for the same reason: a modal that keeps focus
@@ -102,19 +165,53 @@ export function AddSheet({ id, onClose }: { id: string; onClose: () => void }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        onClose();
+        dismiss();
       }
     };
     document.addEventListener('keydown', onKey);
-    panel.current?.querySelector<HTMLElement>('a,button:not([disabled])')?.focus();
+    /* `preventScroll`, AND IT IS THE WHOLE BUG REPORT.
+
+       MEASURED BUG, REPORTED as *the background screen is moving when clicking
+       More*. The sheet now MOUNTS at `translateY(100%)` — `@starting-style`'s
+       pose, 658px below the fold — and this line then asked the browser to put
+       the first row where a user could see it. The browser obliged the only way
+       it can: it scrolled the nearest scrollport, which is `.app`.
+
+       `.app` is `overflow:hidden`, and **`hidden` still creates a scrollport**.
+       There is no scrollbar and a finger cannot drag it, so nothing in the app
+       had ever scrolled it and nothing looked scrollable — but `focus()` can,
+       and did. MEASURED at 390x700 on `/today`: `.app.scrollTop` went 0 to
+       **421.6px**, putting the top bar at `y:-421.6` and the tab bar in the
+       middle of the screen. The whole shell slid up behind the sheet and stayed
+       there.
+
+       Isolated rather than assumed — the same focus call with and without this
+       flag, three times each: without it 421.6px, with it 0.
+
+       It is the RIGHT answer here and not a workaround. The element is not
+       off-screen because it is somewhere else; it is off-screen because it is
+       240ms into arriving, and it will be in the middle of the viewport when it
+       stops. Scrolling the page to chase a box that is already on its way is
+       the browser solving a problem that is in the act of solving itself.
+
+       `.app` was hardened as well — webapp.css now says `overflow:clip`, which
+       clips exactly as `hidden` did and creates no scrollport at all, so no
+       future `focus()` or `scrollIntoView` anywhere in the product can move the
+       shell. This flag is the fix; that is the class. */
+    panel.current?.querySelector<HTMLElement>('a,button:not([disabled])')?.focus({ preventScroll: true });
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, [dismiss, panel]);
 
   return (
     <>
-      <button className="scrim scrim--top" type="button" aria-label="Close" onClick={onClose} />
+      <button
+        className={`scrim scrim--top${closing ? ' scrim--out' : ''}`}
+        type="button"
+        aria-label="Close"
+        onClick={dismiss}
+      />
       <div
-        className="sheet"
+        className={`sheet${closing ? ' sheet--out' : ''}`}
         id={id}
         role="dialog"
         aria-modal="true"
@@ -133,30 +230,21 @@ export function AddSheet({ id, onClose }: { id: string; onClose: () => void }) {
             What are you doing?
           </h2>
 
+          {/* Five `<Link>`s and no branch. The `<button disabled>` half of this
+              map, and the *Soon* tag beside it, went when the last of the five
+              screens landed — see the docstring's table. Nothing else about the
+              row's markup changed, which is what that pass predicted would
+              happen. */}
           <div className="sheet__g sheet__g--first">
-            {ADD_ACTIONS.map((a) =>
-              a.href ? (
-                <Link key={a.key} className="sheet__i add__i" href={a.href} onClick={onClose}>
-                  {a.icon}
-                  <span className="add__l">
-                    <b>{a.title}</b>
-                    <i>{a.hint}</i>
-                  </span>
-                </Link>
-              ) : (
-                <button key={a.key} className="sheet__i add__i" type="button" disabled>
-                  {a.icon}
-                  <span className="add__l">
-                    <b>{a.title}</b>
-                    <i>{a.hint}</i>
-                  </span>
-                  {/* The word, not a tooltip. A trainer who taps and gets nothing
-                      learns the app is broken; a row that says Soon before the tap
-                      is the only version of this that is honest. */}
-                  <span className="tag">Soon</span>
-                </button>
-              ),
-            )}
+            {ADD_ACTIONS.map((a) => (
+              <Link key={a.key} className="sheet__i add__i" href={a.href} onClick={onClose}>
+                {a.icon}
+                <span className="add__l">
+                  <b>{a.title}</b>
+                  <i>{a.hint}</i>
+                </span>
+              </Link>
+            ))}
           </div>
         </div>
       </div>

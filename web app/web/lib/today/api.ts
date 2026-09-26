@@ -6,6 +6,11 @@ import { getToken } from '@/lib/auth/session';
 import { listRecentNudges } from '@/lib/nudges/api';
 import { COOLDOWN_DAYS, lastContactMap } from '@/lib/nudges/cooldown';
 
+import {
+  bookableClients, DEAD_SESSION, sessionMinutes,
+} from '@/lib/schedule/roster';
+import type { BookSession, ScheduleClient } from '@/lib/schedule/session';
+
 import { buildDeck, staleOpenLogs, type Deck, type DeckInput } from './deck';
 import { DAY_MS, startOfDay } from './time';
 import type { RateSource, WorkWindow } from './day';
@@ -63,7 +68,7 @@ import type { RateSource, WorkWindow } from './day';
  * last-workout-per-client projection on the backend, not a window here.
  *
  * `GET /v1/payments` is unwindowed for a smaller reason: an unpaid invoice from
- * July is still owed today, so *still owed* and the overdue queue cannot be
+ * July is still owed today, so *still pending* and the overdue queue cannot be
  * scoped to this month, and a payment row is one per invoice — a couple of
  * hundred rows for a full book, against thousands of set logs. The endpoint
  * takes `from`/`to` for the money screen, which does want a month.
@@ -191,6 +196,19 @@ interface ClientWire {
   status: string;
   deliveryMode: string | null;
   metadata: Record<string, unknown> | null;
+  /**
+   * The next three are read for the BOOKING FORM this screen now opens in place
+   * — see `TodayData.book`. All three have been on `ClientResponse` since long
+   * before this file; Today simply had no reader for them.
+   *
+   * `membershipStatus` is the roster relationship and is a different fact from
+   * `status` above: it is how a removed client is spelled, and the form must not
+   * offer somebody who left.
+   */
+  membershipStatus: string | null;
+  /** `session_duration_minutes` — what THIS client's sessions are. */
+  sessionDurationMinutes: number | null;
+  sessionsPerWeek: number | null;
   /**
    * `client.goal` — the trainer's own free text. Read for the hero's neutral
    * *Has a note* chip and for nothing else; it is never printed on this screen.
@@ -352,6 +370,29 @@ export interface TodayData {
   };
   hours: WorkWindow[];
   rates: RateSource;
+  /**
+   * WHAT THE BOOKING FORM NEEDS, ON THE SCREEN THAT IS NOT THE SCHEDULE.
+   *
+   * `/today`'s *New session* used to be a link to `/schedule?new=1`: it left the
+   * screen, drew a week, and opened a panel over it — three things to book an
+   * hour on the day the trainer was already looking at. It opens `BookPanel` in
+   * place now (see `Today.tsx`), and this is the raw material it reads.
+   *
+   * NO EXTRA REQUEST. Both halves are derived from rows this file already
+   * fetches for the deck — the same `/v1/clients`, `/v1/programs`,
+   * `/v1/packages` and `/v1/sessions` — and the mapping is
+   * `lib/schedule/roster.ts`'s, shared with the schedule so the two screens
+   * cannot disagree about who may be booked or how long their sessions are.
+   *
+   * It is a separate field rather than part of `Deck` on purpose: the deck is
+   * what the day IS, and this is what one form on it needs. `buildDeck` stays a
+   * pure statement about the day and takes no dependency on the booking panel.
+   */
+  book: {
+    clients: ScheduleClient[];
+    /** The whole fetched window, not just today — see `BookPanel.sessions`. */
+    sessions: BookSession[];
+  };
   /** clientId → the terms of their most recent pack, for the queue's `Renew`. */
   renewTerms: Record<string, RenewTerms>;
   /**
@@ -595,6 +636,30 @@ export const getToday = cache(async (): Promise<TodayData> => {
     openLogs[clientId] = logs.map((l) => l.workoutId);
   }
 
+  /*
+   * The booking form's two lists. Derived, not fetched — see `TodayData.book`.
+   *
+   * The sessions are the WHOLE thirty-day window rather than today's, because
+   * `suggestClients` ranks the roster on *trains around this hour on Thursdays*
+   * and one day of rows cannot say that about anybody. The five fields are all
+   * `BookPanel` reads; `collisionsAt` narrows to the booked day itself.
+   */
+  const clientById = new Map((clients ?? []).map((c) => [c.id, c]));
+  const book = {
+    clients: bookableClients(clients ?? [], programs ?? [], newest),
+    sessions: (sessions ?? []).map((s): BookSession => ({
+      id: s.id,
+      clientId: s.clientId,
+      clientName: clientById.get(s.clientId)?.name?.trim() || 'Client',
+      at: s.scheduledAt,
+      minutes: sessionMinutes(
+        s.durationMinutes,
+        clientById.get(s.clientId)?.sessionDurationMinutes,
+      ),
+      dead: DEAD_SESSION.has((s.status ?? '').toLowerCase()),
+    })),
+  };
+
   return {
     deck,
     trainer: {
@@ -613,6 +678,7 @@ export const getToday = cache(async (): Promise<TodayData> => {
       endMinute: h.endMinute,
     })),
     rates: { perSession, gymSharePercent: maybe(trainer?.gymSharePercent) },
+    book,
     renewTerms,
     openLogs,
     lastContact: Object.fromEntries(lastContactMap(nudges)),

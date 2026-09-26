@@ -112,6 +112,23 @@ public class PackageController {
         return service.extendPackage(trainerId(), packageId, req);
     }
 
+    /**
+     * CORRECT THE COUNT — V4. The pack was sold with twelve and says ten.
+     *
+     * <p>Not how a client buys more: that is {@code /renew} with a
+     * {@code startDate} of today, which writes a second package because a
+     * package is a sale. This moves {@code sessions_total} and
+     * {@code sessions_remaining} and never the price. See
+     * {@link PackageService#correctSessions}.
+     */
+    @PostMapping("/v1/packages/{packageId}/sessions")
+    public PackageService.PackageResponse correctSessions(
+            @PathVariable String packageId,
+            @Valid @RequestBody PackageService.CorrectSessionsRequest req
+    ) {
+        return service.correctSessions(trainerId(), packageId, req);
+    }
+
     /** Everything that has happened to this pack, oldest first. Append-only. */
     @GetMapping("/v1/packages/{packageId}/adjustments")
     public List<PackageService.AdjustmentResponse> listAdjustments(@PathVariable String packageId) {
@@ -158,6 +175,21 @@ public class PackageController {
             @RequestBody PackageService.ConfirmPaymentRequest req
     ) {
         return service.confirmPayment(trainerId(), paymentId, req);
+    }
+
+    /** V8 · stop chasing it. The body is optional; see {@code writeOffPayment}. */
+    @PatchMapping("/v1/payments/{paymentId}/write-off")
+    public PackageService.PaymentResponse writeOffPayment(
+            @PathVariable String paymentId,
+            @RequestBody(required = false) PackageService.WriteOffRequest req
+    ) {
+        return service.writeOffPayment(trainerId(), paymentId, req);
+    }
+
+    /** V8 · give a collected payment a bill number. Idempotent; no body. */
+    @PostMapping("/v1/payments/{paymentId}/invoice")
+    public PackageService.PaymentResponse issueInvoice(@PathVariable String paymentId) {
+        return service.issueInvoice(trainerId(), paymentId);
     }
 
     private UUID trainerId() {

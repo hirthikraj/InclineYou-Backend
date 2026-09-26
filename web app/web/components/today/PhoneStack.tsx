@@ -6,8 +6,15 @@ import Link from 'next/link';
 import type { Deck, DeckActivity, DeckMoney, DeckSession, DeckWeek } from '@/lib/today/deck';
 import { MODE_LABELS, type DeliveryMode } from '@/lib/today/mode';
 import { sessions as sessionCount } from '@/lib/today/copy';
-import { avatarToken, initials, rupees, rupeesShort } from '@/lib/today/time';
-import { Check, Chevron } from '@/components/shell/Icons';
+import { rupees, rupeesShort } from '@/lib/today/time';
+import { Chevron } from '@/components/shell/Icons';
+import { Card } from '@/web-components/ui/Card';
+import { Tag } from '@/web-components/ui/Tag';
+import { Avatar } from '@/web-components/ui/Avatar';
+import { Slab } from '@/web-components/ui/Slab';
+import { Figures, Figure } from '@/web-components/ui/Figures';
+import { Segment, SegmentButton } from '@/web-components/ui/Segment';
+import { Agenda, AgendaRow } from '@/web-components/ui/Agenda';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -146,31 +153,36 @@ function SectionHead({
  * restructure is about not shipping.
  */
 export function Glance({ deck }: { deck: Deck }) {
-  const risk = deck.clientsAtRisk;
   return (
-    <>
-      <SectionHead label="Today at a glance" />
-      <div className="srail">
-        <Link className="stat" href="/schedule?view=day">
-          <span className="stat__k">Sessions today</span>
-          <span className="stat__v">
-            {deck.todayDone}
-            <i className="srail__u">/{deck.today.length}</i>
-          </span>
-        </Link>
-        <Link className="stat" href="/business">
-          <span className="stat__k">Collected this month</span>
-          <span className="stat__v">{rupeesShort(deck.money.collected)}</span>
-        </Link>
-        <Link className={`stat${risk > 0 ? ' stat--warn' : ''}`} href="/clients">
-          <span className="stat__k">Clients at risk</span>
-          {/* An em dash rather than 0. Nobody at risk is a good day, and a bare
-              zero in a warn-capable tile reads as a figure that failed to load —
-              the same call the app makes for an empty pending figure. */}
-          <span className="stat__v">{risk > 0 ? risk : '—'}</span>
-        </Link>
-      </div>
-    </>
+    <Slab title="Today at a glance">
+      {/*
+        THREE NUMBERS, NOT THREE CARDS.
+
+        `.srail` drew these as three equal tiles in a row, which is both the most
+        generated dashboard layout there is and more container than three figures
+        ask for. The block's own argument, in `Today.tsx`, is "three numbers, no
+        more" — so they are three numbers on one ruled line now, and the position
+        at the FOOT of the page, which is the load-bearing part, is unchanged.
+
+        The at-risk figure was an em dash when it was zero. Zero is the good news
+        on that row and a dash reads as a figure that failed to load, so it is a
+        number like the other two.
+      */}
+      <Figures>
+        <Figure
+          label="Sessions today"
+          value={deck.todayDone}
+          of={deck.today.length}
+          href="/schedule?view=day"
+        />
+        <Figure
+          label="Collected this month"
+          value={rupeesShort(deck.money.collected)}
+          href="/business"
+        />
+        <Figure label="Clients at risk" value={deck.clientsAtRisk} href="/clients" />
+      </Figures>
+    </Slab>
   );
 }
 
@@ -341,60 +353,62 @@ export function TodayList({ deck, heroIds }: { deck: Deck; heroIds: string[] }) 
   if (rest.length === 0) return null;
 
   return (
-    <>
-      <SectionHead
-        label="The rest of today"
-        action={{ label: 'Full schedule', href: '/schedule?view=day' }}
-      />
+    <Slab
+      title="The rest of today"
+      action={{ label: 'Full schedule', href: '/schedule?view=day' }}
+      controls={
+        /*
+          THE FILTERS, DE-LIMED.
 
-      <div className="seg" role="group" aria-label="Filter the day">
-        {(['floor', 'remote'] as DeliveryMode[]).map((mode) => (
-          <button
-            key={mode}
-            className="chip"
-            type="button"
-            aria-pressed={filters[mode]}
-            onClick={() => toggle(mode)}
+          These were three `ui/Chip`s, and a pressed Chip is a filled lime pill.
+          Two of the three are pressed by default, so the screen opened with a
+          row of lime plates directly above the day — in the same colour as the
+          primary verb four inches up the page. Lime is the action colour here;
+          a filter takes no action. Selected is an ink plate now, and "Done",
+          the least urgent count on the screen, is no longer the loudest thing
+          on it.
+        */
+        <Segment label="Filter the day">
+          {(['floor', 'remote'] as DeliveryMode[]).map((mode) => (
+            <SegmentButton
+              key={mode}
+              pressed={filters[mode]}
+              onClick={() => toggle(mode)}
+              count={counts[mode]}
+            >
+              {MODE_LABELS[mode]}
+            </SegmentButton>
+          ))}
+          <SegmentButton
+            pressed={filters.done}
+            onClick={() => toggle('done')}
+            count={counts.done}
           >
-            {MODE_LABELS[mode]}
-            <span className="chip__n">{counts[mode]}</span>
-          </button>
-        ))}
-        <button
-          className="chip"
-          type="button"
-          aria-pressed={filters.done}
-          onClick={() => toggle('done')}
-        >
-          Done
-          <span className="chip__n">{counts.done}</span>
-        </button>
-      </div>
-
+            Done
+          </SegmentButton>
+        </Segment>
+      }
+    >
       {visible.length === 0 ? (
-        <div className="card">
-          <div className="card__b">
-            <p className="small">
-              <b className="ink">Nothing in this filter.</b> Turn a chip back on to see the rest of
-              the day.
-            </p>
-          </div>
-        </div>
+        <p className="small" style={{ paddingTop: 4 }}>
+          <b className="ink">Nothing in this filter.</b> Turn a chip back on to see the rest of
+          the day.
+        </p>
       ) : (
-        <div className="slist">
+        <Agenda>
           {visible.map((s) => (
             <SessionRow
               key={s.id}
               session={s}
               next={s.id === deck.next?.id}
-              /* 1 → `.srow--h2`. Anything else is not a hero
-                 card and carries no class. */
+              /* 1 -> the row the second hero card is already drawing. Anything
+                 else is not a hero card and carries no class. */
               heroCard={heroIds.indexOf(s.id)}
             />
           ))}
-        </div>
+        </Agenda>
       )}
-    </>
+    </Slab>
   );
 }
 
@@ -431,34 +445,25 @@ function SessionRow({
   heroCard?: number;
 }) {
   const state = session.live ? 'now' : session.done ? 'done' : next ? 'next' : 'idle';
-  const dup = heroCard === 1 ? ' srow--h2' : '';
   return (
-    <Link className={`srow srow--${state}${dup}`} href={`/sessions/${session.id}`}>
-      <span className="srow__t">
-        <b>{session.time}</b>
-        <i>{session.meridiem}</i>
-      </span>
-      <span
-        className="av av--sm"
-        style={{ background: `var(${avatarToken(session.clientId)})` }}
-        aria-hidden="true"
-      >
-        {initials(session.clientName)}
-      </span>
-      <span className="srow__b">
-        <b>{session.clientName}</b>
-        <i>{session.detail}</i>
-      </span>
-      {session.done ? (
-        // The tick replaces the mode tag rather than joining it: on a 390px row
-        // there is one slot at the end, and "delivered" outranks "floor" in it.
-        <span className="srow__done" aria-label="Delivered">
-          <Check size={13} />
-        </span>
-      ) : (
-        <span className={`tag tag--${session.mode}`}>{MODE_LABELS[session.mode]}</span>
-      )}
-    </Link>
+    <AgendaRow
+      href={`/sessions/${session.id}`}
+      time={session.time}
+      meridiem={session.meridiem}
+      avatar={<Avatar name={session.clientName} id={session.clientId} size="sm" />}
+      name={session.clientName}
+      detail={session.detail}
+      state={state}
+      /* The mode tag, on a row that has not happened yet. `AgendaRow` swaps the
+         tick in for a delivered one: there is one slot at the end of the row and
+         "delivered" outranks "in person" in it. */
+      trailing={<Tag tone={session.mode}>{MODE_LABELS[session.mode]}</Tag>}
+      /* The second hero card draws this same session above 1080px, so the row
+         hides itself there rather than showing the client twice inside 400px.
+         The class is still `.srow--h2` because the rule that reads it is the
+         app's own and is keyed on nothing else. */
+      className={heroCard === 1 ? 'agn__r--dup' : undefined}
+    />
   );
 }
 
@@ -500,45 +505,43 @@ export function PhoneMoney({ money }: { money: DeckMoney }) {
   return (
     <>
       <SectionHead label={money.monthLabel} action={{ label: 'Payments', href: '/business' }} />
-      <div className="card">
-        <div className="card__b">
-          <div className="mny">
-            <span className="mny__m">
-              <span className="stat__k">Billed this month</span>
-              <b className="mny__v">{rupees(money.billed)}</b>
+      <Card>
+        <div className="mny">
+          <span className="mny__m">
+            <span className="stat__k">Billed this month</span>
+            <b className="mny__v">{rupees(money.billed)}</b>
+          </span>
+          {/* Only when a gym cut makes the two differ. Repeating the same figure
+              under a second name reads as a bug, which is the app's reason. */}
+          {money.yours < money.billed && (
+            <span className="mny__s">
+              <span className="stat__k">Your share</span>
+              <b className="mny__sv">{rupees(money.yours)}</b>
             </span>
-            {/* Only when a gym cut makes the two differ. Repeating the same figure
-                under a second name reads as a bug, which is the app's reason. */}
-            {money.yours < money.billed && (
-              <span className="mny__s">
-                <span className="stat__k">Your share</span>
-                <b className="mny__sv">{rupees(money.yours)}</b>
-              </span>
-            )}
-            {money.trendPercent !== null && (
-              <span className={`tag tag--${money.trendPercent >= 0 ? 'ok' : 'warn'}`}>
-                {money.trendPercent >= 0 ? '▲' : '▼'} {Math.abs(money.trendPercent)}%
-              </span>
-            )}
-          </div>
-
-          <div className="meter meter--lg mt3" aria-hidden="true">
-            <i className="ok" style={{ width: `${collected}%` }} />
-            <i className="warn" style={{ width: `${pending}%` }} />
-          </div>
-
-          <div className="lgnd mt2">
-            <span className="lgnd__i">
-              <i className="lgnd__d lgnd__d--ok" />
-              Collected {rupees(money.collected)}
-            </span>
-            <span className="lgnd__i">
-              <i className="lgnd__d lgnd__d--warn" />
-              Pending {rupees(money.pending)}
-            </span>
-          </div>
+          )}
+          {money.trendPercent !== null && (
+            <Tag tone={money.trendPercent >= 0 ? 'ok' : 'warn'}>
+              {money.trendPercent >= 0 ? '▲' : '▼'} {Math.abs(money.trendPercent)}%
+            </Tag>
+          )}
         </div>
-      </div>
+
+        <div className="meter meter--lg mt3" aria-hidden="true">
+          <i className="ok" style={{ width: `${collected}%` }} />
+          <i className="warn" style={{ width: `${pending}%` }} />
+        </div>
+
+        <div className="lgnd mt2">
+          <span className="lgnd__i">
+            <i className="lgnd__d lgnd__d--ok" />
+            Collected {rupees(money.collected)}
+          </span>
+          <span className="lgnd__i">
+            <i className="lgnd__d lgnd__d--warn" />
+            Pending {rupees(money.pending)}
+          </span>
+        </div>
+      </Card>
     </>
   );
 }
@@ -570,34 +573,32 @@ export function PhoneWeek({ week, dayOver }: { week: DeckWeek; dayOver: boolean 
 
   return (
     <>
-      <SectionHead label="This week" action={{ label: 'Reports', href: '/business?tab=reports' }} />
-      <div className="card">
-        <div className="card__b">
-          <div className="wk__hd">
-            <b className="h4">{sessionCount(week.delivered)} delivered</b>
-            <span className="wk__p">{week.percent}%</span>
-          </div>
-          {/*
-            A row of bars, and the accessible name is the sentence a reader gets
-            instead of seven unlabelled columns. The bars themselves are hidden
-            from the tree: the figures are in the line above and in the label, and
-            seven "3"s read out in sequence is not the week.
-          */}
-          <div className="wbars mt3" role="img" aria-label={ariaWeek(week)}>
-            {week.days.map((d, i) => (
-              <span className={`wbar${d.on ? ' wbar--on' : ''}`} key={i} aria-hidden="true">
-                <i
-                  className={`wbar__f${d.value > 0 ? ' wbar__f--n' : ''}`}
-                  style={{ height: `${Math.round((100 * d.value) / peak)}%` }}
-                >
-                  {d.value > 0 && <em>{d.value}</em>}
-                </i>
-                <b>{d.label}</b>
-              </span>
-            ))}
-          </div>
+      <SectionHead label="This week" action={{ label: 'Reports', href: '/business/reports' }} />
+      <Card>
+        <div className="wk__hd">
+          <b className="h4">{sessionCount(week.delivered)} delivered</b>
+          <span className="wk__p">{week.percent}%</span>
         </div>
-      </div>
+        {/*
+          A row of bars, and the accessible name is the sentence a reader gets
+          instead of seven unlabelled columns. The bars themselves are hidden
+          from the tree: the figures are in the line above and in the label, and
+          seven "3"s read out in sequence is not the week.
+        */}
+        <div className="wbars mt3" role="img" aria-label={ariaWeek(week)}>
+          {week.days.map((d, i) => (
+            <span className={`wbar${d.on ? ' wbar--on' : ''}`} key={i} aria-hidden="true">
+              <i
+                className={`wbar__f${d.value > 0 ? ' wbar__f--n' : ''}`}
+                style={{ height: `${Math.round((100 * d.value) / peak)}%` }}
+              >
+                {d.value > 0 && <em>{d.value}</em>}
+              </i>
+              <b>{d.label}</b>
+            </span>
+          ))}
+        </div>
+      </Card>
     </>
   );
 }
@@ -605,7 +606,7 @@ export function PhoneWeek({ week, dayOver }: { week: DeckWeek; dayOver: boolean 
 /** "Mon 2, Tue 1, Wed none, …" — the bars, said. */
 function ariaWeek(week: DeckWeek): string {
   const names = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  return `Delivered this week — ${week.days
+  return `Delivered this week: ${week.days
     .map((d, i) => `${names[i]} ${d.value === 0 ? 'none' : d.value}`)
     .join(', ')}`;
 }
@@ -629,30 +630,27 @@ function PhoneActivity({ activity }: { activity: DeckActivity[] }) {
   const shown = activity.slice(0, 5);
 
   return (
-    <>
-      <SectionHead label="Recent activity" />
+    /* The last section on the screen that was still drawing a `SectionHead`,
+       and therefore the last 10.5px tracked-out mono label on it. It is
+       phone-only, which is exactly why it was easy to miss: a desktop sweep
+       never renders it. */
+    <Slab title="Recent activity">
       <div className="feed">
         {shown.map((a) => (
           <Link className="feed__i" key={a.key} href={`/clients/${a.clientId}`}>
-            <span
-              className="av av--sm"
-              style={{ background: `var(${avatarToken(a.clientId)})` }}
-              aria-hidden="true"
-            >
-              {initials(a.clientName)}
-            </span>
+            <Avatar name={a.clientName} id={a.clientId} size="sm" />
             <span className="feed__b">
               <b>
                 {a.clientName} <span className="feed__v">{a.body}</span>
               </b>
               <i>{a.meta}</i>
             </span>
-            {a.tag && <span className={`tag tag--${a.tag.tone}`}>{a.tag.label}</span>}
+            {a.tag && <Tag tone={a.tag.tone}>{a.tag.label}</Tag>}
           </Link>
         ))}
       </div>
       <p className="small mt2">Workouts and payments from the last 7 days.</p>
-    </>
+    </Slab>
   );
 }
 

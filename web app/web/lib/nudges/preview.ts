@@ -6,7 +6,7 @@
  *
  * The real substitution happens in `NudgeService` on the backend, against the
  * client's live figures — the amount comes off the same rows the money book
- * reads, so the sentence and the ledger cannot disagree. Nothing on this half
+ * reads, so the sentence and the payments list cannot disagree. Nothing on this half
  * renders a message that gets sent, and if a second renderer ever appears here
  * the first symptom will be a WhatsApp quoting a figure the trainer cannot find
  * anywhere in the app.

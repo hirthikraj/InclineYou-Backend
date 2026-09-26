@@ -2,17 +2,14 @@
 
 import { useState, useTransition } from 'react';
 
+import type { ReactNode } from 'react';
+
 import { MessageSlot } from '@/components/auth/MessageSlot';
 import { OtpInput } from '@/components/auth/OtpInput';
 import type { Message } from '@/lib/auth/copy';
 import { CODE_LENGTH, PHONE_PATTERN, formatPhone } from '@/lib/auth/policy';
-import {
-  cancelPhoneChange,
-  confirmPhoneChange,
-  requestNewNumber,
-  startPhoneChange,
-  verifyCurrentNumber,
-} from '@/lib/account/actions';
+import { Button } from '@/web-components/ui/Button';
+import { KeyValueRow } from '@/web-components/ui/KeyValue';
 
 /**
  * CHANGING THE NUMBER YOU SIGN IN WITH — four steps, two codes.
@@ -39,6 +36,24 @@ import {
  * number about to be taken, so the two are on screen together at the point the
  * trainer commits — which is the only moment a mistyped digit is still cheap.
  *
+ * ## Two call-sites now, and the wire is a prop
+ *
+ * The client portal needs this flow more than the trainer does, and for the
+ * reason the paragraph above gives: a client has no email and no password, so
+ * the number is not a contact detail that can be wrong — it is the whole
+ * credential. `lib/portal/actions.ts` states the rest.
+ *
+ * What differs between the two is four server actions and one clause, so those
+ * are props and everything else here is shared. The alternative was a second
+ * copy of a four-step ladder, which is how two flows that are meant to be
+ * identical stop being identical: the root `CLAUDE.md` opens with what three
+ * copies of one policy number already cost this product.
+ *
+ * The actions are `props` rather than imported by this file because importing
+ * both sets would register the trainer's server actions in the portal's bundle
+ * and the portal's in the trainer's — a screen carrying a reference to a write
+ * it must never make.
+ *
  * ## Resending is the server's answer, not a countdown here
  *
  * `/sign-in/verify` draws the resend ladder because it OWNS the wait: it knows
@@ -62,7 +77,69 @@ type Step =
   /** It moved. */
   | { at: 'done'; phone: string };
 
-export function PhoneChange({ phone }: { phone: string }) {
+/** What each rung returns. Both halves' actions answer this shape. */
+type Rung = { ok: true } | { ok: false; message: string; restart?: boolean };
+
+/**
+ * The four writes, whoever's account it is.
+ *
+ * `lib/account/actions.ts` for the trainer, `lib/portal/actions.ts` for the
+ * client. Nothing in this component knows which, and that is the point.
+ */
+export interface PhoneChangeWire {
+  /** 1 · a code to the number they are on. */
+  start: () => Promise<Rung>;
+  /** 2 · that code back. The ticket goes to a cookie, never to this component. */
+  verifyCurrent: (otp: string) => Promise<Rung>;
+  /** 3 · the new number, refused before an SMS is spent on it. */
+  requestNew: (phone: string) => Promise<Rung>;
+  /** 4 · the code from the new number, the swap, and a fresh token. */
+  confirmNew: (
+    phone: string,
+    otp: string,
+  ) => Promise<{ ok: true; phone: string } | { ok: false; message: string; restart?: boolean }>;
+  /** Abandoning it. Nothing is written until step 4, so this only drops the ticket. */
+  cancel: () => Promise<void>;
+}
+
+export function PhoneChange({
+  phone,
+  wire,
+  intact,
+  extra,
+  showNumber = true,
+}: {
+  phone: string;
+  wire: PhoneChangeWire;
+  /**
+   * Whether the closed row READS the number back, or only offers to change it.
+   *
+   * True everywhere by default, because on every screen this has ever been
+   * mounted the row was the only place the number appeared. `/settings` is the
+   * exception as of this pass: its sidecar aside states the number as the
+   * answer to *whose account is this*, and with the row still on this card the
+   * same eleven digits were drawn twice, ~200px apart, with two different
+   * labels for one fact. The aside wins because it is ABOVE the fold and
+   * stays there; this card is about the four-step flow.
+   *
+   * The lead sentence below names the number rather than pointing at it, so
+   * the card is not relying on a layout that collapses under 928px.
+   */
+  showNumber?: boolean;
+  /**
+   * What did NOT move, in the account holder's own nouns — "your clients, your
+   * money book and your history", "your sessions, your logs and your trainer".
+   *
+   * It is a prop rather than a sentence here because it is the one clause on
+   * the screen that is about what kind of account this is, and getting it
+   * wrong is worse than generic: a client told "your clients are where they
+   * were" is being addressed as somebody else.
+   */
+  intact: string;
+  /** One more sentence on the closed row, where this account has a consequence
+   *  the other does not. The portal uses it for a number on two rosters. */
+  extra?: ReactNode;
+}) {
   const [step, setStep] = useState<Step>({ at: 'closed' });
   const [code, setCode] = useState('');
   const [typed, setTyped] = useState('');
@@ -87,7 +164,7 @@ export function PhoneChange({ phone }: { phone: string }) {
     setCode('');
     setTyped('');
     start(async () => {
-      const res = await startPhoneChange();
+      const res = await wire.start();
       if (!res.ok) return fail(res.message);
       setStep({ at: 'current' });
       setMessage({
@@ -107,14 +184,14 @@ export function PhoneChange({ phone }: { phone: string }) {
     // Not awaited: nothing on screen depends on it, and a cookie that outlives
     // the panel by a few hundred milliseconds is expired within ten minutes
     // regardless.
-    void cancelPhoneChange();
+    void wire.cancel();
   }
 
   function submitCurrent() {
     if (code.length !== CODE_LENGTH) return;
     setMessage(null);
     start(async () => {
-      const res = await verifyCurrentNumber(code);
+      const res = await wire.verifyCurrent(code);
       if (!res.ok) return fail(res.message, res.restart);
       setCode('');
       setStep({ at: 'number', phone: '' });
@@ -124,7 +201,7 @@ export function PhoneChange({ phone }: { phone: string }) {
   function submitNumber(next: string) {
     setMessage(null);
     start(async () => {
-      const res = await requestNewNumber(next);
+      const res = await wire.requestNew(next);
       if (!res.ok) return fail(res.message, res.restart);
       const digits = next.replace(/\D/g, '').slice(-10);
       setStep({ at: 'code', phone: digits });
@@ -141,7 +218,7 @@ export function PhoneChange({ phone }: { phone: string }) {
     if (code.length !== CODE_LENGTH) return;
     setMessage(null);
     start(async () => {
-      const res = await confirmPhoneChange(next, code);
+      const res = await wire.confirmNew(next, code);
       if (!res.ok) return fail(res.message, res.restart);
       setCode('');
       setStep({ at: 'done', phone: res.phone });
@@ -155,30 +232,45 @@ export function PhoneChange({ phone }: { phone: string }) {
     const shown = step.at === 'done' ? step.phone : phone;
     return (
       <>
-        <div className="kv">
-          <span className="kv__k">Your number</span>
-          <span className="kv__v mono">{shown ? formatPhone(shown) : '—'}</span>
-        </div>
+        {showNumber ? (
+          <KeyValueRow k="Your number" valueClassName="mono">{shown ? formatPhone(shown) : '—'}</KeyValueRow>
+        ) : null}
         {step.at === 'done' ? (
           <p className="small" style={{ marginTop: 8, color: 'var(--tx-accent-text)' }}>
-            <b>Moved.</b> Your next code goes to this number. Nothing else changed — your clients,
-            your money book and your history are all where they were.
+            {/*
+              The number is NAMED rather than pointed at. *This number* needed
+              the row above it to mean anything, and `showNumber` can take that
+              row away — but it reads better with the row too, because this is
+              the one sentence confirming an account moved and the digits it
+              moved to are the whole of what there is to check.
+            */}
+            <b>Moved.</b> Your next code goes to {shown ? formatPhone(shown) : 'your new number'}.
+            Nothing else changed — {intact}.
           </p>
         ) : (
-          <p className="small" style={{ marginTop: 8 }}>
-            This is your login. Changing it takes a code to this number first, then one to the new
-            one — we check you hold both before anything moves.
-          </p>
+          <>
+            <p className="small" style={{ marginTop: 8 }}>
+              {/*
+                *This is* points at the row above and so needs it. Without the
+                row the same fact is stated rather than pointed at — and the
+                digits are deliberately NOT repeated here, because not saying
+                them twice on one screen is the whole reason the row came off.
+              */}
+              {showNumber ? 'This is your login.' : 'Your number is your login.'} Changing it takes
+              a code to that number first, then one to the new one — we check you hold both before
+              anything moves.
+            </p>
+            {extra}
+          </>
         )}
-        <button
-          className="btn btn--secondary"
-          type="button"
+        <Button
+          variant="secondary"
           style={{ marginTop: 12 }}
           disabled={pending}
           onClick={open}
         >
           {pending ? 'Sending…' : step.at === 'done' ? 'Change it again' : 'Change my number'}
-        </button>
+        </Button>
         <MessageSlot message={message} />
       </>
     );
@@ -214,17 +306,16 @@ export function PhoneChange({ phone }: { phone: string }) {
         />
         <MessageSlot message={message} />
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <button
-            className="btn btn--primary"
-            type="button"
+          <Button
+            variant="primary"
             disabled={pending || code.length !== CODE_LENGTH}
             onClick={submitCurrent}
           >
             {pending ? 'Checking…' : 'Continue'}
-          </button>
-          <button className="btn btn--ghost" type="button" disabled={pending} onClick={open}>
+          </Button>
+          <Button variant="ghost" disabled={pending} onClick={open}>
             Send another code
-          </button>
+          </Button>
         </div>
       </Wrap>
     );
@@ -279,9 +370,9 @@ export function PhoneChange({ phone }: { phone: string }) {
           <MessageSlot message={message} />
 
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button className="btn btn--primary" type="submit" disabled={pending || !ready}>
+            <Button variant="primary" type="submit" disabled={pending || !ready}>
               {pending ? 'Sending…' : 'Send the code'}
-            </button>
+            </Button>
           </div>
         </form>
       </Wrap>
@@ -319,22 +410,20 @@ export function PhoneChange({ phone }: { phone: string }) {
           press that moves the account, and the number it moves to is in the
           button — the last place a wrong digit is still free to notice.
         */}
-        <button
-          className="btn btn--primary"
-          type="button"
+        <Button
+          variant="primary"
           disabled={pending || code.length !== CODE_LENGTH}
           onClick={() => submitConfirm(step.phone)}
         >
           {pending ? 'Moving…' : `Move my account to ${formatPhone(step.phone)}`}
-        </button>
-        <button
-          className="btn btn--ghost"
-          type="button"
+        </Button>
+        <Button
+          variant="ghost"
           disabled={pending}
           onClick={() => submitNumber(step.phone)}
         >
           Send another code
-        </button>
+        </Button>
       </div>
     </Wrap>
   );
@@ -368,9 +457,9 @@ function Wrap({
         <h3 className="h5" style={{ margin: 0 }}>
           {title}
         </h3>
-        <button className="btn btn--ghost btn--sm" type="button" disabled={pending} onClick={onCancel}>
+        <Button variant="ghost" size="sm" disabled={pending} onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
       </div>
       <p className="small" style={{ marginTop: 3, marginBottom: 14 }}>
         {lead}

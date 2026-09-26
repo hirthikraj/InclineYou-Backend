@@ -3,7 +3,7 @@ import { listTemplates } from '@/lib/nudges/api';
 
 export const dynamic = 'force-dynamic';
 
-export const metadata = { title: 'Nudge messages · X REP' };
+export const metadata = { title: 'Nudge messages · InclineYou' };
 
 /**
  * THE NUDGE TEMPLATE LIBRARY — and the only nudge screen in the product.
@@ -12,7 +12,7 @@ export const metadata = { title: 'Nudge messages · X REP' };
  * nudge belongs next to the thing that triggered it, and asking a trainer to
  * leave the person in order to message them is exactly the friction that stops
  * the follow-up happening. The sending is on the rows now — Today's day list,
- * the attention queue, the roster, the dues list, the packs that are ending, the
+ * the attention queue, the roster, the pending list, the packs that are ending, the
  * sessions nobody turned up to, the client's own file.
  *
  * What is left is the WORDING, which is a setting: written once, edited rarely,

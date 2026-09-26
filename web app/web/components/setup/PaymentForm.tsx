@@ -10,8 +10,10 @@ import { isUpiFormat, selfTestLink, upiSuggestions } from '@/lib/setup/upi';
 import type { SetupState } from '@/lib/setup/steps';
 import { AddChip, Chip, ChipRow } from './Chips';
 import { StepHead } from './SetupShell';
-import { StepFoot } from './StepFoot';
+import { StepFoot, skipHomeAction } from './StepFoot';
 import { useStepAction } from './useStepAction';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
 
 /**
  * Frame 5e · `/setup/payment` — step 8, where it stops being a form.
@@ -192,29 +194,30 @@ export function PaymentForm({ state }: { state: SetupState }) {
 
       {valid ? (
         <>
-          <div className="card card--acc" style={{ maxWidth: 520 }}>
-            <div className="card__b">
-              <p className="micro" style={{ color: 'var(--tx-accent-text)' }}>
-                YOUR UPI ID
-              </p>
-              {/* 21px so every character is checkable, and it WRAPS rather than
-                  truncating — an ellipsised UPI ID defeats the entire purpose
-                  of this screen. */}
-              <p
-                className="mono"
-                style={{
-                  fontSize: 21,
-                  fontWeight: 600,
-                  color: 'var(--tx-ink)',
-                  marginTop: 9,
-                  letterSpacing: '.01em',
-                  overflowWrap: 'anywhere',
-                }}
-              >
-                {trimmed}
-              </p>
-            </div>
-          </div>
+          <Card
+            tone="acc"
+            style={{ maxWidth: 520 }}
+          >
+            <p className="micro" style={{ color: 'var(--tx-accent-text)' }}>
+              YOUR UPI ID
+            </p>
+            {/* 21px so every character is checkable, and it WRAPS rather than
+                truncating — an ellipsised UPI ID defeats the entire purpose
+                of this screen. */}
+            <p
+              className="mono"
+              style={{
+                fontSize: 21,
+                fontWeight: 600,
+                color: 'var(--tx-ink)',
+                marginTop: 9,
+                letterSpacing: '.01em',
+                overflowWrap: 'anywhere',
+              }}
+            >
+              {trimmed}
+            </p>
+          </Card>
 
           <div className="msg msg--warn" style={{ marginTop: 16, maxWidth: '66ch' }}>
             <IconWarn size={15} />
@@ -230,9 +233,10 @@ export function PaymentForm({ state }: { state: SetupState }) {
                 desktop browser will usually have nothing registered for it,
                 which is why the sentence under it says what to do instead
                 rather than assuming it worked. */}
-            <a
-              className="btn btn--secondary btn--lg"
+            <Button
               href={selfTestLink(trimmed, state.name)}
+              variant="secondary"
+              size="lg"
               style={{ marginTop: 8 }}
               onClick={() =>
                 setNotice(
@@ -242,7 +246,7 @@ export function PaymentForm({ state }: { state: SetupState }) {
             >
               <IconRupee size={15} />
               Send yourself ₹1 to prove it
-            </a>
+            </Button>
           </p>
           {notice ? (
             <div className="msg msg--warn">
@@ -277,6 +281,7 @@ export function PaymentForm({ state }: { state: SetupState }) {
         continueLabel="Finish"
         onContinue={submit}
         onSkip={() => run(() => skipStep('payment'))}
+        onSkipHome={skipHomeAction(state, run)}
       />
     </>
   );

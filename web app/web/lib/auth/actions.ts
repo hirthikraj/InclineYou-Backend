@@ -301,8 +301,9 @@ export async function abandonPending(): Promise<void> {
  * front of the trainer. So the design set's `Sign out&hellip;` — whose ellipsis
  * its own note explains as "it leads to a screen that lists what is still queued
  * rather than to a dialog that cannot name it" — cannot lead there, because there
- * is no queue to list. See `AccountMenu.tsx` for what the ellipsis leads to
- * instead, and why it keeps one.
+ * is no queue to list — so the web row drops the ellipsis and reads `Sign out`.
+ * See `AccountMenu.tsx` for the confirm step it leads to instead, and why a
+ * one-click row would still be wrong.
  *
  * `redirect` rather than a returned path: this is called as a form action, so the
  * navigation is the framework's and happens whether or not the browser is still

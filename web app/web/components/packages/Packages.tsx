@@ -1,15 +1,20 @@
 'use client';
 
-import Link from 'next/link';
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 
 import { Chip, ChipRow } from '@/components/setup/Chips';
 import { PackSheet, type PackFields } from '@/components/setup/PackSheet';
 import { addPack, savePack, saveWorkMode, setPackStatus } from '@/lib/packs/actions';
 import { buildPacks, modeOf, type PackRow, type PacksData } from '@/lib/packs/compute';
 import { WORK_MODES, type WorkMode } from '@/lib/setup/options';
-import { avatarToken, initials, rupees } from '@/lib/today/time';
+import { rupees } from '@/lib/today/time';
 import { NudgeButton } from '@/components/nudge/NudgeButton';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
+import { Tag } from '@/web-components/ui/Tag';
+import { TextField } from '@/web-components/ui/Field';
+import { Avatar } from '@/web-components/ui/Avatar';
+import { Table, Row } from '@/web-components/ui/Table';
 
 /**
  * **The price list** — the phone's § 06 · 4b, on a desk, and since the
@@ -116,14 +121,84 @@ export function Packages({ data }: { data: PacksData }) {
     }
   }
 
+  /**
+   * THE FORM OPENS WHERE THE THUMB IS, AND ON A PHONE THAT IS NOT WHERE IT WAS.
+   *
+   * Reported as *"the add-a-pack input opens at the bottom but it is not scrolled
+   * down to it"*, and measured at 390px: pressing *Add a pack* grew the page by
+   * 597px, left `.body`'s scroll at 0, and put the form's first field **380px
+   * below the fold**. So the loudest control on the tab did nothing a trainer
+   * could see. app.css docks it to the bottom of the screen below 900px — the
+   * fifth opt-in of that shape after `.sch__panel`, `.crd-fpanel` and
+   * `.rp-panel`, and the same answer *Record payment* already gives one tab over.
+   *
+   * `PackSheet`'s own docstring argues for a panel over a sheet because "adding
+   * two or three packs is the common case, and a modal that has to be opened and
+   * dismissed three times is three dismissals a desk does not need to spend."
+   * **That is an argument about a desk, and on this screen it no longer holds
+   * even there:** `submit` closes the form on every add, so the three openings
+   * are already being paid for. What the dock buys is that the second and third
+   * ones are visible.
+   */
+  const sheet = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLElement | null>(null);
+
   function open(owner: 'trainer' | 'gym', pack: PackRow | null) {
+    /* Remembered so closing can put focus back on the control that opened it —
+       the rule every menu and sheet in this shell already follows. */
+    trigger.current = document.activeElement as HTMLElement | null;
     setNotice(null);
     setError(null);
     setConfirming(null);
     setEditing({ owner, pack });
   }
 
+  function close() {
+    setEditing(null);
+    trigger.current?.focus();
+  }
+
+  /* Focus moves to the form's BOX, not to its first field: focusing an input on
+     a phone opens the keyboard over the sheet the trainer has just asked to see.
+     A reader and a keyboard land inside it either way. Escape closes, which is
+     the third way out beside the scrim and Cancel. */
+  useEffect(() => {
+    if (!editing) return;
+    /* `preventScroll`, and then the scroll is done by hand — MEASURED BUG.
+       `focus()` scrolls its target into view, which is exactly right while the
+       form is in the flow and exactly wrong once it is docked: the wrapper is a
+       zero-height box left deep in the page, so focusing it scrolled `.body`
+       **447px** behind a sheet that had not moved, and dismissing left the
+       trainer 447px down a list they had not scrolled. So: never scroll for the
+       focus, and scroll to the panel only when the panel is somewhere a scroll
+       can reach it. */
+    sheet.current?.focus({ preventScroll: true });
+    const panel = sheet.current?.firstElementChild;
+    if (panel && getComputedStyle(panel).position !== 'fixed') {
+      panel.scrollIntoView({ block: 'nearest' });
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      setEditing(null);
+      trigger.current?.focus();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [editing]);
+
   const form = editing ? (
+    <>
+      {/* The scrim exists only below 900px, where the form is a sheet over the
+          list rather than a card under it — app.css hides it at a desk, so the
+          inline panel keeps every neighbour clickable exactly as before. */}
+      <button
+        className="pk__scrim"
+        type="button"
+        aria-label="Close the pack form"
+        onClick={close}
+      />
+    <div className="pk__sheet" ref={sheet} tabIndex={-1}>
     <PackSheet
       // Read at mount only, so the id is the key — without it, opening a second
       // row would re-show the first row's numbers.
@@ -144,8 +219,10 @@ export function Packages({ data }: { data: PacksData }) {
       }
       submitLabel={editing.pack ? 'Save' : undefined}
       onAdd={submit}
-      onCancel={() => setEditing(null)}
+      onCancel={close}
     />
+    </div>
+    </>
   ) : null;
 
   /** One price list, as a table. Both lists are the same table with different copy. */
@@ -179,11 +256,11 @@ export function Packages({ data }: { data: PacksData }) {
                     </span>
                   )}
                 </td>
-                <td className="num mono" data-l={priceLabel}>{rupees(row.amount)}</td>
-                <td className="num mono" data-l="Per session">
+                <td className="num" data-l={priceLabel}>{rupees(row.amount)}</td>
+                <td className="num" data-l="Per session">
                   {row.perSession != null ? rupees(row.perSession) : '—'}
                 </td>
-                <td className="num mono" data-l="On it now">{row.clients}</td>
+                <td className="num" data-l="On it now">{row.clients}</td>
                 <td className="pk__acts" style={{ textAlign: 'right' }}>
                   {confirming === row.id ? (
                     <span className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
@@ -192,9 +269,9 @@ export function Packages({ data }: { data: PacksData }) {
                           ? `${row.clients} keep${row.clients === 1 ? 's' : ''} what they bought.`
                           : 'It stops being offered.'}
                       </span>
-                      <button
-                        className="btn btn--sm btn--ghost"
-                        type="button"
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         disabled={pending}
                         onClick={() => {
                           setConfirming(null);
@@ -202,34 +279,34 @@ export function Packages({ data }: { data: PacksData }) {
                         }}
                       >
                         Retire it
-                      </button>
-                      <button
-                        className="btn btn--sm btn--ghost"
-                        type="button"
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => setConfirming(null)}
                       >
                         Keep selling it
-                      </button>
+                      </Button>
                     </span>
                   ) : (
                     <span className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                      <button
-                        className="btn btn--sm btn--ghost"
-                        type="button"
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => open(owner, row)}
                       >
                         Edit
-                      </button>
-                      <button
-                        className="btn btn--sm btn--ghost"
-                        type="button"
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => {
                           setEditing(null);
                           setConfirming(row.id);
                         }}
                       >
                         Retire
-                      </button>
+                      </Button>
                     </span>
                   )}
                 </td>
@@ -255,19 +332,25 @@ export function Packages({ data }: { data: PacksData }) {
         the section's own line — the sentence that says whether you are looking at
         one price list or two is the sentence this screen is FOR.
       */}
+      {/*
+        THE SENTENCE, AND NOT A BUTTON BESIDE IT.
+
+        This row used to carry a lime *Add a pack* — inherited from `.ph__acts`
+        when the price list was its own route, where there was one list and a
+        page-level primary could only have meant one thing. There are TWO here,
+        and that is what made it wrong rather than merely duplicated: it was
+        hard-coded to `open('trainer')`, so on a screen showing the trainer's
+        list beside the gym's, the loudest control on it silently picked one and
+        gave the other no way in but a ghost button at the foot of a card. For a
+        gym-only trainer it was worse — `disabled`, permanently, as the only
+        primary on the tab.
+
+        So each list owns its own add, in its own card header, where the title
+        beside it says which list is being added to. Same rule the payments card's chips
+        follow: the control goes next to the thing it changes.
+      */}
       <div className="pk__hd">
         <p className="small pk__hd__s">{view.subtitle}</p>
-        <button
-          className="btn btn--primary"
-          type="button"
-          disabled={pending || !view.showsOwn}
-          onClick={() => open('trainer', null)}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-          Add a pack
-        </button>
       </div>
 
       {(notice || error) && (
@@ -285,37 +368,40 @@ export function Packages({ data }: { data: PacksData }) {
         {/* ── the lists ─────────────────────────────────────────────── */}
         <div>
           {view.showsOwn && (
-            <div className="card">
-              <div className="card__hd">
-                <h2 className="card__t">What you sell</h2>
-                <span className="tag">{view.selling.length}</span>
-                <span className="card__acts" style={{ marginLeft: 'auto' }}>
-                  <button
-                    className="btn btn--sm btn--secondary"
-                    type="button"
+            <Card>
+              <Card.Head title="What you sell" actions={<>{/* Both lists draw *Add a pack*, so the visible label is the
+                      same two words in both card headers — it is the card's
+                      title that says which. A reader has no card to look at, so
+                      the accessible name carries the distinction. */}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    aria-label="Add a pack to your price list"
                     onClick={() => open('trainer', null)}
                   >
                     Add a pack
-                  </button>
-                </span>
-              </div>
+                  </Button></>}>
+                
+                <Tag>{view.selling.length}</Tag>
+                
+              </Card.Head>
 
               {view.selling.length === 0 ? (
-                <div className="card__b">
+                <Card.Body>
                   <p className="empty__t" style={{ marginBottom: 6 }}>No price list yet</p>
                   <p className="empty__b">
                     Add what you actually charge — a 16-session pack, a monthly fee, a single
                     session. Everything else on this screen is built from it.
                   </p>
-                </div>
+                </Card.Body>
               ) : (
-                <div className="card__b card__b--flush">{list(view.selling, 'trainer')}</div>
+                <Card.Body flush>{list(view.selling, 'trainer')}</Card.Body>
               )}
 
               {editing && editing.owner === 'trainer' && (
-                <div className="card__b" style={{ borderTop: '1px solid var(--tx-line)' }}>{form}</div>
+                <Card.Body style={{ borderTop: '1px solid var(--tx-line)' }}>{form}</Card.Body>
               )}
-            </div>
+            </Card>
           )}
 
           {/* The gym's own counter prices. Shown only once there is a gym to
@@ -325,11 +411,29 @@ export function Packages({ data }: { data: PacksData }) {
             <div className="card mt4">
               <div className="card__hd">
                 <h2 className="card__t">{gym ? `${gym} sells` : 'The gym’s packages'}</h2>
-                <span className="tag">{view.gymSelling.length}</span>
+                <Tag>{view.gymSelling.length}</Tag>
                 {data.trainer.gymSharePercent != null && (
                   <p className="small" style={{ color: 'var(--tx-ink-3)', marginLeft: 'auto' }}>
                     {data.trainer.gymSharePercent}% of a floor session goes to them
                   </p>
+                )}
+                {/* The twin of the own list's, and the control this card never
+                    had. Its add used to be *Add another* — a ghost at the FOOT
+                    of the card, which is neither where the other list keeps its
+                    add nor a label that says what another one would be. Not
+                    drawn while the gym is nameless: `gymNeedsName` is the state
+                    where the list cannot exist yet, and the body says so. */}
+                {!gymNeedsName && (
+                  <span className="card__acts">
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      aria-label={`Add a pack to ${gym ?? 'the gym'}'s price list`}
+                      onClick={() => open('gym', null)}
+                    >
+                      Add a pack
+                    </Button>
+                  </span>
                 )}
               </div>
 
@@ -347,25 +451,9 @@ export function Packages({ data }: { data: PacksData }) {
                     Nothing from {gym} yet. Add what their counter charges and you can pick it
                     when a client pays the gym instead of you.
                   </p>
-                  <div className="row" style={{ marginTop: 12 }}>
-                    <button
-                      className="btn btn--secondary"
-                      type="button"
-                      onClick={() => open('gym', null)}
-                    >
-                      Add a {gym} package
-                    </button>
-                  </div>
                 </div>
               ) : (
-                <>
-                  <div className="card__b card__b--flush">{list(view.gymSelling, 'gym')}</div>
-                  <div className="card__b" style={{ borderTop: '1px solid var(--tx-line)' }}>
-                    <button className="btn btn--ghost" type="button" onClick={() => open('gym', null)}>
-                      Add another
-                    </button>
-                  </div>
-                </>
+                <div className="card__b card__b--flush">{list(view.gymSelling, 'gym')}</div>
               )}
 
               {editing && editing.owner === 'gym' && (
@@ -375,33 +463,45 @@ export function Packages({ data }: { data: PacksData }) {
           )}
 
           {view.retired.length > 0 && (
-            <div className="card mt4">
-              <div className="card__hd">
-                <h2 className="card__t">Retired</h2>
-                <span className="tag">{view.retired.length}</span>
-              </div>
-              <div className="card__b card__b--flush">
-                <div className="tblwrap">
-                  <table className="tbl">
-                    <tbody>
-                      {view.retired.map((row) => (
-                        <tr key={row.id} style={{ color: 'var(--tx-ink-3)' }}>
-                          <td>
-                            <b style={{ color: 'var(--tx-ink-2)' }}>{row.name}</b>
-                            {row.owner === 'gym' && gym && (
-                              <span className="tag" style={{ marginLeft: 8 }}>{gym}</span>
-                            )}
-                          </td>
-                          <td className="num mono">{rupees(row.amount)}</td>
-                          <td className="small">
-                            {row.clients > 0
-                              ? `${row.clients} still on it — no longer offered`
-                              : 'No longer offered'}
-                          </td>
-                          <td style={{ textAlign: 'right' }}>
-                            <button
-                              className="btn btn--sm btn--ghost"
-                              type="button"
+            <Card
+              title="Retired"
+              aside={<><Tag>{view.retired.length}</Tag></>}
+              flush
+              className="mt4"
+            >
+              <div className="tblwrap">
+                <Table caption="Retired packs, no longer on sale">
+                  {view.retired.map((row) => (
+                    <Row
+                      key={row.id}
+                      style={{ color: 'var(--tx-ink-3)' }}
+                      cells={[
+                        {
+                          key: 'pack',
+                          content: (
+                            <>
+                              <b style={{ color: 'var(--tx-ink-2)' }}>{row.name}</b>
+                              {row.owner === 'gym' && gym && (
+                                <Tag style={{ marginLeft: 8 }}>{gym}</Tag>
+                              )}
+                            </>
+                          ),
+                        },
+                        { key: 'price', content: rupees(row.amount), numeric: true },
+                        {
+                          key: 'note',
+                          className: 'small',
+                          content: row.clients > 0
+                            ? `${row.clients} still on it — no longer offered`
+                            : 'No longer offered',
+                        },
+                        {
+                          key: 'act',
+                          style: { textAlign: 'right' },
+                          content: (
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               disabled={pending}
                               onClick={() =>
                                 run(
@@ -411,159 +511,149 @@ export function Packages({ data }: { data: PacksData }) {
                               }
                             >
                               Bring back
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                            </Button>
+                          ),
+                        },
+                      ]}
+                    />
+                  ))}
+                </Table>
               </div>
-            </div>
+            </Card>
           )}
         </div>
 
         {/* ── how you work, the callout, and who is running out ──────── */}
         <div>
-          <div className="card">
-            <div className="card__hd"><h2 className="card__t">How you work</h2></div>
-            <div className="card__b">
-              <p className="small" style={{ color: 'var(--tx-ink-3)', marginBottom: 10 }}>
-                It decides which price lists exist. A hint, never a gate — who collects is
-                still decided per client.
-              </p>
+          <Card title="How you work">
+            <p className="small" style={{ color: 'var(--tx-ink-3)', marginBottom: 10 }}>
+              It decides which price lists exist. A hint, never a gate — who collects is
+              still decided per client.
+            </p>
 
-              {/* The flow's `Chip`, not a raw `.chip` button — this is the
-                  same question step 7 asks, and two definitions of one
-                  control drift on the next change. It also settles the
-                  a11y: `aria-pressed` on a toggle button, never
-                  `role="radio"`, which does not support it. */}
-              <ChipRow top={0}>
-                {WORK_MODES.map((m) => (
-                  <Chip
-                    key={m.id}
-                    label={m.label}
-                    pressed={mode === m.id}
-                    disabled={pending}
-                    onClick={() => setMode(m.id)}
-                  />
-                ))}
-              </ChipRow>
-              <p className="small" style={{ color: 'var(--tx-ink-3)', marginTop: 8 }}>
-                {WORK_MODES.find((m) => m.id === mode)?.note}
-              </p>
+            {/* The flow's `Chip`, not a raw `.chip` button — this is the
+                same question step 7 asks, and two definitions of one
+                control drift on the next change. It also settles the
+                a11y: `aria-pressed` on a toggle button, never
+                `role="radio"`, which does not support it. */}
+            <ChipRow top={0}>
+              {WORK_MODES.map((m) => (
+                <Chip
+                  key={m.id}
+                  label={m.label}
+                  pressed={mode === m.id}
+                  disabled={pending}
+                  onClick={() => setMode(m.id)}
+                />
+              ))}
+            </ChipRow>
+            <p className="small" style={{ color: 'var(--tx-ink-3)', marginTop: 8 }}>
+              {WORK_MODES.find((m) => m.id === mode)?.note}
+            </p>
 
-              {(mode === 'gym' || mode === 'both') && (
-                <div className="fld mt3">
-                  <label className="fld__l" htmlFor="pk-gym">Which gym</label>
-                  <input
-                    className="ctl"
-                    id="pk-gym"
-                    value={gymDraft}
-                    maxLength={80}
-                    placeholder="Iron Cage, Anna Nagar"
-                    onChange={(e) => setGymDraft(e.target.value)}
-                  />
-                </div>
-              )}
+            {(mode === 'gym' || mode === 'both') && (
+              <TextField
+                label="Which gym"
+                id="pk-gym"
+                className="mt3"
+                value={gymDraft}
+                maxLength={80}
+                placeholder="Iron Cage, Anna Nagar"
+                onChange={(e) => setGymDraft(e.target.value)}
+              />
+            )}
 
-              {(mode !== modeOf(data.trainer) || gymDraft.trim() !== (data.trainer.gymName ?? '')) && (
-                <div className="row" style={{ gap: 8, marginTop: 14 }}>
-                  <button
-                    className="btn btn--primary"
-                    type="button"
-                    disabled={pending}
-                    onClick={() =>
-                      run(
-                        () => saveWorkMode(mode, gymDraft),
-                        mode === 'independent'
-                          ? 'Saved. One price list — your own.'
-                          : 'Saved. Both lists are on this screen.',
-                      )
-                    }
-                  >
-                    {pending ? 'Saving…' : 'Save'}
-                  </button>
-                  <button
-                    className="btn btn--ghost"
-                    type="button"
-                    onClick={() => {
-                      setMode(modeOf(data.trainer));
-                      setGymDraft(data.trainer.gymName ?? '');
-                    }}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
+            {(mode !== modeOf(data.trainer) || gymDraft.trim() !== (data.trainer.gymName ?? '')) && (
+              <div className="row" style={{ gap: 8, marginTop: 14 }}>
+                <Button
+                  variant="primary"
+                  disabled={pending}
+                  onClick={() =>
+                    run(
+                      () => saveWorkMode(mode, gymDraft),
+                      mode === 'independent'
+                        ? 'Saved. One price list — your own.'
+                        : 'Saved. Both lists are on this screen.',
+                    )
+                  }
+                >
+                  {pending ? 'Saving…' : 'Save'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setMode(modeOf(data.trainer));
+                    setGymDraft(data.trainer.gymName ?? '');
+                  }}
+                >
+                  Cancel
+                </Button>
+              </div>
+            )}
+          </Card>
 
           {view.priceNote && (
-            <div className="card card--acc mt4">
-              <div className="card__hd"><h2 className="card__t">The per-session check</h2></div>
-              <div className="card__b">
-                <p className="small" style={{ lineHeight: 1.6 }}>{view.priceNote}</p>
-              </div>
-            </div>
+            <Card
+              title="The per-session check"
+              tone="acc"
+              className="mt4"
+            >
+              <p className="small" style={{ lineHeight: 1.6 }}>{view.priceNote}</p>
+            </Card>
           )}
 
           {view.ending.length > 0 && (
-            <div className="card mt4">
-              <div className="card__hd">
-                <h2 className="card__t">Ending soon</h2>
-                <span className="tag tag--warn">{view.ending.length}</span>
-              </div>
-              <div className="card__b">
-                <p className="small" style={{ color: 'var(--tx-ink-3)', marginBottom: 10 }}>
-                  Renewing is a money decision, so it sits with the prices.
-                </p>
-                {view.ending.map((row) => (
-                  <div className="pk__end" key={row.packageId}>
-                    <span className="who" style={{ alignItems: 'flex-start', minWidth: 0 }}>
-                      <span className="av av--sm" style={{ background: `var(${avatarToken(row.clientId)})` }}>
-                        {initials(row.name)}
-                      </span>
-                      <span style={{ minWidth: 0 }}>
-                        <b>{row.name}</b>
-                        <span className="small" style={{ display: 'block', color: 'var(--tx-ink-3)' }}>
-                          {row.detail}
-                        </span>
+            <Card
+              title="Ending soon"
+              aside={<><Tag tone="warn">{view.ending.length}</Tag></>}
+              className="mt4"
+            >
+              <p className="small" style={{ color: 'var(--tx-ink-3)', marginBottom: 10 }}>
+                Renewing is a money decision, so it sits with the prices.
+              </p>
+              {view.ending.map((row) => (
+                <div className="pk__end" key={row.packageId}>
+                  <span className="who" style={{ alignItems: 'flex-start', minWidth: 0 }}>
+                    <Avatar name={row.name} id={row.clientId} size="sm" />
+                    <span style={{ minWidth: 0 }}>
+                      <b>{row.name}</b>
+                      <span className="small" style={{ display: 'block', color: 'var(--tx-ink-3)' }}>
+                        {row.detail}
                       </span>
                     </span>
-                    {/*
-                      TWO VERBS, AND THE NUDGE IS THE ONE THAT USUALLY COMES
-                      FIRST.
+                  </span>
+                  {/*
+                    TWO VERBS, AND THE NUDGE IS THE ONE THAT USUALLY COMES
+                    FIRST.
 
-                      *Renew* opens the client's file and sells the next pack —
-                      which a trainer does after the client has agreed to it. The
-                      conversation is what has to happen first, and until now this
-                      row offered no way to have it: a trainer looking at six
-                      packs about to run out had to open six files to send six
-                      messages. That is the friction this whole feature exists to
-                      remove.
+                    *Renew* opens the client's file and sells the next pack —
+                    which a trainer does after the client has agreed to it. The
+                    conversation is what has to happen first, and until now this
+                    row offered no way to have it: a trainer looking at six
+                    packs about to run out had to open six files to send six
+                    messages. That is the friction this whole feature exists to
+                    remove.
 
-                      `renewal`, so the message names the sessions left rather
-                      than asking for money — a pack running out is a renewal
-                      conversation, and `payment_reminder` here would read as
-                      chasing somebody who owes nothing.
-                    */}
-                    <span className="pk__endacts">
-                      <NudgeButton
-                        clientId={row.clientId}
-                        clientName={row.name}
-                        template="renewal"
-                        className="btn btn--sm btn--secondary"
-                        showContactedNote={false}
-                      />
-                      <Link className="btn btn--sm btn--ghost" href={`/clients/${row.clientId}/package`}>
-                        Renew
-                      </Link>
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
+                    `renewal`, so the message names the sessions left rather
+                    than asking for money — a pack running out is a renewal
+                    conversation, and `payment_reminder` here would read as
+                    chasing somebody who owes nothing.
+                  */}
+                  <span className="pk__endacts">
+                    <NudgeButton
+                      clientId={row.clientId}
+                      clientName={row.name}
+                      template="renewal"
+                      className="btn btn--sm btn--secondary"
+                      showContactedNote={false}
+                    />
+                    <Button href={`/clients/${row.clientId}/package`} variant="ghost" size="sm">
+                      Renew
+                    </Button>
+                  </span>
+                </div>
+              ))}
+            </Card>
           )}
 
           {/* A `.card`, not `.why`. §11's `.why` has no BOX rule on this half
@@ -573,15 +663,15 @@ export function Packages({ data }: { data: PacksData }) {
               `AddClientDrawer` use it too and pay the same, which is a
               pre-existing gap and not this screen's to close: adding a `.why`
               box would restyle three components in a pass about a fourth. */}
-          <div className="card mt4">
-            <div className="card__hd"><h2 className="card__t">A price list is not a sale</h2></div>
-            <div className="card__b">
-              <p className="small" style={{ lineHeight: 1.6 }}>
-                Changing a price here never changes a pack somebody already bought. What they
-                paid is what they paid — that is a different row, in a different table.
-              </p>
-            </div>
-          </div>
+          <Card
+            title="A price list is not a sale"
+            className="mt4"
+          >
+            <p className="small" style={{ lineHeight: 1.6 }}>
+              Changing a price here never changes a pack somebody already bought. What they
+              paid is what they paid — that is a different row, in a different table.
+            </p>
+          </Card>
         </div>
       </div>
     </>

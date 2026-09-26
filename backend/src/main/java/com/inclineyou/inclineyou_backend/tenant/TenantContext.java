@@ -57,7 +57,13 @@ public record TenantContext(
      * whether they are standing in one.
      */
     public enum Actor {
-        NONE(""), STAFF("staff"), CLIENT("client");
+        /**
+         * {@code SYSTEM} is boot-time work that writes rows belonging to nobody —
+         * the global exercise library, which V21's policy lets no request write.
+         * A request's context is built by {@code AuthTokenFilter} and is never
+         * SYSTEM; only {@link TenantContext#SYSTEM} is.
+         */
+        NONE(""), STAFF("staff"), CLIENT("client"), SYSTEM("system");
 
         public final String wire;
         Actor(String wire) { this.wire = wire; }
@@ -65,6 +71,14 @@ public record TenantContext(
 
     public static final TenantContext NONE =
             new TenantContext(Actor.NONE, null, null, List.of(), null, List.of());
+
+    /**
+     * Boot-time catalogue work (V21). No workspace, no phone, no trainer: the
+     * only policy it satisfies is the one on global {@code exercise} rows, so it
+     * can seed the library and read nothing else.
+     */
+    public static final TenantContext SYSTEM =
+            new TenantContext(Actor.SYSTEM, null, null, List.of(), null, List.of());
 
     private static final ThreadLocal<TenantContext> CURRENT = new ThreadLocal<>();
 

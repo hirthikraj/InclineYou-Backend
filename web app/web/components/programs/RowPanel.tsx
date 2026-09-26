@@ -7,6 +7,9 @@ import { searchExercises } from '@/lib/exercises/actions';
 import type { ExerciseWire } from '@/lib/exercises/api';
 import { collapseSets, type Entry, type SetDetail } from '@/lib/programs/blueprint';
 import { CheckIcon, CloseIcon, LinkIcon, PlusIcon, SearchIcon, TrashIcon } from './Icons';
+import { Button } from '@/web-components/ui/Button';
+import { Chip } from '@/web-components/ui/Chip';
+import { DockPanel } from '@/web-components/ui/DockPanel';
 
 /**
  * ONE ROW, ONE PANEL.
@@ -154,31 +157,25 @@ export function RowPanel({
   const altName = draft.altExerciseId ? names[draft.altExerciseId]?.name ?? null : null;
 
   return (
-    <aside className="pg__panel" aria-label={`Edit ${name}`}>
-      <header className="pg__panelhd">
-        <div>
-          <p className="pg__panelt">{name}</p>
-          <p className="small">
-            {preview
-              .map(r => (r.count > 1 ? `${r.count} × ${r.label}` : r.label))
-              .join(preview.some(r => r.count > 1) ? ', ' : ' · ')}
-          </p>
-        </div>
-        <button className="btn btn--icon btn--ghost" type="button" aria-label="Close" onClick={onClose}>
-          <CloseIcon />
-        </button>
-      </header>
+    <DockPanel label={`Edit ${name}`}>
+      <DockPanel.Head
+        title={name}
+        sub={preview
+          .map(r => (r.count > 1 ? `${r.count} × ${r.label}` : r.label))
+          .join(preview.some(r => r.count > 1) ? ', ' : ' · ')}
+        actions={
+          <Button variant="ghost" iconOnly label="Close" onClick={onClose} title={undefined} icon={<CloseIcon />} />
+        }
+      />
 
-      <div className="pg__panelb">
+      <DockPanel.Body>
         {/* ── the numbers ── */}
         <section className="card">
           <div className="card__hd">
             <span className="card__t">The numbers</span>
             <div className="tools">
-              <button
-                className="chip"
-                type="button"
-                aria-pressed={draft.mode === 'reps'}
+              <Chip
+                pressed={draft.mode === 'reps'}
                 onClick={() =>
                   setDraft(d => ({
                     ...d,
@@ -192,11 +189,9 @@ export function RowPanel({
                 }
               >
                 Reps
-              </button>
-              <button
-                className="chip"
-                type="button"
-                aria-pressed={draft.mode === 'time'}
+              </Chip>
+              <Chip
+                pressed={draft.mode === 'time'}
                 onClick={() =>
                   setDraft(d => ({
                     ...d,
@@ -210,7 +205,7 @@ export function RowPanel({
                 }
               >
                 Time
-              </button>
+              </Chip>
             </div>
           </div>
 
@@ -234,10 +229,10 @@ export function RowPanel({
               ))}
             </div>
 
-            <button className="btn btn--sm btn--secondary pg__wide pg__gap" type="button" onClick={addSet}>
+            <Button variant="secondary" size="sm" wide className="pg__gap" onClick={addSet}>
               <PlusIcon size={12} />
               Add a set
-            </button>
+            </Button>
 
             <p className="small pg__gap">
               A new set copies the one above it, so a straight 3 × 12 is one number typed once. Tick a
@@ -322,13 +317,14 @@ export function RowPanel({
                   <span className="kv__k">or</span>
                   <span className="kv__v">{altName}</span>
                 </p>
-                <button
-                  className="btn btn--sm btn--ghost pg__gap"
-                  type="button"
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="pg__gap"
                   onClick={() => setDraft(d => ({ ...d, altExerciseId: null }))}
                 >
                   Remove the alternate
-                </button>
+                </Button>
               </>
             ) : (
               <AltPicker onPick={id => setDraft(d => ({ ...d, altExerciseId: id }))} />
@@ -349,18 +345,18 @@ export function RowPanel({
             {entry.groupId ? (
               <>
                 <p className="small">This exercise is part of a superset.</p>
-                <button className="btn btn--sm btn--secondary pg__gap" type="button" onClick={onUnlink}>
+                <Button variant="secondary" size="sm" className="pg__gap" onClick={onUnlink}>
                   <LinkIcon size={13} />
                   Break the superset
-                </button>
+                </Button>
                 <p className="small pg__gap">Unlinking puts each row&rsquo;s own rest back.</p>
               </>
             ) : canLink && pairName ? (
               <>
-                <button className="btn btn--sm btn--secondary pg__wide" type="button" onClick={onLink}>
+                <Button variant="secondary" size="sm" wide onClick={onLink}>
                   <LinkIcon size={13} />
                   Superset with {pairName}
-                </button>
+                </Button>
                 <p className="small pg__gap">
                   {/* The one consequence nobody predicts, said before it happens. */}
                   Rest moves to the pair: <b>none between the two, {draft.restSeconds ?? 90}s after the
@@ -375,17 +371,17 @@ export function RowPanel({
             )}
           </div>
         </section>
-      </div>
+      </DockPanel.Body>
 
-      <footer className="pg__panelft">
-        <button className="btn btn--secondary" type="button" onClick={onClose}>
+      <DockPanel.Foot>
+        <Button variant="secondary" onClick={onClose}>
           Cancel
-        </button>
-        <button className="btn btn--primary" type="button" onClick={() => onSave(fromDraft(draft))}>
+        </Button>
+        <Button variant="primary" onClick={() => onSave(fromDraft(draft))}>
           Save
-        </button>
-      </footer>
-    </aside>
+        </Button>
+      </DockPanel.Foot>
+    </DockPanel>
   );
 }
 

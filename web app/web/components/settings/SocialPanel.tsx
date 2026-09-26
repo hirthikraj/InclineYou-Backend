@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 
 import { MessageSlot } from '@/components/auth/MessageSlot';
 import { SaveRow } from '@/components/settings/IdentityForm';
+import { usePublishDraft } from '@/components/settings/ProfileDraft';
 import type { Message } from '@/lib/auth/copy';
 import { saveSocialLinks } from '@/lib/profile/actions';
 import type { Identity } from '@/lib/profile/api';
@@ -72,6 +73,23 @@ export function SocialPanel({ initial }: { initial: Identity }) {
   const [touched, setTouched] = useState<{ ig: boolean; yt: boolean }>({ ig: false, yt: false });
   const [message, setMessage] = useState<Message | null>(null);
   const [pending, start] = useTransition();
+  const publish = usePublishDraft();
+
+  /* THE HANDLES ARE PUBLISHED AS NULL, AND THAT IS THE HONEST VALUE.
+     `instagramHandle` is derived SERVER-SIDE on write — this half has never
+     parsed a social URL and `lib/profile/social.ts` says why — so while a link
+     is being typed there is no handle to show. `ProfileCard` falls back to the
+     platform's name for exactly this case, so the card reads *Instagram* until
+     the save comes back with `@ravi.trains`. Guessing the handle here would put
+     a second, looser parser in front of the one the server actually uses. */
+  useEffect(() => {
+    publish({
+      instagramUrl: instagram,
+      youtubeUrl: youtube,
+      instagramHandle: instagram === saved.instagramUrl ? saved.instagramHandle : null,
+      youtubeHandle: youtube === saved.youtubeUrl ? saved.youtubeHandle : null,
+    });
+  }, [publish, instagram, youtube, saved]);
 
   const ig = instagram.trim();
   const yt = youtube.trim();
