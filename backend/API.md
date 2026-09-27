@@ -41,7 +41,6 @@ and indexes — see [`SCHEMA.md`](SCHEMA.md).
 | [Workout sessions & set logs](#workout-sessions--set-logs) | `/v1/workouts` | 13 |
 | [Packs (the price list)](#packs-the-price-list) | `/v1/packs` | 3 |
 | [Packages & payments (money book)](#packages--payments-money-book) | `/v1/clients/{id}/packages`, `/v1/packages`, `/v1/payments` | 14 |
-| [Notifications (the trainer's bell)](#notifications-the-trainers-bell) | `/v1/notifications` | 3 | V15
 | [Nudges](#nudges) | `/v1/clients/{clientId}/nudge`, `/v1/nudges`, `/v1/nudge-templates` | 6 |
 | [Attention dismissals](#attention-dismissals) | `/v1/attention/dismissals` | 3 |
 | [Reports](#reports) | `/v1/clients/{clientId}/report` | 2 |
@@ -50,7 +49,7 @@ and indexes — see [`SCHEMA.md`](SCHEMA.md).
 | [Client sync](#client-sync) | `/v1/client/sync` | 2 |
 | [Client portal](#client-portal--v1me) | `/v1/me` | 34 | modules 11a–11e
 
-**Total: 204 endpoints.** (23 Sep 2026: V8 added `PATCH /v1/payments/{id}/write-off` and `POST /v1/payments/{id}/invoice`; V9 added `GET /v1/exercises/categories` and `GET /v1/exercises/{id}`; V11 added the three `/v1/templates/certified` routes; V13 added the five `/v1/workout-templates` routes; V14 added the eleven assessment routes; V15 added the three bell routes; module 11a added the sixteen `/v1/me` reads 11b the four workout writes 11c the three client writes, 11d the portal bell, `PATCH /v1/me/prefs` and `POST /v1/programs/{id}/notify`, and 11e the seven account routes; and V5's two sitting routes were removed with its table; V5's four body-assessment routes were missing from this table and are now counted. The total had read 129 while its own rows summed to 141 — it is now the sum of the rows.)
+**Total: 200 endpoints.** (26 Sep 2026: the trainer's bell — the three `/v1/notifications` routes — and `POST /v1/programs/{id}/notify` were removed; there is no notification service in v1. 23 Sep 2026: V8 added `PATCH /v1/payments/{id}/write-off` and `POST /v1/payments/{id}/invoice`; V9 added `GET /v1/exercises/categories` and `GET /v1/exercises/{id}`; V11 added the three `/v1/templates/certified` routes; V13 added the five `/v1/workout-templates` routes; V14 added the eleven assessment routes; V15 added the three bell routes; module 11a added the sixteen `/v1/me` reads 11b the four workout writes 11c the three client writes, 11d the portal bell, `PATCH /v1/me/prefs` and `POST /v1/programs/{id}/notify`, and 11e the seven account routes; and V5's two sitting routes were removed with its table; V5's four body-assessment routes were missing from this table and are now counted. The total had read 129 while its own rows summed to 141 — it is now the sum of the rows.)
 
 ---
 
@@ -1876,14 +1875,6 @@ puts every row on both sides of the ledger for a plan nobody has touched.
 the same reason. Null for a plan written from scratch and for one applied before
 the column existed — neither has a blueprint to line up against.
 
-### `POST /v1/programs/{id}/notify`
-**Purpose:** the client plan builder's optional *Tell {client}* after a save.
-**V18.** No body; returns `{ sent }`. It writes nothing to the plan — a row edit
-mints nothing on its own, because a typo fix is not an event — and mints one
-`plan` notification (`subjectAt` = the plan's creation, so the portal says *changed
-your plan*). **`{ sent: false }`, not an error**, when the client has switched plan
-notices off. The plan's owning trainer only; anything else is `404`.
-
 ### `GET /v1/programs/{id}/exercises`
 **Purpose:** the program's exercise rows, in `orderIndex` order.
 
@@ -2722,45 +2713,6 @@ has a number answers it unchanged.
 > no tax. `PRICING.md`'s GST-compliant invoices are InclineYou billing the
 > trainer — a different document — and no copy on either half may call this one
 > a tax invoice.
-
----
-
-## Notifications (the trainer's bell)
-
-`notification/TrainerNotificationController.java` — **V15.** The header bell holds
-**events somebody else did** to the trainer's book — never their own writes.
-Rows are **facts, never sentences**; the web's `lib/notifications/copy.ts` writes
-the English, and drops any `kind` its build does not know.
-
-```ts
-Notification { id, kind: 'payment'|'cancelled'|'metric'|'team', clientId|null, clientName|null,
-               amount|null, subjectAt|null, text|null, at, readAt|null }     // epoch ms
-```
-
-| `kind` | `text` means | Minted by |
-| --- | --- | --- |
-| `team` | the coach the client moved **to** | `POST /v1/team/clients/{id}/reassign`, on the bell of the coach who **lost** the client — and only when somebody else made the move |
-| `metric` | `"<value> <unit>"` | **nothing since V22** — it was the portal weigh-in, `POST /v1/me/metrics`, withdrawn with `body_metric`. Kept in the enum so old rows still render. |
-| `cancelled` | the session's day label; `subjectAt` is the slot | a client-side cancel — **no such route exists yet** |
-| `payment` | the method, or `gym` | a payment somebody other than the trainer records — **Ring 2, not yet** |
-
-A `team` row is totals-free by construction: no amount, no payment — *no role sees
-a teammate's money book*.
-
-### `GET /v1/notifications`
-**Purpose:** the caller's feed, **newest first**, the last **90 days**. No
-`?unread` filter, by design: the header counts what the list holds.
-
-### `POST /v1/notifications/{id}/read`
-**Purpose:** mark one read. **Idempotent and never un-reads** — `readAt` is when
-it was first seen. Returns the row; another trainer's is `404`.
-
-### `POST /v1/notifications/read`
-**Purpose:** mark every unread row read, in **one** request. Returns the feed.
-
-There is **no route that marks a row unread**, and **no push** is sent from the
-bell. Rows are written only through `mint_trainer_notification()` — see
-`SCHEMA.md` → `trainer_notification`.
 
 ---
 

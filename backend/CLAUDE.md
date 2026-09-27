@@ -97,7 +97,7 @@ blueprint, so copy from one of the other two.
 
 `auth` · `client` · `exercise` · `template` · `program` · `session` ·
 `progress` · `payment` · `report` · `nudge` · `push` · `sync` · `trainer` ·
-`team` · `workout` · `assessment` · `notification` · `portal`
+`team` · `workout` · `assessment` · `portal`
 
 Cross-cutting: `config` (security, Redis, health, `AppProperties`),
 `ratelimit`, `exception` (the global RFC-7807 handler), `entity` + `repository`

@@ -25,10 +25,12 @@ must-do items standing between the current tree and a production
 deployment, an
 India-first hosting analysis for all three layers with alternates, and the
 security checklist to sign off before release. **Read it before any deployment
-or infrastructure work.** Two of its blockers are worth knowing even if you
-never deploy: the web never sends `X-InclineYou-Client: web`, so it holds an
-unrevocable JWT rather than the session V41 built for it, and no OTP delivery is
-wired, so nothing can sign in off a development machine. **OTP goes over
+or infrastructure work.** One of its blockers is worth knowing even if you
+never deploy: no OTP delivery is wired, so nothing can sign in off a development
+machine. (The other — the web never sending `X-InclineYou-Client: web`, and so
+holding an unrevocable JWT — was fixed on 27 Sep 2026: `lib/auth/api.ts` sends it,
+and a not-yet-claimed number gets a 15-minute JWT that can only claim, because
+`web_session` needs an `app_user` row.) **OTP goes over
 WhatsApp only, no SMS** (decided 24 Sep 2026).
 
 **v1 is the trainer web app alone** (decided 24 Sep 2026, `WEB_LAUNCH.md` §3).

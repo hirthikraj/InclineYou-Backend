@@ -272,7 +272,7 @@ and `next build`. Read this section before writing CSS or a probe.
     server's instant must be threaded down or the browser's clock disagrees with
     the HTML.
 21. **No `setState` in an effect to sync a prop.** Adjust during render, the
-    documented pattern (`Schedule.tsx`'s `?new=1`, `NotificationsHost`).
+    documented pattern (`Schedule.tsx`'s `?new=1`).
 22. **A ref handed across a context boundary** is refused by `react-hooks/refs` —
     find the trigger by selector instead.
 23. **An underscore-prefixed folder is a PRIVATE folder** and never becomes a
@@ -386,9 +386,8 @@ and `next build`. Read this section before writing CSS or a probe.
   invented in a screen is the defect the catalogue exists to prevent — it is
   invisible to review and it drifts. If a screen needs something new, it goes
   **into** the design system first.
-- **A BEM family is ONE component with parts.** The client portal's bell reuses
-  `NotificationPanel` with a `NotificationView` adapter per half rather than a
-  second `.ntf`.
+- **A BEM family is ONE component with parts** — one component with a small
+  adapter per caller, never a second copy of the family.
 - **Extend rather than copy.** `SetRows` grew an editing mode; `Stat` grew `href`;
   `Table` grew `foot` (ten call-sites had each answered its absence by
   hand-writing a raw `<table className="tbl">`); `PhoneChange` grew a `wire` prop
@@ -2111,17 +2110,9 @@ one surface and not the other.**
   tenanted reads are a backend change.
 - **`/team` is a live route with no entry point in the chrome** — a known gap with
   an owner: managing a team is a screen *inside* the team workspace.
-- **The bell holds EVENTS; Today's queue holds STATE.** A notification is
-  something somebody else did, at a moment, read once and then history. **A
-  notification never carries a verb that changes the book.** Two surfaces listing
-  the same rows means every verb has two homes.
-- **Opening the panel does not mark anything read** — a count that clears itself
-  on being looked at is a count nobody can trust. Sorted by time, never
-  unread-first: a list whose order changes as rows are read moves under the
-  pointer.
-- **The test for a new notification kind is whether the product can OBSERVE it.**
-  There is no *client replied to your reminder*: nudges go out through `wa.me` and
-  WhatsApp tells this app nothing.
+- **There is no bell and no notification service in v1** (removed 27 Sep 2026 —
+  the trainer's and the portal's, backend and web). Today's queue is the one
+  place that says what needs doing; don't add a second surface that lists events.
 - **`currentFor` tests the longer prefix first** (`/settings/profile` before
   `/settings`) and **refuses to guess for `/sessions`** — lighting *Schedule*
   would claim the console is part of a screen the trainer did not open.
@@ -2164,7 +2155,7 @@ from the one button Home is arranged around. Four labelled slots fit 320px.
 
 `PortalShell` is a second composition rather than a flag on `AppShell`: the client
 role has no palette (no roster), no workspace host (two rosters are arrangements,
-not tenants). `ToastHost` and the bell transfer unchanged. The rail collapses on
+not tenants). `ToastHost` transfers unchanged. The rail collapses on
 both halves — the collapse is a *choice*, and a control that exists on one half and
 not the other is the same control missing.
 
@@ -2420,18 +2411,6 @@ privacy, because a client will assume the answer is symmetrical.
 - **There is no video anywhere in the portal.** `clip` is GONE from the wire
   rather than nulled — a nullable field is a promise that one arrives.
   `ClipThumb` is kept with a docstring saying the portal no longer consumes it.
-- **The bell's switches gate the MINT, not the read.** A filter on the read means
-  turning a switch back on refills three weeks of history the client was never
-  told about, and turning it off rewrites the past. The seed goes through the same
-  gate.
-- **The client's copy bolds the trainer's NAME**, inverting the trainer's feed: a
-  client has one trainer, so the name is not a disambiguator, it is the point. A
-  row opening *Your programme was updated* is the generic nag. `best` is the one
-  row about the reader and is second person.
-- **Every portal notification row has somewhere to go**, which the trainer's
-  cannot promise.
-- **No `reminder` kind** — *Session tomorrow* is neither an event nor a state, it
-  goes stale by itself, and Home's hero says it bigger and sooner.
 
 ---
 
@@ -2633,8 +2612,7 @@ The one gate that costs nothing and catches a real class:
 - **`PhoneRow` has no row menu**, so none of the roster's four verbs reach ≤900px.
 - **No export of a roster, program or session history.** `webapp-settings.html`
   promises *everything is exportable* and only the money book is.
-- **No push anywhere** — no manifest, no service worker. The portal's notification
-  switches are honoured at the mint and the bell is the only channel that exists.
+- **No push anywhere** — no manifest, no service worker, and no bell.
 - **`ClientReport` still uses a transient inline string** where the toast deck
   should carry the confirm; Tier 2 and Tier 3 toast call-sites are unwired.
 - **`.tag--link` flattens a tone on hover** — its hover sets
