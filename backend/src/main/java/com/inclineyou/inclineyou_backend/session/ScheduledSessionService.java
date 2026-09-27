@@ -103,35 +103,6 @@ public class ScheduledSessionService {
             "status, notes, day_label, template_day, delivery_mode, created_at, updated_at, " +
             "pack_delta, pack_package_id::text AS pack_package_id";
 
-    // ── List ──────────────────────────────────────────────────────────────────
-
-    public List<SessionResponse> list(UUID trainerId, String clientId, Long from, Long to) {
-        var conditions = new ArrayList<String>();
-        var p = new HashMap<String, Object>();
-        p.put("tid", trainerId.toString());
-        conditions.add("trainer_id = :tid::uuid");
-        conditions.add("deleted_at IS NULL");
-
-        if (clientId != null && !clientId.isBlank()) {
-            p.put("cid", clientId);
-            conditions.add("client_id = :cid::uuid");
-        }
-        if (from != null) {
-            p.put("from", Timestamp.from(Instant.ofEpochMilli(from)));
-            conditions.add("scheduled_at >= :from");
-        }
-        if (to != null) {
-            p.put("to", Timestamp.from(Instant.ofEpochMilli(to)));
-            conditions.add("scheduled_at <= :to");
-        }
-
-        var rows = jdbc.queryForList(
-                "SELECT " + SESSION_COLUMNS +
-                " FROM scheduled_session WHERE " + String.join(" AND ", conditions) +
-                " ORDER BY scheduled_at ASC", p);
-        return rows.stream().map(this::toResponse).toList();
-    }
-
     // ── Create ────────────────────────────────────────────────────────────────
 
     @Transactional

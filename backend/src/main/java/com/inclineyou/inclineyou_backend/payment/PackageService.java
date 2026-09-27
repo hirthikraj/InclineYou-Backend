@@ -213,25 +213,6 @@ public class PackageService {
             Integer sessionDurationMinutes
     ) {}
 
-    /**
-     * Repeat a pack that has run out.
-     *
-     * <p>Every field is optional and every one of them defaults to what the
-     * expiring pack said, because that is what renewing MEANS. A trainer standing
-     * on a gym floor renewing a client's block should not be asked to re-type a
-     * price they set last month — {@code POST /v1/packages/{id}/renew} with an
-     * empty body is the whole interaction, and the overrides exist for the sale
-     * where something genuinely changed.
-     */
-    public record RenewPackageRequest(
-            String packId,
-            Integer sessionsTotal,
-            BigDecimal amount,
-            BigDecimal discountAmount,
-            String startDate,
-            String dueDate
-    ) {}
-
     /** Pause or resume. The reason is free text and is never parsed. */
     public record PausePackageRequest(String reason, String effectiveAt) {}
 
@@ -497,51 +478,6 @@ public class PackageService {
         return rows.stream().map(this::toPackageResponse).toList();
     }
 
-    /**
-     * Every package this trainer has ever sold, newest first.
-     *
-     * THE ROSTER-WIDE READ THE PER-CLIENT ROUTE CANNOT BE. Its sibling above
-     * answers "what has this one person bought", which is the client file's
-     * question. Two screens ask a different one — the deck's *who is running
-     * out* and the money book's *what is live* — and answering it through the
-     * per-client route means one request per client on the screen a trainer
-     * opens every morning. At 22 clients that is 22 requests against a 120/min
-     * ceiling, so a refresh is rate-limited for reading a dashboard.
-     *
-     * `status` narrows it because the caller that wants live packs does not want
-     * two years of finished ones; omitting it returns them all.
-     *
-     * <p><b>Since V30 `status=active` means it, and that is a correction rather
-     * than a change.</b> The sweep above has already closed anything exhausted or
-     * lapsed, so this no longer answers with packs that finished in March. Two
-     * callers depended on the old behaviour and neither is worse off: the money
-     * book's *Ending soon* already filtered {@code sessionsRemaining > 0}, and
-     * the panel that records a payment now asks for packs with money outstanding
-     * instead — which is the right question, because a client can finish twelve
-     * sessions and still owe for four of them.
-     */
-    public List<PackageResponse> listAllPackages(UUID trainerId, String status) {
-        String tid = trainerId.toString();
-        sweepLifecycle(tid);
-
-        var p = new HashMap<String, Object>();
-        p.put("tid", tid);
-
-        String filter = "";
-        if (status != null && !status.isBlank()) {
-            p.put("status", status);
-            filter = "AND p.status = :status";
-        }
-
-        var rows = jdbc.queryForList("""
-                SELECT %s
-                FROM package p
-                WHERE p.trainer_id = :tid::uuid AND p.deleted_at IS NULL %s
-                ORDER BY p.created_at DESC
-                """.formatted(PACKAGE_COLUMNS, filter), p);
-        return rows.stream().map(this::toPackageResponse).toList();
-    }
-
     /** One package's pause / resume / extend history, oldest first. */
     public List<AdjustmentResponse> listAdjustments(UUID trainerId, String packageId) {
         String tid = trainerId.toString();
@@ -591,11 +527,11 @@ public class PackageService {
      */
     @Transactional
     public PackageResponse createPackage(UUID trainerId, String clientId, CreatePackageRequest req) {
-        return sell(trainerId, clientId, req, "sold");
+        return sell(trainerId, clientId, req);
     }
 
-    /** The sale itself, told whether it is a first sale or a renewal — the client's bell says which. */
-    private PackageResponse sell(UUID trainerId, String clientId, CreatePackageRequest req, String verb) {
+    /** The sale itself — shared by a first sale and a renewal. */
+    private PackageResponse sell(UUID trainerId, String clientId, CreatePackageRequest req) {
         String tid = trainerId.toString();
         requireClientOwnership(clientId, tid);
 
@@ -767,95 +703,6 @@ public class PackageService {
                 r.status(), r.createdAt(), r.updatedAt(), r.packId(), r.pausedAt(),
                 r.pausedDays(), r.closedAt(), r.dueDate(), r.discountAmount(),
                 r.amountPaid(), r.amountDue(), booked);
-    }
-
-    /**
-     * RENEW — the most revenue-critical interaction in the product, and it has to
-     * be one tap.
-     *
-     * <p>A trainer renews a client while standing next to them on a gym floor
-     * with forty seconds before the next session. An empty body is the whole
-     * request: same type, same price, same session count, same validity WINDOW,
-     * and the new pack starts where the old one stopped.
-     *
-     * <h2>"Dates continue from expiry" — three cases</h2>
-     *
-     * <ul>
-     *   <li>Renewed EARLY, which is the good case and the one a nudge is for: the
-     *       old pack runs to the 30th, so the new one starts on the 1st. The
-     *       client is not charged twice for the same fortnight and the trainer is
-     *       not asked to diary it.</li>
-     *   <li>Renewed LATE: the old pack lapsed three weeks ago. The new one starts
-     *       TODAY — back-dating it would silently hand back validity nobody had,
-     *       which is a gift the trainer did not choose to give. {@code extend} is
-     *       how you choose to give it, and it leaves a row saying so.</li>
-     *   <li>No expiry at all: the new pack has none either. It runs until the
-     *       sessions are used, which is how most of these are actually sold.</li>
-     * </ul>
-     *
-     * <h2>Where the validity window comes from</h2>
-     *
-     * The price-list entry, if the old pack still points at one and it still
-     * carries a {@code validity_days}. Otherwise the OLD PACK'S OWN SPAN, minus
-     * whatever it spent paused — a block sold with ninety days renews with
-     * ninety days even if the price was retired last month, and the three weeks
-     * the client spent in Kerala do not become part of the window forever.
-     */
-    @Transactional
-    public PackageResponse renewPackage(UUID trainerId, String packageId, RenewPackageRequest req) {
-        String tid = trainerId.toString();
-        var old = readPackage(packageId, tid);
-        String clientId = str(old.get("client_id"));
-        if (req == null) req = new RenewPackageRequest(null, null, null, null, null, null);
-
-        String packId = firstNonBlank(req.packId(), str(old.get("pack_id")));
-        Map<String, Object> pack = packId == null ? null : readPackOrNull(packId, tid);
-
-        LocalDate today = LocalDate.now();
-        LocalDate oldEnd = toLocalDate(old.get("end_date"));
-
-        LocalDate startDate;
-        if (req.startDate() != null && !req.startDate().isBlank()) {
-            startDate = parseDate(req.startDate(), "startDate");
-        } else if (oldEnd != null && oldEnd.isAfter(today)) {
-            startDate = oldEnd.plusDays(1);
-        } else {
-            startDate = today;
-        }
-
-        Integer validityDays = pack == null ? null : toInt(pack.get("validity_days"));
-        if (validityDays == null && oldEnd != null) {
-            LocalDate oldStart = toLocalDate(old.get("start_date"));
-            if (oldStart != null) {
-                Integer paused = toInt(old.get("paused_days"));
-                long span = ChronoUnit.DAYS.between(oldStart, oldEnd) - (paused == null ? 0 : paused);
-                if (span > 0) validityDays = (int) span;
-            }
-        }
-
-        var create = new CreatePackageRequest(
-                str(old.get("type")),
-                req.sessionsTotal() != null ? req.sessionsTotal() : toInt(old.get("sessions_total")),
-                req.amount() != null ? req.amount() : toDecimal(old.get("amount")),
-                startDate.toString(),
-                // Computed here rather than left to `createPackage`'s pack lookup,
-                // because the window may have come from the old pack's own span
-                // and that is a fact only this method has.
-                validityDays != null && validityDays > 0 ? startDate.plusDays(validityDays).toString() : null,
-                packId,
-                req.discountAmount(),
-                req.dueDate(),
-                /* A renewal never re-asks the days: the client has been coming on
-                   Tuesdays for six months, and a form between a trainer and a
-                   renewal is what `renewPackage`'s own note refuses. Null leaves
-                   their week exactly as it is, and `createPackage` then books the
-                   new count onto it. */
-                null,
-                null);
-
-        PackageResponse fresh = sell(trainerId, clientId, create, "renewed");
-        log.info("package renewed trainer={} client={} from={} to={}", tid, clientId, packageId, fresh.id());
-        return fresh;
     }
 
     // ── Packages · pause, resume, extend ──────────────────────────────────────
@@ -1058,54 +905,6 @@ public class PackageService {
                 WHERE package_id = :pid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
                 ORDER BY created_at DESC
                 """.formatted(PAYMENT_COLUMNS), Map.of("pid", packageId, "tid", trainerId.toString()));
-        return rows.stream().map(this::toPaymentResponse).toList();
-    }
-
-    /**
-     * The trainer's money, across the whole roster, in a window.
-     *
-     * Same argument as {@link #listAllPackages}: the per-package route is the
-     * right shape for one package's history and the wrong shape for a month's
-     * takings. Reaching a month through it costs one request per client to find
-     * the packages and one per package to find the payments.
-     *
-     * `from` and `to` are epoch ms on `created_at` and both are optional — the
-     * same convention `GET /v1/sessions` already uses, so a caller that knows
-     * one endpoint knows this one. **`created_at`, not `paid_at`, is the window
-     * column** and that is the deliberate half: a month's *billing* is what was
-     * raised that month, and dating by `paid_at` would move an invoice into
-     * whichever month it happened to be settled in — and drop every unpaid one,
-     * which is exactly the figure "still owed" is made of.
-     *
-     * `to` is EXCLUSIVE. A caller passing the first instant of next month must
-     * not also collect that day's first payment.
-     */
-    public List<PaymentResponse> listAllPayments(UUID trainerId, Long from, Long to, String status) {
-        var conditions = new ArrayList<String>();
-        var p = new HashMap<String, Object>();
-        p.put("tid", trainerId.toString());
-        conditions.add("trainer_id = :tid::uuid");
-        conditions.add("deleted_at IS NULL");
-
-        if (from != null) {
-            p.put("from", Timestamp.from(Instant.ofEpochMilli(from)));
-            conditions.add("created_at >= :from");
-        }
-        if (to != null) {
-            p.put("to", Timestamp.from(Instant.ofEpochMilli(to)));
-            conditions.add("created_at < :to");
-        }
-        if (status != null && !status.isBlank()) {
-            p.put("status", status);
-            conditions.add("status = :status");
-        }
-
-        var rows = jdbc.queryForList("""
-                SELECT %s
-                FROM payment
-                WHERE %s
-                ORDER BY created_at DESC
-                """.formatted(PAYMENT_COLUMNS, String.join(" AND ", conditions)), p);
         return rows.stream().map(this::toPaymentResponse).toList();
     }
 
