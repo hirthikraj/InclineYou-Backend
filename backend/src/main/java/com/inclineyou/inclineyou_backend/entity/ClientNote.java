@@ -49,14 +49,6 @@ public class ClientNote {
     @Column(nullable = false)
     private boolean pinned = false;
 
-    /**
-     * The client this note is about may read it in the portal — V7. A different
-     * audience from a teammate, who still sees nothing (V29). False by default in
-     * the DDL, because every earlier note was written as private.
-     */
-    @Column(name = "shared_with_client", nullable = false)
-    private boolean sharedWithClient = false;
-
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;
 
