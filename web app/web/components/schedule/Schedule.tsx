@@ -4,13 +4,15 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useTransit
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { ScheduleData } from '@/lib/schedule/api';
+import { toSession } from '@/lib/schedule/rows';
 import { buildGrid, MAX_WEEK_LANES } from '@/lib/schedule/grid';
 import { buildMonth } from '@/lib/schedule/month';
 import { buildWeekPivot } from '@/lib/schedule/pivot';
-import { updateSession } from '@/lib/schedule/actions';
+import { loadWindow, messageAboutSession, updateSession } from '@/lib/schedule/actions';
+import { useToast } from '@/lib/toast/store';
 import { MOVE_HOLD_SECONDS, SNAP_MINUTES } from '@/lib/schedule/result';
 import {
-  crumbFor, gridDays, gridStart, hrefFor, labelFor, stepAnchor, type ScheduleView,
+  crumbFor, gridDays, gridStart, hrefFor, labelFor, parseAnchor, parseView, stepAnchor, type ScheduleView,
 } from '@/lib/schedule/view';
 /* `defaultSlot` lived in this file until Today grew its own *New session*. It is
    in `lib/schedule/book.ts` now so both screens open the form on the same slot. */
@@ -93,14 +95,12 @@ interface HeaderFact {
 
 interface PendingMove {
   sessionId: string;
+  clientId: string;
   clientName: string;
   /** Where it was, so Undo does not have to re-read the row. */
   fromAt: number;
   toAt: number;
   minutes: number;
-  status: string;
-  mode: 'floor' | 'remote';
-  notes: string | null;
   /** When the hold started, so the bar and the label read from one clock. */
   since: number;
 }
@@ -112,7 +112,31 @@ const EMPTY_ATTENTION: AttentionItem[] = [];
 
 export function Schedule({ data }: { data: ScheduleData }) {
   const router = useRouter();
-  const { view, anchor, sessions, clients, hours, rates, trainer, now: serverNow } = data;
+  const { clients, hours, rates, trainer, people, now: serverNow } = data;
+
+  /*
+   * ── THE WINDOW ON SCREEN IS THIS COMPONENT'S, NOT THE PAGE'S ───────────────
+   *
+   * The page renders the first window with all five reads. After that a view
+   * switch — Day · Week · Month, ‹ ›, swipe, a day in the month — asks for the
+   * diary alone (`loadWindow`), because the roster, the hours, the packs and the
+   * trainer don't change with the view (api-contract *Schedule*: L4 is fetched
+   * again with the new window). The URL still moves, through
+   * `history.pushState`, which Next's router keeps in sync with
+   * `useSearchParams` — so Back, a reload and a shared link all still work, and
+   * `router.refresh()` renders the page for the window the URL now names.
+   *
+   * Whenever the server sends a fresh page — after any write, and on the
+   * five-minute heartbeat — its window is adopted, during render rather than in
+   * an effect, so nothing paints the old rows for a frame.
+   */
+  const [win, setWin] = useState(() => ({ view: data.view, anchor: data.anchor, sessions: data.sessions }));
+  const [seenData, setSeenData] = useState(data);
+  if (data !== seenData) {
+    setSeenData(data);
+    setWin({ view: data.view, anchor: data.anchor, sessions: data.sessions });
+  }
+  const { view, anchor, sessions } = win;
 
   /* Both memoised, because `usePaletteRows` depends on them by IDENTITY: a fresh
      array every render would re-register the rows every render, and the effect
@@ -219,8 +243,10 @@ export function Schedule({ data }: { data: ScheduleData }) {
    * for. `hrefFor` rebuilds the canonical URL, so this loses nothing else.
    */
   useEffect(() => {
-    if (asked !== null) router.replace(hrefFor(view, anchor), { scroll: false });
-  }, [asked, view, anchor, router]);
+    // `replaceState`, not `router.replace`: stripping a parameter is not a reason
+    // to render the page and make its five reads again.
+    if (asked !== null) window.history.replaceState(null, '', hrefFor(view, anchor));
+  }, [asked, view, anchor]);
   const [moving, setMoving] = useState<string | null>(null);
   const [pending, setPending] = useState<PendingMove | null>(null);
   const [, startWrite] = useTransition();
@@ -299,19 +325,42 @@ export function Schedule({ data }: { data: ScheduleData }) {
 
   /* ---------------------------------------------------------------- moving */
 
+  /*
+   * The held move lands: a PATCH of the start alone (R14), so it cannot reset
+   * the session's length, mode or note. A refusal — the client already has a
+   * session at that start, or the session was settled meanwhile — puts the
+   * block back and says why; it used to snap back in silence.
+   *
+   * Nobody is told in v1 (R11), so the receipt offers the message instead of
+   * claiming it was sent.
+   */
+  const { show } = useToast();
   const commit = useCallback((move: PendingMove) => {
     startWrite(async () => {
-      await updateSession({
-        id: move.sessionId,
-        scheduledAt: move.toAt,
-        durationMinutes: move.minutes,
-        status: move.status,
-        deliveryMode: move.mode,
-        notes: move.notes,
-      });
+      const res = await updateSession({ id: move.sessionId, scheduledAt: move.toAt });
       setPending(null);
+      if (!res.ok) {
+        show({ tone: 'danger', title: <>Not moved</>, body: res.message });
+        return;
+      }
+      const first = move.clientName.split(' ')[0] || move.clientName;
+      const requestId = crypto.randomUUID();
+      show({
+        tone: 'ok',
+        variant: 'receipt',
+        title: <>Moved</>,
+        body: <>{move.clientName} &middot; {dayLong(move.toAt)} at {formatMinute(minuteOfDay(move.toAt))}</>,
+        action: {
+          label: `Message ${first}`,
+          onClick: () => void messageAboutSession(move.clientId, move.sessionId, requestId)
+            .then((m) => {
+              if (m.ok && m.whatsappUrl) window.open(m.whatsappUrl, '_blank', 'noopener');
+              else if (!m.ok) show({ tone: 'danger', title: <>Could not draft it</>, body: m.message });
+            }),
+        },
+      });
     });
-  }, []);
+  }, [show]);
 
   const placeAt = useCallback(
     (dayAt: number, minute: number) => {
@@ -332,13 +381,11 @@ export function Schedule({ data }: { data: ScheduleData }) {
 
       const move: PendingMove = {
         sessionId: s.id,
+        clientId: s.clientId,
         clientName: s.clientName,
         fromAt: s.at,
         toAt,
         minutes: s.minutes,
-        status: s.status,
-        mode: s.mode,
-        notes: s.notes,
         since: Date.now(),
       };
       setPending(move);
@@ -402,14 +449,70 @@ export function Schedule({ data }: { data: ScheduleData }) {
     [moving, placeAt, sessions, grid.days],
   );
 
+  /*
+   * One window load at a time, and the LATEST one wins: `wanted` is the href of
+   * the window last asked for, so a slow answer for a week the trainer has
+   * already stepped past is dropped rather than drawn over the current one.
+   * While it is in flight the old window stays on screen, dimmed, so the grid
+   * and the toolbar change together.
+   */
+  const [loadingWindow, startLoad] = useTransition();
+  const wanted = useRef(hrefFor(data.view, data.anchor));
+  const load = useCallback(
+    (nextView: ScheduleView, nextAnchor: number) => {
+      const key = hrefFor(nextView, nextAnchor);
+      wanted.current = key;
+      startLoad(async () => {
+        const res = await loadWindow(nextView, nextAnchor);
+        if (wanted.current !== key) return;
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            router.refresh();
+            return;
+          }
+          show({
+            tone: 'danger',
+            title: <>Could not load {crumbFor(nextView, nextAnchor)}</>,
+            body: res.status === null
+              ? 'The server did not answer. The window on screen is unchanged.'
+              : 'The server refused it. The window on screen is unchanged.',
+          });
+          return;
+        }
+        const at = Date.now();
+        setWin({
+          view: nextView,
+          anchor: nextAnchor,
+          sessions: res.rows.map((r) => toSession(r, people[r.clientId], at)),
+        });
+        document.title = `${crumbFor(nextView, nextAnchor)} · Schedule · InclineYou`;
+      });
+    },
+    [people, router, show],
+  );
+
   const goTo = useCallback(
     (nextView: ScheduleView, nextAnchor: number) => {
-      // `push`, not `replace`: stepping through weeks is navigation, and the back
+      // A push, not a replace: stepping through weeks is navigation, and the back
       // button going back a week is what a trainer expects from an arrow.
-      router.push(hrefFor(nextView, nextAnchor));
+      window.history.pushState(null, '', hrefFor(nextView, nextAnchor));
+      load(nextView, nextAnchor);
     },
-    [router],
+    [load],
   );
+
+  /* Back and Forward: the URL moved without a call to `goTo`, so the window it
+     names is loaded here. A URL that already names the window on screen, or the
+     one in flight, loads nothing. */
+  const urlView = parseView(params.get('view') ?? undefined);
+  const urlAnchor = parseAnchor(params.get('d') ?? undefined);
+  const winKey = hrefFor(view, anchor);
+  useEffect(() => {
+    const a = urlAnchor ?? startOfDay(Date.now());
+    const key = hrefFor(urlView, a);
+    if (key === wanted.current || key === winKey) return;
+    load(urlView, a);
+  }, [urlView, urlAnchor, winKey, load]);
 
   /* ── touch swipe: left = next, right = prev ─────────────────────────────
      Attached to .sch__body so the whole calendar area is the swipe surface.
@@ -737,7 +840,12 @@ export function Schedule({ data }: { data: ScheduleData }) {
     <>
       <TopBar crumb={crumbFor(view, anchor)} />
 
-      <main className="main" id="main-content">
+      <main
+        className="main"
+        id="main-content"
+        aria-busy={loadingWindow || undefined}
+        style={loadingWindow ? { opacity: 0.6, transition: 'opacity 120ms' } : undefined}
+      >
         <div className="ph sch__ph">
           <div className="ph__row">
             <div className="ph__id">
@@ -1116,12 +1224,12 @@ function UndoBar({
         </b>
         <br />
         <i>
-          {move.clientName} will be told in <b>{left}s</b>
+          Saving in <b>{left}s</b> &middot; {move.clientName} is not told automatically
         </i>
       </p>
       <div className="sch__undor">
         <button className="u__b" type="button" onClick={onNow}>
-          Send now
+          Save now
         </button>
         <button className="u__b" type="button" onClick={onUndo}>
           Undo

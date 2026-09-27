@@ -284,13 +284,8 @@ export function Finish({ data }: { data: FinishData }) {
           onPick={(outcome, costsASession) =>
             close(() =>
               outcome === 'no_show'
-                ? markNoShow({
-                    id: session.id,
-                    scheduledAt: session.scheduledAt,
-                    durationMinutes: session.durationMinutes ?? 60,
-                    costsASession,
-                  })
-                : cancelSession(session.id),
+                ? markNoShow({ id: session.id, costsASession })
+                : cancelSession(session.id, outcome === 'client_cancelled' ? 'client' : 'trainer'),
             )
           }
         />

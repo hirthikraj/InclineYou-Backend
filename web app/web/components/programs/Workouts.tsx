@@ -755,12 +755,7 @@ export function Workouts({
     startMark(async () => {
       const result = kind === 'done'
         ? await markDone(row.id)
-        : await markNoShow({
-          id: row.id,
-          scheduledAt: row.scheduledAt,
-          durationMinutes: row.minutes,
-          costsASession: true,
-        });
+        : await markNoShow({ id: row.id, costsASession: true });
       setMarking(null);
 
       if (!result.ok) {

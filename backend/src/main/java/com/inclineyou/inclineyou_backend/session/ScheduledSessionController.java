@@ -19,6 +19,7 @@ public class ScheduledSessionController {
     private final SessionReadService reads;
     private final SessionWriteService writes;
     private final SessionBookingService bookings;
+    private final SessionStateService states;
 
     private UUID trainerId(Authentication auth) {
         return UUID.fromString(auth.getName());
@@ -81,27 +82,62 @@ public class ScheduledSessionController {
         return service.get(id, trainerId(auth));
     }
 
-    @PutMapping("/{id}")
-    public ScheduledSessionService.SessionResponse update(
+    /** api-contract Schedule — move a session, or change its length, mode or note. */
+    @PatchMapping("/{id}")
+    public ResponseEntity<SessionReadService.SessionRow> patch(
             Authentication auth,
             @PathVariable UUID id,
-            @RequestBody ScheduledSessionService.UpdateRequest req
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @RequestBody(required = false) Map<String, Object> body
     ) {
-        return service.update(id, trainerId(auth), req);
+        var row = states.patch(trainerId(auth), id, body, ifMatch);
+        return ResponseEntity.ok().eTag(row.version()).body(row);
     }
 
+    /** api-contract Schedule — take back a booking just made by mistake. */
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(Authentication auth, @PathVariable UUID id) {
-        service.delete(id, trainerId(auth));
+        states.delete(trainerId(auth), id);
     }
 
+    /** api-contract Schedule — mark one session delivered; the batch's item shape. */
     @PostMapping("/{id}/done")
-    public Map<String, Object> markDone(
+    public SessionWriteService.MarkResult markDone(
             Authentication auth,
             @PathVariable UUID id,
-            @RequestBody(required = false) ScheduledSessionService.MarkDoneRequest req
+            @RequestBody(required = false) Map<String, Object> body
     ) {
-        return service.markDone(id, trainerId(auth), req);
+        return states.markDone(trainerId(auth), id, body);
+    }
+
+    /** api-contract Schedule — record a no-show, and whether it costs a pack session. */
+    @PostMapping("/{id}/no-show")
+    public SessionStateService.NoShowResult noShow(
+            Authentication auth,
+            @PathVariable UUID id,
+            @RequestBody(required = false) Map<String, Object> body
+    ) {
+        return states.noShow(trainerId(auth), id, body);
+    }
+
+    /** api-contract Schedule — cancel a booking; the row stays in the diary. */
+    @PostMapping("/{id}/cancel")
+    public SessionReadService.SessionRow cancel(
+            Authentication auth,
+            @PathVariable UUID id,
+            @RequestBody(required = false) Map<String, Object> body
+    ) {
+        return states.cancel(trainerId(auth), id, body);
+    }
+
+    /** api-contract Schedule — undo a done, no-show or cancel, reversing its charge. */
+    @PostMapping("/{id}/reopen")
+    public SessionStateService.Reopened reopen(
+            Authentication auth,
+            @PathVariable UUID id,
+            @RequestBody(required = false) Map<String, Object> body
+    ) {
+        return states.reopen(trainerId(auth), id, body);
     }
 }

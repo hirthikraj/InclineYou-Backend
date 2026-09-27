@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { dayLong, formatMinute, formatMinuteRange, rupees } from '@/lib/today/time';
 import type { RateSource } from '@/lib/today/day';
 import type { BookSession, ScheduleClient } from '@/lib/schedule/session';
-import { bookSession, cancelSession } from '@/lib/schedule/actions';
+import { bookSession, undoBooking } from '@/lib/schedule/actions';
 import { useToast } from '@/lib/toast/store';
 import { lengthChoices, SNAP_MINUTES } from '@/lib/schedule/result';
 import { TimeField } from '@/components/shell/TimeField';
@@ -223,12 +223,12 @@ export function BookPanel({
          The panel closes over the grid it just wrote to, and on the day and
          week views the new block is usually below the fold or behind the
          scroller — so there is no row on screen for the write to land on. What
-         makes it the other motion is `sessionId`: `cancelSession` is a real
-         inverse, so this confirm can carry an Undo, and an Undo is only honest
+         makes it the other motion is `sessionId`: `undoBooking` (DELETE, R12) is
+         a real inverse, so this confirm can carry an Undo, and an Undo is only honest
          while the card is up. Five seconds, then it is a booking like any
          other and the way back is the block's own panel.
 
-         The trainer is not messaged either way — `cancelSession` says so — so
+         The trainer is not messaged either way, so
          undoing inside the window costs nobody an explanation. */
       const id = res.sessionId;
       show({
@@ -240,7 +240,7 @@ export function BookPanel({
             {client?.name ?? 'Session'} &middot; {dayLong(dayAt)} at {formatMinute(startMinute)}
           </>
         ),
-        action: id ? { label: 'Undo', onClick: () => void cancelSession(id) } : undefined,
+        action: id ? { label: 'Undo', onClick: () => void undoBooking(id) } : undefined,
       });
       /* A booking that lands leaves the same way a cancelled one does. `onBooked`
          unmounts this panel AND refreshes the grid behind it, so calling it

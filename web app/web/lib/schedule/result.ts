@@ -13,26 +13,25 @@ export interface WriteResult {
   message?: string;
   /** The row that was written, so the panel can redraw without a round trip. */
   sessionId?: string;
+  /** 412: the row changed elsewhere and the screen has been revalidated (R69). */
+  stale?: boolean;
+  /** A no-show: whether it took a session off the pack. */
+  charged?: boolean;
+  /** Sessions left on the pack the write touched, when it touched one. */
+  sessionsRemaining?: number | null;
 }
 
 /**
- * How long a move waits before the client is told.
+ * How long a move is held in the browser before it is written.
  *
- * Ten seconds, and the same argument as the queue's — the design set's §05b makes
- * it explicitly about THIS action: the session panel's own history reads *"Moved
- * from Monday 17:00 · Nikhil asked. He was told automatically"*, so a mis-drop
- * sends a WhatsApp. Undo after the message has gone is an apology, not an undo.
- *
- * The difference from the queue is worth naming: there, the WRITE is instant and
- * only the message is held. Here the write itself is held, because a move is one
- * request that does both — `PUT /v1/sessions/{id}` changes `scheduled_at`, and
- * the notification is the backend's reaction to that change. There is no seam to
- * hold half of, so the whole thing waits in the browser and this module is only
- * ever called once the ten seconds are up.
+ * Nobody is told about a move in v1 (R11, decided 26 Sep): the portal's bell is
+ * out of v1 and WhatsApp auto-send is v2. So the ten seconds guard against a
+ * mis-placed click, not against a message — the whole write waits, and the
+ * receipt offers *Message {name}* for a trainer who wants to say so.
  *
  * The cost is stated: a move is not on the server for ten seconds, so a trainer
  * who closes the tab inside them has not moved anything. That is the correct
- * reading of an undo that has not expired — nothing was promised to anyone yet.
+ * reading of an undo that has not expired.
  */
 export const MOVE_HOLD_SECONDS = 10;
 

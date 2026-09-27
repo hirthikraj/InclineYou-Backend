@@ -2,7 +2,10 @@
 
 import { revalidatePath } from 'next/cache';
 
-import { ScheduleApiError, del, post, put } from './api';
+import { api, ApiError } from '@/lib/http/client';
+import { fetchWindow, ScheduleApiError } from './api';
+import type { SessionWire as DiaryRow } from './rows';
+import type { ScheduleView } from './view';
 /* WriteResult and the three constants live in ./result for the rule in
    lib/today/hold.ts: a 'use server' module may export only async functions. */
 import type { WriteResult } from './result';
@@ -10,7 +13,7 @@ import type { WriteResult } from './result';
 /**
  * THE FOUR THINGS THIS SCREEN WRITES, AND ONE RULE THEY ALL SHARE.
  *
- * Book, move, cancel, mark done. Every one of them goes straight to the server —
+ * Book, move, edit, mark done or no-show, cancel, reopen — and undo a booking. Every one of them goes straight to the server —
  * the web half is online-only, which `AGENTS.md` states as the rule that reverses
  * a doc, and a calendar is where the temptation to queue is strongest and the
  * cost highest. A booking held in a browser is a booking that exists for one
@@ -37,9 +40,12 @@ import type { WriteResult } from './result';
  * names who, and then it books.
  */
 
-/** Every failure a trainer can be told about, in the words that fit the verb. */
+/**
+ * Every failure a trainer can be told about, in the words that fit the verb.
+ * Branches on the problem's `code`, never on the prose (api-contract *Errors*).
+ */
 function readFailure(error: unknown, subject: string): WriteResult {
-  if (error instanceof ScheduleApiError) {
+  if (error instanceof ApiError) {
     if (error.status === null) {
       return { ok: false, message: `${subject} could not reach the server. Nothing changed.` };
     }
@@ -49,8 +55,20 @@ function readFailure(error: unknown, subject: string): WriteResult {
     if (error.status === 404) {
       return { ok: false, message: `${subject} is no longer there. Reload the week.` };
     }
-    if (error.status === 409) {
-      return { ok: false, message: `${subject} was refused — something else has that slot.` };
+    if (error.status === 412) {
+      return { ok: false, stale: true, message: 'This session changed elsewhere. It has been reloaded — check it and try again.' };
+    }
+    switch (error.problem.code) {
+      case 'SESSION_CLIENT_TIME_TAKEN':
+        return { ok: false, message: `${subject} was refused — this client already has a session at that time.` };
+      case 'CLIENT_NOT_BOOKABLE':
+        return { ok: false, message: `${subject} was refused — ${error.problem.detail ?? 'this client can’t be booked right now.'}` };
+      case 'SESSION_NOT_STARTED':
+        return { ok: false, message: 'This session hasn’t started yet. Mark it once its start time has passed.' };
+      case 'SESSION_SETTLED':
+      case 'SESSION_DONE':
+      case 'SESSION_CANCELLED':
+        return { ok: false, message: error.problem.detail ?? `${subject} was refused.` };
     }
     return { ok: false, message: `${subject} did not go through. Nothing changed.` };
   }
@@ -77,18 +95,14 @@ interface SessionWire {
 }
 
 /**
- * Book one session.
+ * Book one session — api-contract Today A1.
  *
- * `scheduledAt` is an absolute instant and not a date plus a minute, because the
- * server stores `scheduled_at` as epoch milliseconds and any split representation
- * is a timezone argument waiting to happen. The browser composes it from the day
- * it clicked and the minute it chose, both local, which is the same arithmetic
- * `atMinute` does on the phone.
+ * `scheduledAt` is an absolute instant and not a date plus a minute, because any
+ * split representation is a timezone argument waiting to happen.
  *
  * `deliveryMode` is sent only when the trainer changed it. Null means "use
- * whatever this client usually does" — `API.md` says so, and the alternative
- * freezes a client's default onto every row booked before they switched to
- * remote, so the day would keep drawing them on the floor forever.
+ * whatever this client usually does"; freezing a client's default onto every row
+ * would keep drawing them on the floor after they switched to remote.
  */
 export async function bookSession(input: {
   /**
@@ -106,16 +120,19 @@ export async function bookSession(input: {
   notes?: string | null;
 }): Promise<WriteResult> {
   try {
-    // api-contract Today A1 (1.1). `workoutId: null` lets the server pick the next
-    // workout in the client's active program, which replaces the old `programId`.
-    const res = await post<SessionWire>('/v1/sessions', {
-      id: input.requestId ?? crypto.randomUUID(),
-      clientId: input.clientId,
-      scheduledAt: input.scheduledAt,
-      durationMinutes: input.durationMinutes,
-      workoutId: null,
-      deliveryMode: input.deliveryMode ?? null,
-      notes: input.notes ?? null,
+    // `workoutId: null` lets the server pick the next workout in the client's
+    // active program.
+    const res = await api<SessionWire>('/v1/sessions', {
+      method: 'POST',
+      body: {
+        id: input.requestId ?? crypto.randomUUID(),
+        clientId: input.clientId,
+        scheduledAt: input.scheduledAt,
+        durationMinutes: input.durationMinutes,
+        workoutId: null,
+        deliveryMode: input.deliveryMode ?? null,
+        notes: input.notes ?? null,
+      },
     });
     refresh();
     return { ok: true, sessionId: res?.id };
@@ -125,131 +142,209 @@ export async function bookSession(input: {
 }
 
 /**
- * Move or re-shape one session.
- *
- * A single `PUT` for both, because they are one edit on the wire —
- * `PUT /v1/sessions/{id}` takes `scheduledAt`, `status`, `durationMinutes`,
- * `notes` and `deliveryMode` together — and because they are one edit to a
- * trainer: dragging a block's edge changes its length, dragging its body changes
- * its start, and both are "I changed this session".
- *
- * Every field is sent on every call, including the ones that did not change. That
- * is not laziness, it is the shape of the endpoint: `PUT` replaces, so omitting
- * `durationMinutes` on a move would reset a 90-minute session to the default. The
- * caller holds the whole row and hands the whole row back.
+ * Take back a booking just made by mistake — `DELETE /v1/sessions/{id}`, the
+ * booking receipt's Undo and nothing else (R12). The server allows it only
+ * while the session is untouched; anything with a history is cancelled instead.
+ * A retried Undo is harmless: a row already removed answers 204 again.
  */
-export async function updateSession(input: {
-  id: string;
-  scheduledAt: number;
-  durationMinutes: number;
-  status?: string;
-  deliveryMode?: 'floor' | 'remote' | null;
-  notes?: string | null;
-}): Promise<WriteResult> {
+export async function undoBooking(id: string): Promise<WriteResult> {
   try {
-    await put(`/v1/sessions/${input.id}`, {
-      scheduledAt: input.scheduledAt,
-      durationMinutes: input.durationMinutes,
-      status: input.status,
-      deliveryMode: input.deliveryMode ?? null,
-      notes: input.notes ?? null,
-    });
+    await api(`/v1/sessions/${id}`, { method: 'DELETE' });
     refresh();
-    return { ok: true, sessionId: input.id };
+    return { ok: true, sessionId: id };
   } catch (error) {
-    return readFailure(error, 'The move');
+    return readFailure(error, 'Undoing the booking');
   }
 }
 
 /**
- * Mark a booked session delivered — the bridge from *planned* to *logged*.
+ * Move a session, or change its length, mode or note —
+ * `PATCH /v1/sessions/{id}` with ONLY what changed (R14). A move sends
+ * `{scheduledAt}`; a panel save sends the dirty fields. `status` is never sent:
+ * it changes only through the verbs below.
  *
- * `POST /v1/sessions/{id}/done` and not a `PUT` to `status: 'done'`, and the
- * difference is a side effect the schedule must not skip: the endpoint creates
- * the corresponding `workout_session` row AND decrements the client's session
- * pack. A status flip would mark the grid green and leave the pack at 6 of 12
- * forever, so the money book and the calendar would disagree about how many
- * sessions a client had used — which is the one disagreement a trainer settles
- * with a client in person.
+ * `version` goes out as If-Match when the caller has one — the panel's Save sends
+ * it, so a panel left open cannot undo a move made in another tab; a 412 comes
+ * back as `stale` and the caller reloads (R69). The held move doesn't need it:
+ * it only sends the start.
+ */
+export async function updateSession(input: {
+  id: string;
+  version?: string;
+  scheduledAt?: number;
+  durationMinutes?: number;
+  deliveryMode?: 'floor' | 'remote' | null;
+  notes?: string | null;
+}): Promise<WriteResult> {
+  const { id, version, ...fields } = input;
+  const body = Object.fromEntries(Object.entries(fields).filter(([, v]) => v !== undefined));
+  try {
+    await api(`/v1/sessions/${id}`, {
+      method: 'PATCH',
+      body,
+      headers: version ? { 'if-match': `"${version}"` } : undefined,
+    });
+    refresh();
+    return { ok: true, sessionId: id };
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 412) refresh();
+    return readFailure(error, 'scheduledAt' in body ? 'The move' : 'The change');
+  }
+}
+
+/** One mark's outcome — `SessionWriteService.MarkResult`, the batch's item shape. */
+interface MarkWire {
+  outcome: 'done' | 'already_done' | 'not_charged';
+  packageId?: string;
+  sessionsRemaining?: number;
+  reason?: 'NO_PACKAGE' | 'PACKAGE_PAUSED' | 'PACKAGE_EMPTY';
+}
+
+/**
+ * Mark a session delivered — `POST /v1/sessions/{id}/done`, the same code as
+ * Today's batch mark. It charges the pack when one should pay; a session with no
+ * live pack is still marked, and `message` says it wasn't charged. Only once the
+ * start time has passed (R15): before that the server answers
+ * SESSION_NOT_STARTED.
  */
 export async function markDone(id: string): Promise<WriteResult> {
   try {
-    await post(`/v1/sessions/${id}/done`, {});
+    const res = await api<MarkWire>(`/v1/sessions/${id}/done`, { method: 'POST', body: {} });
     refresh();
-    return { ok: true, sessionId: id };
+    return {
+      ok: true,
+      sessionId: id,
+      message: res?.outcome === 'not_charged' ? notChargedLine(res.reason) : undefined,
+      sessionsRemaining: res?.sessionsRemaining ?? null,
+    };
   } catch (error) {
     return readFailure(error, 'Marking it done');
   }
 }
 
+function notChargedLine(reason: MarkWire['reason']): string {
+  return reason === 'PACKAGE_PAUSED' ? 'No session was taken — their pack is paused.'
+    : reason === 'PACKAGE_EMPTY' ? 'No session was taken — their pack has none left.'
+    : 'No session was taken — there is no running pack for it.';
+}
+
 /**
- * Record a no-show, and settle the pack in the same write.
- *
- * A `PUT`, not `/done`, and the two are not interchangeable: a no-show is a
- * session that did not happen, so there is no workout to create.
- *
- * ── `costsASession` IS A PARAMETER, NOT A RULE ──────────────────────────────
+ * Record a no-show — `POST /v1/sessions/{id}/no-show {charge}` (R13).
  *
  * Whether a missed session burns one off the pack is a commercial decision the
- * trainer makes with the client, and it stays theirs — the caller passes what
- * the trainer chose on the sheet. What has changed is that the answer is now
- * SAYABLE: until `packDelta` landed on `PUT /v1/sessions/{id}` (28 Aug 2026),
- * `POST /v1/sessions/{id}/done` was the only endpoint anywhere that touched
- * `package.sessions_remaining`, so this wrote a status and the trainer was told
- * to go and edit the pack by hand in the money book. There was no package
- * `PATCH` to do it with either.
- *
- * The server settles it from what this session has ALREADY taken, not from
- * zero — so calling this twice costs one session, and calling it again with
- * `false` gives the session back. That is what makes re-deciding safe, and it is
- * the same four-quadrant rule the phone's `settlePack` has always used.
- *
- * `-1` and `0` are the only values the endpoint accepts; a delta it does not
- * recognise is a 400, deliberately. A paused pack is never charged.
- *
- * Duration and start are re-sent for `updateSession`'s reason: `PUT` replaces.
+ * trainer makes with the client, so it is a parameter: the diary's button sends
+ * true, the finish screen lets the trainer untick it. The server settles against
+ * what the session already carries, so asking twice costs one session and asking
+ * again with `false` gives it back. A paused pack is never charged.
  */
 export async function markNoShow(input: {
   id: string;
-  scheduledAt: number;
-  durationMinutes: number;
   costsASession: boolean;
 }): Promise<WriteResult> {
   try {
-    await put(`/v1/sessions/${input.id}`, {
-      scheduledAt: input.scheduledAt,
-      durationMinutes: input.durationMinutes,
-      status: 'no_show',
-      packDelta: input.costsASession ? -1 : 0,
-    });
+    const res = await api<{ charged: boolean; sessionsRemaining?: number; reason?: MarkWire['reason'] }>(
+      `/v1/sessions/${input.id}/no-show`,
+      { method: 'POST', body: { charge: input.costsASession } },
+    );
     refresh();
-    return { ok: true, sessionId: input.id };
+    return {
+      ok: true,
+      sessionId: input.id,
+      charged: res?.charged ?? false,
+      message: input.costsASession && res && !res.charged ? notChargedLine(res.reason) : undefined,
+      sessionsRemaining: res?.sessionsRemaining ?? null,
+    };
   } catch (error) {
     return readFailure(error, 'Marking the no-show');
   }
 }
 
 /**
- * Cancel one booking.
- *
- * `DELETE`, which the backend tombstones with `deleted_at` rather than removing —
- * "soft delete — the row is tombstoned so sync can propagate the removal". That
- * matters here for a reason the API doc does not state: the trainer's phone holds
- * this row in SQLite, and a hard delete on the server is a row the phone would
- * never hear about and would keep drawing. The schema law applies to rows as well
- * as columns.
- *
- * This is the one verb on the screen that has no undo, so it is the one verb
- * behind a confirm. Ten seconds would be the wrong shape: a cancel usually
- * follows a phone call, so the trainer is certain and the delay is friction —
- * whereas a drag is a gesture, which is why the drag is what gets the ten seconds.
+ * Cancel one booking — `POST /v1/sessions/{id}/cancel`. The row stays in the
+ * diary as cancelled, the client's start time is freed, and nobody is told.
+ * `reason` is `trainer` (the default) or `client`. Undo is `reopenSession`.
  */
-export async function cancelSession(id: string): Promise<WriteResult> {
+export async function cancelSession(id: string, reason: 'trainer' | 'client' = 'trainer'): Promise<WriteResult> {
   try {
-    await del(`/v1/sessions/${id}`);
+    await api(`/v1/sessions/${id}/cancel`, { method: 'POST', body: { reason } });
     refresh();
     return { ok: true, sessionId: id };
   } catch (error) {
     return readFailure(error, 'The cancellation');
+  }
+}
+
+/**
+ * Take back a done, no-show or cancel — `POST /v1/sessions/{id}/reopen` (R69).
+ * The session is booked again, its log is kept, and a pack charge is reversed
+ * (never deleted). The Undo on every settle receipt, and Reopen on a settled
+ * session's panel.
+ */
+export async function reopenSession(id: string): Promise<WriteResult> {
+  try {
+    const res = await api<{ effects: { chargeReversed: boolean; sessionsRemaining?: number } }>(
+      `/v1/sessions/${id}/reopen`,
+      { method: 'POST', body: {} },
+    );
+    refresh();
+    return {
+      ok: true,
+      sessionId: id,
+      message: res?.effects?.chargeReversed ? 'The session is back on their pack.' : undefined,
+      sessionsRemaining: res?.effects?.sessionsRemaining ?? null,
+    };
+  } catch (error) {
+    return readFailure(error, 'Reopening it');
+  }
+}
+
+/**
+ * *Message {name}* on a move's receipt (R11): nobody is told about a move in v1,
+ * so the trainer decides. Drafts `session_reminder` for the moved session —
+ * `POST /v1/clients/{id}/nudges`, which logs `reason = session` and returns the
+ * wa.me link; nothing is sent from here.
+ */
+export async function messageAboutSession(
+  clientId: string,
+  sessionId: string,
+  requestId: string,
+): Promise<{ ok: boolean; whatsappUrl?: string; message?: string }> {
+  try {
+    const res = await api<{ whatsappUrl: string }>(`/v1/clients/${encodeURIComponent(clientId)}/nudges`, {
+      method: 'POST',
+      body: { id: requestId, template: 'session_reminder', sessionId },
+    });
+    revalidatePath('/today');
+    return { ok: true, whatsappUrl: res?.whatsappUrl };
+  } catch (error) {
+    if (error instanceof ApiError && error.problem.code === 'CLIENT_NO_PHONE') {
+      return { ok: false, message: 'This client has no phone number on file. Add one in their file first.' };
+    }
+    if (error instanceof ApiError && error.status === 429) {
+      return { ok: false, message: 'Too many messages in a minute. Wait a moment and try again.' };
+    }
+    return readFailure(error, 'The message');
+  }
+}
+
+/**
+ * A view switch — Day · Week · Month, ‹ ›, swipe, a day in the month — asks for
+ * the new window of the diary and nothing else (api-contract *Schedule*: L4 is
+ * fetched again with the new window). The page already holds the roster, the
+ * hours, the packs and the trainer, none of which depend on the view, so the
+ * browser maps these rows against them (`lib/schedule/rows.ts`). A write still
+ * refreshes the whole page, because it can change any of the five.
+ *
+ * Read-only, so it revalidates nothing.
+ */
+export async function loadWindow(view: ScheduleView, anchor: number): Promise<
+  | { ok: true; from: number; to: number; rows: DiaryRow[] }
+  | { ok: false; status: number | null }
+> {
+  try {
+    return { ok: true, ...(await fetchWindow(view, anchor)) };
+  } catch (error) {
+    if (error instanceof ScheduleApiError) return { ok: false, status: error.status };
+    throw error;
   }
 }

@@ -34,6 +34,8 @@ export interface ApiOptions {
   /** Default true: send the signed-in cookie's token, and 401 locally without one. */
   auth?: boolean;
   timeoutMs?: number;
+  /** Extra request headers, e.g. `if-match` on a conditional write. */
+  headers?: Record<string, string>;
 }
 
 /**
@@ -75,10 +77,11 @@ export function apiLogEntries(): ApiLogEntry[] {
 }
 
 export async function api<T>(path: string, options: ApiOptions = {}): Promise<T> {
-  const { method = 'GET', body, auth = true, timeoutMs = DEFAULT_TIMEOUT_MS } = options;
+  const { method = 'GET', body, auth = true, timeoutMs = DEFAULT_TIMEOUT_MS, headers: extra } = options;
   const url = `${BASE}${path}`;
 
   const headers: Record<string, string> = {
+    ...extra,
     // Every web request says it is the web (api-contract *Conventions*).
     'x-inclineyou-client': 'web',
   };

@@ -1,13 +1,14 @@
 'use client';
 
-import { useEffect, useRef, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition, type ReactNode } from 'react';
 
 import { dayLong, formatMinute, formatMinuteRange, formatSpan, minuteOfDay, rupees } from '@/lib/today/time';
 import type { ScheduleClient, ScheduleSession } from '@/lib/schedule/api';
 import { lengthChoices } from '@/lib/schedule/result';
 import {
-  cancelSession, markDone, markNoShow, updateSession,
+  cancelSession, markDone, markNoShow, reopenSession, updateSession,
 } from '@/lib/schedule/actions';
+import type { WriteResult } from '@/lib/schedule/result';
 import { Calendar, Check, Chevron } from '@/components/shell/Icons';
 import { Cross, Remote, WarnTriangle } from './Icons';
 import { useToast } from '@/lib/toast/store';
@@ -69,8 +70,9 @@ import { Avatar } from '@/web-components/ui/Avatar';
  * has already changed.
  *
  * So the three controls hold local state, `dirty` compares it against the row,
- * and Save sends all of it in the single `PUT` the endpoint wanted. Discard puts
- * the row back. Nothing is written until one of them is pressed, which also means
+ * and Save sends the changed fields in one `PATCH` (R14), with the row's version
+ * as If-Match so a panel left open cannot undo a move made in another tab — a
+ * 412 reloads the week and says so (R69). Discard puts the row back. Nothing is written until one of them is pressed, which also means
  * a trainer who opened a panel to look at a client's pack cannot change the
  * session by brushing a chip.
  *
@@ -184,16 +186,58 @@ export function SessionPanel({
   const { show } = useToast();
   const endMinute = startMinute + session.minutes;
 
-  const run = (fn: () => Promise<{ ok: boolean; message?: string }>) => {
+  const run = (fn: () => Promise<WriteResult>) => {
     setError(null);
     start(async () => {
       const res = await fn();
-      if (!res.ok) setError(res.message ?? 'That did not go through.');
-      else onChanged?.();
+      if (!res.ok) {
+        setError(res.message ?? 'That did not go through.');
+        // A stale row has been revalidated; let the shell redraw from it.
+        if (res.stale) onChanged?.();
+      } else onChanged?.();
     });
   };
 
   const settled = session.done || session.noShow || session.dead;
+  /* A log is open: the session is happening, so its time, length and mode are
+     what it is being logged as, and it can be neither cancelled nor a no-show. */
+  const started = session.startedAt !== null;
+  /* Done and No-show only from the start minute on (R15): the server refuses
+     both before it, and a panel offering them on a Thursday for a Saturday is the
+     §01.7 finding. Before the start, Move and Cancel are the verbs. */
+  const begun = now >= session.at;
+  const first = session.clientName.split(' ')[0] || session.clientName;
+
+  /**
+   * Every settle — done, no-show, cancel — gets a receipt whose Undo reopens the
+   * session (R69), which reverses any pack charge on the server. The panel
+   * closes, because the block it was about has changed state under it.
+   */
+  const settle = (
+    fn: () => Promise<WriteResult>,
+    title: string,
+    body: (res: WriteResult) => ReactNode,
+  ) =>
+    run(async () => {
+      const res = await fn();
+      if (res.ok) {
+        show({
+          tone: 'ok',
+          variant: 'receipt',
+          title: <>{title}</>,
+          body: body(res),
+          action: {
+            label: 'Undo',
+            onClick: () => void reopenSession(session.id).then((back) => {
+              if (!back.ok) show({ tone: 'danger', title: <>Could not undo</>, body: back.message });
+              else onChanged?.();
+            }),
+          },
+        });
+        dismiss();
+      }
+      return res;
+    });
 
   /*
    * WHAT IS STAGED, AND WHETHER ANY OF IT DIFFERS FROM THE ROW.
@@ -214,16 +258,15 @@ export function SessionPanel({
     setNotes(session.notes ?? '');
   };
 
-  /** One `PUT`, the whole row. `updateSession` says why it must be the whole row. */
+  /** One `PATCH` of the dirty fields only (R14), conditional on the row's version. */
   const save = () =>
     run(() =>
       updateSession({
         id: session.id,
-        scheduledAt: session.at,
-        durationMinutes: minutes,
-        status: session.status,
-        deliveryMode: mode,
-        notes,
+        version: session.version,
+        durationMinutes: minutes !== session.minutes ? minutes : undefined,
+        deliveryMode: mode !== session.mode ? mode : undefined,
+        notes: notes !== (session.notes ?? '') ? notes : undefined,
       }),
     );
 
@@ -279,7 +322,7 @@ export function SessionPanel({
                        two outcomes this button has, and a panel that drew them
                        identically would send the trainer to the money book to
                        find out which one they picked. */
-                    session.packDelta < 0
+                    session.charged
                     ? 'Marked no-show · pack −1'
                     : 'Marked no-show · pack unchanged'
                   : 'Cancelled'}
@@ -288,11 +331,21 @@ export function SessionPanel({
           {!settled && session.late && (
             <p className="sch__state sch__state--warn">
               <WarnTriangle size={14} />
-              This ran{' '}
-              {formatSpan(
-                Math.max(0, Math.round((now - (session.at + session.minutes * 60_000)) / 60_000)),
-              )}{' '}
-              ago and is still unmarked
+              {now < session.at + session.minutes * 60_000 ? (
+                <>
+                  Started{' '}
+                  {formatSpan(Math.max(0, Math.round((now - session.at) / 60_000)))}{' '}
+                  ago and no log is open
+                </>
+              ) : (
+                <>
+                  This ran{' '}
+                  {formatSpan(
+                    Math.max(0, Math.round((now - (session.at + session.minutes * 60_000)) / 60_000)),
+                  )}{' '}
+                  ago and is still unmarked
+                </>
+              )}
             </p>
           )}
 
@@ -336,7 +389,7 @@ export function SessionPanel({
                   <Chip
                     pressed={minutes === m}
                     key={m}
-                    disabled={pending || settled}
+                    disabled={pending || settled || started}
                     onClick={() => setMinutes(m)}
                   >
                     {m} min
@@ -355,14 +408,14 @@ export function SessionPanel({
               <div className="row gap2">
                 <Chip
                   pressed={mode === 'floor'}
-                  disabled={pending || settled}
+                  disabled={pending || settled || started}
                   onClick={() => setMode('floor')}
                 >
                   In Person
                 </Chip>
                 <Chip
                   pressed={mode === 'remote'}
-                  disabled={pending || settled}
+                  disabled={pending || settled || started}
                   onClick={() => setMode('remote')}
                 >
                   <Remote size={13} />
@@ -410,7 +463,7 @@ export function SessionPanel({
                   </Button>
                 </div>
                 <p className="fld__h">
-                  {settled
+                  {settled || started
                     ? 'Length and delivery are settled with the session; the note is not.'
                     : 'Length, delivery and the note go together in one write.'}{' '}
                   Nothing has changed on {session.clientName.split(' ')[0]}&rsquo;s calendar
@@ -429,7 +482,7 @@ export function SessionPanel({
             that also works on a touch screen. `Schedule.tsx` carries the
             argument in full.
           */}
-          {!settled && onMove && (
+          {!settled && !started && onMove && (
             <div className="sect">
               <Button
                 variant="secondary"
@@ -440,8 +493,8 @@ export function SessionPanel({
                 Move this session
               </Button>
               <p className="fld__h mt2">
-                Then pick the new slot on the grid. {session.clientName} is told
-                automatically, ten seconds after you place it.
+                Then pick the new slot on the grid. It saves ten seconds after you
+                place it, with an Undo. {first} is not told automatically.
               </p>
             </div>
           )}
@@ -463,19 +516,18 @@ export function SessionPanel({
 
         {/*
           THE FOOT, AND THE ONE VERB BEHIND A CONFIRM.
-          Cancelling is the only thing on this panel with no undo — a move gets
-          ten seconds because it is a gesture, and a cancel usually follows a
-          phone call, so the trainer is certain and a delay is friction. The
-          confirm replaces the foot's contents in the same box rather than
-          opening a second surface, which is the call `AccountMenu` already made
-          and for the same reason: a panel foot cannot hold a modal.
+          Cancel keeps the row in the diary (R12) and its receipt's Undo reopens
+          it, but it is still the verb a trainer usually presses after a phone
+          call, so it asks once. The confirm replaces the foot's contents in the
+          same box rather than opening a second surface: a panel foot cannot hold
+          a modal. Every settle's receipt carries an Undo that reopens (R69).
         */}
         <div className="panel__foot">
           {confirming ? (
             <>
               <p className="small sch__confirm">
-                Cancel this session? {session.clientName} is not told automatically, and
-                this cannot be undone.
+                Cancel this session? {first} is not told automatically. It stays in
+                the diary, and you can reopen it.
               </p>
               <Button variant="ghost" onClick={() => setConfirming(false)}>
                 Keep it
@@ -483,84 +535,100 @@ export function SessionPanel({
               <Button
                 variant="danger"
                 disabled={pending}
+                onClick={() => settle(
+                  () => cancelSession(session.id),
+                  'Session cancelled',
+                  () => (
+                    <>
+                      {session.clientName} &middot; {dayLong(session.at)} at{' '}
+                      {formatMinute(startMinute)} &mdash; they are not told automatically.
+                    </>
+                  ),
+                )}
+              >
+                Cancel session
+              </Button>
+            </>
+          ) : settled ? (
+            <>
+              {/* Reopen: a mis-tapped done, no-show or cancel goes back to
+                  booked, and any pack charge is given back (R69). */}
+              <Button
+                variant="ghost"
+                disabled={pending}
                 onClick={() => run(async () => {
-                  const res = await cancelSession(session.id);
+                  const res = await reopenSession(session.id);
                   if (res.ok) {
-                    /* THE BLOCK LEAVES THE GRID AND THE PANEL GOES WITH IT, so
-                       nothing is left on screen to say what happened — the one
-                       shape the deck is for. A receipt rather than a notice
-                       because it is a single fact about a moment, and with NO
-                       action on it: the confirm above says in as many words
-                       that this cannot be undone, and a card offering Undo
-                       five seconds later would contradict the sentence the
-                       trainer just agreed to. */
                     show({
                       tone: 'ok',
                       variant: 'receipt',
-                      title: <>Session cancelled</>,
-                      body: (
-                        <>
-                          {session.clientName} &middot; {dayLong(session.at)} at{' '}
-                          {formatMinute(startMinute)} &mdash; they are not told
-                          automatically.
-                        </>
-                      ),
+                      title: <>Reopened</>,
+                      body: <>{session.clientName} is booked again.{res.message ? <> {res.message}</> : null}</>,
                     });
                     dismiss();
                   }
                   return res;
                 })}
               >
-                Cancel session
+                Reopen
+              </Button>
+              <Button variant="secondary" onClick={dismiss}>
+                Close
               </Button>
             </>
-          ) : settled ? (
-            <Button variant="secondary" onClick={dismiss}>
-              Close
-            </Button>
           ) : (
             <>
-              <Button
-                variant="ghost"
-                disabled={pending}
-                onClick={() => setConfirming(true)}
-              >
-                Cancel session
-              </Button>
+              {!started && (
+                <Button
+                  variant="ghost"
+                  disabled={pending}
+                  onClick={() => setConfirming(true)}
+                >
+                  Cancel session
+                </Button>
+              )}
               {/* One press, and it TAKES A SESSION — the design's rule and what
                   the phone's `markNotTrained` has always done. The considered
                   version of this decision lives on the finish screen, which
-                  offers the checkbox; the diary is the fast surface and a
-                  two-step here would make the common case slower to serve the
-                  rare one. Safe to press: the server settles from what the
-                  session has already taken, so re-marking it from the finish
-                  screen with the box clear puts the session back. The label
-                  says so rather than leaving it to be discovered. */}
-              <Button
-                variant="secondary"
-                disabled={pending}
-                title="Records a no-show and takes one off the client’s pack. Change it on the finish screen."
-                onClick={() => run(() => markNoShow({
-                  id: session.id,
-                  scheduledAt: session.at,
-                  durationMinutes: session.minutes,
-                  costsASession: true,
-                }))}
-              >
-                No-show &middot; &minus;1
-              </Button>
+                  offers the checkbox; the diary is the fast surface. Safe to
+                  press: the receipt's Undo reopens it and gives the session back.
+                  Not on a started session: somebody trained. */}
+              {begun && !started && (
+                <Button
+                  variant="secondary"
+                  disabled={pending}
+                  title="Records a no-show and takes one off the client’s pack. Undo gives it back."
+                  onClick={() => settle(
+                    () => markNoShow({ id: session.id, costsASession: true }),
+                    'No-show recorded',
+                    (res) => res.message
+                      ? <>{session.clientName} &mdash; {res.message}</>
+                      : <>{session.clientName} &mdash; one session off their pack.</>,
+                  )}
+                >
+                  No-show &middot; &minus;1
+                </Button>
+              )}
               {/* `POST /v1/sessions/{id}/done`, never a status flip: the endpoint
-                  also creates the workout row and decrements the pack, and a flip
-                  would leave the money book and the calendar disagreeing about
-                  how many sessions a client had used. */}
-              <Button
-                variant="primary"
-                disabled={pending}
-                onClick={() => run(() => markDone(session.id))}
-              >
-                <Check size={15} />
-                Mark done
-              </Button>
+                  also charges the pack and closes an open log, and a flip would
+                  leave the money book and the calendar disagreeing about how many
+                  sessions a client had used. */}
+              {begun && (
+                <Button
+                  variant="primary"
+                  disabled={pending}
+                  onClick={() => settle(
+                    () => markDone(session.id),
+                    'Marked done',
+                    (res) => res.message
+                      ? <>{session.clientName} &mdash; {res.message}</>
+                      : <>{session.clientName}&rsquo;s session is done, and one is off their pack.</>,
+                  )}
+                >
+                  <Check size={15} />
+                  Mark done
+                </Button>
+              )}
             </>
           )}
         </div>

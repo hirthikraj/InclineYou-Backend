@@ -225,6 +225,24 @@ public class SessionWriteService {
                     (Integer) charge.getFirst().get("sessions_remaining"), null);
         }
 
+        Charged c = chargePack(p);
+        return new MarkResult(sessionId.toString(), c.charged() ? "done" : "not_charged",
+                c.packageId(), c.sessionsRemaining(), c.reason());
+    }
+
+    /**
+     * What a charge attempt came to: {@code charged}, or why not
+     * ({@code NO_PACKAGE} · {@code PACKAGE_PAUSED} · {@code PACKAGE_EMPTY}).
+     */
+    record Charged(boolean charged, String packageId, Integer sessionsRemaining, String reason) {}
+
+    /**
+     * Charge one session to the pack that should pay for it — shared by Mark done
+     * and a charged no-show, so the two can never pick different packs. Expects
+     * {@code sid}, {@code tid}, {@code cid} and {@code service} in {@code p}, and
+     * the session row already locked by the caller.
+     */
+    Charged chargePack(Map<String, Object> p) {
         /*
          * Which pack pays: this client's live session pack for the same service
          * (floor, home_visit or remote). A running, unpaused pack with sessions
@@ -242,14 +260,14 @@ public class SessionWriteService {
                          start_date NULLS LAST, created_at, id
                 LIMIT 1
                 """, p);
-        if (packs.isEmpty()) return new MarkResult(sessionId.toString(), "not_charged", null, null, "NO_PACKAGE");
+        if (packs.isEmpty()) return new Charged(false, null, null, "NO_PACKAGE");
         var pack = packs.getFirst();
         String packageId = (String) pack.get("id");
         if (Boolean.TRUE.equals(pack.get("paused"))) {
-            return new MarkResult(sessionId.toString(), "not_charged", packageId, (Integer) pack.get("sessions_remaining"), "PACKAGE_PAUSED");
+            return new Charged(false, packageId, (Integer) pack.get("sessions_remaining"), "PACKAGE_PAUSED");
         }
         if (((Number) pack.get("sessions_remaining")).intValue() <= 0) {
-            return new MarkResult(sessionId.toString(), "not_charged", packageId, 0, "PACKAGE_EMPTY");
+            return new Charged(false, packageId, 0, "PACKAGE_EMPTY");
         }
 
         p.put("pid", packageId);
@@ -268,7 +286,7 @@ public class SessionWriteService {
                 WHERE id = :pid::uuid
                 RETURNING sessions_remaining
                 """, p, Integer.class);
-        return new MarkResult(sessionId.toString(), "done", packageId, left, null);
+        return new Charged(true, packageId, left, null);
     }
 
     /**

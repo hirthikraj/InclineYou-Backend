@@ -2,14 +2,13 @@ import 'server-only';
 
 import { cache } from 'react';
 
-import { getToken } from '@/lib/auth/session';
 import type { RateSource, WorkWindow } from '@/lib/today/day';
-import { clockParts, startOfDay, DAY_MS } from '@/lib/today/time';
-import { readMode } from '@/lib/today/mode';
+import { DAY_MS } from '@/lib/today/time';
+import { api, ApiError, listAll, type ListEnvelope } from '@/lib/http/client';
 import { rangeFor, type ScheduleView } from './view';
-import { bookableClients, DEAD_SESSION, sessionMinutes } from './roster';
+import { bookableClients } from './roster';
+import { inWindow, toSession, type ClientBrief, type SessionWire } from './rows';
 import type { ScheduleClient, ScheduleSession } from './session';
-import { listAll, type ListEnvelope } from '@/lib/http/client';
 
 /* The shapes live in `./session`, which carries no `server-only`, so the client
    components can import them without pulling this file's fetch layer with them.
@@ -17,50 +16,39 @@ import { listAll, type ListEnvelope } from '@/lib/http/client';
 export type { ScheduleClient, ScheduleSession };
 
 /**
- * WHAT THE SCHEDULE ASKS THE SERVER FOR, AND WHY IT IS SIX REQUESTS.
+ * WHAT THE SCHEDULE ASKS THE SERVER FOR — FIVE READS, ALL OF THEM TODAY'S.
  *
- * `lib/today/api.ts` makes seven and explains at length why it is not one
- * `sync/pull`; every word of that applies here and is not repeated. What is
- * different is the WINDOW.
+ * api-contract *Schedule* (1.1): L1–L5 are the same requests Today makes, so a
+ * response shape is defined once and the two screens cannot draw one session
+ * two ways. `/v1/programs` folded into the client summary (each client carries
+ * its active plan), and `/v1/trainers/me` became `/v1/me`.
  *
- * Today fetches Monday-to-tomorrow because every consumer of its session list
- * lives inside that range. This screen's whole subject is a range the trainer
- * chooses, so the window is the view's own — one day, one week, or the 42 days a
- * month grid draws. `rangeFor` is the single place that arithmetic lives, and the
- * page hands the same range to the fetch and to the grid, so the thing drawn and
- * the thing fetched cannot disagree.
+ *   · `/v1/me`                      — timezone, and the setup redirect.
+ *   · `/v1/working-hours`           — the ground every block is drawn on.
+ *   · `/v1/clients?view=summary`    — the booking picker, the client week, each
+ *                                     client's usual length and mode and plan.
+ *   · `/v1/sessions?from=&to=`      — every block, windowed by the view.
+ *   · `/v1/packages?scope=current`  — "6 of 12 left" and the per-session rate.
  *
- * Five of the six are not windowed and each has a reason:
+ * Only the diary is windowed, and by the view's own range (`rangeFor`), so the
+ * thing drawn and the thing fetched cannot disagree. A view switch asks for the
+ * diary alone (`loadWindow` in `./actions`, through `fetchWindow` below): the
+ * other four don't change with the view, so they come only with the page. The window goes out as
+ * DATES, which the server reads in the workspace's timezone (R8); since the
+ * dates are picked on a Next server whose zone may not be the trainer's, each
+ * end is widened by a day and the rows are trimmed back to the grid's instants.
  *
- *   · `/v1/trainers/me`   — one row.
- *   · `/v1/clients`       — the roster, and the booking form needs ALL of it. A
- *                           client with nothing booked this week is exactly who a
- *                           trainer opens this screen to book.
- *   · `/v1/programs`      — the block's plan line ("Full Body B · Week 4/8") and
- *                           the booking form's plan picker.
- *   · `/v1/packages`      — the per-session rate a gap is priced at, and the
- *                           panel's "6 of 12 left". Windowing a package by the
- *                           week it is looked at in is meaningless.
- *   · `/v1/working-hours` — the ground every block is drawn on.
- *
- * Deliberately NOT fetched, and this is the difference from Today that matters
- * most: `/v1/workouts` and `/v1/payments`. Today needs them for the attention
- * queue — *gone quiet* and *still pending* — and both are unwindowed reads over a
- * whole account. This screen has no queue. It draws what is PLANNED, which is
- * `scheduled_session` and nothing else, so a month view costs six bounded reads
- * rather than a full history.
- *
- * The consequence is honest and worth stating: a block here cannot say whether a
- * log was opened against it, because that lives in `workout_session`. So `live`
- * and `late` are computed from the schedule alone — see `toSession`.
+ * `startedAt` is on the session row in v1 (the log IS the session), so a block
+ * can now say a session is running — the old schedule could not see
+ * `workout_session` and drew `live` as always false.
  */
 
-const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
-
-/** Same eight seconds, same reason, as `lib/today/api.ts`. A fetch with no
- *  timeout does not fail when a server stops answering — only when it refuses. */
-const TIMEOUT_MS = 8_000;
-
+/**
+ * Kept as this screen's error type so `guard.ts` can tell *unreachable* from
+ * *refused*; every request goes through the shared `api()`, which adds the
+ * token and `X-InclineYou-Client: web` (the private fetch this file used to
+ * have sent neither header).
+ */
 export class ScheduleApiError extends Error {
   constructor(readonly status: number | null) {
     super(`inclineyou api ${status ?? 'unreachable'}`);
@@ -68,132 +56,82 @@ export class ScheduleApiError extends Error {
   }
 }
 
-async function request<T>(
-  path: string,
-  init?: { method: string; body?: unknown },
-): Promise<T> {
-  const token = await getToken();
-  // Not tidiness: without a token the backend answers 401 and the screen would
-  // report a server problem for what is a signed-out browser.
-  if (!token) throw new ScheduleApiError(401);
-
-  let res: Response;
+async function get<T>(path: string): Promise<T> {
   try {
-    res = await fetch(`${BASE}${path}`, {
-      method: init?.method ?? 'GET',
-      headers: {
-        authorization: `Bearer ${token}`,
-        ...(init?.body !== undefined ? { 'content-type': 'application/json' } : {}),
-      },
-      body: init?.body !== undefined ? JSON.stringify(init.body) : undefined,
-      // A schedule is a snapshot of a minute like the deck is, and a cached one
-      // is wrong in the way that looks exactly like being right.
-      cache: 'no-store',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch {
-    throw new ScheduleApiError(null);
+    return await api<T>(path);
+  } catch (error) {
+    if (error instanceof ApiError) throw new ScheduleApiError(error.status);
+    throw error;
   }
-  if (!res.ok) throw new ScheduleApiError(res.status);
-
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T;
 }
 
-const get = <T>(path: string) => request<T>(path);
-export const post = <T>(path: string, body?: unknown) => request<T>(path, { method: 'POST', body });
-export const put = <T>(path: string, body?: unknown) => request<T>(path, { method: 'PUT', body });
-export const del = (path: string) => request<null>(path, { method: 'DELETE' });
+function items<T>(path: string): Promise<T[]> {
+  return listAll<T>(path, (p) => get<ListEnvelope<T>>(p));
+}
 
 /* ------------------------------------------------------------ wire shapes ── */
 /* Named after the Java records, so a change there is greppable from here. Every
  * field the screen does not read is left out on purpose. ------------------- */
 
-interface TrainerWire {
-  name: string;
+/** L1 · `MeService.MeResponse`. */
+interface MeWire {
+  name: string | null;
   phone: string | null;
+  setupCompletedAt: number | null;
   gymName: string | null;
-  gymSharePercent: number | null;
-  setupComplete: boolean;
 }
 
+/** L2 · `WorkingHoursService.WorkingHourResponse` — weekday 1 = Monday, times "HH:mm". */
+interface WorkingHourWire {
+  weekday: number;
+  start: string;
+  end: string;
+}
+
+/** L3 · `ClientSummaryService.ClientSummary`. */
 interface ClientWire {
   id: string;
-  name: string;
+  name: string | null;
   status: string;
-  /** The roster relationship. See the note on `ScheduleClient.membership`. */
-  membershipStatus?: string | null;
-  deliveryMode: string | null;
-  metadata: Record<string, unknown> | null;
-  /** On `ClientResponse` since the create body carried it; the booking form's
-   *  default length comes from here rather than from a constant. */
-  sessionDurationMinutes?: number | null;
-  sessionsPerWeek?: number | null;
+  membershipStatus: string;
+  schedule: { sessionsPerWeek: number | null; sessionDurationMinutes: number | null; deliveryMode: string | null } | null;
+  program: { id: string; name: string; weeks: number } | null;
 }
 
-interface SessionWire {
-  id: string;
-  clientId: string;
-  programId: string | null;
-  scheduledAt: number;
-  durationMinutes: number | null;
-  status: string;
-  dayLabel: string | null;
-  templateDay: number | null;
-  deliveryMode: string | null;
-  notes?: string | null;
-  /**
-   * V10's `pack_delta` — what this session took off the client's pack, or 0/null
-   * when it cost nothing. Appended to `SessionResponse` on 28 Aug 2026.
-   *
-   * The panel reads it for one sentence: *Marked no-show* and *Marked no-show ·
-   * pack −1* are different facts, and until this was on the wire the diary could
-   * only ever say the first. The phone's diary has drawn the distinction since
-   * V10 because it holds the column in SQLite.
-   */
-  packDelta?: number | null;
-}
-
-interface ProgramWire {
-  id: string;
-  clientId: string;
-  name: string;
-  startDate: string | null;
-  endDate: string | null;
-  status: string;
-}
-
+/** L5 · `PackageReadService.CurrentPackage`. Money is a decimal string. */
 interface PackageWire {
-  id: string;
   clientId: string;
-  type: string;
+  basis: 'sessions' | 'period';
   sessionsTotal: number | null;
   sessionsRemaining: number | null;
-  amount: number | string | null;
-  status: string;
+  amount: string;
+  trainerSharePercent: string | null;
+  trainerShareAmount: string | null;
   createdAt: number;
 }
 
-interface WorkingHourWire {
-  id: string;
-  weekday: number;
-  startMinute: number;
-  endMinute: number;
-}
-
-/** Jackson can hand back a string for a `BigDecimal`; `₹NaN` is not a price. */
+/** Money arrives as a decimal string; `₹NaN` is not a price. */
 function num(v: number | string | null | undefined): number {
   if (v === null || v === undefined) return 0;
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
-/* ------------------------------------------------------------ the screen ── */
+/** `"06:30"` → 390. */
+function minuteOf(hm: string): number {
+  const [h, m] = hm.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
 
-/* The default length and the dead-status set are `./roster`'s — Today's booking form
-   reads the same two rules now, and one of them deciding a session is dead while
-   the other does not is a clash warning that appears on one screen only. */
-const DONE_SESSION = new Set(['done', 'completed']);
+/** `yyyy-MM-dd` for a local-calendar instant on the Next server. */
+function isoDate(at: number): string {
+  const d = new Date(at);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+/* ------------------------------------------------------------ the screen ── */
 
 export interface ScheduleData {
   view: ScheduleView;
@@ -201,6 +139,12 @@ export interface ScheduleData {
   from: number;
   to: number;
   sessions: ScheduleSession[];
+  /**
+   * Every client on L3, by id — what a session row needs to draw (name, usual
+   * length and mode, plan). Held by the page so a view switch can map a new
+   * window of L4 in the browser without asking for the roster again.
+   */
+  people: Record<string, ClientBrief>;
   clients: ScheduleClient[];
   hours: WorkWindow[];
   rates: RateSource;
@@ -216,168 +160,108 @@ export interface ScheduleData {
 }
 
 /**
- * A wire row into the shape the geometry reasons in.
- *
- * `DeckSession` is reused rather than redefined, and that is the point: it is
- * what `findGaps`, `dayMoney` and `findClash` in `lib/today/day.ts` take, so this
- * screen and Today compute a gap and a clash with the SAME function. Two
- * definitions of "is this hour free" is two answers on two screens open at the
- * same minute, which is the disagreement `lib/today/deck.ts` opens by refusing.
- *
- * ── THE TWO FIELDS THIS SCREEN CANNOT KNOW ──────────────────────────────────
- * `live` (a workout log is open against this session) and `late` (it started and
- * nobody opened one) are facts about `workout_session`, and this screen does not
- * fetch that table — see the header. So:
- *
- *   · `live` is always false here. A block never claims a session is running.
- *   · `late` is a session that has STARTED and is not done or dead, which is what
- *     the trainer can see for themselves from the now-line. It earns the warn
- *     ring honestly — "this should have been marked by now" — without asserting
- *     anything about a log.
- *
- * Today's version of `late` is stronger because Today holds the logs. Neither is
- * wrong; they are the same word at two resolutions, and the block's `aria-label`
- * says "not marked" rather than "not started" so the sentence is true at this one.
+ * L4 for one view's window: the dates widened a day each side (the Next
+ * server's zone may not be the trainer's, R8), then trimmed back to the grid's
+ * own instants. The page's first render and the view-switch action both call it.
  */
-function toSession(
-  s: SessionWire,
-  client: ClientWire | undefined,
-  program: ProgramWire | undefined,
-  now: number,
-): ScheduleSession {
-  const status = (s.status ?? '').toLowerCase();
-  const done = DONE_SESSION.has(status);
-  const dead = DEAD_SESSION.has(status);
-  const { time, meridiem } = clockParts(s.scheduledAt);
-
-  const minutes = sessionMinutes(s.durationMinutes, client?.sessionDurationMinutes);
-
-  return {
-    id: s.id,
-    clientId: s.clientId,
-    clientName: client?.name?.trim() || 'Client',
-    programId: s.programId ?? undefined,
-    templateDay: s.templateDay ?? undefined,
-    at: s.scheduledAt,
-    minutes,
-    time,
-    meridiem,
-    detail: planLine(s, program, s.scheduledAt),
-    mode: readMode({
-      session: s.deliveryMode,
-      client: client?.deliveryMode,
-      metadata: client?.metadata,
-    }),
-    done,
-    dead,
-    live: false,
-    late: !done && !dead && s.scheduledAt + minutes * 60_000 <= now,
-    status,
-    noShow: status === 'no_show' || status === 'noshow',
-    packDelta: s.packDelta ?? 0,
-    notes: s.notes ?? null,
-    /*
-     * `DeckSession.hasNote`, and on this half of the product it is derived from
-     * the BOOKING's note only — not from `client.goal` the way Today's is.
-     *
-     * Not an inconsistency: this file already carries `notes` in full, because
-     * the session panel prints it. The chip is Today's affordance for a screen
-     * that cannot show the text; here the text is one click away in the panel, so
-     * the flag is only ever a redundant restatement of a field this object
-     * already has. Kept in the shape so `ScheduleSession` stays assignable
-     * wherever a `DeckSession` is expected, which is what caught this.
-     */
-    hasNote: (s.notes ?? '').trim().length > 0,
-    programName: program?.name ?? null,
-  };
-}
-
-/** "Full Body B · Week 4/8" — the same sentence `deck.ts` composes, same rules. */
-function planLine(s: SessionWire, program: ProgramWire | undefined, at: number): string {
-  const label = s.dayLabel?.trim() || program?.name?.trim() || 'Session';
-  if (!program?.startDate) return label;
-
-  const start = Date.parse(`${program.startDate}T00:00:00`);
-  if (!Number.isFinite(start)) return label;
-
-  const week = Math.floor((startOfDay(at) - startOfDay(start)) / (7 * DAY_MS)) + 1;
-  if (week < 1) return label;
-
-  const end = program.endDate ? Date.parse(`${program.endDate}T00:00:00`) : NaN;
-  if (!Number.isFinite(end)) return `${label} · Week ${week}`;
-
-  const total = Math.max(1, Math.ceil((startOfDay(end) - startOfDay(start)) / (7 * DAY_MS)));
-  return `${label} · Week ${Math.min(week, total)}/${total}`;
+export async function fetchWindow(view: ScheduleView, anchor: number): Promise<{ from: number; to: number; rows: SessionWire[] }> {
+  const { from, to } = rangeFor(view, anchor);
+  const rows = await items<SessionWire>(`/v1/sessions?from=${isoDate(from - DAY_MS)}&to=${isoDate(to + DAY_MS)}`);
+  return { from, to, rows: inWindow(rows, from, to) };
 }
 
 /**
- * `cache()` for the same reason `lib/today/api.ts` uses it: the page and its
- * metadata both want the week, and React's per-request cache makes that one round
- * of requests rather than two. A REQUEST cache — it does not survive the response.
+ * `cache()`, so the page and its metadata make one round of requests, not two.
+ * A REQUEST cache — it does not survive the response.
  */
 export const getSchedule = cache(
   async (view: ScheduleView, anchor: number): Promise<ScheduleData> => {
     const now = Date.now();
-    const { from, to } = rangeFor(view, anchor);
 
-    const [trainer, clients, sessions, programs, packages, hours] = await Promise.all([
-      get<TrainerWire>('/v1/trainers/me'),
-      get<ClientWire[]>('/v1/clients?view=legacy'),
-      // 1.1: lists are `{items}` envelopes; the diary is followed to its last page.
-      listAll<SessionWire>(`/v1/sessions?from=${from}&to=${to}`, (p) => get<ListEnvelope<SessionWire>>(p)),
-      get<ProgramWire[]>('/v1/programs'),
-      listAll<PackageWire>('/v1/packages?scope=current', (p) => get<ListEnvelope<PackageWire>>(p)),
-      listAll<WorkingHourWire>('/v1/working-hours', (p) => get<ListEnvelope<WorkingHourWire>>(p)),
+    const [me, hours, clients, diary, packages] = await Promise.all([
+      get<MeWire>('/v1/me'),
+      items<WorkingHourWire>('/v1/working-hours'),
+      items<ClientWire>('/v1/clients?view=summary'),
+      fetchWindow(view, anchor),
+      items<PackageWire>('/v1/packages?scope=current'),
     ]);
+    const { from, to } = diary;
 
-    const clientById = new Map((clients ?? []).map((c) => [c.id, c]));
-    const programById = new Map((programs ?? []).map((p) => [p.id, p]));
+    const people: Record<string, ClientBrief> = Object.fromEntries(clients.map((c) => [c.id, {
+      name: c.name ?? '',
+      minutes: c.schedule?.sessionDurationMinutes ?? null,
+      mode: c.schedule?.deliveryMode ?? null,
+      programId: c.program?.id ?? null,
+      programName: c.program?.name ?? null,
+      programWeeks: c.program?.weeks ?? null,
+    }]));
 
     /*
      * The newest package per client answers three questions at once — the rate a
      * gap is priced at, the "6 of 12 left" on the panel, and whether booking one
-     * more would run the pack out. The NEWEST regardless of status, which is
-     * `lib/today/api.ts`'s rule and its reason: a client whose pack ran out
-     * yesterday still has an agreed price, and that price is what an hour with
-     * them is worth.
+     * more would run the pack out. Newest regardless of status: a client whose
+     * pack ran out yesterday still has an agreed price. The trainer's share is
+     * the package's own (R3), and a period pack has no per-session rate.
      */
     const newest = new Map<string, PackageWire>();
-    for (const p of packages ?? []) {
+    for (const p of packages) {
       const seen = newest.get(p.clientId);
       if (!seen || p.createdAt > seen.createdAt) newest.set(p.clientId, p);
     }
-
     const perSession = new Map<string, number>();
     for (const [clientId, p] of newest) {
       const amount = num(p.amount);
-      const count = p.type === 'single' ? 1 : (p.sessionsTotal ?? 0);
-      // A monthly fee has no session count to divide by and yields nothing, which
-      // is correct rather than a gap: a month's fee is not attributable to one
-      // hour of it. `lib/setup/money.ts` divides the same way.
-      if (amount > 0 && count > 0) perSession.set(clientId, Math.round(amount / count));
+      const count = p.basis === 'sessions' ? p.sessionsTotal ?? 0 : 0;
+      if (amount > 0 && count > 0) {
+        const rate = p.trainerSharePercent !== null
+          ? (amount / count) * (num(p.trainerSharePercent) / 100)
+          : p.trainerShareAmount !== null
+            ? num(p.trainerShareAmount) / count
+            : amount / count;
+        perSession.set(clientId, Math.round(rate));
+      }
     }
+
+    const roster = clients.map((c) => ({
+      id: c.id,
+      name: c.name ?? '',
+      status: c.status,
+      membershipStatus: c.membershipStatus,
+      deliveryMode: c.schedule?.deliveryMode ?? null,
+      metadata: null,
+      sessionDurationMinutes: c.schedule?.sessionDurationMinutes ?? null,
+      sessionsPerWeek: c.schedule?.sessionsPerWeek ?? null,
+    }));
+    const programs = clients
+      .filter((c) => c.program !== null)
+      .map((c) => ({ id: c.program!.id, clientId: c.id, name: c.program!.name, status: 'active' }));
+    const packs = new Map(
+      [...newest].map(([clientId, p]) => [clientId, {
+        sessionsTotal: p.sessionsTotal, sessionsRemaining: p.sessionsRemaining,
+      }]),
+    );
 
     return {
       view,
       anchor,
       from,
       to,
-      sessions: (sessions ?? []).map((s) =>
-        toSession(s, clientById.get(s.clientId), programById.get(s.programId ?? ''), now),
-      ),
-      clients: bookableClients(clients ?? [], programs ?? [], newest),
-      hours: (hours ?? []).map((h) => ({
-        weekday: h.weekday,
-        startMinute: h.startMinute,
-        endMinute: h.endMinute,
+      sessions: diary.rows.map((s) => toSession(s, people[s.clientId], now)),
+      people,
+      clients: bookableClients(roster, programs, packs),
+      // The wire's weekday is 1 = Monday; `WorkWindow` is 0 = Monday.
+      hours: hours.map((h) => ({
+        weekday: h.weekday - 1,
+        startMinute: minuteOf(h.start),
+        endMinute: minuteOf(h.end),
       })),
-      rates: { perSession, gymSharePercent: trainer?.gymSharePercent ?? null },
+      rates: { perSession, gymSharePercent: null },
       trainer: {
-        name: trainer?.name ?? '',
-        phone: trainer?.phone ?? null,
-        gymName: trainer?.gymName ?? null,
-        gymSharePercent: trainer?.gymSharePercent ?? null,
-        setupComplete: Boolean(trainer?.setupComplete),
+        name: me?.name ?? '',
+        phone: me?.phone ?? null,
+        gymName: me?.gymName ?? null,
+        gymSharePercent: null,
+        setupComplete: me?.setupCompletedAt != null,
       },
       now,
     };

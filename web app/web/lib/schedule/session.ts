@@ -33,14 +33,19 @@ export interface ScheduleSession extends DeckSession {
    */
   noShow: boolean;
   /**
-   * What this session took off the pack: `-1`, or `0` when it cost nothing.
+   * Whether this session has a live charge on a pack (`charge != null` on L4,
+   * R13).
    *
    * A settled session is not one fact but two — what happened, and what it was
    * charged for — and a no-show is the only outcome where the second one is a
    * decision rather than a consequence. So the panel says which, rather than
    * leaving the trainer to open the money book to find out.
    */
-  packDelta: number;
+  charged: boolean;
+  /** When the log was opened, or null. A started session can't be moved, cancelled or no-showed. */
+  startedAt: number | null;
+  /** The row's version — sent as If-Match on the panel's Save (R69). */
+  version: string;
   notes: string | null;
   programName: string | null;
 }
