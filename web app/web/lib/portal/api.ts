@@ -5,7 +5,6 @@ import { cache } from 'react';
 import { getActiveClient, getToken } from '@/lib/auth/session';
 
 import type { CheckInDetailWire, CheckInWire } from './checkin';
-import { isClientKind, type ClientNotificationKind } from './notifications';
 
 /**
  * Everything the client portal reads, in scoped requests against `/v1/me/*`.
@@ -197,15 +196,6 @@ export interface MeWire {
 export interface PrefsWire {
   clientId: string;
   hideWeight: boolean;
-  notify: {
-    programUpdated: boolean;
-    sessionReminder: boolean;
-    trainerNote: boolean;
-    personalBest: boolean;
-    /** A pack sold, renewed, or money written against it. See `mock/types.ts`
-     *  for why the spec's four categories became five. */
-    packChanged: boolean;
-  };
   /**
    * DPDP §14's nominee — one person who may exercise §§11–13 if the client
    * dies or cannot act. `null` where they have not named anybody.
@@ -385,25 +375,6 @@ export interface PortalMilestoneWire {
   at: number;
 }
 
-/**
- * One row of the client's bell. Facts, never a rendered sentence —
- * `lib/portal/notifications.ts` is the only place that turns them into English,
- * and `mock/types.ts` carries the argument for why the wire works that way.
- *
- * `clientId` is deliberately absent. Every row in the response is this client's
- * by construction, so echoing it back would put the one field the roster cookie
- * is about into a payload the browser can read.
- */
-export interface PortalNotificationWire {
-  id: string;
-  kind: ClientNotificationKind;
-  amount: number | null;
-  subjectAt: number | null;
-  text: string | null;
-  at: number;
-  readAt: number | null;
-}
-
 export interface PortalSetHistoryWire {
   exerciseId: string;
   setNumber: number;
@@ -554,66 +525,6 @@ export const getPortalMilestones = cache(
   (): Promise<PortalMilestoneWire[]> => get<PortalMilestoneWire[]>('/v1/me/milestones'),
 );
 
-/**
- * The client's bell, for the portal's layout.
- *
- * ── WHY THE LAYOUT READS THIS AND NOT EACH PAGE ────────────────────────────
- *
- * `lib/notifications/api.ts`'s argument, unchanged: the bell is drawn by
- * `TopBar` on every screen inside the shell, and a count each page had to
- * remember to fetch is a count that is right on the screens somebody remembered
- * and absent on the rest — which on a bell reads as *you have missed nothing*,
- * a claim rather than an absence.
- *
- * ── AND IT RETURNS [] ON EVERY FAILURE, WHICH THE REST OF THIS FILE DOES NOT ──
- *
- * Every other read here throws, so `requirePortal` can tell a 401 from a 500
- * and `Unavailable` can say which. This one swallows, and it is the same trade
- * the trainer's feed makes for the same reason: the layout draws the SHELL, and
- * a bell that could take the rail and the tab bar down with it would cost a
- * client every way out of the screen to report that a list of things which
- * already happened could not be fetched.
- *
- * The cost is stated: an empty feed and a broken feed look identical. That is
- * survivable here precisely because nothing in this feed carries a verb — every
- * row is a pointer to a screen that is still reachable from the tab bar.
- *
- * The rows are filtered on the way in rather than trusted. `kind` drives a CSS
- * modifier, a glyph map and two switches with no default, so a kind this build
- * has never heard of would render an untinted plate above an empty line — a row
- * that says nothing, on the one surface whose contract is that every row says
- * something.
- */
-export async function getPortalNotifications(): Promise<PortalNotificationWire[]> {
-  try {
-    const rows = await get<unknown>('/v1/me/notifications');
-    if (!Array.isArray(rows)) return [];
-    return rows.filter(isNotification);
-  } catch {
-    return [];
-  }
-}
-
-function isNotification(row: unknown): row is PortalNotificationWire {
-  if (!row || typeof row !== 'object') return false;
-  const r = row as Record<string, unknown>;
-  return typeof r.id === 'string' && typeof r.at === 'number' && typeof r.kind === 'string' && isClientKind(r.kind);
-}
-
-/** One row, on the way to somewhere else. See `lib/portal/actions.ts`. */
-export function postNotificationRead(id: string) {
-  return call<{ id: string; readAt: number }>(
-    `/v1/me/notifications/${encodeURIComponent(id)}/read`,
-    { method: 'POST' },
-  );
-}
-
-/** All of them, in one request — see `mock/portal.ts` for why it is not N. */
-export function postNotificationsReadAll() {
-  return call<{ readAt: number }>('/v1/me/notifications/read', { method: 'POST' });
-}
-
-
 /* ── §"assessments" · the check-ins addressed to me ────────────────────────
 
    Two reads and they are deliberately not one. The LIST is what Home draws —
@@ -716,7 +627,6 @@ export function patchMe(fields: { phone?: string; health?: string }) {
 
 export function patchPrefs(fields: {
   hideWeight?: boolean;
-  notify?: Partial<PrefsWire['notify']>;
   /** `null` withdraws the nomination. Absent leaves it alone. */
   nominee?: { name: string; phone: string } | null;
 }) {

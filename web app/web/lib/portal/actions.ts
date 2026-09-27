@@ -18,8 +18,6 @@ import {
   getPortalExport,
   patchMe,
   patchPrefs,
-  postNotificationRead,
-  postNotificationsReadAll,
   postFinish,
   postMessageRead,
   postCheckInAnswer,
@@ -176,57 +174,6 @@ export async function setHideWeight(hidden: boolean): Promise<PortalResult> {
   revalidatePath('/me/today');
   revalidatePath('/me/account');
   return { ok: true, value: undefined };
-}
-
-export async function setNotify(
-  key: 'programUpdated' | 'sessionReminder' | 'trainerNote' | 'personalBest' | 'packChanged',
-  on: boolean,
-): Promise<PortalResult> {
-  const res = await run(() => patchPrefs({ notify: { [key]: on } }));
-  if (!res.ok) return res;
-  revalidatePath('/me/account');
-  return { ok: true, value: undefined };
-}
-
-/* ── §"Notifications" · the two writes the bell can make ───────────────────
- *
- * `lib/notifications/actions.ts` carries the whole argument and it transfers
- * without a word changed: a notification carries no verb, so the only thing
- * that can be written about one is whether it has been seen. Everything a
- * client might want to DO about an event is on the screen the row links to.
- *
- * ── NO `revalidatePath`, AND THAT IS NOT AN OMISSION ───────────────────────
- *
- * The obvious line to end each of these with is `revalidatePath('/me', 'layout')`.
- * It is left out for the trainer's two reasons and one of this half's own: the
- * layout does not re-render on a navigation between two screens it already
- * wraps, so the call would not refresh the bell on the trip it was written for;
- * revalidating it throws away `getMe` — the ONE request four screens share, per
- * that layout's own header — on every row anybody reads; and `NotificationsHost`
- * has already stamped the row in the browser, so there is nothing left for the
- * round trip to show.
- *
- * Neither is awaited by its caller and neither returns a `PortalResult`: the
- * browser is already navigating when a row is opened, and a failure costs one
- * row that comes back unread on the next full load. Holding a navigation until
- * a stamp lands is a click that hesitates, on the one control in the portal that
- * is supposed to be a glance.
- */
-export async function markNotificationRead(id: string): Promise<void> {
-  try {
-    await postNotificationRead(id);
-  } catch {
-    /* See above. The row is already stamped in the browser. */
-  }
-}
-
-export async function markNotificationsRead(): Promise<void> {
-  try {
-    await postNotificationsReadAll();
-  } catch {
-    /* Same. `Mark all read` is a single click and a single outcome, and the
-       outcome the client sees is the one the panel painted. */
-  }
 }
 
 /**

@@ -2,15 +2,14 @@
 
 import Link from 'next/link';
 
-import { Bell, ChevronLeft, Search } from './Icons';
-import { useNotifications } from './NotificationsHost';
+import { ChevronLeft, Search } from './Icons';
 import { useWorkspace } from './WorkspaceHost';
 import { WorkspaceMenu } from './WorkspaceMenu';
 import { usePaletteOpener } from './PaletteHost';
 import { ShortcutKeys } from './ShortcutKeys';
 
 /**
- * Breadcrumb · search · notifications.
+ * Breadcrumb · search.
  *
  * The breadcrumb is not decoration. On a phone "back" is unambiguous because
  * there is one stack; on the web a trainer can arrive anywhere from a URL, so
@@ -115,9 +114,6 @@ export function TopBar({
 }) {
   const openPalette = usePaletteOpener();
   const search = onSearch ?? openPalette;
-  /* Undefined outside the shell, exactly as `openPalette` is — see below for
-     why the bell is then dropped rather than drawn inert. */
-  const notify = useNotifications();
   /* Same contract again: `undefined` outside the shell, and the bar falls back
      to the breadcrumb rather than drawing a switcher with nothing to switch. */
   const workspace = useWorkspace();
@@ -282,57 +278,6 @@ export function TopBar({
           <ShortcutKeys letter="K" />
         </button>
       )}
-
-      <div className="top__acts">
-        {/*
-          THE BELL IS DROPPED OUTSIDE THE SHELL, and that is the same argument
-          the search box two blocks up makes about itself.
-
-          It used to be drawn unconditionally, on every one of the twenty
-          screens that render this bar, wired to nothing — an icon button with
-          an accessible name, a hover state and a click that produced no
-          surface. That is the defect this file already records for `.omni`,
-          and it is worse on this control: a bell with no count reads as *you
-          have missed nothing*, which is a claim rather than an absence.
-
-          `NotificationsHost` is mounted by the shell, so `useNotifications()`
-          answering is exactly the condition "there is a panel to open".
-
-          ── AND THE MARK IS OUTSIDE THE BUTTON'S LABEL ────────────────────
-
-          `aria-hidden` on the pill, and the figure said in the button's own
-          name instead. A screen reader reading the button and then the badge
-          gives "Notifications, 5" — five of what, and is it a count or a
-          position. One sentence, on the control the count is about.
-        */}
-        {notify && (
-          <span className="top__bell">
-            <button
-              className="btn btn--icon btn--ghost"
-              type="button"
-              aria-label={
-                notify.unread > 0
-                  ? `Notifications, ${notify.unread} unread`
-                  : 'Notifications'
-              }
-              aria-haspopup="dialog"
-              aria-expanded={notify.open}
-              onClick={notify.toggle}
-            >
-              <Bell size={18} />
-            </button>
-            {notify.unread > 0 && (
-              <span className="top__n" aria-hidden="true">
-                {/* 9+, not `CountBadge`'s 99+. The pill is 15px and sits ON the
-                    glyph, so three characters cover the bell they are a mark
-                    on — and past nine the exact number has stopped changing
-                    what anybody does with it. */}
-                {notify.unread > 9 ? '9+' : notify.unread}
-              </span>
-            )}
-          </span>
-        )}
-      </div>
     </header>
   );
 }

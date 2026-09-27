@@ -1,15 +1,11 @@
 'use client';
 
-import { useEffect, useMemo } from 'react';
+import { useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 
-import { markAllRead, markRead } from '@/lib/notifications/actions';
-import type { Notification } from '@/lib/notifications/types';
 import type { Workspace } from '@/lib/workspace/types';
 
 import { sectionFor, type RailKey } from './nav';
-import { NotificationsHost } from './NotificationsHost';
-import { TRAINER_EMPTY, trainerViews } from './notificationViews';
 import { PaletteHost } from './PaletteHost';
 import { Rail } from './Rail';
 import { SectionPane } from './SectionPane';
@@ -78,7 +74,6 @@ function currentFor(pathname: string): RailKey {
 export function AppShell({
   trainerName,
   roster,
-  notifications,
   workspaces,
   activeWorkspaceId,
   defaultWorkspaceId,
@@ -87,8 +82,6 @@ export function AppShell({
   trainerName: string;
   /** The palette's floor. See `PaletteHost` for why it is the shell that holds it. */
   roster: { id: string; name: string }[];
-  /** The bell's feed. Same argument as `roster` — `NotificationsHost` says it. */
-  notifications: Notification[];
   /** Every book this trainer can open, and which one is open. Same argument
    *  again, and `WorkspaceHost` states it: the bar that draws the switcher is
    *  mounted by twenty screens rather than by this shell. */
@@ -108,7 +101,6 @@ export function AppShell({
      for it to disagree with. `undefined` on Today, Schedule and every account
      screen, and `.app--pane` comes off with it so `.main` reclaims the track. */
   const section = sectionFor(current);
-  const views = useMemo(() => trainerViews(notifications), [notifications]);
   /* WHETHER THE PANE IS THERE AT ALL IS THE CHOICE; THE RAIL'S WIDTH IS NOT —
      `app--rail-min` is unconditional. `app--pane-min` rides on `app--pane`, so a
      route with no section draws neither and the remembered answer waits for one
@@ -179,24 +171,6 @@ export function AppShell({
         defaultId={defaultWorkspaceId}
       >
       <PaletteHost roster={roster}>
-        {/* Inside the palette's provider rather than outside it, so that the
-            two surfaces stack in the order §03 gives them: `.pal` is z 50 and
-            `.ntf` is z 35, and mounting the palette last means a ⌘K opened
-            over an open panel paints above it rather than under. */}
-        {/* The wire rows become views HERE rather than in the host, because
-            "which plate, which glyph, which sentence, which route" is the one
-            thing about a feed that is not shared between the two halves of this
-            product — `notificationViews.tsx` beside this file is the trainer's
-            answer and `components/portal/notificationViews.tsx` is the
-            client's. Memoised on the array the layout handed down, so a
-            re-render of the shell does not rebuild every row and hand the host
-            a new identity to diff against. */}
-        <NotificationsHost
-          views={views}
-          onRead={(id) => void markRead(id)}
-          onReadAll={() => void markAllRead()}
-          empty={TRAINER_EMPTY}
-        >
           {/* INSIDE `.app`, and inside every provider rather than around them.
               `.toasts` reads `--w-tabs` — the tab bar's own height token, which
               is declared on `.app` under 900px — to lift the deck clear of the
@@ -204,8 +178,8 @@ export function AppShell({
               would sit outside that declaration and drop four confirms behind
               the bar on every phone.
 
-              Last of the four, so the deck paints over the palette and the
-              notification centre. It is the only surface here that reports
+              Last of the providers, so the deck paints over the palette. It is
+              the only surface here that reports
               something that has ALREADY happened, and a confirm a trainer
               cannot see because a menu they left open is covering it is a
               confirm that did not happen. */}
@@ -261,7 +235,6 @@ export function AppShell({
           {children}
           <TabBar current={current} trainerName={trainerName} />
           </ToastHost>
-        </NotificationsHost>
       </PaletteHost>
       </WorkspaceHost>
     </div>

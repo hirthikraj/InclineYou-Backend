@@ -95,12 +95,6 @@ public class ProgramController {
      * which is the reason `template` and `program` are two tables. See
      * {@link ProgramService#resync} for what it does and does not touch.
      */
-    /** V18 · "Tell {client}" — `{sent: false}` when they switched plan notices off. */
-    @PostMapping("/{id}/notify")
-    public ProgramService.NotifyResult notifyClient(@PathVariable UUID id) {
-        return programService.notifyClient(id, trainerId());
-    }
-
     @PostMapping("/{id}/resync")
     public ProgramService.ResyncResult resync(@PathVariable UUID id) {
         return programService.resync(id, trainerId());

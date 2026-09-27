@@ -494,13 +494,6 @@ export const ENTRIES: Entry[] = [
      was, so the catalogue records the component rather than the screen. */
   { id: 'c-pager', name: 'Pager', group: 'NAVIGATION', page: 'nav', badge: 'NEW', impl: 'component',
     desc: 'Numbered pages as links, not a button that appends: a page of a list is a place, so it survives a reload and can be sent to someone.' },
-  /* The 48th, and the only entry whose `page` names no frame: the design set has
-     no notification-centre document — §03 draws the bell in the top bar of
-     twenty screens and nothing behind it. It is grouped with NAVIGATION rather
-     than CONTAINERS because that is where the shell's other overlay lives: the
-     palette is §03's too, and both are surfaces the shell mounts once for every
-     screen rather than boxes a screen puts content in. */
-  { id: 'c-notify', name: 'Notification panel', group: 'NAVIGATION', page: 'nav', badge: 'NEW', impl: 'component', desc: '' , cls: 'ntf' },
   /* ── A `c-secnav` WAS ADDED HERE AND REMOVED THE SAME DAY ─────────────────
      A sticky in-page jump list, written for the client portal's Progress
      screen when it was one page five screens tall. It worked and it was the

@@ -26,8 +26,6 @@ public class ProgramService {
 
     private final NamedParameterJdbcTemplate jdbc;
     private final TemplateService templates;
-    /** V18 · facts for the client's bell, gated by their own switches. */
-    private final com.inclineyou.inclineyou_backend.notification.ClientNotificationService clientBell;
 
     /**
      * `program.schedule` and `program_exercise.set_detail` are both jsonb
@@ -314,36 +312,7 @@ public class ProgramService {
                     " WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL", p);
 
         var updated = findOwned(id, trainerId);
-        /* V18 · a plan whose name, goal or dates changed is news to the client —
-           subjectAt is the plan's own birthday, so `subjectAt != at` and the
-           portal words it "changed your plan". A status flip alone is the
-           trainer's bookkeeping; a row edit is `PUT …/exercises`, which is a
-           typo fix until the trainer says otherwise with `notify`. */
-        if (req.name() != null || req.goal() != null || req.startDate() != null || req.endDate() != null) {
-            announcePlan(updated);
-        }
         return toProgramResponse(updated);
-    }
-
-    /** What `POST /v1/programs/{id}/notify` answers. */
-    public record NotifyResult(boolean sent) {}
-
-    /**
-     * "Tell {client}" after a save. Writes nothing to the plan — a row edit mints
-     * nothing on its own, because a typo fix is not an event — and mints one
-     * {@code plan} row, unless the client switched those off: that is
-     * {@code {sent:false}}, not an error. The plan's owning trainer only (404
-     * otherwise).
-     */
-    @Transactional
-    public NotifyResult notifyClient(UUID id, UUID trainerId) {
-        return new NotifyResult(announcePlan(findOwned(id, trainerId)));
-    }
-
-    private boolean announcePlan(Map<String, Object> program) {
-        Object created = program.get("created_at");
-        Instant birthday = created instanceof Timestamp ts ? ts.toInstant() : Instant.now();
-        return clientBell.mint(str(program.get("client_id")), "plan", null, birthday, str(program.get("name")));
     }
 
     // ── Delete ────────────────────────────────────────────────────────────────

@@ -87,8 +87,6 @@ public class PackageService {
      * found it empty. {@link DiaryService} carries the whole argument.
      */
     private final DiaryService diary;
-    /** V18 · facts for the client's bell, gated by their own switches. */
-    private final com.inclineyou.inclineyou_backend.notification.ClientNotificationService clientBell;
 
     private static final ObjectMapper STORE = new ObjectMapper();
 
@@ -704,9 +702,7 @@ public class PackageService {
         // Re-read rather than reconstruct: `amountPaid` is a correlated sum and
         // is zero on a fresh row only until the panel that sold this records the
         // deposit against it. Reading is one query and cannot be wrong.
-        var sold = withBooked(getPackage(tid, id.toString()), booked.booked());
-        clientBell.mint(clientId, "pack", sold.amount(), null, verb);
-        return sold;
+        return withBooked(getPackage(tid, id.toString()), booked.booked());
     }
 
     /**
@@ -1182,9 +1178,6 @@ public class PackageService {
                     :share, :sharePercent, :now, :now)
                 """, p);
 
-        // V18 · money that has ARRIVED is news to the client; a pending row is not yet.
-        if (settled) clientBell.mint(clientId, "pack", req.amount(), null, req.method());
-
         // On a pending row gymShareAmount is null rather than 0: the split has not
         // been made yet, and zero would read as "the gym took nothing", which is a
         // different fact.
@@ -1320,12 +1313,7 @@ public class PackageService {
         var updated = jdbc.queryForList("""
                 SELECT %s FROM payment WHERE id = :id::uuid
                 """.formatted(PAYMENT_COLUMNS), Map.of("id", paymentId));
-        var confirmed = toPaymentResponse(updated.get(0));
-        // V18 · only the first confirmation is news; a second press re-stamps nothing the client needs.
-        if (!"paid".equals(str(row.get("status"))) && !"confirmed".equals(str(row.get("status")))) {
-            clientBell.mint(confirmed.clientId(), "pack", confirmed.amount(), null, confirmed.method());
-        }
-        return confirmed;
+        return toPaymentResponse(updated.get(0));
     }
 
     /** The financial year turns over on an Indian calendar, not the server's. */

@@ -204,7 +204,7 @@ class TenantIsolationTest {
     }
 
     @Test
-    @DisplayName("V18 · client_prefs is the client's alone — its own trainer reads nothing; the bell is minted only by the gate")
+    @DisplayName("V18 · client_prefs is the client's alone — its own trainer reads nothing")
     void clientPrefsAreTheClientsAlone() throws SQLException {
         try (Connection c = asAppRole()) {
             set(c, "app.actor", "client");
@@ -213,24 +213,16 @@ class TenantIsolationTest {
             exec(c, "INSERT INTO client_prefs (client_id, notify_session_reminder, nominee_name, nominee_phone, tenant_id) "
                     + "VALUES ('" + meeraPrivate + "', false, 'Ravi', '9845012345', '" + tenantA + "')");
             assertThat(count(c, "SELECT count(*) FROM client_prefs")).isOne();
-            assertThatThrownBy(() -> exec(c, "INSERT INTO client_notification (client_id, kind, tenant_id) VALUES ('"
-                    + meeraPrivate + "', 'note', '" + tenantA + "')")).isInstanceOf(SQLException.class);
         }
         try (Connection c = asAppRole()) {
             // Her own trainer, standing in her own workspace: nothing.
             staff(c, tenantA, List.of(tenantA), trainerPriya);
             assertThat(count(c, "SELECT count(*) FROM client_prefs WHERE client_id = '" + meeraPrivate + "'")).isZero();
-            assertThat(count(c, "SELECT count(*) FROM client_notification WHERE client_id = '" + meeraPrivate + "'")).isZero();
-            // …and yet the gate, run from a trainer request, reads the switch she set.
-            assertThat(strings(c, "SELECT mint_client_notification('" + meeraPrivate + "', 'session', NULL, now(), 'booked')::text"))
-                    .containsExactly((String) null);
-            assertThat(strings(c, "SELECT mint_client_notification('" + meeraPrivate + "', 'pack', 100, NULL, 'sold') IS NOT NULL"))
-                    .containsExactly("t");
         }
     }
 
     @Test
-    @DisplayName("11c · a client answers its own assessment, cannot touch another's, and can ring its trainer's bell")
+    @DisplayName("11c · a client answers its own assessment and cannot touch another's")
     void portalClientAnswers() throws SQLException {
         UUID mine = UUID.randomUUID();
         UUID theirs = UUID.randomUUID();
@@ -249,11 +241,7 @@ class TenantIsolationTest {
                     "UPDATE assessment SET answers = '[{\"questionId\":\"q\"}]' WHERE id = '" + mine + "'")).isOne();
             assertThat(c.createStatement().executeUpdate(
                     "UPDATE assessment SET answers = '[]' WHERE id = '" + theirs + "'")).isZero();
-            exec(c, "SELECT mint_trainer_notification('" + trainerPriya + "', 'metric', '" + meeraPrivate + "', NULL, NULL, 'from portal')");
         }
-        assertThat(jdbc.queryForObject(
-                "SELECT tenant_id::text FROM trainer_notification WHERE text = 'from portal' AND trainer_id = :t::uuid",
-                Map.of("t", trainerPriya.toString()), String.class)).isEqualTo(tenantA.toString());
     }
 
     @Test
@@ -370,28 +358,6 @@ class TenantIsolationTest {
                 VALUES (:c::uuid, :t::uuid, :tid::uuid, :tpl::uuid, 'x', now(), %s)
                 """.formatted(sent ? "now()" : "NULL"), Map.of("c", clientId.toString(), "t", trainerId.toString(),
                 "tid", tenantId.toString(), "tpl", templateId.toString()));
-    }
-
-    @Test
-    @DisplayName("V15 · the bell is read through the policy and written only through the mint function")
-    void bellIsMintOnly() throws SQLException {
-        UUID clientA = insertClient(tenantA, trainerPriya, "Bela", null);
-        jdbc.queryForObject("""
-                SELECT mint_trainer_notification(:t::uuid, 'metric', :c::uuid, NULL, NULL, '74 kg')::text
-                """, Map.of("t", trainerPriya.toString(), "c", clientA.toString()), String.class);
-
-        try (Connection c = asAppRole()) {
-            staff(c, tenantA, List.of(tenantA), trainerPriya);
-            assertThat(count(c, "SELECT count(*) FROM trainer_notification WHERE text = '74 kg'")).isOne();
-            assertThatThrownBy(() -> exec(c, """
-                    INSERT INTO trainer_notification (trainer_id, kind, tenant_id)
-                    VALUES ('%s', 'metric', '%s')
-                    """.formatted(trainerPriya, tenantA))).isInstanceOf(SQLException.class);
-        }
-        try (Connection c = asAppRole()) {
-            staff(c, tenantB, List.of(tenantB), trainerArun);
-            assertThat(count(c, "SELECT count(*) FROM trainer_notification WHERE text = '74 kg'")).isZero();
-        }
     }
 
     @Test
@@ -649,22 +615,6 @@ class TenantIsolationTest {
             inRolledBackTransaction(c, () -> assertThatThrownBy(() -> exec(c,
                     "SELECT portal_change_client_phone('" + meera + "', '9999900001')"))
                     .hasMessageContaining("own number"));
-        }
-    }
-
-    @Test
-    @DisplayName("V21 · a notification cannot be minted into a bell with no claim on the client")
-    void bellNeedsAClaimOnTheClient() throws SQLException {
-        try (Connection c = asAppRole()) {
-            staff(c, tenantA, List.of(tenantA), trainerPriya);
-            inRolledBackTransaction(c, () -> {
-                assertThat(strings(c, "SELECT mint_trainer_notification('" + trainerArun
-                        + "'::uuid, 'metric', '" + meeraPrivate + "'::uuid, NULL, NULL, 'not yours')"))
-                        .containsExactly((String) null);
-                assertThat(strings(c, "SELECT mint_trainer_notification('" + trainerPriya
-                        + "'::uuid, 'metric', '" + meeraPrivate + "'::uuid, NULL, NULL, 'yours')"))
-                        .doesNotContainNull();
-            });
         }
     }
 

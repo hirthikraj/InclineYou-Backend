@@ -30,8 +30,6 @@ public class TemplateService {
     private final NamedParameterJdbcTemplate jdbc;
     /** V3 · a plan arriving names the sessions already booked. See {@link #apply}. */
     private final DiaryService diary;
-    /** V18 · facts for the client's bell, gated by their own switches. */
-    private final com.inclineyou.inclineyou_backend.notification.ClientNotificationService clientBell;
 
     /**
      * The blueprint's STORAGE format, and the only place snake_case is correct.
@@ -846,12 +844,6 @@ public class TemplateService {
            than no plan. */
         writeStandingWeek(req.clientId(), trainerId.toString(), bySlot);
         diary.reconcile(trainerId, req.clientId());
-        /* V18 · a NEW plan: `subjectAt == at` is how the portal words it as new
-           rather than changed — so the subject is the TRANSACTION's clock, which
-           is exactly what the row's `at DEFAULT now()` takes. Java's `now` is a
-           few milliseconds later, and a few milliseconds is "changed". */
-        Timestamp txNow = jdbc.queryForObject("SELECT now()", Map.of(), Timestamp.class);
-        clientBell.mint(req.clientId(), "plan", null, txNow.toInstant(), programName);
 
         return new ProgramSummary(
                 programId.toString(), req.clientId(), templateId.toString(),

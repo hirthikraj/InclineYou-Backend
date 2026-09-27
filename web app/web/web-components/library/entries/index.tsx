@@ -63,7 +63,6 @@ import { TextareaEntry } from './forms/Textarea.entry';
 import { ActionBarEntry } from './nav/ActionBar.entry';
 import { BulkBarEntry } from './nav/BulkBar.entry';
 import { CrumbsEntry } from './nav/Crumbs.entry';
-import { NotificationsEntry } from './nav/Notifications.entry';
 import { PagerEntry } from './nav/Pager.entry';
 import { PaletteEntry } from './nav/Palette.entry';
 import { RailEntry } from './nav/Rail.entry';
@@ -173,7 +172,6 @@ export const ENTRY_VIEWS: Record<string, () => ReactNode> = {
   'c-bulkbar': BulkBarEntry,
   'c-actionbar': ActionBarEntry,
   'c-pager': PagerEntry,
-  'c-notify': NotificationsEntry,
 
   // DOMAIN
   'c-agenda': AgendaEntry,

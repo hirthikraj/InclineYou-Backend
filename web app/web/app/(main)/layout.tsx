@@ -1,5 +1,4 @@
 import { AppShell } from '@/components/shell/AppShell';
-import { listNotifications } from '@/lib/notifications/api';
 import { getRoster, getTrainerName } from '@/lib/shell/api';
 import { listWorkspaces, resolveWorkspaces } from '@/lib/workspace/api';
 
@@ -15,25 +14,18 @@ export default async function MainLayout({
 }: {
   children: React.ReactNode;
 }) {
-  /* In parallel, not in sequence: three independent reads on the critical path
-     of every navigation inside the shell, and awaiting them one after the other
+  /* In parallel, not in sequence: independent reads on the critical path of
+     every navigation inside the shell, and awaiting them one after the other
      would add the roster's latency to every page rather than overlapping it.
 
-     The third is the bell's feed. It is here for `PaletteHost`'s reason, stated
-     in full in `NotificationsHost`: a count each PAGE had to remember to fetch
-     is a count that is absent on the screens somebody forgot — and an absent
-     count on a bell is not a missing control, it is the claim that nothing
-     happened. The server windows the feed to three weeks, so this is a couple
-     of dozen small rows rather than a history. */
-  /* The fourth is the top bar's workspace switcher. It is here for the same
-     reason the other three are, and it costs less than it looks: `getTrainerName`
+     The third is the top bar's workspace switcher, and it costs less than it
+     looks: `getTrainerName`
      and `listWorkspaces` both read `/v1/trainers/me` through `getTrainerIdentity`,
      which is `cache()`d per request, so the two of them are ONE round trip plus
      `/v1/team`. */
-  const [trainerName, roster, notifications, workspaces] = await Promise.all([
+  const [trainerName, roster, workspaces] = await Promise.all([
     getTrainerName(),
     getRoster(),
-    listNotifications(),
     listWorkspaces(),
   ]);
   /* After, not beside: both cookies are resolved AGAINST the list, so a trainer
@@ -45,7 +37,6 @@ export default async function MainLayout({
     <AppShell
       trainerName={trainerName}
       roster={roster}
-      notifications={notifications}
       workspaces={workspaces}
       activeWorkspaceId={activeId}
       defaultWorkspaceId={defaultId}

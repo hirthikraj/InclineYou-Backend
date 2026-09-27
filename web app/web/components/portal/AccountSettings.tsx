@@ -1,28 +1,27 @@
 import type { MeWire } from '@/lib/portal/api';
 
 import { MyDetails } from './MyDetails';
-import { NotifySwitches } from './NotifySwitches';
 import { ThisDevice } from './ThisDevice';
 
 /**
  * §5 · Settings — the things on this destination a client can CHANGE.
  *
- * Three cards, and the ordering is what each one writes and how hard it is to
+ * Two cards, and the ordering is what each one writes and how hard it is to
  * take back:
  *
  *   1. **Your details** — the number they sign in with (four steps, two codes)
  *      and the health note their trainer reads. §5's *correct my data*.
- *   2. **Notifications** — four switches, saving on the move.
- *   3. **This device** — the theme, and the way out. Nothing on the account.
+ *   2. **This device** — the theme, and the way out. Nothing on the account.
+ *
+ * There are no notification switches: there is no notification service in v1.
  *
  * ── THE PRIVACY TAB IS NEXT DOOR, AND THE SPLIT IS THE POINT ────────────────
  *
- * These three and the privacy card used to be one column, and the delete flow
- * was 500px below the notification switches. `lib/portal/account-tabs.ts`
+ * These cards and the privacy card used to be one column. `lib/portal/account-tabs.ts`
  * carries the measurement; the shape of the argument is that a client changing
- * whether they get a session reminder should not be scrolling through the
- * irreversible thing to do it, and a client reading the trust screen should not
- * arrive at it on the fourth screen of a settings form.
+ * a setting should not be scrolling through the irreversible thing to do it,
+ * and a client reading the trust screen should not arrive at it on the fourth
+ * screen of a settings form.
  *
  * ── AND *This device* IS LAST ON PURPOSE ────────────────────────────────────
  *
@@ -45,9 +44,6 @@ export function AccountSettings({ me }: { me: MeWire }) {
         trainerFirstName={first}
         rosterCount={me.rosters.length}
       />
-
-      {/* ── §5's *granular, and genuinely respected* ───────────────────────── */}
-      <NotifySwitches notify={me.prefs.notify} trainerFirstName={first} />
 
       {/* ── the theme and the way out · absent at phone width until now ───── */}
       <ThisDevice />

@@ -3294,78 +3294,6 @@ a.gapb--h{display:flex}
   .q__who{padding-left:12px}
 }
 
-/* ── the notification centre, on a phone ──────────────────────
-   §03 draws it as a 400px card hanging 6px under the bar's right edge, which
-   on a 390px screen is a card with 14px of window beside it — an alignment
-   nobody can see, paid for in the only 26px the rows had to spare.
-
-   It becomes the full width instead, minus a 6px margin on each side, which is
-   the same treatment `.pal` gets four rules down and for the same reason. The
-   height cap goes with it: `min(560px, ...)` is a desk's number, and the panel
-   should take whatever the window has between the bar and the tab strip.
-
-   It stays anchored to the bar rather than becoming a full-screen sheet. A
-   sheet would cover the tab bar, and the trainer opened this to GLANCE — the
-   way out has to still be visible, and on this half the way out is the tap
-   anywhere else that a sheet's own scrim would have swallowed.
-
-   ── AND THE HEIGHT NOW DOES WHAT THE PARAGRAPH ABOVE SAYS ──────────────────
-
-   It did not. The rule was `min(72dvh, calc(100% - var(--w-top) - 20px))`, which
-   keeps a viewport cap the paragraph says goes, and subtracts the header twice
-   over while never subtracting the TAB BAR at all — the one thing "between the
-   bar and the tab strip" has to account for. 72dvh was what bound, so the panel
-   stopped short of the strip by a margin that had nothing to do with the strip:
-
-     390×844   panel ended 131px above the tab bar
-     310×616   panel ended  68px above it
-
-   and on both the list still had ~1,000px of notifications left to scroll. The
-   pass that took `--w-top` from 90 to 46 made it worse without touching this
-   rule, because the panel's TOP moved up 44px and its height did not grow.
-
-   Stated properly, the space is: the window, less the header, less the tab bar,
-   less the 6px it sits off each. That is the whole calc, and `--w-tabs` (see
-   `.app` in the 900px block) is what makes the second subtraction possible.
-   The dvh cap is gone rather than kept alongside — two limits where one is
-   always the binding one is how the first version drifted from its own comment.
-
-   ── AND IT COVERED THE TAB BAR BETWEEN 641 AND 900px ───────────────────────
-
-   MEASURED, and it is the failure this panel's own design refused. The rule
-   above is scoped to 640px, but the TAB BAR exists at every width up to 900 —
-   so in the range where the panel is still §03's 400px card, its height came
-   from `min(560px, calc(100% - var(--w-top) - 28px))`, which does not know the
-   strip is there:
-
-     700×600   panel overhangs the tab bar by **31px**
-     820×640   overhangs by **25px**
-
-   Two of the five destinations under an opaque card, on the panel whose comment
-   reads *"a sheet would cover the tab bar … the way out has to still be
-   visible"*. The layout refused to be a sheet and the height formula made it one
-   anyway, on any short window in that range — a laptop with a narrowed window,
-   or a tablet in landscape.
-
-   So the tab bar is subtracted from 900px down, and the 560px cap is KEPT in
-   that range: a 400px-wide dropdown 800px tall is a different mistake, and a
-   card that is not full width should not be full height either. Below 640px,
-   where the panel spans the window, the rule below drops the cap and takes the
-   space. */
-@media (max-width:900px){
-  .ntf{max-height:min(560px,calc(100% - var(--w-top) - var(--w-tabs) - 12px))}
-}
-@media (max-width:640px){
-  .ntf{
-    left:0;right:0;width:auto;margin:0 6px;
-    max-height:calc(100% - var(--w-top) - var(--w-tabs) - 12px);
-  }
-  /* 44px of row, WCAG 2.5.5, the same floor the bar's own buttons take in the
-     900px block above. The plate and the two lines already come to 41px; this
-     buys the last 3 and the thumb some slop at the edges. */
-  .ntf__i{padding:11px 14px 12px;min-height:44px}
-}
-
 /* ── the palette, at a width it was never drawn for ───────────────────────
    §03 gives `.pal` a 620px box at `top:92px` with `max-width:calc(100% - 64px)`
    — so on a 390px phone it is a 326px card floating 92px down, with a 340px
@@ -3601,7 +3529,7 @@ a.gapb--h{display:flex}
 
      This is the block's own argument applied twice more — `pointer:coarse` is
      the question, and the width never was. */
-  .pal__i,.ntf__i{min-height:44px}
+  .pal__i{min-height:44px}
 
   /* ── AND THE SWITCH, WHICH IS A TRACK AND CANNOT SIMPLY GROW ──────────────
      §04 draws `.switch` at 38 x 22 — a track with a thumb in it — and 22 is
@@ -19942,45 +19870,6 @@ a.setrow:hover{background:var(--tx-surface-2)}
    still the drawing at every width above that line and the measurement it
    records is still true of it; a future pass that moves the line back down
    inherits a working rule instead of re-finding a 60px overflow. */
-
-/* ══════════════════════════════════════════════════════════════════════════
-   THE CLIENT'S BELL — ONE PLATE TONE THE TRAINER'S FEED NEVER NEEDED
-   ──────────────────────────────────────────────────────────────────────────
-   §04 ships five `.ntf__ic--*` tones and the trainer's four kinds use four of
-   them: `money`, `diary`, `floor` and `team`. The client's five kinds take the
-   fifth — `reply`, finally used, for the line their trainer typed — and then
-   need one more, for `best`.
-
-   ── WHY IT IS NOT SIMPLY `--team` ─────────────────────────────────────────
-
-   The values ARE `--team`'s: `--tx-remote` on `--tx-remote-soft`, the one
-   distinct plate §04 has left. What is wrong is the NAME. `KIND_TONE` maps a
-   kind to a modifier, so a milestone wearing `ntf__ic--team` is this half
-   calling purple "team" — and the next reader greps `--team` to find out which
-   rows are about a coach being reassigned and finds every personal best in the
-   client's feed.
-
-   So this is a semantic alias and nothing else: one more name for a pair of
-   values that already exist, which is what a token layer is for. It costs no
-   new colour, it changes no trainer surface, and `lib/portal/notifications.ts`
-   carries the mapping it serves.
-
-   ── AND IT IS HERE RATHER THAN IN `webapp.css` ────────────────────────────
-
-   That file is copied verbatim from the design set and never edited — the rule
-   this stylesheet opens with. A modifier the design set does not draw is a
-   delta, and a delta lives here with its reason beside it, which is exactly
-   what this file is for. If the design set ever grows a sixth tone, this block
-   is deleted rather than reconciled.
-
-   `background-color`, never the `background` shorthand: this file's own law,
-   written after the shorthand silently deleted `select.ctl`'s chevron on
-   focus. A plate holds no image today and the rule does not get to assume it
-   never will.                                                                */
-.ntf__ic--win{
-  background-color:var(--tx-remote-soft);
-  color:var(--tx-remote);
-}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ONE CLIENT'S OWN COPY OF A PLAN — `/clients/:id/program/:pid`

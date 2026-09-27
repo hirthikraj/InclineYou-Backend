@@ -58,8 +58,6 @@ import java.util.UUID;
 public class DiaryService {
 
     private final NamedParameterJdbcTemplate jdbc;
-    /** V18 · facts for the client's bell, gated by their own switches. */
-    private final com.inclineyou.inclineyou_backend.notification.ClientNotificationService clientBell;
 
     private static final ObjectMapper STORE = new ObjectMapper();
 
@@ -208,12 +206,6 @@ public class DiaryService {
 
         if (booked > 0 || removed > 0) {
             log.debug("diary reconciled for client {}: +{} -{}", clientId, booked, removed);
-        }
-        /* V18 · ONE notification for a booking run, naming the first session.
-           Twelve rows for a twelve-session pack is the behaviour that makes a
-           client switch the category off — and then miss the one that matters. */
-        if (booked > 0 && firstAt != null) {
-            clientBell.mint(clientId, "session", null, java.time.Instant.ofEpochMilli(firstAt), "booked");
         }
         return new Result(booked, removed, firstAt);
     }

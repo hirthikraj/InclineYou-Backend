@@ -1,6 +1,5 @@
 import { PortalShell } from '@/components/portal/PortalShell';
 import { Unavailable } from '@/components/portal/Unavailable';
-import { getPortalNotifications } from '@/lib/portal/api';
 import { requirePortal } from '@/lib/portal/guard';
 
 /**
@@ -14,23 +13,10 @@ import { requirePortal } from '@/lib/portal/guard';
  * data is actually used, without paying twice.
  *
  * It matters more here than on the trainer's half. `(main)/layout.tsx` makes
- * four parallel reads for the rail, the roster, the bell and the workspace
- * switcher; the client's rail needs two strings, and a layout that spent a
+ * parallel reads for the rail, the roster and the workspace switcher; the client's rail needs two strings, and a layout that spent a
  * request per navigation to fetch them would be the largest cost on a screen
  * whose whole performance budget is §1's *"opens to the workout in under two
  * seconds"*.
- *
- * ── IT IS TWO REQUESTS NOW, AND THE SECOND ONE IS THE BELL ──────────────────
- *
- * `getPortalNotifications` joins it, in the SAME `Promise.all`, so a navigation
- * costs one round trip's latency rather than two. It is here for
- * `NotificationsHost`'s reason rather than for convenience: the bell is drawn by
- * `TopBar` on every `/me/*` screen, and a feed each page had to remember to
- * fetch is a count that is absent on the screens somebody forgot — which on a
- * bell reads as *you have missed nothing*, a claim rather than an absence.
- *
- * The server windows it to twenty-one days and this is one client's own book, so
- * it is a couple of dozen small rows and never a history.
  *
  * ── AND A FAILURE IS RENDERED HERE RATHER THAN THROWN ────────────────────────
  *
@@ -42,15 +28,7 @@ import { requirePortal } from '@/lib/portal/guard';
 export const dynamic = 'force-dynamic';
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
-  /* In parallel, not in sequence. `requirePortal` is the guard, so awaiting the
-     feed after it would add its latency to every navigation — and the feed read
-     cannot fail the layout anyway: it answers `[]` on everything, for the reason
-     stated on the function. A signed-out browser gets an empty array and then
-     meets `Unavailable` a line later, which is the right order. */
-  const [result, notifications] = await Promise.all([
-    requirePortal(),
-    getPortalNotifications(),
-  ]);
+  const result = await requirePortal();
 
   if (!result.ok) {
     /* No shell. There is nothing to navigate to — every `/me/*` route reads the
@@ -70,7 +48,6 @@ export default async function PortalLayout({ children }: { children: React.React
       clientName={result.me.client.name}
       clientPhone={result.me.client.phone}
       trainerName={result.me.trainer.name}
-      notifications={notifications}
     >
       {children}
     </PortalShell>
