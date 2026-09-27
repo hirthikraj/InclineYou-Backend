@@ -43,8 +43,11 @@ public class MeService {
             String id,
             String name,
             String phone,
-            /** Null until setup is done — the redirect signal, an ISO string like every assessment timestamp. */
-            String setupCompletedAt,
+            /**
+             * Null until setup is done — the redirect signal. Epoch ms since 1.1,
+             * like every other instant on the wire (it was an ISO string in 1.0).
+             */
+            Long setupCompletedAt,
             String gymName,
             Workspace workspace
     ) {}
@@ -69,7 +72,7 @@ public class MeService {
                 t.getId().toString(),
                 t.getName(),
                 user.getPhone(),
-                t.getSetupCompletedAt() == null ? null : t.getSetupCompletedAt().toString(),
+                t.getSetupCompletedAt() == null ? null : t.getSetupCompletedAt().toEpochMilli(),
                 gymName,
                 loadWorkspace(tenantId));
     }

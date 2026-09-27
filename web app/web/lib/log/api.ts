@@ -10,6 +10,7 @@ import {
   type FinishView, type HistorySession, type HistoryView, type LogInput, type LogSet,
   type LogView, type PickView, type ProgressRange, type ProgressView,
 } from './log';
+import { listAll, type ListEnvelope } from '@/lib/http/client';
 
 const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
@@ -258,7 +259,7 @@ const allExercises = cache(async (): Promise<ExerciseWire[]> => {
   return page?.exercises ?? [];
 });
 
-const allClients = cache(async () => get<ClientWire[]>('/v1/clients'));
+const allClients = cache(async () => get<ClientWire[]>('/v1/clients?view=legacy'));
 const allWorkouts = cache(async () => get<WorkoutWire[]>('/v1/workouts'));
 
 function toWorkout(w: WorkoutWire) {
@@ -349,7 +350,7 @@ export const getConsole = cache(
       allClients(),
       allExercises(),
       get<ProgramWire[]>(`/v1/programs?clientId=${workout.clientId}`),
-      get<SessionWire[]>(`/v1/sessions?clientId=${workout.clientId}`),
+      listAll<SessionWire>(`/v1/sessions?clientId=${workout.clientId}`, (p) => get<ListEnvelope<SessionWire>>(p)),
       get<PackageWire[]>(`/v1/clients/${workout.clientId}/packages`).catch(() => [] as PackageWire[]),
       /* Today's card list. Lenient: a log opened by `/done`, or by a build older
          than the route, simply has none — and `buildRows` reconstructs the grid
@@ -623,7 +624,7 @@ export const getPicker = cache(async (): Promise<PickView> => {
   const [clients, workouts, sessions] = await Promise.all([
     allClients(),
     allWorkouts(),
-    get<SessionWire[]>(`/v1/sessions?from=${from}&to=${to}`),
+    listAll<SessionWire>(`/v1/sessions?from=${from}&to=${to}`, (p) => get<ListEnvelope<SessionWire>>(p)),
   ]);
 
   /* Only the open logs need their sets, and there are rarely more than two —

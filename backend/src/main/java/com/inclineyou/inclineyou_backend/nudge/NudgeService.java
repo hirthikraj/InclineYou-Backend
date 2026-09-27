@@ -1,5 +1,10 @@
 package com.inclineyou.inclineyou_backend.nudge;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.inclineyou.inclineyou_backend.tenant.WorkspaceClock;
+import com.inclineyou.inclineyou_backend.wire.Cursor;
+import com.inclineyou.inclineyou_backend.wire.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.EmptyResultDataAccessException;
@@ -11,6 +16,8 @@ import java.math.RoundingMode;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -465,6 +472,67 @@ public class NudgeService {
                     rs.getString("message"),
                     sent == null ? 0L : sent.getTime());
         });
+    }
+
+    /**
+     * api-contract Today L9 / Client file L3 — who was messaged, when, and why.
+     * {@code message} only with {@code include=message}: opt-in on any query,
+     * rather than switched on by {@code clientId}, because a field that appears
+     * and disappears with a filter is a trap for every typed client.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record NudgeSummary(String id, String clientId, String template, String reason, long sentAt,
+                               String message,
+                               /** sent_at at full precision, for the cursor only — never on the wire. */
+                               @JsonIgnore String cursorKey) {}
+
+    /**
+     * Every message drafted on or after {@code from}, newest first, on
+     * idx_nudge_log_trainer_sent (idx_nudge_log_client_sent with a client).
+     * Today asks for the cooldown window, which is also the default, and uses it
+     * to RANK its queue — the window is a hint, never a refusal.
+     *
+     * <p>Keyset on (sentAt, id) descending. The 1.0 read cut the list at 2,000
+     * rows without saying so; a non-null {@code nextCursor} says there is more.
+     *
+     * @param from a date in the workspace's timezone; null means {@link #COOLDOWN_DAYS} ago
+     */
+    public Page<NudgeSummary> list(UUID trainerId, java.time.LocalDate from, UUID clientId,
+                                   boolean withMessage, int limit, Cursor after, java.time.ZoneId zone) {
+        Instant since = from == null
+                ? Instant.now().minus(Duration.ofDays(COOLDOWN_DAYS))
+                : WorkspaceClock.startOf(from, zone);
+        var p = new HashMap<String, Object>();
+        p.put("tid", trainerId.toString());
+        p.put("from", Timestamp.from(since));
+        p.put("limit", limit + 1);
+        var where = new StringBuilder();
+        if (clientId != null) {
+            p.put("cid", clientId.toString());
+            where.append(" AND client_id = :cid::uuid");
+        }
+        if (after != null) {
+            p.put("afterAt", after.keyAsTimestamp());
+            p.put("afterId", after.id().toString());
+            where.append(" AND (sent_at, id) < (:afterAt, :afterId::uuid)");
+        }
+        var rows = jdbc.query("""
+                SELECT id::text AS id, client_id::text AS client_id, template, reason, sent_at, message
+                FROM nudge_log
+                WHERE trainer_id = :tid::uuid AND sent_at >= :from""" + where + """
+
+                ORDER BY sent_at DESC, id DESC
+                LIMIT :limit
+                """, p,
+                (rs, i) -> new NudgeSummary(
+                        rs.getString("id"),
+                        rs.getString("client_id"),
+                        rs.getString("template"),
+                        rs.getString("reason"),
+                        rs.getTimestamp("sent_at").getTime(),
+                        withMessage ? rs.getString("message") : null,
+                        Cursor.key(rs.getTimestamp("sent_at"))));
+        return Page.of(rows, limit, r -> Cursor.encode(r.cursorKey(), r.id()));
     }
 
     /* ═══════════════════════════════════════════════════ formatting ═════════ */

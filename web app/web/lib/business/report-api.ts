@@ -5,6 +5,7 @@ import { cache } from 'react';
 import { getToken } from '@/lib/auth/session';
 import type { ReportClient, ReportSession, ReportWorkout } from './report';
 import { REPORT_MONTHS } from './report';
+import { listAll, type ListEnvelope } from '@/lib/http/client';
 
 /**
  * WHAT THE REPORTS TAB ASKS THE SERVER FOR, AND WHAT IT DELIBERATELY DOES NOT.
@@ -139,8 +140,8 @@ export const getReportsData = cache(async (): Promise<ReportsData> => {
   const from = new Date(anchor.getFullYear(), anchor.getMonth() - (REPORT_MONTHS - 1), 1).getTime();
 
   const [clients, sessions, workouts] = await Promise.all([
-    get<ClientWire[]>('/v1/clients'),
-    get<SessionWire[]>(`/v1/sessions?from=${from}&to=${now}`),
+    get<ClientWire[]>('/v1/clients?view=legacy'),
+    listAll<SessionWire>(`/v1/sessions?from=${from}&to=${now}`, (p) => get<ListEnvelope<SessionWire>>(p)),
     /* A backend without this route should cost the trainer the delivery bars,
        not the whole screen — every other figure here stands without it. */
     get<WorkoutWire[]>('/v1/workouts').catch(() => [] as WorkoutWire[]),

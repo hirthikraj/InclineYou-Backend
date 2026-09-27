@@ -5,6 +5,7 @@ import { cache } from 'react';
 import { getToken } from '@/lib/auth/session';
 import { listClientNudges } from '@/lib/nudges/api';
 import type { NudgeLogEntry } from '@/lib/nudges/types';
+import { listAll, type ListEnvelope } from '@/lib/http/client';
 
 export class ClientDetailApiError extends Error {
   /**
@@ -464,10 +465,11 @@ const getClientSessionsWindowed = cache(async (clientId: string): Promise<Client
    * tight for in the first place: the roster-wide version still asks for a week.
    */
   const fourMonthsAhead = now + 120 * 24 * 60 * 60 * 1000;
-  const rows = await get<ClientSessionWire[]>(
+  // 1.1: a paged `{items}` envelope, followed to its last page.
+  return listAll<ClientSessionWire>(
     `/v1/sessions?clientId=${clientId}&from=${threeMonthsAgo}&to=${fourMonthsAhead}`,
+    (p) => get<ListEnvelope<ClientSessionWire>>(p),
   );
-  return rows ?? [];
 });
 
 const getClientPackages = cache(async (clientId: string): Promise<ClientPackageWire[]> => {

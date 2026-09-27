@@ -9,6 +9,7 @@ import { readMode } from '@/lib/today/mode';
 import { rangeFor, type ScheduleView } from './view';
 import { bookableClients, DEAD_SESSION, sessionMinutes } from './roster';
 import type { ScheduleClient, ScheduleSession } from './session';
+import { listAll, type ListEnvelope } from '@/lib/http/client';
 
 /* The shapes live in `./session`, which carries no `server-only`, so the client
    components can import them without pulling this file's fetch layer with them.
@@ -321,11 +322,12 @@ export const getSchedule = cache(
 
     const [trainer, clients, sessions, programs, packages, hours] = await Promise.all([
       get<TrainerWire>('/v1/trainers/me'),
-      get<ClientWire[]>('/v1/clients'),
-      get<SessionWire[]>(`/v1/sessions?from=${from}&to=${to}`),
+      get<ClientWire[]>('/v1/clients?view=legacy'),
+      // 1.1: lists are `{items}` envelopes; the diary is followed to its last page.
+      listAll<SessionWire>(`/v1/sessions?from=${from}&to=${to}`, (p) => get<ListEnvelope<SessionWire>>(p)),
       get<ProgramWire[]>('/v1/programs'),
-      get<PackageWire[]>('/v1/packages'),
-      get<WorkingHourWire[]>('/v1/working-hours'),
+      listAll<PackageWire>('/v1/packages?scope=current', (p) => get<ListEnvelope<PackageWire>>(p)),
+      listAll<WorkingHourWire>('/v1/working-hours', (p) => get<ListEnvelope<WorkingHourWire>>(p)),
     ]);
 
     const clientById = new Map((clients ?? []).map((c) => [c.id, c]));

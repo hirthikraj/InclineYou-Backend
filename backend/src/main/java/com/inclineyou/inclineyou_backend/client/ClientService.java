@@ -1,15 +1,12 @@
 package com.inclineyou.inclineyou_backend.client;
 
-import com.inclineyou.inclineyou_backend.assessment.MeasurementService;
 import com.inclineyou.inclineyou_backend.assessment.MetricReadings;
-import com.inclineyou.inclineyou_backend.session.DiaryService;
 import com.inclineyou.inclineyou_backend.session.SessionPlanner;
 import com.inclineyou.inclineyou_backend.entity.Client;
 import com.inclineyou.inclineyou_backend.entity.ClientNote;
 import com.inclineyou.inclineyou_backend.repository.ClientNoteRepository;
 import com.inclineyou.inclineyou_backend.repository.ClientRepository;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -17,6 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.math.BigDecimal;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneId;
@@ -26,6 +25,17 @@ import java.util.stream.Collectors;
 
 import static org.springframework.http.HttpStatus.NOT_FOUND;
 
+/**
+ * The client row and the trainer's notes on it, on the v1 schema.
+ *
+ * <p>{@link ClientResponse} keeps the pre-v1 wire shape on purpose: a dozen web
+ * screens still read {@code GET /v1/clients} in that shape while they move to
+ * {@code ?view=summary} (api-contract *Clients*). So the fields are now read from
+ * where v1 keeps them — the rhythm from {@code client_schedule} and
+ * {@code client_schedule_slot} — and the ones whose columns v1 dropped
+ * ({@code paymentMode}, {@code trainerSplitPercent}, the measuring cycle) are
+ * always null rather than removed from the response.
+ */
 @Service
 @RequiredArgsConstructor
 public class ClientService {
@@ -37,8 +47,9 @@ public class ClientService {
     private final ClientNoteRepository clientNoteRepo;
     private final ClientPhoneGuard phoneGuard;
     private final NamedParameterJdbcTemplate jdbc;
-    /** V3 · the diary follows the rhythm. See {@link #update}. */
-    private final DiaryService diary;
+
+    private static final Set<String> CLIENT_TYPES = Set.of("independent", "gym");
+    private static final Set<String> STATUSES = Set.of("active", "paused", "inactive", "archived");
 
     // ── DTOs ──────────────────────────────────────────────────────────────────
 
@@ -46,8 +57,8 @@ public class ClientService {
             @NotBlank String name,
             String phone,
             String goal,
-            String paymentMode,
-            BigDecimal trainerSplitPercent,
+            /** {@code independent} (the default) | {@code gym}. */
+            String clientType,
             BigDecimal heightCm,
             String activityLevel,
             Map<String, Object> metadata,
@@ -61,8 +72,7 @@ public class ClientService {
             String phone,
             String goal,
             String status,
-            String paymentMode,
-            BigDecimal trainerSplitPercent,
+            String clientType,
             BigDecimal heightCm,
             String activityLevel,
             Map<String, Object> metadata,
@@ -70,11 +80,6 @@ public class ClientService {
             Integer sessionDurationMinutes,
             List<Map<String, Object>> weeklySchedule,
             String deliveryMode,
-            /* ---- V5 · the measuring cycle. Null leaves alone; 0 / "" / [] clears. ---- */
-            Integer assessmentIntervalDays,
-            /** ISO date. "" clears it — nothing is owed. */
-            String nextAssessmentOn,
-            List<String> assessmentMetrics,
             /* ---- V7. Null leaves alone; "" clears. ISO date, not in the future. ---- */
             String dateOfBirth
     ) {}
@@ -91,80 +96,34 @@ public class ClientService {
             String phone,
             String goal,
             String status,
+            /** Always null in v1 — the split is set per package (R3). */
             String paymentMode,
+            /** Always null in v1 — see {@code paymentMode}. */
             BigDecimal trainerSplitPercent,
             BigDecimal heightCm,
             String activityLevel,
             Map<String, Object> metadata,
+            /* The rhythm — `client_schedule` in v1. */
             Integer sessionsPerWeek,
             Integer sessionDurationMinutes,
+            /**
+             * `client_schedule_slot`, as `[{templateDay, weekday, time}]`. v1 stores
+             * no program day on a slot (R45 is pending), so `templateDay` is the
+             * slot's ordinal in the week.
+             */
             List<Map<String, Object>> weeklySchedule,
             String deliveryMode,
             StatusFlags statusFlags,
             long createdAt,
             long updatedAt,
-            /*
-             * V18's `membership_status` — 'accepted' | 'invited' | 'declined' |
-             * 'removed' | 'unavailable'. It is the state of the *invitation*, not
-             * of the coaching: `status` above says whether this person is an
-             * active client, this says whether their phone can be reached at all.
-             *
-             * The column has existed since V18 and travels in the sync envelope;
-             * this DTO never carried it, which cost the roster one whole attention
-             * band. 'unavailable' fires when the number a trainer typed already
-             * signs in as a trainer account — the invite can never be delivered,
-             * so the row needs a *Fix number* action rather than a silent wait.
-             * The phone reads the field out of SQLite and draws the band; the web
-             * had no way to know, so the band simply did not exist there.
-             *
-             * APPENDED LAST — every existing caller destructures by name, so a
-             * reader written against the eighteen-field shape keeps working.
-             */
             String membershipStatus,
-            /*
-             * ── APPENDED BY V3 · THE RHYTHM BOOKS THE SESSIONS ───────────────
-             *
-             * How many sessions THIS REQUEST put in the diary, and when the
-             * first one lands. Exactly the pair {@code PackageResponse} carries
-             * for the same reason and under the same rules: not a `client`
-             * column and not pretending to be one — what the write DID, which
-             * is what lets the add-a-client flow say "12 booked, first on
-             * Monday" instead of moving on in silence.
-             *
-             * Counting the diary afterwards would answer a different question:
-             * a client who already had four sessions on the board comes back as
-             * sixteen. So it is {@link DiaryService.Result}'s own figure, and it
-             * is NULL on every read and on every write that did not touch the
-             * rhythm — a name change books nothing and must not claim a zero.
-             * Zero is a real answer: a week agreed for somebody with no live
-             * pack and no working days books nothing, and the screen says so
-             * rather than implying a diary that is not there.
-             */
+            /** What a write booked in the diary. Always null until the schedule write moves to v1. */
             Integer sessionsBooked,
-            /** Epoch millis of the first session this request booked. Null with
-             *  {@code sessionsBooked}, and null when it booked nothing. */
             Long firstSessionAt,
-            /*
-             * ── APPENDED BY V5 · THE MEASURING CYCLE ─────────────────────────
-             *
-             * On the client row rather than derived from the last assessment, because
-             * `/today` reads this endpoint trainer-wide and a due-check computed
-             * from last-reading-per-client is one request per client on the one
-             * screen a trainer opens every morning.
-             *
-             * `nextAssessmentOn` is an ISO date and not an instant: what is owed
-             * is a day, and an instant would make it owed at a time.
-             * `assessmentMetrics` is null where the client has never been given
-             * a sheet of their own, which reads as the trainer's default.
-             */
+            /* The measuring cycle moved to `assessment_schedule` — always null here. */
             Integer assessmentIntervalDays,
             String nextAssessmentOn,
             List<String> assessmentMetrics,
-            /*
-             * ── APPENDED BY V7 · PHYSICAL INFORMATION ────────────────────────
-             * An ISO date or null. The age beside it on the client file is
-             * derived on read by the web, never stored, so it cannot go stale.
-             */
             String dateOfBirth
     ) {}
 
@@ -191,15 +150,12 @@ public class ClientService {
        PAR-Q flag in this request, and there must never be one — the interaction
        map excludes health data outright under the DPDP Act 2023, and a field
        that tells a medical note apart from any other note makes this a health
-       record whatever it is called. `V29__client_note.sql` carries the whole
-       argument, including the sanctioned path to structured health data, which
-       is a separate consented table and not a wider version of this one. */
+       record whatever it is called. Notes shared with the client are out of v1,
+       so a note is only ever the trainer's. */
 
     public record NoteRequest(
             @NotBlank String body,
-            Boolean pinned,
-            /** V7. Null leaves alone (on create: private). Only TRUE shares. */
-            Boolean sharedWithClient
+            Boolean pinned
     ) {}
 
     public record NoteResponse(
@@ -208,10 +164,14 @@ public class ClientService {
             String body,
             boolean pinned,
             long createdAt,
-            long updatedAt,
-            /** V7 · appended last. The client this note is about may read it. */
-            boolean sharedWithClient
+            long updatedAt
     ) {}
+
+    /** A client's rhythm: the `client_schedule` row and its live slots. */
+    private record Rhythm(Integer sessionsPerWeek, Integer sessionDurationMinutes, String deliveryMode,
+                          List<Map<String, Object>> weeklySchedule) {}
+
+    private static final Rhythm NO_RHYTHM = new Rhythm(null, null, null, List.of());
 
     // ── Client CRUD ───────────────────────────────────────────────────────────
 
@@ -221,17 +181,17 @@ public class ClientService {
 
         var idStrings = clients.stream().map(c -> c.getId().toString()).toList();
         var flagMap = computeStatusFlags(trainerId, idStrings);
+        var rhythms = rhythms(idStrings);
 
         return clients.stream()
-                .map(c -> toResponse(c, flagMap.getOrDefault(c.getId(), new StatusFlags(false, false, false))))
+                .map(c -> toResponse(c,
+                        flagMap.getOrDefault(c.getId(), new StatusFlags(false, false, false)),
+                        rhythms.getOrDefault(c.getId(), NO_RHYTHM)))
                 .toList();
     }
 
     public ClientResponse get(UUID trainerId, UUID clientId) {
-        var client = findOwned(trainerId, clientId);
-        var flags = computeStatusFlags(trainerId, List.of(clientId.toString()))
-                .getOrDefault(clientId, new StatusFlags(false, false, false));
-        return toResponse(client, flags);
+        return respond(trainerId, findOwned(trainerId, clientId));
     }
 
     /** Can this trainer put this number on their roster? Asked before the form is submitted. */
@@ -248,16 +208,15 @@ public class ClientService {
         client.setName(req.name());
         client.setPhone(req.phone());
         client.setGoal(req.goal());
-        client.setPaymentMode(req.paymentMode() != null ? req.paymentMode() : "trainer_collects");
-        client.setTrainerSplitPercent(req.trainerSplitPercent());
+        client.setClientType(clientType(req.clientType(), "independent"));
         client.setHeightCm(req.heightCm());
         client.setActivityLevel(req.activityLevel());
         client.setMetadata(req.metadata());
-        client.setSessionsPerWeek(req.sessionsPerWeek());
-        client.setSessionDurationMinutes(req.sessionDurationMinutes());
-        client.setDeliveryMode(deliveryMode(req.deliveryMode()));
-        clientRepo.save(client);
-        return toResponse(client, new StatusFlags(false, false, false));
+        // Flushed, because `ensure_client_schedule` creates the schedule row on
+        // INSERT and the update below has to find it.
+        clientRepo.saveAndFlush(client);
+        writeSchedule(client.getId(), req.sessionsPerWeek(), req.sessionDurationMinutes(), req.deliveryMode());
+        return respond(trainerId, client);
     }
 
     @Transactional
@@ -271,71 +230,30 @@ public class ClientService {
         }
         if (req.phone() != null)               client.setPhone(req.phone());
         if (req.goal() != null)                client.setGoal(req.goal());
-        if (req.status() != null)              client.setStatus(req.status());
-        if (req.paymentMode() != null)         client.setPaymentMode(req.paymentMode());
-        if (req.trainerSplitPercent() != null) client.setTrainerSplitPercent(req.trainerSplitPercent());
+        if (req.status() != null)              applyStatus(client, req.status());
+        if (req.clientType() != null)          client.setClientType(clientType(req.clientType(), client.getClientType()));
         // 0 clears (V7): null already means "leave it alone", and no person is
         // zero centimetres tall, so the sentinel cannot collide with an answer.
         if (req.heightCm() != null)            client.setHeightCm(req.heightCm().signum() == 0 ? null : req.heightCm());
         if (req.dateOfBirth() != null)         client.setDateOfBirth(birthDate(req.dateOfBirth()));
-        if (req.activityLevel() != null)            client.setActivityLevel(req.activityLevel());
-        if (req.metadata() != null)                 client.setMetadata(req.metadata());
-        if (req.sessionsPerWeek() != null)          client.setSessionsPerWeek(req.sessionsPerWeek());
-        if (req.sessionDurationMinutes() != null)   client.setSessionDurationMinutes(req.sessionDurationMinutes());
-        /* THE RHYTHM, AND THE DIARY THAT FOLLOWS IT.
-         *
-         * `sessions_per_week` is kept in step in the same breath because it is
-         * the same fact counted: the portal's progress screen reads it as *the
-         * agreed frequency* and draws "3 of 4 this week" from it, so a client who
-         * moved to four days while that column still said three is told they are
-         * behind on a week they finished. Normalised through `SessionPlanner` so
-         * one slot per weekday and the ordinal numbering are the same here as on
-         * every other writer of this column — the phone's `serializeWeeklySchedule`
-         * makes the identical three decisions.
-         *
-         * The reconcile itself is after the save, below: it reads the client row
-         * back, so it has to see the new week. */
-        boolean rhythmChanged = false;
+        if (req.activityLevel() != null)       client.setActivityLevel(req.activityLevel());
+        if (req.metadata() != null)            client.setMetadata(req.metadata());
+        clientRepo.save(client);
+
+        /* THE RHYTHM. `sessions_per_week` is kept in step with the slots because
+           it is the same fact counted, normalised through `SessionPlanner` so one
+           slot per weekday is the rule here as on every other writer. The diary is
+           NOT re-laid from here: `DiaryService` still reads the pre-v1
+           `client.weekly_schedule`, and booking the week belongs to the contract's
+           `PUT /v1/clients/{id}/schedule`. */
+        Integer perWeek = req.sessionsPerWeek();
         if (req.weeklySchedule() != null) {
             var slots = SessionPlanner.parseSlots(req.weeklySchedule());
-            client.setWeeklySchedule(slots.stream()
-                    .map(s -> Map.<String, Object>of("templateDay", s.templateDay(),
-                                                     "weekday", s.weekday(),
-                                                     "time", s.time()))
-                    .toList());
-            if (!slots.isEmpty()) {
-                client.setSessionsPerWeek(slots.size());
-                rhythmChanged = true;
-            }
+            replaceSlots(clientId, slots);
+            if (!slots.isEmpty()) perWeek = slots.size();
         }
-        // An empty string clears it back to "never said" — the same convention
-        // the trainer profile endpoint uses for its skippable fields.
-        if (req.deliveryMode() != null)             client.setDeliveryMode(deliveryMode(req.deliveryMode()));
-        applyAssessmentCycle(client, req);
-        /* FLUSHED, NOT MERELY SAVED, AND ONLY WHEN THE DIARY IS ABOUT TO READ IT.
-         *
-         * `DiaryService` reads `client.weekly_schedule` back over JDBC, and JPA
-         * defers its flush to commit — so the reconcile below would lay the diary
-         * out from the week this call just REPLACED. Found by test: the days
-         * moved, the sessions did not.
-         *
-         * `saveAndFlush` only on the path that needs it. Every other field on this
-         * request is read back through the entity, which is already current in the
-         * persistence context, and forcing a flush for a name change would buy a
-         * round trip for nothing. */
-        if (rhythmChanged) clientRepo.saveAndFlush(client); else clientRepo.save(client);
-        /* `updateClientSchedule` is the only caller that sends `weeklySchedule`,
-           and it is step 3 of the add-a-client flow: the days are agreed AFTER the
-           pack is sold on step 2, so without this the very first client a trainer
-           adds is the one whose pack books nothing. `DiaryService.reconcile`
-           carries the three-pass rule that keeps a hand-booked session and a
-           typed note through the change. */
-        DiaryService.Result booked = rhythmChanged
-                ? diary.reconcile(trainerId, clientId.toString())
-                : null;
-        var flags = computeStatusFlags(trainerId, List.of(clientId.toString()))
-                .getOrDefault(clientId, new StatusFlags(false, false, false));
-        return toResponse(client, flags, booked);
+        writeSchedule(clientId, perWeek, req.sessionDurationMinutes(), req.deliveryMode());
+        return respond(trainerId, client);
     }
 
     @Transactional
@@ -387,9 +305,6 @@ public class ClientService {
         note.setTrainerId(trainerId);
         note.setBody(noteBody(req.body()));
         note.setPinned(Boolean.TRUE.equals(req.pinned()));
-        // Only an explicit TRUE shares: a missing field on create is a private
-        // note, which is what every note was before V7.
-        note.setSharedWithClient(Boolean.TRUE.equals(req.sharedWithClient()));
         clientNoteRepo.save(note);
         return toNoteResponse(note);
     }
@@ -407,7 +322,6 @@ public class ClientService {
         var note = findOwnedNote(trainerId, clientId, noteId);
         if (req.body() != null) note.setBody(noteBody(req.body()));
         if (req.pinned() != null) note.setPinned(req.pinned());
-        if (req.sharedWithClient() != null) note.setSharedWithClient(req.sharedWithClient());
         clientNoteRepo.save(note);
         return toNoteResponse(note);
     }
@@ -423,46 +337,124 @@ public class ClientService {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /**
-     * 'floor' | 'remote' | null.
+     * 'floor' | 'home_visit' | 'remote' | null — the schema's three modes.
      *
-     * Anything else is stored as null rather than rejected with a 400: an older
-     * or newer client sending a mode this build doesn't know about should lose
-     * one optional field, not have its whole write fail. Tolerant reader, both
-     * directions — the same contract the rest of the sync surface keeps.
+     * Anything else is stored as null rather than rejected with a 400: a caller
+     * sending a mode this build doesn't know about should lose one optional
+     * field, not have its whole write fail.
      */
     private static String deliveryMode(String raw) {
         if (raw == null) return null;
         String value = raw.trim().toLowerCase();
-        return value.equals("floor") || value.equals("remote") ? value : null;
+        return value.equals("floor") || value.equals("home_visit") || value.equals("remote") ? value : null;
+    }
+
+    private static String clientType(String raw, String fallback) {
+        if (raw == null) return fallback;
+        String value = raw.trim().toLowerCase();
+        if (!CLIENT_TYPES.contains(value)) {
+            throw ClientRuleException.validation("clientType: must be independent or gym");
+        }
+        return value;
     }
 
     /**
-     * V5 · how often this client is measured, and when the next one is owed.
-     *
-     * Setting a cadence on somebody with no date yet SEEDS one, because a
-     * trainer who answered "every four weeks" has said something that should
-     * produce a day; leaving it null would make the answer inert. Sending the
-     * date explicitly always wins — that is how the add flow says "take it at
-     * the first session".
+     * A status change carries its timestamps, because `client_status_dates` ties
+     * `paused` to `paused_at` and `archived` to `archived_at` — and
+     * `client_archive` wants a reason beside the date. The contract's pause,
+     * resume and archive verbs will replace this path; until then an archive
+     * through here is recorded with reason `other`.
      */
-    private void applyAssessmentCycle(Client client, UpdateClientRequest req) {
-        if (req.assessmentIntervalDays() != null) {
-            Short days = MeasurementService.validInterval(req.assessmentIntervalDays());
-            client.setAssessmentIntervalDays(days);
-            if (days == null) {
-                client.setNextAssessmentOn(null);
-            } else if (client.getNextAssessmentOn() == null && req.nextAssessmentOn() == null) {
-                client.setNextAssessmentOn(LocalDate.now(IST).plusDays(days));
-            }
+    private static void applyStatus(Client client, String raw) {
+        String status = raw.trim().toLowerCase();
+        if (!STATUSES.contains(status)) {
+            throw ClientRuleException.validation("status: must be active, paused, inactive or archived");
         }
-        if (req.nextAssessmentOn() != null) {
-            client.setNextAssessmentOn(req.nextAssessmentOn().isBlank()
-                    ? null : LocalDate.parse(req.nextAssessmentOn()));
+        if (status.equals(client.getStatus())) return;
+        Instant now = Instant.now();
+        client.setStatus(status);
+        client.setPausedAt("paused".equals(status) ? now : null);
+        if (!"paused".equals(status)) client.setPausedUntil(null);
+        if ("archived".equals(status)) {
+            client.setArchivedAt(now);
+            client.setArchiveReason("other");
+        } else {
+            client.setArchivedAt(null);
+            client.setArchiveReason(null);
+            client.setArchiveNote(null);
         }
-        if (req.assessmentMetrics() != null) {
-            var ids = MeasurementService.validMetrics(req.assessmentMetrics());
-            client.setAssessmentMetrics(ids == null || ids.isEmpty() ? null : ids);
+    }
+
+    /** Each argument null leaves that column alone. The row itself always exists (`ensure_client_schedule`). */
+    private void writeSchedule(UUID clientId, Integer perWeek, Integer minutes, String mode) {
+        var sets = new ArrayList<String>();
+        var p = new HashMap<String, Object>();
+        p.put("cid", clientId.toString());
+        if (perWeek != null) { p.put("perWeek", perWeek); sets.add("sessions_per_week = :perWeek"); }
+        if (minutes != null) { p.put("minutes", minutes); sets.add("session_duration_minutes = :minutes"); }
+        // An empty string clears it back to "never said".
+        if (mode != null)    { p.put("mode", deliveryMode(mode)); sets.add("delivery_mode = :mode"); }
+        if (sets.isEmpty()) return;
+        jdbc.update("UPDATE client_schedule SET " + String.join(", ", sets) + ", updated_at = now() "
+                + "WHERE client_id = :cid::uuid", p);
+    }
+
+    /** The whole week replaced: live slots soft-deleted, the new ones inserted. */
+    private void replaceSlots(UUID clientId, List<SessionPlanner.Slot> slots) {
+        var p = new HashMap<String, Object>();
+        p.put("cid", clientId.toString());
+        jdbc.update("""
+                UPDATE client_schedule_slot SET deleted_at = now(), updated_at = now()
+                WHERE client_id = :cid::uuid AND deleted_at IS NULL
+                """, p);
+        for (var slot : slots) {
+            p.put("weekday", slot.weekday());
+            p.put("start", slot.time());
+            jdbc.update("""
+                    INSERT INTO client_schedule_slot (client_id, weekday, start_time)
+                    VALUES (:cid::uuid, :weekday, CAST(:start AS time))
+                    """, p);
         }
+    }
+
+    /** One client's response, with its flags and rhythm read fresh. */
+    private ClientResponse respond(UUID trainerId, Client client) {
+        String id = client.getId().toString();
+        var flags = computeStatusFlags(trainerId, List.of(id))
+                .getOrDefault(client.getId(), new StatusFlags(false, false, false));
+        return toResponse(client, flags, rhythms(List.of(id)).getOrDefault(client.getId(), NO_RHYTHM));
+    }
+
+    /** Schedule rows and live slots for a batch of clients, in two queries. */
+    private Map<UUID, Rhythm> rhythms(List<String> clientIds) {
+        var p = Map.of("ids", clientIds);
+        var slots = new HashMap<UUID, List<Map<String, Object>>>();
+        jdbc.query("""
+                SELECT client_id::text AS client_id, weekday, to_char(start_time, 'HH24:MI') AS start_hm
+                FROM client_schedule_slot
+                WHERE client_id::text IN (:ids) AND deleted_at IS NULL
+                ORDER BY client_id, weekday, start_time
+                """, p, rs -> {
+            var list = slots.computeIfAbsent(UUID.fromString(rs.getString("client_id")), k -> new ArrayList<>());
+            list.add(Map.of("templateDay", list.size() + 1,
+                            "weekday", rs.getInt("weekday"),
+                            "time", rs.getString("start_hm")));
+        });
+        var out = new HashMap<UUID, Rhythm>();
+        jdbc.query("""
+                SELECT client_id::text AS client_id, sessions_per_week, session_duration_minutes, delivery_mode
+                FROM client_schedule WHERE client_id::text IN (:ids)
+                """, p, rs -> {
+            UUID id = UUID.fromString(rs.getString("client_id"));
+            out.put(id, new Rhythm(intOrNull(rs, "sessions_per_week"), intOrNull(rs, "session_duration_minutes"),
+                    rs.getString("delivery_mode"), slots.getOrDefault(id, List.of())));
+        });
+        return out;
+    }
+
+    private static Integer intOrNull(ResultSet rs, String column) throws SQLException {
+        int v = rs.getInt(column);
+        return rs.wasNull() ? null : v;
     }
 
     /**
@@ -521,38 +513,21 @@ public class ClientService {
     private NoteResponse toNoteResponse(ClientNote n) {
         return new NoteResponse(
                 n.getId(), n.getClientId(), n.getBody(), n.isPinned(),
-                n.getCreatedAt().toEpochMilli(), n.getUpdatedAt().toEpochMilli(),
-                n.isSharedWithClient()
-        );
+                n.getCreatedAt().toEpochMilli(), n.getUpdatedAt().toEpochMilli());
     }
 
-    private ClientResponse toResponse(Client c, StatusFlags flags) {
-        return toResponse(c, flags, null);
-    }
-
-    /**
-     * The same row, plus what a rhythm change just did to the diary.
-     *
-     * An overload rather than a third argument on the only caller, because every
-     * other path through this class answers a READ — and a read books nothing,
-     * so `null` is the honest value and passing it explicitly four times would
-     * invite somebody to pass a zero instead.
-     */
-    private ClientResponse toResponse(Client c, StatusFlags flags, DiaryService.Result diary) {
+    private ClientResponse toResponse(Client c, StatusFlags flags, Rhythm rhythm) {
         return new ClientResponse(
                 c.getId(), c.getTrainerId(), c.getName(), c.getPhone(), c.getGoal(),
-                c.getStatus(), c.getPaymentMode(), c.getTrainerSplitPercent(), c.getHeightCm(),
+                c.getStatus(), null, null, c.getHeightCm(),
                 c.getActivityLevel(), c.getMetadata(),
-                c.getSessionsPerWeek(), c.getSessionDurationMinutes(), c.getWeeklySchedule(),
-                c.getDeliveryMode(),
+                rhythm.sessionsPerWeek(), rhythm.sessionDurationMinutes(), rhythm.weeklySchedule(),
+                rhythm.deliveryMode(),
                 flags,
                 c.getCreatedAt().toEpochMilli(), c.getUpdatedAt().toEpochMilli(),
                 c.getMembershipStatus(),
-                diary == null ? null : diary.booked(),
-                diary == null ? null : diary.firstAt(),
-                c.getAssessmentIntervalDays() == null ? null : (int) (short) c.getAssessmentIntervalDays(),
-                c.getNextAssessmentOn() == null ? null : c.getNextAssessmentOn().toString(),
-                c.getAssessmentMetrics(),
+                null, null,
+                null, null, null,
                 c.getDateOfBirth() == null ? null : c.getDateOfBirth().toString()
         );
     }

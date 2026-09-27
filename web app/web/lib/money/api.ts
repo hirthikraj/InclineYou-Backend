@@ -3,6 +3,7 @@ import 'server-only';
 import { cache } from 'react';
 
 import { getToken } from '@/lib/auth/session';
+import { listAll, type ListEnvelope } from '@/lib/http/client';
 
 /**
  * THE MONEY SCREEN'S DATA LAYER.
@@ -283,9 +284,10 @@ export const getMoney = cache(async (): Promise<MoneyData> => {
 
   const [trainer, clients, packages, payments] = await Promise.all([
     get<TrainerWire>('/v1/trainers/me'),
-    get<ClientWire[]>('/v1/clients'),
-    get<PackageWire[]>('/v1/packages'),
-    get<PaymentWire[]>('/v1/payments'),
+    get<ClientWire[]>('/v1/clients?view=legacy'),
+    // 1.1: lists are `{items}` envelopes; the ledger is followed to its last page.
+    listAll<PackageWire>('/v1/packages?scope=current', (p) => get<ListEnvelope<PackageWire>>(p)),
+    listAll<PaymentWire>('/v1/payments?limit=200', (p) => get<ListEnvelope<PaymentWire>>(p)),
   ]);
 
   return {

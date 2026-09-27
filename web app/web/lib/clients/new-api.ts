@@ -4,6 +4,7 @@ import { cache } from 'react';
 
 import { getToken } from '@/lib/auth/session';
 import type { Pack, PackType } from '@/lib/setup/money';
+import { type ListEnvelope } from '@/lib/http/client';
 
 export class NewClientApiError extends Error {
   constructor(readonly status: number | null) {
@@ -138,8 +139,8 @@ function asWorkMode(raw: string | null | undefined): 'independent' | 'gym' | 'bo
 export const getNewClientData = cache(async (): Promise<NewClientData> => {
   const [trainer, workingHours, clients, templates, packs] = await Promise.all([
     get<TrainerWire>('/v1/trainers/me'),
-    get<WorkingHourWire[]>('/v1/working-hours'),
-    get<ClientScheduleWire[]>('/v1/clients'),
+    get<ListEnvelope<WorkingHourWire>>('/v1/working-hours').then((r) => r?.items ?? []),
+    get<ClientScheduleWire[]>('/v1/clients?view=legacy'),
     get<TemplateWire[]>('/v1/templates'),
     /* The ONLY call here allowed to fail quietly. The other four decide whether
        a client can be added at all; the price list decides what step 2 can

@@ -35,13 +35,14 @@ export async function countClients(): Promise<number | null> {
   try {
     const token = await getToken();
     if (!token) return null;
-    const res = await fetch(`${BASE}/v1/clients`, {
+    const res = await fetch(`${BASE}/v1/clients?status=all`, {
       headers: { authorization: `Bearer ${token}` },
       cache: 'no-store',
       signal: AbortSignal.timeout(6_000),
     });
     if (!res.ok) return null;
-    const rows: unknown = await res.json();
+    // 1.1: every list is an `{items}` envelope; `status=all` counts archived too.
+    const rows = ((await res.json()) as { items?: unknown })?.items;
     return Array.isArray(rows) ? rows.length : null;
   } catch {
     return null;

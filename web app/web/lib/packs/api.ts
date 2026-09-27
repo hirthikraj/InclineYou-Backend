@@ -9,6 +9,7 @@ import { asWorkMode, type WorkMode } from '@/lib/setup/options';
    `server-only`, and a client component that imported a VALUE from it — not a
    type, which is erased — would fail the build. `modeOf` is a value. */
 import type { LivePackage, PacksData, PacksTrainer, PriceListPack } from './compute';
+import { type ListEnvelope } from '@/lib/http/client';
 
 /**
  * THE PRICE LIST'S DATA LAYER — `pack`, not `package`.
@@ -160,8 +161,9 @@ export const getPacksData = cache(async (): Promise<PacksData> => {
   const [trainer, packs, live, clients] = await Promise.all([
     call<TrainerWire>('/v1/trainers/me', { method: 'GET' }),
     call<PackWire[]>('/v1/packs', { method: 'GET' }),
-    call<PackageWire[]>('/v1/packages?status=active', { method: 'GET' }),
-    call<ClientWire[]>('/v1/clients', { method: 'GET' }),
+    // 1.1: `{items}`, and `scope=current` is the live packs plus what is owed.
+    call<ListEnvelope<PackageWire>>('/v1/packages?scope=current', { method: 'GET' }).then((r) => r?.items ?? []),
+    call<ClientWire[]>('/v1/clients?view=legacy', { method: 'GET' }),
   ]);
 
   return {

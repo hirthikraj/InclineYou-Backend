@@ -541,6 +541,27 @@ export interface DeckClient {
    * argument, including what this field must never be turned into.
    */
   goal?: string | null;
+  /**
+   * v1 · `client.hasPinnedNote` — the pinned `client_note` replaces `goal` as the
+   * client half of the *Has a note* chip (api-contract R7). Still a boolean that
+   * never looks at what the note says.
+   */
+  hasNote?: boolean;
+  /**
+   * v1 · the two session aggregates the server now computes (`stats` on
+   * `GET /v1/clients?view=summary`). When present they replace the unbounded
+   * workout history as the source for *gone quiet* and *100th session*:
+   * epoch ms of the newest delivered session, and how many were delivered.
+   */
+  lastDoneAt?: number | null;
+  sessionsDone?: number;
+  /**
+   * v1 · `stats.missedStreak` — consecutive no-shows among the client's newest
+   * settled sessions, counted by the server over the WHOLE history. When present
+   * it is the streak the *missed* row states: walking the sessions window here
+   * would cut off a streak older than the window.
+   */
+  missedStreak?: number;
 }
 export interface DeckScheduled {
   id: string;
@@ -554,6 +575,8 @@ export interface DeckScheduled {
   deliveryMode?: string | null;
   /** `scheduled_session.notes` — what the trainer wrote about this booking. */
   notes?: string | null;
+  /** v1 · `workout.week` — the plan week this session's workout sits in. */
+  week?: number;
 }
 export interface DeckWorkout {
   id: string;
@@ -564,6 +587,14 @@ export interface DeckWorkout {
   createdAt: number;
   /** V13 — set when the trainer closed the log. Absent means still open. */
   endedAt?: number | null;
+  /**
+   * v1 · the log summary that rides on the session row (`log` on
+   * `GET /v1/sessions`). When present it is used instead of `DeckInput.setLogs`,
+   * which the v1 wire no longer carries.
+   */
+  setsDone?: number;
+  volumeKg?: number;
+  lastSetAt?: number | null;
 }
 export interface DeckSetLog {
   id: string;
@@ -580,6 +611,8 @@ export interface DeckProgram {
   startDate?: string;
   endDate?: string;
   status: string;
+  /** v1 · `program.weeks` — the plan's length, the "8" in "Week 4/8". */
+  weeks?: number;
 }
 export interface DeckPackage {
   id: string;
@@ -602,6 +635,15 @@ export interface DeckPackage {
   endDate?: string | null;
   /** V30 · set while the clock is stopped. See the skip in `buildAttention`. */
   pausedAt?: number | null;
+  /**
+   * v1 · what is still owed on this pack, computed by the server, and when it
+   * was due. In v1 a due date lives on the package, not on a payment, so the
+   * money rows are raised from these two fields (api-contract L5).
+   */
+  amountDue?: number;
+  dueDate?: string | null;
+  /** v1 · floor | home_visit | remote | programming — what "the same pack" means for a renewal. */
+  service?: string;
 }
 export interface DeckPayment {
   id: string;
@@ -673,6 +715,22 @@ export interface DeckInput {
    * message", and the day must render without it.
    */
   nudges?: DeckNudge[];
+  /**
+   * v1 · `GET /v1/money/summary?months=2`, newest month first. When present the
+   * money card reads it rather than summing payment rows (api-contract R4).
+   */
+  moneySummary?: DeckMoneyMonth[];
+}
+
+/** One month of `GET /v1/money/summary`, numbers already parsed. */
+export interface DeckMoneyMonth {
+  month: string;
+  billed: number;
+  collected: number;
+  gymCut: number;
+  yours: number;
+  pending: number;
+  clientsOwing: number;
 }
 
 /* ------------------------------------------------------------------- output */
@@ -774,6 +832,12 @@ export interface AttentionItem {
    * for the same reason as `TodayData.openLogs`.
    */
   sessionIds?: string[];
+  /**
+   * The pack a `Renew` row is about — the one that raised it, which is the one
+   * the server must renew. Renewing "the client's newest" instead would, right
+   * after a renewal, renew the new pack a second time.
+   */
+  packageId?: string;
   /**
    * Set only on the rows in `Deck.silenced`: the `attention_dismissal` row that
    * is hiding this one, which is what *Restore* deletes.
@@ -1038,6 +1102,8 @@ function sessionDetail(
 ): string {
   const label = session.dayLabel?.trim() || program?.name?.trim() || 'Session';
   if (!program) return label;
+  // v1: the workout knows its own plan week, which beats counting from dates.
+  if (session.week && program.weeks) return `${label} · Week ${Math.min(session.week, program.weeks)}/${program.weeks}`;
 
   const start = parseDay(program.startDate);
   const end = parseDay(program.endDate);
@@ -1101,6 +1167,7 @@ function toDeckSession(
      * "nothing written" and only one of them is falsy.
      */
     hasNote: (session.notes ?? '').trim().length > 0
+      || client?.hasNote === true
       || (client?.goal ?? '').trim().length > 0,
   };
 }
@@ -1117,22 +1184,23 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
   const byId = new Map(input.clients.map((c) => [c.id, c]));
 
   // --- money owed ---
+  //
+  // v1: from the package's server-computed `amountDue` against its `dueDate`
+  // (api-contract L5). A pack whose due date is more than a week out is not
+  // raised yet — "due soon" means soon — and one with no due date is dated from
+  // when it was sold.
   const dueByClient = new Map<string, { total: number; oldest: number; overdue: boolean }>();
-  for (const p of input.payments) {
-    const status = lower(p.status);
-    if (!DUE_PAYMENT.has(status)) continue;
-    const at = p.createdAt;
+  for (const p of input.packages) {
+    const owed = p.amountDue ?? 0;
+    if (owed <= 0) continue;
+    const at = parseDay(p.dueDate ?? undefined) ?? p.updatedAt;
+    if (at - now > OVERDUE_DAYS * DAY_MS) continue;
     const entry = dueByClient.get(p.clientId);
     if (entry) {
-      entry.total += p.amount || 0;
+      entry.total += owed;
       entry.oldest = Math.min(entry.oldest, at);
-      entry.overdue = entry.overdue || status === 'overdue';
     } else {
-      dueByClient.set(p.clientId, {
-        total: p.amount || 0,
-        oldest: at,
-        overdue: status === 'overdue',
-      });
+      dueByClient.set(p.clientId, { total: owed, oldest: at, overdue: false });
     }
   }
   for (const [clientId, due] of dueByClient) {
@@ -1162,6 +1230,13 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
     const at = parseDay(w.sessionDate) ?? w.createdAt;
     const seen = lastWorkout.get(w.clientId);
     if (seen === undefined || at > seen) lastWorkout.set(w.clientId, at);
+  }
+  // v1: the server's last delivered session, at any age, wins over the window.
+  for (const c of input.clients) {
+    if (c.lastDoneAt !== undefined) {
+      if (c.lastDoneAt === null) lastWorkout.delete(c.id);
+      else lastWorkout.set(c.id, c.lastDoneAt);
+    }
   }
   const engaged = new Set<string>();
   for (const p of input.programs) if (!DEAD_PROGRAM.has(lower(p.status))) engaged.add(p.clientId);
@@ -1215,10 +1290,19 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
    * one that expires on Friday, and "fewest sessions" picks the wrong one. */
   const worst = new Map<
     string,
-    { band: AttentionBand; remaining: number; daysLeft: number | null; at: number }
+    { band: AttentionBand; remaining: number; daysLeft: number | null; at: number; packageId: string }
   >();
   for (const pkg of input.packages) {
     if (DEAD_PACKAGE.has(lower(pkg.status))) continue;
+    /*
+     * v1 · a pack that has ALREADY BEEN RENEWED raises nothing: the client holds
+     * a newer running pack of the same service. Without this, Meera's old pack
+     * keeps saying "ends in 2 sessions" the moment after she paid for the next
+     * twelve, and the row invites a second sale.
+     */
+    if (pkg.service && input.packages.some((o) =>
+      o.id !== pkg.id && o.clientId === pkg.clientId && o.service === pkg.service
+      && !DEAD_PACKAGE.has(lower(o.status)) && !o.pausedAt && o.updatedAt > pkg.updatedAt)) continue;
     /*
      * V30 · a PAUSED pack raises nothing.
      *
@@ -1249,10 +1333,11 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
         remaining: pkg.sessionsRemaining,
         daysLeft,
         at: pkg.updatedAt,
+        packageId: pkg.id,
       });
     }
   }
-  for (const [clientId, { band, remaining, daysLeft, at }] of worst) {
+  for (const [clientId, { band, remaining, daysLeft, at, packageId }] of worst) {
     const client = byId.get(clientId);
     if (!client) continue;
     /*
@@ -1275,6 +1360,7 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
       line,
       severity: attentionSeverity(band),
       action: 'Renew',
+      packageId,
       /*
        * Fewer left is more urgent inside the two session bands; fewer DAYS left
        * is more urgent inside the date band. Same axis, different unit, and the
@@ -1312,16 +1398,35 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
     if (list) list.push(s);
     else settledPast.set(s.clientId, [s]);
   }
-  for (const [clientId, list] of settledPast) {
+  /*
+   * The server's streak wins when the roster carries it (v1, L3): it is counted
+   * over every settled session, so a client whose last two no-shows fell before
+   * the window is still raised. The window is then used only to DATE the row.
+   * Without it (an older wire), the streak is walked from the window as before.
+   */
+  const serverStreak = input.clients.some((c) => c.missedStreak !== undefined);
+  const missedClients = serverStreak
+    ? input.clients.filter((c) => (c.missedStreak ?? 0) >= MISSED_STREAK).map((c) => c.id)
+    : [...settledPast.keys()];
+  const windowStart = input.sessions.reduce((min, s) => Math.min(min, s.scheduledAt), now);
+  for (const clientId of missedClients) {
     const client = byId.get(clientId);
     if (!client) continue;
+    const list = settledPast.get(clientId) ?? [];
     list.sort((a, b) => b.scheduledAt - a.scheduledAt);
     let streak = 0;
-    for (const s of list) {
-      if (lower(s.status) !== 'no_show') break;
-      streak += 1;
+    if (serverStreak) {
+      streak = client.missedStreak ?? 0;
+    } else {
+      for (const s of list) {
+        if (lower(s.status) !== 'no_show') break;
+        streak += 1;
+      }
     }
     if (streak < MISSED_STREAK) continue;
+    // The newest absence in the window; a streak entirely older than the window
+    // is dated from the window's start — "at least this long ago".
+    const lastAbsence = list.find((s) => lower(s.status) === 'no_show')?.scheduledAt ?? windowStart;
     items.push({
       key: `missed:${clientId}`,
       kind: 'missed',
@@ -1336,7 +1441,7 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
       weight: attentionWeight('missed', streak),
       // The most recent absence, so the row dates from the last time they did not
       // turn up rather than from the first.
-      at: list[0].scheduledAt,
+      at: lastAbsence,
     });
   }
 
@@ -1462,6 +1567,15 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
       seen.newest = Math.max(seen.newest, at);
     } else {
       deliveredByClient.set(w.clientId, { count: 1, newest: at });
+    }
+  }
+  // v1: the server counts every delivered session, not just the fetched window.
+  for (const c of input.clients) {
+    if (c.sessionsDone === undefined) continue;
+    if (c.sessionsDone > 0 && c.lastDoneAt) {
+      deliveredByClient.set(c.id, { count: c.sessionsDone, newest: c.lastDoneAt });
+    } else {
+      deliveredByClient.delete(c.id);
     }
   }
   for (const [clientId, { count, newest }] of deliveredByClient) {
@@ -1686,11 +1800,16 @@ function buildRunning(
   if (!workout) return null;
 
   const sets = input.setLogs.filter((l) => l.workoutSessionId === workout.id);
-  const volume = sets.reduce((sum, l) => sum + (l.loadKg || 0) * (l.reps || 0), 0);
-  const lastSetAt = sets.reduce<number | undefined>(
-    (best, l) => (best === undefined || l.createdAt > best ? l.createdAt : best),
-    undefined,
-  );
+  const summed = workout.setsDone === undefined;
+  const volume = summed
+    ? sets.reduce((sum, l) => sum + (l.loadKg || 0) * (l.reps || 0), 0)
+    : workout.volumeKg ?? 0;
+  const lastSetAt = summed
+    ? sets.reduce<number | undefined>(
+      (best, l) => (best === undefined || l.createdAt > best ? l.createdAt : best),
+      undefined,
+    )
+    : workout.lastSetAt ?? undefined;
 
   return {
     scheduledId: live.id,
@@ -1704,7 +1823,7 @@ function buildRunning(
     durationMinutes: live.minutes,
     mode: live.mode,
     detail: live.detail,
-    setsLogged: sets.length,
+    setsLogged: summed ? sets.length : workout.setsDone ?? 0,
     volumeKg: Math.round(volume),
     lastSetAt,
   };
@@ -1725,6 +1844,25 @@ function buildRunning(
  * changes in October must not move September's split.
  */
 function buildMoney(input: DeckInput, now: number): DeckMoney {
+  // v1: the server's month summary (api-contract R4) — billed is packages sold
+  // this month, collected is payments paid this month, pending is owed now.
+  const summary = input.moneySummary;
+  if (summary && summary.length > 0) {
+    const [month, previous] = summary;
+    return {
+      monthLabel: monthName(now),
+      billed: month.billed,
+      collected: month.collected,
+      pending: month.pending,
+      cut: month.gymCut,
+      yours: month.yours,
+      trendPercent: previous && previous.billed > 0
+        ? Math.round(((month.billed - previous.billed) / previous.billed) * 100)
+        : null,
+      clientsOwing: month.clientsOwing,
+    };
+  }
+
   const monthStart = startOfMonth(now);
   const previousStart = startOfMonth(monthStart - 1);
 
@@ -1810,8 +1948,9 @@ function buildActivity(input: DeckInput, now: number): DeckActivity[] {
     const client = byId.get(w.clientId);
     if (!client) continue;
     const logs = setsByWorkout.get(w.id) ?? [];
+    const setCount = w.setsDone ?? logs.length;
     const volume = Math.round(
-      logs.reduce((sum, l) => sum + (l.loadKg || 0) * (l.reps || 0), 0),
+      w.volumeKg ?? logs.reduce((sum, l) => sum + (l.loadKg || 0) * (l.reps || 0), 0),
     );
     const label = w.scheduledSessionId
       ? sessionsById.get(w.scheduledSessionId)?.dayLabel?.trim()
@@ -1826,7 +1965,7 @@ function buildActivity(input: DeckInput, now: number): DeckActivity[] {
       // a fact about a plan, and "logged a workout" is all that is left without
       // it. Never a made-up label.
       body: label ? `finished ${label}` : 'logged a workout',
-      meta: `${logs.length} set${logs.length === 1 ? '' : 's'}${
+      meta: `${setCount} set${setCount === 1 ? '' : 's'}${
         volume > 0 ? ` · ${volume.toLocaleString('en-IN')} kg` : ''
       } · ${time} ${meridiem}`,
       // An open log is a session still running, which the hero above already
@@ -1999,9 +2138,12 @@ export function buildDeck(input: DeckInput, now: number): Deck {
     })
     .reduce((sum, p) => sum + (p.amount || 0), 0);
 
-  const pendingTotal = input.payments
-    .filter((p) => DUE_PAYMENT.has(lower(p.status)))
-    .reduce((sum, p) => sum + (p.amount || 0), 0);
+  // v1: owed money lives on the package (`amountDue`), not on pending payments.
+  const pendingTotal = input.packages.some((p) => p.amountDue !== undefined)
+    ? input.packages.reduce((sum, p) => sum + (p.amountDue ?? 0), 0)
+    : input.payments
+      .filter((p) => DUE_PAYMENT.has(lower(p.status)))
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
 
   /*
    * The queue is built whole and then filtered, rather than filtered as it is

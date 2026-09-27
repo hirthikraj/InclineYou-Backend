@@ -91,6 +91,13 @@ interface SessionWire {
  * remote, so the day would keep drawing them on the floor forever.
  */
 export async function bookSession(input: {
+  /**
+   * The browser's attempt id (1.1: a client-minted id, and a replay answers 200
+   * with the first booking). Kept by the panel across retries of the same
+   * booking — minted here, a retry after a timeout would be a second booking
+   * and a 409 SESSION_CLIENT_TIME_TAKEN.
+   */
+  requestId?: string;
   clientId: string;
   scheduledAt: number;
   durationMinutes: number;
@@ -99,11 +106,14 @@ export async function bookSession(input: {
   notes?: string | null;
 }): Promise<WriteResult> {
   try {
+    // api-contract Today A1 (1.1). `workoutId: null` lets the server pick the next
+    // workout in the client's active program, which replaces the old `programId`.
     const res = await post<SessionWire>('/v1/sessions', {
+      id: input.requestId ?? crypto.randomUUID(),
       clientId: input.clientId,
       scheduledAt: input.scheduledAt,
       durationMinutes: input.durationMinutes,
-      programId: input.programId ?? null,
+      workoutId: null,
       deliveryMode: input.deliveryMode ?? null,
       notes: input.notes ?? null,
     });

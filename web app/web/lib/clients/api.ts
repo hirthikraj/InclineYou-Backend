@@ -3,6 +3,7 @@ import 'server-only';
 import { cache } from 'react';
 
 import { getToken } from '@/lib/auth/session';
+import { listAll, type ListEnvelope } from '@/lib/http/client';
 
 export class ClientsApiError extends Error {
   constructor(readonly status: number | null) {
@@ -164,12 +165,13 @@ export const getRosterData = cache(async (): Promise<RosterData> => {
 
   const [trainer, clients, packages, payments, workouts, programs, sessions] = await Promise.all([
     get<TrainerWire>('/v1/trainers/me'),
-    get<ClientWire[]>('/v1/clients'),
-    get<PackageWire[]>('/v1/packages'),
-    get<PaymentWire[]>('/v1/payments'),
+    get<ClientWire[]>('/v1/clients?view=legacy'),
+    // 1.1: lists are `{items}` envelopes; the paged ones are followed to the end.
+    listAll<PackageWire>('/v1/packages?scope=current', (p) => get<ListEnvelope<PackageWire>>(p)),
+    listAll<PaymentWire>('/v1/payments?limit=200', (p) => get<ListEnvelope<PaymentWire>>(p)),
     get<WorkoutWire[]>('/v1/workouts'),
     get<ProgramWire[]>('/v1/programs'),
-    get<SessionWire[]>(`/v1/sessions?from=${eightWeeksAgo}&to=${fourWeeksAhead}`),
+    listAll<SessionWire>(`/v1/sessions?from=${eightWeeksAgo}&to=${fourWeeksAhead}`, (p) => get<ListEnvelope<SessionWire>>(p)),
   ]);
 
   return {

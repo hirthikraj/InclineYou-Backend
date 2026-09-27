@@ -134,6 +134,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // 10/min ceiling is the anti-spam control and not only a cost control.
         if ("POST".equals(request.getMethod())
                 && (path.endsWith("/nudge")
+                    // 1.1's route (POST /v1/clients/{id}/nudges). A GET of the
+                    // same path is the history and stays STANDARD.
+                    || path.endsWith("/nudges")
                     || path.endsWith("/report/weekly"))) {
             return Tier.MESSAGING;
         }

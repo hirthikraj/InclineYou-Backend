@@ -2,107 +2,51 @@ import 'server-only';
 
 import { cache } from 'react';
 
-import { getToken } from '@/lib/auth/session';
-import { apiFetch } from '@/lib/http/client';
+import { api, ApiError, listAll, type ListEnvelope } from '@/lib/http/client';
 import { listRecentNudges } from '@/lib/nudges/api';
 import { COOLDOWN_DAYS, lastContactMap } from '@/lib/nudges/cooldown';
 
 import {
   bookableClients, DEAD_SESSION, sessionMinutes,
+  type RosterClientRow, type RosterPackRow, type RosterProgramRow,
 } from '@/lib/schedule/roster';
-import type { BookSession, ScheduleClient } from '@/lib/schedule/session';
+import type { BookSession } from '@/lib/schedule/session';
 
-import { buildDeck, staleOpenLogs, type Deck, type DeckInput } from './deck';
-import { DAY_MS, startOfDay } from './time';
+import {
+  ACTIVITY_DAYS, buildDeck, staleOpenLogs,
+  type Deck, type DeckInput, type DeckWorkout,
+} from './deck';
+import { DAY_MS } from './time';
 import type { RateSource, WorkWindow } from './day';
 
 /**
- * Everything Today needs from the backend, in nine parallel requests.
+ * Everything Today needs from the backend — the v1 wire, api-contract.html
+ * *Today*: ten reads, all in parallel, none conditional.
  *
- * ═══════════════════════════════════════════════════════════════════════════
- * WHY NINE SCOPED REQUESTS AND NOT ONE `sync/pull`
+ * What changed from the pre-v1 build, and why this file is mostly adaptation:
  *
- * `/v1/sync/pull?lastPulledAt=0` returns exactly `DeckInput` in a single call
- * and it is the wrong tool here. It also returns the 1,324-row global exercise
- * library and **every set log ever recorded** — for a trainer two years in with
- * twenty clients that is tens of thousands of rows, on a screen that is opened
- * every morning and left open. `lib/setup/api.ts` reaches for `pull()` and says
- * why it is allowed to: setup is only reachable while `setupComplete` is false,
- * so the envelope is nearly empty. Its comment then names this screen
- * explicitly — *"do not reach for `pull()` on a built screen — a dashboard that
- * pulled the whole account on every render is the shape of bug this comment
- * exists to prevent"*. This file is that screen, and it does not.
+ *   · There is no `workout_session` in v1. A session's log IS the scheduled
+ *     session row (`startedAt` / `endedAt`), and its live set count rides on the
+ *     row (`log`), so the old second round-trip for the running session's sets is
+ *     gone. The deck still speaks of "workouts"; they are built here from the
+ *     session rows that have a log, keyed by the SESSION id (R2).
+ *   · The two unbounded reads are gone. `GET /v1/workouts` (every log ever, for
+ *     *gone quiet* and *100th session*) became `stats` on the client summary, and
+ *     `GET /v1/payments` (every payment ever, for "owed") became `amountDue` on
+ *     the package plus the month summary. Payments are now a seven-day window for
+ *     the activity feed alone.
+ *   · The trainer's gym share is per package (R3), so the per-session rate is
+ *     worked out here from each client's newest package and `gymSharePercent` is
+ *     always null.
  *
- * ═══════════════════════════════════════════════════════════════════════════
- * WHAT WAS MISSING FROM REST, AND WHAT WAS ADDED
- *
- * Four of the row sets already had a trainer-wide route: `clients`, `sessions`
- * (windowed), `programs`, `workouts`. Three did not, and each was load-bearing
- * for a whole module:
- *
- *   · `packages` — per-client only. Reaching the deck's *who is running out* one
- *     client at a time is 22 requests against a 120/min ceiling, so refreshing
- *     a dashboard rate-limits the trainer. → `GET /v1/packages`
- *   · `payments`  — per-PACKAGE only, and `PaymentResponse` carried no
- *     `gymShareAmount`, so `yours = billed − cut` was not computable at any
- *     number of requests. → `GET /v1/payments`, and the field, appended last.
- *   · `working_hours` — no route at all; it reached the wire only inside the
- *     sync envelope. Without it the ribbon has no ground, no hole between
- *     shifts, and no *gap* — a sellable gap is by definition free time inside a
- *     working window. → `GET /v1/working-hours`
- *
- * All three are reads, all three are additive, and `backend/API.md` carries them
- * as of the same commit. Nothing was removed and no response field changed
- * meaning, which is the schema law applying to the wire.
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * THE TWO REQUESTS THAT ARE DELIBERATELY UNWINDOWED
- *
- * `GET /v1/workouts` fetches the whole history and that is not an oversight.
- * The *gone quiet* rule needs the last logged workout PER CLIENT, at any age,
- * because the copy states the number — "No workout logged in 41 days". Bounding
- * it to a window would make a client quiet for longer than the window vanish
- * from the queue entirely (`buildAttention` skips a client with no workout at
- * all, on the grounds that they have not started rather than gone quiet), and
- * that is the exact client who most needs chasing. One row per delivered
- * session, so it grows with tenure; if it ever bites, the fix is a
- * last-workout-per-client projection on the backend, not a window here.
- *
- * `GET /v1/payments` is unwindowed for a smaller reason: an unpaid invoice from
- * July is still owed today, so *still pending* and the overdue queue cannot be
- * scoped to this month, and a payment row is one per invoice — a couple of
- * hundred rows for a full book, against thousands of set logs. The endpoint
- * takes `from`/`to` for the money screen, which does want a month.
- *
- * `GET /v1/sessions` IS windowed, and the window WIDENED on 27 Aug 2026 — from
- * Monday-of-this-week to `SESSION_LOOKBACK_DAYS` back — because the restructured
- * queue asks two questions of the past that a week cannot answer. See that
- * constant.
- * ═══════════════════════════════════════════════════════════════════════════
- * AND THERE ARE NINE REQUESTS NOW, NOT EIGHT
- *
- * `GET /v1/attention/dismissals` is the ninth (V28). It is a handful of tiny rows
- * on one index and it buys the property the whole queue rests on: a list that can
- * be silenced is one a trainer will keep reading, and a silence that lives in
- * `localStorage` is not a silence — a shared gym desktop hands it to the next
- * person, and the same trainer's own laptop never hears about it.
- *
- * The budget argument in this file is not "eight"; it is *scoped reads, not the
- * whole account*. A ninth scoped read is inside that argument and a `pull()` is
- * still outside it. The nine run in parallel, so `TIMEOUT_MS` is the ceiling for
- * the screen and not nine times it.
+ * `deck.ts` stays a pure statement about the day; the translation lives here so
+ * a wire change touches one file.
  */
 
-const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
-
 /**
- * How far back `GET /v1/sessions` reaches. See the note in `getToday` for why
- * this is thirty and not seven, and not ninety.
- *
- * Exported so `deck.ts`'s two backward-looking rules can never quietly outgrow
- * it: `missed` walks settled sessions and `unmarked` looks back a week, and a rule
- * that reached further than the window would silently return a shorter answer
- * rather than a wrong-looking one, which is the harder bug to see.
+ * How far back `GET /v1/sessions` reaches. `missed` walks settled sessions and
+ * `unmarked` looks back a week; a rule that reached further than the window would
+ * silently return a shorter answer, which is the harder bug to see.
  */
 export const SESSION_LOOKBACK_DAYS = 30;
 
@@ -115,249 +59,219 @@ export class TodayApiError extends Error {
 }
 
 /**
- * How long any one of the nine requests may take before it counts as no answer.
- *
- * ── MEASURED, NOT GUESSED, AND IT WAS FOUND BY BREAKING IT ───────────────────
- *
- * The first version had no timeout, and a `fetch` with no timeout does not fail
- * when a server stops answering — it fails when the server REFUSES. Those are
- * different states and only the second one is fast.
- *
- * Suspending the API process proved it: the kernel still completes the TCP
- * handshake, so the connection is established and the request is sent and nothing
- * ever comes back. `/today` hung indefinitely — no error screen, no retry, a
- * blank tab spinning — which is the worst of the three possible failures and the
- * only one a trainer cannot even describe. A restarting Spring process, a dropped
- * VPN and a half-open connection through a proxy all look exactly like this.
- *
- * Eight seconds: comfortably above the slowest of these requests against a warm
- * database (the roster-wide reads are indexed single queries, tens of
- * milliseconds), and well under how long somebody will stare at a blank screen
- * before deciding the product is broken. The nine run in parallel, so this is
- * the ceiling for the whole screen and not nine times it.
+ * Every read goes through the common `api()` (`lib/http/client.ts`), which
+ * adds the token and the web header, times out after 8 s — a `fetch` with no
+ * timeout does not fail when a server stops answering, only when it refuses —
+ * and logs request and response to the terminal and, in development, to the
+ * browser console. The ten run in parallel, so the timeout is the ceiling for
+ * the whole screen.
  */
-const TIMEOUT_MS = 8_000;
-
 async function get<T>(path: string): Promise<T> {
-  const token = await getToken();
-  // Not an assertion for tidiness: without a token the backend answers 401 and
-  // the screen would report a server problem for what is a signed-out browser.
-  if (!token) throw new TodayApiError(401);
-
-  let res: Response, text: string;
   try {
-    ({ res, text } = await apiFetch(`${BASE}${path}`, {
-      headers: { authorization: `Bearer ${token}` },
-      // The deck is a snapshot of a minute. Nothing here is cacheable, and a
-      // cached Today is the one bug a trainer cannot diagnose — the screen would
-      // be wrong in a way that looks exactly like being right.
-      cache: 'no-store',
-      timeoutMs: TIMEOUT_MS,
-    }));
-  } catch {
-    // Connection refused, DNS, and a timeout all land here and all mean the same
-    // thing to the screen: nothing answered. `TodayApiError(null)` is what
-    // `requireToday` reads as `unreachable`.
-    throw new TodayApiError(null);
+    return await api<T>(path);
+  } catch (error) {
+    // `requireToday` reads the status: 401 signs in again, null is unreachable.
+    if (error instanceof ApiError) throw new TodayApiError(error.status);
+    throw error;
   }
+}
 
-  if (!res.ok) throw new TodayApiError(res.status);
+/**
+ * Every item of a list read (1.1 R66): `{items}`, and for a paged read (L4, L9,
+ * L10) the Next server follows `nextCursor` before drawing — on a solo
+ * trainer's book it never has to at these limits, but nothing is dropped if it
+ * does.
+ */
+function items<T>(path: string): Promise<T[]> {
+  return listAll<T>(path, (p) => get<ListEnvelope<T>>(p));
+}
 
-  return (text ? JSON.parse(text) : null) as T;
+/** For the reads the contract lets fail silently (L9, L10): they become empty. */
+async function itemsOr<T>(path: string): Promise<T[]> {
+  try {
+    return await listAll<T>(path);
+  } catch {
+    return [];
+  }
 }
 
 /* ------------------------------------------------------------ wire shapes ──
  * Named after the Java records they come from, so a change there is greppable
- * from here. Every field the deck does not read is left out on purpose — a DTO
- * that mirrors the server is a second place the server's shape is written down.
+ * from here. Fields the screen does not read are left out on purpose.
  * -------------------------------------------------------------------------- */
 
-/** `TrainerService.TrainerResponse` — only the fields this screen reads. */
-interface TrainerWire {
+/** L1 · `MeService.MeResponse`. */
+interface MeWire {
   id: string;
-  name: string;
-  /** Not the deck's — the rail's foot menu prints it so a trainer can see which
-   *  account is open before signing out of it. Already on the response; this is a
-   *  field being read, not a field being added. */
+  name: string | null;
   phone: string | null;
+  /** Epoch ms since 1.1; null until setup is done. */
+  setupCompletedAt: number | null;
   gymName: string | null;
-  gymSharePercent: number | null;
-  /**
-   * Read here rather than through `lib/setup/api.ts` so the guard's redirect
-   * costs no extra request: this screen already fetches the profile for the
-   * gym's share, and `getSetupState` would fetch the same row again.
-   */
-  setupComplete: boolean;
+  workspace: { id: string; name: string; currency: string; country: string; timezone: string };
 }
 
-/** `ClientService.ClientResponse`. */
-interface ClientWire {
-  id: string;
-  name: string;
-  status: string;
-  deliveryMode: string | null;
-  metadata: Record<string, unknown> | null;
-  /**
-   * The next three are read for the BOOKING FORM this screen now opens in place
-   * — see `TodayData.book`. All three have been on `ClientResponse` since long
-   * before this file; Today simply had no reader for them.
-   *
-   * `membershipStatus` is the roster relationship and is a different fact from
-   * `status` above: it is how a removed client is spelled, and the form must not
-   * offer somebody who left.
-   */
-  membershipStatus: string | null;
-  /** `session_duration_minutes` — what THIS client's sessions are. */
-  sessionDurationMinutes: number | null;
-  sessionsPerWeek: number | null;
-  /**
-   * `client.goal` — the trainer's own free text. Read for the hero's neutral
-   * *Has a note* chip and for nothing else; it is never printed on this screen.
-   * `DeckSession.hasNote` carries the whole argument, including the field this is
-   * deliberately not.
-   */
-  goal: string | null;
-  statusFlags?: { paymentDue: boolean; sessionPackLow: boolean; planExpiring: boolean };
-}
-
-/** `ScheduledSessionService.SessionResponse`. */
-interface SessionWire {
-  id: string;
-  clientId: string;
-  programId: string | null;
-  scheduledAt: number;
-  durationMinutes: number | null;
-  status: string;
-  dayLabel: string | null;
-  templateDay: number | null;
-  deliveryMode: string | null;
-  /** Already on `SessionResponse`; read here for the *Has a note* chip. */
-  notes: string | null;
-}
-
-/** `ProgramService`'s response — the four fields the week counter needs. */
-interface ProgramWire {
-  id: string;
-  clientId: string;
-  name: string;
-  startDate: string | null;
-  endDate: string | null;
-  status: string;
-}
-
-/** `WorkoutSessionService.WorkoutSessionResponse`. */
-interface WorkoutWire {
-  id: string;
-  clientId: string;
-  programId: string | null;
-  scheduledSessionId: string | null;
-  sessionDate: string;
-  createdAt: number;
-  endedAt: number | null;
-}
-
-/** `WorkoutSessionService.SetLogResponse`. */
-interface SetLogWire {
-  id: string;
-  workoutSessionId?: string;
-  exerciseId: string;
-  loadKg: number | null;
-  reps: number | null;
-  createdAt: number;
-}
-
-/** `PackageService.PackageResponse`. */
-interface PackageWire {
-  id: string;
-  clientId: string;
-  type: string;
-  sessionsTotal: number | null;
-  sessionsRemaining: number | null;
-  amount: number | string | null;
-  status: string;
-  /**
-   * ISO `yyyy-MM-dd`, nullable — a pack sold with no expiry, which is most of
-   * them. On `PackageResponse` since it was written; this screen read the session
-   * count and never the date, which is why a monthly pack with fourteen sessions
-   * left and four days to run was invisible on it.
-   */
-  endDate: string | null;
-  /**
-   * V30 · set while the pack's clock is stopped, null while it is running.
-   *
-   * READ HERE FOR ONE REASON: a paused pack must not raise an attention row.
-   * Its `endDate` is frozen — that is what a pause IS — but the days-left
-   * arithmetic is `endDate` against TODAY, and today keeps moving. So a client
-   * three weeks in Kerala would slide from "expires in 9 days" to "expires
-   * today" and then sit there nagging every morning about a pack whose expiry
-   * is not actually running, on behalf of somebody who cannot train anyway.
-   */
-  pausedAt: number | null;
-  createdAt: number;
-  updatedAt: number;
-}
-
-/** `AttentionDismissalService.DismissalResponse` — V28. */
-interface DismissalWire {
-  id: string;
-  clientId: string;
-  kind: string;
-  band: string;
-  /** Null for a permanent dismissal. */
-  snoozedUntil: number | null;
-}
-
-/** `PackageService.PaymentResponse`, including the field appended for this screen. */
-interface PaymentWire {
-  id: string;
-  clientId: string;
-  amount: number | string | null;
-  method: string | null;
-  status: string;
-  upiReference: string | null;
-  paidAt: number | null;
-  gymShareAmount: number | string | null;
-  createdAt: number;
-}
-
-/** `WorkingHoursService.WorkingHourResponse`. */
+/** L2 · `WorkingHoursService.WorkingHourResponse` — weekday 1 = Monday. */
 interface WorkingHourWire {
   id: string;
   weekday: number;
-  startMinute: number;
-  endMinute: number;
+  start: string;
+  end: string;
+}
+
+/** L3 · `ClientSummaryService.ClientSummary`. */
+interface ClientWire {
+  id: string;
+  name: string | null;
+  phone: string | null;
+  status: string;
+  pausedUntil: string | null;
+  membershipStatus: string;
+  clientType: string;
+  hasPinnedNote: boolean;
+  /** Never null on the wire (a trigger makes one per client); `version` is its If-Match. */
+  schedule: { sessionsPerWeek: number | null; sessionDurationMinutes: number | null; deliveryMode: string | null; version: string | null } | null;
+  slots: { id: string; weekday: number; start: string; durationMinutes: number | null; deliveryMode: string | null }[];
+  program: { id: string; name: string; weeks: number; days: number; startDate: string | null; endDate: string | null } | null;
+  stats: { sessionsDone: number; lastDoneAt: number | null; nextSessionAt: number | null; missedStreak: number };
+}
+
+/** L4 · `SessionReadService.SessionRow`. */
+interface SessionWire {
+  id: string;
+  clientId: string;
+  scheduledAt: number;
+  endsAt: number;
+  durationMinutes: number;
+  status: string;
+  deliveryMode: string | null;
+  notes: string | null;
+  slotId: string | null;
+  workout: { id: string; name: string; programId: string | null; week: number | null; day: number | null } | null;
+  startedAt: number | null;
+  endedAt: number | null;
+  /** `volumeKg` is a JSON number since 1.1 (only money is a string). */
+  log: { exercises: number; setsDone: number; volumeKg: number; lastSetAt: number | null } | null;
+  charge: { packageId: string } | null;
+  updatedAt: number;
+  version: string;
+}
+
+/** L5 · `PackageReadService.CurrentPackage`. Money is a decimal string. */
+interface PackageWire {
+  id: string;
+  clientId: string;
+  name: string;
+  service: string;
+  basis: 'sessions' | 'period';
+  sessionsTotal: number | null;
+  sessionsRemaining: number | null;
+  amount: string;
+  discountAmount: string | null;
+  endDate: string | null;
+  dueDate: string | null;
+  status: string;
+  pausedAt: number | null;
+  trainerSharePercent: string | null;
+  trainerShareAmount: string | null;
+  amountPaid: string;
+  amountRefunded: string;
+  amountDue: string;
+  createdAt: number;
 }
 
 /**
- * Spring serialises `NUMERIC` as a JSON number, but Jackson can hand back a
- * string for a `BigDecimal` depending on configuration — and a money figure that
- * silently becomes `NaN` would show as `₹NaN` on the one screen a trainer checks
- * against what they remember. Coerced once, here.
+ * L6 · `MoneySummaryService.Summary` — the one shape, shared with Business
+ * (R65). Months come oldest first; `now` is as of today, not the span.
  */
+interface MoneySummaryWire {
+  currency: string;
+  months: {
+    month: string; billed: string; collected: string; gymCut: string;
+    yours: string; writtenOff: string; refunded: string;
+    packagesSold: number; paymentsCount: number;
+  }[];
+  total: { billed: string; trendPercent: number | null };
+  now: { pending: string; overdue: string; clientsOwing: number; clientsOverdue: number };
+}
+
+/** L7 · `PackageReadService.PaymentRow` — a page of the ledger, the fields Today reads. */
+interface PaymentWire {
+  id: string;
+  clientId: string;
+  packageId: string;
+  clientName: string;
+  packageName: string;
+  amount: string;
+  method: string | null;
+  status: string;
+  reference: string | null;
+  paidAt: number | null;
+  bookAt: number;
+  createdAt: number;
+}
+
+/** L7's envelope: the ledger always says its currency. */
+interface LedgerWire {
+  currency: string;
+  items: PaymentWire[];
+  nextCursor: string | null;
+}
+
+/** L8 · `AttentionDismissalService.DismissalResponse` — keyed by client + kind, no id (R1). */
+interface DismissalWire {
+  clientId: string;
+  kind: string;
+  band: string;
+  snoozedUntil: number | null;
+}
+
+/** L10 · one `AssessmentListService.Item`, the fields Today reads. */
+interface AssessmentWire {
+  id: string; clientId: string; name: string; dueOn: string; state: string;
+}
+
+/** Money arrives as a decimal string; a figure that became NaN would print as ₹NaN. */
 function num(v: number | string | null | undefined): number {
   if (v === null || v === undefined) return 0;
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
-function maybe(v: number | string | null | undefined): number | null {
-  if (v === null || v === undefined) return null;
-  const n = typeof v === 'number' ? v : Number(v);
-  return Number.isFinite(n) ? n : null;
+/** `"06:30"` → 390. */
+function minuteOf(hm: string): number {
+  const [h, m] = hm.split(':').map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+/** `yyyy-MM-dd` for a local-calendar instant on the Next server. */
+function isoDate(at: number): string {
+  const d = new Date(at);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
 }
 
 /* ------------------------------------------------------------------- the day */
 
 /**
- * What `Renew` repeats. Plain object rather than a `Map` because it crosses into
- * a client component, and a record survives that boundary in every Next version
- * this project has run on — `rates.perSession` stays a Map precisely because it
- * does not cross it.
+ * What `Renew` repeats. The v1 renew call copies the terms on the server and
+ * needs only `packageId`; the rest stays until the write moves over.
  */
 export interface RenewTerms {
+  packageId: string;
   type: string;
   amount: number;
   sessionsTotal: number | null;
+}
+
+/** The earliest assessment a client owes today or earlier (L10). */
+export interface OwedAssessment {
+  id: string;
+  clientId: string;
+  name: string;
+  dueOn: string;
+  missed: boolean;
 }
 
 export interface TodayData {
@@ -366,323 +280,312 @@ export interface TodayData {
     name: string;
     phone: string | null;
     gymName: string | null;
+    /** Always null in v1 — the share is per package (R3). Kept for the day ribbon's type. */
     gymSharePercent: number | null;
     setupComplete: boolean;
   };
+  /** The active workspace — currency and the clock every date on the screen is read in. */
+  workspace: MeWire['workspace'];
   hours: WorkWindow[];
   rates: RateSource;
   /**
-   * WHAT THE BOOKING FORM NEEDS, ON THE SCREEN THAT IS NOT THE SCHEDULE.
-   *
-   * `/today`'s *New session* used to be a link to `/schedule?new=1`: it left the
-   * screen, drew a week, and opened a panel over it — three things to book an
-   * hour on the day the trainer was already looking at. It opens `BookPanel` in
-   * place now (see `Today.tsx`), and this is the raw material it reads.
-   *
-   * NO EXTRA REQUEST. Both halves are derived from rows this file already
-   * fetches for the deck — the same `/v1/clients`, `/v1/programs`,
-   * `/v1/packages` and `/v1/sessions` — and the mapping is
-   * `lib/schedule/roster.ts`'s, shared with the schedule so the two screens
-   * cannot disagree about who may be booked or how long their sessions are.
-   *
-   * It is a separate field rather than part of `Deck` on purpose: the deck is
-   * what the day IS, and this is what one form on it needs. `buildDeck` stays a
-   * pure statement about the day and takes no dependency on the booking panel.
+   * What the booking panel Today opens in place needs — derived from rows this
+   * file already fetched, through `lib/schedule/roster.ts` so the schedule and
+   * Today cannot disagree about who may be booked.
    */
   book: {
-    clients: ScheduleClient[];
+    clients: ReturnType<typeof bookableClients>;
     /** The whole fetched window, not just today — see `BookPanel.sessions`. */
     sessions: BookSession[];
   };
   /** clientId → the terms of their most recent pack, for the queue's `Renew`. */
   renewTerms: Record<string, RenewTerms>;
-  /**
-   * clientId → the workout logs that client's `Close` will end.
-   *
-   * IDS ONLY, and that is deliberate. `closeLogs` has to send a whole
-   * `workout_session` row back through the sync envelope — the upsert's
-   * `ON CONFLICT` assigns `notes` and `session_date` from what it is given, so a
-   * caller that guessed at them would erase them. Rather than round-trip a
-   * client's session notes through the browser to be handed back, the action
-   * re-reads each log on the server and edits one field of it. The browser only
-   * ever learns which logs exist, which the row it is drawn beside already says.
-   */
+  /** clientId → the session ids whose open logs that client's `Close` will end. */
   openLogs: Record<string, string[]>;
-  /**
-   * clientId → when they were last messaged, inside the cooldown window.
-   *
-   * The same rows `deck.attention`'s `contactedAt` is derived from, handed
-   * across again in map form — because the two readers want different shapes.
-   * The queue's ranking wants it per ROW, so the deck stamps it; the hero's
-   * nudge buttons want it per CLIENT and sit four components deep, so they read
-   * it through `LastContactProvider`. Deriving it twice from one read is cheaper
-   * than a second request and cheaper than threading a prop through the hero.
-   */
+  /** clientId → when they were last messaged, inside the cooldown window. */
   lastContact: Record<string, number>;
+  /**
+   * clientId → the earliest assessment they owe (L10). Read now so the hero's
+   * *Assessment due* chip and the queue's assessment-due row have their data;
+   * neither is drawn yet.
+   */
+  assessments: Record<string, OwedAssessment>;
   /** The instant the server derived this from. The browser ticks on from it. */
   now: number;
 }
 
 /**
- * `cache()` for the same reason `lib/setup/api.ts` uses it: the page and its
- * metadata both want the deck, and React's per-request cache makes that one
- * round of requests rather than two. It is a REQUEST cache, not a data cache —
- * it does not survive the response, so the next load re-reads the day.
+ * `cache()` so the page and its metadata make one round of requests, not two.
+ * It is a REQUEST cache: the next load re-reads the day.
  */
 export const getToday = cache(async (): Promise<TodayData> => {
   const now = Date.now();
 
   /*
-   * Thirty days back through the end of tomorrow. `to` is exclusive on
-   * `GET /v1/sessions`, so the day after tomorrow's first instant is the bound.
+   * The window, as dates. The server resolves the day boundary from the
+   * workspace's timezone (R8), but the dates themselves are picked here, on a
+   * server whose zone may not be the trainer's — so each end is widened by a
+   * day and the deck, which works in instants, ignores the slack.
    *
-   * WIDENED from `startOfWeek(now)` on 27 Aug 2026. The old window could not
-   * answer either of the queue's two backward-looking triggers:
-   *
-   *   · **Missed the last 2 sessions.** A streak of no-shows is by definition
-   *     older than the sessions that are still to come, and on a Tuesday
-   *     Monday-of-this-week holds at most one settled day.
-   *   · **Yesterday's sessions not marked.** On every Monday of the year
-   *     "yesterday" is a Sunday, which the old window excluded — so the row could
-   *     not exist on the one morning it is most likely to.
-   *
-   * Thirty and not ninety: `unmarked` looks back a week and `missed` needs enough
-   * settled sessions to see a streak, which at two or three a week is comfortably
-   * inside a month. Beyond that the rows are about a client who left rather than
-   * one who is leaving, and this is still the row set with the most volume per
-   * day on the wire.
+   * Thirty days back is what `missed` and `unmarked` need; `to` is exclusive and
+   * must cover the whole of tomorrow.
    */
-  const from = startOfDay(now) - SESSION_LOOKBACK_DAYS * DAY_MS;
-  const to = startOfDay(now) + 2 * DAY_MS;
+  const today = isoDate(now);
+  const sessionsFrom = isoDate(now - (SESSION_LOOKBACK_DAYS + 1) * DAY_MS);
+  const sessionsTo = isoDate(now + 3 * DAY_MS);
+  const paymentsFrom = isoDate(now - ACTIVITY_DAYS * DAY_MS);
 
   const [
-    trainer,
+    me,
+    hours,
     clients,
     sessions,
-    programs,
-    workouts,
     packages,
+    money,
     payments,
-    hours,
     dismissals,
     nudges,
+    assessments,
   ] = await Promise.all([
-    get<TrainerWire>('/v1/trainers/me'),
-    get<ClientWire[]>('/v1/clients'),
-    get<SessionWire[]>(`/v1/sessions?from=${from}&to=${to}`),
-    get<ProgramWire[]>('/v1/programs'),
-    get<WorkoutWire[]>('/v1/workouts'),
-    get<PackageWire[]>('/v1/packages'),
-    get<PaymentWire[]>('/v1/payments'),
-    get<WorkingHourWire[]>('/v1/working-hours'),
-    get<DismissalWire[]>('/v1/attention/dismissals'),
-    /*
-     * THE TENTH REQUEST, AND THE ONLY ONE THAT CANNOT FAIL THE SCREEN.
-     *
-     * `GET /v1/nudges` — a week of `nudge_log` rows, so the queue stops raising
-     * a row about somebody the trainer messaged yesterday. Windowed to the
-     * cooldown, which is tens of rows for a full book rather than the hundreds
-     * `/v1/payments` costs unwindowed.
-     *
-     * `listRecentNudges` swallows its own failure and answers `[]` — it is the
-     * one read here that does. The other nine each answer a question the screen
-     * cannot draw without; this one answers "who have I already contacted", and
-     * losing it degrades the RANKING back to what it was before this feature
-     * existed. A dashboard that 500s because a supporting read did is the worse
-     * failure, and a backend that predates V32 404s this route.
-     */
+    get<MeWire>('/v1/me'),
+    items<WorkingHourWire>('/v1/working-hours'),
+    items<ClientWire>('/v1/clients?view=summary'),
+    items<SessionWire>(`/v1/sessions?from=${sessionsFrom}&to=${sessionsTo}`),
+    items<PackageWire>('/v1/packages?scope=current'),
+    get<MoneySummaryWire>('/v1/money/summary?months=2'),
+    // The feed shows twenty rows, so this one page is the whole answer — the
+    // cursor is not followed (L7).
+    get<LedgerWire>(`/v1/payments?status=paid&from=${paymentsFrom}&limit=20`),
+    items<DismissalWire>('/v1/attention/dismissals'),
+    // L9 and L10 are the only reads allowed to fail silently: losing either
+    // degrades the queue's ranking or a chip, never the screen.
     listRecentNudges(COOLDOWN_DAYS),
+    itemsOr<AssessmentWire>(`/v1/assessments?state=booked,missed&dueBy=${today}&limit=500`),
   ]);
 
-  const input: DeckInput = {
-    clients: (clients ?? []).map((c) => ({
-      id: c.id,
-      name: c.name,
-      status: c.status,
-      deliveryMode: c.deliveryMode,
-      metadata: c.metadata,
-      goal: c.goal,
-    })),
-    sessions: (sessions ?? []).map((s) => ({
+  const clientRows = clients ?? [];
+  const sessionRows = sessions ?? [];
+  const packageRows = packages ?? [];
+
+  /*
+   * A logged session is the deck's "workout". Keyed by the session id, because
+   * in v1 that IS the log's id — `/sessions/{id}` opens it.
+   */
+  const workouts: DeckWorkout[] = sessionRows
+    .filter((s) => s.startedAt !== null)
+    .map((s) => ({
       id: s.id,
       clientId: s.clientId,
-      programId: s.programId ?? undefined,
+      programId: s.workout?.programId ?? undefined,
+      scheduledSessionId: s.id,
+      sessionDate: isoDate(s.startedAt!),
+      createdAt: s.startedAt!,
+      endedAt: s.endedAt,
+      setsDone: s.log?.setsDone ?? 0,
+      volumeKg: num(s.log?.volumeKg),
+      lastSetAt: s.log?.lastSetAt ?? null,
+    }));
+
+  const input: DeckInput = {
+    clients: clientRows.map((c) => ({
+      id: c.id,
+      name: c.name ?? '',
+      status: c.status,
+      deliveryMode: c.schedule?.deliveryMode ?? null,
+      metadata: null,
+      hasNote: c.hasPinnedNote,
+      lastDoneAt: c.stats.lastDoneAt,
+      sessionsDone: c.stats.sessionsDone,
+      // The server's streak over the whole history (L3), not one walked from
+      // L4's 30-day window, which would cut off an older streak.
+      missedStreak: c.stats.missedStreak,
+    })),
+    sessions: sessionRows.map((s) => ({
+      id: s.id,
+      clientId: s.clientId,
+      programId: s.workout?.programId ?? undefined,
       scheduledAt: s.scheduledAt,
-      durationMinutes: s.durationMinutes ?? undefined,
+      durationMinutes: s.durationMinutes,
       status: s.status,
-      dayLabel: s.dayLabel ?? undefined,
-      templateDay: s.templateDay ?? undefined,
+      dayLabel: s.workout?.name,
+      templateDay: s.workout?.day ?? undefined,
       deliveryMode: s.deliveryMode,
       notes: s.notes,
+      week: s.workout?.week ?? undefined,
     })),
-    programs: (programs ?? []).map((p) => ({
-      id: p.id,
-      clientId: p.clientId,
-      name: p.name,
-      startDate: p.startDate ?? undefined,
-      endDate: p.endDate ?? undefined,
-      status: p.status,
-    })),
-    workouts: (workouts ?? []).map((w) => ({
-      id: w.id,
-      clientId: w.clientId,
-      programId: w.programId ?? undefined,
-      scheduledSessionId: w.scheduledSessionId ?? undefined,
-      sessionDate: w.sessionDate,
-      createdAt: w.createdAt,
-      endedAt: w.endedAt,
-    })),
-    packages: (packages ?? []).map((p) => ({
+    workouts,
+    // The live set counts ride on the session rows now (`DeckWorkout.setsDone`).
+    setLogs: [],
+    programs: clientRows
+      .filter((c) => c.program !== null)
+      .map((c) => ({
+        id: c.program!.id,
+        clientId: c.id,
+        name: c.program!.name,
+        startDate: c.program!.startDate ?? undefined,
+        endDate: c.program!.endDate ?? undefined,
+        status: 'active',
+        weeks: c.program!.weeks,
+      })),
+    packages: packageRows.map((p) => ({
       id: p.id,
       clientId: p.clientId,
       sessionsTotal: p.sessionsTotal,
       sessionsRemaining: p.sessionsRemaining,
       amount: num(p.amount),
       status: p.status,
-      updatedAt: p.updatedAt,
+      updatedAt: p.createdAt,
       endDate: p.endDate,
-      pausedAt: p.pausedAt ?? null,
+      pausedAt: p.pausedAt,
+      amountDue: num(p.amountDue),
+      dueDate: p.dueDate,
+      service: p.service,
     })),
-    payments: (payments ?? []).map((p) => ({
+    payments: (payments?.items ?? []).map((p) => ({
       id: p.id,
       clientId: p.clientId,
       amount: num(p.amount),
       method: p.method ?? undefined,
       status: p.status,
-      upiReference: p.upiReference ?? undefined,
-      gymShareAmount: maybe(p.gymShareAmount),
+      upiReference: p.reference ?? undefined,
       paidAt: p.paidAt,
       createdAt: p.createdAt,
     })),
     dismissals: (dismissals ?? []).map((d) => ({
-      id: d.id,
+      // No id on the wire (R1): the row is addressed by client + kind.
+      id: `${d.clientId}:${d.kind}`,
       clientId: d.clientId,
       kind: d.kind,
       band: d.band,
       snoozedUntil: d.snoozedUntil,
     })),
     nudges: (nudges ?? []).map((n) => ({ clientId: n.clientId, sentAt: n.sentAt })),
-    // The last row set, and the only one fetched conditionally — see below.
-    setLogs: [],
+    // The deck reads newest month first; 1.1 sends oldest first. Pending and
+    // clients owing are "right now" figures (`now`), the same on every month.
+    moneySummary: [...(money?.months ?? [])].reverse().map((m) => ({
+      month: m.month,
+      billed: num(m.billed),
+      collected: num(m.collected),
+      gymCut: num(m.gymCut),
+      yours: num(m.yours),
+      pending: num(money?.now?.pending),
+      clientsOwing: money?.now?.clientsOwing ?? 0,
+    })),
   };
 
-  let deck = buildDeck(input, now);
+  const deck = buildDeck(input, now);
 
   /*
-   * THE ONE CONDITIONAL REQUEST.
-   *
-   * Set logs exist on the wire only per workout (`GET /v1/workouts/{id}/sets`),
-   * and this screen needs them for exactly one thing: the live hero's "14 sets ·
-   * 2,180 kg". So they are fetched for the ONE open log, after the deck has
-   * identified it, and the deck is rebuilt with them.
-   *
-   * Two rounds instead of one, on the minority of loads where a session is
-   * actually running. The alternative is a set-log request per workout in the
-   * history, which is the N+1 this whole file is arranged to avoid.
+   * The per-session rate, per client, from their NEWEST package whatever its
+   * status: a client whose pack ran out yesterday still has an agreed price.
+   * The trainer's share is the package's own (R3) — a percentage, or a flat
+   * amount spread over the sessions — and a package with no share is wholly the
+   * trainer's. A period pack has no per-session rate: a month's fee is not
+   * attributable to one hour of it.
    */
-  if (deck.running) {
-    try {
-      const sets = await get<SetLogWire[]>(`/v1/workouts/${deck.running.workoutId}/sets`);
-      input.setLogs = (sets ?? []).map((l) => ({
-        id: l.id,
-        workoutSessionId: l.workoutSessionId ?? deck.running!.workoutId,
-        exerciseId: l.exerciseId,
-        loadKg: l.loadKg ?? undefined,
-        reps: l.reps ?? undefined,
-        createdAt: l.createdAt,
-      }));
-      deck = buildDeck(input, now);
-    } catch {
-      // A hero that says "in session" with no set count is worth having; a Today
-      // that 500s because one sub-request did is not. The rest of the screen is
-      // already derived and correct.
-    }
-  }
-
-  /*
-   * The per-session rate, per client.
-   *
-   * The NEWEST package regardless of status, not the newest live one: a client
-   * whose pack ran out yesterday still has an agreed price, and that price is
-   * what today's session with them is worth. `perSession` in
-   * `lib/setup/money.ts` does the same division — a monthly fee has no session
-   * count to divide by and yields nothing, which is correct rather than a gap:
-   * a month's fee is not attributable to one hour of it.
-   */
-  const perSession = new Map<string, number>();
-  const renewTerms: Record<string, RenewTerms> = {};
   const newest = new Map<string, PackageWire>();
-  for (const p of packages ?? []) {
+  for (const p of packageRows) {
     const seen = newest.get(p.clientId);
     if (!seen || p.createdAt > seen.createdAt) newest.set(p.clientId, p);
   }
+  const perSession = new Map<string, number>();
+  const renewTerms: Record<string, RenewTerms> = {};
   for (const [clientId, p] of newest) {
     const amount = num(p.amount);
-    const count = p.type === 'single' ? 1 : (p.sessionsTotal ?? 0);
-    if (amount > 0 && count > 0) perSession.set(clientId, Math.round(amount / count));
-    // The same row answers a second question — what `Renew` should repeat — so
-    // it is carried rather than re-fetched when the trainer clicks the verb.
+    const count = p.basis === 'sessions' ? p.sessionsTotal ?? 0 : 0;
+    if (amount > 0 && count > 0) {
+      const rate = p.trainerSharePercent !== null
+        ? (amount / count) * (num(p.trainerSharePercent) / 100)
+        : p.trainerShareAmount !== null
+          ? num(p.trainerShareAmount) / count
+          : amount / count;
+      perSession.set(clientId, Math.round(rate));
+    }
     if (amount > 0) {
-      renewTerms[clientId] = { type: p.type, amount, sessionsTotal: p.sessionsTotal };
+      renewTerms[clientId] = { packageId: p.id, type: p.basis, amount, sessionsTotal: p.sessionsTotal };
     }
   }
 
-  /*
-   * The same rule the queue's row was raised by, so the verb can never reach a
-   * log the row did not count — `staleOpenLogs` is exported for exactly this.
-   * `deck` is already built, so this costs a pass over rows we hold.
-   */
+  /* The same rule the queue's row was raised by, so Close never reaches a log the row did not count. */
   const openLogs: Record<string, string[]> = {};
   for (const [clientId, logs] of staleOpenLogs(input, now)) {
     openLogs[clientId] = logs.map((l) => l.workoutId);
   }
 
   /*
-   * The booking form's two lists. Derived, not fetched — see `TodayData.book`.
-   *
-   * The sessions are the WHOLE thirty-day window rather than today's, because
-   * `suggestClients` ranks the roster on *trains around this hour on Thursdays*
-   * and one day of rows cannot say that about anybody. The five fields are all
-   * `BookPanel` reads; `collisionsAt` narrows to the booked day itself.
+   * The booking form's two lists, derived rather than fetched. The sessions are
+   * the whole window, because `suggestClients` ranks the roster on *trains around
+   * this hour on Thursdays* and one day of rows cannot say that about anybody.
    */
-  const clientById = new Map((clients ?? []).map((c) => [c.id, c]));
+  const rosterRows: RosterClientRow[] = clientRows.map((c) => ({
+    id: c.id,
+    name: c.name ?? '',
+    status: c.status,
+    membershipStatus: c.membershipStatus,
+    deliveryMode: c.schedule?.deliveryMode ?? null,
+    metadata: null,
+    sessionDurationMinutes: c.schedule?.sessionDurationMinutes ?? null,
+    sessionsPerWeek: c.schedule?.sessionsPerWeek ?? null,
+  }));
+  const rosterPrograms: RosterProgramRow[] = input.programs.map((p) => ({
+    id: p.id, clientId: p.clientId, name: p.name, status: p.status,
+  }));
+  const rosterPacks = new Map<string, RosterPackRow>(
+    [...newest].map(([clientId, p]) => [clientId, {
+      sessionsTotal: p.sessionsTotal, sessionsRemaining: p.sessionsRemaining,
+    }]),
+  );
+  const clientById = new Map(clientRows.map((c) => [c.id, c]));
   const book = {
-    clients: bookableClients(clients ?? [], programs ?? [], newest),
-    sessions: (sessions ?? []).map((s): BookSession => ({
+    clients: bookableClients(rosterRows, rosterPrograms, rosterPacks),
+    sessions: sessionRows.map((s): BookSession => ({
       id: s.id,
       clientId: s.clientId,
       clientName: clientById.get(s.clientId)?.name?.trim() || 'Client',
       at: s.scheduledAt,
       minutes: sessionMinutes(
         s.durationMinutes,
-        clientById.get(s.clientId)?.sessionDurationMinutes,
+        clientById.get(s.clientId)?.schedule?.sessionDurationMinutes,
       ),
       dead: DEAD_SESSION.has((s.status ?? '').toLowerCase()),
     })),
   };
 
+  /* Only the earliest owed assessment per client is used (L10). */
+  const owed: Record<string, OwedAssessment> = {};
+  for (const a of assessments) {
+    const seen = owed[a.clientId];
+    if (!seen || a.dueOn < seen.dueOn) {
+      owed[a.clientId] = {
+        id: a.id, clientId: a.clientId, name: a.name, dueOn: a.dueOn, missed: a.state === 'missed',
+      };
+    }
+  }
+
   return {
     deck,
     trainer: {
-      name: trainer?.name ?? '',
-      phone: trainer?.phone ?? null,
-      gymName: trainer?.gymName ?? null,
-      gymSharePercent: maybe(trainer?.gymSharePercent),
-      // Absent means a backend older than V8, and every trainer one of those ever
-      // answered had finished setup — so absence reads as done rather than as a
-      // redirect back into a flow they completed months ago.
-      setupComplete: trainer?.setupComplete !== false,
+      name: me?.name ?? '',
+      phone: me?.phone ?? null,
+      gymName: me?.gymName ?? null,
+      gymSharePercent: null,
+      // `setupCompletedAt: null` is the redirect signal — the contract's
+      // timestamp, not the old boolean.
+      setupComplete: me?.setupCompletedAt != null,
     },
+    workspace: me.workspace,
+    // The wire's weekday is 1 = Monday; the ribbon's `WorkWindow` is 0 = Monday.
     hours: (hours ?? []).map((h) => ({
-      weekday: h.weekday,
-      startMinute: h.startMinute,
-      endMinute: h.endMinute,
+      weekday: h.weekday - 1,
+      startMinute: minuteOf(h.start),
+      endMinute: minuteOf(h.end),
     })),
-    rates: { perSession, gymSharePercent: maybe(trainer?.gymSharePercent) },
+    rates: { perSession, gymSharePercent: null },
     book,
     renewTerms,
     openLogs,
     lastContact: Object.fromEntries(lastContactMap(nudges)),
+    assessments: owed,
     now,
   };
 });

@@ -11,6 +11,7 @@ import {
   type ReportSetRow,
   type ReportWeeks,
 } from './build';
+import { listAll, type ListEnvelope } from '@/lib/http/client';
 
 /**
  * WHAT ONE CLIENT'S PROGRESS REPORT COSTS.
@@ -144,7 +145,7 @@ export const getClientReport = cache(
     const [client, trainer, sessions, workouts, sets, metrics] = await Promise.all([
       get<ClientWire>(`/v1/clients/${clientId}`),
       get<TrainerWire>('/v1/trainers/me'),
-      get<SessionWire[]>(`/v1/sessions?clientId=${clientId}&from=${from}&to=${now}`),
+      listAll<SessionWire>(`/v1/sessions?clientId=${clientId}&from=${from}&to=${now}`, (p) => get<ListEnvelope<SessionWire>>(p)),
       get<WorkoutWire[]>(`/v1/workouts?clientId=${clientId}`).catch(() => [] as WorkoutWire[]),
       get<SetWire[]>(`/v1/workouts/sets?clientId=${clientId}`).catch(() => [] as SetWire[]),
       get<MetricWire[]>(`/v1/clients/${clientId}/body-metrics`).catch(() => [] as MetricWire[]),

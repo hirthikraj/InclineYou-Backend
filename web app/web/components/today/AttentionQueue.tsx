@@ -115,6 +115,15 @@ export function AttentionQueue({
   const [expanded, setExpanded] = useState(false);
   const [showSilenced, setShowSilenced] = useState(false);
   const pending = useRef<Map<string, Pending>>(new Map());
+  /*
+   * row key → the id this row's current attempt is written under (1.1: every
+   * create takes a client-minted id, and a replay answers with the first
+   * result). Kept across a failed try, so pressing again after a timeout — when
+   * the server may well have done it — replays instead of sending a second
+   * WhatsApp draft or a second pack. Dropped on success: the next press is a
+   * new act.
+   */
+  const attempts = useRef<Map<string, string>>(new Map());
 
   const setState = useCallback((key: string, state: RowState) => {
     setStates((prev) => ({ ...prev, [key]: state }));
@@ -144,7 +153,9 @@ export function AttentionQueue({
   const commit = useCallback(
     async (item: AttentionItem) => {
       setState(item.key, { kind: 'working' });
-      const result = await runVerb(item, renewTerms, openLogs);
+      const attemptId = attempts.current.get(item.key) ?? crypto.randomUUID();
+      attempts.current.set(item.key, attemptId);
+      const result = await runVerb(item, renewTerms, openLogs, attemptId);
 
       if (!result.ok) {
         setState(item.key, { kind: 'failed', message: result.message ?? 'That did not go through.' });
@@ -175,6 +186,7 @@ export function AttentionQueue({
        * `noopener` because `wa.me` is a third-party origin and a tab opened
        * without it can reach back through `window.opener`.
        */
+      attempts.current.delete(item.key);
       if (result.whatsappUrl) {
         window.open(result.whatsappUrl, '_blank', 'noopener,noreferrer');
       }
@@ -429,25 +441,24 @@ async function runVerb(
   item: AttentionItem,
   renewTerms: Record<string, RenewTerms>,
   openLogs: Record<string, string[]>,
+  attemptId: string,
 ) {
   switch (item.action) {
     case 'Remind':
-      return remind(item.clientId);
+      return remind(item.clientId, attemptId);
     case 'Check in':
       // The band picks the template: `missed_session` names the absences,
       // `check_in` asks after somebody. Same verb on the row, different draft.
-      return checkIn(item.clientId, item.kind === 'missed' ? 'missed_session' : 'check_in');
+      return checkIn(item.clientId, item.kind === 'missed' ? 'missed_session' : 'check_in', attemptId);
     case 'Wish':
-      return wish(item.clientId);
+      return wish(item.clientId, attemptId);
     case 'Mark':
       return markAttended(item.sessionIds ?? []);
     case 'Close':
       return closeLogs(openLogs[item.clientId] ?? []);
     case 'Renew':
-      return renew(
-        item.clientId,
-        renewTerms[item.clientId] ?? { type: 'session_pack', amount: 0, sessionsTotal: null },
-      );
+      // The pack the row is about; the newest pack only as a fallback.
+      return renew(item.packageId ?? renewTerms[item.clientId]?.packageId, attemptId);
     default:
       return { ok: false, message: `${item.action} is not wired up on this screen yet.` };
   }

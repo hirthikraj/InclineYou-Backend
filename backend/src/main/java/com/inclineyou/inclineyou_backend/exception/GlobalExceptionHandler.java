@@ -10,6 +10,7 @@ import com.inclineyou.inclineyou_backend.workout.WorkoutRuleException;
 import com.inclineyou.inclineyou_backend.client.PhoneUnavailableException;
 import com.inclineyou.inclineyou_backend.nudge.NudgeRuleException;
 import com.inclineyou.inclineyou_backend.assessment.AssessmentRuleException;
+import com.inclineyou.inclineyou_backend.attention.AttentionRuleException;
 import com.inclineyou.inclineyou_backend.payment.PackRuleException;
 import com.inclineyou.inclineyou_backend.trainer.account.AccountRuleException;
 import com.inclineyou.inclineyou_backend.payment.PackageRuleException;
@@ -18,11 +19,20 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /** The wire-wide codes — `VALIDATION`, `RANGE_TOO_LARGE`, `ID_CONFLICT`. See {@link ApiException}. */
+    @ExceptionHandler(ApiException.class)
+    ResponseEntity<ProblemDetail> handleApi(ApiException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
+        if (ex.getCode() != null) pd.setProperty("code", ex.getCode());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
 
     @ExceptionHandler(InvalidOtpException.class)
     ProblemDetail handleInvalidOtp(InvalidOtpException ex) {
@@ -102,6 +112,14 @@ public class GlobalExceptionHandler {
     ResponseEntity<ProblemDetail> handleTenantRule(TenantRuleException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(
                 org.springframework.http.HttpStatus.valueOf(ex.getStatus()), ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
+
+    /** A dismissal the queue cannot record — `BAND_KIND_MISMATCH`. */
+    @ExceptionHandler(AttentionRuleException.class)
+    ResponseEntity<ProblemDetail> handleAttentionRule(AttentionRuleException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
         pd.setProperty("code", ex.getCode());
         return ResponseEntity.status(ex.getStatus()).body(pd);
     }
@@ -215,6 +233,21 @@ public class GlobalExceptionHandler {
                 .map(e -> e.getField() + ": " + e.getDefaultMessage())
                 .findFirst()
                 .orElse("Validation failed");
-        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail);
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail);
+        pd.setProperty("code", "VALIDATION");
+        return pd;
+    }
+
+    /**
+     * A path or query value that isn't the type the route takes — most often a
+     * malformed id in {@code /v1/packages/{packageId}/renew}. 400 {@code VALIDATION}
+     * like every other malformed input (1.1), rather than Spring's uncoded 400.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    ProblemDetail handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                ex.getName() + ": not a valid value");
+        pd.setProperty("code", "VALIDATION");
+        return pd;
     }
 }

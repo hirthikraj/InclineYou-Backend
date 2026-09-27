@@ -1,18 +1,19 @@
 package com.inclineyou.inclineyou_backend.attention;
 
+import com.inclineyou.inclineyou_backend.wire.Items;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
  * What the trainer has silenced in *Needs you today*.
  *
- * Three routes and no more: read them all, silence one, put one back. There is no
+ * Three routes and no more: read them all, silence one, put one back — each
+ * row addressed by client + kind, because that is the table's key (R1). There is no
  * per-client GET, because the only caller is a dashboard that has just read the
  * whole roster anyway — a per-client route here would be the mistake
  * {@code GET /v1/packages} was added to fix, one request per client on the screen
@@ -34,29 +35,30 @@ public class AttentionDismissalController {
     }
 
     @GetMapping
-    public List<AttentionDismissalService.DismissalResponse> list(Authentication auth) {
-        return service.list(trainerId(auth));
+    public Items<AttentionDismissalService.DismissalResponse> list(Authentication auth) {
+        // Bounded — one row per client per kind at most — so {items} and no cursor.
+        return Items.of(service.list(trainerId(auth)));
     }
 
     /**
-     * {@code 201} on both a first dismissal and an extension of one, which is a
-     * small lie the alternative does not improve on: the caller cannot tell the two
-     * apart before it asks, and a route that answered 200-or-201 would make every
-     * client branch on a distinction none of them acts on. The row comes back
-     * either way, and its {@code id} is what a DELETE needs.
+     * Snooze ("Not now") or silence ("Not again") one row. PUT because it is an
+     * upsert on a natural key the caller already knows — the same call extends a
+     * snooze or makes it permanent. 200 with the row either way.
      */
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
+    @PutMapping("/{clientId}/{kind}")
     public AttentionDismissalService.DismissalResponse dismiss(
             Authentication auth,
+            @PathVariable UUID clientId,
+            @PathVariable String kind,
             @Valid @RequestBody AttentionDismissalService.DismissRequest req
     ) {
-        return service.dismiss(trainerId(auth), req);
+        return service.dismiss(trainerId(auth), clientId, kind, req);
     }
 
-    @DeleteMapping("/{id}")
+    /** Put a row back. 204 even when nothing was there — see the service. */
+    @DeleteMapping("/{clientId}/{kind}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void restore(Authentication auth, @PathVariable UUID id) {
-        service.restore(trainerId(auth), id);
+    public void restore(Authentication auth, @PathVariable UUID clientId, @PathVariable String kind) {
+        service.restore(trainerId(auth), clientId, kind);
     }
 }

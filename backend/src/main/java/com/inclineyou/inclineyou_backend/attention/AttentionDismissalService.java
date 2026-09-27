@@ -14,6 +14,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -42,50 +43,60 @@ public class AttentionDismissalService {
 
     // ── DTOs ──────────────────────────────────────────────────────────────────
 
-    public record DismissRequest(
-            @NotBlank String clientId,
-            /** {@code AttentionItem.kind} — which job is being silenced. */
-            @NotBlank String kind,
-            /** The band it sits in right now, so an escalation can outrank it. */
-            @NotBlank String band,
-            /**
-             * Epoch millis to stay quiet until, or null for "do not raise this
-             * again". Absent and null mean the same thing; there is no third
-             * state, because {@code snoozed_until} is one nullable column.
-             */
-            Long snoozeUntil
-    ) {}
+    /**
+     * {@code PUT /v1/attention/dismissals/{clientId}/{kind}} — the body of a
+     * snooze ("Not now") or a silence ("Not again").
+     *
+     * @param band         the band the row sits in right now, so an escalation
+     *                     can outrank the dismissal (see the class comment)
+     * @param snoozedUntil epoch ms to stay quiet until; null means "do not raise
+     *                     this again". Absent and null are the same thing.
+     */
+    public record DismissRequest(@NotBlank String band, Long snoozedUntil) {}
 
+    /** Which bands each kind may be dismissed at — {@code attention_dismissal_band}, word for word. */
+    private static final Map<String, Set<String>> BANDS = Map.of(
+            "pack", Set.of("pack-empty", "pack-ending", "pack-expiring"),
+            "overdue", Set.of("overdue-late", "due-soon"),
+            "missed", Set.of("missed"),
+            "quiet", Set.of("quiet"),
+            "no-program", Set.of("no-program"),
+            "unmarked", Set.of("unmarked"),
+            "milestone", Set.of("milestone"),
+            "log", Set.of("log-open"));
+
+    /**
+     * No id: the table's key is (trainer_id, client_id, kind), so a row is
+     * addressed by clientId + kind (api-contract R1). One silence per client per
+     * kind is the correct shape, and the wire says so.
+     */
     public record DismissalResponse(
-            String id,
             String clientId,
             String kind,
             String band,
             /** Null for a permanent dismissal. */
             Long snoozedUntil,
-            long createdAt,
-            long updatedAt
+            long createdAt
     ) {}
 
     private static final String COLUMNS =
-            "id::text, client_id::text, kind, band, snoozed_until, created_at, updated_at";
+            "client_id::text, kind, band, snoozed_until, created_at";
 
     // ── List ──────────────────────────────────────────────────────────────────
 
     /**
-     * Every silence this trainer still has in force.
+     * Every silence this trainer has — api-contract Today L8.
      *
-     * Expired snoozes are filtered in SQL rather than deleted on read. A GET that
-     * writes is a GET that cannot be retried, cannot be cached by anything ever,
-     * and turns a read timeout into a partial mutation — and the rows are tiny.
-     * They are cleaned up by the next dismissal of the same job, which UPDATEs the
-     * row it would otherwise duplicate.
+     * Lapsed snoozes are returned too, deliberately: the frontend's
+     * {@code isSilenced} already ignores them, and filtering here would make the
+     * answer depend on this server's clock rather than the one the deck is built
+     * against. A GET that deleted them instead would be a read that writes. The
+     * rows are tiny and the next dismissal of the same job overwrites its row.
      */
     public List<DismissalResponse> list(UUID trainerId) {
         var rows = jdbc.queryForList(
                 "SELECT " + COLUMNS + " FROM attention_dismissal " +
-                "WHERE trainer_id = :tid::uuid " +
-                "  AND (snoozed_until IS NULL OR snoozed_until > NOW())",
+                "WHERE trainer_id = :tid::uuid ORDER BY created_at, client_id, kind",
                 Map.of("tid", trainerId.toString()));
         return rows.stream().map(this::toResponse).toList();
     }
@@ -93,55 +104,48 @@ public class AttentionDismissalService {
     // ── Dismiss ───────────────────────────────────────────────────────────────
 
     /**
-     * Silence a job, or change how long it stays silent.
+     * Snooze or silence one queue row. An upsert on the table's key
+     * (trainer_id, client_id, kind), so dismissing a row that is already
+     * dismissed just replaces its band and snooze. {@code created_at} is not
+     * reassigned on conflict: it dates the first "not now".
      *
-     * Upsert on the natural key, so a snooze extended and a snooze made permanent
-     * are the same call. {@code created_at} is deliberately NOT reassigned on
-     * conflict: it dates the first time the trainer said "not now" about this job,
-     * which is the figure a later "you have been putting this off for three weeks"
-     * would need. {@code updated_at} moves.
+     * <p>Checked in Java before the write rather than left to the check
+     * constraint, so the trainer gets {@code BAND_KIND_MISMATCH} and a sentence
+     * instead of a 500.
      */
     @Transactional
-    public DismissalResponse dismiss(UUID trainerId, DismissRequest req) {
-        // Ownership, not tidiness: the client id comes from the browser, and
-        // without this a trainer could silence a row on somebody else's roster —
-        // writing a row that the other trainer's queue would then read.
-        Boolean owned = jdbc.queryForObject(
-                "SELECT EXISTS(SELECT 1 FROM client WHERE id = :cid::uuid " +
-                "AND trainer_id = :tid::uuid AND deleted_at IS NULL)",
-                Map.of("cid", req.clientId(), "tid", trainerId.toString()), Boolean.class);
-        if (!Boolean.TRUE.equals(owned)) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Client not found");
+    public DismissalResponse dismiss(UUID trainerId, UUID clientId, String kind, DismissRequest req) {
+        var bands = BANDS.get(kind);
+        if (bands == null || !bands.contains(req.band())) {
+            throw AttentionRuleException.bandKindMismatch(kind, req.band());
         }
+        requireOwnedClient(trainerId, clientId);
 
         var p = new HashMap<String, Object>();
-        p.put("id",  UUID.randomUUID().toString());
         p.put("tid", trainerId.toString());
-        p.put("cid", req.clientId());
-        p.put("kind", req.kind());
+        p.put("cid", clientId.toString());
+        p.put("kind", kind);
         p.put("band", req.band());
-        p.put("until", req.snoozeUntil() == null
+        p.put("until", req.snoozedUntil() == null
                 ? null
-                : Timestamp.from(Instant.ofEpochMilli(req.snoozeUntil())));
+                : Timestamp.from(Instant.ofEpochMilli(req.snoozedUntil())));
 
+        // tenant_id is stamped by trg_attention_dismissal_stamp_tenant.
         jdbc.update("""
-                INSERT INTO attention_dismissal
-                    (id, trainer_id, client_id, kind, band, snoozed_until, created_at, updated_at)
-                VALUES
-                    (:id::uuid, :tid::uuid, :cid::uuid, :kind, :band, :until, NOW(), NOW())
+                INSERT INTO attention_dismissal (trainer_id, client_id, kind, band, snoozed_until)
+                VALUES (:tid::uuid, :cid::uuid, :kind, :band, :until)
                 ON CONFLICT (trainer_id, client_id, kind) DO UPDATE SET
                     band          = EXCLUDED.band,
                     snoozed_until = EXCLUDED.snoozed_until,
-                    updated_at    = NOW()
+                    updated_at    = now()
                 """, p);
 
-        log.info("attention dismissed trainer={} client={} kind={} until={}",
-                trainerId, req.clientId(), req.kind(), req.snoozeUntil());
+        log.info("attention dismissed trainer={} client={} kind={} band={} until={}",
+                trainerId, clientId, kind, req.band(), req.snoozedUntil());
 
         return jdbc.queryForList(
                 "SELECT " + COLUMNS + " FROM attention_dismissal " +
-                "WHERE trainer_id = :tid::uuid AND client_id = :cid::uuid AND kind = :kind",
-                Map.of("tid", trainerId.toString(), "cid", req.clientId(), "kind", req.kind()))
+                "WHERE trainer_id = :tid::uuid AND client_id = :cid::uuid AND kind = :kind", p)
                 .stream().map(this::toResponse).findFirst()
                 .orElseThrow(() -> new ResponseStatusException(
                         HttpStatus.INTERNAL_SERVER_ERROR, "Dismissal did not persist"));
@@ -150,23 +154,31 @@ public class AttentionDismissalService {
     // ── Restore ───────────────────────────────────────────────────────────────
 
     /**
-     * Put the job back in the list.
+     * Put a row back in the queue. A DELETE rather than a flag: the table has no
+     * soft delete, because the key allows one silence per client per kind.
      *
-     * A DELETE rather than a flag, per the table's closing note: the unique
-     * constraint counts a tombstone, so a soft delete would make the next
-     * dismissal of the same job collide with a silence that is meant to be gone.
-     *
-     * Scoped by {@code trainer_id} in the WHERE clause and not merely checked
-     * first — the id comes from the browser, and a row that is not this trainer's
-     * must be a 404 rather than a deletion.
+     * <p>Idempotent — nothing there is still success. Another tab, or a snooze
+     * that lapsed and was overwritten, may have got there first, and the state
+     * the trainer asked for ("not silenced") is true either way. Scoped by
+     * {@code trainer_id} in the WHERE clause, so another trainer's row is simply
+     * never matched.
      */
     @Transactional
-    public void restore(UUID trainerId, UUID id) {
-        int gone = jdbc.update(
-                "DELETE FROM attention_dismissal WHERE id = :id::uuid AND trainer_id = :tid::uuid",
-                Map.of("id", id.toString(), "tid", trainerId.toString()));
-        if (gone == 0) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Dismissal not found");
+    public void restore(UUID trainerId, UUID clientId, String kind) {
+        jdbc.update("""
+                DELETE FROM attention_dismissal
+                WHERE trainer_id = :tid::uuid AND client_id = :cid::uuid AND kind = :kind
+                """, Map.of("tid", trainerId.toString(), "cid", clientId.toString(), "kind", kind));
+    }
+
+    /** 404, not 403, for a client that is not this trainer's — ownership is a query filter. */
+    private void requireOwnedClient(UUID trainerId, UUID clientId) {
+        Boolean owned = jdbc.queryForObject(
+                "SELECT EXISTS(SELECT 1 FROM client WHERE id = :cid::uuid " +
+                "AND trainer_id = :tid::uuid AND deleted_at IS NULL)",
+                Map.of("cid", clientId.toString(), "tid", trainerId.toString()), Boolean.class);
+        if (!Boolean.TRUE.equals(owned)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Client not found");
         }
     }
 
@@ -174,13 +186,11 @@ public class AttentionDismissalService {
 
     private DismissalResponse toResponse(Map<String, Object> r) {
         return new DismissalResponse(
-                str(r.get("id")),
                 str(r.get("client_id")),
                 str(r.get("kind")),
                 str(r.get("band")),
                 maybeEpochMilli(r.get("snoozed_until")),
-                toEpochMilli(r.get("created_at")),
-                toEpochMilli(r.get("updated_at")));
+                toEpochMilli(r.get("created_at")));
     }
 
     private String str(Object v) { return v == null ? null : v.toString(); }

@@ -216,4 +216,14 @@ public class PackageRuleException extends RuntimeException {
         return new PackageRuleException(HttpStatus.NOT_FOUND, "CLIENT_NOT_FOUND",
                 "That client is not on your roster.");
     }
+
+    /**
+     * Renew refused: the pack was already renewed — the client holds a newer
+     * running, unpaused pack for the same service — so a double click cannot
+     * sell two. api-contract Today A3; 1.1 named the code for what it means.
+     */
+    public static PackageRuleException alreadyRenewed() {
+        return new PackageRuleException(HttpStatus.CONFLICT, "PACKAGE_ALREADY_RENEWED",
+                "This pack was already renewed — a newer pack for the same service is running.");
+    }
 }

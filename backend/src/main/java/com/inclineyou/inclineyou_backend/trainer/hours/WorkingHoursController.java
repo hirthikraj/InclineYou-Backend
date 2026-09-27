@@ -1,12 +1,12 @@
 package com.inclineyou.inclineyou_backend.trainer.hours;
 
+import com.inclineyou.inclineyou_backend.wire.Items;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -16,6 +16,8 @@ import java.util.UUID;
  * with its own table, its own row ids and its own lifecycle: hanging seven-to-
  * fourteen rows off the profile response would make every profile read carry
  * them, including the six PATCHes the setup flow performs.
+ *
+ * Bounded — a handful of windows a day — so `{items}` with no cursor (1.1).
  *
  * `anyRequest().hasRole("TRAINER")` in `SecurityConfig` covers this path, and
  * `RateLimitFilter` puts it in the STANDARD tier — which is right: it costs one
@@ -29,8 +31,8 @@ public class WorkingHoursController {
     private final WorkingHoursService service;
 
     @GetMapping
-    public List<WorkingHoursService.WorkingHourResponse> list() {
-        return service.list(trainerId());
+    public Items<WorkingHoursService.WorkingHourResponse> list() {
+        return Items.of(service.list(trainerId()));
     }
 
     private UUID trainerId() {

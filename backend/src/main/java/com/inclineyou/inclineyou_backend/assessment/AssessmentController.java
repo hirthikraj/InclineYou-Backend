@@ -20,18 +20,21 @@ public class AssessmentController {
 
     private final AssessmentService assessments;
     private final AssessmentTemplateService templates;
+    private final AssessmentListService list;
 
     /* ── sent assessments ─────────────────────────────────────────────────── */
 
+    /** The v1 list — Today L10 and the Assessments screen. See {@link AssessmentListService}. */
     @GetMapping("/assessments")
-    public AssessmentService.Page list(
-            @RequestParam(required = false) String status,
-            @RequestParam(required = false) String read,
+    public AssessmentListService.Page list(
+            @RequestParam(required = false) String state,
             @RequestParam(required = false) String clientId,
             @RequestParam(required = false) String q,
-            @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        return assessments.list(trainerId(), status, read, clientId, q, page, size);
+            @RequestParam(required = false) String dueBy,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "false") boolean includeTotal) {
+        return list.list(trainerId(), state, clientId, q, dueBy, limit, cursor, includeTotal);
     }
 
     @GetMapping("/assessments/{id}")

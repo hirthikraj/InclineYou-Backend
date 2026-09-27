@@ -83,12 +83,14 @@ export async function getRoster(): Promise<{ id: string; name: string }[]> {
   const token = await getToken();
   if (!token) return [];
   try {
-    const res = await fetch(`${BASE}/v1/clients`, {
+    const res = await fetch(`${BASE}/v1/clients?status=all`, {
       headers: { authorization: `Bearer ${token}` },
       cache: 'no-store',
     });
     if (!res.ok) return [];
-    const data: unknown = await res.json();
+    // 1.1: every list is an `{items}` envelope.
+    const body = (await res.json()) as { items?: unknown };
+    const data: unknown = body?.items;
     if (!Array.isArray(data)) return [];
     return data
       .filter((c): c is { id: string; name?: string } => !!c && typeof (c as { id?: unknown }).id === 'string')

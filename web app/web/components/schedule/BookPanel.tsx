@@ -185,11 +185,26 @@ export function BookPanel({
   const emptiesPack = client?.packLeft === 1;
   const packEmpty = client?.packLeft === 0;
 
+  /*
+   * One id per booking attempt (1.1 Conventions · Ids & retries). Pressing
+   * Book again after a failure with the same client, time, length and mode is
+   * a retry of the same booking and reuses it, so a first try that landed but
+   * never answered replays instead of double-booking. Changing any of those
+   * makes it a different booking, with a new id.
+   */
+  const attempt = useRef<{ key: string; id: string } | null>(null);
+  const attemptFor = (key: string): string => {
+    if (attempt.current?.key !== key) attempt.current = { key, id: crypto.randomUUID() };
+    return attempt.current.id;
+  };
+
   const book = () => {
     if (!clientId) return;
     setError(null);
+    const requestId = attemptFor(`${clientId}|${at}|${length}|${mode ?? ''}`);
     start(async () => {
       const res = await bookSession({
+        requestId,
         clientId,
         scheduledAt: at,
         durationMinutes: length,
@@ -203,6 +218,7 @@ export function BookPanel({
         setError(res.message ?? 'The booking did not go through.');
         return;
       }
+      attempt.current = null;
       /* A RECEIPT, NOT A NOTICE, and the difference is the deadline.
          The panel closes over the grid it just wrote to, and on the day and
          week views the new block is usually below the fold or behind the

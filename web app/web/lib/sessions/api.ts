@@ -5,6 +5,7 @@ import { cache } from 'react';
 import { getToken } from '@/lib/auth/session';
 import { programWeek, rowsForDay, type ProgramExerciseWire } from '@/lib/log/plan';
 import type { ClientNoteWire } from '@/lib/clients/client-api';
+import { listAll, type ListEnvelope } from '@/lib/http/client';
 
 const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;
@@ -465,8 +466,8 @@ export const getSessions = cache(async (): Promise<SessionsData> => {
   const to = now + 30 * 24 * 60 * 60 * 1000;
 
   const [sessions, clients, workouts, programs] = await Promise.all([
-    request<SessionWire[]>(`/v1/sessions?from=${from}&to=${to}`),
-    request<ClientWire[]>('/v1/clients'),
+    listAll<SessionWire>(`/v1/sessions?from=${from}&to=${to}`, (p) => request<ListEnvelope<SessionWire>>(p)),
+    request<ClientWire[]>('/v1/clients?view=legacy'),
     request<WorkoutWire[]>('/v1/workouts'),
     request<ProgramWire[]>('/v1/programs'),
   ]);

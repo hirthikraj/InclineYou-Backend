@@ -581,7 +581,7 @@ export async function getBuilder(templateId: string): Promise<BuilderData> {
     get<TemplateWire[]>('/v1/templates'),
     get<TemplateWire>(`/v1/templates/${encodeURIComponent(templateId)}`),
     get<AssignmentWire[]>(`/v1/templates/${encodeURIComponent(templateId)}/assignments`),
-    get<ClientWire[]>('/v1/clients'),
+    get<ClientWire[]>('/v1/clients?view=legacy'),
   ]);
 
   const ids = [
@@ -828,7 +828,7 @@ export interface ClientProgramsData {
 export async function getClientPrograms(): Promise<ClientProgramsData> {
   const [programs, clients] = await Promise.all([
     get<ProgramWire[]>('/v1/programs'),
-    get<ClientWire[]>('/v1/clients'),
+    get<ClientWire[]>('/v1/clients?view=legacy'),
   ]);
   return { programs: programs ?? [], clients: clients ?? [] };
 }

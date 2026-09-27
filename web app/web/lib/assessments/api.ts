@@ -2,6 +2,7 @@ import 'server-only';
 
 import { getToken } from '@/lib/auth/session';
 import type { ClientWire } from '@/lib/clients/api';
+import { listAll } from '@/lib/http/client';
 import { PAGE_SIZE, type Query } from './address';
 import type { AssessmentDetailWire } from './detail';
 import { STATUSES_FOR } from './vocab';
@@ -57,9 +58,15 @@ async function lenient<T>(path: string, fallback: T): Promise<T> {
 }
 
 /** `{items, total}` — the shape a filtered search route answers with (trap 30). */
+/**
+ * `GET /v1/assessments` on the 1.1 wire: keyset-paged. `total` and `grandTotal`
+ * come back only with `includeTotal=true`.
+ */
 interface Page {
   items: AssessmentWire[];
-  total: number;
+  nextCursor: string | null;
+  total?: number;
+  grandTotal?: number;
 }
 
 export interface AssessmentsData {
@@ -83,13 +90,28 @@ function listPath(q: Query): string {
      that mapping; a second one in the route handler is how a filter chip comes
      to disagree with the rows it selects. */
   const states = STATUSES_FOR[q.status];
-  if (states.length > 0) p.set('status', states.join(','));
+  // `state`, not `status` — the value is derived, not a column (1.1).
+  if (states.length > 0) p.set('state', states.join(','));
   if (q.read !== 'all') p.set('read', q.read);
   if (q.clientId) p.set('clientId', q.clientId);
   if (q.q.trim()) p.set('q', q.q.trim());
-  p.set('page', String(q.page));
-  p.set('size', String(PAGE_SIZE));
+  p.set('limit', String(PAGE_SIZE));
   return `/v1/assessments?${p.toString()}`;
+}
+
+/**
+ * Page `q.page` of the list. 1.1 pages by cursor, not by number, so the pager's
+ * page N is reached by walking N−1 cursors — cheap at twenty a page, and the
+ * first read asks for the totals the pager divides.
+ */
+async function pageOf(q: Query): Promise<Page> {
+  const base = listPath(q);
+  let page = await request<Page>(`${base}&includeTotal=true`);
+  const totals = { total: page.total ?? 0, grandTotal: page.grandTotal ?? 0 };
+  for (let n = 1; n < q.page && page.nextCursor; n++) {
+    page = await request<Page>(`${base}&cursor=${encodeURIComponent(page.nextCursor)}`);
+  }
+  return { ...page, ...totals };
 }
 
 /**
@@ -104,17 +126,17 @@ function listPath(q: Query): string {
  */
 export async function getAssessments(q: Query): Promise<AssessmentsData> {
   const [page, all, templates, catalog, clients] = await Promise.all([
-    request<Page>(listPath(q)),
-    lenient<Page>('/v1/assessments?size=1', { items: [], total: 0 }),
+    pageOf(q),
+    lenient<Page>('/v1/assessments?limit=1&includeTotal=true', { items: [], nextCursor: null, total: 0 }),
     lenient<TemplateWire[]>('/v1/assessment-templates', []),
     lenient<CatalogWire | null>('/v1/assessment-catalog', null),
-    lenient<ClientWire[]>('/v1/clients', []),
+    lenient<ClientWire[]>('/v1/clients?view=legacy', []),
   ]);
 
   return {
     rows: page.items,
-    total: page.total,
-    grandTotal: all.total,
+    total: page.total ?? 0,
+    grandTotal: all.total ?? 0,
     templates,
     catalog,
     clients,
@@ -135,10 +157,10 @@ export async function getAssessmentTemplates(): Promise<TemplatesData> {
   const [templates, catalog, all, clients] = await Promise.all([
     request<TemplateWire[]>('/v1/assessment-templates'),
     lenient<CatalogWire | null>('/v1/assessment-catalog', null),
-    lenient<Page>('/v1/assessments?size=1', { items: [], total: 0 }),
-    lenient<ClientWire[]>('/v1/clients', []),
+    lenient<Page>('/v1/assessments?limit=1&includeTotal=true', { items: [], nextCursor: null, total: 0 }),
+    lenient<ClientWire[]>('/v1/clients?view=legacy', []),
   ]);
-  return { templates, catalog, assessmentTotal: all.total, clients, now: Date.now() };
+  return { templates, catalog, assessmentTotal: all.total ?? 0, clients, now: Date.now() };
 }
 
 /**
@@ -176,8 +198,9 @@ export async function getAssessment(id: string): Promise<AssessmentDetailWire> {
  * came back rather than re-sorting it.
  */
 export async function getClientAssessments(clientId: string): Promise<AssessmentWire[]> {
-  const page = await request<Page>(
-    `/v1/assessments?clientId=${encodeURIComponent(clientId)}&size=200`,
+  // One client's list, followed to its end (1.1 pages by cursor; 200 a page).
+  return listAll<AssessmentWire>(
+    `/v1/assessments?clientId=${encodeURIComponent(clientId)}&limit=200`,
+    (p) => request<Page>(p),
   );
-  return page.items ?? [];
 }

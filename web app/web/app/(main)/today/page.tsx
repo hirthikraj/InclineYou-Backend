@@ -1,4 +1,6 @@
+import { ApiLogConsole } from '@/components/dev/ApiLogConsole';
 import { Today } from '@/components/today/Today';
+import { apiLogEntries } from '@/lib/http/client';
 import { Unavailable } from '@/components/today/Unavailable';
 import { requireToday } from '@/lib/today/guard';
 
@@ -26,8 +28,12 @@ export const dynamic = 'force-dynamic';
 
 export default async function Page() {
   const result = await requireToday();
+  /* Development only: the backend calls this render made, printed in the
+     browser console — they never reach the Network tab. Read after
+     `requireToday`, so every call has finished and is in the list. */
+  const log = <ApiLogConsole entries={apiLogEntries()} page="/today" />;
   if (!result.ok) {
-    return <Unavailable kind={result.kind} status={result.kind === 'refused' ? result.status : undefined} />;
+    return <>{log}<Unavailable kind={result.kind} status={result.kind === 'refused' ? result.status : undefined} /></>;
   }
-  return <Today data={result.data} />;
+  return <>{log}<Today data={result.data} /></>;
 }

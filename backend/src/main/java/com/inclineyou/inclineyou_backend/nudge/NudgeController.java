@@ -1,9 +1,16 @@
 package com.inclineyou.inclineyou_backend.nudge;
 
+import com.inclineyou.inclineyou_backend.exception.ApiException;
+import com.inclineyou.inclineyou_backend.tenant.WorkspaceClock;
+import com.inclineyou.inclineyou_backend.wire.Cursor;
+import com.inclineyou.inclineyou_backend.wire.Page;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -34,6 +41,8 @@ import java.util.UUID;
 public class NudgeController {
 
     private final NudgeService nudgeService;
+    private final NudgeDraftService drafts;
+    private final WorkspaceClock clock;
 
     /**
      * {@code templateName} is the catalogue's name. The message itself is NOT in
@@ -54,23 +63,49 @@ public class NudgeController {
     }
 
     /**
-     * Everything sent across the roster, newest first.
-     *
-     * <p>{@code ?days} defaults to the cooldown window, which is what the caller
-     * that matters is asking about: Today's queue reads this to stop raising a
-     * row about somebody the trainer messaged yesterday. A client file asking for
-     * a history passes a longer span.
-     *
-     * <p>One trainer-wide read rather than one per client, for the reason
-     * {@code GET /v1/packages} exists: the screen has already read the roster,
-     * and a per-client route on a dashboard is twenty-two requests against a
-     * 120/min ceiling.
+     * api-contract Today L9 — messages drafted on or after {@code from} (a date,
+     * workspace timezone; 1.1 replaced the epoch-ms {@code since}), defaulting to
+     * the cooldown window. One trainer-wide read rather than one per client: the
+     * screen has already read the roster.
      */
     @GetMapping("/nudges")
-    public List<NudgeService.NudgeLogResponse> listNudges(
-            @RequestParam(required = false) Integer days,
-            @RequestParam(required = false) Integer limit) {
-        return nudgeService.recentNudges(trainerId(), null, days, limit);
+    public Page<NudgeService.NudgeSummary> listNudges(
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String clientId,
+            @RequestParam(required = false) String include,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String cursor) {
+        boolean withMessage = false;
+        if (include != null && !include.isBlank()) {
+            for (String one : include.split(",")) {
+                if (!"message".equals(one.strip())) throw ApiException.validation("include: only 'message'");
+                withMessage = true;
+            }
+        }
+        UUID client = null;
+        if (clientId != null && !clientId.isBlank()) {
+            try {
+                client = UUID.fromString(clientId.strip());
+            } catch (IllegalArgumentException e) {
+                throw ApiException.validation("clientId: not a client id");
+            }
+        }
+        LocalDate fromDate = WorkspaceClock.parseDate(from, "from");
+        return nudgeService.list(trainerId(), fromDate, client, withMessage,
+                Cursor.limit(limit, 500, 1000), Cursor.decode(cursor), clock.zone());
+    }
+
+    /**
+     * api-contract Today A2 — draft a message, log it, return the wa.me link.
+     * MESSAGING tier. 201 the first time; a replayed {@code id} answers 200 from
+     * the row it wrote.
+     */
+    @PostMapping("/clients/{clientId}/nudges")
+    public ResponseEntity<NudgeDraftService.Draft> draftNudge(
+            @PathVariable UUID clientId,
+            @RequestBody(required = false) NudgeDraftService.DraftRequest req) {
+        var drafted = drafts.draft(trainerId(), clientId, req);
+        return ResponseEntity.status(drafted.created() ? HttpStatus.CREATED : HttpStatus.OK).body(drafted.draft());
     }
 
     /** One client's follow-up history — the client file's timeline. */

@@ -10,10 +10,22 @@ import org.hibernate.type.SqlTypes;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+/**
+ * The v1 {@code client} row (release/proposed-schema.html).
+ *
+ * <p>What is NOT here any more, and where it went: the weekly rhythm
+ * ({@code sessions_per_week}, {@code session_duration_minutes},
+ * {@code delivery_mode}, {@code weekly_schedule}) is {@code client_schedule} and
+ * {@code client_schedule_slot}; the measuring cycle is {@code assessment_schedule};
+ * {@code payment_mode} and {@code trainer_split_percent} are gone — the split is
+ * set per package (api-contract R3).
+ *
+ * <p>{@code tenant_id} is read-only here: {@code stamp_tenant_id} sets it at
+ * insert and {@code freeze_tenant_id} refuses any change (TENANCY.md).
+ */
 @Entity
 @Table(name = "client")
 @Getter
@@ -25,26 +37,23 @@ public class Client {
     @Column(updatable = false, nullable = false)
     private UUID id;
 
+    @Column(name = "tenant_id", insertable = false, updatable = false)
+    private UUID tenantId;
+
     @Column(name = "trainer_id", nullable = false)
     private UUID trainerId;
 
-    @Column(nullable = false, length = 100)
+    @Column(length = 100)
     private String name;
 
-    @Column(length = 15)
+    @Column(length = 16)
     private String phone;
+
+    @Column(name = "date_of_birth")
+    private LocalDate dateOfBirth;
 
     @Column(columnDefinition = "text")
     private String goal;
-
-    @Column(nullable = false, length = 20)
-    private String status = "active";
-
-    @Column(name = "payment_mode", nullable = false, length = 20)
-    private String paymentMode = "trainer_collects";
-
-    @Column(name = "trainer_split_percent", precision = 5, scale = 2)
-    private BigDecimal trainerSplitPercent;
 
     @Column(name = "height_cm", precision = 5, scale = 1)
     private BigDecimal heightCm;
@@ -52,60 +61,43 @@ public class Client {
     @Column(name = "activity_level", length = 20)
     private String activityLevel;
 
-    /**
-     * 'floor' | 'remote', or null for "never said".
-     *
-     * Null is meaningful: a session with no mode of its own falls back to this,
-     * and this falling back to floor happens in application code. Not validated
-     * against a fixed set here for the same reason the statuses aren't — a third
-     * mode should cost a deploy, not a migration.
-     */
-    @Column(name = "delivery_mode", length = 16)
-    private String deliveryMode;
-
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private Map<String, Object> metadata;
 
-    @Column(name = "sessions_per_week")
-    private Integer sessionsPerWeek;
+    /* ── status · client_status_dates ties each state to its timestamp ───── */
 
-    @Column(name = "session_duration_minutes")
-    private Integer sessionDurationMinutes;
+    @Column(nullable = false, length = 20)
+    private String status = "active";
 
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "weekly_schedule", columnDefinition = "jsonb")
-    private List<Map<String, Object>> weeklySchedule;
-
-    /**
-     * V14 · when access was paused, or null if it is not.
-     *
-     * `status` already says paused; this says when, which is the difference
-     * between a wall and information at sign-in: "Ravi Kannan paused your
-     * account on 22 July. Your history is safe." Stamped by the sync push when
-     * the status flips, so an app that has never heard of this column still
-     * produces the date.
-     */
     @Column(name = "paused_at")
     private Instant pausedAt;
 
-    /* ------------------------------------------------------ V18 · consent */
+    @Column(name = "paused_until")
+    private LocalDate pausedUntil;
+
+    @Column(name = "archived_at")
+    private Instant archivedAt;
+
+    @Column(name = "archive_reason", length = 20)
+    private String archiveReason;
+
+    @Column(name = "archive_note", length = 200)
+    private String archiveNote;
+
+    /** {@code independent} | {@code gym} — required by the schema (R18). */
+    @Column(name = "client_type", nullable = false, length = 12)
+    private String clientType = "independent";
+
+    /* ── the portal relationship · V18 ────────────────────────────────────── */
 
     /**
-     * 'invited' | 'accepted' | 'declined' | 'paused' | 'removed'.
-     *
-     * The CLIENT's answer, kept apart from {@link #status} on purpose: that one
-     * is the TRAINER's view of the arrangement (are we training, is it on hold,
-     * is it over), and a single column serving both would have to answer to two
-     * people who can disagree. A trainer can hold a membership they are still
-     * being billed for while the client has never opened the app.
-     *
-     * Defaults to accepted for the same reason the column does in V18: every row
-     * that predates consent is a live arrangement, and putting a wall in front of
-     * somebody who has trained for months is the one outcome this must not cause.
+     * Starts {@code not_invited}: v1 sends no portal invite, and
+     * {@code client_membership_dates} refuses {@code accepted} without an
+     * {@code accepted_at}.
      */
     @Column(name = "membership_status", nullable = false, length = 20)
-    private String membershipStatus = "accepted";
+    private String membershipStatus = "not_invited";
 
     @Column(name = "invited_at")
     private Instant invitedAt;
@@ -119,45 +111,8 @@ public class Client {
     @Column(name = "removed_at")
     private Instant removedAt;
 
-    /**
-     * When the client acknowledged the removal on their own phone.
-     *
-     * The row outlives the membership — the trainer's payments, packages and
-     * session history all point at it — so `removed` stays true forever, and
-     * without this stamp sign-in would redraw the removal notice every time.
-     */
     @Column(name = "removed_ack_at")
     private Instant removedAckAt;
-
-    /* ------------------------------------------------ V5 · the measuring cycle */
-
-    /** Days between sittings. Null means this client is not on a cycle. */
-    @Column(name = "assessment_interval_days")
-    private Short assessmentIntervalDays;
-
-    /**
-     * When the next sitting is owed.
-     *
-     * Stored rather than computed from the last reading plus the interval, so a
-     * trainer can push one week without rewriting when the last one happened.
-     */
-    @Column(name = "next_assessment_on")
-    private LocalDate nextAssessmentOn;
-
-    /** Which metric ids are on this client's sheet. Null means the trainer's default. */
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "assessment_metrics", columnDefinition = "jsonb")
-    private List<String> assessmentMetrics;
-
-    /* ------------------------------------------------ V7 · physical information */
-
-    /**
-     * A date, never an age — an age stored in September is wrong by March. Personal
-     * data and not health data; {@code client.sex} must not arrive beside it. Not in
-     * the phone's push upsert, so an old build cannot null it. See V7.
-     */
-    @Column(name = "date_of_birth")
-    private LocalDate dateOfBirth;
 
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;

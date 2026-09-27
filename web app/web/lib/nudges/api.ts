@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { getToken } from '@/lib/auth/session';
+import { listAll } from '@/lib/http/client';
 
 import type { NudgeLogEntry, NudgeTemplate } from './types';
 import { TEMPLATE_ORDER } from './types';
@@ -141,10 +142,37 @@ export async function resetTemplate(name: string): Promise<NudgeTemplate> {
  */
 export async function listRecentNudges(days = 7): Promise<NudgeLogEntry[]> {
   try {
-    return (await request<NudgeLogEntry[]>(`/v1/nudges?days=${days}`)) ?? [];
+    // 1.1 (api-contract Today L9): `from` is a DATE in the workspace's
+    // timezone — no query parameter carries an instant — and the list is a
+    // paged `{items}` envelope. The row carries no body or client name; callers
+    // here only need who and when. A day of slack on the Next server's clock is
+    // harmless: the window only ranks the queue.
+    const from = new Date(Date.now() - (days + 1) * 86_400_000).toISOString().slice(0, 10);
+    // Through the common client (`listAll` → `api()`), so this read is logged like the rest of Today's.
+    const rows = await listAll<RecentNudgeWire>(`/v1/nudges?from=${from}`);
+    return rows.map((n) => ({
+      id: n.id,
+      clientId: n.clientId,
+      clientName: '',
+      templateName: n.template,
+      templateLabel: n.template,
+      channel: 'whatsapp_manual',
+      status: n.reason,
+      message: null,
+      sentAt: n.sentAt,
+    }));
   } catch {
     return [];
   }
+}
+
+/** `NudgeService.NudgeSummary` — one row of `GET /v1/nudges?from=`. */
+interface RecentNudgeWire {
+  id: string;
+  clientId: string;
+  template: string;
+  reason: string;
+  sentAt: number;
 }
 
 /**

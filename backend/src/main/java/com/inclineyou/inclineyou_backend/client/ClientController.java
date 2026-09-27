@@ -1,5 +1,7 @@
 package com.inclineyou.inclineyou_backend.client;
 
+import com.inclineyou.inclineyou_backend.exception.ApiException;
+import com.inclineyou.inclineyou_backend.wire.Items;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -15,9 +17,29 @@ import java.util.UUID;
 public class ClientController {
 
     private final ClientService clientService;
+    private final ClientSummaryService summaryService;
 
+    /**
+     * api-contract Today L3 — the v1 roster read, and since 1.1 the default:
+     * {@code view} picks the shape of a row, never which rows, and {@code summary}
+     * is the shape. See {@link ClientSummaryService}.
+     */
     @GetMapping
-    public List<ClientService.ClientResponse> list() {
+    public Items<ClientSummaryService.ClientSummary> summary(
+            @RequestParam(required = false) String view,
+            @RequestParam(required = false) String status) {
+        if (view != null && !"summary".equals(view)) {
+            throw ApiException.validation("view: summary or legacy");
+        }
+        return Items.of(summaryService.list(trainerId(), status));
+    }
+
+    /**
+     * The pre-v1 row, kept only for the screens not yet on the summary. A bare
+     * array, as it always was: it is deleted, not evolved, once they move.
+     */
+    @GetMapping(params = "view=legacy")
+    public List<ClientService.ClientResponse> legacy() {
         return clientService.list(trainerId());
     }
 

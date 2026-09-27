@@ -114,50 +114,6 @@ public class AssessmentService {
         return new Catalog(AssessmentCatalogue.GROUPS, AssessmentCatalogue.MEASUREMENTS, AssessmentCatalogue.QUESTIONS);
     }
 
-    // ── The list ──────────────────────────────────────────────────────────────
-
-    /**
-     * {@code status} is a CSV SET; unknown names are ignored, and a set of only
-     * unknown names filters nothing (a hand-typed typo is not an empty screen).
-     * {@code read=read} means returned AND read. {@code q} matches the
-     * assessment's name or the client's. {@code total} is counted after every
-     * filter. Ordered newest due first, then id — a total order.
-     */
-    public Page list(UUID trainerId, String status, String read, String clientId, String q, int page, int size) {
-        var where = new ArrayList<String>(List.of("a.trainer_id = :tid::uuid", "a.deleted_at IS NULL"));
-        var p = new HashMap<String, Object>();
-        p.put("tid", trainerId.toString());
-
-        var wanted = new ArrayList<String>();
-        if (status != null) {
-            for (String s : status.split(",")) if (STATUSES.contains(s.strip())) wanted.add(s.strip());
-        }
-        if (!wanted.isEmpty()) { p.put("statuses", wanted); where.add("(" + STATUS_SQL + ") IN (:statuses)"); }
-        if ("unread".equals(read)) where.add("a.completed_at IS NOT NULL AND a.read_at IS NULL");
-        else if ("read".equals(read)) where.add("a.completed_at IS NOT NULL AND a.read_at IS NOT NULL");
-        if (clientId != null && !clientId.isBlank()) {
-            try {
-                p.put("cid", UUID.fromString(clientId.strip()).toString());
-            } catch (IllegalArgumentException e) {
-                return new Page(List.of(), 0);
-            }
-            where.add("a.client_id = :cid::uuid");
-        }
-        if (q != null && !q.isBlank()) {
-            p.put("q", q.strip());
-            where.add("(a.name ILIKE '%' || :q || '%' OR c.name ILIKE '%' || :q || '%')");
-        }
-        int s = Math.max(1, Math.min(MAX_SIZE, size));
-        p.put("limit", s);
-        p.put("offset", (long) Math.max(0, page) * s);
-        String from = " FROM assessment a JOIN client c ON c.id = a.client_id WHERE " + String.join(" AND ", where);
-
-        var rows = jdbc.queryForList("SELECT " + ROW_COLUMNS + from
-                + " ORDER BY a.due_at DESC, a.id LIMIT :limit OFFSET :offset", p);
-        Integer total = jdbc.queryForObject("SELECT count(*)" + from, p, Integer.class);
-        return new Page(rows.stream().map(AssessmentService::toRow).toList(), total == null ? 0 : total);
-    }
-
     // ── One, assembled ────────────────────────────────────────────────────────
 
     public Detail get(UUID trainerId, UUID id) {

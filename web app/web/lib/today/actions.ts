@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 
-import { getToken } from '@/lib/auth/session';
+import { api, ApiError } from '@/lib/http/client';
 /* HOLD_SECONDS, HELD_VERBS and ActionResult live next door because a 'use server'
    module may export only async functions — see lib/today/hold.ts. */
 import type { ActionResult } from './hold';
@@ -65,46 +65,6 @@ import type { ActionResult } from './hold';
  * this pass did not make.
  */
 
-const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
-
-async function call<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
-  const token = await getToken();
-  if (!token) throw new Error('signed out');
-
-  const res = await fetch(`${BASE}${path}`, {
-    method,
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` },
-    body: JSON.stringify(body),
-    cache: 'no-store',
-  });
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    throw new ApiFailure(res.status, detail);
-  }
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T;
-}
-
-/** The read half. `call` is POST-only; `closeLogs` has to fetch before it writes. */
-async function read<T>(path: string): Promise<T> {
-  const token = await getToken();
-  if (!token) throw new Error('signed out');
-
-  const res = await fetch(`${BASE}${path}`, {
-    headers: { authorization: `Bearer ${token}` },
-    cache: 'no-store',
-  });
-  if (!res.ok) throw new ApiFailure(res.status, await res.text().catch(() => ''));
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T;
-}
-
-class ApiFailure extends Error {
-  constructor(readonly status: number, readonly detail: string) {
-    super(`${status}`);
-  }
-}
-
 /**
  * The MESSAGING tier is 10 requests a minute because each call spends a WhatsApp
  * message, so a 429 here is the one refusal a trainer will actually meet — six
@@ -113,7 +73,9 @@ class ApiFailure extends Error {
  * cannot guess that.
  */
 function readFailure(error: unknown, verb: string): ActionResult {
-  if (error instanceof ApiFailure) {
+  // `ApiError` is the common client's (`lib/http/client.ts`); a null status is
+  // "nothing answered", which reads as unreachable below.
+  if (error instanceof ApiError && error.status !== null) {
     if (error.status === 429) {
       return { ok: false, message: 'Too many messages in a minute. Wait a moment and try again.' };
     }
@@ -128,10 +90,36 @@ function readFailure(error: unknown, verb: string): ActionResult {
   return { ok: false, message: `${verb} could not reach the server. Nothing was sent.` };
 }
 
+/** `NudgeDraftService.Draft` — api-contract Today A2. */
 interface NudgeWire {
-  nudgeId: string;
+  id: string;
   whatsappUrl: string;
   message: string;
+  sentAt: number;
+}
+
+type NudgeTemplateName = 'payment_reminder' | 'check_in' | 'missed_session' | 'well_done';
+
+/**
+ * `POST /v1/clients/{clientId}/nudges` (1.1). `requestId` is the id the server
+ * stores the draft under, and it must come from the BROWSER — one per attempt,
+ * kept across its retries (`AttentionQueue`'s `attempts`). Minted here, every
+ * call would carry a fresh one and a retry would log a second row, which is the
+ * duplicate the id exists to prevent: the log is append-only and it would skew
+ * the cooldown. The fallback is only for a caller that has no attempt to name.
+ */
+function draft(clientId: string, template: NudgeTemplateName, requestId?: string): Promise<NudgeWire> {
+  return api<NudgeWire>(`/v1/clients/${encodeURIComponent(clientId)}/nudges`, {
+    method: 'POST',
+    body: { id: requestId ?? crypto.randomUUID(), template },
+  });
+}
+
+/** 409 CLIENT_NO_PHONE is the one refusal with its own fix: add a number. */
+function noPhone(error: unknown): ActionResult | null {
+  return error instanceof ApiError && error.problem.code === 'CLIENT_NO_PHONE'
+    ? { ok: false, message: 'This client has no phone number on file. Add one in their file first.' }
+    : null;
 }
 
 /**
@@ -140,15 +128,13 @@ interface NudgeWire {
  * number the caller passes, which is what keeps the message and the payments list from
  * disagreeing.
  */
-export async function remind(clientId: string): Promise<ActionResult> {
+export async function remind(clientId: string, requestId?: string): Promise<ActionResult> {
   try {
-    const res = await call<NudgeWire>(`/v1/clients/${clientId}/nudge`, {
-      templateName: 'payment_reminder',
-    });
+    const res = await draft(clientId, 'payment_reminder', requestId);
     revalidatePath('/today');
     return { ok: true, whatsappUrl: res.whatsappUrl, message: res.message };
   } catch (error) {
-    return readFailure(error, 'The reminder');
+    return noPhone(error) ?? readFailure(error, 'The reminder');
   }
 }
 
@@ -173,13 +159,14 @@ export async function remind(clientId: string): Promise<ActionResult> {
 export async function checkIn(
   clientId: string,
   templateName: 'check_in' | 'missed_session' = 'check_in',
+  requestId?: string,
 ): Promise<ActionResult> {
   try {
-    const res = await call<NudgeWire>(`/v1/clients/${clientId}/nudge`, { templateName });
+    const res = await draft(clientId, templateName, requestId);
     revalidatePath('/today');
     return { ok: true, whatsappUrl: res.whatsappUrl, message: res.message };
   } catch (error) {
-    return readFailure(error, 'The check-in');
+    return noPhone(error) ?? readFailure(error, 'The check-in');
   }
 }
 
@@ -198,15 +185,13 @@ export async function checkIn(
  * mistaken payment reminder is embarrassing; a mistaken "well done, you've been
  * showing up" to somebody who has not is worse.
  */
-export async function wish(clientId: string): Promise<ActionResult> {
+export async function wish(clientId: string, requestId?: string): Promise<ActionResult> {
   try {
-    const res = await call<NudgeWire>(`/v1/clients/${clientId}/nudge`, {
-      templateName: 'well_done',
-    });
+    const res = await draft(clientId, 'well_done', requestId);
     revalidatePath('/today');
     return { ok: true, whatsappUrl: res.whatsappUrl, message: res.message };
   } catch (error) {
-    return readFailure(error, 'The message');
+    return noPhone(error) ?? readFailure(error, 'The message');
   }
 }
 
@@ -245,27 +230,52 @@ export async function markAttended(sessionIds: string[]): Promise<ActionResult> 
   if (sessionIds.length === 0) {
     return { ok: false, message: 'There is no session left to mark.' };
   }
-  let marked = 0;
-  let failure: unknown = null;
-  for (const id of sessionIds) {
-    try {
-      await call(`/v1/sessions/${id}/done`, {});
-      marked += 1;
-    } catch (error) {
-      failure = error;
-      break;
-    }
-  }
-  revalidatePath('/today');
-  if (failure && marked === 0) return readFailure(failure, 'Marking the session');
-  if (failure) {
+  try {
+    /*
+     * One batch call — `POST /v1/sessions/done`. The server marks them in the
+     * order they happened, each in its own transaction, and charges the pack
+     * under a row lock, so the old one-at-a-time loop guarding the pack count
+     * is gone. A session marked but not charged (no pack, a paused or empty
+     * pack) is still marked: that is the fact the row asked about.
+     */
+    const { results } = await api<{ results: MarkResult[] }>('/v1/sessions/done', {
+      method: 'POST',
+      body: { sessionIds },
+    });
+    revalidatePath('/today');
+    revalidatePath('/schedule');
+
+    const marked = results.filter((r) => MARKED.has(r.outcome)).length;
+    if (marked === results.length) return { ok: true };
+    const why = results.find((r) => !MARKED.has(r.outcome));
     return {
       ok: false,
-      message: `${marked} of ${sessionIds.length} marked. The rest did not go through.`,
+      message: `${marked} of ${results.length} marked. ${NOT_MARKED[why?.reason ?? why?.outcome ?? ''] ?? 'The rest could not be marked.'}`,
     };
+  } catch (error) {
+    return readFailure(error, 'Marking the session');
   }
-  return { ok: true };
 }
+
+/** One outcome of `POST /v1/sessions/done` — `SessionWriteService.MarkResult`. */
+interface MarkResult {
+  sessionId: string;
+  outcome: 'done' | 'already_done' | 'not_charged' | 'skipped' | 'not_found';
+  packageId?: string;
+  sessionsRemaining?: number;
+  reason?: string;
+}
+
+/** Outcomes where the session now reads delivered, charged or not. */
+const MARKED = new Set(['done', 'already_done', 'not_charged']);
+
+const NOT_MARKED: Record<string, string> = {
+  SESSION_CANCELLED: 'One was cancelled, so it was left alone.',
+  // 1.1: a no-show CAN be marked done now (the client came after all); what
+  // is skipped instead is a session whose start time hasn't come.
+  SESSION_NOT_STARTED: "One hasn't started yet, so it was left alone.",
+  not_found: 'One is no longer in your diary.',
+};
 
 /* ──────────────────────────────────────────────── silencing a row ────────── */
 
@@ -299,11 +309,9 @@ export async function dismissRow(
   snoozeUntil: number | null,
 ): Promise<ActionResult & { dismissalId?: string }> {
   try {
-    const res = await call<{ id: string }>('/v1/attention/dismissals', {
-      clientId,
-      kind,
-      band,
-      snoozeUntil,
+    await api(`/v1/attention/dismissals/${encodeURIComponent(clientId)}/${encodeURIComponent(kind)}`, {
+      method: 'PUT',
+      body: { band, snoozedUntil: snoozeUntil },
     });
     /*
      * THE ONE WRITE ON THIS SCREEN THAT DELIBERATELY DOES NOT REVALIDATE.
@@ -320,7 +328,10 @@ export async function dismissRow(
      * undo in front of them and the row is genuinely gone. `restoreRow` DOES
      * revalidate, because bringing a row back is exactly a change to the queue.
      */
-    return { ok: true, dismissalId: res.id };
+    // A dismissal has no id of its own (R1): client + kind is its key, and
+    // this is the handle Undo and Restore send back — the same one the deck
+    // builds for `Deck.silenced`.
+    return { ok: true, dismissalId: `${clientId}:${kind}` };
   } catch (error) {
     return readFailure(error, 'Dismissing the row');
   }
@@ -329,32 +340,18 @@ export async function dismissRow(
 /**
  * Put a silenced row back in the queue.
  *
- * A DELETE, keyed by the dismissal's own id — which the browser has either from
- * `Deck.silenced` (the folded list) or from the `dismissRow` that just created it
- * (the row's Undo). Two callers, one route.
- *
- * `call` is POST-only, so this reaches for `fetch` directly rather than growing the
- * helper a method parameter for one use. Stated rather than hidden, because the
- * next verb that needs a DELETE should generalise it instead of copying this.
+ * Keyed by client + kind — the `dismissalId` the browser holds is exactly that,
+ * `"<clientId>:<kind>"`, whether it came from `Deck.silenced` (the folded list)
+ * or from the `dismissRow` that just created it (the row's Undo). The server
+ * answers 204 even when the row was already gone (another tab got there
+ * first), because "not silenced" is then true either way.
  */
 export async function restoreRow(dismissalId: string): Promise<ActionResult> {
+  const [clientId, kind] = dismissalId.split(':');
   try {
-    const token = await getToken();
-    if (!token) throw new Error('signed out');
-    const res = await fetch(`${BASE}/v1/attention/dismissals/${dismissalId}`, {
+    await api(`/v1/attention/dismissals/${encodeURIComponent(clientId)}/${encodeURIComponent(kind)}`, {
       method: 'DELETE',
-      headers: { authorization: `Bearer ${token}` },
-      cache: 'no-store',
     });
-    /*
-     * A 404 is SUCCESS here. The row is gone, which is exactly what restoring it
-     * means — the phone or another tab got there first, or the snooze lapsed and
-     * something tidied it. Reporting a failure for a state the trainer asked for
-     * would leave a row claiming to be silenced that is not.
-     */
-    if (!res.ok && res.status !== 404) {
-      throw new ApiFailure(res.status, await res.text().catch(() => ''));
-    }
     revalidatePath('/today');
     return { ok: true };
   } catch (error) {
@@ -363,72 +360,26 @@ export async function restoreRow(dismissalId: string): Promise<ActionResult> {
 }
 
 /**
- * `WorkoutSessionService.WorkoutSessionResponse` — every field the row needs to
- * survive being written back. Not a subset: see `closeLogs`.
+ * Close the logs a queue row counted — `POST /v1/sessions/end`.
+ *
+ * In v1 a log IS the scheduled session (started_at / ended_at), so the ids here
+ * are session ids, and the server closes every open one in a single UPDATE. A
+ * log someone else already closed keeps its time and comes back `skipped`
+ * (`ALREADY_CLOSED`) in `results[]`, which is still success: the state the
+ * trainer asked for is true. Closing a
+ * log does not mark the session delivered or charge the pack.
+ *
+ * Not held: nothing leaves for the client.
  */
-/**
- * Two fields, where this used to need nine.
- *
- * The sync envelope made every column this row's business — it had to be sent
- * back whole or the upsert would erase what it was not told. `PUT /v1/workouts/
- * {id}` leaves an absent field alone, so all this read has to answer now is
- * "which of these is still open, and what is its id".
- */
-interface WorkoutRowWire {
-  id: string;
-  endedAt: number | null;
-}
-
-/**
- * A log left open on a session that is over.
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * THIS USED TO BE THE ONLY VERB ON THIS SCREEN THAT SPOKE THE SYNC ENVELOPE
- *
- * `ended_at` reached the wire in exactly one place — `SyncService.pushWorkoutSessions`
- * — because `PUT /v1/workouts/{id}` took `UpdateSessionRequest(String notes)`
- * and nothing else. So this posted whole rows through `/v1/sync/push`, on a half
- * that does not otherwise speak that protocol, and it had to send each log back
- * WHOLE: the upsert assigns `notes` and `session_date` from what it is given, so
- * omitting either erased the note or failed the NOT NULL.
- *
- * `endedAt` is on the request since 28 Aug 2026. One field, one PUT, no envelope
- * and nothing to erase — the endpoint leaves an absent field alone.
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * IT STILL READS EACH LOG FIRST, FOR A DIFFERENT REASON THAN IT USED TO
- *
- * Not to send the row back — there is no row to send now. To tell an open log
- * from one the PHONE closed between this page rendering and the click. Closing
- * it again would restamp `ended_at` to the moment of the click, quietly moving a
- * time somebody else already recorded correctly. Skipping is not an error: the
- * trainer wanted them shut and they are shut.
- *
- * ═══════════════════════════════════════════════════════════════════════════
- * AND IT IS INSTANT
- *
- * Nothing leaves for the client — no message, no WhatsApp, nothing anybody but
- * the trainer will ever see. `HELD_VERBS` is `Remind` and `Nudge` for that exact
- * reason, and ten seconds of countdown on a housekeeping write would make it feel
- * broken, the same call `Renew` already makes.
- */
-export async function closeLogs(workoutIds: string[]): Promise<ActionResult> {
-  if (workoutIds.length === 0) {
+export async function closeLogs(sessionIds: string[]): Promise<ActionResult> {
+  if (sessionIds.length === 0) {
     return { ok: false, message: 'There is no open log left to close.' };
   }
   try {
-    const rows = await Promise.all(
-      workoutIds.map((id) => read<WorkoutRowWire>(`/v1/workouts/${id}`)),
-    );
-    const now = Date.now();
-    const open = rows.filter((r) => r && r.endedAt === null);
-    if (open.length === 0) {
-      revalidatePath('/today');
-      return { ok: true };
-    }
-    await Promise.all(
-      open.map((r) => call(`/v1/workouts/${r.id}`, { endedAt: now }, 'PUT')),
-    );
+    await api<{ results: { sessionId: string; outcome: string; reason?: string }[] }>('/v1/sessions/end', {
+      method: 'POST',
+      body: { sessionIds },
+    });
     revalidatePath('/today');
     revalidatePath('/schedule');
     return { ok: true };
@@ -438,41 +389,39 @@ export async function closeLogs(workoutIds: string[]): Promise<ActionResult> {
 }
 
 /**
- * A pack that has run out, sold again.
+ * Renew — `POST /v1/packages/{packageId}/renew`, one click and no body.
  *
- * The new pack repeats the last one — same type, same amount, same session count
- * — because that is what renewing means, and asking a trainer to re-type a price
- * they set last month is how a one-click row becomes a form. `sessionsRemaining`
- * is seeded from `sessionsTotal` by the server and decremented by
- * `POST /v1/sessions/{id}/done`, so the pack is immediately live.
+ * The server copies the terms: a price-list pack that is still on sale renews
+ * at its CURRENT price, sessions, validity and share; a custom pack (or one
+ * since retired) repeats its own terms (R5). So the browser sends nothing but
+ * which pack to repeat — the client's newest, from `TodayData.renewTerms`.
  *
- * The terms come from the CALLER rather than being looked up here, because the
- * page has already read every package on the roster — see `api.ts`. Looking them
- * up again would be a request to answer a question already answered.
+ * A second renew of a pack that was already renewed is refused with
+ * `409 PACKAGE_ALREADY_RENEWED`; a double click is caught by the client-minted
+ * `id`, which the server answers a second time with the same package.
  *
- * Instant, not held: nothing leaves for the client. If the trainer renewed the
- * wrong person's pack the row is theirs to delete in the money book, which is a
- * different affordance from a message that has already been read.
+ * Instant, not held: nothing leaves for the client.
  */
-export async function renew(
-  clientId: string,
-  terms: { type: string; amount: number; sessionsTotal: number | null },
-): Promise<ActionResult> {
-  if (!(terms.amount > 0)) {
+export async function renew(packageId: string | undefined, requestId?: string): Promise<ActionResult> {
+  if (!packageId) {
     return {
       ok: false,
       message: 'That client has no pack to repeat. Sell one in the money book.',
     };
   }
   try {
-    await call(`/v1/clients/${clientId}/packages`, {
-      type: terms.type,
-      amount: terms.amount,
-      sessionsTotal: terms.sessionsTotal,
+    await api(`/v1/packages/${encodeURIComponent(packageId)}/renew`, {
+      method: 'POST',
+      // The browser's attempt id (see `draft`): a retry of a renew that landed
+      // answers 200 with the same package instead of 409 already-renewed.
+      body: { id: requestId ?? crypto.randomUUID() },
     });
     revalidatePath('/today');
     return { ok: true };
   } catch (error) {
+    if (error instanceof ApiError && error.problem.code === 'PACKAGE_ALREADY_RENEWED') {
+      return { ok: false, message: 'Already renewed — there is a newer pack running for this client.' };
+    }
     return readFailure(error, 'The renewal');
   }
 }

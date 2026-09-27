@@ -1,8 +1,11 @@
 package com.inclineyou.inclineyou_backend.payment;
 
+import com.inclineyou.inclineyou_backend.exception.ApiException;
+import com.inclineyou.inclineyou_backend.wire.Items;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
@@ -14,6 +17,8 @@ import java.util.UUID;
 public class PackageController {
 
     private final PackageService service;
+    private final PackageReadService reads;
+    private final PackageRenewService renewals;
 
     // ── Packages ──────────────────────────────────────────────────────────────
 
@@ -23,18 +28,33 @@ public class PackageController {
     }
 
     /**
-     * Every package on the roster. Trainer-scoped, `?status=` to narrow.
-     *
-     * Sits beside the per-client route rather than replacing it, because they
-     * answer different questions — see {@code PackageService.listAllPackages}.
-     * Added for the web's Today screen, which needs to know who is running out
-     * of sessions without asking once per client.
+     * api-contract Today L5 / Client file L1 — packages with owed money computed
+     * on the server. {@code scope=current} is the packs that matter today (1.1:
+     * renamed from {@code view}, which means a row's shape everywhere else);
+     * {@code clientId} narrows to one client, and without a scope gives every
+     * package they bought. One of the two is required: an unscoped, unfiltered
+     * read would be every package ever sold.
      */
     @GetMapping("/v1/packages")
-    public List<PackageService.PackageResponse> listAllPackages(
-            @RequestParam(required = false) String status
+    public Items<PackageReadService.CurrentPackage> listPackages(
+            @RequestParam(required = false) String scope,
+            @RequestParam(required = false) String clientId
     ) {
-        return service.listAllPackages(trainerId(), status);
+        if (scope != null && !"current".equals(scope)) {
+            throw ApiException.validation("scope: only 'current' is defined");
+        }
+        UUID client = null;
+        if (clientId != null && !clientId.isBlank()) {
+            try {
+                client = UUID.fromString(clientId.strip());
+            } catch (IllegalArgumentException e) {
+                throw ApiException.validation("clientId: not a client id");
+            }
+        }
+        if (scope == null && client == null) {
+            throw ApiException.validation("scope=current or clientId is required");
+        }
+        return Items.of(reads.list(trainerId(), scope != null, client));
     }
 
     @PostMapping("/v1/clients/{clientId}/packages")
@@ -60,12 +80,13 @@ public class PackageController {
      * would have to guess which.
      */
     @PostMapping("/v1/packages/{packageId}/renew")
-    @ResponseStatus(HttpStatus.CREATED)
-    public PackageService.PackageResponse renewPackage(
-            @PathVariable String packageId,
-            @RequestBody(required = false) PackageService.RenewPackageRequest req
+    public ResponseEntity<PackageReadService.CurrentPackage> renewPackage(
+            @PathVariable UUID packageId,
+            @RequestBody(required = false) PackageRenewService.RenewRequest req
     ) {
-        return service.renewPackage(trainerId(), packageId, req);
+        // 201 the first time; a replayed id answers 200 with the same package.
+        var renewed = renewals.renew(trainerId(), packageId, req);
+        return ResponseEntity.status(renewed.created() ? HttpStatus.CREATED : HttpStatus.OK).body(renewed.pkg());
     }
 
     // ── The pack's life · V30 ─────────────────────────────────────────────────
@@ -143,21 +164,25 @@ public class PackageController {
     }
 
     /**
-     * The trainer's money across the whole roster. `from`/`to` are epoch ms on
-     * `created_at` and `to` is exclusive — the same convention as
-     * `GET /v1/sessions`, so the two windows read alike.
-     *
-     * Route order matters here and the framework gets it right for the wrong-
-     * looking reason: `/v1/payments/{paymentId}/confirm` is a PATCH on a longer
-     * path, so this GET cannot shadow it.
+     * api-contract Business L2 = Today L7 — the ledger, keyset-paged on bookAt.
+     * Dates in the workspace timezone, {@code to} exclusive.
      */
     @GetMapping("/v1/payments")
-    public List<PackageService.PaymentResponse> listAllPayments(
-            @RequestParam(required = false) Long from,
-            @RequestParam(required = false) Long to,
-            @RequestParam(required = false) String status
+    public PackageReadService.Ledger listPayments(
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(required = false) String method,
+            @RequestParam(required = false) String clientId,
+            @RequestParam(required = false) String packageId,
+            @RequestParam(required = false) String collectedBy,
+            @RequestParam(required = false) String clientType,
+            @RequestParam(required = false) Integer limit,
+            @RequestParam(required = false) String cursor,
+            @RequestParam(defaultValue = "false") boolean includeTotal
     ) {
-        return service.listAllPayments(trainerId(), from, to, status);
+        return reads.payments(trainerId(), new PackageReadService.LedgerQuery(
+                status, from, to, method, clientId, packageId, collectedBy, clientType, limit, cursor, includeTotal));
     }
 
     @PostMapping("/v1/packages/{packageId}/payments")

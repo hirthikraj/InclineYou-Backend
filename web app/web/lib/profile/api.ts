@@ -317,7 +317,8 @@ export const getIdentity = cache(async function getIdentity(): Promise<Identity>
  * and press Save on is not the same as a week the server claims they work.
  */
 export async function getWorkingWeek(): Promise<StoredHour[]> {
-  const rows = await request<StoredHour[]>('/v1/working-hours');
+  // 1.1: `{items}` envelope.
+  const rows = (await request<{ items: StoredHour[] }>('/v1/working-hours'))?.items;
   return (rows ?? []).filter(
     (h) => h.weekday >= 0 && h.weekday <= 6 && h.endMinute > h.startMinute,
   );
