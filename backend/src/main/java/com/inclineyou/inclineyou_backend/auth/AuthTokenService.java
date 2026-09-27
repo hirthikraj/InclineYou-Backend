@@ -53,7 +53,19 @@ public class AuthTokenService {
     public enum Platform { MOBILE, WEB }
 
     public IssuedToken issue(AuthPrincipal principal, Platform platform, TokenContext context) {
-        return (platform == Platform.WEB ? session : jwt).issue(principal, context);
+        /*
+         * A `pending` sign-in — a number verified and not yet claimed — gets a
+         * JWT on the web too. A web session cannot hold one: `web_session`
+         * needs an `app_user` row (the number has none until it claims) and its
+         * role check admits trainer, client and gym_admin only. The JWT is
+         * short-lived (JwtService.PENDING_MINUTES) and opens exactly one route,
+         * POST /v1/auth/trainer, which reads no data — so being unrevocable for
+         * a quarter of an hour costs nothing. Claiming creates the app_user and
+         * mints the ordinary revocable session.
+         */
+        boolean sessionable = platform == Platform.WEB
+                && !JwtService.ROLE_PENDING.equals(principal.role());
+        return (sessionable ? session : jwt).issue(principal, context);
     }
 
     /** Mint for whoever is calling right now, on whatever they are calling from. */

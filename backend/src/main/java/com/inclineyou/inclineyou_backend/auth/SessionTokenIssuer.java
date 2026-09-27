@@ -79,12 +79,9 @@ public class SessionTokenIssuer implements AuthTokenIssuer {
         // AuthTokenService reads its own header: a storage concern of ONE
         // issuer, not a shape every caller of `issue` needs to know about.
         //
-        // KNOWN GAP: a brand-new number (role `pending`, verified but never
-        // claimed) has no app_user row yet, so this resolves to null and
-        // `sessions.save` refuses it — the web cannot yet hold a `pending`
-        // session. Fixing that is a schema question (an `app_user` row with
-        // no committed role, or a nullable `app_user_id`) for whoever builds
-        // out the rest of the sign-in contract, not a issuer-local patch.
+        // A brand-new number (role `pending`) has no app_user row yet, so it
+        // never reaches here: AuthTokenService gives it a short-lived JWT, and
+        // the claim that creates the row mints the session.
         UUID appUserId = appUserRepo.findByPhoneAndDeletedAtIsNull(p.phone())
                 .map(com.inclineyou.inclineyou_backend.entity.AppUser::getId)
                 .orElse(null);

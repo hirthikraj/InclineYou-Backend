@@ -100,6 +100,14 @@ public class JwtService {
         return build(phone, phone, ROLE_CLIENT);
     }
 
+    /**
+     * How long a {@code pending} token lives: long enough to read the notice and
+     * press "I'm a trainer", not the seven days a working credential gets. It
+     * is also what the web holds before it claims — see
+     * {@code AuthTokenService.issue} — so its lifetime is its exposure.
+     */
+    public static final int PENDING_MINUTES = 15;
+
     /** For 7a — enough to claim a trainer account with, and nothing else. */
     public String generatePending(String phone) {
         return build(phone, phone, ROLE_PENDING);
@@ -115,8 +123,7 @@ public class JwtService {
     }
 
     private String build(String subject, String phone, String role) {
-        return build(subject, phone, role, null,
-                (long) props.getJwt().getExpiryMinutes() * 60 * 1000);
+        return build(subject, phone, role, null, expiryMs(role));
     }
 
     private String build(String subject, String phone, String role, long expiryMs) {
@@ -130,8 +137,13 @@ public class JwtService {
      * now; this class stays the thing that knows how a claim set is spelled.
      */
     public String build(String subject, String phone, String role, UUID tenantId) {
-        return build(subject, phone, role, tenantId,
-                (long) props.getJwt().getExpiryMinutes() * 60 * 1000);
+        return build(subject, phone, role, tenantId, expiryMs(role));
+    }
+
+    private long expiryMs(String role) {
+        return ROLE_PENDING.equals(role)
+                ? PENDING_MINUTES * 60_000L
+                : (long) props.getJwt().getExpiryMinutes() * 60 * 1000;
     }
 
     private String build(String subject, String phone, String role, UUID tenantId, long expiryMs) {

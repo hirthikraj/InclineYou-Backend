@@ -53,6 +53,17 @@ async function fetchJson<T>(path: string, init: RequestInit): Promise<T> {
   try {
     res = await fetch(`${BASE}${path}`, {
       ...init,
+      headers: {
+        /*
+         * Every sign-in says it is the web, so the backend mints the revocable
+         * session (V41) rather than the phone's seven-day JWT — absence means
+         * mobile. A brand-new number is the one exception, and the backend
+         * handles it: until it claims, it gets a fifteen-minute token that can
+         * only claim (api-contract *Sign in*).
+         */
+        'x-inclineyou-client': 'web',
+        ...(init.headers as Record<string, string> | undefined),
+      },
       // Auth is the one thing that must never be served from a cache.
       cache: 'no-store',
     });
