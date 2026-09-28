@@ -15,10 +15,10 @@ import { requireClientReport } from '@/lib/reports/guard';
  * different reader belongs at a different address, not behind a tab strip whose
  * other six are private.
  *
- * It is reached from three places, which is deliberate: the *Progress report*
+ * It is reached from three places, which is deliberate: the *Report*
  * button on the client's own file, the Progress tab beside the charts it
- * summarises, and the list at the foot of Business → Reports, where a trainer
- * thinking about retention is one thought away from wanting one.
+ * summarises, and the renewal row in Today's queue — the moment a pack runs
+ * out is when a client decides whether their progress was worth paying for.
  *
  * `weeks` is in the query string because a chosen range is a **place** — the
  * same call `/clients/:id/progress` makes for its own `range`. It also decides

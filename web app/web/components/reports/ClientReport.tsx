@@ -25,6 +25,7 @@ import { TopBar } from '@/components/shell/TopBar';
 import { CardPreview } from './CardPreview';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
+import { Crumbs } from '@/web-components/ui/Crumbs';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 import { Fold } from '@/web-components/ui/Fold';
 import { Message } from '@/web-components/ui/Message';
@@ -190,7 +191,15 @@ export function ClientReport({ report }: { report: Report }) {
 
   return (
     <>
-      <TopBar crumb={`Clients / ${report.clientName} / Progress report`} />
+      {/* The way back is to the client's file, not to wherever the trainer came
+          from — Today's renewal row, the header, the Progress tab all open this
+          card about ONE client, and that client's file is where it belongs. The
+          bar's title is the phone's back control; the crumbs are the desk's. */}
+      <TopBar
+        crumb={`Clients / ${report.clientName} / Progress report`}
+        title={report.clientName}
+        titleHref={`/clients/${report.clientId}`}
+      />
 
       <main className="main" id="main-content">
         {/* `c-pageheader`, and it was three hand-written `.ph__*` divs until this
@@ -202,6 +211,15 @@ export function ClientReport({ report }: { report: Report }) {
             `c-segment` in `single` mode announces a radiogroup and gives it
             arrow-key navigation, which those buttons never had. */}
         <PageHeader
+          crumbs={
+            <Crumbs
+              items={[
+                { label: 'Clients', href: '/clients' },
+                { label: report.clientName, href: `/clients/${report.clientId}` },
+                { label: 'Progress report' },
+              ]}
+            />
+          }
           title={report.clientName}
           sub={
             <>

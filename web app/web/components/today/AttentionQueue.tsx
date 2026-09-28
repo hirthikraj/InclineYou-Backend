@@ -17,6 +17,7 @@ import { BellOff, Check, Ellipsis } from '@/components/shell/Icons';
 import { Button } from '@/web-components/ui/Button';
 import { Tag } from '@/web-components/ui/Tag';
 import { Avatar } from '@/web-components/ui/Avatar';
+import { InlineLink } from '@/web-components/ui/InlineLink';
 import { Slab } from '@/web-components/ui/Slab';
 
 /**
@@ -765,6 +766,16 @@ function Row({
       {who}
       <td className="q__why">
         {item.line}
+        {/* THE MOMENT THE PROGRESS REPORT EXISTS FOR. Clients renew when they
+            can see progress, and a pack running out is when that is decided —
+            so the card is offered on the row that asks for the renewal. In the
+            text and not beside the verb: `.q__act` is sized for one button. */}
+        {item.action === 'Renew' && (
+          <>
+            {' · '}
+            <InlineLink href={`/clients/${item.clientId}/report`}>Send progress report</InlineLink>
+          </>
+        )}
         {/*
           ALREADY MESSAGED, AND THE ROW SAYS SO RATHER THAN VANISHING.
 

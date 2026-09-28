@@ -31,8 +31,8 @@ import { requireMoney } from '@/lib/money/guard';
  * keep pointing here and the table below forwards them. `?record=` goes with
  * them: it opens the record panel, which lives on Transactions now.
  *
- * `permanentRedirect` for the five that name a page, because those URLs will
- * never mean anything else again. The two folded tabs get a temporary `redirect`
+ * `permanentRedirect` for the four that name a page, because those URLs will
+ * never mean anything else again. The three folded tabs get a temporary `redirect`
  * with the filter pre-selected — `owed` and `writeoffs` are not gone, they are
  * chips, and a 308 would teach a browser to cache a mapping that a later pass
  * could reasonably change.
@@ -41,19 +41,19 @@ export const dynamic = 'force-dynamic';
 
 export const metadata = { title: 'Business · InclineYou' };
 
-/** The five old tabs that became pages. */
+/** The four old tabs that became pages. */
 const MOVED: Record<string, string> = {
   ledger: '/business/transactions',
   packages: '/business/packages',
-  gymshare: '/business/gym',
   gst: '/business/gst',
   reports: '/business/reports',
 };
 
-/** The two that became chips on the ledger. `LedgerFilter`'s own spellings. */
+/** The three that became chips on the ledger. `LedgerFilter`'s own spellings. */
 const FOLDED: Record<string, string> = {
   owed: '/business/transactions?filter=owed',
   writeoffs: '/business/transactions?filter=writeoff',
+  gymshare: '/business/transactions?filter=gymshare',
 };
 
 export default async function Page(props: {

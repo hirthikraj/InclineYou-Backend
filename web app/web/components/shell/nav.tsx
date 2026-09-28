@@ -1,7 +1,7 @@
 import type React from 'react';
 
 import {
-  Building, Calendar, Chart, Dots6, Dumbbell, Gear, Grid, Home, Note, Ruler,
+  Calendar, Chart, Dots6, Dumbbell, Gear, Grid, Home, Note, Ruler,
   Rupee, Stack, User, Users, Wallet,
 } from './Icons';
 
@@ -252,10 +252,10 @@ export const PRIMARY: Destination[] = [
 
        That is the test this column applies and the strip never did: a row here
        has to be a PLACE, and a slice of the rows on a place is a view of it.
-       *Gym share* survives the test where *Write-offs* does not, because it is
-       not a filter over the ledger — it is the floor's arithmetic, the split
-       percentage and what the gym is owed, which is a different reading of the
-       same money rather than a subset of the same rows.
+       *Gym share* was kept as a page on the argument that the floor's split is
+       a different reading of the money, and it has since gone the same way: the
+       *Gym share* chip narrows the rows and the *Yours* tile states the cut and
+       the floor/online split, which was everything the page added.
 
        ── AND *OVERVIEW* IS NEW, WHICH IS WHY THE FOLD-IN PAID ───────────────
 
@@ -275,7 +275,6 @@ export const PRIMARY: Destination[] = [
       { key: 'overview', icon: <Grid size={17} />, label: 'Overview', href: '/business' },
       { key: 'transactions', icon: <Rupee size={17} />, label: 'Transactions', href: '/business/transactions' },
       { key: 'packages', icon: <Stack size={17} />, label: 'Packages', href: '/business/packages' },
-      { key: 'gym', icon: <Building size={17} />, label: 'Gym share', href: '/business/gym' },
       { key: 'gst', icon: <Note size={17} />, label: 'GST', href: '/business/gst' },
       { key: 'reports', icon: <Chart size={17} />, label: 'Reports', href: '/business/reports' },
     ],

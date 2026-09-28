@@ -10,10 +10,9 @@ import { rupees, initials, avatarToken } from '@/lib/today/time';
 import type { MoneyTrainer } from '@/lib/money/api';
 import { PaymentRowMenu } from './PaymentRowMenu';
 import { Button } from '@/web-components/ui/Button';
-import { Card } from '@/web-components/ui/Card';
 import { Tag } from '@/web-components/ui/Tag';
 import { Chip } from '@/web-components/ui/Chip';
-import { KeyValueRow } from '@/web-components/ui/KeyValue';
+import { Stat } from '@/web-components/ui/Stat';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 
 const DOWN_ARROW = (
@@ -126,6 +125,13 @@ export function LedgerTab({
      denominator `computeWriteOffs` used and the only one the sentence can mean. */
   const writtenOff = rows.filter((r) => r.isWriteOff).reduce((s, r) => s + r.amount, 0);
   const writeOffPercent = stats.billed > 0 ? Math.round((writtenOff / stats.billed) * 100) : 0;
+  /* The deleted Gym share page's one figure the ledger did not already state:
+     what came in on the floor against online. Same side rule as `howLabel`. */
+  const collectedRows = rows.filter((r) => r.status === 'paid' || r.status === 'confirmed');
+  const floorIn = collectedRows
+    .filter((r) => r.collectedBy === 'gym' || (r.gymShareAmount ?? 0) > 0)
+    .reduce((s, r) => s + r.amount, 0);
+  const onlineIn = collectedRows.reduce((s, r) => s + r.amount, 0) - floorIn;
 
   if (rows.length === 0) {
     return (
@@ -187,8 +193,50 @@ export function LedgerTab({
         </p>
       )}
 
-      {/* ── Ledger + summary ────────────────────────────────────────────────── */}
-      <div className="mny__grid mt4">
+      {/* ── The period at a glance ──────────────────────────────────────────── */}
+      {/* The side card's figures, as tiles above the book rather than a column
+          beside it: *billed* and *collected* are the two a trainer opens this
+          page to read, and the table gets the full width its six columns want.
+          Every figure is still the total of the rows below. */}
+      <div className="stats stats--4 mnystats mt4">
+        <Stat
+          label={<>Billed · {periodChip(period)}</>}
+          value={rupees(stats.billed)}
+          detail={writtenOff > 0
+            ? `−${rupees(writtenOff)} written off · ${writeOffPercent}% of billed`
+            : `${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}`}
+        />
+        <Stat
+          label="Collected"
+          value={rupees(stats.collected)}
+          tone="acc"
+          detail={<>
+            {100 - stats.owedPercent}% of billed
+            {/* The collection-rate card's meter, folded into the tile it is
+                the ratio of. A `span`: `.stat__d` is a `<p>`. */}
+            <span className="meter" style={{ marginTop: 8 }} aria-hidden="true">
+              <i style={{ width: `${100 - stats.owedPercent}%` }}></i>
+            </span>
+          </>}
+        />
+        <Stat
+          label="Yours"
+          value={rupees(stats.yours)}
+          tone="acc"
+          detail={hasGym
+            ? <>After the gym&#8217;s cut of {rupees(stats.gymShare)}<br />{rupees(floorIn)} floor · {rupees(onlineIn)} online</>
+            : 'No gym share'}
+        />
+        <Stat
+          label="Still pending"
+          value={stats.owedAmount > 0 ? rupees(stats.owedAmount) : '—'}
+          tone={stats.owedAmount > 0 ? 'warn' : 'neutral'}
+          detail={stats.owedAmount > 0 ? `${stats.owedPercent}% of billed` : 'Everything billed is in'}
+        />
+      </div>
+
+      {/* ── Ledger ──────────────────────────────────────────────────────────── */}
+      <div className="mt3">
         <div className="card">
           {/* `.mny__hd` — see `OwedTab`. *Record payment* was 24px past the
               card's right edge at 390px, and `.main` is `overflow:hidden`, so it
@@ -379,53 +427,6 @@ export function LedgerTab({
           </div>
         </div>
 
-        {/* Side summary card — the book's own vocabulary, kept whole */}
-        <div>
-          <Card title={<>{periodChip(period)}</>}>
-            <KeyValueRow k="Billed">{rupees(stats.billed)}</KeyValueRow>
-            <KeyValueRow k="Collected" valueClassName="acc">{rupees(stats.collected)}</KeyValueRow>
-            {hasGym && (
-              <KeyValueRow k="Gym&#8217;s cut" valueClassName="warn">−{rupees(stats.gymShare)}</KeyValueRow>
-            )}
-            <KeyValueRow k="Yours" valueClassName="acc">{rupees(stats.yours)}</KeyValueRow>
-            {stats.owedAmount > 0 && (
-              <div className="kv"><span className="kv__k">Still pending</span><span className="kv__v" style={{ color: 'var(--tx-warn)' }}>{rupees(stats.owedAmount)}</span></div>
-            )}
-            {/* THE DELETED *WRITE-OFFS* TAB'S ONE FIGURE.
-                That tab drew three tiles over a filtered copy of this table, and
-                two of the three were the count and the total — which the chip
-                above already carries and the table already sums. The third was
-                *as a share of billed*, a ratio nothing else states, and a ratio
-                about the period belongs in the card that holds every other one.
-                Drawn only where there are any: a `0%` line on a clean month is a
-                row spent saying nothing happened. */}
-            {writtenOff > 0 && (
-              <div className="kv">
-                <span className="kv__k">Written off</span>
-                <span className="kv__v">
-                  −{rupees(writtenOff)}
-                  <span className="small" style={{ color: 'var(--tx-ink-3)' }}>
-                    {' '}· {writeOffPercent}% of billed
-                  </span>
-                </span>
-              </div>
-            )}
-          </Card>
-
-          {stats.owedAmount > 0 && (
-            <Card
-              title="Collection rate"
-              className="mt3"
-            >
-              <div className="meter meter--lg" style={{ marginBottom: 8 }}>
-                <i style={{ width: `${100 - stats.owedPercent}%` }}></i>
-              </div>
-              <p className="small" style={{ color: 'var(--tx-ink-3)' }}>
-                {100 - stats.owedPercent}% collected · {stats.owedPercent}% pending
-              </p>
-            </Card>
-          )}
-        </div>
       </div>
 
       {/* THE SIX-BAR TREND MOVED TO THE OVERVIEW TOO, for the same reason as

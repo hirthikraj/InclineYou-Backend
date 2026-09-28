@@ -2,7 +2,7 @@
 
 import type { MoneyData } from '@/lib/money/api';
 import type { ReportsData } from '@/lib/business/report-api';
-import { buildPracticeReport, reportCandidates } from '@/lib/business/report';
+import { buildPracticeReport } from '@/lib/business/report';
 import { TopBar } from '@/components/shell/TopBar';
 import { ReportsTab } from './ReportsTab';
 import { BizHeader } from './BizHeader';
@@ -47,7 +47,6 @@ export function ReportsPage({
     now: reports.now,
   };
   const practice = buildPracticeReport(input);
-  const candidates = reportCandidates(input);
 
   return (
     <>
@@ -60,7 +59,7 @@ export function ReportsPage({
         />
 
         <div className="body">
-          <ReportsTab report={practice} candidates={candidates} />
+          <ReportsTab report={practice} />
         </div>
       </main>
     </>

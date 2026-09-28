@@ -5,7 +5,6 @@ import {
   changePercent,
   wholeMonthAverage,
   type PracticeReport,
-  type ReportCandidate,
 } from '@/lib/business/report';
 import { csvFilename, downloadCsv } from '@/lib/money/csv';
 import { rupees, rupeesShort } from '@/lib/today/time';
@@ -15,27 +14,24 @@ import { Card } from '@/web-components/ui/Card';
 import { Tag } from '@/web-components/ui/Tag';
 import { KeyValueRow } from '@/web-components/ui/KeyValue';
 import { Stat } from '@/web-components/ui/Stat';
-import { Avatar } from '@/web-components/ui/Avatar';
-import { Table, Row } from '@/web-components/ui/Table';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 
 /**
- * REPORTS — *how is the practice doing*, and the door to the other audience.
+ * REPORTS — *how is the practice doing*.
  *
  * This was a `NotBuilt` notice, and before that a rail row pointing at a
  * full-page dead end. It is the brief's section 9, which opens with a warning
  * this file is arranged around: **"Two distinct audiences. Don't mix them."**
  *
- * So the screen is two things stacked, with no figure crossing between them:
+ * So this screen is the trainer's business report and nothing else. Six
+ * metrics, one screen, and the ceiling is the feature — *"a trainer is not an
+ * analyst"*. Four headline figures with a direction on each, then three shapes
+ * that say whether the figures are normal.
  *
- * 1. **The trainer's business report.** Six metrics, one screen, and the ceiling
- *    is the feature — *"a trainer is not an analyst"*. Four headline figures with
- *    a direction on each, then three shapes that say whether the figures are
- *    normal.
- * 2. **Client progress reports.** Not a metric and not on this page's axes: a
- *    list of the clients whose twelve weeks are worth showing them, each one
- *    linking to a card built for the CLIENT to read. The brief ranks it above
- *    most of the analytics above it, and it is a different screen entirely.
+ * The CLIENT's progress report used to be listed at the foot of this page, which
+ * is the one place a trainer thinking about a client never looks. It is reached
+ * from the client's file header, their Progress tab, and the renewal row on
+ * Today — the moment the card exists for.
  *
  * ── WHY THE NUMBERS ARE NOT ALL OVER THE SAME WINDOW ────────────────────────
  *
@@ -51,13 +47,7 @@ import { EmptyState } from '@/web-components/ui/EmptyState';
  * Indian gym floors empty in December and fill in January, and a trainer looking
  * at six months in February cannot tell a good month from a normal one.
  */
-export function ReportsTab({
-  report,
-  candidates,
-}: {
-  report: PracticeReport;
-  candidates: ReportCandidate[];
-}) {
+export function ReportsTab({ report }: { report: PracticeReport }) {
   const { headline: h, months } = report;
 
   if (report.isEmpty) {
@@ -309,126 +299,7 @@ export function ReportsTab({
           </Card.Body>
         </Card>
       </div>
-
-      {/* ── The OTHER audience. Separated by a rule and a heading, because the
-             brief's first instruction about this section is not to mix them. ── */}
-      <ClientReportsIndex candidates={candidates} />
     </>
-  );
-}
-
-/**
- * THE SECOND AUDIENCE — and it is a door, not a report.
- *
- * The brief puts this above most of the analytics above it, and gives three
- * reasons in order: clients renew when they can see progress; it makes the
- * trainer look professional; and clients share it, which is free acquisition
- * from the most credible source there is.
- *
- * What belongs HERE is only the way in. The card itself is
- * `/clients/:id/report`, built for a reader who is not the trainer — no revenue,
- * no retention, nothing about the practice at all.
- *
- * Ranked by sessions in the last twelve weeks, because the card with the most on
- * it is the one most likely to renew somebody. Alphabetical would bury exactly
- * the client this feature was built for. A client with nothing delivered in the
- * window is not listed: their report would be a blank page with their name on
- * it, and sending that is worse than sending nothing.
- */
-function ClientReportsIndex({ candidates }: { candidates: ReportCandidate[] }) {
-  return (
-    <div className="sect mt4">
-      <div className="card">
-        <div className="card__hd">
-          <h2 className="card__t">Client progress reports</h2>
-          <Tag>Last 12 weeks</Tag>
-          <span className="card__acts small" style={{ color: 'var(--tx-ink-3)' }}>
-            {candidates.length} with something to show
-          </span>
-        </div>
-
-        <div className="card__b" style={{ borderBottom: '1px solid var(--tx-line)' }}>
-          <p className="small" style={{ lineHeight: 1.6, maxWidth: '68ch' }}>
-            A card for the <b>client</b> to read — sessions, measurements and the lifts
-            that moved, with nothing about your business on it. Send it as an image on
-            WhatsApp, or hand it over at the end of a session. Most people quit because
-            progress feels invisible, not because it is absent.
-          </p>
-        </div>
-
-        <div className="card__b card__b--flush">
-          {candidates.length === 0 ? (
-            <p className="small" style={{ padding: 24, textAlign: 'center', color: 'var(--tx-ink-3)' }}>
-              Nobody has trained in the last twelve weeks, so there is no progress to
-              report yet.
-            </p>
-          ) : (
-            /* NOT `maxHeight:420` with its own `overflowY`. Twenty-two clients
-                is 1,004px of rows, so ten showed and 584px sat behind an inner
-                scrollbar INSIDE the page's own scroller — a second scroll
-                surface with nothing saying it was there, on the list that is
-                this tab's only way into a client's card. The card is last on the
-                tab and the page already scrolls; the count is in the header. */
-            <div className="tblwrap">
-              <Table
-                caption={`${candidates.length} clients you can send a progress report to`}
-                className="rpttbl"
-                columns={[
-                  { key: 'client', label: 'Client' },
-                  { key: 'sessions', label: 'Sessions', numeric: true, className: 'rptcol' },
-                  { key: 'last', label: 'Last trained', className: 'rptcol' },
-                  { key: 'act', label: '', bare: false },
-                ]}
-              >
-                {candidates.map((c) => (
-                  <Row
-                    key={c.clientId}
-                    cells={[
-                      {
-                        key: 'client',
-                        content: (
-                          <>
-                            <span className="who">
-                              <Avatar name={c.name} id={c.clientId} size="sm" />
-                              <b>{c.name}</b>
-                            </span>
-                            {/* The two figures again, as one line, for the narrow
-                                reflow. `.tbl--stack` drops the header and this table
-                                cannot afford that — a bare `24` under no column name
-                                is not a number anybody can read. So the columns fold
-                                INTO the client cell, where the words come with them,
-                                and app.css hides whichever copy is not in play. */}
-                            <span className="rptmeta">
-                              {c.sessions} session{c.sessions === 1 ? '' : 's'} · last {whenLabel(c.lastAt)}
-                            </span>
-                          </>
-                        ),
-                      },
-                      { key: 'sessions', content: c.sessions, numeric: true, className: 'rptcol' },
-                      {
-                        key: 'last',
-                        content: whenLabel(c.lastAt),
-                        className: 'rptcol',
-                        style: { color: 'var(--tx-ink-3)' },
-                      },
-                      {
-                        key: 'act',
-                        style: { textAlign: 'right' },
-                        content: (
-                          <Button href={`/clients/${c.clientId}/report`} variant="secondary" size="sm">
-                            Progress report
-                          </Button>
-                        ),
-                      },
-                    ]}
-                  />
-                ))}
-              </Table>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -451,11 +322,4 @@ function growthLabel(pct: number): string {
     return `${times >= 10 ? Math.round(times) : times.toFixed(1).replace(/\.0$/, '')}×`;
   }
   return `${pct > 0 ? '+' : '−'}${Math.abs(pct)}%`;
-}
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-function whenLabel(at: number): string {
-  const d = new Date(at);
-  return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
 }
