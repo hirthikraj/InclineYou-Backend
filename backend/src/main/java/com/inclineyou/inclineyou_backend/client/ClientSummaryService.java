@@ -44,7 +44,9 @@ public class ClientSummaryService {
     public record Schedule(Integer sessionsPerWeek, Integer sessionDurationMinutes, String deliveryMode,
                            String version) {}
 
-    public record Slot(String id, int weekday, String start, Integer durationMinutes, String deliveryMode) {}
+    /** @param programDay the program day this slot books (V2, R45); null = the sequence rule */
+    public record Slot(String id, int weekday, String start, Integer programDay, Integer durationMinutes,
+                       String deliveryMode) {}
 
     public record Program(String id, String name, int weeks, int days, String startDate, String endDate) {}
 
@@ -60,14 +62,23 @@ public class ClientSummaryService {
             String name,
             String phone,
             String status,
+            /** Epoch ms; set while paused. */
+            Long pausedAt,
             String pausedUntil,
+            /** Epoch ms and the reason, set while archived — the Archived list reads them. */
+            Long archivedAt,
+            String archiveReason,
+            String archiveNote,
             String membershipStatus,
             String clientType,
             boolean hasPinnedNote,
             Schedule schedule,
             List<Slot> slots,
             Program program,
-            Stats stats
+            Stats stats,
+            long createdAt,
+            /** {@code client.updated_at} as epoch ms — If-Match for {@code PATCH /v1/clients/{id}}. */
+            String version
     ) {}
 
     private static final Stats NO_SESSIONS = new Stats(0, null, null, 0);
@@ -79,15 +90,27 @@ public class ClientSummaryService {
      *               default rather than answering an empty roster for a typo.
      */
     public List<ClientSummary> list(UUID trainerId, String status) {
+        return query(trainerId, statuses(status), null);
+    }
+
+    /** One client in the L3 shape, whatever their status — what every Clients write answers with. */
+    public java.util.Optional<ClientSummary> one(UUID trainerId, UUID clientId) {
+        return query(trainerId, List.copyOf(STATUSES), clientId).stream().findFirst();
+    }
+
+    private List<ClientSummary> query(UUID trainerId, List<String> statuses, UUID clientId) {
         var p = new HashMap<String, Object>();
         p.put("tid", trainerId.toString());
-        p.put("statuses", statuses(status));
+        p.put("statuses", statuses);
+        // Folded into every roster predicate below, so one client costs one client's rows.
+        p.put("cid", clientId == null ? null : clientId.toString());
 
         var slots = slotsByClient(p);
         var stats = statsByClient(p);
 
         return jdbc.query("""
-                SELECT c.id::text AS id, c.name, c.phone, c.status, c.paused_until::text AS paused_until,
+                SELECT c.id::text AS id, c.name, c.phone, c.status, c.paused_at, c.paused_until::text AS paused_until,
+                       c.archived_at, c.archive_reason, c.archive_note, c.created_at, c.updated_at,
                        c.membership_status, c.client_type,
                        EXISTS (SELECT 1 FROM client_note n
                                WHERE n.client_id = c.id AND n.pinned AND n.deleted_at IS NULL) AS has_pinned_note,
@@ -101,6 +124,7 @@ public class ClientSummaryService {
                 -- uq_program_client_active guarantees at most one row here.
                 LEFT JOIN program p ON p.client_id = c.id AND p.status = 'active' AND p.deleted_at IS NULL
                 WHERE c.trainer_id = :tid::uuid AND c.deleted_at IS NULL AND c.status IN (:statuses)
+                  AND (CAST(:cid AS uuid) IS NULL OR c.id = CAST(:cid AS uuid))
                 ORDER BY lower(c.name), c.id
                 """, p, (rs, i) -> {
             String id = rs.getString("id");
@@ -109,7 +133,11 @@ public class ClientSummaryService {
                     rs.getString("name"),
                     rs.getString("phone"),
                     rs.getString("status"),
+                    epochOrNull(rs.getTimestamp("paused_at")),
                     rs.getString("paused_until"),
+                    epochOrNull(rs.getTimestamp("archived_at")),
+                    rs.getString("archive_reason"),
+                    rs.getString("archive_note"),
                     rs.getString("membership_status"),
                     rs.getString("client_type"),
                     rs.getBoolean("has_pinned_note"),
@@ -127,7 +155,9 @@ public class ClientSummaryService {
                             : new Program(rs.getString("program_id"), rs.getString("program_name"),
                                           rs.getInt("weeks"), rs.getInt("days"),
                                           rs.getString("start_date"), rs.getString("end_date")),
-                    stats.getOrDefault(id, NO_SESSIONS));
+                    stats.getOrDefault(id, NO_SESSIONS),
+                    rs.getTimestamp("created_at").getTime(),
+                    String.valueOf(rs.getTimestamp("updated_at").getTime()));
         });
     }
 
@@ -135,16 +165,17 @@ public class ClientSummaryService {
         var out = new HashMap<String, List<Slot>>();
         jdbc.query("""
                 SELECT s.client_id::text AS client_id, s.id::text AS id, s.weekday,
-                       to_char(s.start_time, 'HH24:MI') AS start_hm, s.duration_minutes, s.delivery_mode
+                       to_char(s.start_time, 'HH24:MI') AS start_hm, s.program_day, s.duration_minutes, s.delivery_mode
                 FROM client_schedule_slot s
                 JOIN client c ON c.id = s.client_id
                 WHERE c.trainer_id = :tid::uuid AND c.deleted_at IS NULL AND c.status IN (:statuses)
+                  AND (CAST(:cid AS uuid) IS NULL OR c.id = CAST(:cid AS uuid))
                   AND s.deleted_at IS NULL
                 ORDER BY s.weekday, s.start_time, s.id
                 """, p, rs -> {
             out.computeIfAbsent(rs.getString("client_id"), k -> new ArrayList<>()).add(new Slot(
                     rs.getString("id"), rs.getInt("weekday"), rs.getString("start_hm"),
-                    intOrNull(rs, "duration_minutes"), rs.getString("delivery_mode")));
+                    intOrNull(rs, "program_day"), intOrNull(rs, "duration_minutes"), rs.getString("delivery_mode")));
         });
         return out;
     }
@@ -167,6 +198,7 @@ public class ClientSummaryService {
                 WITH roster AS (
                     SELECT id FROM client
                     WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND status IN (:statuses)
+                      AND (CAST(:cid AS uuid) IS NULL OR id = CAST(:cid AS uuid))
                 ),
                 agg AS (
                     SELECT s.client_id,

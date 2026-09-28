@@ -23,6 +23,7 @@ import {
   type ClientTag,
   type Filters,
   type Focus,
+  type Roster,
   type RosterRow,
   type Segment,
   type SortKey,
@@ -52,9 +53,12 @@ import {
   archiveClient,
   pauseClient,
   resumeClient,
+  unarchiveClient,
+  type ArchiveReason,
   type StatusWriteResult,
 } from '@/lib/clients/status-actions';
 import { Button } from '@/web-components/ui/Button';
+import { renew } from '@/lib/today/actions';
 import { Tag } from '@/web-components/ui/Tag';
 import { Chip } from '@/web-components/ui/Chip';
 import { Avatar } from '@/web-components/ui/Avatar';
@@ -545,6 +549,89 @@ function FilterPanel({
  * `window.confirm` cannot say the sentence that actually matters: **nothing is
  * deleted.** Pause is not confirmed. It is one click to undo from this menu.
  */
+/**
+ * The Archived list — the archived rows from the same `status=all` read, with
+ * the reason and date, and Unarchive (api-contract Clients: no extra request).
+ * Unarchive books their kept week again; closed packs stay closed.
+ */
+function ArchivedList({ rows }: { rows: Roster['archivedRows'] }) {
+  const [pending, startTransition] = useTransition();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const label = Object.fromEntries(ARCHIVE_REASONS) as Record<string, string>;
+  return (
+    <details className="rst__archived">
+      <summary>{rows.length} archived</summary>
+      <ul>
+        {rows.map((r) => (
+          <li key={r.id}>
+            <span>{r.name}</span>
+            <span className="ink3">
+              {' · '}{(r.reason && label[r.reason]) ?? 'Archived'}
+              {r.archivedAt ? ` · ${new Date(r.archivedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}` : ''}
+              {r.note ? ` · ${r.note}` : ''}
+            </span>{' '}
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={pending}
+              onClick={() => {
+                setBusy(r.id);
+                setMessage(null);
+                startTransition(async () => {
+                  const result = await unarchiveClient(r.id);
+                  if (!result.ok) setMessage(result.message ?? 'That did not save.');
+                  setBusy(null);
+                });
+              }}
+            >
+              {pending && busy === r.id ? 'Bringing back…' : 'Unarchive'}
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {message && <p className="fail" role="alert">{message}</p>}
+    </details>
+  );
+}
+
+/**
+ * Renew — POST /v1/packages/{id}/renew (Today A3), the pack's own terms copied
+ * on the server. The id is minted once per button, so a retried click answers
+ * 200 with the same package instead of selling two.
+ */
+function RenewButton({ packageId, label }: { packageId: string; label: string }) {
+  const [attempt] = useState(() => crypto.randomUUID());
+  const [pending, startTransition] = useTransition();
+  const [message, setMessage] = useState<string | null>(null);
+  return (
+    <>
+      <Button
+        variant="secondary"
+        size="sm"
+        disabled={pending}
+        onClick={() => startTransition(async () => {
+          const result = await renew(packageId, attempt);
+          setMessage(result.ok ? null : result.message ?? 'That did not renew.');
+        })}
+      >
+        {pending ? 'Renewing…' : label}
+      </Button>
+      {message && <span className="fail" role="alert">{message}</span>}
+    </>
+  );
+}
+
+/** client_archive_reason's six values, in the MockUI ArchiveSheet's words. */
+const ARCHIVE_REASONS: [ArchiveReason, string][] = [
+  ['goal_reached', 'Reached their goal'],
+  ['moved_away', 'Moved away'],
+  ['cost', 'Cost'],
+  ['no_time', 'No time'],
+  ['switched_trainer', 'Switched trainer'],
+  ['other', 'Other'],
+];
+
 function RowMenu({
   row,
   onClose,
@@ -554,7 +641,12 @@ function RowMenu({
 }) {
   const router = useRouter();
   const wrap = useRef<HTMLDivElement>(null);
-  const [confirming, setConfirming] = useState(false);
+  /* The menu BECOMES the sheet for the two verbs that ask something first:
+     archive needs a reason (client_archive), pause asks when they're back. */
+  const [confirming, setConfirming] = useState<false | 'archive' | 'pause'>(false);
+  const [reason, setReason] = useState<ArchiveReason>('other');
+  const [note, setNote] = useState('');
+  const [backOn, setBackOn] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -624,7 +716,47 @@ function RowMenu({
     });
   }
 
-  if (confirming) {
+  if (confirming === 'pause') {
+    return (
+      <div
+        className="menu menu--confirm"
+        ref={wrap}
+        role="menu"
+        aria-label={`Pause ${row.name}?`}
+        style={{ top: '100%', right: 0, marginTop: 4 }}
+      >
+        <p className="menu__note">
+          Their packs stop running and the sessions while they&apos;re away are
+          cancelled. Leave the date empty if you don&apos;t know yet.
+        </p>
+        <label className="menu__note">
+          Back on{' '}
+          <input type="date" value={backOn} onChange={(e) => setBackOn(e.target.value)} disabled={pending} />
+        </label>
+        <button
+          className="menu__i"
+          type="button"
+          role="menuitem"
+          disabled={pending}
+          onClick={() => write(() => pauseClient(row.id, backOn || null))}
+        >
+          {pending ? 'Pausing…' : `Pause ${first}`}
+        </button>
+        <button
+          className="menu__i"
+          type="button"
+          role="menuitem"
+          disabled={pending}
+          onClick={() => { setError(null); setConfirming(false); }}
+        >
+          Not now
+        </button>
+        {error && <p className="menu__note fail">{error}</p>}
+      </div>
+    );
+  }
+
+  if (confirming === 'archive') {
     return (
       <div
         className="menu menu--confirm"
@@ -637,12 +769,22 @@ function RowMenu({
           {first} comes off the roster. Their sessions, payments and history all
           stay — nothing is deleted.
         </p>
+        <label className="menu__note">
+          Why{' '}
+          <select value={reason} onChange={(e) => setReason(e.target.value as ArchiveReason)} disabled={pending}>
+            {ARCHIVE_REASONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <label className="menu__note">
+          Note{' '}
+          <input value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} disabled={pending} placeholder="Optional" />
+        </label>
         <button
           className="menu__i menu__i--danger"
           type="button"
           role="menuitem"
           disabled={pending}
-          onClick={() => write(() => archiveClient(row.id))}
+          onClick={() => write(() => archiveClient(row.id, reason, note))}
         >
           {pending ? 'Archiving…' : `Archive ${first}`}
         </button>
@@ -722,7 +864,7 @@ function RowMenu({
             ? `Let the roster read ${first}'s sessions and packs again`
             : `Stop the roster raising ${first} while they are away`
         }
-        onClick={() => write(() => (paused ? resumeClient(row.id) : pauseClient(row.id)))}
+        onClick={() => (paused ? write(() => resumeClient(row.id)) : setConfirming('pause'))}
       >
         {pending ? (paused ? 'Resuming…' : 'Pausing…') : paused ? 'Resume' : 'Pause'}
       </button>
@@ -731,7 +873,7 @@ function RowMenu({
         type="button"
         role="menuitem"
         disabled={pending}
-        onClick={() => setConfirming(true)}
+        onClick={() => setConfirming('archive')}
       >
         Archive
       </button>
@@ -885,7 +1027,9 @@ function ClientRow({
           key: 'act',
           className: 'act',
           content: row.attention &&
-            (templateForKind(row.attention.kind) ? (
+            (row.attention.kind === 'pack' && row.attention.packageId ? (
+              <RenewButton packageId={row.attention.packageId} label={row.attention.action} />
+            ) : templateForKind(row.attention.kind) ? (
               <NudgeButton
                 clientId={row.id}
                 clientName={row.name}
@@ -1238,7 +1382,7 @@ export function Clients({
   const filterPanelCount = visible.length;
 
   const paletteClients: PaletteClient[] = useMemo(
-    () => data.clients.map(c => ({ id: c.id, name: c.name })),
+    () => data.clients.filter(c => c.status !== 'archived').map(c => ({ id: c.id, name: c.name ?? 'Client' })),
     [data.clients],
   );
 
@@ -1747,6 +1891,7 @@ export function Clients({
               </div>
             </>
           )}
+          {roster.archivedRows.length > 0 && <ArchivedList rows={roster.archivedRows} />}
         </div>
 
         {/* Filter panel — absolute, anchored to .main (position:relative) */}

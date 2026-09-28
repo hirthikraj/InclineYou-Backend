@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react';
 
 import { scheduleAssessment } from '@/lib/assessments/actions';
 import { templateShape, type TemplateWire } from '@/lib/assessments/vocab';
-import type { ClientWire } from '@/lib/clients/api';
+import type { ClientWire } from '@/lib/assessments/api';
 import { Button } from '@/web-components/ui/Button';
 import { Checkbox } from '@/web-components/ui/Checkbox';
 import { Message } from '@/web-components/ui/Message';

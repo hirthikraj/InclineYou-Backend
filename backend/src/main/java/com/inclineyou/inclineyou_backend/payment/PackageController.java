@@ -19,6 +19,7 @@ public class PackageController {
     private final PackageService service;
     private final PackageReadService reads;
     private final PackageRenewService renewals;
+    private final PackageSaleService sales;
 
     // ── Packages ──────────────────────────────────────────────────────────────
 
@@ -57,13 +58,14 @@ public class PackageController {
         return Items.of(reads.list(trainerId(), scope != null, client));
     }
 
+    /** api-contract 1.1 Clients A7 — 201 the first time, 200 on a replayed id. */
     @PostMapping("/v1/clients/{clientId}/packages")
-    @ResponseStatus(HttpStatus.CREATED)
-    public PackageService.PackageResponse createPackage(
-            @PathVariable String clientId,
-            @Valid @RequestBody PackageService.CreatePackageRequest req
+    public ResponseEntity<PackageReadService.CurrentPackage> createPackage(
+            @PathVariable UUID clientId,
+            @RequestBody(required = false) java.util.Map<String, Object> body
     ) {
-        return service.createPackage(trainerId(), clientId, req);
+        var sold = sales.sell(trainerId(), clientId, body);
+        return ResponseEntity.status(sold.created() ? HttpStatus.CREATED : HttpStatus.OK).body(sold.pkg());
     }
 
     /**

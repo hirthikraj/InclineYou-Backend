@@ -53,20 +53,6 @@ public class ClientService {
 
     // ── DTOs ──────────────────────────────────────────────────────────────────
 
-    public record CreateClientRequest(
-            @NotBlank String name,
-            String phone,
-            String goal,
-            /** {@code independent} (the default) | {@code gym}. */
-            String clientType,
-            BigDecimal heightCm,
-            String activityLevel,
-            Map<String, Object> metadata,
-            Integer sessionsPerWeek,
-            Integer sessionDurationMinutes,
-            String deliveryMode
-    ) {}
-
     public record UpdateClientRequest(
             String name,
             String phone,
@@ -83,9 +69,6 @@ public class ClientService {
             /* ---- V7. Null leaves alone; "" clears. ISO date, not in the future. ---- */
             String dateOfBirth
     ) {}
-
-    /** One number to ask about, in a body rather than a query string. */
-    public record PhoneCheckRequest(@NotBlank String phone) {}
 
     public record StatusFlags(boolean paymentDue, boolean sessionPackLow, boolean planExpiring) {}
 
@@ -192,31 +175,6 @@ public class ClientService {
 
     public ClientResponse get(UUID trainerId, UUID clientId) {
         return respond(trainerId, findOwned(trainerId, clientId));
-    }
-
-    /** Can this trainer put this number on their roster? Asked before the form is submitted. */
-    public ClientPhoneGuard.Verdict checkPhone(UUID trainerId, String phone) {
-        return phoneGuard.check(trainerId.toString(), phone);
-    }
-
-    @Transactional
-    public ClientResponse create(UUID trainerId, CreateClientRequest req) {
-        phoneGuard.require(trainerId.toString(), req.phone());
-
-        var client = new Client();
-        client.setTrainerId(trainerId);
-        client.setName(req.name());
-        client.setPhone(req.phone());
-        client.setGoal(req.goal());
-        client.setClientType(clientType(req.clientType(), "independent"));
-        client.setHeightCm(req.heightCm());
-        client.setActivityLevel(req.activityLevel());
-        client.setMetadata(req.metadata());
-        // Flushed, because `ensure_client_schedule` creates the schedule row on
-        // INSERT and the update below has to find it.
-        clientRepo.saveAndFlush(client);
-        writeSchedule(client.getId(), req.sessionsPerWeek(), req.sessionDurationMinutes(), req.deliveryMode());
-        return respond(trainerId, client);
     }
 
     @Transactional

@@ -82,8 +82,14 @@ public class ClientPhoneGuard {
      */
     public static final String CODE_OTHER_ROSTER = "PHONE_ON_ANOTHER_ROSTER";
 
-    /** The number is on the caller's own roster. Recovery: edit that client. */
-    public static final String CODE_OWN_ROSTER = "PHONE_ON_YOUR_ROSTER";
+    /** The number is on the caller's own roster. Recovery: edit that client (or unarchive them). */
+    public static final String CODE_OWN_ROSTER = "PHONE_ALREADY_YOURS";
+
+    /** Fails {@code client_phone_format}: E.164, and an Indian number is +91[6-9] and 9 digits. */
+    public static final String CODE_INVALID = "PHONE_INVALID";
+
+    private static final java.util.regex.Pattern E164 = java.util.regex.Pattern.compile("^\\+[1-9][0-9]{6,14}$");
+    private static final java.util.regex.Pattern INDIA = java.util.regex.Pattern.compile("^\\+91[6-9][0-9]{9}$");
 
     private static final String MSG_TRAINER =
             "That's your own number — you can't add yourself as a client. "
@@ -98,9 +104,21 @@ public class ClientPhoneGuard {
             "This number is already on your roster — it's saved for %s. One number can only "
             + "belong to one client, so edit them instead of adding them again.";
 
-    /** Available, or the reason it is not. */
-    public record Verdict(boolean available, String code, String message) {
-        public static Verdict ok() { return new Verdict(true, null, null); }
+    /**
+     * Available, or the reason it is not. {@code clientId}, {@code clientName} and
+     * {@code clientStatus} only for {@code PHONE_ALREADY_YOURS} — it is the caller's
+     * own book, so the UI can say "open Meera", or offer to restore an archived one.
+     */
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public record Verdict(boolean available, String code, String message,
+                          String clientId, String clientName, String clientStatus) {
+        public static Verdict ok() { return new Verdict(true, null, null, null, null, null); }
+        static Verdict no(String code, String message) { return new Verdict(false, code, message, null, null, null); }
+    }
+
+    /** The {@code client_phone_format} rule, before any query. */
+    public static boolean validFormat(String phone) {
+        return E164.matcher(phone).matches() && (!phone.startsWith("+91") || INDIA.matcher(phone).matches());
     }
 
     /**
@@ -109,7 +127,21 @@ public class ClientPhoneGuard {
      *                  trainer's, and there is no identity to collide with
      */
     public Verdict check(String trainerId, String phone) {
+        return check(trainerId, phone, false);
+    }
+
+    /**
+     * @param includeArchived the phone-check asks about the trainer's archived
+     *                        clients too, so the add flow can offer a restore
+     *                        instead of a second row; a write does not, because
+     *                        uq_client_phone_live lets a new client take an
+     *                        archived one's number
+     */
+    public Verdict check(String trainerId, String phone, boolean includeArchived) {
         if (phone == null || phone.isBlank()) return Verdict.ok();
+        if (!validFormat(phone)) {
+            return Verdict.no(CODE_INVALID, "That isn't a phone number we can use — +91 and ten digits.");
+        }
 
         var row = jdbc.queryForMap("""
                 SELECT
@@ -131,28 +163,32 @@ public class ClientPhoneGuard {
                           AND status <> 'archived'
                           AND membership_status NOT IN ('removed', 'declined', 'unavailable')
                     ) AS on_other_roster,
-                    (
-                        SELECT name FROM client
+                    own.id::text AS own_client_id, own.name AS own_client_name, own.status AS own_client_status
+                FROM (SELECT 1) one
+                LEFT JOIN LATERAL (
+                        SELECT id, name, status FROM client
                         WHERE phone = :phone
                           AND trainer_id = :tid::uuid
                           AND (:tenantId::uuid IS NULL OR tenant_id = :tenantId::uuid)
                           AND deleted_at IS NULL
-                          AND status <> 'archived'
-                          AND membership_status NOT IN ('removed', 'declined', 'unavailable')
-                        ORDER BY created_at
+                          AND (:archived OR (status <> 'archived'
+                               AND membership_status NOT IN ('removed', 'declined', 'unavailable')))
+                        -- A live client before an archived one with the same number.
+                        ORDER BY (status = 'archived'), created_at
                         LIMIT 1
-                    ) AS own_client_name
-                """, params(phone, trainerId, activeTenantId()));
+                ) own ON true
+                """, params(phone, trainerId, activeTenantId(), includeArchived));
 
         if (Boolean.TRUE.equals(row.get("is_self"))) {
-            return new Verdict(false, CODE_TRAINER, MSG_TRAINER);
+            return Verdict.no(CODE_TRAINER, MSG_TRAINER);
         }
         Object ownClient = row.get("own_client_name");
-        if (ownClient != null) {
-            return new Verdict(false, CODE_OWN_ROSTER, MSG_OWN_ROSTER.formatted(ownClient));
+        if (row.get("own_client_id") != null) {
+            return new Verdict(false, CODE_OWN_ROSTER, MSG_OWN_ROSTER.formatted(ownClient),
+                    (String) row.get("own_client_id"), (String) ownClient, (String) row.get("own_client_status"));
         }
         if (Boolean.TRUE.equals(row.get("on_other_roster"))) {
-            return new Verdict(false, CODE_OTHER_ROSTER, MSG_OTHER_ROSTER);
+            return Verdict.no(CODE_OTHER_ROSTER, MSG_OTHER_ROSTER);
         }
         return Verdict.ok();
     }
@@ -177,8 +213,9 @@ public class ClientPhoneGuard {
     }
 
     /** {@code Map.of} refuses nulls, and a null tenant is a meaningful value here. */
-    private static Map<String, Object> params(String phone, String trainerId, String tenantId) {
+    private static Map<String, Object> params(String phone, String trainerId, String tenantId, boolean archived) {
         var p = new java.util.HashMap<String, Object>();
+        p.put("archived", archived);
         p.put("phone", phone);
         p.put("tid", trainerId);
         p.put("tenantId", tenantId);

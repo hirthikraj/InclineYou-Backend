@@ -117,7 +117,7 @@ class ClientPhysicalTest {
         client("Ravi", "+919100000712");
         putClient("{\"name\":\"Meera\",\"phone\":\"+919100000712\"}")
                 .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("PHONE_ON_YOUR_ROSTER"));
+                .andExpect(jsonPath("$.code").value("PHONE_ALREADY_YOURS"));
 
         // Re-saving the number the row already holds is not a move.
         putClient("{\"name\":\"Meera K\",\"phone\":\"+919100000711\"}").andExpect(status().isOk());

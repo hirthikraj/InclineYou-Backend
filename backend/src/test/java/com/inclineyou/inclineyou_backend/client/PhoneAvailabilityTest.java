@@ -111,16 +111,20 @@ class PhoneAvailabilityTest {
     }
 
     @Test
-    @DisplayName("the asker's own ARCHIVED client frees the number again")
-    void ownArchivedClientDoesNotBlock() throws Exception {
+    @DisplayName("the asker's own ARCHIVED client is named, so the flow can offer a restore (1.1 A4)")
+    void ownArchivedClientIsOffered() throws Exception {
         jdbc.update("""
-                INSERT INTO client (id, trainer_id, name, phone, status, membership_status, removed_at, client_type)
-                VALUES (gen_random_uuid(), :tid::uuid, 'Meera', :p, 'archived', 'removed', now(), 'independent')
+                INSERT INTO client (id, trainer_id, name, phone, status, archived_at, archive_reason,
+                                    membership_status, removed_at, client_type)
+                VALUES (gen_random_uuid(), :tid::uuid, 'Meera', :p, 'archived', now(), 'other',
+                        'removed', now(), 'independent')
                 """, Map.of("tid", asker.toString(), "p", ROSTER_PHONE));
 
         ask(ROSTER_PHONE)
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.available").value(true));
+                .andExpect(jsonPath("$.available").value(false))
+                .andExpect(jsonPath("$.code").value(ClientPhoneGuard.CODE_OWN_ROSTER))
+                .andExpect(jsonPath("$.clientStatus").value("archived"));
     }
 
     @Test
@@ -132,7 +136,7 @@ class PhoneAvailabilityTest {
     /* ------------------------------------------------------------- fixtures */
 
     private ResultActions ask(String phone) throws Exception {
-        return mvc.perform(post("/v1/clients/phone-availability")
+        return mvc.perform(post("/v1/clients/phone-check")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"phone\":\"%s\"}".formatted(phone)));
     }

@@ -15,11 +15,28 @@ import java.util.UUID;
 public class ProgramController {
 
     private final ProgramService programService;
+    private final ProgramTemplateService templates;
 
     @GetMapping
     public List<ProgramService.ProgramResponse> list(
             @RequestParam(required = false) String clientId) {
         return programService.list(trainerId(), clientId);
+    }
+
+    /** api-contract Clients, add-client step 4 — what can be applied. */
+    @GetMapping(params = "kind=template")
+    public com.inclineyou.inclineyou_backend.wire.Items<ProgramTemplateService.Template> templates() {
+        return com.inclineyou.inclineyou_backend.wire.Items.of(templates.templates(trainerId()));
+    }
+
+    /** Programs A5 — 201 with the new plan, 200 on a replayed id. */
+    @PostMapping("/{templateId}/apply")
+    public org.springframework.http.ResponseEntity<ProgramTemplateService.Plan> apply(
+            @PathVariable UUID templateId,
+            @RequestBody(required = false) java.util.Map<String, Object> body) {
+        var applied = templates.apply(trainerId(), templateId, body);
+        return org.springframework.http.ResponseEntity.status(applied.created() ? HttpStatus.CREATED : HttpStatus.OK)
+                .body(applied.plan());
     }
 
     @PostMapping

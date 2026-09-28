@@ -295,10 +295,9 @@ public class SessionStateService {
      * Cancel a booking and keep it in the diary. The client's start time is freed
      * ({@code uq_scheduled_session_client_start} skips cancelled rows).
      *
-     * <p>{@code reason} ({@code trainer} · {@code client}) is checked and NOT
-     * stored: the approved schema has no {@code cancel_reason} column (R68 is
-     * pending the schema owner's decision). Accepting it now keeps the web's
-     * request shape stable for when it lands.
+     * <p>{@code reason} ({@code trainer} · {@code client}, default trainer) is
+     * stored as {@code cancel_reason} (V2, R68), so a re-pause can tell a hand
+     * cancel from one the pause made and never bring the first back.
      */
     @Transactional
     public SessionReadService.SessionRow cancel(UUID trainerId, UUID sessionId, Map<String, Object> body) {
@@ -312,12 +311,13 @@ public class SessionStateService {
             }
         }
         var p = params(trainerId, sessionId);
+        p.put("reason", body != null && body.get("reason") instanceof String r ? r : "trainer");
         Locked s = lockLive(p);
         if ("cancelled".equals(s.status())) return row(trainerId, sessionId);
         if (!"scheduled".equals(s.status()) || s.started()) {
             throw settled("This session is " + describe(s) + ", so it can't be cancelled.");
         }
-        jdbc.update("UPDATE scheduled_session SET status = 'cancelled' WHERE id = :sid::uuid", p);
+        jdbc.update("UPDATE scheduled_session SET status = 'cancelled', cancel_reason = :reason WHERE id = :sid::uuid", p);
         log.info("session cancelled trainer={} session={}", trainerId, sessionId);
         return row(trainerId, sessionId);
     }
@@ -358,7 +358,7 @@ public class SessionStateService {
             if (startTaken(p, "start")) throw timeTaken();
         }
         try {
-            jdbc.update("UPDATE scheduled_session SET status = 'scheduled' WHERE id = :sid::uuid", p);
+            jdbc.update("UPDATE scheduled_session SET status = 'scheduled', cancel_reason = NULL WHERE id = :sid::uuid", p);
         } catch (DuplicateKeyException e) {
             // A cancelled session gave its start back; somebody took it since.
             throw timeTaken();

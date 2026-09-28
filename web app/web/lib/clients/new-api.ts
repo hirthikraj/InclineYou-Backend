@@ -2,10 +2,19 @@ import 'server-only';
 
 import { cache } from 'react';
 
-import { getToken } from '@/lib/auth/session';
+import { api, ApiError, type ListEnvelope } from '@/lib/http/client';
 import type { Pack, PackType } from '@/lib/setup/money';
-import { type ListEnvelope } from '@/lib/http/client';
 
+import { ClientsApiError, getClients, getMe } from './api';
+
+/**
+ * The add-client flow's reads on the v1.1 wire — api-contract *Clients ·
+ * Add-client load*: L1 (/v1/me), L2 (working hours, for slot suggestions), L3
+ * (everyone's slots, to flag a taken time), the price list and the templates.
+ *
+ * Mapped here onto the shapes `AddClientFlow` already draws, so the component
+ * did not have to change with the wire.
+ */
 export class NewClientApiError extends Error {
   constructor(readonly status: number | null) {
     super(`inclineyou api ${status ?? 'unreachable'}`);
@@ -13,40 +22,54 @@ export class NewClientApiError extends Error {
   }
 }
 
-const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
-const TIMEOUT_MS = 8_000;
-
 async function get<T>(path: string): Promise<T> {
-  const token = await getToken();
-  if (!token) throw new NewClientApiError(401);
-
-  let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, {
-      headers: { authorization: `Bearer ${token}` },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch {
-    throw new NewClientApiError(null);
+    return await api<T>(path);
+  } catch (error) {
+    if (error instanceof ApiError) throw new NewClientApiError(error.status);
+    throw error;
   }
-  if (!res.ok) throw new NewClientApiError(res.status);
+}
 
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T;
+/** The shared reads throw the roster's error type; the flow's guard reads this one. */
+async function shared<T>(read: Promise<T>): Promise<T> {
+  try {
+    return await read;
+  } catch (error) {
+    if (error instanceof ClientsApiError) throw new NewClientApiError(error.status);
+    throw error;
+  }
 }
 
 /* -------------------------------------------------------- wire shapes ── */
 
-interface TrainerWire {
+interface WorkingHourV1 { id: string; weekday: number; start: string; end: string }
+
+/** `PackService.PackRow`. */
+interface PackWire {
   id: string;
   name: string;
-  phone: string | null;
-  workMode: string | null;
-  gymName: string | null;
-  gymSharePercent: number | null;
-  setupComplete: boolean;
+  service: string;
+  basis: 'sessions' | 'period';
+  sessions: number | null;
+  validityDays: number | null;
+  amount: string;
+  owner: 'trainer' | 'gym';
+  status: string;
+  orderIndex: number;
 }
+
+/** `ProgramTemplateService.Template`. */
+interface TemplateV1 {
+  id: string;
+  name: string;
+  goal: string | null;
+  description: string | null;
+  days: number;
+  workouts: string[];
+}
+
+/* ------------------------------------------ the shapes the flow draws ── */
 
 export interface WorkingHourWire {
   id: string;
@@ -60,29 +83,7 @@ export interface ClientScheduleWire {
   name: string;
   status: string;
   sessionDurationMinutes: number | null;
-  weeklySchedule: Array<{ templateDay: number; weekday: number; time: string }> | null;
-}
-
-/**
- * A row of the `pack` table, as the server sends it.
- *
- * Deliberately the same coercion `lib/packs/api.ts` applies — `amount` arrives
- * as a string from a DECIMAL column on some builds, `owner` is absent on every
- * row written before V19 and an absent owner is the trainer's own, and an
- * unrecognised `type` degrades to the commonest kind rather than failing the
- * read. Two screens disagreeing about what a price list SAYS is the one bug a
- * price list cannot have.
- */
-interface PackWire {
-  id: string;
-  name: string;
-  type: string;
-  sessions: number | null;
-  amount: number | string | null;
-  validityDays: number | null;
-  status: string;
-  owner: string | null;
-  orderIndex: number | null;
+  weeklySchedule: Array<{ templateDay: number; weekday: number; time: string }>;
 }
 
 export interface TemplateWire {
@@ -90,30 +91,22 @@ export interface TemplateWire {
   name: string;
   goal: string | null;
   description: string | null;
-  dayLabels: string[] | null;
+  /** One label per program day — its length is what step 4 matches against the week picked. */
+  dayLabels: string[];
 }
-
-/* ----------------------------------------------------------- output ── */
 
 export interface NewClientData {
   trainer: {
     id: string;
     name: string;
+    /** `both` when the trainer has a gym on file: step 2 then asks own or gym (R18). */
     workMode: 'independent' | 'gym' | 'both' | null;
     gymName: string | null;
     gymSharePercent: number | null;
   };
   workingHours: WorkingHourWire[];
   clients: ClientScheduleWire[];
-  /**
-   * The ACTIVE price list, both owners on one array — step 2 asks whose packs
-   * this client buys from and then draws them, so the flow needs the lists in
-   * the browser rather than a link to the screen that holds them.
-   *
-   * Retired packs are filtered out here: *Packages* shows them because
-   * restoring one is a decision made there, and nobody sells from a retired
-   * pack, so a client being added should never see one.
-   */
+  /** The ACTIVE price list, both owners. */
   packs: Pack[];
   templates: TemplateWire[];
   setupComplete: boolean;
@@ -121,60 +114,67 @@ export interface NewClientData {
   trainerPhone: string | null;
 }
 
-function asPackType(value: string): PackType {
-  return value === 'monthly' || value === 'single' ? value : 'session_pack';
-}
+const minutes = (hm: string) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3, 5));
 
-function packAmount(v: number | string | null | undefined): number {
-  if (v === null || v === undefined) return 0;
-  const n = typeof v === 'number' ? v : Number(v);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function asWorkMode(raw: string | null | undefined): 'independent' | 'gym' | 'both' | null {
-  if (raw === 'independent' || raw === 'gym' || raw === 'both') return raw;
-  return null;
+/** `single | session_pack | monthly` from basis + sessions (R24). */
+function packType(p: PackWire): PackType {
+  if (p.basis === 'period') return 'monthly';
+  return p.sessions === 1 ? 'single' : 'session_pack';
 }
 
 export const getNewClientData = cache(async (): Promise<NewClientData> => {
-  const [trainer, workingHours, clients, templates, packs] = await Promise.all([
-    get<TrainerWire>('/v1/trainers/me'),
-    get<ListEnvelope<WorkingHourWire>>('/v1/working-hours').then((r) => r?.items ?? []),
-    get<ClientScheduleWire[]>('/v1/clients?view=legacy'),
-    get<TemplateWire[]>('/v1/templates'),
-    /* The ONLY call here allowed to fail quietly. The other four decide whether
-       a client can be added at all; the price list decides what step 2 can
-       DRAW, and a build whose `/v1/packs` is missing or refused should cost the
-       trainer a price list and an empty state, not the whole flow. */
-    get<PackWire[]>('/v1/packs').catch((): PackWire[] => []),
+  const [me, hours, clients, templates, packs] = await Promise.all([
+    // L1 and L3 are the roster's own cached reads, so /clients fetches each once.
+    shared(getMe()),
+    get<ListEnvelope<WorkingHourV1>>('/v1/working-hours'),
+    shared(getClients()),
+    get<ListEnvelope<TemplateV1>>('/v1/programs?kind=template'),
+    /* The one read allowed to fail quietly: the price list decides what step 2
+       can DRAW, not whether a client can be added. */
+    get<ListEnvelope<PackWire>>('/v1/packs').catch((): ListEnvelope<PackWire> => ({ items: [] })),
   ]);
 
   return {
     trainer: {
-      id: trainer.id,
-      name: trainer.name,
-      workMode: asWorkMode(trainer.workMode),
-      gymName: trainer.gymName,
-      gymSharePercent: trainer.gymSharePercent,
+      id: me.id,
+      name: me.name ?? '',
+      workMode: me.gymName ? 'both' : 'independent',
+      gymName: me.gymName,
+      // The split is set per pack sale now (R3); the flow's default stands in.
+      gymSharePercent: null,
     },
-    workingHours: workingHours ?? [],
-    clients: clients ?? [],
-    packs: (packs ?? [])
-      .filter(p => p.status !== 'inactive')
-      .map(p => ({
+    // v1 says 1 = Monday; the flow's `slotsForDay` still reads the old 0 = Monday.
+    workingHours: (hours?.items ?? []).map((h) => ({
+      id: h.id, weekday: h.weekday - 1, startMinute: minutes(h.start), endMinute: minutes(h.end),
+    })),
+    clients: clients.filter((c) => c.status !== 'archived').map((c) => ({
+      id: c.id,
+      name: c.name ?? 'Client',
+      status: c.status,
+      sessionDurationMinutes: c.schedule.sessionDurationMinutes,
+      weeklySchedule: c.slots.map((s, i) => ({ templateDay: s.programDay ?? i + 1, weekday: s.weekday, time: s.start })),
+    })),
+    packs: (packs?.items ?? [])
+      .map((p) => ({
         id: p.id,
         name: p.name || 'Pack',
-        type: asPackType(p.type),
-        sessions: typeof p.sessions === 'number' ? p.sessions : null,
-        amount: packAmount(p.amount),
-        validityDays: typeof p.validityDays === 'number' ? p.validityDays : null,
-        owner: p.owner === 'gym' ? ('gym' as const) : ('trainer' as const),
-        orderIndex: p.orderIndex ?? 0,
+        type: packType(p),
+        sessions: p.sessions,
+        amount: Number(p.amount) || 0,
+        validityDays: p.validityDays,
+        owner: p.owner,
+        orderIndex: p.orderIndex,
       }))
       .sort((a, b) => a.orderIndex - b.orderIndex),
-    templates: templates ?? [],
-    setupComplete: trainer.setupComplete,
-    trainerName: trainer.name,
-    trainerPhone: trainer.phone,
+    templates: (templates?.items ?? []).map((t) => ({
+      id: t.id,
+      name: t.name,
+      goal: t.goal,
+      description: t.description,
+      dayLabels: Array.from({ length: t.days }, (_, i) => t.workouts[i] ?? `Day ${i + 1}`),
+    })),
+    setupComplete: me.setupCompletedAt !== null,
+    trainerName: me.name ?? '',
+    trainerPhone: me.phone,
   };
 });

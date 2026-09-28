@@ -190,6 +190,70 @@ public class PackService {
         return rows.stream().map(this::toPackResponse).toList();
     }
 
+    /**
+     * One price-list row on the 1.1 wire (api-contract Clients, the add flow's
+     * step 2). {@code activeClients} and {@code soldCount} only with
+     * {@code include=usage}, which Business asks for.
+     */
+    public record PackRow(String id, String name, String service, String basis, Integer sessions,
+                          Integer validityDays, String amount, String currency, String owner,
+                          BigDecimal trainerSharePercent, String trainerShareAmount, String status, int orderIndex,
+                          String version,
+                          @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Integer activeClients,
+                          @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL) Integer soldCount) {}
+
+    /**
+     * {@code GET /v1/packs} — bounded, ordered by orderIndex then id. {@code status}
+     * defaults to active; {@code all} adds the retired ones. Usage is one grouped
+     * pass over idx_package_pack, and only when asked for.
+     */
+    public List<PackRow> list(UUID trainerId, String status, String owner, String include) {
+        var p = new HashMap<String, Object>();
+        p.put("tid", trainerId.toString());
+        var where = new ArrayList<String>(List.of("p.trainer_id = :tid::uuid", "p.deleted_at IS NULL"));
+        String st = status == null || status.isBlank() ? "active" : status.strip();
+        if (!"all".equals(st)) {
+            if (!"active".equals(st)) throw com.inclineyou.inclineyou_backend.exception.ApiException.validation("status: active or all");
+            where.add("p.status = 'active'");
+        }
+        if (owner != null && !owner.isBlank()) {
+            if (!OWNERS.contains(owner.strip())) throw com.inclineyou.inclineyou_backend.exception.ApiException.validation("owner: trainer or gym");
+            p.put("owner", owner.strip());
+            where.add("p.owner = :owner");
+        }
+        if (include != null && !include.isBlank() && !"usage".equals(include.strip())) {
+            throw com.inclineyou.inclineyou_backend.exception.ApiException.validation("include: usage");
+        }
+        boolean usage = include != null && "usage".equals(include.strip());
+        return jdbc.query("""
+                SELECT p.id::text AS id, p.name, p.service, p.basis, p.sessions, p.validity_days, p.amount, p.currency,
+                       p.owner, p.trainer_share_percent, p.trainer_share_amount, p.status, p.order_index, p.updated_at,
+                       u.active_clients, u.sold
+                FROM pack p
+                LEFT JOIN (
+                    SELECT pack_id, count(DISTINCT client_id) FILTER (WHERE status = 'active') AS active_clients,
+                           count(*) AS sold
+                    FROM package WHERE trainer_id = :tid::uuid AND pack_id IS NOT NULL AND deleted_at IS NULL AND :usage
+                    GROUP BY pack_id
+                ) u ON u.pack_id = p.id
+                WHERE %s
+                ORDER BY p.order_index, p.id
+                """.formatted(String.join(" AND ", where)), withUsage(p, usage), (rs, i) -> new PackRow(
+                rs.getString("id"), rs.getString("name"), rs.getString("service"), rs.getString("basis"),
+                (Integer) rs.getObject("sessions"), (Integer) rs.getObject("validity_days"),
+                PackageReadService.money(rs.getBigDecimal("amount")), rs.getString("currency"), rs.getString("owner"),
+                rs.getBigDecimal("trainer_share_percent"),   // a percentage is a JSON number, not money
+                PackageReadService.money(rs.getBigDecimal("trainer_share_amount")),
+                rs.getString("status"), rs.getInt("order_index"),
+                String.valueOf(rs.getTimestamp("updated_at").getTime()),
+                usage ? rs.getInt("active_clients") : null, usage ? rs.getInt("sold") : null));
+    }
+
+    private static Map<String, Object> withUsage(Map<String, Object> p, boolean usage) {
+        p.put("usage", usage);
+        return p;
+    }
+
     // ── Writes ────────────────────────────────────────────────────────────────
 
     /**

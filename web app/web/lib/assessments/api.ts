@@ -1,12 +1,28 @@
 import 'server-only';
 
 import { getToken } from '@/lib/auth/session';
-import type { ClientWire } from '@/lib/clients/api';
 import { listAll } from '@/lib/http/client';
 import { PAGE_SIZE, type Query } from './address';
 import type { AssessmentDetailWire } from './detail';
 import { STATUSES_FOR } from './vocab';
 import type { AssessmentWire, CatalogWire, TemplateWire } from './vocab';
+
+/**
+ * A row of `GET /v1/clients?view=legacy` — the pre-v1 shape this screen still
+ * reads until its own pass moves it to the summary (the roster no longer does).
+ */
+export interface ClientWire {
+  id: string;
+  name: string;
+  phone: string | null;
+  status: string;
+  membershipStatus: string | null;
+  deliveryMode: string | null;
+  metadata: Record<string, unknown> | null;
+  weeklySchedule: Array<{ templateDay: number; weekday: number; time: string }> | null;
+  createdAt: number;
+  updatedAt: number;
+}
 
 const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
 const TIMEOUT_MS = 8_000;

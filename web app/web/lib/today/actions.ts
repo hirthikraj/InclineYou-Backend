@@ -417,6 +417,7 @@ export async function renew(packageId: string | undefined, requestId?: string): 
       body: { id: requestId ?? crypto.randomUUID() },
     });
     revalidatePath('/today');
+    revalidatePath('/clients');   // the roster's action column renews too
     return { ok: true };
   } catch (error) {
     if (error instanceof ApiError && error.problem.code === 'PACKAGE_ALREADY_RENEWED') {

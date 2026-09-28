@@ -7,12 +7,12 @@ import type { NewClientData, WorkingHourWire, ClientScheduleWire } from '@/lib/c
 import {
   checkPhone,
   createClient,
-  updateClientSchedule,
+  saveSchedule,
+  sellPack,
   updateClientDetails,
   applyTemplate,
   type WeeklySlot,
 } from '@/lib/clients/new-actions';
-import { assignPackage } from '@/lib/clients/package-actions';
 import { Glyph } from '@/components/shell/Icons';
 import { avatarToken, initials, rupees } from '@/lib/today/time';
 import { packSubtitle, type Pack } from '@/lib/setup/money';
@@ -481,6 +481,12 @@ export function AddClientFlow({
     data.trainer.gymSharePercent !== null ? 100 - data.trainer.gymSharePercent : 60,
   );
   const [createdClientId, setCreatedClientId] = useState<string | null>(null);
+  /* Minted when the flow opens (api-contract Clients A5, A7, Programs A5): a
+     retried Continue, Sell or Apply replays the same id and the server answers
+     with the row the first attempt made, so nothing is made twice. */
+  const [ids] = useState(() => ({ client: crypto.randomUUID(), pack: crypto.randomUUID(), plan: crypto.randomUUID() }));
+  /** `schedule.version` from the create, then from each save — step 3's If-Match. */
+  const [scheduleVersion, setScheduleVersion] = useState<string | null>(null);
   /**
    * What the server currently holds for the five things steps 1 and 2 write.
    *
@@ -496,7 +502,7 @@ export function AddClientFlow({
     name: string;
     phone: string;
     deliveryMode: 'floor' | 'remote';
-    split: number | null;
+    clientType: 'independent' | 'gym';
     packId: string | null;
   } | null>(null);
   /** The furthest rung reached. Rungs and Back walk anywhere at or below it. */
@@ -587,9 +593,9 @@ export function AddClientFlow({
     try {
       const result = await checkPhone(digits);
       if (!result.available) {
-        if (result.code === 'CLIENT_PHONE_EXISTS') {
+        if (result.code === 'PHONE_ALREADY_YOURS') {
           setPhoneCheck('on-roster');
-          setRosterMatch(null);
+          setRosterMatch(result.clientId ? { id: result.clientId, name: result.clientName ?? 'them' } : null);
         } else {
           setPhoneCheck('blocked');
         }
@@ -649,6 +655,11 @@ export function AddClientFlow({
      never from each in one sale — so the state is a single id and picking in
      one group replaces a pick in the other by construction. */
   const pickPack = useCallback((id: string | null) => setPackId(id), []);
+
+  /* client_type (R18): a gym client buys the gym's packs, so the pick decides;
+     with no pick, the mode does. */
+  const clientType: 'independent' | 'gym' =
+    picked ? (picked.owner === 'gym' ? 'gym' : 'independent') : packMode === 'gym' ? 'gym' : 'independent';
 
   /* Changing whose packs they buy drops a pick the new mode cannot show, in the
      handler rather than in an effect: an effect would paint one frame with a
@@ -806,26 +817,24 @@ export function AddClientFlow({
     setError(null);
     try {
       const created = await createClient({
+        id: ids.client,
         name: name.trim(),
         phone: digits,
+        clientType,
         deliveryMode,
-        trainerSplitPercent: includeSplit && showSplit ? trainerSplit : undefined,
       });
       setCreatedClientId(created.id);
-      setCommitted({
-        name: trimmed,
-        phone: digits,
-        deliveryMode,
-        split: includeSplit && showSplit ? trainerSplit : null,
-        packId: null,
-      });
+      setScheduleVersion(created.scheduleVersion);
+      setCommitted({ name: trimmed, phone: digits, deliveryMode, clientType, packId: null });
 
       if (includePack && picked) {
-        /* `packId` alone is a complete request — `assignPackage` says so: a pack
-           chosen off the price list carries its own price, count and validity,
-           and re-sending them from here is a second opinion about numbers the
-           server already holds. */
-        const sale = await assignPackage(created.id, { packId: picked.id });
+        /* `packId` alone is a complete sale: the pack's own terms are copied on
+           the server. The split rides on a gym pack's sale (R3). */
+        const sale = await sellPack(created.id, {
+          id: ids.pack,
+          packId: picked.id,
+          trainerSharePercent: includeSplit && showSplit && picked.owner === 'gym' ? trainerSplit : undefined,
+        });
         if (sale.ok) {
           setCommitted(prev => (prev ? { ...prev, packId: picked.id } : prev));
         } else {
@@ -859,23 +868,24 @@ export function AddClientFlow({
     if (!createdClientId || !committed || submitting) return;
     setError(null);
 
-    const nextSplit = showSplit ? trainerSplit : null;
-    const detailsDirty =
-      deliveryMode !== committed.deliveryMode || nextSplit !== committed.split;
+    /* Delivery is the schedule's, so it rides on step 3's save; the split is
+       the sale's. Only the client type is a field on the client. */
+    const detailsDirty = clientType !== committed.clientType;
     const sellNow = committed.packId === null && picked !== null;
     if (!detailsDirty && !sellNow) { goTo(3); return; }
 
     setSubmitting(true);
     try {
       if (detailsDirty) {
-        await updateClientDetails(createdClientId, {
-          deliveryMode,
-          ...(nextSplit !== null ? { trainerSplitPercent: nextSplit } : {}),
-        });
-        setCommitted(prev => (prev ? { ...prev, deliveryMode, split: nextSplit } : prev));
+        await updateClientDetails(createdClientId, { clientType });
+        setCommitted(prev => (prev ? { ...prev, clientType } : prev));
       }
       if (sellNow && picked) {
-        const sale = await assignPackage(createdClientId, { packId: picked.id });
+        const sale = await sellPack(createdClientId, {
+          id: ids.pack,
+          packId: picked.id,
+          trainerSharePercent: showSplit && picked.owner === 'gym' ? trainerSplit : undefined,
+        });
         if (sale.ok) setCommitted(prev => (prev ? { ...prev, packId: picked.id } : prev));
         else setError(sale.message ?? 'That pack did not go through. Nothing else changed.');
       }
@@ -889,18 +899,20 @@ export function AddClientFlow({
 
   /* step 3 */
   const handleStep3Continue = async () => {
-    if (!createdClientId || submitting) return;
-    const slots = Object.entries(selectedSlots).map(([wd, time], idx) => ({
-      templateDay: idx + 1,
-      weekday: Number(wd),
-      time,
-    })) satisfies WeeklySlot[];
+    if (!createdClientId || !scheduleVersion || submitting) return;
+    /* Program days in week order (R45): the first slot books Day 1. */
+    const slots = Object.entries(selectedSlots)
+      .sort(([a], [b]) => Number(a) - Number(b))
+      .map(([wd, time], idx) => ({ weekday: Number(wd), start: time, programDay: idx + 1 })) satisfies WeeklySlot[];
 
-    if (slots.length === 0) { goTo(4); return; }
+    const modeChanged = committed !== null && deliveryMode !== committed.deliveryMode;
+    if (slots.length === 0 && !modeChanged) { goTo(4); return; }
     setSubmitting(true);
     setError(null);
     try {
-      await updateClientSchedule(createdClientId, slots);
+      const saved = await saveSchedule(createdClientId, scheduleVersion, { deliveryMode, slots });
+      setScheduleVersion(saved.version);
+      setCommitted(prev => (prev ? { ...prev, deliveryMode } : prev));
       goTo(4);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
@@ -915,7 +927,7 @@ export function AddClientFlow({
     setSubmitting(true);
     setError(null);
     try {
-      await applyTemplate(selectedTemplateId, { clientId: createdClientId });
+      await applyTemplate(selectedTemplateId, { id: ids.plan, clientId: createdClientId });
       onClose?.();
       router.push(`/clients/${createdClientId}`);
     } catch (err) {

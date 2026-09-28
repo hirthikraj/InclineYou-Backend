@@ -54,7 +54,13 @@ import {
 } from '@/lib/today/deck';
 import { DAY_MS, WEEKDAYS_LONG, daysBetween, isoWeekday, startOfDay } from '@/lib/today/time';
 import { readMode, type DeliveryMode } from '@/lib/today/mode';
-import type { ClientWire, PackageWire, PaymentWire, WorkoutWire, ProgramWire, SessionWire } from './api';
+import type { ClientWire, PackageWire } from './api';
+
+/** Money is a decimal string on the wire. (Not imported from `./api`, which is server-only.) */
+const num = (v: string | number | null | undefined): number => {
+  const n = typeof v === 'number' ? v : Number(v ?? 0);
+  return Number.isFinite(n) ? n : 0;
+};
 
 /* ---------------------------------------------------------------- constants */
 
@@ -96,10 +102,7 @@ export const MISSED_WINDOW_DAYS = 30;
 const EVENING_FROM = 16;
 const NIGHT_FROM = 20;
 
-const DONE_SESSION = new Set(['done', 'completed']);
-const DUE_PAYMENT = new Set(['pending', 'due', 'unpaid', 'overdue']);
 const DEAD_PACKAGE = new Set(['cancelled', 'canceled', 'completed', 'expired', 'refunded']);
-const DEAD_PROGRAM = new Set(['cancelled', 'canceled', 'completed', 'archived']);
 
 /* -------------------------------------------------------------------- types */
 
@@ -144,7 +147,8 @@ export interface RosterRow {
   letter: string;
   line: string;
   severity?: 'alert' | 'critical';
-  attention?: { kind: AttentionKind; action: string; weight: number };
+  /** `packageId` on a `pack` row: the one Renew repeats (Today A3). */
+  attention?: { kind: AttentionKind; action: string; weight: number; packageId?: string };
   setupStep?: 'schedule' | 'plan';
   pack?: { remaining: number; total?: number };
   owed: number;
@@ -191,6 +195,8 @@ export interface Roster {
   tally: Tally;
   paused: number;
   archived: number;
+  /** The Archived list: from the same read, newest first — no extra request. */
+  archivedRows: { id: string; name: string; reason: string | null; note: string | null; archivedAt: number | null }[];
   firstRun: boolean;
 }
 
@@ -326,15 +332,9 @@ export const SORTS: { key: SortKey; label: string; hint?: string }[] = [
 export interface RosterInput {
   clients: ClientWire[];
   packages: PackageWire[];
-  payments: PaymentWire[];
-  workouts: WorkoutWire[];
-  programs: ProgramWire[];
-  sessions: SessionWire[];
 }
 
 /* ------------------------------------------------------------------- rules */
-
-const ms = (v: number | undefined | null): number => (v == null ? 0 : Number(v));
 
 const lower = (v: string | undefined | null): string => (v ?? '').toLowerCase();
 
@@ -354,7 +354,7 @@ function parseDay(value?: string | null): number | null {
 }
 
 function programLine(
-  program: ProgramWire | undefined,
+  program: ClientWire['program'] | undefined,
   now: number,
 ): string | null {
   if (!program) return null;
@@ -380,21 +380,13 @@ function shortDate(at: number): string {
   return `${d.getDate()} ${DAY_NAMES[d.getMonth()]}`;
 }
 
-function readBatch(sessions: SessionWire[]): Batch {
-  let morning = 0;
-  let evening = 0;
-  let night = 0;
-
-  for (const s of sessions) {
-    const hour = new Date(ms(s.scheduledAt)).getHours();
-    if (hour < 12) morning += 1;
-    else if (hour >= NIGHT_FROM) night += 1;
-    else if (hour >= EVENING_FROM) evening += 1;
-  }
-
-  if (morning === 0 && evening === 0 && night === 0) return 'none';
-  if (morning >= evening && morning >= night) return 'morning';
-  return evening >= night ? 'evening' : 'night';
+/** The client's batch from their weekly slots (api-contract Clients): the earliest start decides. */
+function readBatch(slots: ClientWire['slots']): Batch {
+  if (slots.length === 0) return 'none';
+  const hour = Math.min(...slots.map((s) => Number(s.start.slice(0, 2))));
+  if (hour < 12) return 'morning';
+  if (hour >= NIGHT_FROM) return 'night';
+  return hour >= EVENING_FROM ? 'evening' : 'morning';
 }
 
 function groupBy<T extends { clientId: string }>(rows: T[]): Map<string, T[]> {
@@ -409,12 +401,12 @@ function groupBy<T extends { clientId: string }>(rows: T[]): Map<string, T[]> {
 
 /** Inline port of `app/src/clients/schedule.ts`'s `onboardingStep`. */
 function onboardingStep(input: {
-  weeklySchedule?: Array<unknown> | null;
+  weeklySchedule: Array<unknown>;
   hasLiveProgram: boolean;
   hasWorkouts: boolean;
 }): 'schedule' | 'plan' | null {
   if (input.hasWorkouts) return null;
-  const hasSchedule = Array.isArray(input.weeklySchedule) && input.weeklySchedule.length > 0;
+  const hasSchedule = input.weeklySchedule.length > 0;
   if (!hasSchedule) return input.hasLiveProgram ? null : 'schedule';
   return input.hasLiveProgram ? null : 'plan';
 }
@@ -422,15 +414,11 @@ function onboardingStep(input: {
 /* -------------------------------------------------------------------- build */
 
 export function buildRoster(input: RosterInput, now: number): Roster {
-  const byProgram = groupBy(input.programs);
   const byPackage = groupBy(input.packages);
-  const byPayment = groupBy(input.payments);
-  const byWorkout = groupBy(input.workouts);
-  const bySession = groupBy(input.sessions);
 
   const rows = input.clients
     .filter((c) => readStatus(c.status) !== 'archived')
-    .map((c) => buildRow(c, now, { byProgram, byPackage, byPayment, byWorkout, bySession }));
+    .map((c) => buildRow(c, now, byPackage));
 
   const counts: Record<Segment, number> = {
     all: rows.length,
@@ -470,6 +458,10 @@ export function buildRoster(input: RosterInput, now: number): Roster {
     tally,
     paused: counts.paused,
     archived: input.clients.filter((c) => readStatus(c.status) === 'archived').length,
+    archivedRows: input.clients
+      .filter((c) => readStatus(c.status) === 'archived')
+      .map((c) => ({ id: c.id, name: c.name?.trim() || 'Client', reason: c.archiveReason, note: c.archiveNote, archivedAt: c.archivedAt }))
+      .sort((a, b) => (b.archivedAt ?? 0) - (a.archivedAt ?? 0)),
     firstRun: input.clients.length === 0,
   };
 }
@@ -477,33 +469,21 @@ export function buildRoster(input: RosterInput, now: number): Roster {
 function buildRow(
   client: ClientWire,
   now: number,
-  index: {
-    byProgram: Map<string, ProgramWire[]>;
-    byPackage: Map<string, PackageWire[]>;
-    byPayment: Map<string, PaymentWire[]>;
-    byWorkout: Map<string, WorkoutWire[]>;
-    bySession: Map<string, SessionWire[]>;
-  },
+  byPackage: Map<string, PackageWire[]>,
 ): RosterRow {
   const status = readStatus(client.status);
   const name = client.name?.trim() || 'Client';
-  const sessions = index.bySession.get(client.id) ?? [];
+  const packs = byPackage.get(client.id) ?? [];
 
-  /* money */
-  const due = (index.byPayment.get(client.id) ?? []).filter((p) =>
-    DUE_PAYMENT.has(lower(p.status)),
-  );
-  const owed = due.reduce((sum, p) => {
-    const n = typeof p.amount === 'number' ? p.amount : Number(p.amount ?? 0);
-    return sum + (Number.isFinite(n) ? n : 0);
-  }, 0);
-  const oldestDue = due.length > 0 ? Math.min(...due.map((p) => ms(p.createdAt))) : null;
-  const owedDays = oldestDue === null ? 0 : daysBetween(oldestDue, now);
+  /* money — `amountDue` on each pack, computed on the server; how long it has
+     been owed runs from the oldest due date among the packs still owing. */
+  const owing = packs.filter((p) => num(p.amountDue) > 0);
+  const owed = owing.reduce((sum, p) => sum + num(p.amountDue), 0);
+  const dueDays = owing.map((p) => parseDay(p.dueDate) ?? p.createdAt);
+  const owedDays = dueDays.length > 0 ? Math.max(0, daysBetween(Math.min(...dueDays), now)) : 0;
 
   /* pack */
-  const livePacks = (index.byPackage.get(client.id) ?? []).filter(
-    (p) => !DEAD_PACKAGE.has(lower(p.status)),
-  );
+  const livePacks = packs.filter((p) => !DEAD_PACKAGE.has(lower(p.status)));
   const remaining = livePacks
     .map((p) => p.sessionsRemaining)
     .filter((n): n is number => typeof n === 'number');
@@ -515,98 +495,49 @@ function buildRow(
 
   /*
    * The pack that RAISES the row is the worst of theirs by band, not the one with
-   * the fewest sessions — `deck.ts`'s rule, and its reasoning holds here word for
-   * word: a client can hold a nearly-empty pack that runs to December and a full
-   * one that expires on Friday, and "fewest sessions" picks the wrong one. The
-   * `Sessions left` COLUMN still shows the leanest, because that column is a
-   * count and not a verdict.
+   * the fewest sessions — `deck.ts`'s rule: a nearly-empty pack that runs to
+   * December and a full one that expires on Friday, and "fewest sessions" picks
+   * the wrong one. The `Sessions left` COLUMN still shows the leanest.
    */
-  let worstPack: { band: AttentionBand; remaining: number; daysLeft: number | null } | null = null;
+  let worstPack: { band: AttentionBand; remaining: number; daysLeft: number | null; id: string } | null = null;
   for (const p of livePacks) {
-    /* V30 · a paused pack raises no band. `deck.ts` carries the argument: the
-       date is frozen and today is not, so the row would get louder every morning
-       about an expiry that has stopped running. */
+    /* A paused pack raises no band: its date is frozen and today is not. */
     if (p.pausedAt) continue;
     if (typeof p.sessionsRemaining !== 'number') continue;
     const endsAt = parseDay(p.endDate);
-    // Floored at 0: an already-lapsed date reads as "today" rather than as a
-    // negative that would sort below a pack expiring next week.
     const daysLeft = endsAt === null ? null : Math.max(0, daysBetween(now, endsAt));
     const band = packBand(p.sessionsRemaining, daysLeft);
     if (band === null) continue;
     if (worstPack === null || attentionWeight(band) > attentionWeight(worstPack.band)) {
-      worstPack = { band, remaining: p.sessionsRemaining, daysLeft };
+      worstPack = { band, remaining: p.sessionsRemaining, daysLeft, id: p.id };
     }
   }
 
-  /* quiet */
-  const workouts = index.byWorkout.get(client.id) ?? [];
-  const lastLoggedAt =
-    workouts.length > 0 ? Math.max(...workouts.map((w) => ms(w.createdAt))) : null;
-  const livePrograms = (index.byProgram.get(client.id) ?? []).filter(
-    (p) => !DEAD_PROGRAM.has(lower(p.status)),
-  );
+  /* quiet and attended — both `stats.lastDoneAt`, the newest delivered session */
+  const lastLoggedAt = client.stats.lastDoneAt;
+  const lastAttendedAt = client.stats.lastDoneAt;
   const quietDays =
-    livePrograms.length > 0 && status === 'active'
-      ? daysBetween(lastLoggedAt ?? ms(client.createdAt), now)
+    client.program && status === 'active'
+      ? daysBetween(lastLoggedAt ?? client.createdAt, now)
       : null;
 
-  /* attended — a log, or a session someone ticked off, whichever is later */
-  const doneAt = sessions
-    .filter((s) => DONE_SESSION.has(lower(s.status)) && ms(s.scheduledAt) <= now)
-    .map((s) => ms(s.scheduledAt));
-  const lastDoneAt = doneAt.length > 0 ? Math.max(...doneAt) : null;
-  const lastAttendedAt =
-    lastLoggedAt === null && lastDoneAt === null
-      ? null
-      : Math.max(lastLoggedAt ?? 0, lastDoneAt ?? 0);
-
-  /*
-   * missed — `no_show` ONLY, in both readings.
-   *
-   * A cancelled session was called off, by either side, with notice, and says
-   * nothing about whether the client is drifting; counting it would tag the most
-   * considerate clients on the roster. A session still sitting at `scheduled` in
-   * the past says nothing either — nobody has marked it, and that is a fact about
-   * the trainer. So both counts run over SETTLED sessions: done or no-show.
-   *
-   * The window is `GET /v1/sessions?from&to`'s — eight weeks back — so a streak
-   * older than that cannot be seen. That is the right failure: a client whose
-   * last absence was in June is `lapsed` by then, not `at-risk`.
-   */
-  const settled = sessions
-    .filter((s) => ms(s.scheduledAt) < now)
-    .filter((s) => DONE_SESSION.has(lower(s.status)) || lower(s.status) === 'no_show')
-    .sort((a, b) => ms(b.scheduledAt) - ms(a.scheduledAt));
-
-  let missedStreak = 0;
-  for (const s of settled) {
-    if (lower(s.status) !== 'no_show') break;
-    missedStreak += 1;
-  }
-  const missedRecent = settled.filter(
-    (s) =>
-      lower(s.status) === 'no_show' &&
-      daysBetween(ms(s.scheduledAt), now) <= MISSED_WINDOW_DAYS,
-  ).length;
+  /* missed — the server counts the streak over the whole history (settled sessions only). */
+  const missedStreak = client.stats.missedStreak;
+  const missedRecent = 0;
 
   /* attention */
   let attention: RosterRow['attention'];
   let line: string | null = null;
   let severity: RosterRow['severity'];
 
-  const invitedAt =
-    (client.metadata && typeof client.metadata === 'object'
-      ? metaNum(client.metadata, 'invitedAt')
-      : null) ?? ms(client.createdAt);
-  const inviteDays = daysBetween(invitedAt, now);
+  const inviteDays = daysBetween(client.createdAt, now);
 
   const setupStep =
     status === 'active'
       ? onboardingStep({
-          weeklySchedule: client.weeklySchedule,
-          hasLiveProgram: livePrograms.length > 0,
-          hasWorkouts: workouts.length > 0,
+          weeklySchedule: client.slots,
+          hasLiveProgram: client.program !== null,
+          hasWorkouts: client.stats.sessionsDone > 0,
         })
       : null;
 
@@ -762,23 +693,23 @@ function buildRow(
     .sort((a, b) => b.weight - a.weight)[0];
 
   if (top) {
-    attention = { kind: top.kind, action: top.action, weight: top.weight };
+    attention = {
+      kind: top.kind, action: top.action, weight: top.weight,
+      packageId: top.kind === 'pack' ? worstPack?.id : undefined,
+    };
     severity = attentionSeverity(top.band);
     line = top.line;
   } else if (status === 'paused') {
-    const pausedAt =
-      (client.metadata && typeof client.metadata === 'object'
-        ? metaNum(client.metadata, 'pausedAt')
-        : null) ?? ms(client.updatedAt);
-    const tail = sessionsLeft === null ? 'no pack' : `${sessionsLeft} sessions left`;
-    line = `Paused ${shortDate(pausedAt)} · ${tail}`;
+    const back = parseDay(client.pausedUntil);
+    const tail = back !== null ? `back ${shortDate(back)}` : sessionsLeft === null ? 'no pack' : `${sessionsLeft} sessions left`;
+    line = `Paused ${shortDate(client.pausedAt ?? now)} · ${tail}`;
   } else if (status === 'invited') {
     line = `Invited ${inviteDays === 0 ? 'today' : `${inviteDays} days ago`}`;
   }
 
   if (!line) {
     line =
-      programLine(livePrograms[0], now) ??
+      programLine(client.program, now) ??
       (lastLoggedAt ? `Last session ${shortDate(lastLoggedAt)}` : 'No plan yet');
   }
 
@@ -789,12 +720,12 @@ function buildRow(
    * when there has never been one — so a client added this morning is not
    * lapsed, and one added five weeks ago who never started is.
    */
-  const silentDays = daysBetween(lastAttendedAt ?? ms(client.createdAt), now);
+  const silentDays = daysBetween(lastAttendedAt ?? client.createdAt, now);
 
   const tag = readTag({
     status,
     silentDays,
-    dormantAfter: dormantAfterDays(client.weeklySchedule),
+    dormantAfter: dormantAfterDays(client.slots),
     missedStreak,
     missedRecent,
     packBand: worstPack?.band ?? null,
@@ -807,7 +738,7 @@ function buildRow(
     phone: client.phone ?? undefined,
     status,
     tag,
-    mode: readMode({ client: client.deliveryMode, metadata: client.metadata }),
+    mode: readMode({ client: client.schedule.deliveryMode }),
     letter: /[A-Z]/.test(letter) ? letter : '#',
     line,
     severity,
@@ -825,7 +756,7 @@ function buildRow(
     lastAttendedAt,
     missedStreak,
     sessionsLeft,
-    batch: readBatch(sessions),
+    batch: readBatch(client.slots),
   };
 }
 
@@ -895,16 +826,6 @@ function readTag(input: {
    * what the row's own line says. */
   if (input.packBand !== null) return 'expiring';
   return 'active';
-}
-
-function metaNum(meta: Record<string, unknown>, key: string): number | null {
-  const raw = meta[key];
-  if (typeof raw === 'number') return raw;
-  if (typeof raw === 'string') {
-    const t = Date.parse(raw);
-    return Number.isNaN(t) ? null : t;
-  }
-  return null;
 }
 
 /* ---------------------------------------------------------------- sort/filter */

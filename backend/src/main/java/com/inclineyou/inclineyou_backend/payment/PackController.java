@@ -36,11 +36,12 @@ public class PackController {
      * `?status=active` drops what is no longer offered.
      */
     @GetMapping("/v1/packs")
-    public List<PackService.PackResponse> listPacks(
+    public com.inclineyou.inclineyou_backend.wire.Items<PackService.PackRow> listPacks(
             @RequestParam(required = false) String owner,
-            @RequestParam(required = false) String status
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String include
     ) {
-        return service.listPacks(trainerId(), owner, status);
+        return com.inclineyou.inclineyou_backend.wire.Items.of(service.list(trainerId(), status, owner, include));
     }
 
     @PostMapping("/v1/packs")

@@ -741,7 +741,7 @@ function RemoveCard({ clientId, clientName }: { clientId: string; clientName: st
   function remove() {
     setError(null);
     start(async () => {
-      const result = await archiveClient(clientId);
+      const result = await archiveClient(clientId, 'other', null);
       /* To the roster, and not back to this file. The file of somebody who has
          just been taken off the roster is a screen with nothing on it that is
          still true, and leaving the trainer there is how they press the button
