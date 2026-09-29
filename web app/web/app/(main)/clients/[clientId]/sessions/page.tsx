@@ -1,23 +1,23 @@
-import { notFound } from 'next/navigation';
+import { ClientFilePage } from '@/components/clients/file/ClientFilePage';
 
-import { ClientFile } from '@/components/clients/file/ClientFile';
-import { Unavailable } from '@/components/today/Unavailable';
-import { requireClientFile } from '@/lib/clients/client-guard';
-
-/** Frame 3b · what each session did to the pack. */
+/**
+ * The window chip is a place — `?range=30d|90d|all` — and `Load older` is
+ * `?older=n`, n whole windows back (R76). `all` reads the newest 400 days, L4's cap.
+ */
 export const dynamic = 'force-dynamic';
 
-export default async function Page({ params }: { params: Promise<{ clientId: string }> }) {
+const RANGES = new Set(['30d', '90d', 'all']);
+
+export default async function Page({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ clientId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { clientId } = await params;
-  const result = await requireClientFile(clientId);
-  if (!result.ok) {
-    if (result.kind === 'not_found') notFound();
-    return (
-      <Unavailable
-        kind={result.kind}
-        status={result.kind === 'refused' ? result.status : undefined}
-      />
-    );
-  }
-  return <ClientFile payload={result.payload} now={result.now} tab="sessions" />;
+  const q = await searchParams;
+  const range = (typeof q.range === 'string' && RANGES.has(q.range) ? q.range : '90d') as '30d' | '90d' | 'all';
+  const older = typeof q.older === 'string' ? Math.max(0, Number(q.older) || 0) : 0;
+  return <ClientFilePage clientId={clientId} tab="sessions" options={{ range, older }} />;
 }

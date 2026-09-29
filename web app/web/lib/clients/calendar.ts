@@ -129,11 +129,11 @@ export function buildClientMonth(
     const pill: CalendarSession = {
       id: s.id,
       time: shortTime(s.scheduledAt),
-      label: s.dayLabel,
+      label: s.workout?.name ?? null,
       state,
       href: `/sessions/${s.id}`,
       spoken: `${dayLong(s.scheduledAt)}, ${shortTime(s.scheduledAt)}`
-        + `${s.dayLabel ? `, ${s.dayLabel}` : ''}, ${SPOKEN[state]}`,
+        + `${s.workout ? `, ${s.workout.name}` : ''}, ${SPOKEN[state]}`,
     };
     const bucket = byDay.get(key);
     if (bucket) bucket.push(pill);
@@ -173,31 +173,6 @@ export function buildClientMonth(
   }
 
   return { at: first, label: monthLabel(first), weeks, sessions: total, counts };
-}
-
-/**
- * The months the loaded window actually covers.
- *
- * `getClientSessionsWindowed` asks for 90 days back and 120 forward, and that
- * is a data-layer decision this screen cannot see and a trainer cannot guess. A
- * calendar that pages happily into an empty March says *they did not train in
- * March*, about a month nobody read. So the arrows stop at the edge of the
- * window and the foot says what the window is.
- *
- * Derived from the rows that arrived rather than from the window constant, for one reason: the
- * constant lives in `client-api.ts` and a change there that this file did not
- * follow would put the boundary in the wrong place, silently. The rows are the
- * truth about what was fetched.
- */
-export function monthBounds(sessions: ClientSessionWire[], now: number) {
-  let lo = startOfMonth(now);
-  let hi = startOfMonth(now);
-  for (const s of sessions) {
-    const m = startOfMonth(s.scheduledAt);
-    if (m < lo) lo = m;
-    if (m > hi) hi = m;
-  }
-  return { first: lo, last: hi };
 }
 
 /**

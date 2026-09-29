@@ -2,31 +2,25 @@ package com.inclineyou.inclineyou_backend.payment;
 
 import com.inclineyou.inclineyou_backend.exception.ApiException;
 import com.inclineyou.inclineyou_backend.wire.Items;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @RestController
 @RequiredArgsConstructor
 public class PackageController {
 
-    private final PackageService service;
+    private final PackageLedgerService ledger;
     private final PackageReadService reads;
     private final PackageRenewService renewals;
     private final PackageSaleService sales;
 
     // ── Packages ──────────────────────────────────────────────────────────────
-
-    @GetMapping("/v1/clients/{clientId}/packages")
-    public List<PackageService.PackageResponse> listPackages(@PathVariable String clientId) {
-        return service.listPackages(trainerId(), clientId);
-    }
 
     /**
      * api-contract Today L5 / Client file L1 — packages with owed money computed
@@ -62,7 +56,7 @@ public class PackageController {
     @PostMapping("/v1/clients/{clientId}/packages")
     public ResponseEntity<PackageReadService.CurrentPackage> createPackage(
             @PathVariable UUID clientId,
-            @RequestBody(required = false) java.util.Map<String, Object> body
+            @RequestBody(required = false) Map<String, Object> body
     ) {
         var sold = sales.sell(trainerId(), clientId, body);
         return ResponseEntity.status(sold.created() ? HttpStatus.CREATED : HttpStatus.OK).body(sold.pkg());
@@ -91,79 +85,47 @@ public class PackageController {
         return ResponseEntity.status(renewed.created() ? HttpStatus.CREATED : HttpStatus.OK).body(renewed.pkg());
     }
 
-    // ── The pack's life · V30 ─────────────────────────────────────────────────
+    // ── The pack's life · api-contract 1.1 Client file A1, A11 ─────────────────
 
     /**
-     * Pause, resume and extend are POSTs on their own paths rather than fields on
-     * a {@code PATCH /v1/packages/{id}}, and that is the one design decision here
-     * worth defending.
-     *
-     * <p><b>They are events, not edits.</b> Each one writes a `package_adjustment`
-     * row as well as changing the pack, and each has a precondition the other two
-     * do not — pausing a paused pack, resuming a running one, extending one with
-     * no expiry. A single PATCH would have to infer which event was meant from
-     * which fields arrived, and answer one status for three different conflicts.
-     *
-     * <p>It also keeps the dangerous door shut. `BACKEND_GAPS.md` §6 asks for a
-     * general `PATCH /v1/packages/{id}` carrying `sessionsRemaining` and calls it
-     * "the more general answer and the more dangerous one" — a route that can set
-     * a session count directly is a route that can silently undo a charge the
-     * diary's 24-hour undo is built to reverse properly. These three cannot: they
-     * move dates and nothing else.
+     * Pause, resume, extend and cancel are POSTs on their own paths rather than
+     * fields on a {@code PATCH /v1/packages/{id}}: each is an event with its own
+     * precondition, and the first three write a `package_adjustment` row that the
+     * trigger applies. There is deliberately no route that sets a session count.
      */
     @PostMapping("/v1/packages/{packageId}/pause")
-    public PackageService.PackageResponse pausePackage(
-            @PathVariable String packageId,
-            @RequestBody(required = false) PackageService.PausePackageRequest req
-    ) {
-        return service.pausePackage(trainerId(), packageId, req);
+    public PackageReadService.CurrentPackage pausePackage(@PathVariable UUID packageId,
+                                                          @RequestBody(required = false) Map<String, Object> body) {
+        return ledger.pause(trainerId(), packageId, body);
     }
 
     @PostMapping("/v1/packages/{packageId}/resume")
-    public PackageService.PackageResponse resumePackage(
-            @PathVariable String packageId,
-            @RequestBody(required = false) PackageService.PausePackageRequest req
-    ) {
-        return service.resumePackage(trainerId(), packageId, req);
+    public PackageReadService.CurrentPackage resumePackage(@PathVariable UUID packageId,
+                                                           @RequestBody(required = false) Map<String, Object> body) {
+        return ledger.resume(trainerId(), packageId, body);
     }
 
     @PostMapping("/v1/packages/{packageId}/extend")
-    public PackageService.PackageResponse extendPackage(
-            @PathVariable String packageId,
-            @Valid @RequestBody PackageService.ExtendPackageRequest req
-    ) {
-        return service.extendPackage(trainerId(), packageId, req);
+    public PackageReadService.CurrentPackage extendPackage(@PathVariable UUID packageId,
+                                                           @RequestBody(required = false) Map<String, Object> body) {
+        return ledger.extend(trainerId(), packageId, body);
     }
 
-    /**
-     * CORRECT THE COUNT — V4. The pack was sold with twelve and says ten.
-     *
-     * <p>Not how a client buys more: that is {@code /renew} with a
-     * {@code startDate} of today, which writes a second package because a
-     * package is a sale. This moves {@code sessions_total} and
-     * {@code sessions_remaining} and never the price. See
-     * {@link PackageService#correctSessions}.
-     */
-    @PostMapping("/v1/packages/{packageId}/sessions")
-    public PackageService.PackageResponse correctSessions(
-            @PathVariable String packageId,
-            @Valid @RequestBody PackageService.CorrectSessionsRequest req
-    ) {
-        return service.correctSessions(trainerId(), packageId, req);
+    /** R74 — end one deal early, once nothing is owed. */
+    @PostMapping("/v1/packages/{packageId}/cancel")
+    public PackageReadService.CurrentPackage cancelPackage(@PathVariable UUID packageId,
+                                                           @RequestBody(required = false) Map<String, Object> body) {
+        return ledger.cancel(trainerId(), packageId, body);
     }
 
     /** Everything that has happened to this pack, oldest first. Append-only. */
     @GetMapping("/v1/packages/{packageId}/adjustments")
-    public List<PackageService.AdjustmentResponse> listAdjustments(@PathVariable String packageId) {
-        return service.listAdjustments(trainerId(), packageId);
+    public Items<PackageLedgerService.Adjustment> listAdjustments(@PathVariable UUID packageId,
+                                                                  @RequestParam(required = false) String kind) {
+        return Items.of(ledger.adjustments(trainerId(), packageId, kind));
     }
 
     // ── Payments ──────────────────────────────────────────────────────────────
-
-    @GetMapping("/v1/packages/{packageId}/payments")
-    public List<PackageService.PaymentResponse> listPayments(@PathVariable String packageId) {
-        return service.listPayments(trainerId(), packageId);
-    }
 
     /**
      * api-contract Business L2 = Today L7 — the ledger, keyset-paged on bookAt.
@@ -187,36 +149,52 @@ public class PackageController {
                 status, from, to, method, clientId, packageId, collectedBy, clientType, limit, cursor, includeTotal));
     }
 
+    /** A2 — 201 the first time, 200 on a replayed id. */
     @PostMapping("/v1/packages/{packageId}/payments")
-    @ResponseStatus(HttpStatus.CREATED)
-    public PackageService.PaymentResponse createPayment(
-            @PathVariable String packageId,
-            @Valid @RequestBody PackageService.CreatePaymentRequest req
-    ) {
-        return service.createPayment(trainerId(), packageId, req);
+    public ResponseEntity<Map<String, Object>> createPayment(@PathVariable UUID packageId,
+                                                             @RequestBody(required = false) Map<String, Object> body) {
+        return created(ledger.record(trainerId(), packageId, body));
     }
 
-    @PatchMapping("/v1/payments/{paymentId}/confirm")
-    public PackageService.PaymentResponse confirmPayment(
-            @PathVariable String paymentId,
-            @RequestBody PackageService.ConfirmPaymentRequest req
-    ) {
-        return service.confirmPayment(trainerId(), paymentId, req);
+    @PostMapping("/v1/payments/{paymentId}/paid")
+    public Map<String, Object> markPaid(@PathVariable UUID paymentId,
+                                        @RequestBody(required = false) Map<String, Object> body) {
+        return ledger.markPaid(trainerId(), paymentId, body).body();
     }
 
-    /** V8 · stop chasing it. The body is optional; see {@code writeOffPayment}. */
-    @PatchMapping("/v1/payments/{paymentId}/write-off")
-    public PackageService.PaymentResponse writeOffPayment(
-            @PathVariable String paymentId,
-            @RequestBody(required = false) PackageService.WriteOffRequest req
-    ) {
-        return service.writeOffPayment(trainerId(), paymentId, req);
+    @PostMapping("/v1/payments/{paymentId}/write-off")
+    public Map<String, Object> writeOffPayment(@PathVariable UUID paymentId,
+                                               @RequestBody(required = false) Map<String, Object> body) {
+        return ledger.writeOffPayment(trainerId(), paymentId, body).body();
     }
 
-    /** V8 · give a collected payment a bill number. Idempotent; no body. */
-    @PostMapping("/v1/payments/{paymentId}/invoice")
-    public PackageService.PaymentResponse issueInvoice(@PathVariable String paymentId) {
-        return service.issueInvoice(trainerId(), paymentId);
+    @PostMapping("/v1/packages/{packageId}/write-off")
+    public ResponseEntity<Map<String, Object>> writeOffPackage(@PathVariable UUID packageId,
+                                                               @RequestBody(required = false) Map<String, Object> body) {
+        return created(ledger.writeOffPackage(trainerId(), packageId, body));
+    }
+
+    @PostMapping("/v1/packages/{packageId}/refund")
+    public ResponseEntity<Map<String, Object>> refund(@PathVariable UUID packageId,
+                                                      @RequestBody(required = false) Map<String, Object> body) {
+        return created(ledger.refund(trainerId(), packageId, body));
+    }
+
+    @PatchMapping("/v1/payments/{paymentId}")
+    public Map<String, Object> patchPayment(@PathVariable UUID paymentId,
+                                            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+                                            @RequestBody(required = false) Map<String, Object> body) {
+        return ledger.patch(trainerId(), paymentId, ifMatch, body).body();
+    }
+
+    @DeleteMapping("/v1/payments/{paymentId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deletePayment(@PathVariable UUID paymentId) {
+        ledger.delete(trainerId(), paymentId);
+    }
+
+    private static ResponseEntity<Map<String, Object>> created(PackageLedgerService.Ledgered l) {
+        return ResponseEntity.status(l.created() ? HttpStatus.CREATED : HttpStatus.OK).body(l.body());
     }
 
     private UUID trainerId() {

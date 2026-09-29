@@ -3,7 +3,7 @@
 import Link from 'next/link';
 
 import { TopBar } from '@/components/shell/TopBar';
-import type { ClientFilePayload } from '@/lib/clients/client-api';
+import type { ClientFilePayload, ClientNoteWire, TabOptions } from '@/lib/clients/client-api';
 import type { ProgressView } from '@/lib/log/log';
 import type { AssessmentWire } from '@/lib/assessments/vocab';
 
@@ -56,10 +56,12 @@ import { TABS, tabHref, type Tab } from './shared';
  * record the DPDP Act 2023 puts out of this product's reach.
  */
 
-interface ClientFileProps {
+export interface ClientFileProps {
   payload: ClientFilePayload;
   now: number;
   tab: Tab;
+  /** The tab's own place — the calendar's month, the sessions window. */
+  options?: TabOptions;
   /** Only the Progress route loads this; every other tab passes null. */
   progress?: ProgressView | null;
   /**
@@ -80,6 +82,7 @@ export function ClientFile({
   tab,
   progress = null,
   assessments = null,
+  options = {},
 }: ClientFileProps) {
   /* ── THE STRIP STANDS DOWN ON THE TAB THAT OWNS ITS CONTENTS ─────────────
 
@@ -106,45 +109,15 @@ export function ClientFile({
      the fold. */
   const pinStrip = tab !== 'notes';
 
-  const {
-    client,
-    trainerName,
-    trainerPhone,
-    trainerUpiVpa,
-    trainerHeadline,
-    gymName,
-    gymSharePercent,
-    sessions,
-    packages,
-    payments,
-    activePackagePayments,
-    priceList,
-    adjustments,
-    programs,
-    workouts,
-    bodyMetrics,
-    notes,
-  } = payload;
+  const { client, packages } = payload;
 
-  /* No local palette. This screen used to mount one whose whole roster was
-     `[client]` — a search over the single person already filling the page. The
-     shell's carries the real roster, which is the only version of this control
-     that can do anything from here. */
+  /* The strip draws the header's pinned notes: every tab has them without
+     reading the notes list, which only Personal information does. */
+  const latestWeight = payload.readings.filter((r) => r.key === 'weight').at(-1) ?? null;
 
-  /* The latest weight, read once here. The overview takes the identical
-     reading off the identical array; the physical card needs it too, and two
-     components sorting the same list separately is how they come to disagree
-     about which one is newest. */
-  const latestWeight =
-    [...bodyMetrics]
-      .filter((m) => m.metricType === 'weight')
-      .sort((a, b) => b.recordedAt - a.recordedAt)[0] ?? null;
-
-  const counts: Partial<Record<Tab, number>> = {
-    sessions: sessions.length,
-    program: programs.length,
-    notes: notes.length,
-  };
+  const pinned: ClientNoteWire[] = client.pinnedNotes.map((n) => ({
+    id: n.id, body: n.body, pinned: true, createdAt: n.updatedAt, updatedAt: n.updatedAt, version: String(n.updatedAt),
+  }));
 
   return (
     <>
@@ -181,12 +154,7 @@ export function ClientFile({
 
       <main className="main" id="main-content">
         <div className="ph">
-          <Header
-            client={client}
-            packages={packages}
-            activePackagePayments={activePackagePayments}
-            sessionCount={workouts.length}
-          />
+          <Header client={client} packages={packages} />
 
           {/* THE PIN HINT IS THE DESK'S HERE TOO. It is a sentence a trainer
               reads on arrival — *Nothing pinned. Pin a note to keep it in front
@@ -195,7 +163,7 @@ export function ClientFile({
               travels with them into the scroller below. */}
           {pinStrip && (
             <div className="cfd cfd--desk">
-              <PinnedStrip clientId={client.id} notes={notes} />
+              <PinnedStrip clientId={client.id} notes={pinned} />
             </div>
           )}
 
@@ -214,7 +182,6 @@ export function ClientFile({
                 }
               >
                 {t.label}
-                {(counts[t.key] ?? 0) > 0 && <span className="rail__n">{counts[t.key]}</span>}
               </Link>
             ))}
           </div>
@@ -227,16 +194,14 @@ export function ClientFile({
               not in the layout, not in the tab order and not in the
               accessibility tree. */}
           <div className="cfd cfd--phone">
-            <HeaderDetail
-              client={client}
-              packages={packages}
-              activePackagePayments={activePackagePayments}
-            />
-            {pinStrip && <PinnedStrip clientId={client.id} notes={notes} />}
+            <HeaderDetail client={client} packages={packages} />
+            {pinStrip && <PinnedStrip clientId={client.id} notes={pinned} />}
           </div>
 
           {tab === 'overview' && <OverviewTab payload={payload} now={now} />}
-          {tab === 'calendar' && <CalendarTab sessions={sessions} now={now} />}
+          {tab === 'calendar' && (
+            <CalendarTab clientId={client.id} sessions={payload.sessions} month={options.month ?? null} now={now} />
+          )}
           {tab === 'progress' && (
             <ProgressTab clientId={client.id} progress={progress} />
           )}
@@ -245,53 +210,35 @@ export function ClientFile({
           )}
           {tab === 'sessions' && (
             <SessionsTab
-              sessions={sessions}
-              workouts={workouts}
-              programs={programs}
+              clientId={client.id}
+              sessions={payload.sessions}
+              range={options.range ?? '90d'}
+              older={options.older ?? 0}
               now={now}
             />
           )}
           {tab === 'program' && (
-            <ProgramTab programs={programs} sessions={sessions} client={client} now={now} />
+            <ProgramTab programs={payload.programs} sessions={payload.sessions} client={client} now={now} />
           )}
           {tab === 'payments' && (
             <PaymentsTab
-              clientId={client.id}
-              clientName={client.name}
-              clientPhone={client.phone}
-              packages={packages}
-              payments={payments}
-              priceList={priceList}
-              adjustments={adjustments}
-              weeklySchedule={client.weeklySchedule}
-              sessionDurationMinutes={client.sessionDurationMinutes}
+              client={client}
+              packages={payload.history}
+              payments={payload.payments}
+              priceList={payload.priceList}
+              adjustments={payload.adjustments}
               now={now}
-              gymName={gymName}
-              gymSharePercent={gymSharePercent}
-              /* The *From* block on any invoice raised from that tab. The
-                 payload has carried the trainer's row all along; only two of
-                 its fields had ever been declared on the wire. */
-              trainerName={trainerName}
-              trainerPhone={trainerPhone}
-              trainerUpiVpa={trainerUpiVpa}
-              trainerHeadline={trainerHeadline}
             />
           )}
           {tab === 'notes' && (
             <PersonalTab
-              clientId={client.id}
-              clientName={client.name}
-              clientPhone={client.phone}
               client={client}
-              /* Picked out HERE and not in the tab, because it is the same
-                 reading the overview already takes off the same array — one
-                 `metricType === 'weight'`, newest first — and two components
-                 sorting the same list two ways is how they end up disagreeing
-                 about which reading is the latest. */
+              /* The newest weight reading, off the readings the tab loaded
+                 (R30: weight only ever comes from an assessment). */
               weightKg={latestWeight?.value ?? null}
-              weightAt={latestWeight?.recordedAt ?? null}
+              weightAt={latestWeight?.at ?? null}
               now={now}
-              notes={notes}
+              notes={payload.notes}
             />
           )}
         </div>

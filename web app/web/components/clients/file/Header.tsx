@@ -1,7 +1,7 @@
 
 import { Chevron } from '@/components/shell/Icons';
 import { avatarToken, initials, rupees } from '@/lib/today/time';
-import type { ClientDetailWire, ClientPackageWire, ClientPaymentWire } from '@/lib/clients/client-api';
+import type { ClientDetailWire, ClientPackageWire } from '@/lib/clients/client-api';
 
 import { CalendarIcon, MessageIcon, PhoneIcon, dateStr, num } from './shared';
 import { Button } from '@/web-components/ui/Button';
@@ -30,15 +30,16 @@ import { Button } from '@/web-components/ui/Button';
  */
 
 /** `9876543210` → `98765 43210`. Anything that is not ten digits is left alone. */
+/** E.164 on the wire (`+919876500003`); the ten digits a trainer reads, split 5 · 5. */
 function prettyPhone(phone: string): string {
-  const digits = phone.replace(/\D/g, '');
+  const digits = phone.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '');
   return digits.length === 10 ? `${digits.slice(0, 5)} ${digits.slice(5)}` : phone;
 }
 
 /** What `wa.me` and `tel:` want: country code, no punctuation. */
 function dialable(phone: string): string {
   const digits = phone.replace(/\D/g, '');
-  return digits.length === 10 ? `91${digits}` : digits;
+  return digits.length === 10 ? `91${digits}` : digits;   // E.164 already carries the 91
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -87,40 +88,16 @@ const STATUS_TAG: Record<string, string> = {
 export function HeaderDetail({
   client,
   packages,
-  activePackagePayments,
 }: {
   client: ClientDetailWire;
+  /** The client's current packs (L5 `scope=current`), amountDue computed on the server. */
   packages: ClientPackageWire[];
-  activePackagePayments: ClientPaymentWire[];
 }) {
   const activePkg = packages.find((p) => p.status === 'active') ?? null;
-  const billed = activePkg ? num(activePkg.amount) : 0;
-  /*
-   * SERVER-COMPUTED, and it used to be wrong here.
-   *
-   * This summed payments whose `status === 'confirmed'`. `PackageService`
-   * writes **`'paid'`** on confirmation, so no payment ever matched: a client
-   * who had paid in full showed as owing every rupee, on the strip a trainer
-   * reads before walking over to them. `lib/money/compute.ts` had always
-   * accepted both spellings, which is why the money book and the client file
-   * disagreed about the same money.
-   *
-   * `amountPaid` / `amountDue` are now computed in SQL beside the payment rows
-   * (`PackageService.PACKAGE_COLUMNS`, which counts both spellings and excludes
-   * write-offs). The local sum survives only as the fallback for a backend that
-   * predates V30 — and it takes both spellings now, so even the fallback is
-   * right.
-   */
-  const paid = activePkg?.amountPaid != null
-    ? num(activePkg.amountPaid)
-    : activePackagePayments
-        .filter((p) => p.status === 'paid' || p.status === 'confirmed')
-        .reduce((s, p) => s + num(p.amount), 0);
-  const owed = activePkg
-    ? activePkg.amountDue != null
-      ? num(activePkg.amountDue)
-      : Math.max(0, billed - paid)
-    : 0;
+  /* Everything owed on the client's current packs, not just the running one:
+     a finished pack can still be owed for, and the server's `amountDue` is the
+     only sum there is (never re-added from payments here). */
+  const owed = packages.reduce((sum, p) => sum + num(p.amountDue), 0);
   const left = activePkg?.sessionsRemaining ?? null;
   const total = activePkg?.sessionsTotal ?? null;
   /*
@@ -223,21 +200,19 @@ export function HeaderDetail({
 export function Header({
   client,
   packages,
-  activePackagePayments,
-  sessionCount,
 }: {
   client: ClientDetailWire;
   packages: ClientPackageWire[];
-  activePackagePayments: ClientPaymentWire[];
-  sessionCount: number;
 }) {
+  const sessionCount = client.stats.sessionsDone;
+  const mode = client.schedule.deliveryMode;
   /* The money and the pack count moved to `HeaderDetail` with the figures that
      draw them — this half of the header is identity only. */
   const statusLabel = STATUS_LABEL[client.status] ?? client.status;
   const statusTag = STATUS_TAG[client.status] ?? '';
   const modeLabel =
-    client.deliveryMode === 'floor' ? 'In Person' : client.deliveryMode === 'remote' ? 'Online' : null;
-  const modeTag = client.deliveryMode === 'floor' ? 'tag--floor' : 'tag--remote';
+    mode === 'floor' ? 'In Person' : mode === 'remote' ? 'Online' : mode === 'home_visit' ? 'Home visit' : null;
+  const modeTag = mode === 'floor' ? 'tag--floor' : 'tag--remote';
 
   return (
     <>
@@ -297,7 +272,6 @@ export function Header({
           <HeaderDetail
             client={client}
             packages={packages}
-            activePackagePayments={activePackagePayments}
           />
         </div>
       </div>

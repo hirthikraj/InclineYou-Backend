@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 
 import type { ClientPackageWire, PackageAdjustmentWire } from '@/lib/clients/client-api';
-import { extendPack, pausePack, resumePack } from '@/lib/clients/package-actions';
+import { endPack, extendPack, pausePack, resumePack } from '@/lib/clients/package-actions';
 
 import { longDateStr } from './shared';
 import { Button } from '@/web-components/ui/Button';
@@ -34,6 +34,13 @@ import { TextField } from '@/web-components/ui/Field';
  * into a line they can read. But a required field between a trainer on a gym
  * floor and a two-second kindness is a field that stops the kindness, so it is
  * offered and never demanded — the same call `payment.note` and V29's notes make.
+ *
+ * ── AND A DEAL CAN END EARLY ────────────────────────────────────────────────
+ *
+ * *End this pack* (R74) is for the client who switches from the floor to home
+ * visits without leaving: the pack closes `cancelled` and its sessions stop
+ * being charged. Only once nothing is owed or pending — the server says so if
+ * there is, and the sentence names the two ways out.
  */
 
 function todayISO(): string {
@@ -42,7 +49,7 @@ function todayISO(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-type Mode = null | 'pause' | 'resume' | 'extend';
+type Mode = null | 'pause' | 'resume' | 'extend' | 'end';
 
 export function PackLife({
   clientId,
@@ -147,6 +154,34 @@ export function PackLife({
               Give more time
             </Button>
           )}
+          <Button variant="ghost" size="sm" onClick={() => setMode('end')}>
+            End this pack
+          </Button>
+        </div>
+      )}
+
+      {/* ── End it early ───────────────────────────────────────────────── */}
+      {mode === 'end' && (
+        <div>
+          <p className="small" style={{ marginBottom: 8 }}>
+            Closes this pack now. Sessions left on it are no longer charged — the next
+            live pack of the same kind takes them, or they go uncharged. It can&rsquo;t be
+            reopened; sell a new pack if you change your mind.
+          </p>
+          {error && (
+            <p className="msg msg--warn mt3" role="alert">
+              <span>{error}</span>
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <Button variant="danger" size="sm" disabled={pending}
+              onClick={() => run(() => endPack(clientId, pkg.id))}>
+              {pending ? 'Ending…' : 'End it'}
+            </Button>
+            <Button variant="ghost" size="sm" disabled={pending} onClick={close}>
+              Keep it running
+            </Button>
+          </div>
         </div>
       )}
 
@@ -174,16 +209,19 @@ export function PackLife({
               should not cost anybody three days.
             </p>
           </div>
-          <TextField
-            label={<>Why <span className="ink3">· optional</span></>}
-            id="pl-reason"
-            className="mt3"
-            type="text"
-            value={reason}
-            maxLength={200}
-            placeholder={mode === 'pause' ? 'Kerala till the 20th' : 'Back in town'}
-            onChange={(e) => setReason(e.target.value)}
-          />
+          {/* A resume carries no reason on the wire — the pause did. */}
+          {mode === 'pause' && (
+            <TextField
+              label={<>Why <span className="ink3">· optional</span></>}
+              id="pl-reason"
+              className="mt3"
+              type="text"
+              value={reason}
+              maxLength={200}
+              placeholder="Kerala till the 20th"
+              onChange={(e) => setReason(e.target.value)}
+            />
+          )}
           {error && (
             <p className="msg msg--warn mt3" role="alert">
               <span>{error}</span>
@@ -198,7 +236,7 @@ export function PackLife({
                 run(() =>
                   mode === 'pause'
                     ? pausePack(clientId, pkg.id, { reason, effectiveDate: effective })
-                    : resumePack(clientId, pkg.id, { reason, effectiveDate: effective }),
+                    : resumePack(clientId, pkg.id, { effectiveDate: effective }),
                 )
               }
             >
@@ -224,7 +262,7 @@ export function PackLife({
             numeric
             type="number"
             min="1"
-            max="365"
+            max="3650"
             step="1"
             value={days}
             onChange={(e) => setDays(e.target.value)}
@@ -302,5 +340,8 @@ function adjustmentLabel(a: PackageAdjustmentWire): string {
     return a.days > 0 ? `back after ${a.days} days, all of them returned` : 'back the same day';
   }
   if (a.kind === 'extend') return `${a.days} days given`;
+  if (a.kind === 'sessions') return `${a.sessions > 0 ? '+' : ''}${a.sessions} sessions corrected`;
+  if (a.kind === 'session') return a.reversedAt ? 'a session charged, then undone' : 'a session charged';
+  if (a.kind === 'due_date') return a.dueDate ? `due date moved to ${a.dueDate}` : 'due date cleared';
   return a.kind;
 }

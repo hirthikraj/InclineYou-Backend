@@ -623,7 +623,7 @@ function RenewButton({ packageId, label }: { packageId: string; label: string })
 }
 
 /** client_archive_reason's six values, in the MockUI ArchiveSheet's words. */
-const ARCHIVE_REASONS: [ArchiveReason, string][] = [
+export const ARCHIVE_REASONS: [ArchiveReason, string][] = [
   ['goal_reached', 'Reached their goal'],
   ['moved_away', 'Moved away'],
   ['cost', 'Cost'],

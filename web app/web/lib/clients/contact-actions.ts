@@ -2,36 +2,18 @@
 
 import { revalidatePath } from 'next/cache';
 
-import {
-  ClientDetailApiError,
-  putClientContact,
-  putClientPhysical,
-} from './client-api';
+import { ClientDetailApiError, patchClient } from './client-api';
 
 /**
- * THE CONTACT WRITE PATH — the two fields a client record actually carries.
+ * THE CONTACT AND PHYSICAL WRITE PATH — `PATCH /v1/clients/{id}` (Clients A6).
  *
- * ── WHY THIS IS TWO FIELDS AND NOT THE FIVE A FORM USUALLY HAS ───────────────
+ * Each card sends only the keys it owns, so neither can clobber the other, and
+ * each sends `If-Match` with the `version` it was drawn from: a save over an
+ * edit made in another tab is a 412 the trainer is told about, not a silent
+ * overwrite.
  *
- * `ClientDetailWire` is `name` and `phone`. There is no first/last split, no
- * e-mail, no address and no date of birth, and the form draws exactly what the
- * record holds rather than three inputs that would save nowhere. The gap is
- * written up in `BACKEND_GAPS.md`; until the API grows the fields, a form that
- * showed them would be a form that lies.
- *
- * ── THE PHONE IS THE LOGIN, WHICH IS WHY IT IS CHECKED HERE ──────────────────
- *
- * A client signs in with an OTP to the last ten digits of this field. So a save
- * that quietly accepted eight digits would not produce a client with a slightly
- * wrong number — it would produce a client who cannot open the portal, and no
- * screen anywhere would say so. Ten digits, or nothing is sent.
- *
- * ── AND NOTHING ELSE GOES IN THE BODY ────────────────────────────────────────
- *
- * `PUT /v1/clients/{id}` is partial, so this sends the two keys it owns and
- * leaves `metadata`, `weeklySchedule`, `status` and the rest of the row alone —
- * the same contract `putClientStatus` relies on, and the reason that one has to
- * read `metadata` before it writes and this one does not.
+ * The phone is the number the client will sign in with, which is why it is
+ * checked here and goes out E.164 — ten digits, or nothing is sent.
  */
 
 export interface ContactWriteResult {
@@ -39,14 +21,25 @@ export interface ContactWriteResult {
   message?: string;
 }
 
-/** Digits only, and an Indian mobile typed with a leading 0 loses it. */
+/** The ten digits: a leading 0, or the 91 of a pasted `+91…`, is dropped. */
 function cleanPhone(raw: string): string {
   const digits = raw.replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('91')) return digits.slice(2);
   return digits.startsWith('0') ? digits.slice(1) : digits;
 }
 
+/** The refusals a trainer can act on, by `code` — the UI never branches on prose. */
+const BY_CODE: Record<string, string> = {
+  PRECONDITION_FAILED: 'This client was changed somewhere else. Reload the page and try again.',
+  PHONE_ALREADY_YOURS: 'That number is already on another client on your roster.',
+  PHONE_ON_ANOTHER_ROSTER: 'That number belongs to a client of another coach in this workspace.',
+  PHONE_IS_TRAINER: 'That is a trainer\'s number, not a client\'s.',
+  CLIENT_UNDER_18: 'Clients must be 18 or older.',
+};
+
 function fail(error: unknown): ContactWriteResult {
   if (error instanceof ClientDetailApiError) {
+    if (error.code && BY_CODE[error.code]) return { ok: false, message: BY_CODE[error.code] };
     if (error.detail) return { ok: false, message: error.detail };
     if (error.status === null) {
       return { ok: false, message: 'Could not reach the server. Nothing changed.' };
@@ -57,10 +50,6 @@ function fail(error: unknown): ContactWriteResult {
     if (error.status === 404) {
       return { ok: false, message: 'That client is no longer there.' };
     }
-    if (error.status === 409) {
-      return { ok: false, message: 'That number is already on somebody else on your roster.' };
-    }
-    return { ok: false, message: 'It did not save. Nothing changed.' };
   }
   return { ok: false, message: 'It did not save. Nothing changed.' };
 }
@@ -82,6 +71,7 @@ function refresh(clientId: string): void {
 /** Save the name and the number. Both are sent; both are required. */
 export async function saveContact(
   clientId: string,
+  version: string,
   name: string,
   phone: string,
 ): Promise<ContactWriteResult> {
@@ -95,7 +85,7 @@ export async function saveContact(
   }
 
   try {
-    await putClientContact(clientId, { name: trimmed, phone: digits });
+    await patchClient(clientId, { name: trimmed, phone: `+91${digits}` }, version);
     refresh(clientId);
     return { ok: true };
   } catch (error) {
@@ -106,38 +96,25 @@ export async function saveContact(
 /* ──────────────────────────────────────────────── the physical card ── */
 
 /**
- * Height and birth date.
+ * Height, birth date and activity level — the client's own physical fields
+ * (R30). Never a weight: a body is measured in an assessment and nowhere else.
  *
- * It was three fields. `sex` was stored for one reason — the constant that
- * differs between Mifflin-St Jeor's two forms — and when the metabolism rows
- * were cut on 15 Sep 2026 it lost its only reader, so the column went with
- * them. A sex field nothing reads is personal data held for no stated purpose.
- *
- * ── EVERY FIELD IS OPTIONAL, AND THAT IS THE POINT ───────────────────────────
- *
- * A trainer knows some of this about some of their roster. The card is not a
- * form that must be completed — it is three facts that improve two derived
- * figures when they are there, and an empty one is a normal state rather than an
- * error. So a blank clears the value rather than failing the save, and the only
- * refusals below are for values that are not facts at all.
- *
- * ── THE BOUNDS ARE REFUSALS, NOT CLAMPS ─────────────────────────────────────
- *
- * A height of 17cm is a typo for 170 and a birth date in 1893 is a typo for
- * 1993, and silently clamping either to the nearest legal value writes a number
- * the trainer did not type into a field a client may later read. The save is
- * refused with the reason instead.
+ * Every field is optional and a blank clears it. The bounds are refusals, not
+ * clamps — 17cm is a typo for 170, and writing the nearest legal value writes a
+ * number nobody typed. 18+ is checked here as well as refused by the server
+ * (MUST-22), so the sentence arrives before the round trip.
  */
 export async function savePhysical(
   clientId: string,
-  input: { heightCm: string; dateOfBirth: string },
+  version: string,
+  input: { heightCm: string; dateOfBirth: string; activityLevel: string },
 ): Promise<ContactWriteResult> {
   const rawHeight = input.heightCm.trim();
   let heightCm: number | null = null;
   if (rawHeight) {
     const n = Number(rawHeight);
-    if (!Number.isFinite(n) || n < 60 || n > 250) {
-      return { ok: false, message: 'A height is in centimetres, somewhere between 60 and 250.' };
+    if (!Number.isFinite(n) || n < 50 || n > 250) {
+      return { ok: false, message: 'A height is in centimetres, somewhere between 50 and 250.' };
     }
     heightCm = Math.round(n * 10) / 10;
   }
@@ -145,20 +122,19 @@ export async function savePhysical(
   const rawDob = input.dateOfBirth.trim();
   let dateOfBirth: string | null = null;
   if (rawDob) {
-    const at = new Date(`${rawDob}T00:00:00`).getTime();
-    if (Number.isNaN(at)) return { ok: false, message: 'That is not a date.' };
-    /* The future is the mistake this catches — a date picker opened on today
-       and arrowed the wrong way. 130 years is the other end, and both are
-       refusals rather than corrections. */
-    if (at > Date.now()) return { ok: false, message: 'A birth date is in the past.' };
-    if (Date.now() - at > 130 * 365.25 * 86_400_000) {
-      return { ok: false, message: 'Check the year on that birth date.' };
-    }
+    const born = new Date(`${rawDob}T00:00:00`);
+    if (Number.isNaN(born.getTime())) return { ok: false, message: 'That is not a date.' };
+    if (born.getFullYear() < 1900) return { ok: false, message: 'Check the year on that birth date.' };
+    const adult = new Date(born);
+    adult.setFullYear(born.getFullYear() + 18);
+    if (adult.getTime() > Date.now()) return { ok: false, message: BY_CODE.CLIENT_UNDER_18 };
     dateOfBirth = rawDob;
   }
 
+  const activityLevel = input.activityLevel || null;
+
   try {
-    await putClientPhysical(clientId, { heightCm, dateOfBirth });
+    await patchClient(clientId, { heightCm, dateOfBirth, activityLevel }, version);
     refresh(clientId);
     return { ok: true };
   } catch (error) {

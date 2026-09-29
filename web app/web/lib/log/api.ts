@@ -1,4 +1,6 @@
 import 'server-only';
+import { ClientDetailApiError, clientReadings, dayIso, getClientHeader } from '@/lib/clients/client-api';
+import { fetchSetHistory, toLogInput } from './set-history';
 
 import { cache } from 'react';
 
@@ -146,13 +148,6 @@ interface PackageWire {
   sessionsRemaining: number | null;
   status: string;
   createdAt: number;
-}
-
-interface MetricWire {
-  metricType: string;
-  value: number;
-  unit: string;
-  recordedAt: number;
 }
 
 /* ──────────────────────────────────────────── the client's whole history ── */
@@ -660,100 +655,68 @@ export const getPicker = cache(async (): Promise<PickView> => {
 
 /* ───────────────────────────────────── 4a · one exercise, every session ── */
 
+/**
+ * Set-history narrowed to one movement: this page is about one lift, and asking
+ * for one is what makes "every session" affordable enough to mean it — the walk
+ * reaches the client's real first session, so the `first` tag lands on it.
+ */
 export const getExerciseHistory = cache(
   async (clientId: string, exerciseId: string): Promise<HistoryView | null> => {
-    const now = Date.now();
-    const [clients, exercises, workouts] = await Promise.all([
-      allClients(),
-      allExercises(),
-      allWorkouts(),
+    const [{ client }, history] = await Promise.all([
+      header(clientId),
+      fetchSetHistory(clientId, { exerciseId }),
     ]);
-
-    const client = (clients ?? []).find((c) => c.id === clientId);
-    if (!client) return null;
-
-    const mine = (workouts ?? [])
-      .filter((w) => w.clientId === clientId)
-      .sort((a, b) => (a.sessionDate < b.sessionDate ? 1 : -1));
-
-    /* Narrowed on the wire: this page is about one movement, and asking for one
-       is what makes "every session" affordable enough to mean it. The walk
-       forward now reaches the client's real first session, so the `first` tag
-       lands on it rather than on the oldest one a window happened to hold. */
-    const sets = await setsForClient(clientId, exerciseId);
-
     return buildHistory(
-      {
-        ...EMPTY,
-        workouts: mine.map(toWorkout),
-        sets,
-        clients: [{ id: client.id, name: client.name }],
-        exercises: (exercises ?? []).map((e) => ({
-          id: e.id, name: e.name, equipment: e.equipment, isCustom: e.isCustom,
-          logType: e.logType,
-        })),
-      },
+      { ...EMPTY, ...toLogInput(clientId, history), clients: [{ id: client.id, name: client.name }] },
       clientId,
       exerciseId,
-      now,
+      Date.now(),
     );
   },
 );
 
 /* ──────────────────────────────────────────────────────────── 4b · progress ── */
 
+const RANGE_FROM_DAYS: Record<ProgressRange, number | null> = { '8w': 56, '6m': 183, all: null };
+
+/**
+ * Progress on two reads beside the header: set-history from the range's start
+ * (nothing for all time) and the readings, whose weight is the bodyweight line.
+ */
 export const getProgress = cache(
   async (clientId: string, range: ProgressRange, focus: string | null): Promise<ProgressView | null> => {
     const now = Date.now();
-    const [clients, exercises, workouts] = await Promise.all([
-      allClients(),
-      allExercises(),
-      allWorkouts(),
+    const days = RANGE_FROM_DAYS[range];
+    const [{ client }, history, readings] = await Promise.all([
+      header(clientId),
+      fetchSetHistory(clientId, days == null ? {} : { from: dayIso(now - days * 86_400_000) }),
+      clientReadings(clientId),
     ]);
 
-    const client = (clients ?? []).find((c) => c.id === clientId);
-    if (!client) return null;
-
-    const mine = (workouts ?? [])
-      .filter((w) => w.clientId === clientId)
-      .sort((a, b) => (a.sessionDate < b.sessionDate ? 1 : -1));
-
-    const [sets, metrics] = await Promise.all([
-      setsForClient(clientId),
-      get<MetricWire[]>(`/v1/clients/${clientId}/body-metrics`).catch(() => [] as MetricWire[]),
-    ]);
-
-    const weights = (metrics ?? [])
-      .filter((m) => m.metricType === 'weight')
-      .sort((a, b) => a.recordedAt - b.recordedAt);
+    const weights = readings.filter((r) => r.key === 'weight');
     const latest = weights[weights.length - 1];
-    const days = range === '8w' ? 56 : range === '6m' ? 183 : 3650;
-    const earlier = weights.find((m) => m.recordedAt >= now - days * 86_400_000);
+    const earlier = weights.find((r) => r.at >= now - (days ?? 3650) * 86_400_000);
 
     return buildProgress(
-      {
-        ...EMPTY,
-        workouts: mine.map(toWorkout),
-        sets,
-        clients: [{ id: client.id, name: client.name }],
-        exercises: (exercises ?? []).map((e) => ({
-          id: e.id, name: e.name, equipment: e.equipment, isCustom: e.isCustom,
-          logType: e.logType,
-        })),
-      },
+      { ...EMPTY, ...toLogInput(clientId, history), clients: [{ id: client.id, name: client.name }] },
       clientId,
       range,
       now,
       focus,
-      latest
-        ? {
-            value: Number(latest.value),
-            earlier: earlier && earlier !== latest ? Number(earlier.value) : null,
-          }
-        : null,
+      latest ? { value: latest.value, earlier: earlier && earlier !== latest ? earlier.value : null } : null,
     );
   },
 );
+
+/** The file's header read, re-thrown as this module's error so `guard` maps a 404 to not found. */
+async function header(clientId: string) {
+  try {
+    return await getClientHeader(clientId);
+  } catch (e) {
+    if (e instanceof ClientDetailApiError) throw new LogApiError(e.status);
+    throw e;
+  }
+}
 
 /* ──────────────────────────────────── starting a log, which is not marking done ── */
 

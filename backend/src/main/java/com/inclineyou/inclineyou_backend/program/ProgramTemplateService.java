@@ -193,6 +193,65 @@ public class ProgramTemplateService {
         return new Applied(plan(p, linked), true);
     }
 
+    public record Progress(int sessionsDone, int sessionsPlanned, Integer currentWeek) {}
+
+    public record ClientProgram(String id, String name, String goal, int weeks, int days, String status,
+                                String startDate, String endDate, String copiedFromProgramId, long revisedAt,
+                                Progress progress) {}
+
+    /**
+     * {@code GET /v1/programs?clientId=} — api-contract 1.1 Client file. The
+     * client's plans, the active one first, then the rest newest first. Bounded.
+     *
+     * <p>{@code sessionsDone} counts done sessions whose workout belongs to the
+     * plan, in one grouped count over idx_scheduled_session_workout for all of
+     * them; {@code sessionsPlanned} is the plan's workouts. {@code currentWeek}
+     * is where today falls from the start, held inside the plan's weeks, and null
+     * without a start date.
+     */
+    public List<ClientProgram> forClient(UUID trainerId, UUID clientId) {
+        var p = new HashMap<String, Object>();
+        p.put("tid", trainerId.toString());
+        p.put("cid", clientId.toString());
+        Boolean mine = jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM client WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)
+                """, p, Boolean.class);
+        if (!Boolean.TRUE.equals(mine)) throw ApiException.notFound("That client is not on your roster.");
+        LocalDate today = WorkspaceClock.today(clock.zone());
+        return jdbc.query("""
+                WITH mine AS (
+                    SELECT * FROM program WHERE client_id = :cid::uuid AND deleted_at IS NULL
+                ),
+                planned AS (
+                    SELECT w.program_id, count(*) AS planned FROM workout w
+                    WHERE w.program_id IN (SELECT id FROM mine) AND w.deleted_at IS NULL GROUP BY w.program_id
+                ),
+                done AS (
+                    SELECT w.program_id, count(*) AS done FROM scheduled_session s
+                    JOIN workout w ON w.id = s.workout_id
+                    WHERE w.program_id IN (SELECT id FROM mine) AND s.status = 'done' AND s.deleted_at IS NULL
+                    GROUP BY w.program_id
+                )
+                SELECT m.id::text AS id, m.name, m.goal, m.weeks, m.days, m.status,
+                       m.start_date, m.end_date::text AS end_date,
+                       m.copied_from_program_id::text AS copied_from, m.revised_at,
+                       coalesce(d.done, 0) AS done, coalesce(pl.planned, 0) AS planned
+                FROM mine m
+                LEFT JOIN planned pl ON pl.program_id = m.id
+                LEFT JOIN done d ON d.program_id = m.id
+                ORDER BY (m.status = 'active') DESC, m.start_date DESC NULLS LAST, m.created_at DESC, m.id
+                """, p, (rs, i) -> {
+            var start = rs.getDate("start_date");
+            int weeks = rs.getInt("weeks");
+            Integer week = start == null ? null : (int) Math.min(weeks, Math.max(1,
+                    (today.toEpochDay() - start.toLocalDate().toEpochDay()) / 7 + 1));
+            return new ClientProgram(rs.getString("id"), rs.getString("name"), rs.getString("goal"), weeks,
+                    rs.getInt("days"), rs.getString("status"), start == null ? null : start.toString(),
+                    rs.getString("end_date"), rs.getString("copied_from"), rs.getTimestamp("revised_at").getTime(),
+                    new Progress(rs.getInt("done"), rs.getInt("planned"), week));
+        });
+    }
+
     private Plan plan(Map<String, Object> p, Integer linked) {
         return jdbc.queryForObject("""
                 SELECT id::text AS id, client_id::text AS client_id, name, goal, weeks, days, status,

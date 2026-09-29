@@ -17,10 +17,17 @@ public class ProgramController {
     private final ProgramService programService;
     private final ProgramTemplateService templates;
 
+    /** Pre-v1, for the Programs screen until its pass. A clientId goes to {@link #forClient}. */
     @GetMapping
-    public List<ProgramService.ProgramResponse> list(
-            @RequestParam(required = false) String clientId) {
-        return programService.list(trainerId(), clientId);
+    public List<ProgramService.ProgramResponse> list() {
+        return programService.list(trainerId(), null);
+    }
+
+    /** api-contract 1.1 Client file — the client's programs, active first, with progress. */
+    @GetMapping(params = "clientId")
+    public com.inclineyou.inclineyou_backend.wire.Items<ProgramTemplateService.ClientProgram> forClient(
+            @RequestParam UUID clientId) {
+        return com.inclineyou.inclineyou_backend.wire.Items.of(templates.forClient(trainerId(), clientId));
     }
 
     /** api-contract Clients, add-client step 4 — what can be applied. */

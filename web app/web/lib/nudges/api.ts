@@ -74,6 +74,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       headers: {
         authorization: `Bearer ${token}`,
+        // Every web request says it is the web (api-contract *Conventions*).
+        'x-inclineyou-client': 'web',
         ...(init?.body ? { 'content-type': 'application/json' } : {}),
         ...init?.headers,
       },
@@ -198,24 +200,26 @@ export async function listClientNudges(clientId: string, days = 365): Promise<Nu
 /* ───────────────────────────────────────────────────────────── the send ──── */
 
 export interface NudgeWire {
-  nudgeId: string;
+  id: string;
   whatsappUrl: string;
   message: string;
   sentAt: number;
 }
 
 /**
- * Draft a message and log it. The server renders from the trainer's template and
- * the client's live figures; nothing is sent, here or there.
+ * Draft a message and log it — `POST /v1/clients/{id}/nudges` (1.1). The server
+ * renders from the trainer's template and the client's live figures; nothing is
+ * sent, here or there. The rendered text is NOT passed in: a caller that could
+ * supply the sentence could put a number in it that disagrees with the money book.
  *
- * The rendered text is NOT passed in — see `NudgeController.SendNudgeRequest`.
- * A caller that could supply the sentence could put a number in it that
- * disagrees with the money book, and the caller most likely to is the screen
- * that has just done some arithmetic of its own.
+ * `id` is the log row's: pass one per attempt, kept across its retries, so a
+ * retry answers 200 from the stored row instead of logging a second.
+ * `re_engagement` and `session_summary` answer 400 until their reasons are agreed (R64).
  */
-export async function postNudge(clientId: string, templateName: string): Promise<NudgeWire> {
-  return request<NudgeWire>(`/v1/clients/${encodeURIComponent(clientId)}/nudge`, {
+export async function postNudge(clientId: string, templateName: string, id: string = crypto.randomUUID()): Promise<NudgeWire> {
+  return request<NudgeWire>(`/v1/clients/${encodeURIComponent(clientId)}/nudges`, {
     method: 'POST',
-    body: JSON.stringify({ templateName }),
+    body: JSON.stringify({ id, template: templateName }),
   });
 }
+

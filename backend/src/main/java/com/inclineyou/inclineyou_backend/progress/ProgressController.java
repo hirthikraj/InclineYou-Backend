@@ -7,15 +7,19 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/v1/clients/{clientId}/progress")
 @RequiredArgsConstructor
 public class ProgressController {
 
-    private final ProgressService service;
+    private final SetHistoryService history;
 
-    @GetMapping
-    public ProgressService.ProgressResponse get(@PathVariable String clientId) {
-        return service.get(trainerId(), clientId);
+    /** api-contract 1.1 Client file — every completed set, the input to Progress and the report. */
+    @GetMapping("/v1/clients/{clientId}/set-history")
+    public SetHistoryService.History setHistory(@PathVariable UUID clientId,
+                                                @RequestParam(required = false) String from,
+                                                @RequestParam(required = false) String exerciseId,
+                                                @RequestParam(required = false) Integer limit,
+                                                @RequestParam(required = false) String cursor) {
+        return history.list(trainerId(), clientId, from, exerciseId, limit, cursor);
     }
 
     private UUID trainerId() {

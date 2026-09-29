@@ -17,7 +17,6 @@ import {
 import type {
   ClientPackageWire,
   ClientPaymentWire,
-  PriceListPackWire,
 } from '@/lib/clients/client-api';
 
 import { longDateStr, isoDateStr } from './shared';
@@ -71,10 +70,10 @@ export function InvoiceSheet({
   trainerPhone,
   trainerUpiVpa,
   trainerHeadline,
-  priceList,
   onClose,
 }: {
-  payment: ClientPaymentWire;
+  /** `invoiceNo` / `invoicedAt` are later-schema (R27) — absent on every v1 row. */
+  payment: ClientPaymentWire & { invoiceNo?: string | null; invoicedAt?: number | null };
   /** The pack the money was against. Null for a payment recorded on its own. */
   pkg: ClientPackageWire | null;
   clientName: string;
@@ -83,7 +82,6 @@ export function InvoiceSheet({
   trainerPhone: string | null;
   trainerUpiVpa: string | null;
   trainerHeadline: string | null;
-  priceList: PriceListPackWire[];
   onClose: () => void;
 }) {
   const toast = useToast();
@@ -101,7 +99,7 @@ export function InvoiceSheet({
   const number = minted ?? payment.invoiceNo ?? null;
 
   const figures = invoiceFigures(pkg);
-  const what = packName(pkg, priceList);
+  const what = packName(pkg);
   const paidAt = payment.paidAt ?? payment.createdAt;
   const paid = isCollected(payment);
   const amount = rupees(figures.net || Number(payment.amount));
@@ -254,7 +252,7 @@ export function InvoiceSheet({
                      label to make it sit inside a sentence turns it into `upi`,
                      which is the raw enum this map exists to stop printing. */
                   ? `Paid by ${methodLabel(payment.method) ?? 'the client'} on ${longDateStr(paidAt)}${
-                      payment.upiReference ? ` · reference ${payment.upiReference}` : ''
+                      payment.reference ? ` · reference ${payment.reference}` : ''
                     }.`
                   : trainerUpiVpa
                     ? `Payable to ${trainerUpiVpa}.`

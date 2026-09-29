@@ -3,18 +3,25 @@
 import { revalidatePath } from 'next/cache';
 
 import {
+  cancelPackage,
   ClientDetailApiError,
+  deletePayment,
   extendPackage,
+  patchPayment,
   pausePackage,
+  refundPackage,
   renewPackage,
   resumePackage,
   sellPackage,
+  writeOffPackage,
+  type SaleInput,
 } from './client-api';
 
 /**
- * THE PACKAGE WRITE PATH — the commercial engine's five verbs.
+ * THE PACKAGE WRITE PATH — a pack's life and the corrections to its money book.
  *
- * Sell · Renew · Pause · Resume · Extend. Every one of them straight to the
+ * Sell · Renew · Pause · Resume · Extend · End, and Write off · Refund · Edit ·
+ * Delete a payment (api-contract 1.1 Client file, R73). Every one of them straight to the
  * server, because this half is online-only and there is no queue to hold a
  * commercial fact in.
  *
@@ -33,18 +40,18 @@ import {
  * somebody paused it on the phone, or the lifecycle sweep closed it. That is not
  * the trainer's mistake and the recovery is not to fix the form, so it says so
  * and the page revalidates underneath them.
+ *
+ * ── AND EVERY CREATE CARRIES AN ID THE BROWSER MINTED ───────────────────────
+ *
+ * A sale, a renewal, a write-off and a refund each make a row, and each takes
+ * the id its sheet minted when it opened (`crypto.randomUUID()`), kept across
+ * retries. A double tap or a timeout-then-retry answers the row the first
+ * attempt made (200) rather than selling or refunding twice (Conventions).
  */
 
 export interface PackageResult {
   ok: boolean;
   message?: string;
-  /**
-   * How many sessions the sale put in the diary. Present only on a sale or a
-   * renewal that carried a rhythm, and `0` is a real answer — a pack sold to
-   * somebody whose days are not agreed yet books nothing, and the panel says so
-   * rather than implying a diary that is not there.
-   */
-  sessionsBooked?: number;
 }
 
 function fail(error: unknown, subject: string): PackageResult {
@@ -86,87 +93,46 @@ function refresh(clientId: string): void {
   revalidatePath('/business', 'layout');
   revalidatePath('/today');
   revalidatePath('/clients');
-  /* THE FIFTH SURFACE, AND IT IS NEW BECAUSE THE WRITE IS. A sale now books the
-     sessions it owes, so the calendar is no longer a screen a pack cannot
-     touch — and the one thing worse than a schedule that did not get the
-     bookings is a schedule that has them and is showing a cached week without. */
+  /* Ending a pack or pausing it changes which sessions will be charged, and the
+     schedule's panel says so. */
   revalidatePath('/schedule');
 }
 
 /**
- * SELL A PACK — the write that did not exist.
+ * SELL A PACK — `POST /v1/clients/{id}/packages` (Clients A7).
  *
- * Until this pass, nothing on this half could create a package except *Renew* on
- * Today's queue, which needed a pack to already be there. Every *Sell a pack*
- * button led to a panel that could only record a payment against a package that
- * did not exist, and said "Sell one first" with nothing to click. This is the
- * "first".
- *
- * `packId` is what makes the price list a mechanism rather than a document: the
- * type, the count, the price and the validity window all come off the entry, and
- * `package.pack_id` finally gets written — which is what `pack.activeClients`
- * has been counting all along and finding zero.
+ * Off the price list the pack's terms win — name, service, basis, count, price,
+ * validity — and only a start date and a discount are sent. A custom sale sends
+ * the terms. It does not book sessions any more: the client's week is its own
+ * resource (`PUT /v1/clients/{id}/schedule`, set in the add flow), and a second
+ * pack sold to somebody who comes on Tuesdays is charged on those Tuesdays.
  */
-export async function assignPackage(
-  clientId: string,
-  input: {
-    packId?: string | null;
-    type?: string;
-    sessionsTotal?: number | null;
-    amount?: number;
-    startDate?: string | null;
-    discountAmount?: number | null;
-    dueDate?: string | null;
-    /**
-     * The days and times agreed on the sale. 0 = Monday … 6 = Sunday.
-     *
-     * This is what makes a sale produce a diary rather than a number. It is
-     * written onto the CLIENT as their standing week and the pack's sessions are
-     * laid down on it — see `sellPackage`. Omitted means *leave their week
-     * alone*, which is the right default for a second pack sold to somebody who
-     * has been coming on Tuesdays for a year.
-     */
-    weeklySchedule?: Array<{ templateDay: number; weekday: number; time: string }> | null;
-    sessionDurationMinutes?: number | null;
-  },
-): Promise<PackageResult> {
-  // Only checked when the price list is not filling it in. A pack chosen off the
-  // list carries its own price, and demanding one here would make the picker
-  // pointless.
-  if (!input.packId && !(input.amount && input.amount > 0)) {
+export async function assignPackage(clientId: string, input: SaleInput): Promise<PackageResult> {
+  // Only checked when the price list is not filling it in.
+  if (!input.packId && !(Number(input.amount) > 0)) {
     return { ok: false, message: 'A pack needs a price.' };
   }
   try {
-    const sold = await sellPackage(clientId, input);
+    await sellPackage(clientId, input);
     refresh(clientId);
-    return { ok: true, sessionsBooked: sold?.sessionsBooked ?? 0 };
+    return { ok: true };
   } catch (error) {
     return fail(error, 'That pack');
   }
 }
 
 /**
- * RENEW — one tap, standing on a gym floor.
- *
- * The empty-object default is the feature. Same terms, and the new pack starts
- * where the old one stopped: renewed early it begins the day after the current
- * one lapses, so the client is not charged twice for the same fortnight; renewed
- * late it begins today, because back-dating would hand back validity nobody had.
- * `PackageService.renewPackage` carries the three cases.
+ * RENEW — one tap, standing on a gym floor. The server copies the terms (the
+ * pack's current ones if it came off a live price-list entry, else the old
+ * package's own) and starts it today unless told otherwise.
  */
 export async function renewPack(
   clientId: string,
   packageId: string,
-  overrides: {
-    packId?: string | null;
-    sessionsTotal?: number | null;
-    amount?: number;
-    discountAmount?: number | null;
-    dueDate?: string | null;
-  } = {},
+  input: { id: string; startDate?: string | null },
 ): Promise<PackageResult> {
   try {
-    await renewPackage(packageId, overrides);
+    await renewPackage(packageId, input);
     refresh(clientId);
     return { ok: true };
   } catch (error) {
@@ -177,10 +143,11 @@ export async function renewPack(
 /**
  * STOP THE CLOCK — the client is travelling.
  *
- * `effectiveAt` is a plain `YYYY-MM-DD` from a date input, sent as an ISO
- * instant at the start of that day. Trainers catch up on Sundays, and a pause
- * backdated to the Thursday the client actually left gives back the right number
- * of days when it resumes.
+ * `effectiveDate` is a plain `YYYY-MM-DD` from a date input, sent as epoch ms
+ * at the start of that day — or not at all when it is today, so the server
+ * stamps now. Trainers catch up on Sundays, and a pause backdated to the
+ * Thursday the client actually left gives back the right number of days when
+ * it resumes. The server refuses a future one.
  */
 export async function pausePack(
   clientId: string,
@@ -189,8 +156,8 @@ export async function pausePack(
 ): Promise<PackageResult> {
   try {
     await pausePackage(packageId, {
-      reason: input.reason ?? null,
-      effectiveAt: isoDayStart(input.effectiveDate),
+      reason: input.reason?.trim() || null,
+      effectiveAt: dayStart(input.effectiveDate),
     });
     refresh(clientId);
     return { ok: true };
@@ -202,13 +169,11 @@ export async function pausePack(
 export async function resumePack(
   clientId: string,
   packageId: string,
-  input: { reason?: string; effectiveDate?: string } = {},
+  input: { effectiveDate?: string } = {},
 ): Promise<PackageResult> {
   try {
-    await resumePackage(packageId, {
-      reason: input.reason ?? null,
-      effectiveAt: isoDayStart(input.effectiveDate),
-    });
+    // Resume takes no reason on the wire — the pause carried it.
+    await resumePackage(packageId, { effectiveAt: dayStart(input.effectiveDate) });
     refresh(clientId);
     return { ok: true };
   } catch (error) {
@@ -223,11 +188,11 @@ export async function extendPack(
   days: number,
   reason?: string,
 ): Promise<PackageResult> {
-  if (!Number.isFinite(days) || days <= 0 || days > 365) {
-    return { ok: false, message: 'Extend by a number of days between 1 and 365.' };
+  if (!Number.isFinite(days) || days <= 0 || days > 3650) {
+    return { ok: false, message: 'Extend by a number of days between 1 and 3,650.' };
   }
   try {
-    await extendPackage(packageId, Math.round(days), reason ?? null);
+    await extendPackage(packageId, Math.round(days), reason?.trim() || null);
     refresh(clientId);
     return { ok: true };
   } catch (error) {
@@ -236,18 +201,105 @@ export async function extendPack(
 }
 
 /**
- * `2026-08-14` → the ISO instant of that local midnight, or null.
+ * END THIS PACK — `POST /v1/packages/{id}/cancel` (R74).
  *
- * Local rather than UTC, and the difference is a whole day at this longitude: a
- * trainer in IST picking the 14th means the 14th where they are, and
- * `new Date('2026-08-14')` parses as UTC midnight — which is 05:30 on the 14th
- * in India, but reads back as the 13th anywhere west of Greenwich. The
- * three-argument constructor is local by definition and has no such ambiguity.
+ * Only once nothing is owed and nothing is pending; otherwise the server says
+ * 409 PACKAGE_HAS_DUES and this says what to do about it. Sessions left on it
+ * are simply no longer charged.
  */
-function isoDayStart(date?: string): string | null {
+export async function endPack(clientId: string, packageId: string): Promise<PackageResult> {
+  try {
+    await cancelPackage(packageId);
+    refresh(clientId);
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof ClientDetailApiError && error.code === 'PACKAGE_HAS_DUES') {
+      return { ok: false, message: 'Money is still owed on this pack. Collect it or write it off first.' };
+    }
+    return fail(error, 'Ending that pack');
+  }
+}
+
+/** WRITE OFF WHAT'S OWED — `amount: null` forgives all of it, pending rows included. */
+export async function writeOffOwed(
+  clientId: string,
+  packageId: string,
+  input: { id: string; amount: string | null; note?: string },
+): Promise<PackageResult> {
+  try {
+    await writeOffPackage(packageId, { id: input.id, amount: input.amount, note: input.note?.trim() || null });
+    refresh(clientId);
+    return { ok: true };
+  } catch (error) {
+    return fail(error, 'The write-off');
+  }
+}
+
+/** REFUND — a fully paid pack, once, and it closes for good. */
+export async function refundPack(
+  clientId: string,
+  packageId: string,
+  input: { id: string; amount: string; method: string | null; reference?: string; note?: string },
+): Promise<PackageResult> {
+  try {
+    await refundPackage(packageId, {
+      id: input.id,
+      amount: input.amount,
+      method: input.method,
+      reference: input.method && input.method !== 'cash' ? input.reference?.trim() || null : null,
+      note: input.note?.trim() || null,
+    });
+    refresh(clientId);
+    return { ok: true };
+  } catch (error) {
+    return fail(error, 'The refund');
+  }
+}
+
+/** EDIT A PAYMENT TYPED WRONG — only the fields its status allows; If-Match on its version. */
+export async function editPayment(
+  clientId: string,
+  paymentId: string,
+  patch: { amount?: string; method?: string | null; reference?: string | null; paidAt?: number; note?: string | null },
+  version: string,
+): Promise<PackageResult> {
+  try {
+    await patchPayment(paymentId, patch, version);
+    refresh(clientId);
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof ClientDetailApiError && error.status === 412) {
+      return { ok: false, message: 'That payment changed since you opened it. Reload and look again.' };
+    }
+    return fail(error, 'That correction');
+  }
+}
+
+/** DELETE — a payment recorded by mistake. Soft; the pack's balance goes back up. */
+export async function removePayment(clientId: string, paymentId: string): Promise<PackageResult> {
+  try {
+    await deletePayment(paymentId);
+    refresh(clientId);
+    return { ok: true };
+  } catch (error) {
+    return fail(error, 'Deleting that payment');
+  }
+}
+
+/**
+ * `2026-08-14` → epoch ms of that local midnight; null for today or nothing, so
+ * the server stamps the instant itself.
+ *
+ * Local rather than UTC, and the difference is a whole day at this longitude:
+ * `new Date('2026-08-14')` parses as UTC midnight. The three-argument
+ * constructor is local by definition.
+ */
+function dayStart(date?: string): number | null {
   if (!date) return null;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
   if (!m) return null;
   const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+  const t = new Date();
+  if (d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate()) return null;
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
 }

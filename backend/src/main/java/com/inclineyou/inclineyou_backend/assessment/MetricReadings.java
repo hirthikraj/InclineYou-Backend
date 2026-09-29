@@ -60,16 +60,17 @@ public class MetricReadings {
         p.put("keys", metricType == null ? MetricCatalogue.ids() : List.of(metricType));
         // `order` is one of two literals chosen above, never caller text.
         String sql = """
-                SELECT a.id::text AS assessment_id, r->>'key' AS metric_type,
-                       (r->>'value')::numeric AS value, a.completed_at
+                SELECT a.id::text AS assessment_id, r.key AS metric_type,
+                       (r.value)::text::numeric AS value, a.completed_at
                 FROM assessment a
-                CROSS JOIN LATERAL jsonb_array_elements(a.readings) r
+                -- v1: readings is an object keyed by measurement id (assessment_readings_valid).
+                CROSS JOIN LATERAL jsonb_each(a.readings) r
                 WHERE a.client_id = :cid::uuid
                   AND a.deleted_at IS NULL
                   AND a.completed_at IS NOT NULL
-                  AND r->>'key' IN (:keys)
-                  AND jsonb_typeof(r->'value') = 'number'
-                ORDER BY a.completed_at %1$s, a.id %1$s, r->>'key'
+                  AND r.key IN (:keys)
+                  AND jsonb_typeof(r.value) = 'number'
+                ORDER BY a.completed_at %1$s, a.id %1$s, r.key
                 """.formatted(order) + (limit == null ? "" : " LIMIT :limit");
         if (limit != null) p.put("limit", limit);
         return jdbc.queryForList(sql, p).stream().map(r -> {

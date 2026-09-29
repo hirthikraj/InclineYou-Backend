@@ -9,7 +9,7 @@ import {
 import { relativeDay } from '@/lib/sessions/group';
 import { classifySession, type SessionFilter } from '@/components/clients/file/shared';
 
-import type { ClientProgramWire, ClientSessionWire, ClientWorkoutWire } from './client-api';
+import type { ClientSessionWire } from './client-api';
 
 /**
  * THE SESSIONS TABLE — which rows, in which section, and what each cell says.
@@ -172,7 +172,7 @@ export type SessionSection = 'upcoming' | 'history';
  *
  * ── AND THE NOTE IS NOT A COLUMN, WHICH TOOK A MEASUREMENT TO SETTLE ──────
  *
- * `workout.notes` is the sentence the trainer wrote at the end of a session —
+ * `session.notes` is the sentence the trainer wrote at the end of a session —
  * *Shoulder felt fine throughout. Keep the load here next week.* — and the
  * client file drew it nowhere. It was given the surplus as a *Note* column,
  * which read well on the rows that had one.
@@ -263,34 +263,18 @@ const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'S
  * half, which is the one place the two sections disagree and the reason it is a
  * decision taken there rather than here.
  */
-export function buildSessionRows(
-  sessions: ClientSessionWire[],
-  workouts: ClientWorkoutWire[],
-  programs: ClientProgramWire[],
-  now: number,
-): SessionTableRow[] {
-  const programName = new Map(programs.map((p) => [p.id, p.name]));
+export function buildSessionRows(sessions: ClientSessionWire[], now: number): SessionTableRow[] {
   const today = startOfDay(now);
-
-  /* Keyed by the session, so the join is one pass rather than a scan per row.
-     A session with two logs against it keeps the FIRST — the case is a double
-     log nobody meant, and picking the earlier of them at least matches the
-     clock the session started on. */
-  const logOf = new Map<string, ClientWorkoutWire>();
-  for (const w of workouts) {
-    const key = w.scheduledSessionId;
-    if (key && !logOf.has(key)) logOf.set(key, w);
-  }
 
   return sessions
     .map((s): SessionTableRow => {
       const cls = classifySession(s, now);
-      const log = logOf.get(s.id);
+      /* The log sits on the session row (R28) — no workout join. */
       const done = cls === 'done';
       /* Only a log that ENDED gives a clock. One still open is a session in
          progress, and `now - started` would be a stopwatch rather than a
          record. */
-      const logged = log && log.endedAt !== null ? { from: log.createdAt, to: log.endedAt } : null;
+      const logged = s.startedAt !== null && s.endedAt !== null ? { from: s.startedAt, to: s.endedAt } : null;
       const planned = { from: s.scheduledAt, to: s.scheduledAt + (s.durationMinutes ?? 60) * 60_000 };
       const clock = logged ?? planned;
       const d = new Date(s.scheduledAt);
@@ -313,10 +297,12 @@ export function buildSessionRows(
         duration: done
           ? formatSpan(Math.max(1, Math.round((clock.to - clock.from) / 60_000)))
           : null,
-        name: s.dayLabel ?? null,
-        program: (s.programId ? programName.get(s.programId) : null) ?? null,
-        exercises: done ? (log?.exerciseCount ?? null) : null,
-        note: log?.notes ?? s.notes ?? null,
+        name: s.workout?.name ?? null,
+        /* The session row names its workout, not the plan; the tab reads no
+           program list (Client file · Sessions), so the plan column is empty. */
+        program: null,
+        exercises: done ? (s.log?.exercises ?? null) : null,
+        note: s.notes ?? null,
         relative: relativeDay(startOfDay(s.scheduledAt), now),
         month: new Date(d.getFullYear(), d.getMonth(), 1).getTime(),
         monthLabel: `${MONTHS_LONG[d.getMonth()]} ${d.getFullYear()}`,

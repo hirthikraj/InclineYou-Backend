@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { Chevron } from '@/components/shell/Icons';
-import type { ClientProgramWire, ClientSessionWire, ClientWorkoutWire } from '@/lib/clients/client-api';
+import type { ClientSessionWire } from '@/lib/clients/client-api';
 import {
   buildSessionRows,
   columnsFor,
@@ -318,15 +318,28 @@ const DIARY_PREVIEW = 4;
 
 /* ───────────────────────────────────────────────────────────── the tab ── */
 
+/**
+ * The window is a place (R76): `?range=30d|90d|all` picks it, `all` being the
+ * newest 400 days (L4's cap), and *Load older* is `?older=n` — n whole windows
+ * back, one range scan each. The outcome pills filter inside the window.
+ */
+const WINDOWS: { value: '30d' | '90d' | 'all'; label: string }[] = [
+  { value: '30d', label: 'Last 30 days' },
+  { value: '90d', label: 'Last 90 days' },
+  { value: 'all', label: 'All' },
+];
+
 export function SessionsTab({
+  clientId,
   sessions,
-  workouts,
-  programs,
+  range,
+  older,
   now,
 }: {
+  clientId: string;
   sessions: ClientSessionWire[];
-  workouts: ClientWorkoutWire[];
-  programs: ClientProgramWire[];
+  range: '30d' | '90d' | 'all';
+  older: number;
   now: number;
 }) {
   const router = useRouter();
@@ -334,10 +347,9 @@ export function SessionsTab({
   const [wholeDiary, setWholeDiary] = useState(false);
   const open = (id: string) => router.push(`/sessions/${id}`);
 
-  const rows = useMemo(
-    () => buildSessionRows(sessions, workouts, programs, now),
-    [sessions, workouts, programs, now],
-  );
+  const place = (r: string, n: number) =>
+    router.push(`/clients/${clientId}/sessions?range=${r}${n > 0 ? `&older=${n}` : ''}`);
+  const rows = useMemo(() => buildSessionRows(sessions, now), [sessions, now]);
   /* The counts are taken from the WHOLE file and never from the filtered view.
      A pill whose number changes when you press its neighbour is a pill that
      cannot be read before you press it, which is the only thing these are for. */
@@ -367,6 +379,18 @@ export function SessionsTab({
   return (
     <div className="cfses__wrap">
       <div className="cfses__tools">
+        <Segment label="Sessions window" mode="single">
+          {WINDOWS.map((w) => (
+            <SegmentButton
+              key={w.value}
+              mode="single"
+              pressed={range === w.value && older === 0}
+              onClick={() => place(w.value, 0)}
+            >
+              {w.label}
+            </SegmentButton>
+          ))}
+        </Segment>
         <Segment label="Filter sessions by outcome" mode="single">
           {options.map((o) => (
             <SegmentButton
@@ -393,7 +417,7 @@ export function SessionsTab({
           <EmptyState
             inCard
             title="No sessions on this file yet"
-            body="Anything booked ahead and everything trained in the last three months will be listed here."
+            body="Nothing was booked or trained in this window."
           />
         </Card>
       ) : visible.length === 0 ? (
@@ -472,8 +496,11 @@ export function SessionsTab({
       )}
 
       <p className="cfses__note">
-        The last three months and everything booked ahead. Older sessions are on
-        the record and are not drawn here.
+        {older > 0 ? `${older} window${older === 1 ? '' : 's'} back. ` : ''}
+        Older sessions are on the record.{' '}
+        <Button variant="ghost" size="sm" onClick={() => place(range, older + 1)}>
+          Load older
+        </Button>
       </p>
     </div>
   );

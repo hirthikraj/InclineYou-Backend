@@ -4,16 +4,20 @@ import { useState } from 'react';
 
 import { Plus } from '@/components/shell/Icons';
 import { rupees } from '@/lib/today/time';
-import { sendReminder, writeOffPayment } from '@/lib/money/actions';
+import { writeOffPayment } from '@/lib/money/actions';
+import { remind as draftReminder } from '@/lib/today/actions';
 import { useToast } from '@/lib/toast/store';
 import {
-  arrangementOf,
   canInvoice,
+  INVOICES_ENABLED,
   isCollected,
   methodLabel,
   packName,
+  packTerms,
+  viaGym,
 } from '@/lib/clients/billing';
 import type {
+  ClientDetailWire,
   ClientPackageWire,
   ClientPaymentWire,
   PackageAdjustmentWire,
@@ -22,6 +26,8 @@ import type {
 
 import { CollectSheet } from './CollectSheet';
 import { InvoiceSheet } from './InvoiceSheet';
+import { DeletePaymentSheet, EditPaymentSheet, RefundSheet, WriteOffOwedSheet } from './MoneySheets';
+import { PackLife } from './PackLife';
 import { PackPanel } from './PackPanel';
 import { Blank, isoDateStr, longDateStr, num } from './shared';
 import { Button } from '@/web-components/ui/Button';
@@ -75,27 +81,23 @@ import { Tag } from '@/web-components/ui/Tag';
  * was the last one setting layout from a style attribute on the whole route.
  *
  * ════════════════════════════════════════════════════════════════════════════
- * INVOICES, AND THE RULE THAT DECIDES WHO GETS ONE
+ * INVOICES ARE OUT OF v1 (R27)
  * ════════════════════════════════════════════════════════════════════════════
  *
- * **A bill belongs to a client the trainer collects from.** A client the gym's
- * counter signed up pays the gym; the gym raises that receipt and takes its cut.
- * `lib/clients/billing.ts` carries the whole argument and the two ways the fact
- * is read off the wire, and `POST /v1/payments/{id}/invoice` refuses a
- * gym-collected row with a 409 — so this screen is drawing a rule rather than
- * holding one.
+ * The sheet, the column and *Raise an invoice* stay behind `INVOICES_ENABLED`
+ * (MUST-19); `invoice_no` is later-schema. The rule they will follow when it
+ * turns on is in `lib/clients/billing.ts`: a bill belongs to a client the
+ * trainer collects from, never a gym client.
  *
- * Two consequences here, and the second is the one worth stating:
+ * ════════════════════════════════════════════════════════════════════════════
+ * THE MONEY BOOK CAN NOW BE CORRECTED (R73)
+ * ════════════════════════════════════════════════════════════════════════════
  *
- * · a gym client's table has **no Invoice column**, because a column of
- *   permanent em-dashes is a feature drawn as a failure;
- * · and the absence is **named**. A trainer who can bill four clients and not
- *   the fifth will look for the missing button, so the card's foot says which
- *   counter collects for this person. An unexplained absence is a bug report.
- *
- * It is optional even where it is allowed: `invoiceNo` is null until somebody
- * asks, and the verb is *Raise an invoice* rather than something that happened
- * by default. Most clients never want one.
+ * A pack that is owed can have its dues written off; one fully paid can be
+ * refunded, which closes it for good; a row typed wrong can be edited, and one
+ * recorded by mistake deleted. `MoneySheets.tsx` carries the four sheets. A
+ * refunded pack takes no payment write at all — the server refuses with
+ * PACKAGE_CLOSED — so none of those controls is drawn on one.
  *
  * ════════════════════════════════════════════════════════════════════════════
  * THREE STANDINGS, NOT TWO
@@ -135,6 +137,8 @@ function closedTag(pkg: ClientPackageWire): { label: string; tone: 'neutral' | '
     };
   }
   if (pkg.status === 'completed') return { label: 'Finished', tone: 'neutral' };
+  if (pkg.status === 'refunded') return { label: 'Refunded', tone: 'warn' };
+  if (pkg.status === 'cancelled') return { label: 'Ended early', tone: 'neutral' };
   return { label: 'Closed', tone: 'neutral' };
 }
 
@@ -171,100 +175,58 @@ function liveTag(pkg: ClientPackageWire, queued: boolean) {
 }
 
 /**
- * What is still owed on one pack.
+ * What is still owed on one pack — the server's `amountDue`, and nothing else.
  *
- * `amountDue` is server-computed and is the figure every other screen reads, so
- * it is the base. What it does NOT know about is a write-off.
- *
- * ── THE DEFECT THIS FIXES, FOUND BY DRIVING THE BUTTON ──────────────────────
- *
- * The server's `amountDue` is *billed minus collected*, and a written-off row
- * is neither: `settle()` re-sums the payments whose status is `paid` or
- * `confirmed`, a write-off is in neither set, so the balance stays exactly
- * where it was. MEASURED on `cli_008`: writing off ₹6,400 left the Outstanding
- * tile reading **₹6,400 · never recorded as paid** — under a confirmation that
- * had just promised, in those words, that the row *"drops out of what you are
- * owed"*. The product contradicted itself in two clicks.
- *
- * A write-off is a decision, not a payment. The money never arrived and never
- * will, which is why it must not count as collected — and it is no longer owed,
- * which is why it must not count here. It stays on the row, on the write-offs
- * tab and in the CA export, which is where the history lives.
- *
- * Subtracted rather than folded into `amountPaid` for that reason: adding it to
- * what was collected would make ₹6,400 that never existed turn up in the
- * lifetime *Collected* figure and in every report downstream of it.
+ * It is `amount − paid − written off`, never below zero, and zero on a
+ * cancelled or refunded pack (L5). This file used to re-add payments itself and
+ * then subtract write-offs the old server did not know about; v1's figure
+ * already knows, and a second sum here is how two screens come to disagree.
  */
-function owedOn(pkg: ClientPackageWire, payments: ClientPaymentWire[]): number {
-  const base =
-    pkg.amountDue != null
-      ? num(pkg.amountDue)
-      : Math.max(
-          0,
-          num(pkg.amount) -
-            payments
-              .filter((p) => p.packageId === pkg.id && isCollected(p))
-              .reduce((s, p) => s + num(p.amount), 0),
-        );
-  const letGo = payments
-    .filter((p) => p.packageId === pkg.id && p.status === 'write_off')
-    .reduce((s, p) => s + num(p.amount), 0);
-  return Math.max(0, base - letGo);
+function owedOn(pkg: ClientPackageWire): number {
+  return num(pkg.amountDue);
+}
+
+/** The pack the page read adjustments for — client-api's `livePackage` rule (the running one, else the newest). */
+function livePackageId(packages: ClientPackageWire[]): string | null {
+  return (packages.find((p) => p.status === 'active') ?? packages[0])?.id ?? null;
+}
+
+/**
+ * Can this pack be refunded? Only fully paid, with nothing written off, and
+ * once — the rule `check_package_ledger()` holds on the server. Drawn only
+ * where it would succeed, so the Refund button never answers a 409.
+ */
+function refundable(pkg: ClientPackageWire, payments: ClientPaymentWire[]): boolean {
+  return (
+    pkg.status !== 'refunded' &&
+    num(pkg.amountPaid) > 0 &&
+    num(pkg.amountPaid) >= num(pkg.amount) &&
+    !payments.some((p) => p.packageId === pkg.id && p.status === 'write_off')
+  );
 }
 
 export function PaymentsTab({
-  clientId,
-  clientName,
-  clientPhone,
+  client,
   packages,
   payments,
   priceList,
-  weeklySchedule,
-  sessionDurationMinutes,
+  adjustments,
   now,
-  gymName,
-  gymSharePercent,
-  trainerName,
-  trainerPhone,
-  trainerUpiVpa,
-  trainerHeadline,
 }: {
-  /** Whose file this is. Needed by the empty states and by every write. */
-  clientId: string;
-  clientName: string;
-  /** Where an invoice gets sent. */
-  clientPhone: string | null;
+  client: ClientDetailWire;
+  /** Every pack the client bought, newest first — closed ones included. */
   packages: ClientPackageWire[];
+  /** L7 for this client, every status. */
   payments: ClientPaymentWire[];
-  /** The trainer's own price list, so *Sell a pack* offers real prices. */
+  /** Active entries of the list this client buys from (the owner matches their type). */
   priceList: PriceListPackWire[];
-  /**
-   * The live pack's pause / resume / extend history.
-   *
-   * STILL ON THE WIRE, DRAWN BY NOTHING. `PackLife` was the reader and it went
-   * with the action card under the bar. The prop stays because `ClientFile`
-   * fetches and passes it for this tab, and a tab that stops accepting it is a
-   * fetch nobody can see the purpose of — whatever draws the pause history next
-   * finds it already here.
-   */
+  /** The live pack's life — pauses, extensions, corrections. `PackLife` draws it. */
   adjustments: PackageAdjustmentWire[];
-  /**
-   * The client's standing week, `0 = Monday`. Handed to the sell panel, which
-   * books the pack's sessions as well as recording the sale — so the days this
-   * person already trains are what the picker opens on.
-   */
-  weeklySchedule: Array<{ templateDay: number; weekday: number; time: string }> | null;
-  sessionDurationMinutes: number | null;
-  /** The page's clock, for the sell panel's read-out of the dates it will book. */
+  /** The page's clock. */
   now: number;
-  gymName: string | null;
-  gymSharePercent: number | null;
-  /** The *From* block on every invoice raised from this tab. */
-  trainerName: string;
-  trainerPhone: string | null;
-  trainerUpiVpa: string | null;
-  trainerHeadline: string | null;
 }) {
+  const clientId = client.id;
+  const clientName = client.name;
   const toast = useToast();
 
   /** null = shut, 'sell' = a fresh pack, or the pack being renewed with changes. */
@@ -276,7 +238,15 @@ export function PaymentsTab({
   }>(null);
   const [invoicing, setInvoicing] = useState<ClientPaymentWire | null>(null);
   const [writingOff, setWritingOff] = useState<ClientPaymentWire | null>(null);
+  /** The pack whose dues are being forgiven, or refunded. */
+  const [forgiving, setForgiving] = useState<ClientPackageWire | null>(null);
+  const [refunding, setRefunding] = useState<ClientPackageWire | null>(null);
+  const [editing, setEditing] = useState<ClientPaymentWire | null>(null);
+  const [deleting, setDeleting] = useState<ClientPaymentWire | null>(null);
   const [busy, setBusy] = useState(false);
+  /* One id per reminder attempt, kept until it lands, so a retry logs no second
+     nudge (the cooldown reads that log). */
+  const [reminderId, setReminderId] = useState(() => crypto.randomUUID());
 
   /* ── the standings ──────────────────────────────────────────────────────── */
 
@@ -290,31 +260,16 @@ export function PaymentsTab({
     .filter((p) => p.status !== 'active')
     .sort((a, b) => b.createdAt - a.createdAt);
 
-  const arrangement = arrangementOf(packages, payments, priceList);
-  /** Whether this screen offers bills at all. See the header. */
-  const billable = !arrangement.viaGym;
+  const gym = viaGym(client);
+  /** Whether this screen offers bills at all — never in v1 (R27), never to a gym client. */
+  const billable = INVOICES_ENABLED && !gym;
 
   /* ── the four figures, and the order is the reading order ───────────────── */
 
   const billed = packages.reduce((s, p) => s + num(p.amount), 0);
-  /*
-   * Server-computed per pack and summed here, rather than summed from the
-   * payment rows — so the header cannot disagree with the bar underneath it.
-   * The fallback exists because a backend older than V30 answers without the
-   * field, and a tab that blanks against an old server is worse than one that
-   * falls back.
-   */
-  const collected = packages.reduce(
-    (s, p) =>
-      s +
-      (p.amountPaid != null
-        ? num(p.amountPaid)
-        : payments
-            .filter((x) => x.packageId === p.id && isCollected(x))
-            .reduce((t, x) => t + num(x.amount), 0)),
-    0,
-  );
-  const outstanding = packages.reduce((s, p) => s + owedOn(p, payments), 0);
+  /* Server-computed per pack and summed here, never re-added from the rows. */
+  const collected = packages.reduce((s, p) => s + num(p.amountPaid), 0);
+  const outstanding = packages.reduce((s, p) => s + owedOn(p), 0);
   const pending = payments.filter((p) => p.status === 'pending');
   const collectedCount = payments.filter(isCollected).length;
   /* Money the trainer has decided never to chase. It is not owed and it was
@@ -324,13 +279,12 @@ export function PaymentsTab({
     .filter((p) => p.status === 'write_off')
     .reduce((s, p) => s + num(p.amount), 0);
 
-  /* What the gym has actually taken off this client, ever. Read from the rows
-     and never recomputed from the percentage: the cut is frozen onto a payment
-     when the money is confirmed, so a contract that changes in October cannot
-     move September's split. */
+  /* What the gym has kept of this client's payments, ever — the `split` the
+     server works out from each pack's trainer share (payment_trainer_share),
+     so a share renegotiated in October cannot move September's split. */
   const gymShare = payments
     .filter(isCollected)
-    .reduce((s, p) => s + num(p.gymShareAmount), 0);
+    .reduce((s, p) => s + num(p.split?.gym), 0);
 
   /*
    * THE NEXT PAYMENT IS THE EARLIEST DUE DATE THAT STILL OWES MONEY, ON ANY PACK.
@@ -343,13 +297,12 @@ export function PaymentsTab({
    */
   const nextDuePkg =
     packages
-      .filter((p) => p.dueDate && owedOn(p, payments) > 0)
+      .filter((p) => p.dueDate && owedOn(p) > 0)
       .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime())[0] ?? null;
   const nextDue = nextDuePkg?.dueDate ? dueRead(nextDuePkg.dueDate, now) : null;
 
-  const ledger = [...payments].sort(
-    (a, b) => (b.paidAt ?? b.createdAt) - (a.paidAt ?? a.createdAt),
-  );
+  /* The server's order already: bookAt, newest first. */
+  const ledger = payments;
 
   /* The join the table is built on. A Map rather than a `find` per row: a client
      with three packs and forty payments is 120 scans of the same array to print
@@ -362,9 +315,10 @@ export function PaymentsTab({
 
   async function remind() {
     setBusy(true);
-    const result = await sendReminder(clientId);
+    const result = await draftReminder(clientId, reminderId);
     setBusy(false);
     if (result.ok) {
+      setReminderId(crypto.randomUUID());
       /* The link is the delivery. `window.open` after an `await` can be refused
          by a popup blocker and `noopener` makes the return value null either
          way, so the toast always carries a real link — a confirm that says
@@ -421,10 +375,8 @@ export function PaymentsTab({
         <PackPanel
           clientId={clientId}
           clientName={clientName}
+          clientType={client.clientType}
           priceList={priceList}
-          weeklySchedule={weeklySchedule}
-          sessionDurationMinutes={sessionDurationMinutes}
-          now={now}
           renewing={panel === 'sell' ? null : panel}
           onClose={() => setPanel(null)}
         />
@@ -434,21 +386,36 @@ export function PaymentsTab({
           pkg={collecting.pkg}
           settling={collecting.settling}
           clientName={clientName}
-          gymName={gymName}
+          clientType={client.clientType}
           onClose={() => setCollecting(null)}
         />
       )}
-      {invoicing && (
+      {forgiving && (
+        <WriteOffOwedSheet clientId={clientId} pkg={forgiving} onClose={() => setForgiving(null)} />
+      )}
+      {refunding && (
+        <RefundSheet clientId={clientId} clientType={client.clientType} pkg={refunding} now={now}
+          onClose={() => setRefunding(null)} />
+      )}
+      {editing && (
+        <EditPaymentSheet clientId={clientId} clientType={client.clientType} payment={editing}
+          onClose={() => setEditing(null)} />
+      )}
+      {deleting && (
+        <DeletePaymentSheet clientId={clientId} payment={deleting} onClose={() => setDeleting(null)} />
+      )}
+      {/* R27: unreachable while INVOICES_ENABLED is off — nothing sets `invoicing`.
+          The trainer's From block (name, UPI, headline) comes from /v1/me when it returns. */}
+      {INVOICES_ENABLED && invoicing && (
         <InvoiceSheet
           payment={invoicing}
-          pkg={invoicing.packageId ? (byPackage.get(invoicing.packageId) ?? null) : null}
+          pkg={byPackage.get(invoicing.packageId) ?? null}
           clientName={clientName}
-          clientPhone={clientPhone}
-          trainerName={trainerName}
-          trainerPhone={trainerPhone}
-          trainerUpiVpa={trainerUpiVpa}
-          trainerHeadline={trainerHeadline}
-          priceList={priceList}
+          clientPhone={client.phone}
+          trainerName=""
+          trainerPhone={null}
+          trainerUpiVpa={null}
+          trainerHeadline={null}
           onClose={() => setInvoicing(null)}
         />
       )}
@@ -491,7 +458,7 @@ export function PaymentsTab({
   /* ── one pack's bar ─────────────────────────────────────────────────────── */
 
   function packBar(pkg: ClientPackageWire, isQueued: boolean) {
-    const owed = owedOn(pkg, payments);
+    const owed = owedOn(pkg);
     /* A pack whose balance went to zero because the trainer LET IT GO is not a
        pack that was paid for, and `Paid in full` on it is the same class of
        self-contradiction the Outstanding tile had — see `owedOn`. */
@@ -504,7 +471,7 @@ export function PaymentsTab({
       <SubscriptionBar
         key={pkg.id}
         label={isQueued ? 'A pack waiting behind the current one' : 'The pack in play'}
-        name={packName(pkg, priceList)}
+        name={`${packName(pkg)} · ${packTerms(pkg)}`}
         status={liveTag(pkg, isQueued)}
         facts={[
           { k: 'Amount', v: rupees(num(pkg.amount)) },
@@ -552,6 +519,16 @@ export function PaymentsTab({
                 onClick={() => setCollecting({ pkg, settling: settleRow })}
               >
                 Take a payment
+              </Button>
+            )}
+            {owed > 0 && (
+              <Button variant="ghost" size="sm" onClick={() => setForgiving(pkg)}>
+                Write off what&rsquo;s owed
+              </Button>
+            )}
+            {owed <= 0 && refundable(pkg, payments) && (
+              <Button variant="ghost" size="sm" onClick={() => setRefunding(pkg)}>
+                Refund
               </Button>
             )}
             {/* A queued pack gets no Renew — renewing the one behind the one in
@@ -628,6 +605,12 @@ export function PaymentsTab({
       {current ? (
         <div className="cfpay__bars">
           {packBar(current, false)}
+          {/* Pause · Resume · Extend · End — the pack's life, under the pack in play. */}
+          <PackLife
+            clientId={clientId}
+            pkg={current}
+            adjustments={adjustments.length > 0 && livePackageId(packages) === current.id ? adjustments : []}
+          />
           {queued.map((pkg) => packBar(pkg, true))}
         </div>
       ) : (
@@ -696,6 +679,11 @@ export function PaymentsTab({
               const eligible = canInvoice(p);
               const settled = isCollected(p);
               const off = p.status === 'write_off';
+              const refund = p.status === 'refund';
+              /* A refund row is frozen, and a refunded pack takes no payment
+                 write at all (the server answers PACKAGE_CLOSED) — so nothing
+                 that would be refused is offered. */
+              const frozen = refund || against?.status === 'refunded';
 
               /* An item that is REFUSED is not drawn. `RowMenu` has a
                  `disabled` flag and a greyed row that cannot say why is the
@@ -703,7 +691,7 @@ export function PaymentsTab({
                  carries the reason for a gym client, which is the only case a
                  trainer will go looking for it. */
               const items = [
-                ...(p.status === 'pending' && against
+                ...(p.status === 'pending' && against && !frozen
                   ? [
                       {
                         key: 'settle',
@@ -721,18 +709,18 @@ export function PaymentsTab({
                       },
                     ]
                   : []),
-                ...(p.upiReference
+                ...(p.reference
                   ? [
                       {
                         key: 'copy',
                         label: 'Copy the reference',
                         onSelect: () => {
-                          navigator.clipboard?.writeText(p.upiReference!).then(
+                          navigator.clipboard?.writeText(p.reference!).then(
                             () =>
                               toast.show({
                                 tone: 'ok',
                                 variant: 'receipt',
-                                title: `Reference ${p.upiReference} copied`,
+                                title: `Reference ${p.reference} copied`,
                               }),
                             () => toast.show({ tone: 'danger', title: 'Could not copy it' }),
                           );
@@ -740,15 +728,16 @@ export function PaymentsTab({
                       },
                     ]
                   : []),
-                ...(p.status === 'pending'
+                ...(!frozen
+                  ? [{ key: 'edit', label: 'Correct it…', onSelect: () => setEditing(p) }]
+                  : []),
+                ...(!frozen
                   ? [
                       { key: 'sep', separator: true as const },
-                      {
-                        key: 'off',
-                        label: 'Write it off…',
-                        danger: true,
-                        onSelect: () => setWritingOff(p),
-                      },
+                      ...(p.status === 'pending'
+                        ? [{ key: 'off', label: 'Write it off…', danger: true, onSelect: () => setWritingOff(p) }]
+                        : []),
+                      { key: 'del', label: 'Delete (recorded by mistake)…', danger: true, onSelect: () => setDeleting(p) },
                     ]
                   : []),
               ];
@@ -770,6 +759,8 @@ export function PaymentsTab({
                       label: 'Status',
                       content: off ? (
                         <Tag>Written off</Tag>
+                      ) : refund ? (
+                        <Tag tone="warn">Refund</Tag>
                       ) : settled ? (
                         <Tag tone="ok">Paid</Tag>
                       ) : (
@@ -783,7 +774,7 @@ export function PaymentsTab({
                          can record one against a client and nothing else — so it
                          says so rather than drawing a bare dash. */
                       content: against ? (
-                        packName(against, priceList)
+                        packName(against)
                       ) : (
                         <span className="ink3">Not against a pack</span>
                       ),
@@ -791,7 +782,7 @@ export function PaymentsTab({
                     {
                       key: 'when',
                       label: 'Date',
-                      content: longDateStr(p.paidAt ?? p.createdAt),
+                      content: longDateStr(p.bookAt),
                       className: 'mono',
                     },
                     ...(billable
@@ -809,13 +800,13 @@ export function PaymentsTab({
                               all three the same way would make the normal case
                               look like missing data.
                             */
-                            content: p.invoiceNo ? (
+                            content: (p as { invoiceNo?: string | null }).invoiceNo ? (
                               <button
                                 type="button"
                                 className="cftx__inv"
                                 onClick={() => setInvoicing(p)}
                               >
-                                {p.invoiceNo}
+                                {(p as { invoiceNo?: string | null }).invoiceNo}
                               </button>
                             ) : eligible.ok ? (
                               <span className="ink3">Not raised</span>
@@ -836,8 +827,8 @@ export function PaymentsTab({
                       content: methodLabel(p.method) ? (
                         <>
                           <span className="cftx__how">{methodLabel(p.method)}</span>
-                          {p.upiReference && (
-                            <span className="cftx__ref mono">{p.upiReference}</span>
+                          {p.reference && (
+                            <span className="cftx__ref mono">{p.reference}</span>
                           )}
                         </>
                       ) : (
@@ -851,9 +842,7 @@ export function PaymentsTab({
                       content:
                         items.length > 0 ? (
                           <RowMenu
-                            label={`Actions for ${rupees(num(p.amount))} on ${longDateStr(
-                              p.paidAt ?? p.createdAt,
-                            )}`}
+                            label={`Actions for ${rupees(num(p.amount))} on ${longDateStr(p.bookAt)}`}
                             items={items}
                           />
                         ) : null,
@@ -873,22 +862,18 @@ export function PaymentsTab({
           for a gym client only: an independent client's table has the column, so
           there is nothing to account for.
         */}
-        {!billable && (
+        {/*
+          THE GYM'S CUT, NAMED — and only where there is one. For a gym client
+          the desk collects and keeps its share; the figure is summed from each
+          payment's split, which the server works out from the pack's trainer
+          share at the time.
+        */}
+        {gym && gymShare > 0 && (
           <Card.Band className="cfpay__note">
             <p className="small" style={{ margin: 0, color: 'var(--tx-ink-3)' }}>
-              {gymName ?? 'The gym'} signs {first} up and collects, so the receipt is
-              theirs to raise. Invoices here are for the clients you collect from
-              yourself.
-              {gymShare > 0 && (
-                <>
-                  {' '}
-                  Their cut of {first}&rsquo;s payments so far is{' '}
-                  <b>{rupees(gymShare)}</b>
-                  {gymSharePercent ? ` · ${gymSharePercent}%` : ''}, frozen onto each
-                  payment when the money was confirmed — so a contract that changes in
-                  October cannot move September&rsquo;s split.
-                </>
-              )}
+              The gym signs {first} up and collects. Its cut of {first}&rsquo;s payments so far is{' '}
+              <b>{rupees(gymShare)}</b>, taken from each pack&rsquo;s share when it was sold — so a
+              share that changes in October cannot move September&rsquo;s split.
             </p>
           </Card.Band>
         )}
@@ -931,11 +916,25 @@ export function PaymentsTab({
               { key: 'rate', label: 'A session', numeric: true },
               { key: 'amount', label: 'Paid', numeric: true },
               { key: 'end', label: '' },
+              { key: 'act', label: '' },
             ]}
           >
             {past.map((pkg) => {
+              /* A finished pack can still be owed for, or refunded once — the
+                 invoice most likely to be forgotten is on a pack that closed. */
+              const menu = [
+                ...(owedOn(pkg) > 0 && pkg.status !== 'cancelled' && pkg.status !== 'refunded'
+                  ? [
+                      { key: 'take', label: 'Take a payment…', onSelect: () => setCollecting({ pkg, settling: null }) },
+                      { key: 'forgive', label: 'Write off what’s owed…', onSelect: () => setForgiving(pkg) },
+                    ]
+                  : []),
+                ...(owedOn(pkg) <= 0 && refundable(pkg, payments)
+                  ? [{ key: 'refund', label: 'Refund…', danger: true, onSelect: () => setRefunding(pkg) }]
+                  : []),
+              ];
               const amount = num(pkg.amount);
-              const owed = owedOn(pkg, payments);
+              const owed = owedOn(pkg);
               const total = pkg.sessionsTotal;
               const used = total != null ? total - (pkg.sessionsRemaining ?? 0) : null;
               const rate = total && total > 0 ? Math.round(amount / total) : null;
@@ -947,7 +946,7 @@ export function PaymentsTab({
                     {
                       key: 'name',
                       label: 'Pack',
-                      content: packName(pkg, priceList),
+                      content: packName(pkg),
                       className: 'strong',
                     },
                     {
@@ -979,10 +978,12 @@ export function PaymentsTab({
                       content:
                         owed > 0 ? (
                           <span style={{ color: 'var(--tx-danger)' }}>
-                            {rupees(amount - owed)} of {rupees(amount)}
+                            {rupees(num(pkg.amountPaid))} of {rupees(amount)}
                           </span>
+                        ) : num(pkg.amountRefunded) > 0 ? (
+                          <>{rupees(num(pkg.amountPaid))} · {rupees(num(pkg.amountRefunded))} back</>
                         ) : (
-                          rupees(amount)
+                          rupees(num(pkg.amountPaid))
                         ),
                     },
                     {
@@ -995,6 +996,15 @@ export function PaymentsTab({
                         ) : (
                           <Tag tone={tag.tone === 'warn' ? 'warn' : 'neutral'}>{tag.label}</Tag>
                         ),
+                    },
+                    {
+                      key: 'act',
+                      label: '',
+                      className: 'cftx__act',
+                      content:
+                        menu.length > 0 ? (
+                          <RowMenu label={`Actions for ${packName(pkg)}`} items={menu} />
+                        ) : null,
                     },
                   ]}
                 />

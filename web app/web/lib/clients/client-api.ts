@@ -2,17 +2,24 @@ import 'server-only';
 
 import { cache } from 'react';
 
-import { getToken } from '@/lib/auth/session';
-import { listClientNudges } from '@/lib/nudges/api';
+import { api, ApiError, listAll, type ListEnvelope } from '@/lib/http/client';
 import type { NudgeLogEntry } from '@/lib/nudges/types';
-import { listAll, type ListEnvelope } from '@/lib/http/client';
+
+/**
+ * THE CLIENT FILE'S WIRE — api-contract 1.1 *Client file*.
+ *
+ * The layout reads the header alone — `GET /v1/clients/{id}` and the client's
+ * current packs — and each tab reads its own data (R25). It used to be one
+ * payload of about thirteen requests that every tab paid for: every session
+ * from three months back to four ahead, every payment of every pack (one request
+ * per pack), the price list, the adjustments, the programs, every workout, the
+ * notes, the body metrics and a year of nudges.
+ */
 
 export class ClientDetailApiError extends Error {
   /**
-   * `detail` is the server's own sentence, when it wrote one. Every refusal on
-   * the package-lifecycle path has a cause a trainer can act on, and a screen
-   * that answers a specific 409 with "that did not go through" has discarded it.
-   * Null for the reads and for anything that answered without a JSON body.
+   * `detail` is the server's own sentence and `code` the branch the UI takes
+   * (api-contract *Errors*). Null for the reads and for a body that was not JSON.
    */
   constructor(
     readonly status: number | null,
@@ -24,807 +31,542 @@ export class ClientDetailApiError extends Error {
   }
 }
 
-const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
-
-async function get<T>(path: string): Promise<T> {
-  const token = await getToken();
-  if (!token) throw new ClientDetailApiError(401);
-  let res: Response;
-  try {
-    res = await fetch(`${BASE}${path}`, {
-      headers: { authorization: `Bearer ${token}` },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(8_000),
-    });
-  } catch {
-    throw new ClientDetailApiError(null);
-  }
-  if (!res.ok) throw new ClientDetailApiError(res.status);
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T;
-}
-
-/**
- * The write side. Same error type, same timeout, same `server-only` boundary.
- *
- * `DELETE` answers `204` with no body and `JSON.parse('')` throws, so the empty
- * response is read as `null` rather than parsed — the same guard `get` already
- * carries.
- */
-async function send<T>(
-  method: 'POST' | 'PUT' | 'DELETE',
+/** Through the common client (the web header, the dev log), re-thrown as this module's error. */
+async function call<T>(
   path: string,
-  body?: unknown,
-): Promise<T | null> {
-  return sendDetailed<T>(method, path, body);
-}
-
-/**
- * The same write, keeping the server's own sentence.
- *
- * `PackageRuleException` answers a `ProblemDetail` whose `detail` is written for
- * a trainer — "That pack is already paused", "That pack has no expiry date, so
- * there is nothing to extend" — and a panel that flattens that into "did not go
- * through" has thrown away the only useful part of the response. Same argument
- * `lib/packs/api.ts` already makes for the price list's 400s.
- *
- * `ClientDetailApiError` carries the detail so `send` above can stay the
- * three-line thing the notes path uses.
- */
-async function sendDetailed<T>(
-  method: 'POST' | 'PUT' | 'DELETE',
-  path: string,
-  body?: unknown,
-): Promise<T | null> {
-  const token = await getToken();
-  if (!token) throw new ClientDetailApiError(401);
-  let res: Response;
+  options: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown; headers?: Record<string, string> } = {},
+): Promise<T> {
   try {
-    res = await fetch(`${BASE}${path}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${token}`,
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      cache: 'no-store',
-      signal: AbortSignal.timeout(8_000),
-    });
-  } catch {
-    throw new ClientDetailApiError(null);
-  }
-  if (!res.ok) {
-    let detail: string | null = null;
-    let code: string | null = null;
-    try {
-      const problem: unknown = await res.json();
-      if (problem && typeof problem === 'object') {
-        const d = (problem as Record<string, unknown>).detail;
-        const c = (problem as Record<string, unknown>).code;
-        if (typeof d === 'string') detail = d;
-        if (typeof c === 'string') code = c;
-      }
-    } catch {
-      /* a body that is not JSON tells us nothing the status has not */
+    return await api<T>(path, options);
+  } catch (e) {
+    if (e instanceof ApiError) {
+      throw new ClientDetailApiError(e.status, e.problem.detail ?? null, e.problem.code ?? null);
     }
-    throw new ClientDetailApiError(res.status, detail, code);
+    throw e;
   }
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T | null;
 }
+
+const get = <T>(path: string) => call<T>(path);
+const items = <T>(path: string) => listAll<T>(path, (p) => get<ListEnvelope<T>>(p));
+/** A tab's secondary read: an empty list rather than a file that will not open. */
+const itemsOr = <T>(path: string) => items<T>(path).catch(() => [] as T[]);
 
 /* -------------------------------------------------------- wire shapes ── */
 
-export interface TrainerDetailWire {
-  name: string;
-  phone: string | null;
-  gymName: string | null;
-  gymSharePercent: number | null;
-  setupComplete: boolean;
-  /**
-   * ── THE TWO FIELDS AN INVOICE NEEDS AND NOTHING ELSE HERE DOES ───────────
-   *
-   * `GET /v1/trainers/me` has always answered with both. This interface did not
-   * declare them, which is trap 28 in the direction that hides a column rather
-   * than inventing one — and it mattered the moment the client file learned to
-   * raise a bill, because the *From* block on an invoice is exactly the place a
-   * stranger looks to find out who to pay and what they do.
-   *
-   * `upiVpa` is on the document so the person reading it can settle it without
-   * writing back to ask. `headline` is what the trainer calls their own work —
-   * *Strength coach · 9 years on the floor* — which is the line that turns a
-   * name into a supplier on a bill somebody has to file.
-   *
-   * Optional, because a profile that never filled them in is a normal profile
-   * and the document draws without them.
-   */
-  upiVpa?: string | null;
-  headline?: string | null;
-}
-
+/** `GET /v1/clients/{id}` — the L3 summary row plus the client's own fields and the pinned notes. */
 export interface ClientDetailWire {
   id: string;
   name: string;
   phone: string | null;
   status: string;
-  deliveryMode: string | null;
-  trainerSplitPercent: number | null;
-  weeklySchedule: Array<{ templateDay: number; weekday: number; time: string }> | null;
-  /**
-   * How long this client's sessions run. Read by the sell panel so a pack booked
-   * for somebody on 45-minute sessions does not lay down twelve hour-long blocks
-   * over the top of the next client's slot.
-   */
-  sessionDurationMinutes: number | null;
-  /**
-   * WHAT THEY ARE TRAINING FOR, and it was missing from this interface rather
-   * than from the wire.
-   *
-   * `GET /v1/clients/{id}` has answered `"goal": "Fat loss"` since the roster
-   * was written — `ClientRow.goal` in `mock/types.ts`, set from `CAST` in the
-   * seed — and the trainer's half declared it nowhere, so the one screen a
-   * trainer opens before walking over to somebody could not say what the
-   * session is for. Trap 28 in the other direction: an interface is a claim,
-   * and an incomplete one hides a column rather than inventing it. CHECKED
-   * against a real response, not against a type.
-   *
-   * Optional, because a client added before the field was collected has none
-   * and a screen must read the absence rather than print `undefined`.
-   */
-  goal?: string | null;
-  /**
-   * How many sessions a week the arrangement asks for. Written by step 3 of the
-   * add flow beside `weeklySchedule`, and the honest denominator for anything
-   * that counts a week: a two-a-week client who trained twice is at 2 of 2, not
-   * 2 of 7.
-   */
-  sessionsPerWeek?: number | null;
-  /**
-   * The two physical attributes. Optional on the wire because a row written
-   * before they existed carries neither. See `ClientRow` in `mock/types.ts` for
-   * why they are attributes on the client and not assessment readings.
-   */
-  heightCm?: number | null;
-  /** ISO `YYYY-MM-DD`. */
-  dateOfBirth?: string | null;
-  metadata: Record<string, unknown> | null;
+  pausedAt: number | null;
+  pausedUntil: string | null;
+  archivedAt: number | null;
+  archiveReason: string | null;
+  archiveNote: string | null;
+  membershipStatus: string;
+  clientType: 'independent' | 'gym';
+  hasPinnedNote: boolean;
+  schedule: {
+    sessionsPerWeek: number | null;
+    sessionDurationMinutes: number | null;
+    deliveryMode: string | null;
+    version: string | null;
+  };
+  /** Weekday is 1 = Monday … 7 = Sunday, the schema's. */
+  slots: {
+    id: string;
+    weekday: number;
+    start: string;
+    programDay: number | null;
+    durationMinutes: number | null;
+    deliveryMode: string | null;
+  }[];
+  program: { id: string; name: string; weeks: number; days: number; startDate: string | null; endDate: string | null } | null;
+  stats: { sessionsDone: number; lastDoneAt: number | null; nextSessionAt: number | null; missedStreak: number };
   createdAt: number;
-  updatedAt: number;
+  /** `client.updated_at` — the If-Match for `PATCH /v1/clients/{id}`. */
+  version: string;
+  dateOfBirth: string | null;
+  heightCm: number | null;
+  activityLevel: string | null;
+  goal: string | null;
+  pinnedNotes: { id: string; body: string; updatedAt: number }[];
 }
 
+/** L4 — one diary row. The log sits on the row itself (R28). */
 export interface ClientSessionWire {
   id: string;
   clientId: string;
   scheduledAt: number;
+  endsAt: number;
+  durationMinutes: number;
   status: string;
-  durationMinutes: number | null;
-  notes: string | null;
-  dayLabel: string | null;
   deliveryMode: string | null;
-  programId: string | null;
-  /**
-   * V31 · when the server last WROTE this row — booked, moved, cancelled, marked.
-   *
-   * The Sessions tab's *Edited on* column, and it cannot be derived here:
-   * `scheduledAt` is when the session IS, which a row booked a month early and
-   * a row marked a no-show the next morning both disagree with, in opposite
-   * directions.
-   *
-   * Optional, and absent means *never edited since it was booked* — old rows
-   * predate the column, and a table that printed `1 Jan 1970` for them would be
-   * worse than one that prints a dash. `BACKEND_GAPS.md` carries the ask.
-   */
-  updatedAt?: number | null;
+  notes: string | null;
+  slotId: string | null;
+  workout: { id: string; name: string; programId: string | null; week: number | null; day: number | null } | null;
+  startedAt: number | null;
+  endedAt: number | null;
+  log: { exercises: number; setsDone: number; volumeKg: number; lastSetAt: number | null } | null;
+  charge: { packageId: string } | null;
+  /** The Sessions tab's *Edited on*. */
+  updatedAt: number;
+  version: string;
 }
 
 /**
- * A pack this client bought.
- *
- * The fields through `createdAt` are V1's. Everything below them is V30's, and
- * they arrive appended for the reason the schema law gives — an old reader that
- * destructures the ten-field shape keeps working.
- *
- * `amountPaid` and `amountDue` are COMPUTED BY THE SERVER and must not be
- * re-derived here. They used to be, in three components, by summing payments
- * whose `status === 'confirmed'` — while the backend writes `'paid'`, so every
- * paid-up client's file showed ₹0 collected and the full amount outstanding.
- * One figure, computed next to the rows it comes from, cannot disagree with
- * itself about a vocabulary.
+ * L5 — a pack this client bought. `amountPaid`, `amountRefunded` and
+ * `amountDue` are COMPUTED BY THE SERVER and must not be re-derived here: the
+ * old file summed payments itself and showed every paid-up client as owing.
  */
 export interface ClientPackageWire {
   id: string;
   clientId: string;
-  type: string;
+  packId: string | null;
+  name: string;
+  service: 'floor' | 'home_visit' | 'remote' | 'programming' | string;
+  basis: 'sessions' | 'period';
   sessionsTotal: number | null;
   sessionsRemaining: number | null;
-  amount: number | string | null;
-  status: string;
+  amount: string;
+  discountAmount: string | null;
+  currency: string;
   startDate: string | null;
   endDate: string | null;
+  dueDate: string | null;
+  status: 'active' | 'completed' | 'expired' | 'cancelled' | 'refunded' | string;
+  pausedAt: number | null;
+  pausedDays: number;
+  trainerSharePercent: string | null;
+  trainerShareAmount: string | null;
+  amountPaid: string;
+  amountRefunded: string;
+  amountDue: string;
+  closedAt: number | null;
   createdAt: number;
-  /* ── V30 ─────────────────────────────────────────────────────────────── */
-  /** The price-list entry it was sold from, or null for a free-typed sale. */
-  packId?: string | null;
-  /** Set while the clock is stopped. Null means running. */
-  pausedAt?: number | null;
-  /** Days spent paused, all time — how far `endDate` has been pushed out. */
-  pausedDays?: number | null;
-  /** When it stopped being live. Null while it still is. */
-  closedAt?: number | null;
-  dueDate?: string | null;
-  discountAmount?: number | string | null;
-  amountPaid?: number | string | null;
-  amountDue?: number | string | null;
+  version: string;
 }
 
-/** One entry on the price list. `GET /v1/packs`. */
+/** L7 — one ledger row. `collectedBy` is stamped by the database from the client's type. */
+export interface ClientPaymentWire {
+  id: string;
+  clientId: string;
+  packageId: string;
+  clientName: string;
+  packageName: string;
+  amount: string;
+  currency: string;
+  collectedBy: 'trainer' | 'gym';
+  method: 'upi' | 'cash' | 'bank_transfer' | null;
+  status: 'pending' | 'paid' | 'write_off' | 'refund' | string;
+  reference: string | null;
+  note: string | null;
+  paidAt: number | null;
+  writtenOffAt: number | null;
+  refundedAt: number | null;
+  /** The instant the row counts on — the ledger's order. */
+  bookAt: number;
+  split: { gym: string; trainer: string } | null;
+  createdAt: number;
+  version: string;
+}
+
+/** `GET /v1/packs` — one entry on the price list. */
 export interface PriceListPackWire {
   id: string;
   name: string;
-  type: string;
+  service: string;
+  basis: 'sessions' | 'period';
   sessions: number | null;
-  amount: number | string | null;
   validityDays: number | null;
+  amount: string;
+  currency?: string;
+  owner: 'trainer' | 'gym';
   status: string;
-  owner: string;
   orderIndex: number;
-  activeClients: number;
+  trainerSharePercent?: number | null;
 }
 
-/**
- * V30 · one thing that happened to a pack — a pause, a resume, an extension.
- *
- * Append-only. `days` is signed: on a resume it is the days the pause cost and
- * gave back, on an extension the goodwill given, and on a pause zero, because an
- * open pause has no length yet.
- */
+/** `GET /v1/packages/{id}/adjustments` — append-only, oldest first. */
 export interface PackageAdjustmentWire {
   id: string;
-  packageId: string;
-  kind: string;
+  kind: 'pause' | 'resume' | 'extend' | 'sessions' | 'session' | 'due_date' | string;
   days: number;
+  sessions: number;
+  sessionId: string | null;
   reason: string | null;
   effectiveAt: number;
+  dueDate: string | null;
+  previousDueDate: string | null;
+  reversedAt: number | null;
   createdAt: number;
 }
 
-export interface ClientPaymentWire {
-  id: string;
-  packageId: string;
-  amount: number | string;
-  status: string;
-  method: string | null;
-  collectedBy: string | null;
-  gymShareAmount: number | string | null;
-  createdAt: number;
-  paidAt: number | null;
-  /**
-   * The bank's own reference for the transfer — the UPI RRN, or whatever the
-   * trainer typed when they confirmed the money had landed.
-   *
-   * Optional on the wire and optional in life: it exists for a UPI or a bank
-   * transfer and cannot exist for cash, so the client file draws a dash rather
-   * than an empty cell. It is the ONE field on a payment that a client could
-   * quote back at a trainer, which is what makes it worth a column.
-   */
-  upiReference?: string | null;
-  /**
-   * The bill raised against this payment, or null because none was asked for.
-   *
-   * `INV-2627-0014` — the Indian financial year, then a per-trainer sequence.
-   * Optional on the wire because a backend that predates the column answers
-   * without it, and a screen that blanked its whole money table against an old
-   * server would be worse than one that reads the absence as *not raised*.
-   *
-   * **Null is the normal value.** Most payments never get a number: a gym-
-   * collected row can never have one (the gym raises that receipt), and an
-   * independent client only gets one when they ask. See `PaymentRow.invoiceNo`
-   * in the mock for the rule and where it is enforced.
-   */
-  invoiceNo?: string | null;
-  invoicedAt?: number | null;
-}
-
+/** `GET /v1/programs?clientId=` — active first, then past. */
 export interface ClientProgramWire {
   id: string;
-  clientId: string;
   name: string;
   goal: string | null;
+  weeks: number;
+  days: number;
+  status: 'active' | 'paused' | 'completed' | string;
   startDate: string | null;
   endDate: string | null;
-  status: string;
-  createdAt: number;
-}
-
-export interface ClientWorkoutWire {
-  id: string;
-  clientId: string;
-  sessionDate: string;
-  notes: string | null;
-  endedAt: number | null;
-  createdAt: number;
-  /* ── V31 · appended, so a reader of the six-field shape keeps working ──── */
-  /**
-   * The diary row this log was kept against, or null for a walk-in nobody
-   * booked.
-   *
-   * It is the join the Sessions tab's completed view is built on: the session
-   * says what was MEANT to happen and when, the workout says what actually did
-   * — the minute it started, the minute it ended, and how much was in it.
-   */
-  scheduledSessionId?: string | null;
-  /** The plan it was logged under, when there was one. */
-  programId?: string | null;
-  /**
-   * How many exercises the log holds, excluding any the trainer took out
-   * mid-session.
-   *
-   * A count rather than the rows, because the only reader is one table column
-   * and fetching every workout's exercise list to take its length is twenty
-   * requests for twenty numbers. Absent means *the server did not send it*, and
-   * the column draws a dash — never a zero, which would say the trainer logged
-   * a session with nothing in it.
-   */
-  exerciseCount?: number | null;
+  copiedFromProgramId: string | null;
+  revisedAt: number;
+  progress: { sessionsDone: number; sessionsPlanned: number; currentWeek: number | null };
 }
 
 /**
- * V29 · one note the trainer wrote about this client.
- *
- * Free text and a pin, and that is the whole shape. There is no injury field,
- * no condition field and no PAR-Q flag, and there must never be one — the
- * interaction map excludes health data outright under the DPDP Act 2023, and a
- * field that tells a medical note apart from any other note makes this a health
- * record whatever it is called. `V29__client_note.sql` carries the argument.
+ * One note the trainer wrote. Free text and a pin, and that is the whole shape:
+ * no injury field, no condition field, no PAR-Q flag, ever — a field that tells
+ * a medical note apart makes this a health record under the DPDP Act.
  */
 export interface ClientNoteWire {
   id: string;
-  clientId: string;
   body: string;
   pinned: boolean;
-  /**
-   * The client can read this one. Absent on rows written before the field
-   * existed, which is why every reader coerces rather than trusts it — and why
-   * the coercion is `=== true`: the safe reading of "we do not know" is private.
-   */
-  sharedWithClient?: boolean;
   createdAt: number;
   updatedAt: number;
+  version: string;
 }
 
-export interface ClientBodyMetricWire {
-  id: string;
-  clientId: string;
-  metricType: string;
-  value: number;
+/** `GET /v1/clients/{id}/readings` — read out of completed assessments, oldest first. */
+export interface ClientReadingWire {
+  assessmentId: string;
+  key: 'weight' | 'body_fat' | 'chest' | 'waist' | 'hip' | 'arm' | string;
+  label: string;
   unit: string;
-  notes: string | null;
-  recordedAt: number;
+  value: number;
+  at: number;
 }
 
-/* -------------------------------------------------------- output type ── */
+/* -------------------------------------------------------- the payload ── */
 
-export interface ClientFilePayload {
+export interface ClientFileHeader {
   client: ClientDetailWire;
-  trainerName: string;
-  trainerPhone: string | null;
-  /** For the *From* block on an invoice. See `TrainerDetailWire`. */
-  trainerUpiVpa: string | null;
-  trainerHeadline: string | null;
-  gymName: string | null;
-  gymSharePercent: number | null;
-  sessions: ClientSessionWire[];
+  /** `GET /v1/packages?clientId=&scope=current` — the header's "4 of 12 left · ₹5,000 owed". */
   packages: ClientPackageWire[];
-  /** Every payment against every pack this client has bought. See `getPayments`. */
+}
+
+/**
+ * The header and whatever the open tab read. A tab's lists are empty on every
+ * other tab — they were never fetched, and nothing outside the tab reads them.
+ */
+export interface ClientFilePayload extends ClientFileHeader {
+  sessions: ClientSessionWire[];
+  /** Every pack the client bought (Payments); the header's current packs elsewhere. */
+  history: ClientPackageWire[];
   payments: ClientPaymentWire[];
-  /** The active pack's payments — the subset Overview and the pack card want. */
-  activePackagePayments: ClientPaymentWire[];
-  /** The trainer's own price list, for *Sell a pack*. Empty if unreachable. */
   priceList: PriceListPackWire[];
-  /** The live pack's pause / resume / extend history. See `getAdjustments`. */
+  /** The live pack's life — pauses, resumes, extensions, corrections, due-date moves. */
   adjustments: PackageAdjustmentWire[];
   programs: ClientProgramWire[];
-  workouts: ClientWorkoutWire[];
-  bodyMetrics: ClientBodyMetricWire[];
   notes: ClientNoteWire[];
-  /**
-   * Every nudge sent to this client in the last year, newest first.
-   *
-   * A YEAR, not the cooldown window: this is the follow-up history the file
-   * draws, and "when did I last chase this" is a question whose answer is often
-   * months old. The queue's seven-day read is a different call with a different
-   * job (`lib/today/api.ts`).
-   *
-   * Empty rather than absent when the read fails — `listClientNudges` swallows
-   * its own error, because six tabs must render without it.
-   */
+  readings: ClientReadingWire[];
   nudges: NudgeLogEntry[];
 }
 
-/* --------------------------------------------------------- fetchers ── */
+export type ClientTab =
+  | 'overview' | 'calendar' | 'progress' | 'assessments' | 'sessions' | 'program' | 'payments' | 'notes';
 
-export const getTrainerDetail = cache(async (): Promise<TrainerDetailWire> =>
-  get<TrainerDetailWire>('/v1/trainers/me'),
-);
-
-export const getClientDetail = cache(async (clientId: string): Promise<ClientDetailWire> =>
-  get<ClientDetailWire>(`/v1/clients/${clientId}`),
-);
-
-const getClientSessionsWindowed = cache(async (clientId: string): Promise<ClientSessionWire[]> => {
-  const now = Date.now();
-  const threeMonthsAgo = now - 90 * 24 * 60 * 60 * 1000;
-  /**
-   * FOUR MONTHS FORWARD, AND IT WAS FOUR WEEKS.
-   *
-   * Selling a pack now books every session it owes, and a twelve-session pack on
-   * two days a week runs six weeks — so the tab that exists to answer *what is
-   * booked* would have shown eight of the twelve and hidden the rest behind a
-   * window nobody could see. Four months covers a sixty-day validity with room,
-   * and the rows are one client's, which is the read this window was drawn
-   * tight for in the first place: the roster-wide version still asks for a week.
-   */
-  const fourMonthsAhead = now + 120 * 24 * 60 * 60 * 1000;
-  // 1.1: a paged `{items}` envelope, followed to its last page.
-  return listAll<ClientSessionWire>(
-    `/v1/sessions?clientId=${clientId}&from=${threeMonthsAgo}&to=${fourMonthsAhead}`,
-    (p) => get<ListEnvelope<ClientSessionWire>>(p),
-  );
-});
-
-const getClientPackages = cache(async (clientId: string): Promise<ClientPackageWire[]> => {
-  const rows = await get<ClientPackageWire[]>(`/v1/clients/${clientId}/packages`);
-  return rows ?? [];
-});
-
-const getPackagePayments = cache(async (packageId: string): Promise<ClientPaymentWire[]> => {
-  const rows = await get<ClientPaymentWire[]>(`/v1/packages/${packageId}/payments`);
-  return rows ?? [];
-});
+const DAY_MS = 86_400_000;
 
 /**
- * The trainer's own price list, active entries only.
- *
- * Fetched with the client file so *Sell a pack* can offer real prices instead of
- * an empty form. `owner=trainer` narrows it to the trainer's own list rather
- * than the gym's: V19's two lists exist because a trainer at a gym can discount
- * their own packs and neither price nor discount the gym's, and this panel sells
- * — so it offers the list the trainer is allowed to sell from.
- *
- * Swallows a failure to an empty list, the way notes and body metrics do. A
- * backend without `GET /v1/packs` should cost the trainer the pack picker, not
- * the client file — the panel falls back to typing the terms by hand, which is
- * what every sale did before V30.
+ * A `yyyy-MM-dd` in the workspace's calendar. Query parameters carry dates,
+ * never instants (Conventions).
+ * ponytail: IST, the one workspace timezone v1 ships with; read `/v1/me`'s
+ * `workspace.timezone` when a second one exists.
  */
-const getPriceList = cache(async (): Promise<PriceListPackWire[]> => {
-  try {
-    const rows = await get<PriceListPackWire[]>('/v1/packs?owner=trainer&status=active');
-    return rows ?? [];
-  } catch {
-    return [];
-  }
-});
-
-/**
- * What has happened to the live pack — its pauses, resumes and extensions.
- *
- * Read for the ACTIVE pack only, and that is a deliberate limit rather than an
- * oversight: the history of a pack that closed in March is not a question
- * anybody opens this file to ask, and fetching it for every past pack would be
- * one request per pack on a screen that already makes one per pack for payments.
- */
-const getAdjustments = cache(async (packageId: string): Promise<PackageAdjustmentWire[]> => {
-  try {
-    const rows = await get<PackageAdjustmentWire[]>(`/v1/packages/${packageId}/adjustments`);
-    return rows ?? [];
-  } catch {
-    return [];
-  }
-});
-
-const getClientPrograms = cache(async (clientId: string): Promise<ClientProgramWire[]> => {
-  const rows = await get<ClientProgramWire[]>(`/v1/programs?clientId=${clientId}`);
-  return rows ?? [];
-});
-
-const getClientWorkouts = cache(async (clientId: string): Promise<ClientWorkoutWire[]> => {
-  const rows = await get<ClientWorkoutWire[]>(`/v1/workouts?clientId=${clientId}`);
-  return rows ?? [];
-});
-
-/**
- * Every payment against every pack, not just the live one.
- *
- * The Payments tab asks *what has this person paid me, ever* — a question the
- * active pack alone cannot answer, and the one a trainer chasing an old invoice
- * is actually asking. `GET /v1/payments` is trainer-wide with no `clientId`
- * filter, so this is one request per pack: a client has a handful of packs over
- * their life, against the roster-wide read's hundreds of rows, and the deck's
- * "22 requests for one dashboard" objection does not apply to one open file.
- *
- * A pack whose payments fail to load contributes nothing rather than failing the
- * page — a 404 on one old pack should not lose a trainer the client file.
- */
-const getPayments = cache(async (packageIds: string[]): Promise<ClientPaymentWire[]> => {
-  const rows = await Promise.all(
-    packageIds.map((id) => getPackagePayments(id).catch(() => [] as ClientPaymentWire[])),
-  );
-  return rows.flat();
-});
-
-/**
- * The trainer's own notes. V29.
- *
- * Swallows a failure to an empty list on purpose, the way body metrics does: a
- * backend that has not run V29 yet answers 404, and a client file that will not
- * open because the notes route is missing is a worse outcome than a file with an
- * empty notes tab. Every other tab on this screen still has its data.
- */
-const getClientNotes = cache(async (clientId: string): Promise<ClientNoteWire[]> => {
-  try {
-    const rows = await get<ClientNoteWire[]>(`/v1/clients/${clientId}/notes`);
-    return rows ?? [];
-  } catch {
-    return [];
-  }
-});
-
-const getClientBodyMetrics = cache(async (clientId: string): Promise<ClientBodyMetricWire[]> => {
-  try {
-    const rows = await get<ClientBodyMetricWire[]>(`/v1/clients/${clientId}/body-metrics`);
-    return rows ?? [];
-  } catch {
-    return [];
-  }
-});
-
-/** Everything the client file needs. Nine parallel reads, then the payments. */
-export async function getClientFilePayload(clientId: string): Promise<ClientFilePayload> {
-  const [
-    client,
-    trainer,
-    sessions,
-    packages,
-    programs,
-    workouts,
-    bodyMetrics,
-    notes,
-    priceList,
-    nudges,
-  ] = await Promise.all([
-    getClientDetail(clientId),
-    getTrainerDetail(),
-    getClientSessionsWindowed(clientId),
-    getClientPackages(clientId),
-    getClientPrograms(clientId),
-    getClientWorkouts(clientId),
-    getClientBodyMetrics(clientId),
-    getClientNotes(clientId),
-    getPriceList(),
-    listClientNudges(clientId),
-  ]);
-
-  /* Sequential because the pack ids come out of the read above. */
-  const activePackage = packages.find((p) => p.status === 'active');
-  const [payments, adjustments] = await Promise.all([
-    getPayments(packages.map((p) => p.id)),
-    activePackage ? getAdjustments(activePackage.id) : Promise.resolve([]),
-  ]);
-  const activePackagePayments = activePackage
-    ? payments.filter((p) => p.packageId === activePackage.id)
-    : [];
-
-  return {
-    client,
-    trainerName: trainer.name,
-    trainerPhone: trainer.phone,
-    trainerUpiVpa: trainer.upiVpa ?? null,
-    trainerHeadline: trainer.headline ?? null,
-    gymName: trainer.gymName,
-    gymSharePercent: trainer.gymSharePercent,
-    sessions,
-    packages,
-    payments,
-    activePackagePayments,
-    priceList,
-    adjustments,
-    programs,
-    workouts,
-    bodyMetrics,
-    notes,
-    nudges,
-  };
+export function dayIso(at: number): string {
+  return new Date(at).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
 }
 
-/* ----------------------------------------------------------- note writes ── */
+/* --------------------------------------------------------- the header ── */
 
-export const createNote = (
-  clientId: string,
-  body: string,
-  pinned: boolean,
-  sharedWithClient: boolean,
-) =>
-  send<ClientNoteWire>('POST', `/v1/clients/${clientId}/notes`, {
-    body,
-    pinned,
-    sharedWithClient,
-  });
+export const getClientDetail = cache(async (clientId: string): Promise<ClientDetailWire> =>
+  get<ClientDetailWire>(`/v1/clients/${encodeURIComponent(clientId)}`),
+);
 
-/**
- * All three fields are optional and absent means UNCHANGED, which is the
- * contract `PUT /v1/clients/{id}/notes/{noteId}` states. So the pin toggle
- * sends only `pinned`, the share switch only `sharedWithClient` and the editor
- * only `body`, and none of the three clobbers the others.
- *
- * That the share switch sends one field is not tidiness — a `PUT` carrying the
- * whole note would let a stale `body` from a row rendered before somebody else
- * edited it ride along behind a switch flip.
- */
-export const editNote = (
+export const getClientHeader = cache(async (clientId: string): Promise<ClientFileHeader> => {
+  const id = encodeURIComponent(clientId);
+  const [client, packages] = await Promise.all([
+    getClientDetail(clientId),
+    items<ClientPackageWire>(`/v1/packages?clientId=${id}&scope=current`),
+  ]);
+  return { client, packages };
+});
+
+/* ------------------------------------------------------- per-tab reads ── */
+
+/** L4 for one client over [from, to), dates in the workspace calendar. */
+export function clientSessions(
   clientId: string,
-  noteId: string,
-  patch: { body?: string; pinned?: boolean; sharedWithClient?: boolean },
-) => send<ClientNoteWire>('PUT', `/v1/clients/${clientId}/notes/${noteId}`, patch);
+  from: string,
+  to: string,
+  order: 'asc' | 'desc' = 'asc',
+): Promise<ClientSessionWire[]> {
+  const id = encodeURIComponent(clientId);
+  return items<ClientSessionWire>(`/v1/sessions?clientId=${id}&from=${from}&to=${to}&order=${order}`);
+}
+
+/** Every package the client bought, newest first. Bounded, so no cursor. */
+export function clientPackages(clientId: string): Promise<ClientPackageWire[]> {
+  return items<ClientPackageWire>(`/v1/packages?clientId=${encodeURIComponent(clientId)}`);
+}
+
+/** L7 for one client, every status, followed to its last page. */
+export function clientPayments(clientId: string, from?: string, limit?: number): Promise<ClientPaymentWire[]> {
+  const q = `clientId=${encodeURIComponent(clientId)}${from ? `&from=${from}` : ''}`;
+  if (limit) {
+    return get<ListEnvelope<ClientPaymentWire>>(`/v1/payments?${q}&limit=${limit}`).then((r) => r?.items ?? []);
+  }
+  return items<ClientPaymentWire>(`/v1/payments?${q}&limit=200`);
+}
+
+export function clientReadings(clientId: string): Promise<ClientReadingWire[]> {
+  return itemsOr<ClientReadingWire>(`/v1/clients/${encodeURIComponent(clientId)}/readings`);
+}
+
+export function clientPrograms(clientId: string): Promise<ClientProgramWire[]> {
+  return itemsOr<ClientProgramWire>(`/v1/programs?clientId=${encodeURIComponent(clientId)}`);
+}
+
+export function clientNotes(clientId: string): Promise<ClientNoteWire[]> {
+  return items<ClientNoteWire>(`/v1/clients/${encodeURIComponent(clientId)}/notes`);
+}
+
+export function packageAdjustments(packageId: string): Promise<PackageAdjustmentWire[]> {
+  return itemsOr<PackageAdjustmentWire>(`/v1/packages/${encodeURIComponent(packageId)}/adjustments`);
+}
+
+/** The price list the Sell sheet offers — the owner that matches the client's type. */
+export function priceList(owner: 'trainer' | 'gym'): Promise<PriceListPackWire[]> {
+  return itemsOr<PriceListPackWire>(`/v1/packs?owner=${owner}`);
+}
+
+/** L9 for one client, with the message text — a year of it, because "when did I last chase this" is often months old. */
+export async function clientNudges(clientId: string, days = 365): Promise<NudgeLogEntry[]> {
+  const rows = await itemsOr<{
+    id: string; clientId: string; template: string; reason: string; sentAt: number; message?: string | null;
+  }>(`/v1/nudges?clientId=${encodeURIComponent(clientId)}&from=${dayIso(Date.now() - days * DAY_MS)}&include=message`);
+  return rows.map((n) => ({
+    id: n.id,
+    clientId: n.clientId,
+    clientName: '',
+    templateName: n.template,
+    templateLabel: n.template,
+    channel: 'whatsapp_manual',
+    status: n.reason,
+    message: n.message ?? null,
+    sentAt: n.sentAt,
+  }));
+}
+
+/** The pack Payments shows the life of: the running one, else the newest. */
+export function livePackage(packages: ClientPackageWire[]): ClientPackageWire | null {
+  return packages.find((p) => p.status === 'active') ?? packages[0] ?? null;
+}
+
+export interface TabOptions {
+  /** Calendar: the month shown, `yyyy-MM`. */
+  month?: string;
+  /** Sessions: the window chip. `all` reads the newest 400 days (L4's cap, R76). */
+  range?: '30d' | '90d' | 'all';
+  /** Sessions: `Load older` steps the window back by whole windows. */
+  older?: number;
+}
+
+const EMPTY: Omit<ClientFilePayload, keyof ClientFileHeader> = {
+  sessions: [], history: [], payments: [], priceList: [], adjustments: [],
+  programs: [], notes: [], readings: [], nudges: [],
+};
+
+/** What one tab reads, per the contract's *Per-tab reads* table. */
+export async function getClientFilePayload(
+  clientId: string,
+  tab: ClientTab,
+  options: TabOptions = {},
+): Promise<ClientFilePayload> {
+  const header = await getClientHeader(clientId);
+  const now = Date.now();
+  const at = (days: number) => dayIso(now + days * DAY_MS);
+  const out: ClientFilePayload = { ...header, ...EMPTY };
+
+  switch (tab) {
+    case 'overview': {
+      // The contract lists L7 here too; nothing on the tab draws a payment, so it isn't read.
+      const [sessions, nudges, readings] = await Promise.all([
+        clientSessions(clientId, at(-28), at(15)),
+        clientNudges(clientId),
+        clientReadings(clientId),
+      ]);
+      return { ...out, sessions, nudges, readings };
+    }
+    case 'calendar': {
+      const month = /^\d{4}-\d{2}$/.test(options.month ?? '') ? options.month! : at(0).slice(0, 7);
+      const [y, m] = month.split('-').map(Number);
+      const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, '0')}`;
+      // A day of slack each side: the grid shows the edges of the weeks around the month.
+      const from = dayIso(Date.parse(`${month}-01T00:00:00+05:30`) - 7 * DAY_MS);
+      const to = dayIso(Date.parse(`${next}-01T00:00:00+05:30`) + 7 * DAY_MS);
+      return { ...out, sessions: await clientSessions(clientId, from, to) };
+    }
+    case 'sessions': {
+      const span = options.range === '30d' ? 30 : options.range === '90d' ? 90 : 400;
+      const back = Math.max(0, Math.floor(options.older ?? 0));
+      // Windows end four weeks ahead, so Upcoming shows what is booked; each is
+      // one span long, inside L4's 400-day cap.
+      const to = at(29 - back * span);
+      const from = at(29 - (back + 1) * span);
+      return { ...out, sessions: await clientSessions(clientId, from, to, 'desc') };
+    }
+    case 'program': {
+      const [programs, sessions] = await Promise.all([
+        clientPrograms(clientId),
+        clientSessions(clientId, at(0), at(29)),
+      ]);
+      return { ...out, programs, sessions };
+    }
+    case 'payments': {
+      const [history, payments, list] = await Promise.all([
+        clientPackages(clientId),
+        clientPayments(clientId),
+        priceList(header.client.clientType === 'gym' ? 'gym' : 'trainer'),
+      ]);
+      const live = livePackage(history);
+      const adjustments = live ? await packageAdjustments(live.id) : [];
+      return { ...out, history, payments, priceList: list.filter((p) => p.status === 'active'), adjustments };
+    }
+    case 'notes':
+      return { ...out, notes: await clientNotes(clientId), readings: await clientReadings(clientId) };
+    case 'progress':
+    case 'assessments':
+      return out;
+  }
+}
+
+/* -------------------------------------------------------------- writes ── */
+
+const cid = encodeURIComponent;
+
+/** Money writes answer the row and the package with its new sums. */
+export interface LedgeredWire {
+  payment: ClientPaymentWire;
+  package: ClientPackageWire;
+}
+
+/* notes */
+
+export const createNote = (clientId: string, input: { id: string; body: string; pinned: boolean }) =>
+  call<ClientNoteWire>(`/v1/clients/${cid(clientId)}/notes`, { method: 'POST', body: input });
+
+/** Send only what changed — `body`, `pinned`, or both — so the pin toggle cannot clobber an edit. */
+export const editNote = (clientId: string, noteId: string, patch: { body?: string; pinned?: boolean }) =>
+  call<ClientNoteWire>(`/v1/clients/${cid(clientId)}/notes/${cid(noteId)}`, { method: 'PATCH', body: patch });
 
 export const removeNote = (clientId: string, noteId: string) =>
-  send<null>('DELETE', `/v1/clients/${clientId}/notes/${noteId}`);
+  call<null>(`/v1/clients/${cid(clientId)}/notes/${cid(noteId)}`, { method: 'DELETE' });
 
-/* ------------------------------------------------- package lifecycle writes ── */
+/** The delete toast's Undo. */
+export const restoreNote = (clientId: string, noteId: string) =>
+  call<ClientNoteWire>(`/v1/clients/${cid(clientId)}/notes/${cid(noteId)}/restore`, { method: 'POST', body: {} });
 
-/**
- * THE FIVE WRITES A PACKAGE'S LIFE IS MADE OF.
- *
- * All POSTs, and none of them a PATCH, because every one is an EVENT rather than
- * a field edit: each writes a `package_adjustment` row alongside whatever it
- * changes, and each has a precondition the others do not. `PackageController`
- * carries the full argument, including why there is deliberately no general
- * `PATCH /v1/packages/{id}` that could set a session count directly.
- */
+/* the client's own fields — Clients A6 */
 
-/**
- * Sell a pack. With `packId`, the price list fills in everything left blank.
- *
- * ── AND IT BOOKS THE SESSIONS, WHICH IS NEW ─────────────────────────────────
- *
- * `weeklySchedule` is the days and times the trainer just agreed with the client
- * standing in front of them, and sending it here is what turns a count into a
- * diary: the server writes it onto the CLIENT — it is their standing week, not
- * this pack's, so the next pack needs no re-typing — and lays down the sessions
- * the pack owes, stopping at whichever runs out first, the count or the validity.
- *
- * Omitted or empty means *do not change their week*, and a client who already
- * trains Tuesdays and Fridays keeps them. It never means *book nothing*: a
- * second pack sold to a client with a rhythm books on that rhythm.
- *
- * `sessionsBooked` comes back on the response and is NOT a package column — it
- * is what this request did, so the panel can say "12 booked, first on Monday"
- * instead of closing silently. Counting the diary afterwards would answer a
- * different question.
- */
-export const sellPackage = (
+export const patchClient = (
   clientId: string,
-  input: {
-    packId?: string | null;
-    type?: string;
-    sessionsTotal?: number | null;
-    amount?: number;
-    startDate?: string | null;
-    endDate?: string | null;
-    discountAmount?: number | null;
-    dueDate?: string | null;
-    /** 0 = Monday … 6 = Sunday. `lib/clients/booking.ts` states the convention. */
-    weeklySchedule?: Array<{ templateDay: number; weekday: number; time: string }> | null;
-    sessionDurationMinutes?: number | null;
-  },
+  patch: Partial<Pick<ClientDetailWire, 'name' | 'phone' | 'dateOfBirth' | 'goal' | 'heightCm' | 'activityLevel'>>,
+  version?: string,
 ) =>
-  send<ClientPackageWire & { sessionsBooked?: number }>(
-    'POST',
-    `/v1/clients/${clientId}/packages`,
-    input,
-  );
+  call<ClientDetailWire>(`/v1/clients/${cid(clientId)}`, {
+    method: 'PATCH',
+    body: patch,
+    headers: version ? { 'if-match': `"${version}"` } : undefined,
+  });
 
-/**
- * Repeat a pack that has run out. An empty body is a complete request — same
- * type, same price, same count, same validity window, starting where the old one
- * stopped. The overrides exist for the sale where something genuinely changed.
- */
-export const renewPackage = (
-  packageId: string,
-  input: {
-    packId?: string | null;
-    sessionsTotal?: number | null;
-    amount?: number;
-    discountAmount?: number | null;
-    startDate?: string | null;
-    dueDate?: string | null;
-  } = {},
-) => send<ClientPackageWire>('POST', `/v1/packages/${packageId}/renew`, input);
+/* a pack's life */
 
-/** Stop the clock. `effectiveAt` backdates it to the day the client actually left. */
-export const pausePackage = (
-  packageId: string,
-  input: { reason?: string | null; effectiveAt?: string | null } = {},
-) => send<ClientPackageWire>('POST', `/v1/packages/${packageId}/pause`, input);
+export interface SaleInput {
+  id: string;
+  packId?: string;
+  name?: string;
+  service?: string;
+  basis?: 'sessions' | 'period';
+  sessionsTotal?: number | null;
+  amount?: string;
+  validityDays?: number | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+  discountAmount?: string | null;
+  trainerSharePercent?: number | null;
+}
 
-/** Start it again, giving back exactly the days the pause cost. */
-export const resumePackage = (
-  packageId: string,
-  input: { reason?: string | null; effectiveAt?: string | null } = {},
-) => send<ClientPackageWire>('POST', `/v1/packages/${packageId}/resume`, input);
+/** Clients A7 — off the price list (the pack's terms win) or custom. */
+export const sellPackage = (clientId: string, input: SaleInput) =>
+  call<ClientPackageWire>(`/v1/clients/${cid(clientId)}/packages`, { method: 'POST', body: input });
 
-/** Goodwill, in days. Logged, so it is a fact next time and not a feeling. */
+/** Today A3 — the same pack again, its terms copied on the server. */
+export const renewPackage = (packageId: string, input: { id: string; startDate?: string | null }) =>
+  call<ClientPackageWire>(`/v1/packages/${cid(packageId)}/renew`, { method: 'POST', body: input });
+
+export const pausePackage = (packageId: string, input: { reason?: string | null; effectiveAt?: number | null } = {}) =>
+  call<ClientPackageWire>(`/v1/packages/${cid(packageId)}/pause`, { method: 'POST', body: input });
+
+export const resumePackage = (packageId: string, input: { effectiveAt?: number | null } = {}) =>
+  call<ClientPackageWire>(`/v1/packages/${cid(packageId)}/resume`, { method: 'POST', body: input });
+
 export const extendPackage = (packageId: string, days: number, reason?: string | null) =>
-  send<ClientPackageWire>('POST', `/v1/packages/${packageId}/extend`, { days, reason });
+  call<ClientPackageWire>(`/v1/packages/${cid(packageId)}/extend`, { method: 'POST', body: { days, reason: reason ?? null } });
 
-/* --------------------------------------------------- client lifecycle writes ── */
+/** R74 — end one deal early, once nothing is owed. */
+export const cancelPackage = (packageId: string) =>
+  call<ClientPackageWire>(`/v1/packages/${cid(packageId)}/cancel`, { method: 'POST', body: {} });
 
-/**
- * THE TWO WRITES THAT CHANGE WHAT A CLIENT *IS*, rather than what is on them.
- *
- * Everything else on this path writes a child row — a note, a package, a
- * measurement. These two move `client.status`, which is the field the whole
- * roster is derived from: `buildRoster` drops `archived` before it builds a
- * single row, and `deriveTag` puts `paused` above every tag it would otherwise
- * compute, so a trainer's own statement outranks anything read from the data.
- *
- * ── PUT AND NOT PATCH, AND WHY THAT IS SAFE HERE ─────────────────────────────
- *
- * `PUT /v1/clients/{id}` is a PARTIAL update on this backend — the same request
- * `updateClientSchedule` already makes with nothing but `weeklySchedule` in the
- * body. Absent means unchanged. That is the contract these two rely on, and it
- * is the reason `pauseClient` below has to READ before it writes: `metadata` is
- * a whole object, so a body carrying `{ pausedAt }` alone would delete the
- * `mode` key that `readMode` still falls back to on older rows.
- *
- * ── ARCHIVE IS A DELETE, AND IT IS STILL NOT A DELETION ──────────────────────
- *
- * `DELETE /v1/clients/{id}` sets `status = 'archived'` and
- * `membership_status = 'removed'`; the row, their sessions, their payments and
- * their history all stay. A trainer who archives somebody by accident has lost
- * a roster row and nothing else — which is exactly why the verb the menu offers
- * is *Archive* and not *Delete*.
- */
+/* money */
 
-/** Move `client.status`, and nothing else on the row. */
-export const putClientStatus = (
-  clientId: string,
-  patch: { status?: string; metadata?: Record<string, unknown> | null },
-) => send<ClientDetailWire>('PUT', `/v1/clients/${clientId}`, patch);
+export interface PaymentInput {
+  id: string;
+  amount: string;
+  /** Null for a gym client — the gym's desk collected it (R75). */
+  method: 'upi' | 'cash' | 'bank_transfer' | null;
+  reference?: string | null;
+  status: 'paid' | 'pending';
+  paidAt?: number | null;
+  note?: string | null;
+}
 
-/** Off the roster, into the archive. Answers `204` with no body. */
-export const archiveClientRow = (clientId: string) =>
-  send<null>('DELETE', `/v1/clients/${clientId}`);
+export const recordPayment = (packageId: string, input: PaymentInput) =>
+  call<LedgeredWire>(`/v1/packages/${cid(packageId)}/payments`, { method: 'POST', body: input });
 
-/**
- * WHO THE CLIENT IS — the name on every screen and the number they log in with.
- *
- * Partial like the two above, and for the same reason: `PUT /v1/clients/{id}`
- * treats an absent key as unchanged, so this sends only the two fields the
- * contact form owns and cannot disturb `metadata`, `weeklySchedule` or the
- * status the roster is derived from.
- *
- * **The phone is not a contact detail.** `POST /v1/auth/request-otp` finds a
- * client by the last ten digits of this field and nothing else — there is no
- * password and no e-mail on this record — so editing it moves which number can
- * open the portal. That is a real consequence and the form says so; it is not a
- * reason to make the field read-only, because the trainer who typed a digit
- * wrong on the add-a-client flow currently has no way back.
- */
-export const putClientContact = (
-  clientId: string,
-  patch: { name?: string; phone?: string | null },
-) => send<ClientDetailWire>('PUT', `/v1/clients/${clientId}`, patch);
+export const markPaymentPaid = (
+  paymentId: string,
+  input: { method?: string | null; reference?: string | null; paidAt?: number | null },
+) => call<LedgeredWire>(`/v1/payments/${cid(paymentId)}/paid`, { method: 'POST', body: input });
 
-/**
- * Height and birth date — the physical card's own two.
- *
- * A separate call from `putClientContact` rather than one wide `putClient`,
- * because the two cards save independently and a shared writer would let the
- * contact form's stale copy of a birth date ride along behind a height edit.
- * Partial, like everything else on this path: absent means unchanged, and an
- * explicit `null` is how a trainer takes a value back off.
- */
-export const putClientPhysical = (
-  clientId: string,
-  patch: { heightCm?: number | null; dateOfBirth?: string | null },
-) => send<ClientDetailWire>('PUT', `/v1/clients/${clientId}`, patch);
+export const writeOffPayment = (paymentId: string, note?: string | null) =>
+  call<LedgeredWire>(`/v1/payments/${cid(paymentId)}/write-off`, { method: 'POST', body: { note: note ?? null } });
+
+/** `amount: null` forgives everything still owed. */
+export const writeOffPackage = (packageId: string, input: { id: string; amount: string | null; note?: string | null }) =>
+  call<LedgeredWire>(`/v1/packages/${cid(packageId)}/write-off`, { method: 'POST', body: input });
+
+export const refundPackage = (
+  packageId: string,
+  input: { id: string; amount: string; method: string | null; reference?: string | null; note?: string | null },
+) => call<LedgeredWire>(`/v1/packages/${cid(packageId)}/refund`, { method: 'POST', body: input });
+
+export const patchPayment = (
+  paymentId: string,
+  patch: { amount?: string; method?: string | null; reference?: string | null; paidAt?: number; note?: string | null },
+  version?: string,
+) =>
+  call<LedgeredWire>(`/v1/payments/${cid(paymentId)}`, {
+    method: 'PATCH',
+    body: patch,
+    headers: version ? { 'if-match': `"${version}"` } : undefined,
+  });
+
+export const deletePayment = (paymentId: string) =>
+  call<null>(`/v1/payments/${cid(paymentId)}`, { method: 'DELETE' });

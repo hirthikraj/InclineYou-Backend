@@ -194,55 +194,30 @@ function whenPhrase(at: number, now: number): string {
   return `in ${Math.round(d / 7)} weeks`;
 }
 
-/** The newest readings of one metric, oldest first, for the chart. */
-function series(metrics: ClientFilePayload['bodyMetrics'], type: string) {
-  return metrics
-    .filter((m) => m.metricType === type)
-    .sort((a, b) => a.recordedAt - b.recordedAt);
+/**
+ * One measurement's readings, oldest first, for the chart. Read out of
+ * completed assessments (R30) — the server already sends them oldest first.
+ */
+function series(readings: ClientFilePayload['readings'], key: string) {
+  return readings
+    .filter((r) => r.key === key)
+    .map((r) => ({ value: r.value, unit: r.unit, recordedAt: r.at }));
 }
 
 export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now: number }) {
-  const { client, packages, activePackagePayments, sessions, workouts, bodyMetrics, programs } =
-    payload;
+  const { client, packages, sessions, readings } = payload;
 
   const activePkg = packages.find((p) => p.status === 'active') ?? null;
   const billed = activePkg ? num(activePkg.amount) : 0;
-  /*
-   * SERVER-COMPUTED, and it used to be wrong here.
-   *
-   * This summed payments whose `status === 'confirmed'`. `PackageService`
-   * writes **`'paid'`** on confirmation, so no payment ever matched: a client
-   * who had paid in full showed as owing every rupee, on the strip a trainer
-   * reads before walking over to them. `lib/money/compute.ts` had always
-   * accepted both spellings, which is why the money book and the client file
-   * disagreed about the same money.
-   *
-   * `amountPaid` / `amountDue` are now computed in SQL beside the payment rows
-   * (`PackageService.PACKAGE_COLUMNS`, which counts both spellings and excludes
-   * write-offs). The local sum survives only as the fallback for a backend that
-   * predates V30 — and it takes both spellings now, so even the fallback is
-   * right.
-   */
-  const paid =
-    activePkg?.amountPaid != null
-      ? num(activePkg.amountPaid)
-      : activePackagePayments
-          .filter((p) => p.status === 'paid' || p.status === 'confirmed')
-          .reduce((s, p) => s + num(p.amount), 0);
-  const owed = activePkg
-    ? activePkg.amountDue != null
-      ? num(activePkg.amountDue)
-      : Math.max(0, billed - paid)
-    : 0;
+  /* Server-computed, never re-added from payments here: summing rows on the
+     page is how every paid-up client once showed as owing everything. */
+  const paid = activePkg ? num(activePkg.amountPaid) : 0;
+  const owed = activePkg ? num(activePkg.amountDue) : 0;
 
   /*
-   * HOW LATE, AND IT WAS NOT ON THIS SCREEN.
-   *
-   * `dueDate` has been on the wire since V30 and the overview never read it, so
-   * a pack whose payment went past its date last Sunday drew the same sentence
-   * as one invoiced this morning: `₹6,400 pending`. An amount is a fact and a
-   * number of days is a job, and the file a trainer opens before walking over
-   * to somebody is the one place the difference is worth a colour.
+   * HOW LATE. An amount is a fact and a number of days is a job, and the file
+   * a trainer opens before walking over to somebody is the one place the
+   * difference is worth a colour.
    */
   const dueAt = activePkg?.dueDate ? new Date(activePkg.dueDate).getTime() : null;
   const daysLate = dueAt !== null && owed > 0 ? daysBetween(dueAt, now) : 0;
@@ -298,7 +273,7 @@ export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now:
    * assumes a week that runs exactly to plan, which no week does. It is a size,
    * not a deadline — the deadline is `endDate`, which is beside it.
    */
-  const perWeek = client.sessionsPerWeek ?? null;
+  const perWeek = client.schedule.sessionsPerWeek ?? null;
   const weeksLeft =
     left !== null && left > 0 && perWeek !== null && perWeek > 0
       ? Math.round(left / perWeek)
@@ -313,15 +288,18 @@ export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now:
   const month = adherenceOver(sessions, now, 30);
   const week = adherenceOver(sessions, now, 7);
 
-  const lastWorkout = [...workouts].sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
-  const activeProgram = programs.find((p) => p.status === 'active') ?? null;
+  /* Off the header's stats: the whole history, not this tab's four weeks. */
+  const lastDoneAt = client.stats.lastDoneAt;
+  const activeProgram = client.program;
 
   /* THE WEEK THAT WAS AGREED, which step 3 of the add flow wrote and which
      `DiaryService.reconcile` books against. It was visible nowhere on this tab,
      and it is the denominator every figure on the week card is implicitly
      measured against. `normaliseSlots` is the one reading of that column --
      shared with the flow that writes it, so the two cannot disagree. */
-  const slots = normaliseSlots(client.weeklySchedule);
+  const slots = normaliseSlots(
+    client.slots.map((sl) => ({ weekday: sl.weekday, time: sl.start, templateDay: sl.programDay })),
+  );
   const agreedDays = new Set(slots.map((slot) => slot.weekday));
   const arrangement = weekClause(slots);
 
@@ -333,12 +311,12 @@ export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now:
      the agreed days are the next best reading of it, and the booked cells are
      the fallback when there is neither. */
   const plannedThisWeek = Math.max(
-    client.sessionsPerWeek ?? (agreedDays.size || days.filter((d) => d.state !== 'rest').length),
+    client.schedule.sessionsPerWeek ?? (agreedDays.size || days.filter((d) => d.state !== 'rest').length),
     doneThisWeek,
   );
 
-  const weights = series(bodyMetrics, 'weight');
-  const fats = series(bodyMetrics, 'body_fat');
+  const weights = series(readings, 'weight');
+  const fats = series(readings, 'body_fat');
   const latestWeight = weights[weights.length - 1] ?? null;
   /* The sitting BEFORE the last one, not the first ever. *57.1 -> 56.4* is the
      movement a trainer is about to talk about; eight months back is a different
@@ -355,7 +333,7 @@ export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now:
       { key: 'waist', label: 'Waist' },
     ] as const
   ).flatMap(({ key, label }) => {
-    const rows = key === 'body_fat' ? fats : series(bodyMetrics, key);
+    const rows = key === 'body_fat' ? fats : series(readings, key);
     if (rows.length < 2) return [];
     const to = rows[rows.length - 1];
     const from = rows[rows.length - 2];
@@ -387,9 +365,9 @@ export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now:
           )}`}
           detail={
             <>
-              {nextSession.dayLabel ?? nextSession.notes ?? 'No day named'}
+              {nextSession.workout?.name ?? nextSession.notes ?? 'No day named'}
               {nextSession.deliveryMode &&
-                ` · ${nextSession.deliveryMode === 'floor' ? 'In Person' : 'Online'}`}
+                ` · ${nextSession.deliveryMode === 'floor' ? 'In Person' : nextSession.deliveryMode === 'home_visit' ? 'Home visit' : 'Online'}`}
               {nextSession.durationMinutes && ` · ${nextSession.durationMinutes} min`}
             </>
           }
@@ -710,8 +688,8 @@ export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now:
         </Card.Body>
         <Card.Band>
           <span className="small">
-            {lastWorkout
-              ? `Last logged ${dateStr(new Date(lastWorkout.sessionDate).getTime())}`
+            {lastDoneAt
+              ? `Last logged ${dateStr(lastDoneAt)}`
               : 'No session logged yet'}
           </span>
         </Card.Band>

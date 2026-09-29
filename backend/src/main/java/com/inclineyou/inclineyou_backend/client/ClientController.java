@@ -2,12 +2,13 @@ package com.inclineyou.inclineyou_backend.client;
 
 import com.inclineyou.inclineyou_backend.exception.ApiException;
 import com.inclineyou.inclineyou_backend.wire.Items;
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.WebRequest;
 
 import java.util.List;
 import java.util.Map;
@@ -23,6 +24,8 @@ public class ClientController {
     private final ClientWriteService writes;
     private final ClientStateService states;
     private final ClientScheduleService schedules;
+    private final ClientFileService files;
+    private final ClientNoteService notes;
 
     /**
      * api-contract Today L3 — the v1 roster read, and since 1.1 the default:
@@ -104,58 +107,58 @@ public class ClientController {
         return ResponseEntity.ok().eTag(saved.schedule().version()).body(saved);
     }
 
+    /* ── api-contract 1.1 Client file ─────────────────────────────────────── */
+
+    /**
+     * The header every tab draws. Answers If-None-Match with 304, so a soft
+     * navigation between tabs usually costs nothing.
+     */
     @GetMapping("/{id}")
-    public ClientService.ClientResponse get(@PathVariable UUID id) {
-        return clientService.get(trainerId(), id);
+    public ResponseEntity<ClientFileService.ClientDetail> get(@PathVariable UUID id, WebRequest request) {
+        var detail = files.get(trainerId(), id);
+        String etag = detail.etag();
+        if (request.checkNotModified(etag)) return null;
+        return ResponseEntity.ok().eTag(etag).cacheControl(CacheControl.noCache().cachePrivate()).body(detail);
     }
 
-    @PutMapping("/{id}")
-    public ClientService.ClientResponse update(@PathVariable UUID id,
-                                               @RequestBody ClientService.UpdateClientRequest req) {
-        return clientService.update(trainerId(), id, req);
+    /** Read out of completed assessments — a correction is an edit to the assessment. */
+    @GetMapping("/{id}/readings")
+    public Items<ClientFileService.Reading> readings(@PathVariable UUID id, @RequestParam(required = false) String key) {
+        return Items.of(files.readings(trainerId(), id, key));
     }
 
-    @DeleteMapping("/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable UUID id) {
-        clientService.delete(trainerId(), id);
-    }
-
-    /** Read-only since V22: a reading is written by taking an assessment. */
-    @GetMapping("/{id}/body-metrics")
-    public List<ClientService.BodyMetricResponse> listMetrics(@PathVariable UUID id) {
-        return clientService.listMetrics(trainerId(), id);
-    }
-
-    /* ── Notes (V29) ──────────────────────────────────────────────────────────
-       Under the client, like body metrics, and the note id is under the client
-       too on the write routes. It costs one extra path segment and buys an
-       ownership check the URL itself states: a note is reached through the
-       person it is about, never on its own. */
+    /* Notes — under the client, and the note id under the client too: a note is
+       reached through the person it is about, never on its own. */
 
     @GetMapping("/{id}/notes")
-    public List<ClientService.NoteResponse> listNotes(@PathVariable UUID id) {
-        return clientService.listNotes(trainerId(), id);
+    public Items<ClientNoteService.Note> listNotes(@PathVariable UUID id) {
+        return Items.of(notes.list(trainerId(), id));
     }
 
+    /** 201 the first time, 200 on a replayed id. */
     @PostMapping("/{id}/notes")
-    @ResponseStatus(HttpStatus.CREATED)
-    public ClientService.NoteResponse addNote(@PathVariable UUID id,
-                                              @Valid @RequestBody ClientService.NoteRequest req) {
-        return clientService.addNote(trainerId(), id, req);
+    public ResponseEntity<ClientNoteService.Note> addNote(@PathVariable UUID id,
+                                                          @RequestBody(required = false) Map<String, Object> body) {
+        var made = notes.create(trainerId(), id, body);
+        return ResponseEntity.status(made.created() ? HttpStatus.CREATED : HttpStatus.OK).body(made.note());
     }
 
-    @PutMapping("/{id}/notes/{noteId}")
-    public ClientService.NoteResponse updateNote(@PathVariable UUID id,
-                                                 @PathVariable UUID noteId,
-                                                 @RequestBody ClientService.NoteRequest req) {
-        return clientService.updateNote(trainerId(), id, noteId, req);
+    @PatchMapping("/{id}/notes/{noteId}")
+    public ClientNoteService.Note patchNote(@PathVariable UUID id, @PathVariable UUID noteId,
+                                            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+                                            @RequestBody(required = false) Map<String, Object> body) {
+        return notes.patch(trainerId(), id, noteId, ifMatch, body);
     }
 
     @DeleteMapping("/{id}/notes/{noteId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteNote(@PathVariable UUID id, @PathVariable UUID noteId) {
-        clientService.deleteNote(trainerId(), id, noteId);
+        notes.delete(trainerId(), id, noteId);
+    }
+
+    @PostMapping("/{id}/notes/{noteId}/restore")
+    public ClientNoteService.Note restoreNote(@PathVariable UUID id, @PathVariable UUID noteId) {
+        return notes.restore(trainerId(), id, noteId);
     }
 
     private UUID trainerId() {

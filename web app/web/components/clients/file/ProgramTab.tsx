@@ -135,10 +135,12 @@ export function ProgramTab({
 }: {
   programs: ClientProgramWire[];
   sessions: ClientSessionWire[];
-  client: { createdAt: number };
+  client: { id: string; createdAt: number };
   now: number;
 }) {
-  const sorted = [...programs].sort((a, b) => b.createdAt - a.createdAt);
+  /* The server's order: the active plan first, then the rest newest first. */
+  const clientId = client.id;
+  const sorted = programs;
   const active = sorted.find((p) => p.status === 'active') ?? null;
 
   const weekStart = startOfWeek(now);
@@ -147,46 +149,25 @@ export function ProgramTab({
         (s) =>
           s.scheduledAt >= weekStart &&
           s.scheduledAt < weekStart + 7 * DAY_MS &&
-          s.programId === active.id,
+          s.workout?.programId === active.id,
       )
     : [];
-  const loggedThisWeek = thisWeek.filter((s) => s.status === 'done').length;
-  const plannedThisWeek = thisWeek.filter((s) => s.status !== 'cancelled').length;
+  /* The tab reads today onward (Client file · Plan), so this week is what is
+     still booked in it, not what was logged earlier in it. */
+  const leftThisWeek = thisWeek.filter((s) => s.status === 'scheduled').length;
   const dayLabels = [
-    ...new Set(thisWeek.filter((s) => s.dayLabel).map((s) => s.dayLabel as string)),
+    ...new Set(thisWeek.flatMap((s) => (s.workout ? [s.workout.name] : []))),
   ].join(', ');
 
   const block = active ? blockOf(active, now) : null;
 
-  /* ── THE BLOCK'S OWN ADHERENCE, WINDOWED BY DATE AND NOT BY `programId` ───
+  /* The block's own count, from the server: done sessions whose workout is in
+     this plan, against the plan's workouts. One grouped count, whatever the
+     block's length — the old figure was windowed by a ninety-day fetch. */
+  const kept = active?.progress.sessionsDone ?? 0;
+  const spent = active?.progress.sessionsPlanned ?? 0;
 
-     `sessions` carries one, and counting on it would be the obvious reading.
-     It is also the one that cannot be checked: the assign handler does not end
-     the program already running (see the timeline's `isLive` below), so a
-     client can hold two `active` rows and the diary's attribution between them
-     is whatever the last write said. What is not in doubt is WHEN a session
-     was, and a block is a stretch of dates — so the window is the block's, from
-     its start to today, and the figure is *of the sessions booked since this
-     block started, how many were kept*.
-
-     The floor is the fetch's. `getClientSessionsWindowed` reads ninety days
-     back, so a block longer than that would silently lose its opening weeks and
-     report a count for a period it cannot see. Clamping the window to what was
-     fetched keeps the COUNT true and moves the date in the label instead — the
-     one that says which period the number is about. */
-  const adherenceFrom = block ? Math.max(block.startMs, now - 89 * DAY_MS) : 0;
-  const inBlock = block
-    ? sessions.filter(
-        (s) =>
-          s.scheduledAt >= adherenceFrom &&
-          s.scheduledAt <= Math.min(now, block.endMs ?? now) &&
-          s.status !== 'cancelled',
-      )
-    : [];
-  const kept = inBlock.filter((s) => s.status === 'done').length;
-  const spent = inBlock.length;
-
-  const firstStart = sorted.length > 0 ? sorted[sorted.length - 1].startDate : null;
+  const firstStart = sorted.map((p) => p.startDate).filter((d): d is string => !!d).sort()[0] ?? null;
   const showGap = firstStart && new Date(firstStart).getTime() > client.createdAt + 3 * DAY_MS;
 
   return (
@@ -266,29 +247,11 @@ export function ProgramTab({
           <Card.Body divided flush className="cfpl__figs">
             <Figures>
               <Figure
-                /* THE LABEL NAMES THE WINDOW ONLY WHERE THE WINDOW IS NOT THE
-                   BLOCK. `Kept since 26 Jul` is exact and it is also the
-                   longest label in a 211px column — and on every block shorter
-                   than thirteen weeks, which is all of them on this roster, it
-                   repeats the start date the range line already carries two
-                   rows up. It says `this block` where the two agree and names
-                   the date where the fetch's ninety days cut the window short,
-                   which is the only case the reader could be misled by. */
-                label={
-                  adherenceFrom > block.startMs
-                    ? `Kept since ${dateStr(adherenceFrom)}`
-                    : 'Kept this block'
-                }
+                label="Done this block"
                 value={spent > 0 ? kept : '—'}
                 of={spent > 0 ? spent : undefined}
-                /* Never `danger`. See the note at the top of this file. */
-                tone={spent > 0 && kept / spent < 0.7 ? 'warn' : 'neutral'}
               />
-              <Figure
-                label="This week"
-                value={plannedThisWeek > 0 ? loggedThisWeek : '—'}
-                of={plannedThisWeek > 0 ? plannedThisWeek : undefined}
-              />
+              <Figure label="Left this week" value={leftThisWeek > 0 ? leftThisWeek : '—'} />
               <Figure
                 label={block.state === 'overrun' ? 'Days over' : 'Days to run'}
                 value={block.daysLeft === null ? 'Open' : Math.abs(block.daysLeft)}
@@ -335,7 +298,7 @@ export function ProgramTab({
                   Assign the next plan
                 </Button>
                 <Button
-                  href={`/clients/${active.clientId}/program/${active.id}`}
+                  href={`/clients/${clientId}/program/${active.id}`}
                   variant="secondary"
                   icon={<ListIcon />}
                 >
@@ -345,7 +308,7 @@ export function ProgramTab({
             ) : (
               <>
                 <Button
-                  href={`/clients/${active.clientId}/program/${active.id}`}
+                  href={`/clients/${clientId}/program/${active.id}`}
                   variant="primary"
                   icon={<ListIcon />}
                 >
@@ -407,7 +370,7 @@ export function ProgramTab({
                      March's plan, and before this the answer was "it is in the
                      database". The whole row is the door now and not the name
                      inside it — see `.tl__i--link`. */
-                  href={`/clients/${p.clientId}/program/${p.id}`}
+                  href={`/clients/${clientId}/program/${p.id}`}
                   mark={sorted.length - i}
                   title={p.name}
                   aside={

@@ -5,10 +5,10 @@ import { redirect } from 'next/navigation';
 import { getToken } from '@/lib/auth/session';
 import {
   ClientDetailApiError,
-  getClientDetail,
-  getTrainerDetail,
   getClientFilePayload,
   type ClientFilePayload,
+  type ClientTab,
+  type TabOptions,
 } from './client-api';
 
 export type ClientFileResult =
@@ -17,24 +17,20 @@ export type ClientFileResult =
   | { ok: false; kind: 'unreachable' }
   | { ok: false; kind: 'refused'; status: number };
 
-export async function requireClientFile(clientId: string): Promise<ClientFileResult> {
-  const token = await getToken();
-  if (!token) redirect('/sign-in');
-
+/** The header plus the open tab's own reads (R25). A client that isn't yours is a 404. */
+export async function requireClientFile(
+  clientId: string,
+  tab: ClientTab,
+  options: TabOptions = {},
+): Promise<ClientFileResult> {
+  if (!(await getToken())) redirect('/sign-in');
   try {
-    // Quick auth check before loading the full payload
-    const trainer = await getTrainerDetail();
-    if (!trainer.setupComplete) redirect('/setup');
-
-    // Verify the client exists and belongs to this trainer (404 if not)
-    await getClientDetail(clientId);
-
-    const payload = await getClientFilePayload(clientId);
+    const payload = await getClientFilePayload(clientId, tab, options);
     return { ok: true, payload, now: Date.now() };
   } catch (e) {
     if (e instanceof ClientDetailApiError) {
       if (e.status === 401) redirect('/sign-in');
-      if (e.status === 404) return { ok: false, kind: 'not_found' };
+      if (e.status === 404 || e.status === 400) return { ok: false, kind: 'not_found' };
       if (e.status === null) return { ok: false, kind: 'unreachable' };
       return { ok: false, kind: 'refused', status: e.status };
     }

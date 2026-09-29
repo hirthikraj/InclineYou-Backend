@@ -67,7 +67,11 @@ public class PackageReadService {
             /** Σ refund rows — 1.1. */
             String amountRefunded,
             String amountDue,
-            long createdAt
+            /** Epoch ms; set once the pack stopped being live (package_closed). */
+            Long closedAt,
+            long createdAt,
+            /** {@code package.updated_at} as epoch ms. A payment write touches it too, so it moves with amountDue. */
+            String version
     ) {}
 
     /**
@@ -112,7 +116,7 @@ public class PackageReadService {
                    currency, start_date::text AS start_date, end_date::text AS end_date,
                    due_date::text AS due_date, status, paused_at, paused_days,
                    trainer_share_percent, trainer_share_amount, amount_paid, amount_refunded,
-                   amount_due, created_at
+                   amount_due, closed_at, created_at, updated_at
             """;
 
     /**
@@ -254,55 +258,68 @@ public class PackageReadService {
         }
         p.put("limit", n + 1);
 
-        var rows = jdbc.query("""
-                SELECT y.id::text AS id, y.client_id::text AS client_id, y.package_id::text AS package_id,
-                       c.name AS client_name, k.name AS package_name,
-                       y.amount, y.currency, y.collected_by, y.method, y.status, y.reference, y.note,
-                       y.paid_at, y.written_off_at, y.refunded_at, y.created_at, y.updated_at,
-                       %s AS book_at, sh.share
-                FROM payment y
-                JOIN client c ON c.id = y.client_id
-                JOIN package k ON k.id = y.package_id
-                LEFT JOIN payment_trainer_share sh ON sh.payment_id = y.id
-                WHERE %s
-                ORDER BY book_at DESC, y.id DESC
-                LIMIT :limit
-                """.formatted(BOOK_AT, String.join(" AND ", page)), p, (rs, i) -> {
-            BigDecimal amount = rs.getBigDecimal("amount");
-            BigDecimal share = rs.getBigDecimal("share");
-            // Negative on a refund in the view; the split names parts of THIS
-            // row's amount, so it is shown as magnitudes.
-            Split split = share == null ? null
-                    : new Split(money(amount.subtract(share.abs())), money(share.abs()));
-            long updated = rs.getTimestamp("updated_at").getTime();
-            return new PaymentRow(
-                    rs.getString("id"),
-                    rs.getString("client_id"),
-                    rs.getString("package_id"),
-                    rs.getString("client_name"),
-                    rs.getString("package_name"),
-                    money(amount),
-                    rs.getString("currency"),
-                    rs.getString("collected_by"),
-                    rs.getString("method"),
-                    rs.getString("status"),
-                    rs.getString("reference"),
-                    rs.getString("note"),
-                    epochOrNull(rs.getTimestamp("paid_at")),
-                    epochOrNull(rs.getTimestamp("written_off_at")),
-                    epochOrNull(rs.getTimestamp("refunded_at")),
-                    rs.getTimestamp("book_at").getTime(),
-                    split,
-                    rs.getTimestamp("created_at").getTime(),
-                    String.valueOf(updated),
-                    Cursor.key(rs.getTimestamp("book_at")));
-        });
+        var rows = jdbc.query(PAYMENT_SELECT.formatted(String.join(" AND ", page)), p, PackageReadService::paymentRow);
         var out = Page.of(rows, n, r -> Cursor.encode(r.cursorKey(), r.id()));
 
         Integer total = !q.includeTotal() ? null : jdbc.queryForObject(
                 "SELECT count(*) FROM payment y JOIN client c ON c.id = y.client_id WHERE " + filtered,
                 p, Integer.class);
         return new Ledger(workspaceCurrency(), out.items(), out.nextCursor(), total);
+    }
+
+    /** The ledger row's SELECT, over one WHERE; ordered for the page. */
+    private static final String PAYMENT_SELECT = """
+            SELECT y.id::text AS id, y.client_id::text AS client_id, y.package_id::text AS package_id,
+                   c.name AS client_name, k.name AS package_name,
+                   y.amount, y.currency, y.collected_by, y.method, y.status, y.reference, y.note,
+                   y.paid_at, y.written_off_at, y.refunded_at, y.created_at, y.updated_at,
+                   """ + BOOK_AT + """
+             AS book_at, sh.share
+            FROM payment y
+            JOIN client c ON c.id = y.client_id
+            JOIN package k ON k.id = y.package_id
+            LEFT JOIN payment_trainer_share sh ON sh.payment_id = y.id
+            WHERE %s
+            ORDER BY book_at DESC, y.id DESC
+            LIMIT :limit
+            """;
+
+    /** One payment in the ledger's shape — what every money write answers with. Empty if not this trainer's. */
+    public Optional<PaymentRow> payment(UUID trainerId, UUID paymentId) {
+        return jdbc.query(PAYMENT_SELECT.formatted("y.id = :yid::uuid AND y.trainer_id = :tid::uuid"),
+                Map.of("tid", trainerId.toString(), "yid", paymentId.toString(), "limit", 1),
+                PackageReadService::paymentRow).stream().findFirst();
+    }
+
+    private static PaymentRow paymentRow(ResultSet rs, int i) throws SQLException {
+        BigDecimal amount = rs.getBigDecimal("amount");
+        BigDecimal share = rs.getBigDecimal("share");
+        // Negative on a refund in the view; the split names parts of THIS
+        // row's amount, so it is shown as magnitudes.
+        Split split = share == null ? null
+                : new Split(money(amount.subtract(share.abs())), money(share.abs()));
+        long updated = rs.getTimestamp("updated_at").getTime();
+        return new PaymentRow(
+                rs.getString("id"),
+                rs.getString("client_id"),
+                rs.getString("package_id"),
+                rs.getString("client_name"),
+                rs.getString("package_name"),
+                money(amount),
+                rs.getString("currency"),
+                rs.getString("collected_by"),
+                rs.getString("method"),
+                rs.getString("status"),
+                rs.getString("reference"),
+                rs.getString("note"),
+                epochOrNull(rs.getTimestamp("paid_at")),
+                epochOrNull(rs.getTimestamp("written_off_at")),
+                epochOrNull(rs.getTimestamp("refunded_at")),
+                rs.getTimestamp("book_at").getTime(),
+                split,
+                rs.getTimestamp("created_at").getTime(),
+                String.valueOf(updated),
+                Cursor.key(rs.getTimestamp("book_at")));
     }
 
     /** Every money response says its currency; an aggregate carries the workspace's. */
@@ -369,7 +386,9 @@ public class PackageReadService {
                 money(rs.getBigDecimal("amount_paid")),
                 money(rs.getBigDecimal("amount_refunded")),
                 money(rs.getBigDecimal("amount_due")),
-                rs.getTimestamp("created_at").getTime());
+                epochOrNull(rs.getTimestamp("closed_at")),
+                rs.getTimestamp("created_at").getTime(),
+                String.valueOf(rs.getTimestamp("updated_at").getTime()));
     }
 
     /** Money is a decimal string on the wire, never a float. Null stays null. */

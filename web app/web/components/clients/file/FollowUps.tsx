@@ -129,7 +129,8 @@ export function FollowUps({
             <li className="fup__row" key={entry.id}>
               <span className="fup__when">{contactedLabel(entry.sentAt, now)}</span>
               <span className="fup__body">
-                <b>{entry.templateLabel}</b>
+                {/* v1 sends the template id alone; the label is this list's. */}
+                <b>{OFFERED.find((o) => o.template === entry.templateName)?.label ?? entry.templateLabel}</b>
                 {/*
                   `message` is null on every row written before V32 added the
                   column, and it is left as an absence rather than re-rendered

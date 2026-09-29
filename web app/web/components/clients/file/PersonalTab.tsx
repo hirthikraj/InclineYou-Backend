@@ -9,14 +9,16 @@ import type { ClientDetailWire, ClientNoteWire } from '@/lib/clients/client-api'
 import { formatPhone } from '@/lib/auth/policy';
 import { saveContact, savePhysical } from '@/lib/clients/contact-actions';
 import { ageFrom, birthDateStr } from '@/lib/clients/physical';
-import { archiveClient } from '@/lib/clients/status-actions';
+import { archiveClient, unarchiveClient, type ArchiveReason } from '@/lib/clients/status-actions';
 import {
   addNote,
   deleteNote,
   saveNote,
-  setNoteShared,
   setNotePinned,
+  undeleteNote,
 } from '@/lib/clients/notes-actions';
+import { useToast } from '@/lib/toast/store';
+import { ARCHIVE_REASONS } from '@/components/clients/Clients';
 
 import { TrashIcon, longDateStr, shortDate } from './shared';
 import { Button } from '@/web-components/ui/Button';
@@ -28,7 +30,7 @@ import { Markup } from '@/web-components/ui/Markup';
 import { MarkupField } from '@/web-components/ui/MarkupField';
 import { NoteCard } from '@/web-components/ui/NoteCard';
 import { PromptList } from '@/web-components/ui/PromptList';
-import { Switch } from '@/web-components/ui/Switch';
+import { Select } from '@/web-components/ui/Select';
 import { TextField } from '@/web-components/ui/Field';
 import { Message } from '@/web-components/ui/Message';
 
@@ -109,14 +111,11 @@ import { Message } from '@/web-components/ui/Message';
 
 function NoteRow({
   clientId,
-  clientFirst,
   note,
   busy,
   onBusy,
 }: {
   clientId: string;
-  /** Named in the switch's label, because *shared* has to say WITH WHOM. */
-  clientFirst: string;
   note: ClientNoteWire;
   busy: boolean;
   onBusy: (fn: () => Promise<void>) => void;
@@ -129,9 +128,7 @@ function NoteRow({
      is about the day it was last true, not the day it was first written. */
   const stamp = note.updatedAt > note.createdAt + 60_000 ? note.updatedAt : note.createdAt;
   const edited = note.updatedAt > note.createdAt + 60_000;
-  /* `=== true`, because the field is absent on every note written before it
-     existed and the safe reading of "we do not know" is private. */
-  const shared = note.sharedWithClient === true;
+  const toast = useToast();
 
   if (editing)
     return (
@@ -143,7 +140,6 @@ function NoteRow({
            mode change that reads as a state change. `.ncard--edit` overrides the
            ground and nothing else. */
         pinned={note.pinned}
-        shared={shared}
         meta={longDateStr(stamp)}
         actions={
           <>
@@ -195,47 +191,10 @@ function NoteRow({
   return (
     <NoteCard
       pinned={note.pinned}
-      shared={shared}
       meta={
         <>
           {longDateStr(stamp)}
           {edited && ' · edited'}
-        </>
-      }
-      /* ── WHO CAN READ IT, AT THE LEFT OF THE FOOTER ───────────────────
-
-         The switch is per note because the decision is per note: the same
-         trainer writes *knee still clicking on step-ups* and *nice work on the
-         80kg — that is a 10kg PR since March* on the same afternoon, and only
-         one of them is for the client to read.
-
-         It carries a WORD beside it and not just the switch. A bare toggle says
-         nothing about which way is which, and the thing being got wrong is not
-         a preference — it is whether somebody else is reading a sentence
-         written candidly. So the state is spelt out, and it names the person.
-
-         First in the footer, ahead of pin / edit / delete: it is the only
-         control on the card that changes who the note is FOR, and the three
-         beside it are all about the trainer's own copy. */
-      state={
-        <>
-          <Switch
-            checked={shared}
-            disabled={busy}
-            label={
-              shared
-                ? `Stop showing this note to ${clientFirst}`
-                : `Show this note to ${clientFirst}`
-            }
-            onChange={(next) =>
-              onBusy(async () => {
-                await setNoteShared(clientId, note.id, next);
-              })
-            }
-          />
-          <span className={shared ? 'small' : 'small ink3'}>
-            {shared ? `${clientFirst} can read this` : 'Only you'}
-          </span>
         </>
       }
       actions={
@@ -280,7 +239,15 @@ function NoteRow({
                 disabled={busy}
                 onClick={() =>
                   onBusy(async () => {
-                    await deleteNote(clientId, note.id);
+                    const result = await deleteNote(clientId, note.id);
+                    if (!result.ok) return;
+                    /* Deleting is soft, and Undo is `…/restore` — one toast,
+                       one choice, the few seconds a mis-tap is noticed in. */
+                    toast.show({
+                      variant: 'receipt',
+                      title: 'Note deleted',
+                      action: { label: 'Undo', onClick: () => void undeleteNote(clientId, note.id) },
+                    });
                   })
                 }
               >
@@ -305,9 +272,8 @@ function NoteRow({
         </>
       }
     >
-      {/* `Markup` and never the bare string. The field writes markers; anything
-          that prints the raw value shows a client `**landmine press**` with the
-          asterisks in it — and on a shared note the reader IS the client. */}
+      {/* `Markup` and never the bare string: the field writes markers, and
+          anything that prints the raw value shows `**landmine press**`. */}
       <Markup value={note.body} />
     </NoteCard>
   );
@@ -340,13 +306,17 @@ function NoteRow({
  */
 function ContactCard({
   clientId,
+  version,
   name,
-  phone,
+  phone: e164,
 }: {
   clientId: string;
+  version: string;
   name: string;
   phone: string | null;
 }) {
+  /* E.164 on the wire; the box holds the ten digits the trainer types. */
+  const phone = e164 ? e164.replace(/\D/g, '').replace(/^91(?=\d{10}$)/, '') : null;
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(name);
   const [draftPhone, setDraftPhone] = useState(phone ?? '');
@@ -404,7 +374,7 @@ function ContactCard({
     if (!dirty || pending) return;
     setError(null);
     start(async () => {
-      const result = await saveContact(clientId, draftName, draftPhone);
+      const result = await saveContact(clientId, version, draftName, draftPhone);
       /* A save that came back is a save that is done: the editor closes and the
          readout underneath it is now the new values, which says *saved* more
          plainly than a line of green text under a form would. */
@@ -555,6 +525,7 @@ function PhysicalCard({
   const [editing, setEditing] = useState(false);
   const [height, setHeight] = useState(client.heightCm == null ? '' : String(client.heightCm));
   const [dob, setDob] = useState(client.dateOfBirth ?? '');
+  const [activity, setActivity] = useState(client.activityLevel ?? '');
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -575,11 +546,13 @@ function PhysicalCard({
   const [committed, setCommitted] = useState({
     h: client.heightCm,
     d: client.dateOfBirth,
+    a: client.activityLevel,
   });
-  if (committed.h !== client.heightCm || committed.d !== client.dateOfBirth) {
-    setCommitted({ h: client.heightCm, d: client.dateOfBirth });
+  if (committed.h !== client.heightCm || committed.d !== client.dateOfBirth || committed.a !== client.activityLevel) {
+    setCommitted({ h: client.heightCm, d: client.dateOfBirth, a: client.activityLevel });
     setHeight(client.heightCm == null ? '' : String(client.heightCm));
     setDob(client.dateOfBirth ?? '');
+    setActivity(client.activityLevel ?? '');
   }
 
   const age = ageFrom(client.dateOfBirth ?? null, now);
@@ -588,7 +561,9 @@ function PhysicalCard({
     if (pending) return;
     setError(null);
     start(async () => {
-      const result = await savePhysical(clientId, { heightCm: height, dateOfBirth: dob });
+      const result = await savePhysical(clientId, client.version, {
+        heightCm: height, dateOfBirth: dob, activityLevel: activity,
+      });
       if (result.ok) close();
       else setError(result.message ?? 'It did not save.');
     });
@@ -599,6 +574,7 @@ function PhysicalCard({
   function cancel() {
     setHeight(client.heightCm == null ? '' : String(client.heightCm));
     setDob(client.dateOfBirth ?? '');
+    setActivity(client.activityLevel ?? '');
     setError(null);
     close();
   }
@@ -630,6 +606,14 @@ function PhysicalCard({
             disabled={pending}
             style={{ marginTop: 12 }}
             onChange={(e) => setDob(e.target.value)}
+          />
+          <Select
+            label="Activity level"
+            value={activity}
+            disabled={pending}
+            style={{ marginTop: 12 }}
+            options={[{ value: '', label: 'Not set' }, ...ACTIVITY]}
+            onChange={(e) => setActivity(e.target.value)}
           />
           <div className="cffm">
             <Button type="submit" variant="primary" disabled={pending}>
@@ -688,6 +672,12 @@ function PhysicalCard({
         >
           {client.dateOfBirth == null ? <FactList.Blank /> : birthDateStr(client.dateOfBirth)}
         </FactList.Row>
+
+        <FactList.Row k="Activity level">
+          {client.activityLevel == null
+            ? <FactList.Blank />
+            : ACTIVITY.find((o) => o.value === client.activityLevel)?.label ?? client.activityLevel}
+        </FactList.Row>
       </FactList>
     </Card>
   );
@@ -695,93 +685,111 @@ function PhysicalCard({
 
 /* ──────────────────────────────────────────────── removing a client ── */
 
+const ACTIVITY = [
+  { value: 'sedentary', label: 'Sedentary' },
+  { value: 'light', label: 'Light' },
+  { value: 'moderate', label: 'Moderate' },
+  { value: 'active', label: 'Active' },
+  { value: 'very_active', label: 'Very active' },
+];
+
 /**
- * THE LAST CARD, AND THE ONLY DESTRUCTIVE CONTROL ON THE FILE.
+ * ARCHIVE, NOT DELETE — and the copy finally says so. The card read *removing
+ * this client is permanent* over a button that archived; now the button is the
+ * v1 verb (Clients A3) and the sentence is what it does: off the roster, future
+ * sessions cancelled, nothing deleted, so Unarchive is a real way back.
  *
- * ── IT SPANS THE FOOT OF THE GRID NOW ───────────────────────────────────────
- *
- * It was the third card in the record column, and both halves of that were
- * wrong. A danger zone is not a peer of the phone number above it — it is what
- * a screen ends with, after everything the screen is FOR — and putting it in
- * the column cost 161px that the notes wall beside it then had to match. It now
- * takes `.cfdz`, which spans both tracks and is ordered last; `.cfgrid--ov >
- * .cffup` already had the shape one tab over.
- *
- * ── ONE THING THE COPY AND THE BUTTON DISAGREE ABOUT ────────────────────────
- *
- * The wording here is the reference design's, asked for verbatim: *removing
- * this client is permanent and cannot be undone*. What
- * `DELETE /v1/clients/{id}` actually does is set `status = 'archived'` and
- * `membership_status = 'removed'` — the row, their sessions, their payments and
- * their history all stay, and the roster's own archive confirm says so in as
- * many words: *"nothing is deleted."*
- *
- * So this screen currently overstates what the button does. That is recorded in
- * `BACKEND_GAPS.md` rather than quietly softened here, because the resolution is
- * a product decision and not a copy edit: either a real erasure endpoint lands
- * and the sentence becomes true, or the sentence changes. Both are somebody's
- * call. What must not happen is the sentence being trusted in the meantime —
- * hence this paragraph, and the gap entry it points at.
- *
- * ── THE CONFIRM IS IN PLACE, AND IT TYPES NOTHING ───────────────────────────
- *
- * Two clicks, not a dialog and not a type-the-name box. The file is already
- * open on one person, their name is at the top of it, and a confirmation that
- * makes somebody transcribe it is protecting against a mis-tap with a chore.
- * Archiving is recoverable at the database and reversible by re-adding; the
- * gesture is worth a second press and not a ceremony.
+ * It asks why, from the roster's own six `client_archive_reason`s, because the
+ * reason is what the Archived list reads back later. The confirm stays in place,
+ * two presses, no dialog: the file is already open on this one person.
  */
-function RemoveCard({ clientId, clientName }: { clientId: string; clientName: string }) {
+function ArchiveCard({ client }: { client: ClientDetailWire }) {
   const [confirming, setConfirming] = useState(false);
+  const [reason, setReason] = useState<ArchiveReason>('goal_reached');
+  const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
-  const first = clientName.split(' ')[0];
+  const first = client.name.split(' ')[0];
 
-  function remove() {
+  function write(fn: () => ReturnType<typeof archiveClient>, then?: () => void) {
     setError(null);
     start(async () => {
-      const result = await archiveClient(clientId, 'other', null);
-      /* To the roster, and not back to this file. The file of somebody who has
-         just been taken off the roster is a screen with nothing on it that is
-         still true, and leaving the trainer there is how they press the button
-         twice. */
-      if (result.ok) router.push('/clients');
+      /* {client, effects} (R72): all-zero effects is "already done" in another
+         tab, which is a success and not a refusal. */
+      const result = await fn();
+      if (result.ok) then?.();
       else setError(result.message ?? 'That did not save. Nothing changed.');
     });
   }
 
-  return (
-    <Card as="section" tone="danger" title={`Remove ${first}`} className="cfdz">
-      {/* The sentence and the verb on one line at a desk, stacked on a phone.
-          Spanning the grid gave this card 1,409px and the sentence is 62
-          characters: left as a block with the buttons under it, the card was a
-          62-character line with 900px of nothing after it and a button below
-          the fold of its own card. */}
-      <div className="cfdz__r">
-        <p className="small">Removing this client is permanent and cannot be undone.</p>
+  if (client.status === 'archived') {
+    return (
+      <Card as="section" title={`${first} is archived`} className="cfdz">
+        <div className="cfdz__r">
+          <p className="small">Unarchive to put them back on the roster. Their kept week is booked again.</p>
+          <div className="cfdz__a">
+            <Button variant="secondary" disabled={pending} onClick={() => write(() => unarchiveClient(client.id))}>
+              {pending ? 'Bringing back…' : 'Unarchive'}
+            </Button>
+          </div>
+        </div>
+        {error && (
+          <Message tone="err" alert style={{ marginTop: 11 }}>
+            {error}
+          </Message>
+        )}
+      </Card>
+    );
+  }
 
+  return (
+    <Card as="section" tone="danger" title={`Archive ${first}`} className="cfdz">
+      <div className="cfdz__r">
+        <p className="small">
+          {first} comes off the roster and their future sessions are cancelled. Nothing is deleted.
+        </p>
         <div className="cfdz__a">
           {confirming ? (
             <>
-              <Button variant="danger" disabled={pending} onClick={remove}>
-                {pending ? 'Removing…' : `Yes, remove ${first}`}
+              <Select
+                label="Why"
+                hideLabel
+                value={reason}
+                disabled={pending}
+                options={ARCHIVE_REASONS.map(([value, label]) => ({ value, label }))}
+                onChange={(e) => setReason(e.target.value as ArchiveReason)}
+              />
+              <TextField
+                label="Note"
+                hideLabel
+                placeholder="Note (optional)"
+                value={note}
+                maxLength={200}
+                disabled={pending}
+                onChange={(e) => setNote(e.target.value)}
+              />
+              <Button
+                variant="danger"
+                disabled={pending}
+                /* To the roster: the file of somebody just taken off it is a
+                   screen where the button gets pressed twice. */
+                onClick={() => write(() => archiveClient(client.id, reason, note), () => router.push('/clients'))}
+              >
+                {pending ? 'Archiving…' : `Archive ${first}`}
               </Button>
-              {/* Dead while the write is away: the request cannot be recalled,
-                  and a live way out beside an in-flight delete is a button that
-                  lies about what pressing it will do. */}
+              {/* Dead while the write is away: it cannot be recalled. */}
               <Button variant="ghost" disabled={pending} onClick={() => setConfirming(false)}>
                 Keep them
               </Button>
             </>
           ) : (
             <Button variant="danger" onClick={() => setConfirming(true)}>
-              Delete
+              Archive
             </Button>
           )}
         </div>
       </div>
-
       {error && (
         <Message tone="err" alert style={{ marginTop: 11 }}>
           {error}
@@ -837,19 +845,13 @@ function promptsFor(first: string): string[] {
  * reason the tab gets opened. So the right column gets the width.
  */
 export function PersonalTab({
-  clientId,
-  clientName,
-  clientPhone,
   client,
   weightKg,
   weightAt,
   now,
   notes,
 }: {
-  clientId: string;
-  clientName: string;
-  clientPhone: string | null;
-  /** The whole row, for the physical card's three fields. */
+  /** The header row: the physical card's fields, the contact card's name and number, and the If-Match `version`. */
   client: ClientDetailWire;
   /** The latest assessment weight reading, already picked out by the file. */
   weightKg: number | null;
@@ -865,9 +867,12 @@ export function PersonalTab({
   const [asked, setAsked] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [pinNew, setPinNew] = useState(false);
-  const [shareNew, setShareNew] = useState(false);
+  /* Minted when the composer opens and kept until the save lands, so a retry
+     answers the note the first attempt made instead of writing two. */
+  const [noteId, setNoteId] = useState(() => crypto.randomUUID());
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const { id: clientId, name: clientName, phone: clientPhone } = client;
   const first = clientName.split(' ')[0];
 
   /* Pinned first, then newest. The strip's contents should be at the top of the
@@ -876,7 +881,6 @@ export function PersonalTab({
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     return b.createdAt - a.createdAt;
   });
-  const sharedCount = notes.filter((n) => n.sharedWithClient === true).length;
 
   function run(fn: () => Promise<void>) {
     setError(null);
@@ -901,7 +905,6 @@ export function PersonalTab({
     setAsked(null);
     setDraft('');
     setPinNew(false);
-    setShareNew(false);
     setError(null);
   }
 
@@ -909,11 +912,11 @@ export function PersonalTab({
     if (!draft.trim() || pending) return;
     setError(null);
     start(async () => {
-      const result = await addNote(clientId, draft, pinNew, shareNew);
+      const result = await addNote(clientId, noteId, draft, pinNew);
       if (result.ok) {
+        setNoteId(crypto.randomUUID());
         setDraft('');
         setPinNew(false);
-        setShareNew(false);
         setComposing(false);
         setAsked(null);
       } else {
@@ -936,33 +939,24 @@ export function PersonalTab({
           weightAt={weightAt}
           now={now}
         />
-        <ContactCard clientId={clientId} name={clientName} phone={clientPhone} />
+        <ContactCard clientId={clientId} version={client.version} name={clientName} phone={clientPhone} />
       </div>
 
       <Card
         as="section"
         title="Notes"
-        /* A count, not a filter. A trainer with three notes does not need a
-           segment to find one, and the number is the one thing the head can say
-           that the wall below it cannot say at a glance — how many are for the
-           client to read. The clause only appears when one is. */
+        /* A count, not a filter: a trainer with three notes does not need a
+           segment to find one. */
         aside={
           notes.length > 0 ? (
             <span className="small ink3">
               {notes.length === 1 ? '1 note' : `${notes.length} notes`}
-              {sharedCount > 0 && ` · ${sharedCount} shared with ${first}`}
             </span>
           ) : null
         }
         flush
         className={pending && !composing ? 'cfnotes cfnotes--busy' : 'cfnotes'}
       >
-        {/* THE STANDING PRIVACY LINE IS GONE, and its removal is the same
-            change as the switch on each card. It read *Only you see these* —
-            which stopped being true of the whole list the moment a note could
-            be shared, and a blanket sentence that is wrong for a quarter of the
-            cards under it is worse than no sentence. What it was really for is
-            now said per note, by the control that decides it. */}
         <div className="cfnw">
           {/* ── THE INVITATION IS AN ORDINARY CELL, AND THAT IS WHAT CLOSES
                  THE HOLE BESIDE A SINGLE NOTE ─────────────────────────────
@@ -986,8 +980,7 @@ export function PersonalTab({
                     drawing a second toolbar over a second format. The pairing is
                     the rule stated on `Markup`: a field edited with markers MUST
                     be printed with `Markup` everywhere it is printed, which here
-                    is the card below, and — for a shared note — the client's own
-                    screen.
+                    is the card below.
 
                     Ctrl/⌘+Enter still saves; `onCommit` is the component's name
                     for it, because Enter is a new line in a box that takes more
@@ -1020,16 +1013,6 @@ export function PersonalTab({
                       checked={pinNew}
                       onChange={(e) => setPinNew(e.target.checked)}
                     />
-                    {/* Offered at write time for the same reason pinning is, and
-                        with more at stake: a note meant for the client that is
-                        written private and shared a moment later has already
-                        been the wrong thing for that moment. The default is off,
-                        here and everywhere. */}
-                    <Checkbox
-                      label={`Show it to ${first}`}
-                      checked={shareNew}
-                      onChange={(e) => setShareNew(e.target.checked)}
-                    />
                   </div>
                   {/* Written out rather than as ⌘↵. FOUND BY RENDERING: the two
                       glyphs fall outside the mono face and came back as tofu,
@@ -1061,14 +1044,13 @@ export function PersonalTab({
               kind="first-run"
               icon={<Note size={22} />}
               title="Nothing written down yet"
-              body={`The things that never fit in a field — how ${first} likes to train, what their week looks like, what to ask about next time. Only you can read a note unless you say otherwise.`}
+              body={`The things that never fit in a field — how ${first} likes to train, what their week looks like, what to ask about next time. Only you can read a note.`}
             />
           ) : (
             ordered.map((note) => (
               <NoteRow
                 key={note.id}
                 clientId={clientId}
-                clientFirst={first}
                 note={note}
                 busy={pending}
                 onBusy={run}
@@ -1104,7 +1086,7 @@ export function PersonalTab({
         )}
       </Card>
 
-      <RemoveCard clientId={clientId} clientName={clientName} />
+      <ArchiveCard client={client} />
     </div>
   );
 }

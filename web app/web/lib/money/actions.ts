@@ -2,7 +2,14 @@
 
 import { revalidatePath } from 'next/cache';
 
-import { MoneyApiError, patch, post } from './api';
+import {
+  ClientDetailApiError,
+  markPaymentPaid as markPaidV1,
+  recordPayment as recordV1,
+  writeOffPayment as writeOffV1,
+} from '@/lib/clients/client-api';
+
+import { MoneyApiError, post } from './api';
 
 export interface MoneyWriteResult {
   ok: boolean;
@@ -10,6 +17,14 @@ export interface MoneyWriteResult {
 }
 
 function fail(error: unknown, subject: string): MoneyWriteResult {
+  /* The v1 writers answer with the server's own sentence — "₹4,000 is all
+     that's owed on this pack" — which beats any line written here. */
+  if (error instanceof ClientDetailApiError) {
+    if (error.status === 401) return { ok: false, message: 'Your session expired. Sign in again.' };
+    if (error.detail) return { ok: false, message: error.detail };
+    if (error.status === null) return { ok: false, message: `${subject} could not reach the server. Nothing changed.` };
+    return { ok: false, message: `${subject} did not go through. Nothing changed.` };
+  }
   if (error instanceof MoneyApiError) {
     if (error.status === null) {
       return { ok: false, message: `${subject} could not reach the server. Nothing changed.` };
@@ -45,36 +60,49 @@ function refresh(): void {
 }
 
 /**
- * Record a payment against a package.
+ * The Business screens still speak their old method words — `bank`, and `gym`
+ * for *the gym's desk took it*. v1 has `bank_transfer`, and a gym's desk is not
+ * a method at all: the database stamps `collectedBy` from the client's type and
+ * a gym-collected row carries no method (R75). So `gym` goes out as null.
+ */
+function v1Method(method: string | null | undefined): 'upi' | 'cash' | 'bank_transfer' | null {
+  if (!method || method === 'gym') return null;
+  if (method === 'bank') return 'bank_transfer';
+  return method as 'upi' | 'cash' | 'bank_transfer';
+}
+
+/**
+ * Record a payment against a package — `POST /v1/packages/{id}/payments`.
  *
- * `paidAt` is the one that changed the meaning of this call. It used to send
- * three fields and the server wrote every row `pending`, so a trainer who had
- * just been handed cash recorded a debt — the payments list's *Collected* never moved,
- * and the money only counted if someone remembered to confirm it from a screen
- * that has no confirm button. Sending the date the money changed hands writes it
- * `paid` and stamps the gym's cut in the same statement.
- *
- * It is optional here for the one case that is genuinely still pending: a UPI
- * intent fired at a client who has not paid yet.
+ * `paidAt` decides the status: sent, the row is `paid` on that instant; left
+ * out, it is `pending` — the one case that is genuinely still awaited. The
+ * amount goes out as a decimal string (money is never a float on the wire), and
+ * `collectedBy` is not sent: the server refuses it as an unknown key, because
+ * it is the database's to stamp. `id` is minted by the caller when its sheet
+ * opens, so a retried tap answers the payment the first one made.
  */
 export async function recordPayment(input: {
+  id?: string;
   packageId: string;
   amount: number;
-  method: string;
-  collectedBy: 'trainer' | 'gym';
+  method: string | null;
+  /** Kept for the Business panel's signature; the server stamps who collected. */
+  collectedBy?: 'trainer' | 'gym';
   /** Epoch ms — when the money arrived. Omit for a payment still awaited. */
   paidAt?: number;
   upiReference?: string;
   note?: string;
 }): Promise<MoneyWriteResult> {
+  const method = v1Method(input.method);
   try {
-    await post(`/v1/packages/${input.packageId}/payments`, {
-      amount: input.amount,
-      method: input.method,
-      collectedBy: input.collectedBy,
-      ...(input.paidAt !== undefined ? { paidAt: input.paidAt } : {}),
-      ...(input.upiReference ? { upiReference: input.upiReference } : {}),
-      ...(input.note ? { note: input.note } : {}),
+    await recordV1(input.packageId, {
+      id: input.id ?? crypto.randomUUID(),
+      amount: input.amount.toFixed(2),
+      method,
+      reference: method && method !== 'cash' ? input.upiReference ?? null : null,
+      status: input.paidAt !== undefined ? 'paid' : 'pending',
+      paidAt: input.paidAt ?? null,
+      note: input.note ?? null,
     });
     refresh();
     return { ok: true };
@@ -84,37 +112,22 @@ export async function recordPayment(input: {
 }
 
 /**
- * SETTLE A PENDING ROW — the call the whole book was missing.
+ * SETTLE A PENDING ROW — `POST /v1/payments/{id}/paid`.
  *
- * `recordPayment` above notes that a row left `pending` "only counted if someone
- * remembered to confirm it from a screen that has no confirm button". This is
- * that button's other half. Until it existed, the Pending tab was a list a trainer
- * could message forever and never clear: the only way to make ₹9,000 of debt go
- * away was to record a SECOND payment for the same package, which double-counts
- * *Billed* and leaves the original row pending anyway.
- *
- * ── THE METHOD IS REQUIRED, AND THAT IS THE DESIGN ───────────────────────────
- *
- * The endpoint would take a bare confirm. The UI does not offer one, because a
- * confirmed row with `method = null` is exactly what draws "— · floor" in the
- * payments table's *How* column — an em-dash where the answer to "how did they pay me"
- * should be. A trainer marking a row paid has just been handed cash or watched a
- * UPI notification; they know which, and asking costs one click on a menu they
- * already opened. See `PaymentRowMenu.tsx`.
- *
- * `paidAt` is stamped here rather than left to the server so the payments list's date
- * is the moment the trainer said the money arrived, which is the moment they can
- * check against their own memory.
+ * The method is asked for rather than left off: a paid row with no method draws
+ * an em-dash where *how did they pay me* should be. `paidAt` is the moment the
+ * trainer said the money arrived. A retried tap on a row already paid the same
+ * way answers 200; paid a different way is a 409 whose sentence says use Edit.
  */
 export async function markPaid(
   paymentId: string,
-  input: { method: string; paidAt?: number; upiReference?: string },
+  input: { method: string | null; paidAt?: number; upiReference?: string },
 ): Promise<MoneyWriteResult> {
   try {
-    await patch(`/v1/payments/${paymentId}/confirm`, {
-      method: input.method,
+    await markPaidV1(paymentId, {
+      method: v1Method(input.method),
+      reference: input.upiReference ?? null,
       paidAt: input.paidAt ?? Date.now(),
-      ...(input.upiReference ? { upiReference: input.upiReference } : {}),
     });
     refresh();
     return { ok: true };
@@ -124,27 +137,19 @@ export async function markPaid(
 }
 
 /**
- * LET IT GO — and the row stays.
+ * LET IT GO — and the row stays. `POST /v1/payments/{id}/write-off`.
  *
- * A write-off is not a delete and the copy says so everywhere it is offered,
- * because the button otherwise reads like one. The row keeps its amount, its
- * client and its date; it changes status, drops out of *Pending*, stops counting as
- * collected, and turns up on the *Write-offs* tab and in the CA export. That tab
- * has existed since this screen was the money book and, until this call, nothing
- * anywhere in the product could put a single row on it.
- *
- * The reason is optional and it is free text on purpose. "He moved to Pune" is
- * the sentence a trainer will want in front of them in March when their CA asks
- * about a ₹9,000 gap, and a fixed list of reasons would not have contained it.
+ * Nothing is deleted: the row keeps its amount and date, drops out of what is
+ * owed, stops counting as collected. The reason is free text on purpose and the
+ * server appends it to the row's note — "He moved to Pune" is the sentence a CA
+ * asks about in March.
  */
 export async function writeOffPayment(
   paymentId: string,
   reason?: string,
 ): Promise<MoneyWriteResult> {
   try {
-    await patch(`/v1/payments/${paymentId}/write-off`, {
-      ...(reason ? { reason } : {}),
-    });
+    await writeOffV1(paymentId, reason ?? null);
     refresh();
     return { ok: true };
   } catch (error) {
@@ -155,9 +160,10 @@ export async function writeOffPayment(
 /** Send a payment reminder nudge via WhatsApp. */
 export async function sendReminder(clientId: string): Promise<MoneyWriteResult & { whatsappUrl?: string }> {
   try {
-    const res = await post<{ nudgeId: string; whatsappUrl: string; message: string }>(
-      `/v1/clients/${clientId}/nudge`,
-      { templateName: 'payment_reminder' },
+    // 1.1: the MESSAGING-tier draft route; the id makes a retry answer the stored row.
+    const res = await post<{ id: string; whatsappUrl: string; message: string }>(
+      `/v1/clients/${encodeURIComponent(clientId)}/nudges`,
+      { id: crypto.randomUUID(), template: 'payment_reminder' },
     );
     refresh();
     return { ok: true, whatsappUrl: res?.whatsappUrl };

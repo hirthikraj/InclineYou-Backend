@@ -1,23 +1,17 @@
-import { notFound } from 'next/navigation';
+import { ClientFilePage } from '@/components/clients/file/ClientFilePage';
 
-import { ClientFile } from '@/components/clients/file/ClientFile';
-import { Unavailable } from '@/components/today/Unavailable';
-import { requireClientFile } from '@/lib/clients/client-guard';
-
-/** The client’s month — when they trained, when they are in, and what they missed. */
+/** The month shown is a place — `?month=yyyy-MM` — so stepping it reads only that month (Client file · Calendar). */
 export const dynamic = 'force-dynamic';
 
-export default async function Page({ params }: { params: Promise<{ clientId: string }> }) {
+export default async function Page({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ clientId: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { clientId } = await params;
-  const result = await requireClientFile(clientId);
-  if (!result.ok) {
-    if (result.kind === 'not_found') notFound();
-    return (
-      <Unavailable
-        kind={result.kind}
-        status={result.kind === 'refused' ? result.status : undefined}
-      />
-    );
-  }
-  return <ClientFile payload={result.payload} now={result.now} tab="calendar" />;
+  const q = await searchParams;
+  const month = typeof q.month === 'string' ? q.month : undefined;
+  return <ClientFilePage clientId={clientId} tab="calendar" options={{ month }} />;
 }

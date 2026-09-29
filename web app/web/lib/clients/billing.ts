@@ -1,8 +1,4 @@
-import type {
-  ClientPackageWire,
-  ClientPaymentWire,
-  PriceListPackWire,
-} from '@/lib/clients/client-api';
+import type { ClientPackageWire, ClientPaymentWire } from '@/lib/clients/client-api';
 
 /**
  * WHO THE TRAINER BILLS, AND WHAT THE BILL SAYS.
@@ -50,23 +46,20 @@ import type {
  * HOW "GYM-SIGNED" IS READ OFF THE WIRE
  * ════════════════════════════════════════════════════════════════════════════
  *
- * There is no `client.isGymOwned` column and there should not be one: the fact
- * is already recorded twice, in the two places it is actually created.
- *
- *   1. `payment.collectedBy`  — who took the money. Written at record time.
- *   2. `package.packId` → `pack.owner` — whose price list it was sold off.
- *
- * (1) is the stronger signal, because it is a fact about money that moved
- * rather than about a catalogue entry, so it is read first. (2) is the fallback
- * for a client whose pack has no payment against it yet — a pack sold this
- * morning and not yet paid for — where the price list is the only evidence
- * there is.
- *
- * `trainerSplitPercent` is deliberately NOT consulted. The seed sets it from
- * the DELIVERY MODE (`remote ? 100 : 70`), so every floor client carries 70
- * whether the gym signed them or not, and a rule built on it would refuse an
- * invoice to two thirds of an independent trainer's roster.
+ * v1 puts it on the client — `client.clientType`, `independent` or `gym` — and
+ * the database stamps each payment's `collectedBy` from it and freezes it
+ * (`stamp_payment_collector()`). So `viaGym` below reads the client, and the
+ * old inference from payments and the price list is gone with the ambiguity
+ * it existed to resolve.
  */
+
+/**
+ * R27 · invoices are out of v1 — `invoice_no` and `POST /v1/payments/{id}/invoice`
+ * are in later-schema.html (decided 25 Sep). The sheet, the column and the verb
+ * stay in the code behind this flag (MUST-19); `canInvoice` and
+ * `invoiceMessage` below are what they will read when it turns on.
+ */
+export const INVOICES_ENABLED = false;
 
 /* ------------------------------------------------------------------ money */
 
@@ -77,41 +70,20 @@ function n(v: number | string | null | undefined): number {
   return Number.isFinite(x) ? x : 0;
 }
 
-/** Both spellings mean *the money arrived*. The backend writes `paid`; older
- *  rows and the phone's queue write `confirmed`. */
+/** The money arrived. v1 has one spelling for it — the old `confirmed` from sync is gone. */
 export function isCollected(p: { status: string }): boolean {
-  return p.status === 'paid' || p.status === 'confirmed';
+  return p.status === 'paid';
 }
 
 /* ------------------------------------------------- who the client is to us */
 
-export type Arrangement = {
-  /** True when the gym's counter signs this person up and takes the money. */
-  viaGym: boolean;
-  /**
-   * Which evidence answered. `'payment'` is a fact about money that moved;
-   * `'pricelist'` is an inference from the catalogue the pack came off;
-   * `'none'` means a client with nothing sold yet, who is treated as the
-   * trainer's own — because the only pack they can be sold from this screen is
-   * one off the trainer's own list.
-   */
-  from: 'payment' | 'pricelist' | 'none';
-};
-
-export function arrangementOf(
-  packages: ClientPackageWire[],
-  payments: ClientPaymentWire[],
-  priceList: PriceListPackWire[],
-): Arrangement {
-  const collected = payments.find((p) => p.collectedBy === 'gym' || p.collectedBy === 'trainer');
-  if (collected) return { viaGym: collected.collectedBy === 'gym', from: 'payment' };
-
-  const owners = packages
-    .map((pkg) => (pkg.packId ? priceList.find((p) => p.id === pkg.packId)?.owner : null))
-    .filter((o): o is string => Boolean(o));
-  if (owners.length > 0) return { viaGym: owners.some((o) => o === 'gym'), from: 'pricelist' };
-
-  return { viaGym: false, from: 'none' };
+/**
+ * v1 records it once, on the client: `clientType` is `gym` for a person the
+ * gym's counter signs up and collects from, and the database stamps every
+ * payment's `collectedBy` from it. There is nothing left to infer.
+ */
+export function viaGym(client: { clientType: string }): boolean {
+  return client.clientType === 'gym';
 }
 
 /**
@@ -136,7 +108,8 @@ export type InvoiceEligibility =
   | { ok: true; already: boolean }
   | { ok: false; why: string };
 
-export function canInvoice(p: ClientPaymentWire): InvoiceEligibility {
+/** `invoiceNo` is later-schema (R27): absent on every v1 row, so optional here. */
+export function canInvoice(p: ClientPaymentWire & { invoiceNo?: string | null }): InvoiceEligibility {
   if (p.invoiceNo) return { ok: true, already: true };
   if (p.collectedBy === 'gym') {
     return {
@@ -156,25 +129,49 @@ export function canInvoice(p: ClientPaymentWire): InvoiceEligibility {
 /* ------------------------------------------------------- the document body */
 
 /**
- * What the pack is CALLED on a bill — and the fallback chain is the point.
- *
- * A pack sold from the price list carries `packId`, and the trainer's own name
- * for it (*12 sessions*, *Monthly unlimited*) is the one the client will
- * recognise from the conversation where they bought it. A free-typed sale has
- * no entry to look up, so the count is the next best name, and a pack with no
- * count falls back to its type with the first letter lifted. `type` is never
- * shown raw: `monthly` on a document of proper nouns reads as a bug.
+ * What the pack is CALLED. v1 stores a name on every package — copied off the
+ * price list at sale, or typed for a custom one — so it is read, never worked
+ * out (R29). The fallback is for a row with no pack at all.
  */
-export function packName(
-  pkg: ClientPackageWire | null | undefined,
-  priceList: PriceListPackWire[],
-): string {
-  if (!pkg) return 'Personal training';
-  const listed = pkg.packId ? priceList.find((p) => p.id === pkg.packId) : null;
-  if (listed?.name) return listed.name;
-  if (pkg.sessionsTotal) return `${pkg.sessionsTotal}-session pack`;
-  const t = (pkg.type ?? '').replace(/_/g, ' ').trim();
-  return t ? `${t.charAt(0).toUpperCase()}${t.slice(1)} pack` : 'Pack';
+export function packName(pkg: ClientPackageWire | null | undefined): string {
+  return pkg?.name?.trim() || 'Personal training';
+}
+
+const SERVICE_WORDS: Record<string, string> = {
+  floor: 'floor',
+  home_visit: 'home visits',
+  remote: 'remote',
+  programming: 'programming',
+};
+
+/**
+ * The pack's terms in words, from `basis` + `service` (R29): *12 sessions ·
+ * floor*, *Monthly · remote*. The name is the trainer's; this is what it is.
+ */
+export function packTerms(pkg: Pick<ClientPackageWire, 'basis' | 'service' | 'sessionsTotal'>): string {
+  const service = SERVICE_WORDS[pkg.service] ?? pkg.service;
+  const count = pkg.basis === 'sessions' && pkg.sessionsTotal
+    ? `${pkg.sessionsTotal} session${pkg.sessionsTotal === 1 ? '' : 's'}`
+    : 'Monthly';
+  return `${count} · ${service}`;
+}
+
+/**
+ * What a refund of this pack should default to: the unused share of what was
+ * paid — the sessions left of a session pack, the days left of a period one.
+ * A suggestion for the sheet only; the server checks the bounds (R73, A6).
+ */
+export function unusedShare(pkg: ClientPackageWire, now: number): number {
+  const paid = n(pkg.amountPaid) - n(pkg.amountRefunded);
+  let left = 1;
+  if (pkg.basis === 'sessions' && pkg.sessionsTotal) {
+    left = (pkg.sessionsRemaining ?? 0) / pkg.sessionsTotal;
+  } else if (pkg.startDate && pkg.endDate) {
+    const start = Date.parse(pkg.startDate);
+    const end = Date.parse(pkg.endDate);
+    left = end > start ? Math.min(1, Math.max(0, (end - now) / (end - start))) : 0;
+  }
+  return Math.max(0, Math.round(paid * left));
 }
 
 export type InvoiceFigures = {
@@ -274,8 +271,8 @@ export function whatsappUrl(phone: string | null | undefined, message: string): 
 /**
  * How the money arrived, in words.
  *
- * `method` is a free string on the wire (`upi`, `cash`, `card`, `bank`, `gym`)
- * and the table used to print it raw — `upi` in a column of proper nouns reads
+ * `method` is `upi`, `cash` or `bank_transfer` on the wire, and null when the
+ * gym's desk collected. The table used to print it raw — `upi` in a column of proper nouns reads
  * as a bug, the same argument `packName` makes about `type`. An unknown value
  * is capitalised rather than dropped: a method this map has not heard of is a
  * real payment, and blanking it would hide a row the trainer recorded.
@@ -283,9 +280,7 @@ export function whatsappUrl(phone: string | null | undefined, message: string): 
 const METHOD_WORDS: Record<string, string> = {
   upi: 'UPI',
   cash: 'Cash',
-  card: 'Card',
-  bank: 'Bank transfer',
-  gym: 'Gym front office',
+  bank_transfer: 'Bank transfer',
 };
 
 export function methodLabel(method: string | null | undefined): string | null {
