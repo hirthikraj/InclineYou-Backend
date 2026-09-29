@@ -1,12 +1,14 @@
 package com.inclineyou.inclineyou_backend.core.auth;
 
+import com.inclineyou.inclineyou_backend.core.auth.dto.SessionView;
+import com.inclineyou.inclineyou_backend.core.auth.dto.SignOut;
+import com.inclineyou.inclineyou_backend.core.auth.dto.SignOutAll;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -26,11 +28,6 @@ public class SessionController {
     private final SessionStore sessions;
     private final AuthTokenService tokens;
     private final SessionTokenIssuer sessionIssuer;
-
-    public record SessionView(
-            String id, String userAgent, Instant issuedAt, Instant lastSeenAt,
-            Instant expiresAt, boolean current
-    ) {}
 
     /** The "you are signed in on" list. */
     @GetMapping
@@ -57,20 +54,11 @@ public class SessionController {
                 SessionTokenIssuer.KIND.equals(kind)));
     }
 
-    /**
-     * @param revoked false for a JWT, which expires on its own clock. The client
-     *                should still clear its local copy; this only says whether
-     *                the server can stop honouring it.
-     */
-    public record SignOut(String tokenKind, boolean revoked) {}
-
     /** Sign out everywhere — every browser, right now. */
     @DeleteMapping("/all")
     public ResponseEntity<SignOutAll> signOutAll() {
         return ResponseEntity.ok(new SignOutAll(sessionIssuer.revokeAllFor(caller())));
     }
-
-    public record SignOutAll(int sessionsEnded) {}
 
     private static String caller() {
         return SecurityContextHolder.getContext().getAuthentication().getName();

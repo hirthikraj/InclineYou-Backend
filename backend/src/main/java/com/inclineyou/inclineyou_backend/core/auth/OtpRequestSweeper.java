@@ -3,14 +3,11 @@ package com.inclineyou.inclineyou_backend.core.auth;
 import com.inclineyou.inclineyou_backend.infrastructure.config.AppProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.Map;
 
 /**
  * The sweeper {@code otp_request} was promised and never had.
@@ -30,7 +27,7 @@ import java.util.Map;
 @Slf4j
 public class OtpRequestSweeper {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final OtpRequestRepository otpRequests;
     private final AppProperties props;
 
     /** Hourly, beside the session sweep, and switched off with it. */
@@ -38,11 +35,7 @@ public class OtpRequestSweeper {
     public void sweep() {
         if (!props.getSession().isSweepEnabled()) return;
         Instant cutoff = Instant.now().minus(props.getOtp().getPurgeAfterDays(), ChronoUnit.DAYS);
-        int removed = jdbc.update("""
-                DELETE FROM otp_request
-                WHERE created_at < :cutoff
-                  AND (locked_until IS NULL OR locked_until < NOW())
-                """, Map.of("cutoff", Timestamp.from(cutoff)));
+        int removed = otpRequests.deleteOlderThan(cutoff);
         if (removed > 0) log.info("swept {} old OTP requests", removed);
     }
 }

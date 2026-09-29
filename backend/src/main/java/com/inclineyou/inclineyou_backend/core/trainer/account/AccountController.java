@@ -36,7 +36,7 @@ import java.util.UUID;
 @Validated
 public class AccountController {
 
-    /** Identical to {@code AuthController.PHONE_PATTERN}, and it has to be. */
+    /** Identical to {@code SendOtpRequest.PHONE_PATTERN}, and it has to be. */
     private static final String PHONE_PATTERN = "^\\+91[6-9]\\d{9}$";
     private static final String PHONE_MESSAGE = "must be a valid Indian mobile number, e.g. +919876543210";
     private static final String OTP_PATTERN = "^\\d{6}$";

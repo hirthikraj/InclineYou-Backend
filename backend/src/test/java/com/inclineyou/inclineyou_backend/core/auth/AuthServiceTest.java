@@ -1,5 +1,8 @@
 package com.inclineyou.inclineyou_backend.core.auth;
 
+import com.inclineyou.inclineyou_backend.core.auth.dto.ClaimTrainerRequest;
+import com.inclineyou.inclineyou_backend.core.auth.dto.VerifyOtpRequest;
+
 import com.inclineyou.inclineyou_backend.core.auth.AppUser;
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
 import com.inclineyou.inclineyou_backend.core.client.ClientRepository;
@@ -70,7 +73,7 @@ class AuthServiceTest {
         var pausedOn = Instant.parse("2026-07-22T04:00:00Z");
         identity(client("Ravi Kannan", "paused", "paused", pausedOn));
 
-        var res = auth.verifyOtp(PHONE, "123456");
+        var res = auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456"));
 
         // The whole point: there is something to sign into.
         assertThat(res.token()).isNotNull();
@@ -94,7 +97,7 @@ class AuthServiceTest {
         stubTokens();
         identity(client("Ravi Kannan", "paused", "paused", Instant.now()));
 
-        assertThat(auth.verifyOtp(PHONE, "123456").role()).isNotEqualTo("paused");
+        assertThat(auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456")).role()).isNotEqualTo("paused");
     }
 
     @Test
@@ -104,7 +107,7 @@ class AuthServiceTest {
         identity(client("Ravi Kannan", "active", "accepted", null),
                  client("Kumar S", "paused", "paused", Instant.parse("2026-07-22T04:00:00Z")));
 
-        var res = auth.verifyOtp(PHONE, "123456");
+        var res = auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456"));
 
         assertThat(res.role()).isEqualTo(AuthService.VIEW_CLIENT);
         // Both come back — the paused one is reachable, it is just labelled.
@@ -119,7 +122,7 @@ class AuthServiceTest {
         stubTokens();
         identity(client("Ravi Kannan", "active", "accepted", null));
 
-        var res = auth.verifyOtp(PHONE, "123456");
+        var res = auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456"));
 
         assertThat(res.role()).isEqualTo(AuthService.VIEW_CLIENT);
         assertThat(res.token()).isNotNull();
@@ -133,7 +136,7 @@ class AuthServiceTest {
         stubTokens();
         when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of());
 
-        var res = auth.verifyOtp(PHONE, "123456");
+        var res = auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456"));
 
         assertThat(res.role()).isEqualTo(AuthService.VIEW_PENDING);
         assertThat(res.isNewUser()).isTrue();
@@ -147,7 +150,7 @@ class AuthServiceTest {
         when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of(
                 trainerRow(UUID.randomUUID(), "Ravi Kannan", Instant.now())));
 
-        var res = auth.verifyOtp(PHONE, "123456");
+        var res = auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456"));
 
         assertThat(res.role()).isEqualTo(AuthService.VIEW_TRAINER);
         assertThat(res.token()).isNotNull();
@@ -163,7 +166,7 @@ class AuthServiceTest {
                 row(AppUser.ROLE_TRAINER, UUID.randomUUID(), "Ravi Kannan", Instant.now(),
                         "Anand", "active", "accepted", null, null, null)));
 
-        var res = auth.verifyOtp(PHONE, "123456");
+        var res = auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456"));
 
         // Trainer stays the destination — home role wins — but the membership
         // is not hidden.
@@ -180,7 +183,7 @@ class AuthServiceTest {
                 row(AppUser.ROLE_TRAINER, UUID.randomUUID(), "Ravi Kannan", Instant.now(),
                         "Anand", "active", "invited", null, null, null)));
 
-        var res = auth.verifyOtp(PHONE, "123456");
+        var res = auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456"));
 
         assertThat(res.role()).isEqualTo(AuthService.VIEW_TRAINER);
         // Deliberately out of scope for this pass — see AuthService#trainerView.
@@ -195,7 +198,7 @@ class AuthServiceTest {
         stubTokens();
         identity(client("Ravi Kannan", "active", "invited", null));
 
-        var res = auth.verifyOtp(PHONE, "123456");
+        var res = auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456"));
 
         assertThat(res.role()).isEqualTo(AuthService.VIEW_INVITED);
         // The distinction the whole consent step rests on: the token behind an
@@ -212,7 +215,7 @@ class AuthServiceTest {
         identity(client("Ravi Kannan", "active", "accepted", null),
                  client("Kumar S", "active", "invited", null));
 
-        var res = auth.verifyOtp(PHONE, "123456");
+        var res = auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456"));
 
         assertThat(res.role()).isEqualTo(AuthService.VIEW_CLIENT);
         assertThat(res.token()).isEqualTo("client-token");
@@ -228,7 +231,7 @@ class AuthServiceTest {
         var removedAt = Instant.parse("2026-08-14T04:00:00Z");
         identity(removedClient("Ravi Kannan", removedAt, null));
 
-        var res = auth.verifyOtp(PHONE, "123456");
+        var res = auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456"));
 
         assertThat(res.role()).isEqualTo(AuthService.VIEW_REMOVED);
         assertThat(res.removed()).isNotNull();
@@ -239,7 +242,7 @@ class AuthServiceTest {
         // books point at it — so the ack stamp is the only thing standing
         // between this person and the notice on every future sign-in.
         identity(removedClient("Ravi Kannan", removedAt, Instant.now()));
-        var after = auth.verifyOtp(PHONE, "123456");
+        var after = auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456"));
 
         assertThat(after.role()).isEqualTo(AuthService.VIEW_UNATTACHED);
         assertThat(after.removed()).isNull();
@@ -251,7 +254,7 @@ class AuthServiceTest {
         stubTokens();
         identity(client("Ravi Kannan", "active", "declined", null));
 
-        var res = auth.verifyOtp(PHONE, "123456");
+        var res = auth.verifyOtp(new VerifyOtpRequest(PHONE, "123456"));
 
         // The distinction matters: 7a offers "I'm a trainer", and handing that
         // to somebody who declined one invite would quietly convert them.
@@ -280,7 +283,7 @@ class AuthServiceTest {
             return t;
         });
 
-        var res = auth.claimTrainer(PHONE, "2026-09");
+        var res = auth.claimTrainer(PHONE, new ClaimTrainerRequest("2026-09"));
 
         assertThat(res.role()).isEqualTo(AuthService.VIEW_TRAINER);
         assertThat(res.token()).isNotNull();

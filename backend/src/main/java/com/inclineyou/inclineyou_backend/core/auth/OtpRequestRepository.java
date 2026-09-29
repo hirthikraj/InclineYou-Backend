@@ -4,9 +4,11 @@ import com.inclineyou.inclineyou_backend.core.auth.OtpRequest;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -65,4 +67,14 @@ public interface OtpRequestRepository extends JpaRepository<OtpRequest, UUID> {
      */
     @Query("SELECT MIN(o.createdAt) FROM OtpRequest o WHERE o.phone = :phone AND o.createdAt > :since")
     Instant oldestSentSince(@Param("phone") String phone, @Param("since") Instant since);
+
+    /** {@link OtpRequestSweeper}'s purge: old rows, never one whose lock is still running. */
+    @Modifying
+    @Transactional
+    @Query(value = """
+            DELETE FROM otp_request
+            WHERE created_at < :cutoff
+              AND (locked_until IS NULL OR locked_until < NOW())
+            """, nativeQuery = true)
+    int deleteOlderThan(@Param("cutoff") Instant cutoff);
 }

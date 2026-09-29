@@ -1,8 +1,10 @@
 package com.inclineyou.inclineyou_backend.core.auth;
 
+import com.inclineyou.inclineyou_backend.core.auth.dto.AuthResponse;
+import com.inclineyou.inclineyou_backend.core.auth.dto.ClaimTrainerRequest;
+import com.inclineyou.inclineyou_backend.core.auth.dto.SendOtpRequest;
+import com.inclineyou.inclineyou_backend.core.auth.dto.VerifyOtpRequest;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -17,76 +19,35 @@ public class AuthController {
 
     private final AuthService authService;
 
-    /**
-     * {@code +91} plus a 10-digit number starting 6–9 — the shape
-     * {@code app_user_phone_format} actually enforces (and the one
-     * {@code api-contract.html}'s {@code PHONE_INVALID} names), not the bare
-     * 10 digits an older mobile build sent. Every phone that reaches this
-     * backend is stored and compared in this one shape from here on.
-     */
-    static final String PHONE_PATTERN = "^\\+91[6-9]\\d{9}$";
-    static final String PHONE_MESSAGE = "must be a valid Indian mobile number, e.g. +919876543210";
-
-    static final String OTP_PATTERN = "^\\d{6}$";
-    static final String OTP_MESSAGE = "must be a 6-digit code";
-
-    public record OtpRequestBody(
-            @NotBlank
-            @Pattern(regexp = PHONE_PATTERN, message = PHONE_MESSAGE)
-            String phone
-    ) {}
-
-    public record OtpVerifyBody(
-            @NotBlank
-            @Pattern(regexp = PHONE_PATTERN, message = PHONE_MESSAGE)
-            String phone,
-
-            @NotBlank
-            @Pattern(regexp = OTP_PATTERN, message = OTP_MESSAGE)
-            String otp
-    ) {}
-
-
     //Requesting an OTP
     @PostMapping("/otp/request")
-    public ResponseEntity<Void> requestOtp(@Valid @RequestBody OtpRequestBody body) {
-        authService.requestOtp(body.phone());
+    public ResponseEntity<Void> requestOtp(@Valid @RequestBody SendOtpRequest body) {
+        authService.requestOtp(body);
         return ResponseEntity.ok().build();
     }
 
     //Verifying an OTP
     @PostMapping("/otp/verify")
-    public ResponseEntity<AuthService.AuthResponse> verifyOtp(@Valid @RequestBody OtpVerifyBody body) {
-        return ResponseEntity.ok(authService.verifyOtp(body.phone(), body.otp()));
+    public ResponseEntity<AuthResponse> verifyOtp(@Valid @RequestBody VerifyOtpRequest body) {
+        return ResponseEntity.ok(authService.verifyOtp(body));
     }
-
-    /**
-     * The notice was accepted on the screen that led here — see
-     * api-contract.html#auth-a4. {@code app_user_privacy_pair} requires this
-     * alongside {@code privacyAcceptedAt}, which is why the field is required
-     * rather than optional: a trainer row with one and not the other is a
-     * consent the database cannot represent as either given or not given.
-     */
-    public record ClaimTrainerBody(
-            @NotBlank String privacyPolicyVersion
-    ) {}
 
     //Claiming an app user as "Trainer"
     @PostMapping("/trainer")
-    public ResponseEntity<AuthService.AuthResponse> claimTrainer(@Valid @RequestBody ClaimTrainerBody body) {
+    public ResponseEntity<AuthResponse> claimTrainer(@Valid @RequestBody ClaimTrainerRequest body) {
         var claims = SecurityContextHolder.getContext().getAuthentication();
-        return ResponseEntity.ok(authService.claimTrainer(claims.getName(), body.privacyPolicyVersion()));
+        return ResponseEntity.ok(authService.claimTrainer(claims.getName(), body));
     }
 
     /** Accept an invite. Also stamps the privacy acceptance the screen carried. */
     @PostMapping("/membership/{clientId}/accept")
-    public ResponseEntity<AuthService.AuthResponse> accept(@PathVariable UUID clientId) {
+    public ResponseEntity<AuthResponse> accept(@PathVariable UUID clientId) {
         return ResponseEntity.ok(authService.acceptInvite(caller(), clientId));
     }
 
     /** Decline. The row is kept — the trainer's roster should say what happened. */
     @PostMapping("/membership/{clientId}/decline")
-    public ResponseEntity<AuthService.AuthResponse> decline(@PathVariable UUID clientId) {
+    public ResponseEntity<AuthResponse> decline(@PathVariable UUID clientId) {
         return ResponseEntity.ok(authService.declineInvite(caller(), clientId));
     }
 
@@ -95,7 +56,7 @@ public class AuthController {
      * only what stops the notice being redrawn at every future sign-in.
      */
     @PostMapping("/membership/{clientId}/ack-removal")
-    public ResponseEntity<AuthService.AuthResponse> ackRemoval(@PathVariable UUID clientId) {
+    public ResponseEntity<AuthResponse> ackRemoval(@PathVariable UUID clientId) {
         return ResponseEntity.ok(authService.acknowledgeRemoval(caller(), clientId));
     }
 
@@ -105,7 +66,7 @@ public class AuthController {
      * caller's current token is simply left to expire.
      */
     @PostMapping("/mode/trainer")
-    public ResponseEntity<AuthService.AuthResponse> switchToTrainerMode() {
+    public ResponseEntity<AuthResponse> switchToTrainerMode() {
         return ResponseEntity.ok(authService.switchToTrainer(callerPhone()));
     }
 
@@ -114,7 +75,7 @@ public class AuthController {
      * live membership on somebody else's roster.
      */
     @PostMapping("/mode/client")
-    public ResponseEntity<AuthService.AuthResponse> switchToClientMode() {
+    public ResponseEntity<AuthResponse> switchToClientMode() {
         return ResponseEntity.ok(authService.switchToClient(callerPhone()));
     }
 
