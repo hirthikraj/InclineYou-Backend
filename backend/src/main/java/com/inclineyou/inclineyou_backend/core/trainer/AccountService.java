@@ -1,11 +1,14 @@
-package com.inclineyou.inclineyou_backend.core.trainer.account;
+package com.inclineyou.inclineyou_backend.core.trainer;
 
 import com.inclineyou.inclineyou_backend.core.auth.JwtService;
 import com.inclineyou.inclineyou_backend.core.auth.OtpService;
 import com.inclineyou.inclineyou_backend.core.auth.AppUser;
-import com.inclineyou.inclineyou_backend.core.trainer.Trainer;
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
-import com.inclineyou.inclineyou_backend.core.trainer.TrainerRepository;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.ConfirmNewPhoneRequest;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.DeleteAccountRequest;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.NewPhoneRequest;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.PhoneChangedResponse;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.VerifyCurrentPhoneRequest;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
@@ -100,14 +103,14 @@ public class AccountService {
      * consumed inside the OTP store's own transaction, and the ticket is a
      * signature over facts that are already true.
      */
-    public String verifyCurrentPhone(UUID trainerId, String otp) {
+    public String verifyCurrentPhone(UUID trainerId, VerifyCurrentPhoneRequest req) {
         String phone = phoneOf(load(trainerId));
         // Throws OtpLocked / OtpExpired / InvalidOtp, each of which already has
         // its own handler and its own recovery on the screen. Deliberately NOT
         // caught and re-thrown as an account rule: "wrong code, 2 tries left" is
         // a better sentence than anything this class could write, and the web
         // already reads all three from the sign-in flow.
-        otpService.verify(phone, otp);
+        otpService.verify(phone, req.otp());
         return jwtService.generatePhoneChangeTicket(trainerId, phone);
     }
 
@@ -120,7 +123,9 @@ public class AccountService {
      * It runs again at the confirm, because two minutes is long enough for
      * somebody else to sign up in between.
      */
-    public void requestNewPhone(UUID trainerId, String ticket, String newPhone) {
+    public void requestNewPhone(UUID trainerId, NewPhoneRequest req) {
+        String ticket = req.ticket();
+        String newPhone = req.phone();
         String phone = phoneOf(load(trainerId));
         requireTicket(ticket, trainerId, phone);
         requireAvailable(phone, newPhone);
@@ -145,7 +150,9 @@ public class AccountService {
      * cookie and reason about later.
      */
     @Transactional
-    public PhoneChanged confirmNewPhone(UUID trainerId, String ticket, String newPhone, String otp) {
+    public PhoneChangedResponse confirmNewPhone(UUID trainerId, ConfirmNewPhoneRequest req) {
+        String ticket = req.ticket();
+        String newPhone = req.phone();
         Trainer t = load(trainerId);
         AppUser user = appUserRepo.findById(t.getAppUserId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
@@ -154,7 +161,7 @@ public class AccountService {
         requireTicket(ticket, trainerId, previous);
         requireAvailable(previous, newPhone);
 
-        otpService.verify(newPhone, otp);
+        otpService.verify(newPhone, req.otp());
 
         // The one row sign-in resolves. `trainer.app_user_id` is a fixed FK —
         // unlike the old phone-on-trainer shape, there is no second copy of the
@@ -164,11 +171,8 @@ public class AccountService {
         appUserRepo.save(user);
 
         log.info("trainer {} changed phone {} → {}", trainerId, masked(previous), masked(newPhone));
-        return new PhoneChanged(newPhone, jwtService.generate(trainerId, newPhone));
+        return new PhoneChangedResponse(newPhone, jwtService.generate(trainerId, newPhone));
     }
-
-    /** The new number, and a token that agrees with it. */
-    public record PhoneChanged(String phone, String token) {}
 
     /* ───────────────────────────────────────────────────── closing it down ── */
 
@@ -186,7 +190,8 @@ public class AccountService {
      * and 404s, which is the honest answer to deleting something already gone.
      */
     @Transactional
-    public void deleteAccount(UUID trainerId, String confirmPhone) {
+    public void deleteAccount(UUID trainerId, DeleteAccountRequest req) {
+        String confirmPhone = req.confirmPhone();
         Trainer t = load(trainerId);
         AppUser user = appUserRepo.findById(t.getAppUserId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));

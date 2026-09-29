@@ -1,8 +1,11 @@
-package com.inclineyou.inclineyou_backend.core.trainer.account;
+package com.inclineyou.inclineyou_backend.core.trainer;
 
+import com.inclineyou.inclineyou_backend.core.trainer.dto.ConfirmNewPhoneRequest;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.NewPhoneRequest;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.PhoneChangedResponse;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.TicketResponse;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.VerifyCurrentPhoneRequest;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -36,34 +39,7 @@ import java.util.UUID;
 @Validated
 public class AccountController {
 
-    /** Identical to {@code SendOtpRequest.PHONE_PATTERN}, and it has to be. */
-    private static final String PHONE_PATTERN = "^\\+91[6-9]\\d{9}$";
-    private static final String PHONE_MESSAGE = "must be a valid Indian mobile number, e.g. +919876543210";
-    private static final String OTP_PATTERN = "^\\d{6}$";
-    private static final String OTP_MESSAGE = "must be a 6-digit code";
-
     private final AccountService service;
-
-    public record OtpBody(
-            @NotBlank @Pattern(regexp = OTP_PATTERN, message = OTP_MESSAGE) String otp
-    ) {}
-
-    public record NewPhoneBody(
-            /** From step 2. Not a bearer token — see {@code JwtService.ROLE_PHONE_CHANGE}. */
-            @NotBlank String ticket,
-            @NotBlank @Pattern(regexp = PHONE_PATTERN, message = PHONE_MESSAGE) String phone
-    ) {}
-
-    public record ConfirmBody(
-            @NotBlank String ticket,
-            @NotBlank @Pattern(regexp = PHONE_PATTERN, message = PHONE_MESSAGE) String phone,
-            @NotBlank @Pattern(regexp = OTP_PATTERN, message = OTP_MESSAGE) String otp
-    ) {}
-
-    /** What the caller needs after step 2 and step 4 respectively. */
-    public record TicketResponse(String ticket) {}
-
-    public record ChangedResponse(String phone, String token) {}
 
     /** 1 · a code to the number they are signed in with. No body: it is the token's. */
     @PostMapping("/challenge")
@@ -74,22 +50,21 @@ public class AccountController {
 
     /** 2 · that code back. The ticket is the memory that this step happened. */
     @PostMapping("/verify")
-    public TicketResponse verify(@Valid @RequestBody OtpBody body) {
-        return new TicketResponse(service.verifyCurrentPhone(trainerId(), body.otp()));
+    public TicketResponse verify(@Valid @RequestBody VerifyCurrentPhoneRequest body) {
+        return new TicketResponse(service.verifyCurrentPhone(trainerId(), body));
     }
 
     /** 3 · the new number, checked for availability before an SMS is spent on it. */
     @PostMapping("/request")
-    public ResponseEntity<Void> request(@Valid @RequestBody NewPhoneBody body) {
-        service.requestNewPhone(trainerId(), body.ticket(), body.phone());
+    public ResponseEntity<Void> request(@Valid @RequestBody NewPhoneRequest body) {
+        service.requestNewPhone(trainerId(), body);
         return ResponseEntity.ok().build();
     }
 
     /** 4 · the code from the new number, and the swap. Answers a fresh token. */
     @PostMapping("/confirm")
-    public ChangedResponse confirm(@Valid @RequestBody ConfirmBody body) {
-        var result = service.confirmNewPhone(trainerId(), body.ticket(), body.phone(), body.otp());
-        return new ChangedResponse(result.phone(), result.token());
+    public PhoneChangedResponse confirm(@Valid @RequestBody ConfirmNewPhoneRequest body) {
+        return service.confirmNewPhone(trainerId(), body);
     }
 
     private UUID trainerId() {

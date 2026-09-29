@@ -1,5 +1,8 @@
-package com.inclineyou.inclineyou_backend.core.trainer.profile;
+package com.inclineyou.inclineyou_backend.core.trainer;
 
+import com.inclineyou.inclineyou_backend.core.trainer.dto.TrainerResponse;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.UpdateTrainerRequest;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
@@ -14,12 +17,12 @@ public class TrainerController {
     private final TrainerService service;
 
     @GetMapping("/me")
-    public TrainerService.TrainerResponse me() {
+    public TrainerResponse me() {
         return service.get(trainerId());
     }
 
     @PatchMapping("/me")
-    public TrainerService.TrainerResponse update(@RequestBody TrainerService.UpdateRequest req) {
+    public TrainerResponse update(@Valid @RequestBody UpdateTrainerRequest req) {
         return service.update(trainerId(), req);
     }
 

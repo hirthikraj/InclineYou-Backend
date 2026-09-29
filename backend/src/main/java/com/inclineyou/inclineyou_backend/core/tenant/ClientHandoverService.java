@@ -1,15 +1,15 @@
 package com.inclineyou.inclineyou_backend.core.tenant;
 
+import com.inclineyou.inclineyou_backend.core.tenant.dto.AssignClientRequest;
+import com.inclineyou.inclineyou_backend.core.tenant.dto.MarkUnavailableRequest;
+import com.inclineyou.inclineyou_backend.core.tenant.dto.StaleClient;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -46,19 +46,12 @@ import java.util.UUID;
 @Slf4j
 public class ClientHandoverService {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final ClientHandoverJdbcRepository repo;
     private final TenantService tenants;
 
     public static final String REASON_LEFT = "trainer_left";
     public static final String REASON_UNAVAILABLE = "trainer_unavailable";
     public static final String REASON_MANUAL = "manual";
-
-    public record StaleClient(
-            String clientId, String name, String phone,
-            String previousTrainerId, String previousTrainerName,
-            String staleReason, java.time.Instant staleAt,
-            BigDecimal outstanding
-    ) {}
 
     /**
      * Everyone in this workspace with no working coach.
@@ -69,44 +62,7 @@ public class ClientHandoverService {
      */
     public List<StaleClient> queue(UUID tenantId) {
         tenants.requireAdmin(tenantId);
-        return jdbc.queryForList("""
-                SELECT c.id::text         AS client_id,
-                       c.name             AS name,
-                       c.phone            AS phone,
-                       c.trainer_id::text AS prev_trainer_id,
-                       t.name             AS prev_trainer_name,
-                       c.stale_reason     AS stale_reason,
-                       c.stale_at         AS stale_at,
-                       -- What is still owed: sold minus collected, floored at
-                       -- zero. There is no `amount_due` column — the balance is
-                       -- derived, and `collected` is 'paid' OR 'confirmed'
-                       -- because REST writes the first and sync has carried the
-                       -- second since V1.
-                       GREATEST(
-                           COALESCE((SELECT SUM(pk.amount - COALESCE(pk.discount_amount, 0)
-                                                - COALESCE(pk.written_off_amount, 0))
-                                     FROM package pk
-                                     WHERE pk.client_id = c.id AND pk.deleted_at IS NULL), 0)
-                         - COALESCE((SELECT SUM(pm.amount) FROM payment pm
-                                     WHERE pm.client_id = c.id AND pm.deleted_at IS NULL
-                                       AND pm.status IN ('paid', 'confirmed')), 0),
-                           0) AS outstanding
-                FROM client c
-                LEFT JOIN trainer t ON t.id = c.trainer_id
-                WHERE c.tenant_id = :tid::uuid
-                  AND c.stale_at IS NOT NULL
-                  AND c.deleted_at IS NULL
-                ORDER BY c.stale_at
-                """, Map.of("tid", tenantId.toString()))
-                .stream()
-                .map(r -> new StaleClient(
-                        (String) r.get("client_id"), (String) r.get("name"), (String) r.get("phone"),
-                        (String) r.get("prev_trainer_id"), (String) r.get("prev_trainer_name"),
-                        (String) r.get("stale_reason"),
-                        r.get("stale_at") == null ? null
-                                : ((java.sql.Timestamp) r.get("stale_at")).toInstant(),
-                        (BigDecimal) r.get("outstanding")))
-                .toList();
+        return repo.staleQueue(tenantId);
     }
 
     /**
@@ -121,18 +77,21 @@ public class ClientHandoverService {
      */
     @Transactional
     public int markStale(UUID tenantId, UUID trainerId, String reason) {
-        int n = jdbc.update("""
-                UPDATE client
-                SET stale_at = NOW(), stale_reason = :reason
-                WHERE tenant_id = :tid::uuid
-                  AND trainer_id = :trainer::uuid
-                  AND deleted_at IS NULL
-                  AND stale_at IS NULL
-                """, Map.of("tid", tenantId.toString(),
-                            "trainer", trainerId.toString(),
-                            "reason", reason));
+        int n = repo.markStale(tenantId, trainerId, reason);
         if (n > 0) log.info("{} clients in tenant {} need a new coach ({})", n, tenantId, reason);
         return n;
+    }
+
+    /**
+     * A coach has stopped working here: an admin marks everyone they hold in
+     * THIS workspace as needing a new one. A null reason is
+     * {@link #REASON_UNAVAILABLE}.
+     */
+    @Transactional
+    public int markUnavailable(UUID tenantId, UUID trainerId, MarkUnavailableRequest req) {
+        tenants.requireAdmin(tenantId);
+        String reason = req.reason() == null ? REASON_UNAVAILABLE : req.reason();
+        return markStale(tenantId, trainerId, reason);
     }
 
     /**
@@ -144,85 +103,23 @@ public class ClientHandoverService {
      * own history is untouched.
      */
     @Transactional
-    public void assign(UUID tenantId, UUID clientId, UUID toTrainerId, String note, String reason) {
+    public void assign(UUID tenantId, UUID clientId, AssignClientRequest req) {
+        UUID toTrainerId = req.toTrainerId();
         tenants.requireAdmin(tenantId);
         var scope = CurrentScope.require();
 
-        var rows = jdbc.queryForList("""
-                SELECT trainer_id::text AS from_trainer FROM client
-                WHERE id = :cid::uuid AND tenant_id = :tid::uuid AND deleted_at IS NULL
-                """, Map.of("cid", clientId.toString(), "tid", tenantId.toString()));
-        if (rows.isEmpty()) throw TenantRuleException.notAMember();
-        UUID fromTrainer = UUID.fromString((String) rows.getFirst().get("from_trainer"));
+        UUID fromTrainer = repo.currentTrainerOf(tenantId, clientId).orElseThrow(TenantRuleException::notAMember);
 
         // The receiving coach must actually coach here. Assigning to somebody
         // outside the workspace would create a row whose trainer cannot read it.
-        Integer coaches = jdbc.queryForObject("""
-                SELECT COUNT(*) FROM tenant_member tm
-                JOIN app_user au ON au.id = tm.app_user_id
-                JOIN trainer t   ON t.phone = au.phone AND t.deleted_at IS NULL
-                WHERE tm.tenant_id = :tid::uuid AND t.id = :trainer::uuid
-                  AND tm.deleted_at IS NULL AND tm.status = 'active'
-                """, Map.of("tid", tenantId.toString(), "trainer", toTrainerId.toString()),
-                Integer.class);
-        if (coaches == null || coaches == 0) throw TenantRuleException.notACoachHere();
+        if (!repo.isActiveCoach(tenantId, toTrainerId)) throw TenantRuleException.notACoachHere();
 
         BigDecimal margin = scope.active()
                 .map(TenantScope.Membership::assignmentMarginPercent)
                 .orElse(null);
-        UUID actorAppUser = tenants.appUserIdFor(scope.phone());
-
-        var p = new MapSqlParameterSource()
-                .addValue("cid", clientId.toString())
-                .addValue("tid", tenantId.toString())
-                .addValue("to", toTrainerId.toString())
-                .addValue("from", fromTrainer.toString())
-                .addValue("actor", actorAppUser == null ? null : actorAppUser.toString())
-                .addValue("margin", margin)
-                .addValue("note", note)
-                .addValue("reason", reason == null ? REASON_MANUAL : reason);
-
-        // `tenant_id` is deliberately absent from this UPDATE. It is immutable —
-        // V39's trigger refuses a change — and a handover is a move within a
-        // workspace, never between two.
-        jdbc.update("""
-                UPDATE client
-                SET trainer_id = :to::uuid,
-                    stale_at = NULL,
-                    stale_reason = NULL,
-                    assigned_by_app_user_id = :actor::uuid,
-                    assignment_margin_percent = :margin,
-                    assigned_at = NOW()
-                WHERE id = :cid::uuid AND tenant_id = :tid::uuid AND deleted_at IS NULL
-                """, p);
-
-        // The plan and the sessions still to come follow the client; everything
-        // already logged stays with whoever did it.
-        jdbc.update("""
-                UPDATE program SET trainer_id = :to::uuid
-                WHERE client_id = :cid::uuid AND tenant_id = :tid::uuid AND deleted_at IS NULL
-                """, p);
-        // `program_exercise` needs no update: it has never carried a trainer_id
-        // and reaches its owner through `program_id`, which has just moved.
-        jdbc.update("""
-                UPDATE scheduled_session SET trainer_id = :to::uuid
-                WHERE client_id = :cid::uuid AND tenant_id = :tid::uuid
-                  AND deleted_at IS NULL AND session_date >= CURRENT_DATE
-                """, p);
-
-        jdbc.update("""
-                INSERT INTO client_assignment
-                    (client_id, tenant_id, from_trainer_id, to_trainer_id,
-                     actor_trainer_id, program_action, note, actor_margin_percent, reason)
-                VALUES
-                    (:cid::uuid, :tid::uuid,
-                     :from::uuid, :to::uuid,
-                     COALESCE((SELECT t.id FROM trainer t
-                               JOIN app_user au ON au.phone = t.phone
-                               WHERE au.id = :actor::uuid AND t.deleted_at IS NULL LIMIT 1),
-                              :to::uuid),
-                     'keep', :note, :margin, :reason)
-                """, p);
+        repo.reassign(new ClientHandoverJdbcRepository.Reassignment(tenantId, clientId, fromTrainer, toTrainerId,
+                tenants.appUserIdFor(scope.phone()), margin, req.note(),
+                req.reason() == null ? REASON_MANUAL : req.reason()));
 
         log.info("client {} handed from {} to {} in tenant {}", clientId, fromTrainer, toTrainerId, tenantId);
     }

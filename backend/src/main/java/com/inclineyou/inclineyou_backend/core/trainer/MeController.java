@@ -1,5 +1,6 @@
-package com.inclineyou.inclineyou_backend.core.trainer.profile;
+package com.inclineyou.inclineyou_backend.core.trainer;
 
+import com.inclineyou.inclineyou_backend.core.trainer.dto.MeResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,7 +29,7 @@ public class MeController {
     private final MeService service;
 
     @GetMapping("/v1/me")
-    public MeService.MeResponse me() {
+    public MeResponse me() {
         return service.get(trainerId());
     }
 

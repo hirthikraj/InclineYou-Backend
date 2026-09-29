@@ -1,14 +1,10 @@
-package com.inclineyou.inclineyou_backend.core.trainer.profile;
+package com.inclineyou.inclineyou_backend.core.trainer;
 
 import com.inclineyou.inclineyou_backend.core.auth.AppUser;
-import com.inclineyou.inclineyou_backend.core.trainer.Trainer;
-import com.inclineyou.inclineyou_backend.core.trainer.TrainerBusiness;
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
-import com.inclineyou.inclineyou_backend.core.trainer.TrainerBusinessRepository;
-import com.inclineyou.inclineyou_backend.core.trainer.TrainerRepository;
-import com.inclineyou.inclineyou_backend.core.trainer.account.AccountRuleException;
-import com.inclineyou.inclineyou_backend.core.trainer.links.SocialLink;
-import com.inclineyou.inclineyou_backend.core.trainer.links.YouTubeLink;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.TrainerResponse;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.UpdateTrainerRequest;
+import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -26,7 +22,7 @@ import java.util.UUID;
  * The trainer's own profile — everything the setup flow collects, plus the flag
  * that says whether that flow is still owed.
  *
- * Every field on {@link UpdateRequest} is nullable and means "leave it alone".
+ * Every field on {@link UpdateTrainerRequest} is nullable and means "leave it alone".
  * The app sends the whole profile in one PATCH at the end of setup, but it may
  * also send a single field later from Settings, and the two must not need
  * different endpoints. Sending an EMPTY list is a real instruction — it clears
@@ -48,40 +44,6 @@ public class TrainerService {
     private static final int MAX_LIST = 25;
     private static final int MAX_ITEM_LENGTH = 80;
 
-    /**
-     * The identity caps — V33. Held here rather than in the column, so raising
-     * one is a line of Java and not a migration under the additive-only law.
-     *
-     * 80 characters is one line beside an avatar at every width the two halves
-     * draw ("Strength & fat-loss coach · Indiranagar" is 39). 1200 comfortably
-     * fits the 200 words the bio asks for, at the ~6 characters a word runs to.
-     */
-    private static final int MAX_HEADLINE = 80;
-    private static final int MAX_BIO = 1200;
-
-    /**
-     * `map_link` — V34. Refused rather than truncated, for the same reason as
-     * the two above and one more: a URL cut at its 500th character is not a
-     * shortened link, it is a broken one, and 200 OK on a link that no longer
-     * opens is the worst of the three outcomes.
-     *
-     * 500 is generous on purpose. A Google Maps share URL with a place id and a
-     * plus code runs to about 200; the long form with coordinates and a
-     * `data=` blob is longer still, and cutting one is exactly what must not
-     * happen.
-     */
-    private static final int MAX_MAP_LINK = 500;
-
-    /**
-     * The social links — V35. The same 500 as the map link, and for the same
-     * reason: what arrives here is a PASTE, share token and all, and it is only
-     * after {@link SocialLink} has reduced it that the stored string is short.
-     * Refusing rather than truncating matters more here than anywhere, because
-     * a canonicaliser handed a cut URL does not fail — it reads the shortened
-     * handle as a real one and stores a link to somebody else's account.
-     */
-    private static final int MAX_SOCIAL_LINK = 500;
-
     /** RFC 5321's ceiling on an address. V36 — refused over, never truncated. */
     private static final int MAX_EMAIL = 254;
 
@@ -102,104 +64,14 @@ public class TrainerService {
     private final TrainerBusinessRepository businessRepo;
     private final AppUserRepository appUserRepo;
 
-    public record TrainerResponse(
-            String id,
-            String phone,
-            String name,
-            String upiVpa,
-            String experienceBand,
-            List<String> specialities,
-            List<String> certifications,
-            List<String> languages,
-            boolean setupComplete,
-            Instant setupCompletedAt,
-            String gymName,
-            Map<String, Object> preferences,
-            /* ---- identity (V33). Null means never answered. ---- */
-            String headline,
-            String bio,
-            /** Canonical watch URL. */
-            String introVideoUrl,
-            /**
-             * The 11-character id out of {@code introVideoUrl}, derived not
-             * stored. It is on the wire so a card that wants a thumbnail or an
-             * `<iframe>` does not re-implement the parse in TypeScript — which
-             * is the same argument that put `label` and `variables` on the
-             * nudge-template wire rather than in a copy on each half.
-             */
-            String introVideoId,
-            /* ---- where and how (V34). Null / empty means never answered. ---- */
-            /** Verbatim, as pasted. Not canonicalised — see V34. */
-            String mapLink,
-            List<String> trainingModes,
-            List<String> serviceAreas,
-            /* ---- where to look (V35). Null means never answered. ---- */
-            /** Canonical profile URL. */
-            String instagramUrl,
-            /** Canonical CHANNEL URL — not a video. */
-            String youtubeUrl,
-            /**
-             * {@code @handle} out of whichever of the two is set, derived not
-             * stored — on the wire for the same reason {@code introVideoId} is,
-             * so a card that wants to render the handle rather than the URL does
-             * not re-implement the parse. Null for a {@code /channel/UC…} URL,
-             * which genuinely has no handle to show.
-             */
-            String instagramHandle,
-            String youtubeHandle,
-            /* ---- the account (V36). Null means never answered. ---- */
-            /**
-             * A contact address, not a login. Appended LAST, like every field
-             * before it, because a response field's position is part of the
-             * additive contract every older build reads by name.
-             */
-            String email,
-            /* ---- V6. Null means never asked; "undisclosed" is an answer. ---- */
-            String gender
-    ) {}
 
-    public record UpdateRequest(
-            String name,
-            String upiVpa,
-            String experienceBand,
-            List<String> specialities,
-            List<String> certifications,
-            List<String> languages,
-            Boolean completeSetup,
-            String gymName,
-            Map<String, Object> preferences,
-            /* ---- identity (V33). Null leaves alone; "" clears. ---- */
-            String headline,
-            String bio,
-            /** Any YouTube shape; stored canonical. "" clears. */
-            String introVideoUrl,
-            /* ---- where and how (V34). Null leaves alone; "" / [] clears. ---- */
-            String mapLink,
-            List<String> trainingModes,
-            List<String> serviceAreas,
-            /* ---- where to look (V35). Null leaves alone; "" clears. ---- */
-            /** A profile URL or a bare {@code @handle}; stored canonical. */
-            String instagramUrl,
-            /** A channel URL or a bare {@code @handle}; stored canonical. */
-            String youtubeUrl,
-            /* ---- the account (V36). Null leaves alone; "" clears. ---- */
-            /**
-             * A contact address. Checked for shape only — there is nothing in
-             * this backend that could send to it and therefore nothing that
-             * could verify it, and a screen that claimed otherwise would be
-             * making a promise the product cannot keep.
-             */
-            String email,
-            /* ---- V6. Null leaves alone; "" clears; otherwise one of GENDERS. ---- */
-            String gender
-    ) {}
 
     public TrainerResponse get(UUID trainerId) {
         return toResponse(load(trainerId), loadBusiness(trainerId));
     }
 
     @Transactional
-    public TrainerResponse update(UUID trainerId, UpdateRequest req) {
+    public TrainerResponse update(UUID trainerId, UpdateTrainerRequest req) {
         Trainer t = load(trainerId);
         TrainerBusiness b = loadBusiness(trainerId);
 
@@ -231,20 +103,19 @@ public class TrainerService {
         // sentence rather than a raw constraint violation from the UPDATE below.
         if (b.getGymName() != null
                 && (b.getTrainingModes() == null || !b.getTrainingModes().contains("gym_floor"))) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "gymName: trainingModes must include gym_floor");
+            throw ApiException.validation("gymName: trainingModes must include gym_floor");
         }
         if (req.headline() != null) {
-            b.setHeadline(req.headline().isBlank() ? null : bounded(req.headline(), MAX_HEADLINE, "headline"));
+            b.setHeadline(req.headline().isBlank() ? null : req.headline());
         }
         if (req.bio() != null) {
-            b.setBio(req.bio().isBlank() ? null : bounded(req.bio(), MAX_BIO, "bio"));
+            b.setBio(req.bio().isBlank() ? null : req.bio());
         }
         if (req.introVideoUrl() != null) {
             b.setIntroVideoUrl(req.introVideoUrl().isBlank() ? null : canonicalVideo(req.introVideoUrl()));
         }
         if (req.mapLink() != null) {
-            b.setMapLink(req.mapLink().isBlank() ? null : mapLink(req.mapLink()));
+            b.setMapLink(req.mapLink().isBlank() ? null : req.mapLink());
         }
         if (req.instagramUrl() != null) {
             b.setInstagramUrl(req.instagramUrl().isBlank() ? null : instagram(req.instagramUrl()));
@@ -287,8 +158,7 @@ public class TrainerService {
             if (!out.contains(value)) out.add(value);
         }
         if (out.size() > MAX_LIST) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST, field + ": at most " + MAX_LIST + " entries");
+            throw ApiException.validation(field + ": at most " + MAX_LIST + " entries");
         }
         return out;
     }
@@ -313,8 +183,7 @@ public class TrainerService {
         });
 
         if (prefs.size() > MAX_PREFS) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST, "preferences: at most " + MAX_PREFS + " keys");
+            throw ApiException.validation("preferences: at most " + MAX_PREFS + " keys");
         }
 
         metadata.put(PREFS_KEY, prefs);
@@ -326,68 +195,19 @@ public class TrainerService {
         return trimmed.length() > max ? trimmed.substring(0, max) : trimmed;
     }
 
-    /**
-     * Like {@link #trim} but it REFUSES instead of truncating, and the
-     * difference is deliberate.
-     *
-     * Everywhere above, an over-long value is silently cut: a 130-character name
-     * or UPI id is a paste accident, and the tail carries nothing. A bio is
-     * prose somebody wrote, and quietly dropping its last sentence — while
-     * answering 200 OK and echoing back a profile that looks saved — is the
-     * worst of the three possible outcomes. Both halves cap the field in the UI
-     * anyway, so anything arriving here over the limit did not come from a
-     * screen and deserves to be told.
-     */
-    private String bounded(String value, int max, String field) {
-        String trimmed = value.trim();
-        if (trimmed.length() > max) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST, field + ": at most " + max + " characters");
-        }
-        return trimmed;
-    }
-
     private String canonicalVideo(String raw) {
         try {
             return YouTubeLink.canonicalise(raw);
         } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST, "introVideoUrl: must be a YouTube link");
+            throw ApiException.validation("introVideoUrl: must be a YouTube link");
         }
-    }
-
-    /**
-     * A map link, checked for being a link and nothing else.
-     *
-     * There is no `MapLink.java` beside {@link YouTubeLink} and there should not
-     * be one. A YouTube URL has a single canonical form and one field that
-     * matters, so reducing it is a service. A maps URL does not: the share sheet
-     * emits a short `maps.app.goo.gl` redirect, the desktop bar emits a long
-     * `/maps/place/...@lat,lng,z/data=` string, Apple and OpenStreetMap emit
-     * neither, and a parser that "normalised" any of those would eventually
-     * break a link that worked. So the only thing refused here is a value that
-     * is not a URL at all — a typed address, a phone number, a sentence — which
-     * is the one failure a trainer would not otherwise discover until a client
-     * tapped it.
-     */
-    private String mapLink(String raw) {
-        String url = bounded(raw, MAX_MAP_LINK, "mapLink");
-        String lower = url.toLowerCase();
-        if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST, "mapLink: must be a link starting http:// or https://");
-        }
-        return url;
     }
 
     private String instagram(String raw) {
-        String value = bounded(raw, MAX_SOCIAL_LINK, "instagramUrl");
         try {
-            return SocialLink.instagram(value);
+            return SocialLink.instagram(raw);
         } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    "instagramUrl: must be an Instagram profile — instagram.com/yourname, or @yourname");
+            throw ApiException.validation("instagramUrl: must be an Instagram profile — instagram.com/yourname, or @yourname");
         }
     }
 
@@ -401,13 +221,10 @@ public class TrainerService {
      * the refusal a person can act on is the one that says what they did.
      */
     private String youtubeChannel(String raw) {
-        String value = bounded(raw, MAX_SOCIAL_LINK, "youtubeUrl");
         try {
-            return SocialLink.youtube(value);
+            return SocialLink.youtube(raw);
         } catch (IllegalArgumentException e) {
-            throw new ResponseStatusException(
-                    HttpStatus.BAD_REQUEST,
-                    SocialLink.isVideo(value)
+            throw ApiException.validation(SocialLink.isVideo(raw)
                             ? "youtubeUrl: that is a video, not a channel — the intro video field takes it"
                             : "youtubeUrl: must be a YouTube channel — youtube.com/@yourname");
         }

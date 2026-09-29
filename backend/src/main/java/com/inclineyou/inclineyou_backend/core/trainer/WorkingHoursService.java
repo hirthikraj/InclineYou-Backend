@@ -1,11 +1,10 @@
-package com.inclineyou.inclineyou_backend.core.trainer.hours;
+package com.inclineyou.inclineyou_backend.core.trainer;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.WorkingHourResponse;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -24,14 +23,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class WorkingHoursService {
 
-    private final NamedParameterJdbcTemplate jdbc;
-
-    /**
-     * @param weekday 1 = Monday … 7 = Sunday, the schema's own numbering.
-     * @param start   {@code "HH:mm"} — the columns are {@code time} in v1, so the
-     *                old {@code startMinute} integers are gone from the wire.
-     */
-    public record WorkingHourResponse(String id, int weekday, String start, String end) {}
+    private final TrainerJdbcRepository repo;
 
     /**
      * Every window, in the order a week is read.
@@ -44,18 +36,6 @@ public class WorkingHoursService {
      * on a ribbon for a trainer who never said so.
      */
     public List<WorkingHourResponse> list(UUID trainerId) {
-        return jdbc.query("""
-                SELECT id::text AS id, weekday,
-                       to_char(start_time, 'HH24:MI') AS start_hm,
-                       to_char(end_time, 'HH24:MI') AS end_hm
-                FROM working_hours
-                WHERE trainer_id = :tid::uuid AND deleted_at IS NULL
-                ORDER BY weekday, start_time, id
-                """, Map.of("tid", trainerId.toString()),
-                (rs, i) -> new WorkingHourResponse(
-                        rs.getString("id"),
-                        rs.getInt("weekday"),
-                        rs.getString("start_hm"),
-                        rs.getString("end_hm")));
+        return repo.workingHours(trainerId);
     }
 }

@@ -1,5 +1,6 @@
-package com.inclineyou.inclineyou_backend.core.trainer.hours;
+package com.inclineyou.inclineyou_backend.core.trainer;
 
+import com.inclineyou.inclineyou_backend.core.trainer.dto.WorkingHourResponse;
 import com.inclineyou.inclineyou_backend.shared.wire.Items;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -31,7 +32,7 @@ public class WorkingHoursController {
     private final WorkingHoursService service;
 
     @GetMapping
-    public Items<WorkingHoursService.WorkingHourResponse> list() {
+    public Items<WorkingHourResponse> list() {
         return Items.of(service.list(trainerId()));
     }
 

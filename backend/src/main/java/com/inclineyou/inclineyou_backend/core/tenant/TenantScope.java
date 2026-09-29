@@ -2,12 +2,9 @@ package com.inclineyou.inclineyou_backend.core.tenant;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -43,7 +40,7 @@ import java.util.UUID;
 @Slf4j
 public class TenantScope {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final TenantJdbcRepository repo;
 
     /**
      * @param activeTenantId  where the caller is standing. Never null after
@@ -133,82 +130,28 @@ public class TenantScope {
     /**
      * Every live membership for a number.
      *
-     * <p>Reads through the bootstrap policy in V42 — keyed on {@code app.phone},
-     * SELECT only — which is what lets this query run before a workspace is
-     * known. It is the only query in the product that is allowed to.
+     * <p>Reads through the bootstrap policy in V42 — see
+     * {@link TenantJdbcRepository#memberships}.
      */
     public List<Membership> membershipsFor(String phone) {
         if (phone == null || phone.isBlank()) return List.of();
-        var out = new ArrayList<Membership>();
-        // `revenue_share_percent` / `assignment_margin_percent` are read as
-        // literal NULLs: they are Ring-2 gym-platform columns (the admin's
-        // per-assignment commission) that never made it into the 25 Sep 2026
-        // rebuild's 41 tables, so `tenant_member` has no such columns yet. Every
-        // membership answers "no split" until that migration lands, rather than
-        // this query failing on every request.
-        for (var row : jdbc.queryForList("""
-                SELECT tm.id::text            AS member_id,
-                       tm.tenant_id::text     AS tenant_id,
-                       t.name                 AS tenant_name,
-                       t.type                 AS tenant_type,
-                       tm.role                AS role,
-                       tm.is_home             AS is_home,
-                       NULL::numeric          AS revenue_share_percent,
-                       NULL::numeric          AS assignment_margin_percent
-                FROM tenant_member tm
-                JOIN tenant   t  ON t.id = tm.tenant_id
-                JOIN app_user au ON au.id = tm.app_user_id
-                WHERE au.phone = :phone
-                  AND au.deleted_at IS NULL
-                  AND tm.deleted_at IS NULL
-                  AND tm.status = 'active'
-                  AND tm.role <> 'client'
-                  AND t.status = 'active'
-                ORDER BY tm.is_home DESC, t.name
-                """, Map.of("phone", phone))) {
-            out.add(new Membership(
-                    UUID.fromString((String) row.get("member_id")),
-                    UUID.fromString((String) row.get("tenant_id")),
-                    (String) row.get("tenant_name"),
-                    (String) row.get("tenant_type"),
-                    (String) row.get("role"),
-                    Boolean.TRUE.equals(row.get("is_home")),
-                    (java.math.BigDecimal) row.get("revenue_share_percent"),
-                    (java.math.BigDecimal) row.get("assignment_margin_percent")));
-        }
-        return out;
+        return repo.memberships(phone);
     }
 
     /** Where a trainer's own data lives, for a token that predates the claim. */
     public UUID homeTenantOf(UUID trainerId) {
-        var rows = jdbc.queryForList(
-                "SELECT home_tenant_id::text AS id FROM trainer WHERE id = :id::uuid",
-                Map.of("id", trainerId.toString()));
-        if (rows.isEmpty() || rows.getFirst().get("id") == null) return null;
-        return UUID.fromString((String) rows.getFirst().get("id"));
+        return repo.homeTenantOf(trainerId).orElse(null);
     }
 
     /** The client rows behind a phone — the client lens, plural by requirement. */
     public List<UUID> clientIdsFor(String phone) {
         if (phone == null || phone.isBlank()) return List.of();
-        return jdbc.queryForList("""
-                SELECT id::text AS id FROM client
-                WHERE phone = :phone
-                  AND deleted_at IS NULL
-                  AND membership_status NOT IN ('declined')
-                """, Map.of("phone", phone))
-                .stream().map(r -> UUID.fromString((String) r.get("id"))).toList();
+        return repo.clientIdsFor(phone);
     }
 
     /** The workspaces those client rows are coached in. */
     public List<UUID> clientTenantIdsFor(String phone) {
         if (phone == null || phone.isBlank()) return List.of();
-        return jdbc.queryForList("""
-                SELECT DISTINCT tenant_id::text AS id FROM client
-                WHERE phone = :phone
-                  AND deleted_at IS NULL
-                  AND membership_status NOT IN ('declined')
-                """, Map.of("phone", phone))
-                .stream().map(r -> UUID.fromString((String) r.get("id"))).toList();
+        return repo.clientTenantIdsFor(phone);
     }
 }

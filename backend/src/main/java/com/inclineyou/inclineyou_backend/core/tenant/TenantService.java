@@ -1,16 +1,23 @@
 package com.inclineyou.inclineyou_backend.core.tenant;
 
+import com.inclineyou.inclineyou_backend.core.auth.AuthPrincipal;
+import com.inclineyou.inclineyou_backend.core.auth.AuthTokenService;
+import com.inclineyou.inclineyou_backend.core.auth.IssuedToken;
+import com.inclineyou.inclineyou_backend.core.auth.JwtService;
+import com.inclineyou.inclineyou_backend.core.tenant.dto.ActivateRequest;
+import com.inclineyou.inclineyou_backend.core.tenant.dto.ActivateResponse;
+import com.inclineyou.inclineyou_backend.core.tenant.dto.MemberView;
+import com.inclineyou.inclineyou_backend.core.tenant.dto.UpdateRoleRequest;
+import com.inclineyou.inclineyou_backend.core.tenant.dto.UpdateSharesRequest;
+import com.inclineyou.inclineyou_backend.core.tenant.dto.WorkspaceView;
 import com.inclineyou.inclineyou_backend.infrastructure.config.AppProperties;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -38,22 +45,10 @@ import java.util.UUID;
 @Slf4j
 public class TenantService {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final TenantJdbcRepository repo;
+    private final AuthTokenService tokens;
     private final TenantScope scope;
     private final AppProperties props;
-
-    public record WorkspaceView(
-            String id, String type, String name, String role,
-            boolean home, boolean active, boolean administers,
-            BigDecimal revenueSharePercent, BigDecimal assignmentMarginPercent
-    ) {}
-
-    public record MemberView(
-            String memberId, String appUserId, String trainerId, String phone,
-            String name, String role, String status, boolean home,
-            BigDecimal revenueSharePercent, BigDecimal assignmentMarginPercent,
-            int clientCount
-    ) {}
 
     /** The switcher at the top of the app. */
     public List<WorkspaceView> myWorkspaces() {
@@ -84,17 +79,31 @@ public class TenantService {
     /** Remember it, so the next sign-in opens here. */
     @Transactional
     public void makeHome(String phone, UUID tenantId) {
-        jdbc.update("""
-                UPDATE tenant_member tm SET is_home = FALSE
-                FROM app_user au
-                WHERE au.id = tm.app_user_id AND au.phone = :phone AND tm.is_home
-                """, Map.of("phone", phone));
-        jdbc.update("""
-                UPDATE tenant_member tm SET is_home = TRUE
-                FROM app_user au
-                WHERE au.id = tm.app_user_id AND au.phone = :phone
-                  AND tm.tenant_id = :tid::uuid AND tm.deleted_at IS NULL
-                """, Map.of("phone", phone, "tid", tenantId.toString()));
+        repo.makeHome(phone, tenantId);
+    }
+
+    /**
+     * Stand in a different workspace.
+     *
+     * <p>The answer says whether the caller's credential changed. On the web it
+     * does not — a session is a row, and moving it is an UPDATE, so the browser
+     * keeps the token it has. On the phone it does: a JWT's workspace is a signed
+     * claim, so a new token comes back and the old one is left to expire. That
+     * asymmetry is the whole reason the two issuers exist.
+     *
+     * @param rawToken the credential this request came in on
+     * @param subject  the authenticated subject — the trainer id
+     */
+    @Transactional
+    public ActivateResponse activate(UUID tenantId, ActivateRequest req, String rawToken, String subject) {
+        requireSwitchable(tenantId);
+        var s = CurrentScope.require();
+        if (req.remember()) makeHome(s.phone(), tenantId);
+        var principal = new AuthPrincipal(subject, s.phone(), JwtService.ROLE_TRAINER, tenantId, null);
+        var reissued = tokens.switchTenant(rawToken, principal, tenantId);
+        return new ActivateResponse(tenantId.toString(),
+                reissued.map(IssuedToken::value).orElse(null),
+                reissued.map(IssuedToken::kind).orElse(tokens.kindOf(rawToken)));
     }
 
     /* ------------------------------------------------------------- members */
@@ -103,42 +112,7 @@ public class TenantService {
         var s = CurrentScope.require();
         if (!s.isMemberOf(tenantId)) throw TenantRuleException.notAMember();
 
-        // The client count is per COACH per WORKSPACE, which is the number an
-        // admin is actually looking for and is not derivable from `trainer` —
-        // the same coach may hold twelve clients here and four somewhere else.
-        return jdbc.queryForList("""
-                SELECT tm.id::text          AS member_id,
-                       tm.app_user_id::text AS app_user_id,
-                       t.id::text           AS trainer_id,
-                       au.phone             AS phone,
-                       COALESCE(t.name, au.phone) AS name,
-                       tm.role              AS role,
-                       tm.status            AS status,
-                       tm.is_home           AS is_home,
-                       tm.revenue_share_percent     AS revenue_share_percent,
-                       tm.assignment_margin_percent AS assignment_margin_percent,
-                       (SELECT COUNT(*) FROM client c
-                         WHERE c.tenant_id = tm.tenant_id
-                           AND c.trainer_id = t.id
-                           AND c.deleted_at IS NULL) AS client_count
-                FROM tenant_member tm
-                JOIN app_user au ON au.id = tm.app_user_id
-                LEFT JOIN trainer t ON t.phone = au.phone AND t.deleted_at IS NULL
-                WHERE tm.tenant_id = :tid::uuid
-                  AND tm.deleted_at IS NULL
-                  AND tm.role <> 'client'
-                ORDER BY tm.role, name
-                """, Map.of("tid", tenantId.toString()))
-                .stream()
-                .map(r -> new MemberView(
-                        (String) r.get("member_id"), (String) r.get("app_user_id"),
-                        (String) r.get("trainer_id"), (String) r.get("phone"),
-                        (String) r.get("name"), (String) r.get("role"),
-                        (String) r.get("status"), Boolean.TRUE.equals(r.get("is_home")),
-                        (BigDecimal) r.get("revenue_share_percent"),
-                        (BigDecimal) r.get("assignment_margin_percent"),
-                        ((Number) r.get("client_count")).intValue()))
-                .toList();
+        return repo.members(tenantId);
     }
 
     /**
@@ -151,34 +125,20 @@ public class TenantService {
      * January.
      */
     @Transactional
-    public void updateShares(UUID tenantId, UUID memberId,
-                             BigDecimal revenueShare, BigDecimal assignmentMargin) {
+    public void updateShares(UUID tenantId, UUID memberId, UpdateSharesRequest req) {
         requireAdmin(tenantId);
-        var p = new MapSqlParameterSource()
-                .addValue("id", memberId.toString())
-                .addValue("tid", tenantId.toString())
-                .addValue("share", revenueShare)
-                .addValue("margin", assignmentMargin);
-        // COALESCE so a PATCH that names one percentage cannot blank the other —
-        // the same "null means leave it alone" contract /v1/trainers/me uses.
-        int n = jdbc.update("""
-                UPDATE tenant_member
-                SET revenue_share_percent     = COALESCE(:share, revenue_share_percent),
-                    assignment_margin_percent = COALESCE(:margin, assignment_margin_percent)
-                WHERE id = :id::uuid AND tenant_id = :tid::uuid AND deleted_at IS NULL
-                """, p);
+        BigDecimal revenueShare = req.revenueSharePercent();
+        BigDecimal assignmentMargin = req.assignmentMarginPercent();
+        int n = repo.updateShares(tenantId, memberId, revenueShare, assignmentMargin);
         if (n == 0) throw TenantRuleException.notAMember();
     }
 
     @Transactional
-    public void updateRole(UUID tenantId, UUID memberId, String role) {
+    public void updateRole(UUID tenantId, UUID memberId, UpdateRoleRequest req) {
         requireAdmin(tenantId);
+        String role = req.role();
         if (TenantRole.CLIENT.equals(role)) throw TenantRuleException.notACoachHere();
-        int n = jdbc.update("""
-                UPDATE tenant_member SET role = :role
-                WHERE id = :id::uuid AND tenant_id = :tid::uuid
-                  AND deleted_at IS NULL AND role <> 'owner'
-                """, Map.of("id", memberId.toString(), "tid", tenantId.toString(), "role", role));
+        int n = repo.updateRole(tenantId, memberId, role);
         if (n == 0) throw TenantRuleException.notAMember();
     }
 
@@ -194,9 +154,6 @@ public class TenantService {
 
     /** Which app_user a phone is, creating nothing. */
     public UUID appUserIdFor(String phone) {
-        var rows = jdbc.queryForList(
-                "SELECT id::text AS id FROM app_user WHERE phone = :phone AND deleted_at IS NULL",
-                Map.of("phone", phone));
-        return rows.isEmpty() ? null : UUID.fromString((String) rows.getFirst().get("id"));
+        return repo.appUserIdFor(phone).orElse(null);
     }
 }

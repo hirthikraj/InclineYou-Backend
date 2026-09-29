@@ -2,14 +2,14 @@ package com.inclineyou.inclineyou_backend.core.tenant;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import com.inclineyou.inclineyou_backend.core.tenant.dto.RevenueView;
+import com.inclineyou.inclineyou_backend.core.tenant.dto.RevenueView.CoachLine;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -52,28 +52,9 @@ import java.util.UUID;
 @Slf4j
 public class TenantRevenueService {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final TenantRevenueJdbcRepository repo;
 
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
-
-    public record CoachLine(
-            String trainerId, String trainerName,
-            BigDecimal collected, int payments, int clientsWhoPaid,
-            BigDecimal sharePercent, BigDecimal share
-    ) {}
-
-    public record RevenueView(
-            String tenantId, LocalDate from, LocalDate to,
-            String role,
-            /** The workspace total. Null for a coach, who is not shown one. */
-            BigDecimal collected,
-            /** One line for a coach; every line for an admin. */
-            List<CoachLine> coaches,
-            /** What this caller personally keeps. */
-            BigDecimal myShare,
-            /** What this caller earned by placing clients with other coaches. */
-            BigDecimal myPlacementMargin
-    ) {}
 
     public RevenueView revenue(UUID tenantId, LocalDate from, LocalDate to) {
         var scope = CurrentScope.require();
@@ -86,55 +67,14 @@ public class TenantRevenueService {
 
         boolean wholeWorkspace = TenantRole.readsTenantRevenue(role);
 
-        var params = Map.<String, Object>of(
-                "tid", tenantId.toString(),
-                "from", from,
-                "to", to,
-                "trainer", scope.trainerId() == null ? null : scope.trainerId().toString());
-
         // The trainer_id predicate is applied here and not by a policy — see the
-        // class comment. `:trainer IS NULL` makes the same statement serve both
-        // shapes without a second copy of it to drift.
-        String coachFilter = wholeWorkspace ? "" : " AND p.trainer_id = :trainer::uuid ";
-
-        List<CoachLine> lines = jdbc.queryForList("""
-                SELECT p.trainer_id::text AS trainer_id,
-                       t.name             AS trainer_name,
-                       SUM(p.amount)      AS collected,
-                       COUNT(*)           AS payments,
-                       COUNT(DISTINCT p.client_id) AS clients,
-                       (SELECT tm.revenue_share_percent
-                          FROM tenant_member tm
-                          JOIN app_user au ON au.id = tm.app_user_id
-                         WHERE tm.tenant_id = :tid::uuid
-                           AND au.phone = t.phone
-                           AND tm.deleted_at IS NULL
-                         LIMIT 1) AS share_percent
-                FROM payment p
-                JOIN trainer t ON t.id = p.trainer_id
-                WHERE p.tenant_id = :tid::uuid
-                  AND p.deleted_at IS NULL
-                  AND p.status IN ('paid', 'confirmed')
-                  AND p.paid_at >= :from
-                  AND p.paid_at < (CAST(:to AS date) + 1)
-                """ + coachFilter + """
-                GROUP BY p.trainer_id, t.name, t.phone
-                ORDER BY SUM(p.amount) DESC
-                """, params)
-                .stream()
-                .map(r -> {
-                    BigDecimal collected = (BigDecimal) r.get("collected");
-                    BigDecimal pct = (BigDecimal) r.get("share_percent");
-                    return new CoachLine(
-                            (String) r.get("trainer_id"),
-                            (String) r.get("trainer_name"),
-                            collected,
-                            ((Number) r.get("payments")).intValue(),
-                            ((Number) r.get("clients")).intValue(),
-                            pct,
-                            share(collected, pct));
-                })
-                .toList();
+        // class comment. A coach with no trainer row has no line of their own,
+        // and must not fall through to the whole-workspace read.
+        List<CoachLine> lines = !wholeWorkspace && scope.trainerId() == null ? List.of()
+                : repo.collections(tenantId, from, to, wholeWorkspace ? null : scope.trainerId()).stream()
+                        .map(c -> new CoachLine(c.trainerId(), c.trainerName(), c.collected(),
+                                c.payments(), c.clients(), c.sharePercent(), share(c.collected(), c.sharePercent())))
+                        .toList();
 
         BigDecimal total = wholeWorkspace
                 ? lines.stream().map(CoachLine::collected).reduce(BigDecimal.ZERO, BigDecimal::add)
@@ -160,24 +100,7 @@ public class TenantRevenueService {
      */
     private BigDecimal placementMargin(UUID tenantId, TenantScope.Scope scope,
                                        LocalDate from, LocalDate to) {
-        var rows = jdbc.queryForList("""
-                SELECT COALESCE(SUM(p.amount * c.assignment_margin_percent / 100), 0) AS margin
-                FROM payment p
-                JOIN client c ON c.id = p.client_id
-                JOIN app_user au ON au.id = c.assigned_by_app_user_id
-                WHERE p.tenant_id = :tid::uuid
-                  AND p.deleted_at IS NULL
-                  AND p.status IN ('paid', 'confirmed')
-                  AND p.paid_at >= :from
-                  AND p.paid_at < (CAST(:to AS date) + 1)
-                  AND au.phone = :phone
-                  AND c.assignment_margin_percent IS NOT NULL
-                  AND c.trainer_id <> COALESCE(
-                        (SELECT t.id FROM trainer t WHERE t.phone = :phone AND t.deleted_at IS NULL LIMIT 1),
-                        '00000000-0000-0000-0000-000000000000'::uuid)
-                """, Map.of("tid", tenantId.toString(), "from", from, "to", to,
-                            "phone", scope.phone()));
-        BigDecimal m = (BigDecimal) rows.getFirst().get("margin");
+        BigDecimal m = repo.placementMargin(tenantId, scope.phone(), from, to);
         return m == null ? BigDecimal.ZERO : m.setScale(2, RoundingMode.HALF_UP);
     }
 

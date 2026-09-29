@@ -1,6 +1,5 @@
 package com.inclineyou.inclineyou_backend.core.trainer;
 
-import com.inclineyou.inclineyou_backend.core.trainer.Trainer;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 

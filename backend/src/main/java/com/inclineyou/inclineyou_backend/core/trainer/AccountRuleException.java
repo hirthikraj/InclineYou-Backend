@@ -1,4 +1,4 @@
-package com.inclineyou.inclineyou_backend.core.trainer.account;
+package com.inclineyou.inclineyou_backend.core.trainer;
 
 import lombok.Getter;
 import org.springframework.http.HttpStatus;

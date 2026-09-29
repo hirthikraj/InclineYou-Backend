@@ -2,7 +2,6 @@ package com.inclineyou.inclineyou_backend.core.tenant;
 
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.time.DateTimeException;
@@ -11,7 +10,6 @@ import java.time.LocalDate;
 import java.time.YearMonth;
 import java.time.ZoneId;
 import java.time.format.DateTimeParseException;
-import java.util.Map;
 
 /**
  * The active workspace's calendar — where "today" starts and a month ends.
@@ -29,13 +27,11 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class WorkspaceClock {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final TenantJdbcRepository repo;
 
     public ZoneId zone() {
         var tenantId = CurrentScope.require().activeTenantId();
-        String tz = jdbc.queryForObject(
-                "SELECT timezone FROM tenant WHERE id = :id::uuid",
-                Map.of("id", tenantId.toString()), String.class);
+        String tz = repo.timezone(tenantId);
         try {
             return ZoneId.of(tz);
         } catch (DateTimeException | NullPointerException e) {

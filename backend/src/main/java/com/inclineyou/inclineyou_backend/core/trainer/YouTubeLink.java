@@ -1,4 +1,4 @@
-package com.inclineyou.inclineyou_backend.core.trainer.links;
+package com.inclineyou.inclineyou_backend.core.trainer;
 
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;

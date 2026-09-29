@@ -12,7 +12,7 @@ import com.inclineyou.inclineyou_backend.core.nudge.NudgeRuleException;
 import com.inclineyou.inclineyou_backend.core.assessment.AssessmentRuleException;
 import com.inclineyou.inclineyou_backend.core.attention.AttentionRuleException;
 import com.inclineyou.inclineyou_backend.core.payment.PackRuleException;
-import com.inclineyou.inclineyou_backend.core.trainer.account.AccountRuleException;
+import com.inclineyou.inclineyou_backend.core.trainer.AccountRuleException;
 import com.inclineyou.inclineyou_backend.core.payment.PackageRuleException;
 import com.inclineyou.inclineyou_backend.core.tenant.TenantRuleException;
 import org.springframework.http.HttpStatus;

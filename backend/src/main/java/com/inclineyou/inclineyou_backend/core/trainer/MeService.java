@@ -1,19 +1,15 @@
-package com.inclineyou.inclineyou_backend.core.trainer.profile;
+package com.inclineyou.inclineyou_backend.core.trainer;
 
 import com.inclineyou.inclineyou_backend.core.auth.AppUser;
-import com.inclineyou.inclineyou_backend.core.trainer.Trainer;
-import com.inclineyou.inclineyou_backend.core.trainer.TrainerBusiness;
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
-import com.inclineyou.inclineyou_backend.core.trainer.TrainerBusinessRepository;
-import com.inclineyou.inclineyou_backend.core.trainer.TrainerRepository;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.MeResponse;
 import com.inclineyou.inclineyou_backend.core.tenant.CurrentScope;
+import com.inclineyou.inclineyou_backend.core.tenant.TenantJdbcRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -35,22 +31,8 @@ public class MeService {
     private final TrainerRepository trainerRepo;
     private final AppUserRepository appUserRepo;
     private final TrainerBusinessRepository businessRepo;
-    private final NamedParameterJdbcTemplate jdbc;
+    private final TenantJdbcRepository tenants;
 
-    public record Workspace(String id, String name, String currency, String country, String timezone) {}
-
-    public record MeResponse(
-            String id,
-            String name,
-            String phone,
-            /**
-             * Null until setup is done — the redirect signal. Epoch ms since 1.1,
-             * like every other instant on the wire (it was an ISO string in 1.0).
-             */
-            Long setupCompletedAt,
-            String gymName,
-            Workspace workspace
-    ) {}
 
     public MeResponse get(UUID trainerId) {
         Trainer t = trainerRepo.findById(trainerId)
@@ -74,20 +56,7 @@ public class MeService {
                 user.getPhone(),
                 t.getSetupCompletedAt() == null ? null : t.getSetupCompletedAt().toEpochMilli(),
                 gymName,
-                loadWorkspace(tenantId));
-    }
-
-    private Workspace loadWorkspace(UUID tenantId) {
-        var rows = jdbc.queryForList("""
-                SELECT id::text AS id, name, currency, country, timezone
-                FROM tenant WHERE id = :id::uuid
-                """, Map.of("id", tenantId.toString()));
-        if (rows.isEmpty()) {
-            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Workspace not found");
-        }
-        var r = rows.getFirst();
-        return new Workspace(
-                (String) r.get("id"), (String) r.get("name"),
-                (String) r.get("currency"), (String) r.get("country"), (String) r.get("timezone"));
+                tenants.workspace(tenantId)
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Workspace not found")));
     }
 }

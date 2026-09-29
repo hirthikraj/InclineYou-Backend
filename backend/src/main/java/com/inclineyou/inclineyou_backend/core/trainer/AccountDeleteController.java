@@ -1,7 +1,7 @@
-package com.inclineyou.inclineyou_backend.core.trainer.account;
+package com.inclineyou.inclineyou_backend.core.trainer;
 
+import com.inclineyou.inclineyou_backend.core.trainer.dto.DeleteAccountRequest;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -34,18 +34,9 @@ public class AccountDeleteController {
 
     private final AccountService service;
 
-    public record DeleteBody(
-            /**
-             * The trainer's own number, typed back. Compared on the last ten
-             * digits, so whichever way the screen formatted it back to them is
-             * an answer this accepts.
-             */
-            @NotBlank String confirmPhone
-    ) {}
-
     @DeleteMapping
-    public ResponseEntity<Void> delete(@Valid @RequestBody DeleteBody body) {
-        service.deleteAccount(trainerId(), body.confirmPhone());
+    public ResponseEntity<Void> delete(@Valid @RequestBody DeleteAccountRequest body) {
+        service.deleteAccount(trainerId(), body);
         // 204: there is nothing left to describe, and a body here would be a
         // description of a thing the caller has just asked us to stop having.
         return ResponseEntity.noContent().build();
