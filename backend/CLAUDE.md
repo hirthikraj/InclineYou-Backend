@@ -92,16 +92,26 @@ blueprint, so copy from one of the other two.
 
 ## Architecture
 
-`com.inclineyou.inclineyou_backend`, one package per feature, each a thin
-`*Controller` over a `*Service`:
+`com.inclineyou.inclineyou_backend`, in three top-level packages (29 Sep 2026):
 
-`auth` · `client` · `exercise` · `template` · `program` · `session` ·
-`progress` · `payment` · `report` · `nudge` · `push` · `sync` · `trainer` ·
-`team` · `workout` · `assessment` · `portal`
+- `core/` — one vertical slice per feature: `assessment` · `attention` · `auth`
+  · `client` · `exercise` · `nudge` · `payment` · `program` · `progress` ·
+  `push` · `report` · `session` · `template` · `tenant` · `trainer` ·
+  `workout`. A slice owns its JPA entities and Spring Data repositories too
+  (`Client` in `core/client`, `Trainer` + `TrainerBusiness` in `core/trainer`,
+  `AppUser` + `OtpRequest` in `core/auth`) — there is no global `entity/` or
+  `repository/` package any more.
+- `infrastructure/` — `config` (security, Redis, health, `AppProperties`),
+  `ratelimit`, `seed`.
+- `shared/` — `exception` (the global RFC-7807 handler), `wire` (the `Page` /
+  `Items` / `Cursor` envelopes every controller returns). `shared/util` gets
+  created by the first helper that two slices need, not before.
 
-Cross-cutting: `config` (security, Redis, health, `AppProperties`),
-`ratelimit`, `exception` (the global RFC-7807 handler), `entity` + `repository`
-(JPA), `seed`.
+A slice is being reshaped, module by module, into four layers:
+`*Controller` (the HTTP contract — a request `record` with Jakarta Bean
+Validation, checked by `@Valid`) → `*Service` (logic only, takes the typed
+record, never a `Map`) → `*JdbcRepository` (all SQL, nothing else) — with the
+records in a `dto/` subpackage once a slice has more than a handful.
 
 ### Persistence is deliberately split
 
@@ -353,8 +363,16 @@ and to the table in `API.md` — the app cannot branch on prose.
 ## Conventions
 
 - Lombok `@RequiredArgsConstructor` for injection; no field `@Autowired`.
-- Request/response DTOs are `record`s nested in the service that owns them.
+- Request/response DTOs are `record`s — nested in the service while a slice is small, in its `dto/` subpackage once it is not.
 - Jakarta Bean Validation on request records; `@Valid` at the controller.
+- Request bodies bind **strictly, app-wide** (`infrastructure/config/JacksonConfig`,
+  29 Sep 2026): an unknown key is a 400, `5.5` is not an `Integer`, `"5"` is not a
+  number. `GlobalExceptionHandler#handleUnreadable` names the field. A record that
+  must tolerate extra keys opts out with `@JsonIgnoreProperties(ignoreUnknown = true)`.
+- A PATCH record's fields are `shared/wire/Patch<T>`: null = key absent (leave it),
+  `Patch` holding null = clear it. Constraints go on the type argument
+  (`Patch<@Size(max = 100) String>`). `Optional<T>` cannot do this — Jackson maps
+  absent and null to the same `Optional.empty()`.
 - All ids are UUIDs, generated client-side so offline writes have stable keys.
 - Money is `BigDecimal`; timestamps are `Instant` (UTC).
 - Comments here explain *why* a non-obvious choice was made (see the 250 ms Redis
