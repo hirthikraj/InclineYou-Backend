@@ -1,13 +1,20 @@
 import 'server-only';
 
-import { cache } from 'react';
+import { api, ApiError } from '@/lib/http/client';
 
 import type { PlanDiff } from './diff';
-
-import { getToken } from '@/lib/auth/session';
-
-const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
-const TIMEOUT_MS = 8_000;
+import {
+  dayLabelsOf,
+  equipmentOf,
+  flatRowsOf,
+  goalIdOf,
+  goalLabelOf,
+  trainingDaysOf,
+  treeOf,
+  type FlatRow,
+  type PlanExerciseNameWire,
+  type PlanProgramWire,
+} from './wire';
 
 export class ProgramsApiError extends Error {
   constructor(
@@ -15,51 +22,41 @@ export class ProgramsApiError extends Error {
     /** The server's own sentence, when it sent one. Always preferred over
      *  anything this half could invent — the rule belongs to the backend. */
     readonly detail?: string,
+    /** The wire `code` (`PROGRAM_REVISED`, `PRECONDITION_FAILED` …). */
+    readonly code?: string,
   ) {
     super(detail ?? `inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'ProgramsApiError';
   }
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = await getToken();
-  if (!token) throw new ProgramsApiError(401);
-
-  let res: Response;
+/**
+ * The shared client does the bearer, `x-inclineyou-client: web`, the timeout and
+ * the dev log; this keeps the screen's own error type, which `guard.ts` reads.
+ */
+async function call<T>(
+  path: string,
+  init?: { method?: 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown; ifMatch?: string },
+): Promise<T> {
   try {
-    res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: {
-        authorization: `Bearer ${token}`,
-        ...(init?.body ? { 'content-type': 'application/json' } : {}),
-        ...init?.headers,
-      },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+    return await api<T>(path, {
+      method: init?.method,
+      body: init?.body,
+      headers: init?.ifMatch ? { 'if-match': `"${init.ifMatch}"` } : undefined,
     });
-  } catch {
-    throw new ProgramsApiError(null);
+  } catch (error) {
+    if (error instanceof ApiError) throw new ProgramsApiError(error.status, error.problem.detail, error.problem.code);
+    throw error;
   }
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    let detail: string | undefined;
-    try {
-      const body = JSON.parse(text) as { detail?: string; message?: string };
-      detail = body.detail ?? body.message;
-    } catch {
-      /* not JSON — the servlet error page, or nothing at all */
-    }
-    throw new ProgramsApiError(res.status, detail);
-  }
-
-  if (res.status === 204) return undefined as T;
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T;
 }
 
 async function get<T>(path: string): Promise<T> {
   return call<T>(path);
+}
+
+/** A 1.1 list is `{ items }`. */
+async function items<T>(path: string): Promise<T[]> {
+  return (await get<{ items: T[] }>(path))?.items ?? [];
 }
 
 /* ═══════════════════════════════════════════════════════ the wire ══ */
@@ -124,6 +121,10 @@ export interface TemplateExerciseWire {
 
 export interface TemplateWire {
   id: string;
+  /** v1.1 — the program's `revisedAt` as text; what `If-Match` carries. */
+  version: string;
+  /** From the summary row, which has no tree: the shelf's figure when `exercises` is empty. */
+  exerciseCount: number;
   name: string;
   goal: string | null;
   description: string | null;
@@ -231,6 +232,8 @@ export interface AssignmentWire {
   /** The blueprint has moved since this copy last did. Not an error — see
    *  `ProgramService.resync` for why nothing repairs it on its own. */
   behindTemplate: boolean;
+  /** The copy's version, when the list sends it — else a push reads it fresh. */
+  version?: string;
 
   /**
    * WHAT THIS COPY SAYS THAT THE BLUEPRINT DOES NOT — and therefore what a
@@ -293,54 +296,243 @@ export interface ClientWire {
   sessionDurationMinutes: number | null;
   deliveryMode: string | null;
   /**
-   * The days and times this client already trains — `1 = Monday`, and set when
-   * their pack was sold. The assign panel seeds itself from it, which is the
-   * difference between *place these four days somewhere* and *confirm the four
-   * mornings this person already comes in*. Null for anyone with no rhythm yet.
+   * The days and times this client already trains — `1 = Monday`. The assign
+   * panel seeds itself from it. Read off the summary's `slots` (`programDay`
+   * is the template day the slot books, else its place in the week).
    */
   weeklySchedule: Array<{ templateDay: number; weekday: number; time: string }> | null;
+  /** `schedule.version` — the `If-Match` of `PUT /v1/clients/{id}/schedule`. */
+  scheduleVersion: string | null;
+}
+
+/** `GET /v1/clients?view=summary` (Clients L3), the fields this screen reads. */
+interface ClientSummaryWire {
+  id: string;
+  name: string | null;
+  status: string;
+  schedule: {
+    sessionsPerWeek: number | null;
+    sessionDurationMinutes: number | null;
+    deliveryMode: string | null;
+    version: string;
+  } | null;
+  slots: { weekday: number; start: string; programDay: number | null }[] | null;
+}
+
+function clientOf(c: ClientSummaryWire): ClientWire {
+  const slots = [...(c.slots ?? [])].sort((a, b) => a.weekday - b.weekday || a.start.localeCompare(b.start));
+  return {
+    id: c.id,
+    name: c.name ?? 'Unnamed client',
+    status: c.status,
+    sessionsPerWeek: c.schedule?.sessionsPerWeek ?? null,
+    sessionDurationMinutes: c.schedule?.sessionDurationMinutes ?? null,
+    deliveryMode: c.schedule?.deliveryMode ?? null,
+    weeklySchedule: slots.length
+      ? slots.map((s, i) => ({ templateDay: s.programDay ?? i + 1, weekday: s.weekday, time: s.start }))
+      : null,
+    scheduleVersion: c.schedule?.version ?? null,
+  };
+}
+
+async function clients(): Promise<ClientWire[]> {
+  return (await items<ClientSummaryWire>('/v1/clients?view=summary')).map(clientOf);
+}
+
+/** `GET /v1/programs/{id}/assignments` items (Programs L5). */
+interface AssignmentItem {
+  programId: string;
+  clientId: string;
+  clientName: string;
+  status: string;
+  startDate: string | null;
+  syncedAt: number | null;
+  behind: boolean;
+  programName?: string;
+  endDate?: string | null;
+  createdAt?: number;
+  updatedAt?: number;
+  divergence?: PlanDiff | null;
+  version?: string;
+}
+
+function assignmentOf(a: AssignmentItem): AssignmentWire {
+  return {
+    programId: a.programId,
+    clientId: a.clientId,
+    clientName: a.clientName,
+    programName: a.programName ?? '',
+    startDate: a.startDate,
+    endDate: a.endDate ?? null,
+    status: a.status,
+    createdAt: a.createdAt ?? a.syncedAt ?? 0,
+    updatedAt: a.updatedAt ?? a.syncedAt ?? 0,
+    behindTemplate: a.behind,
+    version: a.version,
+    divergence: a.divergence ?? null,
+  };
+}
+
+/* ═══════════════════════════════════ the four-level wire, flattened ══
+
+   The backend answers with the schema's tree (`wire.ts`); every screen here
+   reads the flat shapes above. These are the only functions that know both. */
+
+/** A program template (or certified plan) as the shelf and builder read it. */
+function templateOf(p: PlanProgramWire): TemplateWire {
+  return {
+    id: p.id,
+    version: p.version,
+    exerciseCount: p.exerciseCount,
+    name: p.name,
+    goal: goalLabelOf(p.goal),
+    description: p.description,
+    exercises: flatRowsOf(p.workouts) as TemplateExerciseWire[],
+    dayLabels: dayLabelsOf(p.workouts),
+    createdAt: p.createdAt,
+    /* A certified plan's stamp is its REVISION — what a copy is compared
+       against. A trainer's own keeps `updatedAt`, the shelf's order. */
+    updatedAt: p.origin === 'inclineyou' ? p.revisedAt : p.updatedAt,
+    weeks: p.weeks,
+    trainingDays: trainingDaysOf(p.days),
+    assignedCount: p.assignedCount,
+    activeAssignedCount: p.activeAssignedCount,
+    assignedClients: p.assignedClients,
+    source: p.origin === 'inclineyou' ? 'certified' : 'own',
+    /* The copy's `syncedAt` is the moment it took the source — which is what
+       `copiedFrom.updatedAt` has always meant to the *revised since* notice. */
+    copiedFrom: p.copiedFrom
+      ? { id: p.copiedFrom.id, name: p.copiedFrom.name, updatedAt: p.syncedAt ?? 0 }
+      : null,
+  };
+}
+
+function certifiedOf(p: PlanProgramWire): CertifiedWire {
+  return {
+    ...templateOf(p),
+    certified: p.certified
+      ? {
+          summary: p.certified.summary,
+          level: p.certified.level,
+          equipment: equipmentOf(p.certified.equipment),
+          reviewedAt: p.certified.reviewedAt ?? 0,
+          usedCount: p.certified.usedCount,
+        }
+      : null,
+    exerciseCount: p.exerciseCount,
+    mine: p.mine,
+  };
+}
+
+/** A client's plan as the client screens read it. */
+function programOf(p: PlanProgramWire): ProgramWire {
+  return {
+    id: p.id,
+    clientId: p.clientId ?? '',
+    templateId: p.copiedFromProgramId,
+    name: p.name,
+    goal: goalLabelOf(p.goal),
+    startDate: p.startDate,
+    endDate: p.endDate,
+    status: p.status ?? 'active',
+    version: p.version,
+    dayLabels: dayLabelsOf(p.workouts),
+    weeks: p.weeks,
+    trainingDays: trainingDaysOf(p.days),
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
+    syncedAt: p.syncedAt ?? undefined,
+  };
+}
+
+/** A plan's rows as a client copy's — each with the `workout_exercise` id. */
+function programRowsOf(p: PlanProgramWire): ProgramExerciseWire[] {
+  const ids = (p.workouts ?? [])
+    .slice()
+    .sort(
+      (a, b) =>
+        (a.week ?? 1) - (b.week ?? 1) || (a.day ?? 1) - (b.day ?? 1) || (a.position ?? 0) - (b.position ?? 0),
+    )
+    .flatMap(w => w.exercises.map(e => e.id ?? ''));
+  return flatRowsOf(p.workouts).map((r, i) => ({
+    ...(r as TemplateExerciseWire),
+    id: ids[i] || `${p.id}_${i}`,
+    programId: p.id,
+  }));
+}
+
+/**
+ * The builder's patch → the program body. The tree is rebuilt whenever the
+ * rows OR the shape moved — a *mark as rest day* sends `trainingDays` alone,
+ * and compacting the days renumbers the rows under them — so a shape-only
+ * patch reads the current rows first and writes them back re-placed.
+ */
+/** Does this edit touch the tree or its shape? Only then is it a PUT; a rename is a PATCH. */
+const touchesShape = (patch: TemplatePatch) =>
+  patch.exercises !== undefined || patch.trainingDays !== undefined || patch.dayLabels !== undefined
+  || patch.weeks !== undefined;
+
+async function bodyOf(patch: TemplatePatch, currentId: string | null): Promise<Record<string, unknown>> {
+  const body: Record<string, unknown> = {};
+  if (patch.name !== undefined) body.name = patch.name;
+  if (patch.goal !== undefined) body.goal = goalIdOf(patch.goal);
+  if (patch.description !== undefined) body.description = patch.description;
+  if (patch.weeks !== undefined) body.weeks = patch.weeks;
+  if (!touchesShape(patch)) return body;
+
+  /* A PUT is the whole program, so whatever the edit left out comes from what is saved. */
+  const current = currentId ? await get<PlanProgramWire>(`/v1/programs/${encodeURIComponent(currentId)}`) : null;
+  if (current) {
+    if (body.name === undefined) body.name = current.name;
+    if (body.goal === undefined) body.goal = current.goal;
+    if (body.description === undefined) body.description = current.description;
+  }
+  const rows: FlatRow[] = (patch.exercises ?? flatRowsOf(current?.workouts)) as FlatRow[];
+  const tree = treeOf(rows, {
+    trainingDays: patch.trainingDays ?? (current ? trainingDaysOf(current.days) : undefined),
+    dayLabels: patch.dayLabels ?? dayLabelsOf(current?.workouts),
+  });
+  /* Weeks: the patch's, or enough to hold every row written. */
+  const deepest = tree.workouts.reduce((m, w) => Math.max(m, w.week ?? 1), 1);
+  body.weeks = Math.max(Number(body.weeks ?? current?.weeks ?? 1), deepest);
+  body.days = tree.days;
+  body.workouts = tree.workouts;
+  return body;
+}
+
+/** Save an existing program: a PUT of the whole tree, or a PATCH when only its name, goal or description moved. */
+async function savePlan(id: string, patch: TemplatePatch, version: string): Promise<PlanProgramWire> {
+  return call<PlanProgramWire>(`/v1/programs/${encodeURIComponent(id)}`, {
+    method: touchesShape(patch) ? 'PUT' : 'PATCH',
+    body: await bodyOf(patch, id),
+    ifMatch: version,
+  });
 }
 
 /* ══════════════════════════════════════════════════════ the reads ══ */
 
 /**
- * Names for exactly the exercises a blueprint uses.
- *
- * `?ids=` was added for `/sessions/:id` and closed BACKEND_GAPS 8; without it
- * naming six movements costs the whole 1,324-row library. **Keyed on a sorted
- * CSV rather than the array**, because `cache()` memoises on argument identity
- * and a fresh array literal would turn the cache off silently — the same trap
- * `lib/sessions/api.ts` records.
- *
- * The library PANEL is the other half of this and deliberately does not use it:
- * browsing wants everything, and `lib/exercises/api.ts` already serves that
- * through a paged search.
+ * Names come WITH the program read (R48): `exercises` is a dictionary of each
+ * movement once. The builder no longer makes a follow-up `?ids=` request.
+ * A summary row carries no tree and so no dictionary — the shelf needs none.
  */
-const namesByCsv = cache(async (csv: string): Promise<ExerciseNameWire[]> => {
-  if (!csv) return [];
-  // `?ids=` narrows the SEARCH route, so it answers in the search route's
-  // envelope — `{exercises, total}`, not a bare array. Reading it as an array
-  // is a 200 that throws on the spread, which is what it did the first time
-  // this screen was rendered against a real backend. `lib/sessions/api.ts`
-  // unwraps it the same way.
-  const page = await get<{ exercises: ExerciseNameWire[] }>(
-    `/v1/exercises?ids=${encodeURIComponent(csv)}`,
-  );
-  return page?.exercises ?? [];
-});
-
-export async function exercisesByIds(ids: string[]): Promise<Record<string, ExerciseNameWire>> {
-  const unique = [...new Set(ids.filter(Boolean))].sort();
-  if (unique.length === 0) return {};
-  // The route refuses over 600 ids rather than truncating silently, and one
-  // blueprint cannot approach that — but a shelf's worth of them can, so this
-  // chunks rather than trusting the arithmetic.
-  const chunks: string[][] = [];
-  for (let i = 0; i < unique.length; i += 400) chunks.push(unique.slice(i, i + 400));
-
+function namesOf(...plans: (PlanProgramWire | null | undefined)[]): Record<string, ExerciseNameWire> {
   const out: Record<string, ExerciseNameWire> = {};
-  const pages = await Promise.all(chunks.map(chunk => namesByCsv(chunk.join(','))));
-  for (const page of pages) for (const ex of page) out[ex.id] = ex;
+  for (const plan of plans) {
+    for (const [id, n] of Object.entries(plan?.exercises ?? {}) as [string, PlanExerciseNameWire][]) {
+      out[id] = {
+        id,
+        name: n.name,
+        muscleGroup: n.muscleGroup ?? null,
+        bodyPart: n.bodyPart ?? null,
+        target: n.target ?? null,
+        equipment: n.equipment ?? null,
+        movementPattern: n.movementPattern ?? null,
+        level: n.level ?? null,
+        isCustom: n.isCustom ?? false,
+      };
+    }
+  }
   return out;
 }
 
@@ -350,42 +542,26 @@ export interface ShelfData {
 }
 
 /**
- * The shelf. Two requests, and the second is scoped to what the first uses.
- *
- * Deliberately **not** `/v1/sync/pull`: `lib/setup/api.ts` allows itself the
- * full envelope and says exactly why it is the only screen that may — the
- * account is nearly empty there. A program shelf is opened by a trainer with a
- * year of set logs behind it, which is the case that comment forbids.
+ * The shelf. One request: `GET /v1/programs?kind=template` (Programs L1) —
+ * summaries with counts and who is on each, no trees, so no names to fetch.
  */
 export async function getShelf(): Promise<ShelfData> {
-  const templates = await get<TemplateWire[]>('/v1/templates');
-  const ids = templates.flatMap(t => t.exercises.map(e => e.exerciseId));
-  const names = await exercisesByIds(ids);
-  return { templates, names };
+  const templates = (await items<PlanProgramWire>('/v1/programs?kind=template')).map(templateOf);
+  return { templates, names: {} };
 }
 
 export interface CertifiedShelfData {
   certified: CertifiedWire[];
-  /** How many of the trainer's OWN programs there are, for the tab strip's
-   *  count. The blueprints are not wanted here, but the strip is drawn on this
-   *  screen and a tab that counts nothing on one of its three pages is a tab
-   *  that looks broken on that page. */
+  /** How many of the trainer's OWN programs there are, for the tab strip's count. */
   ownCount: number;
 }
 
-/**
- * The certified catalogue. Two requests, and the second is only for a count.
- *
- * Deliberately NOT `getShelf()` for the second half: that read comes back with
- * every blueprint on the trainer's shelf and then fetches a name for every
- * exercise in them, to render an integer on a tab.
- */
 export async function getCertifiedShelf(): Promise<CertifiedShelfData> {
   const [certified, own] = await Promise.all([
-    get<CertifiedWire[]>('/v1/templates/certified'),
-    get<TemplateWire[]>('/v1/templates'),
+    items<PlanProgramWire>('/v1/programs/certified'),
+    items<PlanProgramWire>('/v1/programs?kind=template'),
   ]);
-  return { certified, ownCount: own.length };
+  return { certified: certified.map(certifiedOf), ownCount: own.length };
 }
 
 export interface CertifiedPreviewData {
@@ -394,23 +570,13 @@ export interface CertifiedPreviewData {
   ownCount: number;
 }
 
-/**
- * One certified program, with its blueprint, for the read-only preview.
- *
- * No shelf and no client list: nothing on that screen can assign, and the
- * list pane is the certified grid the trainer came from rather than their own
- * programs. `/v1/clients` is the request `getBuilder` makes for a panel this
- * screen does not have.
- */
+/** One library program with its tree, for the read-only preview (Programs L2). */
 export async function getCertifiedPreview(id: string): Promise<CertifiedPreviewData> {
-  const [template, own] = await Promise.all([
-    get<CertifiedWire>(`/v1/templates/certified/${encodeURIComponent(id)}`),
-    get<TemplateWire[]>('/v1/templates'),
+  const [plan, own] = await Promise.all([
+    get<PlanProgramWire>(`/v1/programs/certified/${encodeURIComponent(id)}`),
+    items<PlanProgramWire>('/v1/programs?kind=template'),
   ]);
-  const names = await exercisesByIds(
-    template.exercises.flatMap(e => [e.exerciseId, e.altExerciseId ?? '']),
-  );
-  return { template, names, ownCount: own.length };
+  return { template: certifiedOf(plan), names: namesOf(plan), ownCount: own.length };
 }
 
 /* ══════════════════════════════════════════ one client's own copy ══ */
@@ -440,6 +606,8 @@ export interface ProgramWire {
   startDate: string | null;
   endDate: string | null;
   status: string;
+  /** v1.1 — `revisedAt` as text; the `If-Match` of the next save. */
+  version: string;
   /** The copy's own shape — see the note on the server's `ProgramRow`. Optional
    *  on the wire so a build that predates the columns still renders: the
    *  builder falls back to deriving days and weeks from the rows themselves,
@@ -511,32 +679,38 @@ export async function getClientPlan(
   clientId: string,
   programId: string,
 ): Promise<ClientPlanData> {
-  const [program, exercises, client, history] = await Promise.all([
-    get<ProgramWire>(`/v1/programs/${encodeURIComponent(programId)}`),
-    get<ProgramExerciseWire[]>(`/v1/programs/${encodeURIComponent(programId)}/exercises`),
-    get<ClientWire>(`/v1/clients/${encodeURIComponent(clientId)}`),
-    get<ProgramWire[]>(`/v1/programs?clientId=${encodeURIComponent(clientId)}`).catch(() => []),
+  const [plan, all, history] = await Promise.all([
+    get<PlanProgramWire>(`/v1/programs/${encodeURIComponent(programId)}`),
+    clients(),
+    items<PlanProgramWire>(`/v1/programs?clientId=${encodeURIComponent(clientId)}`)
+      .then(rows => rows.map(programOf))
+      .catch(() => [] as ProgramWire[]),
   ]);
+  const client = all.find(c => c.id === clientId);
+  if (!client) throw new ProgramsApiError(404);
+  const program = programOf(plan);
+  const exercises = programRowsOf(plan);
 
   // A programme reached through the wrong client's URL is not this client's
   // plan. 404 rather than rendering somebody else's prescription under their
   // name — the guard turns it into *this plan is gone*.
   if (program.clientId !== clientId) throw new ProgramsApiError(404);
 
-  const origin = program.templateId
-    ? await get<TemplateWire>(`/v1/templates/${encodeURIComponent(program.templateId)}`).catch(
-        () => null,
-      )
+  /* An InclineYou source is read through /certified, a trainer's through /{id}; the
+     copy's own `copiedFrom` does not say which, so try the trainer's first and
+     let a 404 (a deleted or library source) fall through to null. */
+  const originPlan = program.templateId
+    ? await get<PlanProgramWire>(`/v1/programs/${encodeURIComponent(program.templateId)}`)
+        .catch(() => get<PlanProgramWire>(`/v1/programs/certified/${encodeURIComponent(program.templateId!)}`))
+        .catch(() => null)
     : null;
+  const origin = originPlan ? templateOf(originPlan) : null;
 
   /* THE ORIGIN'S IDS ARE IN HERE TOO, and they have to be: a diff line reads
      *Bench Press → Dumbbell Press*, and the movement a trainer REMOVED for this
      client is by definition not in their copy any more. Naming it off the copy's
      rows alone printed the id. */
-  const names = await exercisesByIds([
-    ...exercises.flatMap(e => [e.exerciseId, e.altExerciseId ?? '']),
-    ...(origin?.exercises ?? []).flatMap(e => [e.exerciseId, e.altExerciseId ?? '']),
-  ]);
+  const names = namesOf(plan, originPlan);
 
   return {
     program,
@@ -577,20 +751,20 @@ export interface BuilderData extends ShelfData {
  * page. It is the same request `/schedule` and `/today` already make.
  */
 export async function getBuilder(templateId: string): Promise<BuilderData> {
-  const [templates, template, assignments, clients] = await Promise.all([
-    get<TemplateWire[]>('/v1/templates'),
-    get<TemplateWire>(`/v1/templates/${encodeURIComponent(templateId)}`),
-    get<AssignmentWire[]>(`/v1/templates/${encodeURIComponent(templateId)}/assignments`),
-    get<ClientWire[]>('/v1/clients?view=legacy'),
+  const [templates, plan, assignments, roster] = await Promise.all([
+    items<PlanProgramWire>('/v1/programs?kind=template').then(rows => rows.map(templateOf)),
+    get<PlanProgramWire>(`/v1/programs/${encodeURIComponent(templateId)}`),
+    items<AssignmentItem>(`/v1/programs/${encodeURIComponent(templateId)}/assignments`),
+    clients(),
   ]);
 
-  const ids = [
-    ...templates.flatMap(t => t.exercises.map(e => e.exerciseId)),
-    ...template.exercises.flatMap(e => [e.exerciseId, e.altExerciseId ?? '']),
-  ];
-  const names = await exercisesByIds(ids);
-
-  return { templates, template, assignments, clients, names };
+  return {
+    templates,
+    template: templateOf(plan),
+    assignments: assignments.map(assignmentOf),
+    clients: roster,
+    names: namesOf(plan),
+  };
 }
 
 /* ═════════════════════════════════════════════════════ the writes ══ */
@@ -625,66 +799,51 @@ export interface TemplatePatch {
   exercises?: TemplateExercisePayload[];
 }
 
-export async function postTemplate(body: TemplatePatch): Promise<TemplateWire> {
-  return call<TemplateWire>('/v1/templates', { method: 'POST', body: JSON.stringify(body) });
-}
+const newId = () => crypto.randomUUID();
 
-/**
- * A blueprint edit is one PUT of the whole structure, and that is the storage
- * shape rather than a shortcut: `template.structure` is a single jsonb column
- * and there is no row to PATCH. It is also why the builder holds a draft and
- * saves — a per-keystroke write would be a full rewrite per keystroke.
- */
-export async function putTemplate(id: string, body: TemplatePatch): Promise<TemplateWire> {
-  return call<TemplateWire>(`/v1/templates/${encodeURIComponent(id)}`, {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  });
-}
-
-/**
- * Copy a certified program onto the caller's shelf.
- *
- * One request, and the copy is made SERVER-SIDE in one transaction — a
- * read-then-create from here would be a thirty-four-row blueprint rewritten
- * from the browser, which is a half-copied program waiting for a dropped
- * connection, on the endpoint trainers use most.
- *
- * `name` is the ONE thing the copy may differ from its origin in, and the route
- * has always taken it (`str(ctx.body.name, origin.name)`). The certified
- * shelf's *Use this* sends none — a trainer who copied *Upper / Lower · 4 day*
- * is building an upper/lower and the original is not on their shelf to be
- * confused with. The new-program dialog sends one, because there the trainer
- * has a name field in front of them and has typed in it.
- */
-export async function postCertifiedCopy(id: string, name?: string | null): Promise<TemplateWire> {
-  return call<TemplateWire>(`/v1/templates/certified/${encodeURIComponent(id)}/copy`, {
+/** `id` is minted here so a retried create replays (200) instead of making two. */
+export async function postTemplate(body: TemplatePatch, id: string = newId()): Promise<TemplateWire> {
+  const made = await call<PlanProgramWire>('/v1/programs', {
     method: 'POST',
-    body: JSON.stringify(name?.trim() ? { name: name.trim() } : {}),
+    body: { id, ...(await bodyOf(body, null)) },
   });
+  return templateOf(made);
 }
 
 /**
- * The catalogue, list-shaped, and nothing beside it.
- *
- * `getCertifiedShelf` reads the trainer's own shelf as well, to put an integer
- * on a tab; the new-program dialog's picker already holds that list in the
- * browser and needs only this half. The list read carries no blueprints —
- * `CertifiedWire`'s own note — so it is a small response even at forty rows.
+ * A blueprint edit is one PUT of the whole tree, conditional on the version the
+ * builder loaded (R46/R82); the answer carries the next one. A stale save is
+ * `412 PROGRAM_REVISED`, which the caller surfaces as the server's own sentence.
  */
-export async function getCertifiedList(): Promise<CertifiedWire[]> {
-  return get<CertifiedWire[]>('/v1/templates/certified');
+export async function putTemplate(id: string, body: TemplatePatch, version: string): Promise<TemplateWire> {
+  return templateOf(await savePlan(id, body, version));
+}
+
+/** Duplicate · Save as template · Use this — one route, `copyFrom` (Programs A4). */
+export async function postCopy(sourceId: string, name?: string | null): Promise<TemplateWire> {
+  const copy = await call<PlanProgramWire>('/v1/programs', {
+    method: 'POST',
+    body: { id: newId(), copyFrom: sourceId, ...(name?.trim() ? { name: name.trim() } : {}) },
+  });
+  return templateOf(copy);
+}
+
+/** Use an InclineYou program: the same copy call, the library id as the source. */
+export async function postCertifiedCopy(id: string, name?: string | null): Promise<TemplateWire> {
+  return postCopy(id, name);
 }
 
 export async function postDuplicate(id: string, name?: string): Promise<TemplateWire> {
-  return call<TemplateWire>(`/v1/templates/${encodeURIComponent(id)}/duplicate`, {
-    method: 'POST',
-    body: JSON.stringify({ name: name ?? null }),
-  });
+  return postCopy(id, name);
+}
+
+/** The catalogue, list-shaped, and nothing beside it. */
+export async function getCertifiedList(): Promise<CertifiedWire[]> {
+  return (await items<PlanProgramWire>('/v1/programs/certified')).map(certifiedOf);
 }
 
 export async function deleteTemplate(id: string): Promise<void> {
-  await call<void>(`/v1/templates/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  await call<void>(`/v1/programs/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export interface ScheduleEntryPayload {
@@ -697,6 +856,8 @@ export interface ScheduleEntryPayload {
 }
 
 export interface ApplyPayload {
+  /** The new plan's id, minted by the caller so a retry replays. */
+  id?: string;
   clientId: string;
   name?: string | null;
   goal?: string | null;
@@ -715,34 +876,71 @@ export interface ProgramSummaryWire {
   status: string;
 }
 
+const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+
+/**
+ * Give a client a copy of a template (Programs A5, R81).
+ *
+ * Apply takes no schedule any more, so when the trainer changed the week in the
+ * panel this saves it first — `PUT /v1/clients/{id}/schedule`, conditional on
+ * the version the summary carries, `programDay` per slot — and only then applies.
+ * If apply fails after the week saved, a retry with the same `id` is safe.
+ */
 export async function postApply(id: string, body: ApplyPayload): Promise<ProgramSummaryWire> {
-  return call<ProgramSummaryWire>(`/v1/templates/${encodeURIComponent(id)}/apply`, {
+  if (body.schedule.length > 0) {
+    const client = (await clients()).find(c => c.id === body.clientId);
+    const current = (client?.weeklySchedule ?? [])
+      .map(s => `${s.weekday}@${s.time}#${s.templateDay}`)
+      .sort()
+      .join('|');
+    const wanted = body.schedule
+      .map(s => `${s.weekday}@${s.time}#${s.day}`)
+      .sort()
+      .join('|');
+    if (client && client.scheduleVersion && current !== wanted) {
+      await call(`/v1/clients/${encodeURIComponent(body.clientId)}/schedule`, {
+        method: 'PUT',
+        ifMatch: client.scheduleVersion,
+        body: {
+          deliveryMode: client.deliveryMode === 'remote' ? 'remote' : 'floor',
+          sessionsPerWeek: body.schedule.length,
+          slots: body.schedule.map(s => ({ weekday: s.weekday, start: s.time, programDay: s.day })),
+        },
+      });
+    }
+  }
+  const made = await call<PlanProgramWire>(`/v1/programs/${encodeURIComponent(id)}/apply`, {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: {
+      id: body.id ?? newId(),
+      clientId: body.clientId,
+      name: body.name ?? null,
+      goal: body.goal ? goalIdOf(body.goal) : null,
+      startDate: body.startDate ? isoDay(body.startDate) : null,
+      endDate: body.endDate ? isoDay(body.endDate) : null,
+    },
   });
+  return {
+    id: made.id,
+    clientId: made.clientId ?? body.clientId,
+    templateId: made.copiedFromProgramId ?? id,
+    name: made.name,
+    startDate: made.startDate,
+    endDate: made.endDate,
+    status: made.status ?? 'active',
+  };
 }
 
 /**
- * THE CLIENT COPY'S SAVE — one PUT of the whole prescription.
- *
- * The same shape as `putTemplate` and for the same reason, arriving at the
- * other table: the builder holds a draft, every structural edit is local, and
- * this is what the debounce presses. Per-row `POST`/`PUT`/`DELETE` on
- * `/v1/programs/:id/exercises/:rowId` stay where they are — the session log
- * uses them to swap one exercise mid-workout, which is a single edit with a
- * single row's intent behind it. A drag on a board is not.
- *
- * It does NOT move `synced_at`. Tuning a client's copy is not the same act as
- * taking the blueprint, and the assignment list has to go on saying so.
+ * THE CLIENT COPY'S SAVE — one conditional PUT of the whole prescription.
+ * It does NOT move `synced_at`: tuning a copy is not taking the blueprint.
  */
 export async function putProgramBlueprint(
   programId: string,
   body: TemplatePatch,
+  version: string,
 ): Promise<ProgramWire> {
-  return call<ProgramWire>(`/v1/programs/${encodeURIComponent(programId)}/exercises`, {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  });
+  return programOf(await savePlan(programId, body, version));
 }
 
 export interface ResyncResultWire {
@@ -750,41 +948,51 @@ export interface ResyncResultWire {
   templateId: string;
   removed: number;
   added: number;
+  version: string;
 }
 
-export async function postResync(programId: string): Promise<ResyncResultWire> {
-  return call<ResyncResultWire>(`/v1/programs/${encodeURIComponent(programId)}/resync`, {
-    method: 'POST',
-  });
+/** Take the template's latest (Programs A6). `version` is the plan's, as the banner drew it. */
+export async function postResync(programId: string, version?: string): Promise<ResyncResultWire> {
+  /* The assignments list does not carry each copy's version, so a push from the
+     template's side reads it now — the trainer has just confirmed the warning. */
+  version ??= (await get<PlanProgramWire>(`/v1/programs/${encodeURIComponent(programId)}`)).version;
+  const done = await call<{ programId: string; sourceId: string; removed: number; added: number; version: string }>(
+    `/v1/programs/${encodeURIComponent(programId)}/resync`,
+    { method: 'POST', body: {}, ifMatch: version },
+  );
+  return {
+    programId: done.programId,
+    templateId: done.sourceId,
+    removed: done.removed,
+    added: done.added,
+    version: done.version,
+  };
+}
+
+/** `PATCH /v1/programs/{id} {status}` — pause, resume or end a client's plan. */
+export async function patchStatus(
+  programId: string,
+  status: 'active' | 'paused' | 'completed',
+): Promise<ProgramWire> {
+  return programOf(
+    await call<PlanProgramWire>(`/v1/programs/${encodeURIComponent(programId)}`, {
+      method: 'PATCH',
+      body: { status },
+    }),
+  );
 }
 
 export interface PlanNoticeResultWire {
-  /** False when the client has turned plan notifications off. The write still
-   *  succeeded; nobody was told. See `mintClientNotification`'s gate. */
   sent: boolean;
 }
 
 /**
- * TELL THE CLIENT THEIR PLAN CHANGED — the optional half of saving a copy.
- *
- * Its own route rather than a flag on the save, because the two acts have
- * different audiences and the trainer decides on them separately: a typo fixed
- * in a day label is a save nobody needs to hear about, and a deload week is a
- * save that is meaningless unless they do. Folding it into `PUT .../exercises`
- * would make *tell them* a property of *write it down*, and the trainer would
- * be choosing at the moment they are thinking hardest about the prescription.
- *
- * It carries no summary of WHAT changed, and that is the notification system's
- * standing rule rather than a shortcut here: `lib/notifications/types.ts` has
- * it as "a notification never offers to change the book. It names what happened
- * and points at where it happened." The client's bell says their trainer
- * changed their plan and links to the plan, which is the one place the change
- * is actually legible.
+ * HELD BACK IN v1 (R47). `POST /v1/programs/{id}/notify` writes to the portal's
+ * bell, which is out of v1 — the route is gone, so this answers "not sent"
+ * without a request. The call sites stay behind the release flag.
  */
-export async function postPlanNotice(programId: string): Promise<PlanNoticeResultWire> {
-  return call<PlanNoticeResultWire>(`/v1/programs/${encodeURIComponent(programId)}/notify`, {
-    method: 'POST',
-  });
+export async function postPlanNotice(_programId: string): Promise<PlanNoticeResultWire> {
+  return { sent: false };
 }
 
 /* ═══════════════════════════════ every client's copy, in one list ══ */
@@ -826,9 +1034,9 @@ export interface ClientProgramsData {
  * copy could be drawn without reading its rows.
  */
 export async function getClientPrograms(): Promise<ClientProgramsData> {
-  const [programs, clients] = await Promise.all([
-    get<ProgramWire[]>('/v1/programs'),
-    get<ClientWire[]>('/v1/clients?view=legacy'),
+  const [programs, roster] = await Promise.all([
+    items<PlanProgramWire>('/v1/programs?kind=client&status=active,paused,completed'),
+    clients(),
   ]);
-  return { programs: programs ?? [], clients: clients ?? [] };
+  return { programs: programs.map(programOf), clients: roster };
 }

@@ -85,12 +85,16 @@ export async function createTemplate(input: {
  * and the phone draws: *adding, removing and reordering are local; rewriting the
  * numbers goes through the endpoint that validates the blueprint.*
  */
-export async function saveTemplate(id: string, patch: TemplatePatch): Promise<Result<null>> {
+export async function saveTemplate(
+  id: string,
+  version: string,
+  patch: TemplatePatch,
+): Promise<Result<{ version: string }>> {
   try {
-    await putTemplate(id, patch);
+    const saved = await putTemplate(id, patch, version);
     revalidatePath('/programs/templates');
     revalidatePath(`/programs/${id}`);
-    return { ok: true, value: null };
+    return { ok: true, value: { version: saved.version } };
   } catch (error) {
     return refusal(error, 'Could not save the program.');
   }
@@ -270,7 +274,7 @@ export async function createFromTemplate(input: {
        name silently becoming the origin's is the failure this catches, and it
        costs nothing on a wire that honoured it. */
     if (copy.name !== name) patch.name = name;
-    if (Object.keys(patch).length > 0) await putTemplate(copy.id, patch);
+    if (Object.keys(patch).length > 0) await putTemplate(copy.id, patch, copy.version);
 
     revalidatePath('/programs/templates');
     revalidatePath('/programs/certified');
@@ -385,15 +389,18 @@ export async function pushUpdate(
    *  the client's own plan screen goes on rendering the prescription the push
    *  just replaced until something else happens to revalidate it. */
   clientId?: string,
-): Promise<Result<{ removed: number; added: number }>> {
+  /** The plan's version as the panel drew it (`If-Match`); read fresh when the
+   *  caller does not have one. */
+  version?: string,
+): Promise<Result<{ removed: number; added: number; version: string }>> {
   try {
-    const result = await postResync(programId);
+    const result = await postResync(programId, version);
     revalidatePath(`/programs/${templateId}`);
     if (clientId) {
       revalidatePath(`/clients/${clientId}/program`);
       revalidatePath(`/clients/${clientId}/program/${programId}`);
     }
-    return { ok: true, value: { removed: result.removed, added: result.added } };
+    return { ok: true, value: { removed: result.removed, added: result.added, version: result.version } };
   } catch (error) {
     return refusal(error, 'Could not push the update.');
   }
@@ -414,13 +421,14 @@ export async function pushUpdate(
 export async function saveClientPlan(
   clientId: string,
   programId: string,
+  version: string,
   patch: TemplatePatch,
-): Promise<Result<null>> {
+): Promise<Result<{ version: string }>> {
   try {
-    await putProgramBlueprint(programId, patch);
+    const saved = await putProgramBlueprint(programId, patch, version);
     revalidatePath(`/clients/${clientId}/program`);
     revalidatePath(`/clients/${clientId}/program/${programId}`);
-    return { ok: true, value: null };
+    return { ok: true, value: { version: saved.version } };
   } catch (error) {
     return refusal(error, "Could not save this client's plan.");
   }
@@ -461,12 +469,13 @@ export async function notifyPlanChange(programId: string): Promise<Result<{ sent
 export async function resetClientPlan(
   clientId: string,
   programId: string,
-): Promise<Result<{ removed: number; added: number }>> {
+  version?: string,
+): Promise<Result<{ removed: number; added: number; version: string }>> {
   try {
-    const result = await postResync(programId);
+    const result = await postResync(programId, version);
     revalidatePath(`/clients/${clientId}/program`);
     revalidatePath(`/clients/${clientId}/program/${programId}`);
-    return { ok: true, value: { removed: result.removed, added: result.added } };
+    return { ok: true, value: { removed: result.removed, added: result.added, version: result.version } };
   } catch (error) {
     return refusal(error, 'Could not reset this plan to the template.');
   }

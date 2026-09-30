@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
 import type { ClientPlanData, ExerciseNameWire } from '@/lib/programs/api';
@@ -308,6 +308,15 @@ export function ClientPlan({
     [program, data.exercises],
   );
 
+  /* THE VERSION THE NEXT SAVE CARRIES as `If-Match` (R46/R82). Each save returns
+     the new one; a fresh server render (another tab, a revalidate) replaces it. */
+  const version = useRef(program.version);
+  const seenVersion = useRef(program.version);
+  if (seenVersion.current !== program.version) {
+    seenVersion.current = program.version;
+    version.current = program.version;
+  }
+
   const {
     entries,
     labels,
@@ -335,7 +344,12 @@ export function ClientPlan({
        and deliberately does NOT move `synced_at` — tuning a copy is not the
        same act as taking the blueprint, and the assignment list on
        `/programs/:id` must go on saying so. */
-    save: patch => saveClientPlan(client.id, program.id, patch),
+    save: async patch => {
+      const result = await saveClientPlan(client.id, program.id, version.current, patch);
+      if (!result.ok) return result;
+      version.current = result.value.version;
+      return { ok: true, value: null };
+    },
     onAdopt: () => {
       setLibrary(null);
       setPanel(null);

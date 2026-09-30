@@ -547,7 +547,7 @@ function NewProgram({
     description: t.description,
     weeks: t.weeks ?? 1,
     days: t.trainingDays.length,
-    exercises: t.exercises.length,
+    exercises: t.exercises.length || t.exerciseCount,
     /* LIFETIME, not `activeAssignedCount`. The shelf row draws the active
        figure because it is deciding whether an edit is safe; this list is
        deciding which blueprint to reach for, and a program four clients

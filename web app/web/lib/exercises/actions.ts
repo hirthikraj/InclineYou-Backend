@@ -2,9 +2,11 @@
 
 import {
   createExercise,
+  deleteExercise,
   getExercise,
   getExercises,
   getExercisesMeta,
+  patchExercise,
   ExercisesApiError,
   type ExerciseWire,
   type ExercisesMeta,
@@ -61,15 +63,40 @@ export async function createCustomExercise(
     });
     return { ok: true, exercise };
   } catch (error) {
-    if (error instanceof ExercisesApiError) {
-      return {
-        ok: false,
-        error:
-          error.status === null
-            ? 'Could not reach the server. Check your connection.'
-            : `Server error (${error.status}).`,
-      };
-    }
-    return { ok: false, error: 'Something went wrong.' };
+    return { ok: false, error: refusal(error) };
+  }
+}
+
+/** The sentence for a refusal: the server's reason when it gave one the trainer can act on. */
+function refusal(error: unknown): string {
+  if (error instanceof ExercisesApiError) {
+    if (error.status === null) return 'Could not reach the server. Check your connection.';
+    if (error.code === 'EXERCISE_NAME_TAKEN') return 'You already have an exercise with that name.';
+    if (error.status === 412) return 'This exercise changed since you opened it. Reload it and try again.';
+    return `Server error (${error.status}).`;
+  }
+  return 'Something went wrong.';
+}
+
+/** Fix one of the trainer's own exercises. Built on the wire; no screen calls it yet. */
+export async function updateCustomExercise(
+  id: string,
+  fields: Parameters<typeof patchExercise>[1],
+  version?: string,
+): Promise<{ ok: true; exercise: ExerciseWire } | { ok: false; error: string }> {
+  try {
+    return { ok: true, exercise: await patchExercise(id, fields, version) };
+  } catch (error) {
+    return { ok: false, error: refusal(error) };
+  }
+}
+
+/** Retire one of the trainer's own exercises. Built on the wire; no screen calls it yet. */
+export async function removeCustomExercise(id: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await deleteExercise(id);
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: refusal(error) };
   }
 }

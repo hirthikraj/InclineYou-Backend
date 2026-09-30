@@ -102,6 +102,8 @@ export interface WorkoutTemplateWire {
   dividers?: WorkoutTemplateDividerWire[];
   createdAt: number;
   updatedAt: number;
+  /** What a save must echo as If-Match; the dialog keeps it from the read. */
+  version?: string;
   /** Counted by the server, never stored — see `workoutTemplateView`. */
   exerciseCount: number;
   setCount: number;
@@ -122,7 +124,12 @@ export interface WorkoutTemplateInput {
   }[];
 }
 
+/** Keep the headers a caller cares about next to the body; the adapter needs the ETag of a read. */
 async function authed<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return (await authedRaw<T>(path, init)).body;
+}
+
+async function authedRaw<T>(path: string, init: RequestInit = {}): Promise<{ body: T; res: Response }> {
   const token = await getToken();
   if (!token) throw new WorkoutsApiError(401);
 
@@ -145,35 +152,137 @@ async function authed<T>(path: string, init: RequestInit = {}): Promise<T> {
   if (!res.ok) throw new WorkoutsApiError(res.status);
   /* 204 on the delete. `res.json()` on an empty body throws, and the caller
      wants the success rather than the payload. */
-  if (res.status === 204) return null as T;
-  return res.json() as Promise<T>;
+  if (res.status === 204) return { body: null as T, res };
+  return { body: (await res.json()) as T, res };
+}
+
+/* ═════════════════════════════════════════ the v1.1 wire ↔ the UI's shape ══
+ *
+ * The server (Programs L4 / A7) answers `{items}`, names a row's place `position`,
+ * carries dividers as `{position, label}` and sends a `version` that a PUT must
+ * echo as If-Match. The builder was written against the flat shape above
+ * (`orderIndex`, `beforeIndex`, bare arrays), so this is the seam: it translates
+ * on the way in and out, and nothing above this file knows the wire moved. */
+
+interface SetV11 {
+  loadKind: WorkoutTemplateSetWire['loadKind'];
+  loadValue: number | null;
+  effortKind: WorkoutTemplateSetWire['effortKind'];
+  effortValue: number | null;
+  restSeconds: number | null;
+  tempo: string | null;
+  notes: string | null;
+}
+
+interface ExerciseV11 {
+  id: string;
+  exerciseId: string;
+  position: number;
+  groupId: string | null;
+  sets: SetV11[];
+  alternatives?: { exerciseId: string; sets: SetV11[] }[];
+}
+
+interface ItemV11 {
+  id: string;
+  name: string;
+  notes: string | null;
+  exercises: ExerciseV11[];
+  dividers: { position: number; label: string }[];
+  exerciseCount: number;
+  setCount: number;
+  createdAt: number;
+  updatedAt: number;
+  version: string;
+}
+
+const setOf = (s: SetV11): WorkoutTemplateSetWire => ({
+  loadKind: s.loadKind,
+  loadValue: s.loadValue,
+  effortKind: s.effortKind,
+  effortValue: s.effortValue,
+  restSeconds: s.restSeconds,
+  tempo: s.tempo,
+  notes: s.notes,
+});
+
+const viewOf = (w: ItemV11): WorkoutTemplateWire => ({
+  id: w.id,
+  name: w.name,
+  notes: w.notes,
+  exercises: w.exercises.map(e => ({
+    id: e.id,
+    exerciseId: e.exerciseId,
+    orderIndex: e.position,
+    groupId: e.groupId,
+    alternatives: (e.alternatives ?? []).map(a => ({ exerciseId: a.exerciseId, sets: a.sets.map(setOf) })),
+    sets: e.sets.map(setOf),
+  })),
+  dividers: w.dividers.map(d => ({ label: d.label, beforeIndex: d.position })),
+  createdAt: w.createdAt,
+  updatedAt: w.updatedAt,
+  exerciseCount: w.exerciseCount,
+  setCount: w.setCount,
+  version: w.version,
+});
+
+/** Only the keys the server binds — a stray one is a 400. */
+function bodyOf(body: WorkoutTemplateInput, id?: string) {
+  return {
+    ...(id ? { id } : {}),
+    name: body.name.trim() || 'New workout',
+    notes: body.notes,
+    exercises: body.exercises.map(e => ({
+      exerciseId: e.exerciseId,
+      groupId: e.groupId,
+      sets: e.sets.map(setOf),
+      alternatives: e.alternatives.map(a => ({ exerciseId: a.exerciseId, sets: a.sets.map(setOf) })),
+    })),
+    dividers: body.dividers
+      .filter(d => d.label.trim())
+      .map(d => ({ position: Math.max(0, Math.round(d.beforeIndex)), label: d.label.trim().slice(0, 60) })),
+  };
 }
 
 export async function getWorkoutTemplates(): Promise<WorkoutTemplateWire[]> {
-  return authed<WorkoutTemplateWire[]>('/v1/workout-templates');
+  return (await authed<{ items: ItemV11[] }>('/v1/workout-templates')).items.map(viewOf);
 }
 
 export async function getWorkoutTemplate(id: string): Promise<WorkoutTemplateWire> {
-  return authed<WorkoutTemplateWire>(`/v1/workout-templates/${encodeURIComponent(id)}`);
+  return viewOf(await authed<ItemV11>(`/v1/workout-templates/${encodeURIComponent(id)}`));
 }
 
+/** The id is minted here, so a retried create replays (200) instead of making two. */
 export async function createWorkoutTemplate(
   body: WorkoutTemplateInput,
 ): Promise<WorkoutTemplateWire> {
-  return authed<WorkoutTemplateWire>('/v1/workout-templates', {
-    method: 'POST',
-    body: JSON.stringify(body),
-  });
+  return viewOf(
+    await authed<ItemV11>('/v1/workout-templates', {
+      method: 'POST',
+      body: JSON.stringify(bodyOf(body, crypto.randomUUID())),
+    }),
+  );
 }
 
+/**
+ * A save is conditional on the version the workout is at (428 / 412 otherwise). The dialog sends the
+ * one it opened with, so a save from a stale dialog is refused instead of overwriting. A caller with
+ * none (nothing today) falls back to reading it just before the PUT.
+ */
 export async function updateWorkoutTemplate(
   id: string,
   body: WorkoutTemplateInput,
+  version?: string,
 ): Promise<WorkoutTemplateWire> {
-  return authed<WorkoutTemplateWire>(`/v1/workout-templates/${encodeURIComponent(id)}`, {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  });
+  const path = `/v1/workout-templates/${encodeURIComponent(id)}`;
+  const current = version ?? (await authedRaw<ItemV11>(path)).body.version;
+  return viewOf(
+    await authed<ItemV11>(path, {
+      method: 'PUT',
+      headers: { 'if-match': `"${current}"` },
+      body: JSON.stringify(bodyOf(body)),
+    }),
+  );
 }
 
 export async function deleteWorkoutTemplate(id: string): Promise<void> {

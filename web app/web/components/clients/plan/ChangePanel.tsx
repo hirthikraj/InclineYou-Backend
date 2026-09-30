@@ -1,5 +1,6 @@
 'use client';
 
+import { RELEASE_PLAN_NOTICE } from '@/lib/programs/release';
 import type { ReactNode } from 'react';
 
 import type { PlanDiff } from '@/lib/programs/diff';
@@ -220,6 +221,17 @@ export function ChangeFoot({ state: s, onClose }: { state: ChangeState; onClose?
   const settled = settledOf(s);
   const dirty = s.diff.total > 0;
   const busy = s.save === 'saving';
+
+  if (settled && !RELEASE_PLAN_NOTICE) {
+    /* R47 — nobody to tell in v1: the save is the whole act. */
+    return onClose ? (
+      <div className="tools pg__gap">
+        <Button variant="secondary" size="sm" onClick={onClose}>
+          Done
+        </Button>
+      </div>
+    ) : null;
+  }
 
   if (settled) {
     return (

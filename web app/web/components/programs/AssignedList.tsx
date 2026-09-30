@@ -126,7 +126,7 @@ export function AssignedList({
        one refusal must not strand the rest — and the trainer needs to know
        WHICH client did not move, not that something did not. */
     for (const [i, a] of queue.entries()) {
-      const result = await pushUpdate(a.programId, templateId, a.clientId);
+      const result = await pushUpdate(a.programId, templateId, a.clientId, a.version);
       if (result.ok) pushed += 1;
       else failed.push(a.clientName);
       setPhase({ kind: 'running', done: i + 1, total: queue.length });

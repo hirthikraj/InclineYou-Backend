@@ -44,9 +44,10 @@ const TOUCHED = '/programs/workouts';
 export async function saveWorkoutTemplate(
   body: WorkoutTemplateInput,
   id?: string,
+  version?: string,
 ): Promise<Result<WorkoutTemplateWire>> {
   try {
-    const row = id ? await updateWorkoutTemplate(id, body) : await createWorkoutTemplate(body);
+    const row = id ? await updateWorkoutTemplate(id, body, version) : await createWorkoutTemplate(body);
     revalidatePath(TOUCHED);
     return { ok: true, value: row };
   } catch (error) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
 import type { AssignmentWire, ClientWire, ExerciseNameWire, TemplateWire } from '@/lib/programs/api';
@@ -265,6 +265,15 @@ export function Builder({
      `onAdopt` is the shell's half: when a genuinely newer version arrives (a
      second tab, or a push that rewrote this blueprint) the row a panel was
      editing may not exist any more, so whatever is open closes. */
+  /* THE VERSION THE NEXT SAVE CARRIES as `If-Match` (R46/R82). Each save returns
+     the new one; a fresh server render (another tab, a revalidate) replaces it. */
+  const version = useRef(template.version);
+  const seenVersion = useRef(template.version);
+  if (seenVersion.current !== template.version) {
+    seenVersion.current = template.version;
+    version.current = template.version;
+  }
+
   const {
     entries,
     labels,
@@ -282,7 +291,12 @@ export function Builder({
     flush,
   } = useBlueprintDraft({
     source: template,
-    save: patch => saveTemplate(template.id, patch),
+    save: async patch => {
+      const result = await saveTemplate(template.id, version.current, patch);
+      if (!result.ok) return result;
+      version.current = result.value.version;
+      return { ok: true, value: null };
+    },
     onAdopt: () => {
       setLibrary(null);
       setPanel(null);

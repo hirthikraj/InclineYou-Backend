@@ -609,7 +609,7 @@ export function Workouts({
      mounted by its presence — and a half-open state made of independent flags
      is how a dialog ends up drawn over nothing. */
   const [builder, setBuilder] = useState<
-    { id?: string; draft?: Draft } | null
+    { id?: string; draft?: Draft; version?: string } | null
   >(null);
   const [opening, setOpening] = useState<string | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
@@ -629,7 +629,7 @@ export function Workouts({
         setOpenError(result.message);
         return;
       }
-      setBuilder({ id, draft: fromWire(result.template, result.names) });
+      setBuilder({ id, draft: fromWire(result.template, result.names), version: result.template.version });
     });
   }
 
@@ -879,6 +879,7 @@ export function Workouts({
         <WorkoutBuilder
           key={builder.id ?? 'new'}
           templateId={builder.id}
+          version={builder.version}
           initial={builder.draft}
           onClose={() => setBuilder(null)}
           /* The shelf is the server's, so a save revalidates the route rather

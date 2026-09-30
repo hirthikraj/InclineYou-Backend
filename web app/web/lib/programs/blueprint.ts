@@ -196,8 +196,9 @@ export function newUid(): string {
  * Runtime only, for `newUid`'s reason — every caller is an event handler.
  */
 export function newWorkoutId(): string {
-  uidSeq += 1;
-  return `w${uidSeq}-${Math.random().toString(36).slice(2, 7)}`;
+  // A uuid, because the server keeps a workout's id across saves (R46) and
+  // binds it as one; a short local string would 400 or be dropped.
+  return newGroupId();
 }
 
 /** A correlation id for a superset. `crypto.randomUUID` where it exists — the

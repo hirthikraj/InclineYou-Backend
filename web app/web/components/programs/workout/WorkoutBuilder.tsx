@@ -188,6 +188,7 @@ function reduce(state: BuilderState, action: Action): BuilderState {
 export function WorkoutBuilder({
   initial,
   templateId,
+  version,
   onClose,
   onSaved,
   onLocalSave,
@@ -196,6 +197,8 @@ export function WorkoutBuilder({
   initial?: Draft;
   /** Present when this is editing a workout that already exists. */
   templateId?: string;
+  /** The workout's version when it was opened; every save echoes the latest as If-Match. */
+  version?: string;
   onClose: () => void;
   onSaved?: (row: WorkoutTemplateWire) => void;
   /**
@@ -253,6 +256,7 @@ export function WorkoutBuilder({
   const [saving, start] = useTransition();
 
   const canvas = useRef<HTMLDivElement>(null);
+  const versionRef = useRef(version);
 
   /** Every structural edit is one `edit` action. See `reduce`. */
   const write = useCallback((fn: (d: Draft) => Draft) => dispatch({ kind: 'edit', fn }), []);
@@ -438,11 +442,12 @@ export function WorkoutBuilder({
       return;
     }
     start(async () => {
-      const result = await saveWorkoutTemplate(toWire(draft), templateId);
+      const result = await saveWorkoutTemplate(toWire(draft), templateId, versionRef.current);
       if (!result.ok) {
         setError(result.message);
         return;
       }
+      versionRef.current = result.value.version;
       dispatch({ kind: 'saved' });
       onSaved?.(result.value);
       onClose();
