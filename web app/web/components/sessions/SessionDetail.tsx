@@ -429,7 +429,7 @@ function ClientNotes({
       <div className="card__hd">
         <NoteIcon size={15} />
         <h2 className="card__t" style={{ marginLeft: 8 }}>On this client</h2>
-        <Link className="small" href={`/clients/${clientId}/notes`} style={{ marginLeft: 'auto' }}>
+        <Link className="small" href={`/clients/${clientId}/information`} style={{ marginLeft: 'auto' }}>
           All notes
         </Link>
       </div>
@@ -459,7 +459,7 @@ function ClientNotes({
         {loose.length > shown.length && (
           <p className="small ink3">
             {loose.length - shown.length} more in{' '}
-            <Link href={`/clients/${clientId}/notes`}>
+            <Link href={`/clients/${clientId}/information`}>
               {clientName.split(' ')[0]}&rsquo;s notes
             </Link>
             .

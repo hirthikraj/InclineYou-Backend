@@ -29,7 +29,7 @@ export type Tab =
   | 'sessions'
   | 'program'
   | 'payments'
-  | 'notes';
+  | 'information';
 
 export const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
@@ -61,12 +61,14 @@ export const TABS: { key: Tab; label: string }[] = [
   { key: 'sessions', label: 'Sessions' },
   { key: 'program', label: 'Plan' },
   { key: 'payments', label: 'Payments' },
-  /* THE KEY IS STILL `notes` AND THE ROUTE IS STILL `/notes`. The tab grew a
-     contact form on 14 Sep 2026 and took the name of the thing it now is, but a
-     trainer with `/clients/abc/notes` open in a second window — or bookmarked —
-     should not meet a 404 over a rename, and nothing about the label is worth
-     that. */
-  { key: 'notes', label: 'Personal information' },
+  /* WAS `notes` / `/notes` UNTIL 30 SEP 2026. The tab grew a contact form on
+     14 Sep 2026 and took the name of the thing it now is, and the key finally
+     followed the label. A trainer with the old link open in a second window —
+     or bookmarked — does not meet a 404: `app/(main)/clients/[clientId]/notes
+     /page.tsx` is a `permanentRedirect` to `/information`, the same shape
+     `(portal)/me/progress/measurements/page.tsx` uses for its own renamed
+     route. */
+  { key: 'information', label: 'Personal information' },
 ];
 
 /** Every tab is a real route, so the strip works with the back button. */

@@ -1,8 +1,13 @@
-import { ClientFilePage } from '@/components/clients/file/ClientFilePage';
+import { permanentRedirect } from 'next/navigation';
 
-export const dynamic = 'force-dynamic';
-
+/**
+ * Renamed to `/information` on 30 Sep 2026 — the key finally followed the
+ * label (`Personal information`, since 14 Sep). `permanentRedirect` and not a
+ * 404: `(portal)/me/progress/measurements/page.tsx` makes the identical call
+ * for the identical reason. `redirect` would be the temporary form; this
+ * mapping is settled, so it's the 308 instead.
+ */
 export default async function Page({ params }: { params: Promise<{ clientId: string }> }) {
   const { clientId } = await params;
-  return <ClientFilePage clientId={clientId} tab="notes" />;
+  permanentRedirect(`/clients/${clientId}/information`);
 }

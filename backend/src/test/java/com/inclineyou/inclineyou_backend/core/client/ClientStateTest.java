@@ -1,12 +1,14 @@
 package com.inclineyou.inclineyou_backend.core.client;
 
 import com.inclineyou.inclineyou_backend.core.client.dto.ArchiveRequest;
+import com.inclineyou.inclineyou_backend.core.client.dto.DeleteClientRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.PauseRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.PutScheduleRequest;
 
 import com.inclineyou.inclineyou_backend.core.session.SessionStateService;
 import com.inclineyou.inclineyou_backend.core.tenant.CurrentScope;
 import com.inclineyou.inclineyou_backend.core.tenant.TenantScope;
+import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -23,6 +25,8 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -105,6 +109,44 @@ class ClientStateTest {
         assertEquals("cancelled", jdbc.queryForObject("SELECT status FROM scheduled_session WHERE id = :id::uuid",
                 Map.of("id", hand), String.class), "the client's own cancel stays cancelled");
         assertEquals(0, states.resume(trainer, client).effects().get("sessionsBooked"), "already active: zero effects");
+    }
+
+    @Test
+    @DisplayName("delete refuses a mismatched name and touches nothing")
+    void deleteRefusesWrongName() {
+        var ex = assertThrows(ClientRuleException.class,
+                () -> states.delete(trainer, client, new DeleteClientRequest("Not Meera")));
+        assertEquals("CLIENT_DELETE_NOT_CONFIRMED", ex.getCode());
+        assertEquals("Meera", jdbc.queryForObject("SELECT name FROM client WHERE id = :id::uuid",
+                Map.of("id", client.toString()), String.class));
+    }
+
+    @Test
+    @DisplayName("delete tombstones the row, scrubs the contact fields, keeps the name, and cannot run twice")
+    void deleteScrubsAndTombstones() {
+        jdbc.update("UPDATE client SET phone = '+919876543210', goal = 'lean out' WHERE id = :id::uuid",
+                Map.of("id", client.toString()));
+        schedules.put(trainer, client, "*", WEEK);
+
+        // Case- and whitespace-insensitive, like the confirmation it mirrors.
+        var result = states.delete(trainer, client, new DeleteClientRequest("  meera  "));
+        assertEquals("Meera", result.client().name(), "the name it answers with is the one read before the tombstone");
+        assertTrue(result.effects().get("sessionsCancelled") > 0);
+
+        var row = jdbc.queryForMap("""
+                SELECT deleted_at IS NOT NULL AS deleted, phone, goal, membership_status, name
+                FROM client WHERE id = :id::uuid
+                """, Map.of("id", client.toString()));
+        assertEquals(Boolean.TRUE, row.get("deleted"));
+        assertNull(row.get("phone"), "the contact surface is scrubbed");
+        assertNull(row.get("goal"));
+        assertEquals("removed", row.get("membership_status"));
+        assertEquals("Meera", row.get("name"), "the ledger's own read of this row still needs a name");
+
+        assertTrue(cancelled("client_deleted") > 0, "every future session is cancelled under its own reason");
+
+        // The same 404 shape every other verb gives a client that is gone (deleted_at IS NULL).
+        assertThrows(ApiException.class, () -> states.delete(trainer, client, new DeleteClientRequest("Meera")));
     }
 
     private int cancelled(String reason) {

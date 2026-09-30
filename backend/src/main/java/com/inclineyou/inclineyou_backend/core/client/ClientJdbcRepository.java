@@ -186,6 +186,29 @@ public class ClientJdbcRepository {
                 """, Map.of("close", packageIds.toArray(String[]::new)));
     }
 
+    /**
+     * The irreversible verb, and not the hard delete its own copy warns the
+     * trainer about: {@code deleted_at} is the same tombstone every soft
+     * delete in this schema uses, so this row — and the payments and packages
+     * that point at it — survive for the money book and for GST records.
+     * {@code uq_client_phone_live} already excludes {@code deleted_at IS NOT
+     * NULL}, so the number needs no separate release. What IS cleared is the
+     * contact surface nothing reads historically: {@code name} stays,
+     * because {@code PAYMENT_SELECT} reads it straight off this row for every
+     * past payment, and blanking it would blank the trainer's own ledger, not
+     * just this client's file. {@code status} and its pause/archive columns
+     * are left exactly as they were — {@code client_status_dates} ties them
+     * together, and touching one without the other would fail that check.
+     */
+    public void delete(UUID clientId) {
+        jdbc.update("""
+                UPDATE client SET deleted_at = now(), phone = NULL, date_of_birth = NULL, goal = NULL,
+                       height_cm = NULL, activity_level = NULL, metadata = NULL,
+                       membership_status = 'removed', removed_at = now()
+                WHERE id = :cid::uuid
+                """, Map.of("cid", clientId.toString()));
+    }
+
     /** Throws DuplicateKeyException when uq_client_phone_live says the number was taken meanwhile. */
     public void unarchive(UUID clientId) {
         jdbc.update("""

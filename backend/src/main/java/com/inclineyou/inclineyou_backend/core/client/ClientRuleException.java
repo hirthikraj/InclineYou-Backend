@@ -33,4 +33,10 @@ public class ClientRuleException extends RuntimeException {
     public static ClientRuleException validation(String message) {
         return new ClientRuleException(HttpStatus.BAD_REQUEST, "VALIDATION", message);
     }
+
+    /** {@code POST /v1/clients/{id}/delete}: the typed name doesn't match — the mis-tap guard. */
+    public static ClientRuleException deleteNotConfirmed() {
+        return new ClientRuleException(HttpStatus.BAD_REQUEST, "CLIENT_DELETE_NOT_CONFIRMED",
+                "That isn't their name — type it exactly to confirm.");
+    }
 }

@@ -1,6 +1,7 @@
 package com.inclineyou.inclineyou_backend.core.client;
 
 import com.inclineyou.inclineyou_backend.core.client.dto.ArchiveRequest;
+import com.inclineyou.inclineyou_backend.core.client.dto.DeleteClientRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.PauseRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.StateResult;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
@@ -20,14 +21,20 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * Pause, resume, archive and unarchive — api-contract 1.1 Clients A1–A3 and the
- * unarchive verb. Each answers {@code {client, effects}} (R72), and asking for the
- * state a client is already in is a 200 with zero effects, never an error.
+ * Pause, resume, archive, unarchive and delete — api-contract 1.1 Clients A1–A3,
+ * the unarchive verb, and the fifth, irreversible one. The first four answer
+ * {@code {client, effects}} (R72), and asking for the state a client is already
+ * in is a 200 with zero effects, never an error.
  *
  * <p>What the verbs cancel they mark ({@code cancel_reason}, V2), so undoing one
  * brings back exactly those sessions and never one somebody called off by hand
  * (R70). Resume and unarchive restore the future sessions their own pause or
  * archive cancelled, then book the week onward (R21).
+ *
+ * <p>Delete has no undo, which is the one way it is not shaped like the other
+ * four: {@link #delete} answers with the summary it read BEFORE the row was
+ * tombstoned, because {@code summaries.one} would find nothing afterward — the
+ * same {@code deleted_at IS NULL} filter every trainer-facing read uses.
  */
 @Service
 @RequiredArgsConstructor
@@ -36,6 +43,7 @@ public class ClientStateService {
 
     private final ClientJdbcRepository clients;
     private final ClientScheduleJdbcRepository sessions;
+    private final ClientNoteJdbcRepository clientNotes;
     private final WorkspaceClock clock;
     private final ClientSummaryService summaries;
     private final ClientScheduleService schedules;
@@ -132,6 +140,47 @@ public class ClientStateService {
         effects.put("sessionsBooked", rebook(trainerId, clientId, "client_archived"));
         log.info("client unarchived trainer={} client={} effects={}", trainerId, clientId, effects);
         return result(trainerId, clientId, effects);
+    }
+
+    // ── POST /v1/clients/{id}/delete ───────────────────────────────────────────
+
+    /**
+     * Irreversible from every trainer screen, and not the true hard delete its
+     * own button copy might suggest to a trainer reading it: {@code deleted_at}
+     * is the tombstone (CLAUDE.md, "soft deletes everywhere — nothing is
+     * hard-deleted"), so payments and packages survive for the money book and
+     * for GST records, and a pack still owed is left open exactly as
+     * {@link #archive} leaves it. Confirmation is server-checked — the typed
+     * name is the only proof of which client is going, the same shape as
+     * closing the trainer's own account.
+     */
+    @Transactional
+    public StateResult delete(UUID trainerId, UUID clientId, DeleteClientRequest req) {
+        schedules.lockClient(trainerId, clientId);
+        var summary = summaries.one(trainerId, clientId)
+                .orElseThrow(() -> ApiException.notFound("That client is not on your roster."));
+        String typed = req.confirmName() == null ? "" : req.confirmName().trim();
+        if (!typed.equalsIgnoreCase(summary.name() == null ? "" : summary.name().trim())) {
+            throw ClientRuleException.deleteNotConfirmed();
+        }
+
+        var effects = effects("sessionsCancelled", "packagesClosed", "packagesOwing", "notesDeleted");
+        effects.put("sessionsCancelled", sessions.cancelUpcoming(clientId, "client_deleted", null, clock.zone()));
+        // Same rule as archive: a pack with nothing owed closes, one still owed stays open for Business.
+        var close = new ArrayList<String>();
+        int stillOwed = 0;
+        for (var k : clients.activePackages(clientId)) {
+            if (k.due().signum() > 0) stillOwed++;
+            else close.add(k.id());
+        }
+        clients.closePackages(close);
+        effects.put("packagesClosed", close.size());
+        effects.put("packagesOwing", stillOwed);
+        effects.put("notesDeleted", clientNotes.softDeleteAllForClient(clientId));
+
+        clients.delete(clientId);
+        log.info("client deleted trainer={} client={} effects={}", trainerId, clientId, effects);
+        return new StateResult(summary, effects);
     }
 
     // ── shared ─────────────────────────────────────────────────────────────────

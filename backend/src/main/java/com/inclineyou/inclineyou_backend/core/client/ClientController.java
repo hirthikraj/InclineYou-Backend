@@ -6,6 +6,7 @@ import com.inclineyou.inclineyou_backend.core.client.dto.ClientResponse;
 import com.inclineyou.inclineyou_backend.core.client.dto.ClientSummary;
 import com.inclineyou.inclineyou_backend.core.client.dto.CreateClientRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.CreateNoteRequest;
+import com.inclineyou.inclineyou_backend.core.client.dto.DeleteClientRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.Note;
 import com.inclineyou.inclineyou_backend.core.client.dto.PauseRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.PhoneCheckRequest;
@@ -98,8 +99,9 @@ public class ClientController {
         return ResponseEntity.ok().eTag(row.version()).body(row);
     }
 
-    /* The four verbs. A body is optional on pause, resume and unarchive; the
-       last two take no fields, and EmptyBody refuses one sent anyway. */
+    /* The five verbs. A body is optional on pause, resume and unarchive; those
+       two take no fields, and EmptyBody refuses one sent anyway. Delete is the
+       one with no way back. */
 
     @PostMapping("/{id}/pause")
     public StateResult pause(@PathVariable UUID id, @Valid @RequestBody(required = false) PauseRequest body) {
@@ -119,6 +121,11 @@ public class ClientController {
     @PostMapping("/{id}/unarchive")
     public StateResult unarchive(@PathVariable UUID id, @RequestBody(required = false) EmptyBody body) {
         return states.unarchive(trainerId(), id);
+    }
+
+    @PostMapping("/{id}/delete")
+    public StateResult delete(@PathVariable UUID id, @Valid @RequestBody DeleteClientRequest body) {
+        return states.delete(trainerId(), id, body);
     }
 
     /** A8 — the whole week, conditional: 428 without If-Match, 412 when stale. */

@@ -72,3 +72,20 @@ export async function archiveClient(clientId: string, reason: ArchiveReason, not
 export async function unarchiveClient(clientId: string): Promise<StatusWriteResult> {
   return verb(clientId, 'unarchive', {}, 'Bringing them back');
 }
+
+/**
+ * The one verb with no way back — `deleteClient`, not `removeClient`, because
+ * the button it sits behind says Delete. It is NOT the hard delete that copy
+ * might suggest: the server tombstones the row the same way every soft delete
+ * in this schema works, so payments and packages survive for the money book
+ * and for GST records, and a pack still owed stays open exactly as archive
+ * leaves it. What is gone from every screen: the phone number, birth day,
+ * goal, activity level, height and every note.
+ *
+ * `confirmName` is checked server-side against the client's own name — typing
+ * it is the only proof of which client is going, the same shape closing the
+ * trainer's own account uses.
+ */
+export async function deleteClient(clientId: string, confirmName: string): Promise<StatusWriteResult> {
+  return verb(clientId, 'delete', { confirmName }, 'Deleting them');
+}

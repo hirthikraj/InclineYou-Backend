@@ -78,7 +78,7 @@ export function PinnedStrip({
       <p className="small cfpin--none">
         Nothing pinned.{' '}
         <Link
-          href={`/clients/${clientId}/notes`}
+          href={`/clients/${clientId}/information`}
           title="Pinned notes stay above the tabs on every tab of this file"
         >
           Pin a note

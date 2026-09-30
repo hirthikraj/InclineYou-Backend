@@ -92,6 +92,12 @@ public class ClientNoteJdbcRepository {
                 Map.of("nid", noteId.toString()));
     }
 
+    /** Every live note on a deleted client — the trainer's own call, unlike the client's own {@code DELETE /v1/me}, which keeps them. */
+    public int softDeleteAllForClient(UUID clientId) {
+        return jdbc.update("UPDATE client_note SET deleted_at = now() WHERE client_id = :cid::uuid AND deleted_at IS NULL",
+                Map.of("cid", clientId.toString()));
+    }
+
     public Note one(UUID noteId) {
         return jdbc.queryForObject("SELECT " + COLUMNS + " FROM client_note WHERE id = :nid::uuid",
                 Map.of("nid", noteId.toString()), ClientNoteJdbcRepository::row);

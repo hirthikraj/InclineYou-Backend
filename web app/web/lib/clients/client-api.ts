@@ -269,7 +269,7 @@ export interface ClientFilePayload extends ClientFileHeader {
 }
 
 export type ClientTab =
-  | 'overview' | 'calendar' | 'progress' | 'assessments' | 'sessions' | 'program' | 'payments' | 'notes';
+  | 'overview' | 'calendar' | 'progress' | 'assessments' | 'sessions' | 'program' | 'payments' | 'information';
 
 const DAY_MS = 86_400_000;
 
@@ -439,7 +439,7 @@ export async function getClientFilePayload(
       const adjustments = live ? await packageAdjustments(live.id) : [];
       return { ...out, history, payments, priceList: list.filter((p) => p.status === 'active'), adjustments };
     }
-    case 'notes':
+    case 'information':
       return { ...out, notes: await clientNotes(clientId), readings: await clientReadings(clientId) };
     case 'progress':
     case 'assessments':

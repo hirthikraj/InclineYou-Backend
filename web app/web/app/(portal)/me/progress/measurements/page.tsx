@@ -7,9 +7,10 @@ import { permanentRedirect } from 'next/navigation';
  *
  * The tab existed, was linked from the Summary's weight card, and is exactly
  * the sort of screen somebody bookmarks — *is my waist moving* is a question a
- * client comes back to every few weeks. `lib/clients/file/shared.tsx` makes the
- * identical call about `/clients/:id/notes`: **a rename is not worth a 404 to
- * somebody who kept the link.**
+ * client comes back to every few weeks. `app/(main)/clients/[clientId]/notes
+ * /page.tsx` makes the identical call, for the identical reason, when THAT
+ * tab was renamed to `/information` on 30 Sep 2026: **a rename is not worth a
+ * 404 to somebody who kept the link.**
  *
  * `permanentRedirect` and not `redirect`, because this mapping is settled: the
  * tape is on Assessments and there is no pass that would put it back on a route

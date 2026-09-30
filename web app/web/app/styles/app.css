@@ -8776,7 +8776,18 @@ a.lrow:hover{color:inherit}
    remember. */
 .cfdz__r{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
 .cfdz__r > .small{flex:1 1 320px;min-width:0;margin:0}
-.cfdz__a{flex:0 0 auto;display:flex;align-items:center;gap:10px}
+.cfdz__a{flex:0 0 auto;display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+/* `.fld`'s own `margin-bottom:14px` (line ~7018, for fields stacked one above
+   another) is dead weight on a `TextField` sitting beside a `Button` in this
+   row: the extra box height below the input is what centred it a few pixels
+   above the buttons instead of level with them. `.fldrow` solved the same
+   problem the same way, for the same reason. */
+.cfdz__a > .fld{margin-bottom:0}
+
+/* DeleteCard's own sentence — four sentences, not one — so it is a block
+   above `.cfdz__a` rather than sharing `.cfdz__r`'s single row with it; see
+   the note in `PersonalTab.tsx` for why that row is wrong at this length. */
+.cfdz__note{margin:0 0 14px;max-width:720px}
 
 /* The foot of a card that is a FORM — *Save changes* and *Cancel*, on the two
    record cards. It was `style={{display:'flex',alignItems:'center',gap:10,

@@ -60,7 +60,7 @@ export function TabsEntry() {
         title="A tab is a path segment, not a hidden panel"
         lede={
           <>
-            <code>/clients/cl-006/notes</code> is a place. That is what makes the back button work through a
+            <code>/clients/cl-006/information</code> is a place. That is what makes the back button work through a
             client file, and what makes a tab linkable &mdash; a trainer can send somebody straight to the
             payments tab.
           </>

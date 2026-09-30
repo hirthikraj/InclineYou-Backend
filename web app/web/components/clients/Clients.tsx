@@ -539,15 +539,22 @@ function FilterPanel({
  * which is the case this menu is really for. A trainer who wants a different one
  * has all seven in the file's Follow-ups card.
  *
- * ── AND ARCHIVE ASKS FIRST ───────────────────────────────────────────────────
+ * ── ARCHIVE ASKS FIRST, AND DELETE IS NOT HERE AT ALL ────────────────────────
  *
- * It is the one row here a trainer cannot undo from this screen: `SEGMENTS` has
- * no *Archived* filter, so the row leaves and there is no view to bring it back
- * from. `AccountMenu`'s sign-out is the shape borrowed — the menu BECOMES the
- * confirm rather than opening a dialog over it, with the cost named in prose,
- * because a modal for one row is heavier than the thing it protects and a
- * `window.confirm` cannot say the sentence that actually matters: **nothing is
- * deleted.** Pause is not confirmed. It is one click to undo from this menu.
+ * It still makes the menu BECOME the confirm rather than opening a dialog over
+ * it (`AccountMenu`'s sign-out is the borrowed shape), because a modal is
+ * heavier than the thing it protects and a `window.confirm` cannot say the
+ * sentence that actually matters: **nothing is deleted.** It reads as a plain
+ * action asking a mandatory reason, not a danger one, because it has a way
+ * back — Unarchive, from the Archived list. Pause is not confirmed. It is one
+ * click to undo from this menu.
+ *
+ * Delete deliberately has **no row here**, even though `deleteClient` exists
+ * (`lib/clients/status-actions.ts`). It lives only on the client's own file
+ * (`PersonalTab`'s `DeleteCard`), where the typed-name confirm it needs has
+ * room to breathe — a compact per-row menu, three clicks deep and easy to
+ * dismiss by accident, is the wrong place to ask for that much proof before an
+ * action nothing can undo.
  */
 /**
  * The Archived list — the archived rows from the same `status=all` read, with
@@ -642,7 +649,11 @@ function RowMenu({
   const router = useRouter();
   const wrap = useRef<HTMLDivElement>(null);
   /* The menu BECOMES the sheet for the two verbs that ask something first:
-     archive needs a reason (client_archive), pause asks when they're back. */
+     archive needs a reason (client_archive), pause asks when they're back.
+     Delete is deliberately NOT one of this menu's rows — it lives only on the
+     client's own file (Personal Information), where a typed-name confirm has
+     room to breathe. A compact per-row menu is the wrong place to ask for
+     that much proof before an irreversible action. */
   const [confirming, setConfirming] = useState<false | 'archive' | 'pause'>(false);
   const [reason, setReason] = useState<ArchiveReason>('other');
   const [note, setNote] = useState('');
@@ -780,7 +791,7 @@ function RowMenu({
           <input value={note} maxLength={200} onChange={(e) => setNote(e.target.value)} disabled={pending} placeholder="Optional" />
         </label>
         <button
-          className="menu__i menu__i--danger"
+          className="menu__i"
           type="button"
           role="menuitem"
           disabled={pending}
@@ -869,7 +880,7 @@ function RowMenu({
         {pending ? (paused ? 'Resuming…' : 'Pausing…') : paused ? 'Resume' : 'Pause'}
       </button>
       <button
-        className="menu__i menu__i--danger"
+        className="menu__i"
         type="button"
         role="menuitem"
         disabled={pending}

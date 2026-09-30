@@ -103,11 +103,11 @@ export function ClientFile({
 
      The empty case goes with it and gains by going: the strip's invitation is
      *Nothing pinned. **Pin a note** to keep it above every tab*, and that link
-     points at `/clients/{id}/notes` — a link to the page you are on.
+     points at `/clients/{id}/information` — a link to the page you are on.
 
      It buys 60px of header back on the one tab whose content was 224px below
      the fold. */
-  const pinStrip = tab !== 'notes';
+  const pinStrip = tab !== 'information';
 
   const { client, packages } = payload;
 
@@ -230,7 +230,7 @@ export function ClientFile({
               now={now}
             />
           )}
-          {tab === 'notes' && (
+          {tab === 'information' && (
             <PersonalTab
               client={client}
               /* The newest weight reading, off the readings the tab loaded

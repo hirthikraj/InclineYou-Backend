@@ -9,7 +9,15 @@ import type { ClientDetailWire, ClientNoteWire } from '@/lib/clients/client-api'
 import { formatPhone } from '@/lib/auth/policy';
 import { saveContact, savePhysical } from '@/lib/clients/contact-actions';
 import { ageFrom, birthDateStr } from '@/lib/clients/physical';
-import { archiveClient, unarchiveClient, type ArchiveReason } from '@/lib/clients/status-actions';
+import {
+  archiveClient,
+  deleteClient,
+  pauseClient,
+  resumeClient,
+  unarchiveClient,
+  type ArchiveReason,
+  type StatusWriteResult,
+} from '@/lib/clients/status-actions';
 import {
   addNote,
   deleteNote,
@@ -694,64 +702,139 @@ const ACTIVITY = [
 ];
 
 /**
- * ARCHIVE, NOT DELETE — and the copy finally says so. The card read *removing
- * this client is permanent* over a button that archived; now the button is the
- * v1 verb (Clients A3) and the sentence is what it does: off the roster, future
- * sessions cancelled, nothing deleted, so Unarchive is a real way back.
+ * ARCHIVED — the read-only end state, and the one real way back.
  *
- * It asks why, from the roster's own six `client_archive_reason`s, because the
- * reason is what the Archived list reads back later. The confirm stays in place,
- * two presses, no dialog: the file is already open on this one person.
+ * Split out of the old `ArchiveCard` on 29 Sep 2026, the day Delete arrived:
+ * this branch used to be that component's `if (client.status === 'archived')`
+ * half. It is unchanged in substance — Unarchive is still `unarchiveClient`,
+ * still books the kept week again — only its neighbours moved.
  */
-function ArchiveCard({ client }: { client: ClientDetailWire }) {
-  const [confirming, setConfirming] = useState(false);
+function ArchivedCard({ client }: { client: ClientDetailWire }) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const first = client.name.split(' ')[0];
+
+  function write(fn: () => Promise<StatusWriteResult>) {
+    setError(null);
+    start(async () => {
+      const result = await fn();
+      if (!result.ok) setError(result.message ?? 'That did not save. Nothing changed.');
+    });
+  }
+
+  return (
+    <Card as="section" title={`${first} is archived`} className="cfdz">
+      <div className="cfdz__r">
+        <p className="small">Unarchive to put them back on the roster. Their kept week is booked again.</p>
+        <div className="cfdz__a">
+          <Button variant="secondary" disabled={pending} onClick={() => write(() => unarchiveClient(client.id))}>
+            {pending ? 'Bringing back…' : 'Unarchive'}
+          </Button>
+        </div>
+      </div>
+      {error && (
+        <Message tone="err" alert style={{ marginTop: 11 }}>
+          {error}
+        </Message>
+      )}
+    </Card>
+  );
+}
+
+/**
+ * PAUSE AND ARCHIVE — the two reversible verbs, and both a plain button now.
+ *
+ * Neither one deletes anything, which is exactly why this card carries no
+ * `tone="danger"` any more: that tone moved to `DeleteCard` below, the one
+ * verb on this tab with no way back. Pause stops every running pack's clock
+ * and cancels the sessions while they're away — `pauseClient`, the same verb
+ * the roster's row menu has carried since 26 Sep. Archive takes them off the
+ * roster with a reason the Archived list reads back later. Both keep the
+ * two-press, no-dialog confirm the old danger card originated: a modal for a
+ * sentence this short is heavier than the thing it is protecting.
+ */
+function ManageCard({ client }: { client: ClientDetailWire }) {
+  const [action, setAction] = useState<null | 'pause' | 'archive'>(null);
   const [reason, setReason] = useState<ArchiveReason>('goal_reached');
   const [note, setNote] = useState('');
+  const [backOn, setBackOn] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const router = useRouter();
   const first = client.name.split(' ')[0];
+  const paused = client.status === 'paused';
 
-  function write(fn: () => ReturnType<typeof archiveClient>, then?: () => void) {
+  function write(fn: () => Promise<StatusWriteResult>, then?: () => void) {
     setError(null);
     start(async () => {
       /* {client, effects} (R72): all-zero effects is "already done" in another
          tab, which is a success and not a refusal. */
       const result = await fn();
-      if (result.ok) then?.();
+      if (result.ok) { setAction(null); then?.(); }
       else setError(result.message ?? 'That did not save. Nothing changed.');
     });
   }
 
-  if (client.status === 'archived') {
-    return (
-      <Card as="section" title={`${first} is archived`} className="cfdz">
-        <div className="cfdz__r">
-          <p className="small">Unarchive to put them back on the roster. Their kept week is booked again.</p>
-          <div className="cfdz__a">
-            <Button variant="secondary" disabled={pending} onClick={() => write(() => unarchiveClient(client.id))}>
-              {pending ? 'Bringing back…' : 'Unarchive'}
-            </Button>
-          </div>
-        </div>
-        {error && (
-          <Message tone="err" alert style={{ marginTop: 11 }}>
-            {error}
-          </Message>
-        )}
-      </Card>
-    );
-  }
-
   return (
-    <Card as="section" tone="danger" title={`Archive ${first}`} className="cfdz">
+    <Card as="section" title={`Manage ${first}`} className="cfdz">
       <div className="cfdz__r">
-        <p className="small">
-          {first} comes off the roster and their future sessions are cancelled. Nothing is deleted.
-        </p>
-        <div className="cfdz__a">
-          {confirming ? (
-            <>
+        {action === null && (
+          <>
+            <p className="small">
+              {paused
+                ? `${first} is paused. Resume to book their week again.`
+                : `Pause stops their packs and cancels sessions while they're away. Archive takes them off the roster. Nothing is deleted either way.`}
+            </p>
+            <div className="cfdz__a">
+              <Button
+                variant="secondary"
+                disabled={pending}
+                onClick={() => (paused ? write(() => resumeClient(client.id)) : setAction('pause'))}
+              >
+                {pending ? (paused ? 'Resuming…' : 'Pausing…') : paused ? 'Resume' : 'Pause'}
+              </Button>
+              <Button variant="secondary" disabled={pending} onClick={() => setAction('archive')}>
+                Archive
+              </Button>
+            </div>
+          </>
+        )}
+
+        {action === 'pause' && (
+          <>
+            <p className="small">
+              Their packs stop running and the sessions while they&apos;re away are
+              cancelled. Leave the date empty if you don&apos;t know yet.
+            </p>
+            <div className="cfdz__a">
+              <TextField
+                label="Back on"
+                hideLabel
+                type="date"
+                value={backOn}
+                disabled={pending}
+                onChange={(e) => setBackOn(e.target.value)}
+              />
+              <Button
+                variant="secondary"
+                disabled={pending}
+                onClick={() => write(() => pauseClient(client.id, backOn || null))}
+              >
+                {pending ? 'Pausing…' : `Pause ${first}`}
+              </Button>
+              <Button variant="ghost" disabled={pending} onClick={() => setAction(null)}>
+                Not now
+              </Button>
+            </div>
+          </>
+        )}
+
+        {action === 'archive' && (
+          <>
+            <p className="small">
+              {first} comes off the roster and their future sessions are cancelled. Nothing is deleted.
+            </p>
+            <div className="cfdz__a">
               <Select
                 label="Why"
                 hideLabel
@@ -770,7 +853,7 @@ function ArchiveCard({ client }: { client: ClientDetailWire }) {
                 onChange={(e) => setNote(e.target.value)}
               />
               <Button
-                variant="danger"
+                variant="secondary"
                 disabled={pending}
                 /* To the roster: the file of somebody just taken off it is a
                    screen where the button gets pressed twice. */
@@ -779,16 +862,102 @@ function ArchiveCard({ client }: { client: ClientDetailWire }) {
                 {pending ? 'Archiving…' : `Archive ${first}`}
               </Button>
               {/* Dead while the write is away: it cannot be recalled. */}
-              <Button variant="ghost" disabled={pending} onClick={() => setConfirming(false)}>
+              <Button variant="ghost" disabled={pending} onClick={() => setAction(null)}>
                 Keep them
               </Button>
-            </>
-          ) : (
-            <Button variant="danger" onClick={() => setConfirming(true)}>
-              Archive
+            </div>
+          </>
+        )}
+
+        {error && (
+          <Message tone="err" alert style={{ marginTop: 11 }}>
+            {error}
+          </Message>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+/**
+ * DELETE — the one irreversible verb on this tab, and the danger card's new
+ * occupant now that Archive has moved to `ManageCard` above.
+ *
+ * `deleted_at` is the same tombstone every soft delete in this schema uses
+ * (backend/CLAUDE.md: "soft deletes everywhere — nothing is hard-deleted"), so
+ * payments and packages survive — for the money book and for GST records — and
+ * a pack still owed is left open exactly as Archive leaves it. What IS gone
+ * from every screen: the phone number, birth day, goal, activity level, height
+ * and every note. There is no Undelete anywhere, unlike the other four verbs,
+ * which is why the confirm asks for more than a click: the trainer types
+ * {first}'s name back, checked against the server's own copy, the same shape
+ * closing the trainer's own account uses. The button stays off until it matches.
+ */
+function DeleteCard({ client }: { client: ClientDetailWire }) {
+  const [confirming, setConfirming] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [pending, start] = useTransition();
+  const router = useRouter();
+  const first = client.name.split(' ')[0];
+  const matches = typed.trim().toLowerCase() === client.name.trim().toLowerCase();
+
+  function submit() {
+    if (!matches || pending) return;
+    setError(null);
+    start(async () => {
+      const result = await deleteClient(client.id, typed.trim());
+      /* Off to the roster: the file of somebody just deleted is a screen with
+         nothing left on it to look at. */
+      if (result.ok) router.push('/clients');
+      else setError(result.message ?? 'That did not save. Nothing changed.');
+    });
+  }
+
+  /*
+   * NOT `.cfdz__r` — that shared row sits a paragraph and its actions side by
+   * side, which is right for Archived/Manage's one short sentence and wrong
+   * here: this card's sentence is four times as long, and forcing it to share
+   * a line with an input and two buttons produced the cramped, edge-to-edge
+   * row a design pass caught. Stacked block children give the text its own
+   * line and the confirm controls theirs, each free to wrap on its own.
+   */
+  return (
+    <Card as="section" tone="danger" title={`Delete ${first}`} className="cfdz">
+      <p className="small cfdz__note">
+        Everything about {first} is permanently deleted — their number, birth day,
+        goal, activity level, height and every note. Payments and packages stay, so
+        the money book still shows what was collected and what is still owed. This
+        cannot be undone.
+      </p>
+      <div className="cfdz__a">
+        {confirming ? (
+          <>
+            <TextField
+              label={`Type "${client.name}" to confirm`}
+              hideLabel
+              placeholder={`Type "${client.name}" to confirm`}
+              value={typed}
+              disabled={pending}
+              width={260}
+              onChange={(e) => setTyped(e.target.value)}
+            />
+            <Button variant="danger" disabled={pending || !matches} onClick={submit}>
+              {pending ? 'Deleting…' : `Delete ${first}`}
             </Button>
-          )}
-        </div>
+            <Button
+              variant="ghost"
+              disabled={pending}
+              onClick={() => { setConfirming(false); setTyped(''); }}
+            >
+              Keep them
+            </Button>
+          </>
+        ) : (
+          <Button variant="danger" onClick={() => setConfirming(true)}>
+            Delete
+          </Button>
+        )}
       </div>
       {error && (
         <Message tone="err" alert style={{ marginTop: 11 }}>
@@ -1086,7 +1255,8 @@ export function PersonalTab({
         )}
       </Card>
 
-      <ArchiveCard client={client} />
+      {client.status === 'archived' ? <ArchivedCard client={client} /> : <ManageCard client={client} />}
+      <DeleteCard client={client} />
     </div>
   );
 }
