@@ -1,6 +1,8 @@
 package com.inclineyou.inclineyou_backend.core.assessment;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentItem;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.Count;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
 import com.inclineyou.inclineyou_backend.shared.wire.Cursor;
@@ -48,31 +50,12 @@ public class AssessmentListService {
     private static final int DEFAULT_LIMIT = 50;
     private static final int MAX_LIMIT = 500;
 
-    public record Count(int got, int asked) {}
-
-    public record Item(
-            String id,
-            String clientId,
-            String templateId,
-            String scheduleId,
-            String name,
-            String dueOn,
-            String state,
-            Long completedAt,
-            String enteredBy,
-            Count measurements,
-            Count questions,
-            long createdAt,
-            /** Opaque — {@code updated_at} as epoch ms. */
-            String version
-    ) {}
-
     /**
      * @param total      only with {@code includeTotal=true} — matching the filter
      * @param grandTotal only with {@code includeTotal=true} — ignoring the filter:
      *                   the "3 of 57" the list prints
      */
-    public record Page(List<Item> items, String nextCursor,
+    public record Page(List<AssessmentItem> items, String nextCursor,
                        @JsonInclude(JsonInclude.Include.NON_NULL) Integer total,
                        @JsonInclude(JsonInclude.Include.NON_NULL) Integer grandTotal) {}
 
@@ -147,7 +130,7 @@ public class AssessmentListService {
                 """.formatted(STATE_SQL) + pageFrom + " ORDER BY a.due_on DESC, a.id LIMIT :limit",
                 p, (rs, i) -> {
                     Timestamp completed = rs.getTimestamp("completed_at");
-                    return new Item(
+                    return new AssessmentItem(
                             rs.getString("id"),
                             rs.getString("client_id"),
                             rs.getString("template_id"),

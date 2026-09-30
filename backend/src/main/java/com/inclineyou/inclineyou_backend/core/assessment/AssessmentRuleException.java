@@ -42,23 +42,4 @@ public class AssessmentRuleException extends RuntimeException {
         return bad("ASSESSMENT_INTERVAL_RANGE",
                 "How often you measure has to be between %d and %d days.".formatted(min, max));
     }
-
-    /* ── V14 · the questionnaire ─────────────────────────────────────────── */
-
-    /** A field was refused; the message names it. */
-    public static AssessmentRuleException validation(String message) {
-        return new AssessmentRuleException(HttpStatus.BAD_REQUEST, "VALIDATION", message);
-    }
-
-    /** Not one of the caller's sent assessments, or deleted. */
-    public static AssessmentRuleException assessmentNotFound() {
-        return new AssessmentRuleException(HttpStatus.NOT_FOUND, "ASSESSMENT_NOT_FOUND",
-                "That assessment is not on your books.");
-    }
-
-    /** Not one of the caller's assessment templates, or deleted. */
-    public static AssessmentRuleException templateNotFound() {
-        return new AssessmentRuleException(HttpStatus.NOT_FOUND, "ASSESSMENT_TEMPLATE_NOT_FOUND",
-                "That assessment template is not in your library.");
-    }
 }

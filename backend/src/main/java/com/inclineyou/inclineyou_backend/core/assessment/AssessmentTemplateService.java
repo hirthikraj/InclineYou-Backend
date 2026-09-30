@@ -1,306 +1,210 @@
 package com.inclineyou.inclineyou_backend.core.assessment;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.TemplateItem;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.TemplateRequest;
+import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
+import com.inclineyou.inclineyou_backend.shared.wire.IfMatch;
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 /**
- * V14 · the trainer's assessment templates — which catalogue measurements to
- * take and which questions to ask.
+ * api-contract 1.1 Assessments — the trainer's templates: which catalogue
+ * measurements to take and which questions to ask.
  *
- * <h2>Normalised on write</h2>
+ * <p>The editor holds the whole draft and saves it as a unit, so a write is the
+ * whole form and a PUT is conditional (428 without {@code If-Match}, 412 when the
+ * form was edited elsewhere since it loaded). What was a silent repair in the
+ * pre-1.1 build is now a 400 naming the field: an unknown key, a rating scale
+ * outside 5 · 10 · 20, a choice with fewer than two options. Two things are
+ * still normalised, because the editor keeps state the kind does not use while a
+ * trainer flips a question back and forth: {@code scale} is dropped unless the
+ * kind is {@code rating}, and {@code options}, {@code allowMultiple} and
+ * {@code allowCustom} are cleared unless it is {@code choice}. What is stored is
+ * what the client will be shown.
  *
- * The editor holds the whole draft in the browser and saves it as a unit, so
- * each block arrives as {@code {on, keys|items}} — or, from a caller that does
- * not know about the switch yet, as a bare list, which counts as ON (defaulting
- * it off would silently drop what was just sent). Then:
- * <ul>
- *   <li>measurement keys are filtered to the catalogue and de-duplicated in the
- *       order the trainer built them;</li>
- *   <li>a question of an unknown {@code kind} becomes {@code text}; {@code scale}
- *       is kept only on a {@code rating}, and must be 5, 10 or 20, else 10;</li>
- *   <li>{@code options}, {@code allowMultiple} and {@code allowCustom} are
- *       FORCED empty / false unless {@code kind == choice} — the editor keeps them
- *       while a trainer flips a question's kind back and forth, and what is
- *       stored has to be what the client will be shown;</li>
- *   <li>missing question and option ids are minted.</li>
- * </ul>
- *
- * {@code PUT} replaces each block that is PRESENT, whole. There is no
- * per-question PATCH, for the workout builder's reason.
+ * <p>An edit reaches the open assessments nobody has started (R36); a started
+ * one keeps the form it is being answered against. A delete is soft, ends every
+ * live cycle on the template, and leaves every assessment already given as it
+ * was — each holds its own copy of the form.
  */
 @Service
 @RequiredArgsConstructor
 public class AssessmentTemplateService {
 
-    /** Tolerant: the portal (module 11) writes readings and answers, and a key this build lacks must not fail a read. */
-    static final ObjectMapper JSON = new ObjectMapper()
-            .configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-
-    private static final int MAX_NAME = 120;
-    private static final int MAX_DESCRIPTION = 2000;
     private static final int MAX_QUESTIONS = 50;
     private static final int MAX_OPTIONS = 20;
     private static final int MAX_TEXT = 500;
+    private static final int MAX_ID = 64;
     private static final Set<String> KINDS = Set.of("yesno", "rating", "text", "choice");
     private static final Set<Integer> SCALES = Set.of(5, 10, 20);
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final AssessmentTemplateJdbcRepository templates;
+    private final AssessmentScheduleJdbcRepository schedules;
+    private final AssessmentJdbcRepository assessments;
 
-    public record MeasurementBlock(boolean on, List<String> keys) {}
+    public record Created(TemplateItem template, boolean created) {}
 
-    public record QuestionBlock(boolean on, List<AssessmentCatalogue.Question> items) {}
-
-    /** Timestamps are ISO strings on this wire — the one exception to epoch ms (V14). */
-    public record TemplateResponse(String id, String name, String description,
-                                   MeasurementBlock measurements, QuestionBlock questions,
-                                   String createdAt, String updatedAt) {}
-
-    static final String COLUMNS = """
-            id::text, name, description, measurements::text AS measurements,
-            questions::text AS questions, created_at, updated_at
-            """;
-
-    // ── Reads ─────────────────────────────────────────────────────────────────
-
-    public List<TemplateResponse> list(UUID trainerId) {
-        return jdbc.queryForList("""
-                SELECT %s FROM assessment_template
-                WHERE trainer_id = :tid::uuid AND deleted_at IS NULL
-                ORDER BY updated_at DESC, created_at ASC, id
-                """.formatted(COLUMNS), Map.of("tid", trainerId.toString()))
-                .stream().map(AssessmentTemplateService::toResponse).toList();
+    /** The whole shelf, one grouped query for the live-cycle counts. */
+    public List<TemplateItem> list(UUID trainerId) {
+        var cycles = templates.liveCycles(trainerId);
+        return templates.live(trainerId).stream().map(t -> item(t, cycles.getOrDefault(t.id(), 0))).toList();
     }
 
-    public TemplateResponse get(UUID trainerId, UUID id) {
-        return toResponse(load(trainerId, id));
-    }
-
-    /** The row, or null when it is not the caller's live template — for callers that answer their own 400. */
-    Map<String, Object> find(UUID trainerId, String id) {
-        UUID parsed;
+    @Transactional
+    public Created create(UUID trainerId, TemplateRequest req) {
+        if (req.id() != null) {
+            var mine = templates.isMine(req.id(), trainerId);
+            if (mine.isPresent()) {
+                if (!mine.get()) throw ApiException.idConflict();
+                return new Created(one(trainerId, req.id()), false);
+            }
+        }
+        var form = normalise(req);
+        if (templates.nameTaken(trainerId, form.name(), null)) throw nameTaken();
+        UUID id = req.id() == null ? UUID.randomUUID() : req.id();
         try {
-            parsed = UUID.fromString(id);
-        } catch (Exception e) {
-            return null;
+            if (!templates.insert(id, trainerId, form.name(), form.description(),
+                    AssessmentJson.write(form.measurements()), AssessmentJson.write(form.questions()))) {
+                throw ApiException.idConflict();
+            }
+        } catch (DuplicateKeyException e) {
+            throw duplicate(e);
         }
-        var rows = jdbc.queryForList("""
-                SELECT %s FROM assessment_template
-                WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
-                """.formatted(COLUMNS), Map.of("id", parsed.toString(), "tid", trainerId.toString()));
-        return rows.isEmpty() ? null : rows.getFirst();
+        return new Created(one(trainerId, id), true);
     }
 
-    // ── Writes ────────────────────────────────────────────────────────────────
-
+    /** Whole-form replace. Every open assessment nobody has started picks the new form up. */
     @Transactional
-    public TemplateResponse create(UUID trainerId, Map<String, Object> body) {
-        var b = body == null ? Map.<String, Object>of() : body;
-        UUID id = UUID.randomUUID();
-        var p = new HashMap<String, Object>();
-        p.put("id", id.toString());
-        p.put("tid", trainerId.toString());
-        p.put("name", name(b.get("name")));
-        p.put("description", description(b.get("description")));
-        p.put("measurements", write(measurements(b.get("measurements"))));
-        p.put("questions", write(questions(b.get("questions"))));
-        p.put("now", Timestamp.from(Instant.now()));
-        jdbc.update("""
-                INSERT INTO assessment_template (id, trainer_id, name, description, measurements,
-                    questions, created_at, updated_at)
-                VALUES (:id::uuid, :tid::uuid, :name, :description, CAST(:measurements AS jsonb),
-                    CAST(:questions AS jsonb), :now, :now)
-                """, p);
-        return get(trainerId, id);
+    public TemplateItem update(UUID trainerId, UUID id, String ifMatch, TemplateRequest req) {
+        IfMatch.require(ifMatch, "the template");
+        var current = templates.lock(trainerId, id).filter(t -> !t.deleted())
+                .orElseThrow(() -> ApiException.notFound("That assessment template is not in your library."));
+        IfMatch.check(ifMatch, current.version(), "This form was edited elsewhere since it loaded. Reload to see it.");
+        if (req.id() != null && !req.id().equals(id)) throw ApiException.validation("id: must match the template's own");
+        var form = normalise(req);
+        if (templates.nameTaken(trainerId, form.name(), id)) throw nameTaken();
+        try {
+            templates.update(id, form.name(), form.description(),
+                    AssessmentJson.write(form.measurements()), AssessmentJson.write(form.questions()));
+        } catch (DuplicateKeyException e) {
+            throw duplicate(e);
+        }
+        var saved = templates.find(trainerId, id).orElseThrow();
+        assessments.refreshUnstarted(id, saved.name(), AssessmentJson.write(AssessmentForms.copyOf(saved)));
+        return item(saved, templates.liveCycles(trainerId, id));
     }
 
-    /** Whole-block replace of the fields present; an absent field is left alone. */
-    @Transactional
-    public TemplateResponse update(UUID trainerId, UUID id, Map<String, Object> body) {
-        load(trainerId, id);
-        if (body == null || body.isEmpty()) return get(trainerId, id);
-        var sets = new ArrayList<String>();
-        var p = new HashMap<String, Object>();
-        p.put("id", id.toString());
-        p.put("tid", trainerId.toString());
-        if (body.containsKey("name")) { p.put("name", name(body.get("name"))); sets.add("name = :name"); }
-        if (body.containsKey("description")) {
-            p.put("description", description(body.get("description")));
-            sets.add("description = :description");
-        }
-        if (body.containsKey("measurements")) {
-            p.put("measurements", write(measurements(body.get("measurements"))));
-            sets.add("measurements = CAST(:measurements AS jsonb)");
-        }
-        if (body.containsKey("questions")) {
-            p.put("questions", write(questions(body.get("questions"))));
-            sets.add("questions = CAST(:questions AS jsonb)");
-        }
-        if (!sets.isEmpty()) {
-            sets.add("updated_at = now()");
-            jdbc.update("UPDATE assessment_template SET " + String.join(", ", sets)
-                    + " WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL", p);
-        }
-        return get(trainerId, id);
-    }
-
-    /**
-     * Soft delete — and every assessment already sent from it SURVIVES, with its
-     * {@code template_id} nulled in the same transaction. A sent assessment
-     * stopped being the template the moment it went out; a cascade would delete
-     * a client's answers because a trainer tidied their shelf.
-     */
+    /** Soft, and idempotent: a deleted template answers 204 again. */
     @Transactional
     public void delete(UUID trainerId, UUID id) {
-        load(trainerId, id);
-        var p = Map.of("id", id.toString(), "tid", trainerId.toString());
-        jdbc.update("""
-                UPDATE assessment_template SET deleted_at = now(), updated_at = now()
-                WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
-                """, p);
-        jdbc.update("""
-                UPDATE assessment SET template_id = NULL, updated_at = now()
-                WHERE template_id = :id::uuid AND trainer_id = :tid::uuid
-                """, p);
+        var current = templates.lock(trainerId, id)
+                .orElseThrow(() -> ApiException.notFound("That assessment template is not in your library."));
+        if (current.deleted()) return;
+        templates.softDelete(id);
+        schedules.endLiveOnTemplate(trainerId, id);
     }
 
-    // ── Normalisation ─────────────────────────────────────────────────────────
+    // ── wire ──────────────────────────────────────────────────────────────────
 
-    private static String name(Object raw) {
-        if (!(raw instanceof String s) || s.isBlank()) throw AssessmentRuleException.validation("name: required");
-        String v = s.strip();
-        if (v.length() > MAX_NAME) throw AssessmentRuleException.validation("name: at most " + MAX_NAME + " characters");
-        return v;
+    private TemplateItem one(UUID trainerId, UUID id) {
+        var t = templates.find(trainerId, id).orElseThrow(ApiException::idConflict);
+        return item(t, templates.liveCycles(trainerId, id));
     }
 
-    private static String description(Object raw) {
-        if (!(raw instanceof String s) || s.isBlank()) return null;
-        String v = s.strip();
-        if (v.length() > MAX_DESCRIPTION) {
-            throw AssessmentRuleException.validation("description: at most " + MAX_DESCRIPTION + " characters");
-        }
-        return v;
+    static TemplateItem item(AssessmentTemplateJdbcRepository.Stored t, int liveCycles) {
+        return new TemplateItem(t.id().toString(), t.name(), t.description(), t.measurements(), t.questions(),
+                liveCycles, t.createdAt().toEpochMilli(), t.updatedAt().toEpochMilli(), t.version());
     }
 
-    /** `{on, keys}` or a bare list; absent `on` is ON. */
-    private static boolean blockOn(Object raw) {
-        return !(raw instanceof Map<?, ?> m) || !m.containsKey("on") || !Boolean.FALSE.equals(m.get("on"));
-    }
+    // ── validation ────────────────────────────────────────────────────────────
 
-    private static Object blockList(Object raw, String key) {
-        if (raw instanceof List<?>) return raw;
-        if (raw instanceof Map<?, ?> m) return m.get(key);
-        return List.of();
-    }
+    private record Normalised(String name, String description,
+                              TemplateItem.Measurements measurements, TemplateItem.Questions questions) {}
 
-    static MeasurementBlock measurements(Object raw) {
-        var keys = new ArrayList<String>();
-        if (blockList(raw, "keys") instanceof List<?> list) {
-            for (Object v : list) {
-                if (v instanceof String k && AssessmentCatalogue.BY_KEY.containsKey(k) && !keys.contains(k)) keys.add(k);
+    private static Normalised normalise(TemplateRequest req) {
+        String name = req.name().strip();
+        if (name.isEmpty()) throw ApiException.validation("name: required");
+        String description = req.description() == null || req.description().isBlank() ? null : req.description().strip();
+
+        var keys = new LinkedHashSet<String>();
+        if (req.measurements().keys() != null) {
+            for (String k : req.measurements().keys()) {
+                if (k == null || !AssessmentCatalogue.BY_KEY.containsKey(k) || AssessmentCatalogue.HELD_BACK.contains(k)) {
+                    throw ApiException.validation("measurements.keys: " + k + " is not in the catalogue");
+                }
+                keys.add(k);
             }
         }
-        return new MeasurementBlock(blockOn(raw), keys);
-    }
 
-    static QuestionBlock questions(Object raw) {
-        var out = new ArrayList<AssessmentCatalogue.Question>();
-        if (blockList(raw, "items") instanceof List<?> list) {
-            if (list.size() > MAX_QUESTIONS) {
-                throw AssessmentRuleException.validation("questions: at most " + MAX_QUESTIONS);
-            }
-            for (int i = 0; i < list.size(); i++) out.add(question(list.get(i), i));
+        var items = new ArrayList<AssessmentCatalogue.Question>();
+        var ids = new HashSet<String>();
+        List<AssessmentCatalogue.Question> asked = req.questions().items() == null ? List.of() : req.questions().items();
+        if (asked.size() > MAX_QUESTIONS) throw ApiException.validation("questions.items: at most " + MAX_QUESTIONS);
+        for (int i = 0; i < asked.size(); i++) {
+            var q = question(asked.get(i), "questions.items[" + i + "]");
+            if (!ids.add(q.id())) throw ApiException.validation("questions.items[" + i + "].id: used twice");
+            items.add(q);
         }
-        return new QuestionBlock(blockOn(raw), out);
+        return new Normalised(name, description, new TemplateItem.Measurements(req.measurements().on(), List.copyOf(keys)),
+                new TemplateItem.Questions(req.questions().on(), List.copyOf(items)));
     }
 
-    private static AssessmentCatalogue.Question question(Object entry, int i) {
-        var q = entry instanceof Map<?, ?> m ? m : Map.of();
-        String kind = q.get("kind") instanceof String k && KINDS.contains(k) ? k : "text";
-        boolean isChoice = kind.equals("choice");
+    private static AssessmentCatalogue.Question question(AssessmentCatalogue.Question q, String at) {
+        if (q == null) throw ApiException.validation(at + ": required");
+        String text = q.text() == null ? "" : q.text().strip();
+        if (text.isEmpty()) throw ApiException.validation(at + ".text: required");
+        if (text.length() > MAX_TEXT) throw ApiException.validation(at + ".text: at most " + MAX_TEXT + " characters");
+        if (q.kind() == null || !KINDS.contains(q.kind())) {
+            throw ApiException.validation(at + ".kind: one of yesno, rating, text, choice");
+        }
+        // A missing id is minted: the editor gives a fresh question none until it is saved.
+        String id = q.id() == null || q.id().isBlank() ? "aq_" + UUID.randomUUID().toString().substring(0, 8) : q.id().strip();
+        if (id.length() > MAX_ID) throw ApiException.validation(at + ".id: at most " + MAX_ID + " characters");
+
         Integer scale = null;
-        if (kind.equals("rating")) {
-            int asked = q.get("scale") instanceof Number n ? n.intValue() : 10;
-            scale = SCALES.contains(asked) ? asked : 10;
+        if (q.kind().equals("rating")) {
+            if (q.scale() == null || !SCALES.contains(q.scale())) throw ApiException.validation(at + ".scale: 5, 10 or 20");
+            scale = q.scale();
         }
+        boolean choice = q.kind().equals("choice");
         var options = new ArrayList<AssessmentCatalogue.Option>();
-        if (isChoice && q.get("options") instanceof List<?> opts) {
-            if (opts.size() > MAX_OPTIONS) {
-                throw AssessmentRuleException.validation("questions[" + i + "].options: at most " + MAX_OPTIONS);
+        if (choice) {
+            List<AssessmentCatalogue.Option> given = q.options() == null ? List.of() : q.options();
+            if (given.size() < 2) throw ApiException.validation(at + ".options: a choice needs at least 2");
+            if (given.size() > MAX_OPTIONS) throw ApiException.validation(at + ".options: at most " + MAX_OPTIONS);
+            var optionIds = new HashSet<String>();
+            for (int j = 0; j < given.size(); j++) {
+                var o = given.get(j);
+                String otext = o == null || o.text() == null ? "" : o.text().strip();
+                if (otext.isEmpty()) throw ApiException.validation(at + ".options[" + j + "].text: required");
+                if (otext.length() > MAX_TEXT) {
+                    throw ApiException.validation(at + ".options[" + j + "].text: at most " + MAX_TEXT + " characters");
+                }
+                String oid = o.id() == null || o.id().isBlank() ? String.valueOf((char) ('a' + (j % 26))) : o.id().strip();
+                if (!optionIds.add(oid)) throw ApiException.validation(at + ".options[" + j + "].id: used twice");
+                options.add(new AssessmentCatalogue.Option(oid, otext));
             }
-            for (int j = 0; j < opts.size(); j++) {
-                var o = opts.get(j) instanceof Map<?, ?> om ? om : Map.of();
-                String oid = o.get("id") instanceof String s && !s.isBlank() ? s.strip()
-                        : String.valueOf((char) ('a' + (j % 26)));
-                options.add(new AssessmentCatalogue.Option(oid, clip(o.get("text"), "")));
-            }
         }
-        String id = q.get("id") instanceof String s && !s.isBlank() ? s.strip()
-                : "aq_" + UUID.randomUUID().toString().substring(0, 8);
-        return new AssessmentCatalogue.Question(id, clip(q.get("text"), "Question " + (i + 1)), kind, scale,
-                options, isChoice && Boolean.TRUE.equals(q.get("allowMultiple")),
-                isChoice && Boolean.TRUE.equals(q.get("allowCustom")));
+        return new AssessmentCatalogue.Question(id, text, q.kind(), scale, List.copyOf(options),
+                choice && q.allowMultiple(), choice && q.allowCustom());
     }
 
-    private static String clip(Object raw, String fallback) {
-        if (!(raw instanceof String s) || s.isBlank()) return fallback;
-        String v = s.strip();
-        return v.length() > MAX_TEXT ? v.substring(0, MAX_TEXT) : v;
+    private static ApiException nameTaken() {
+        return ApiException.conflict("TEMPLATE_NAME_TAKEN", "You already have a form with that name.");
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private Map<String, Object> load(UUID trainerId, UUID id) {
-        var row = find(trainerId, id.toString());
-        if (row == null) throw AssessmentRuleException.templateNotFound();
-        return row;
-    }
-
-    static TemplateResponse toResponse(Map<String, Object> r) {
-        return new TemplateResponse(str(r.get("id")), str(r.get("name")), str(r.get("description")),
-                readMeasurements(str(r.get("measurements"))), readQuestions(str(r.get("questions"))),
-                iso(r.get("created_at")), iso(r.get("updated_at")));
-    }
-
-    public static MeasurementBlock readMeasurements(String json) {
-        try {
-            return JSON.readValue(Objects.requireNonNullElse(json, "{\"on\":true,\"keys\":[]}"), MeasurementBlock.class);
-        } catch (Exception e) {
-            return new MeasurementBlock(true, List.of());
-        }
-    }
-
-    public static QuestionBlock readQuestions(String json) {
-        try {
-            return JSON.readValue(Objects.requireNonNullElse(json, "{\"on\":true,\"items\":[]}"),
-                    new TypeReference<QuestionBlock>() {});
-        } catch (Exception e) {
-            return new QuestionBlock(true, List.of());
-        }
-    }
-
-    static String write(Object v) {
-        try {
-            return JSON.writeValueAsString(v);
-        } catch (Exception e) {
-            throw new IllegalStateException(e);
-        }
-    }
-
-    static String str(Object v) { return v == null ? null : v.toString(); }
-
-    /** ISO-8601 in UTC, or null. */
-    static String iso(Object v) {
-        if (v instanceof Timestamp ts)                 return ts.toInstant().toString();
-        if (v instanceof java.time.OffsetDateTime odt) return odt.toInstant().toString();
-        if (v instanceof Instant i)                    return i.toString();
-        return null;
+    /** The pre-checks above answer the ordinary case; this is two saves racing for one name or id. */
+    private static ApiException duplicate(DuplicateKeyException e) {
+        String msg = String.valueOf(e.getMostSpecificCause().getMessage());
+        return msg.contains("uq_assessment_template_name") ? nameTaken() : ApiException.idConflict();
     }
 }

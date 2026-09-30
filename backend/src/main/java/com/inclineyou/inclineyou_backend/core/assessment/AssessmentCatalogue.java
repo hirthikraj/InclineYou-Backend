@@ -111,6 +111,23 @@ public final class AssessmentCatalogue {
     public static final Set<String> HEALTH_MEASUREMENTS = Set.of("visceral", "resting_hr", "bp");
     public static final Set<String> HEALTH_QUESTIONS = Set.of("q_pain");
 
+    /**
+     * Out of v1 by the launch scope (WEB_LAUNCH.md — blood pressure and resting
+     * heart rate wait for the release that can hold them). Still in
+     * {@link #MEASUREMENTS} so an assessment already carrying one keeps reading;
+     * {@link #OFFERED} is what the catalogue endpoint serves and a template write
+     * accepts. Withdrawing the rest of the health items would be one more entry here.
+     */
+    public static final Set<String> HELD_BACK = Set.of("resting_hr", "bp");
+
+    /** What a template may ask in v1, in catalogue order. */
+    public static final List<Measurement> OFFERED =
+            MEASUREMENTS.stream().filter(m -> !HELD_BACK.contains(m.key())).toList();
+
+    /** The groups that still have something in them — "Vitals" is empty while both are held back. */
+    public static final List<String> OFFERED_GROUPS =
+            GROUPS.stream().filter(g -> OFFERED.stream().anyMatch(m -> m.group().equals(g))).toList();
+
     public static final Map<String, Measurement> BY_KEY =
             MEASUREMENTS.stream().collect(Collectors.toUnmodifiableMap(Measurement::key, Function.identity()));
     public static final Map<String, Question> BANK =

@@ -1,30 +1,52 @@
 package com.inclineyou.inclineyou_backend.core.assessment;
 
+import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentDetail;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentItem;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.Catalog;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.CreateAssessmentRequest;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.CreateScheduleRequest;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.EntryRequest;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.MoveAssessmentRequest;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.ScheduleItem;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.TemplateItem;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.TemplateRequest;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.UpdateScheduleRequest;
+import com.inclineyou.inclineyou_backend.shared.wire.EmptyBody;
+import com.inclineyou.inclineyou_backend.shared.wire.Items;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.WebRequest;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
- * V14 · assessments, trainer side: the templates, the ones sent, and the
- * catalogue a template picks from. Timestamps on these routes are ISO strings.
+ * api-contract 1.1 Assessments — templates, the assessments given from them, the
+ * cycles that book those on a rhythm, and the catalogue a template picks from.
+ * Instants are epoch ms and every replaceable resource carries a {@code version}.
  */
 @RestController
 @RequestMapping("/v1")
 @RequiredArgsConstructor
 public class AssessmentController {
 
+    /** Bump when {@link AssessmentCatalogue} changes: the catalogue changes only on a deploy. */
+    static final String CATALOG_ETAG = "catalog-2026-09-30";
+
     private final AssessmentService assessments;
-    private final AssessmentTemplateService templates;
+    private final AssessmentEntryService entries;
     private final AssessmentListService list;
+    private final AssessmentTemplateService templates;
+    private final AssessmentScheduleService schedules;
 
-    /* ── sent assessments ─────────────────────────────────────────────────── */
+    /* ── assessments ──────────────────────────────────────────────────────── */
 
-    /** The v1 list — Today L10 and the Assessments screen. See {@link AssessmentListService}. */
+    /** The list — Today L10, the Assessments screen and a client's tab. See {@link AssessmentListService}. */
     @GetMapping("/assessments")
     public AssessmentListService.Page list(
             @RequestParam(required = false) String state,
@@ -38,49 +60,71 @@ public class AssessmentController {
     }
 
     @GetMapping("/assessments/{id}")
-    public AssessmentService.Detail get(@PathVariable UUID id) {
-        return assessments.get(trainerId(), id);
+    public ResponseEntity<AssessmentDetail> get(@PathVariable UUID id) {
+        var detail = assessments.get(trainerId(), id);
+        return ResponseEntity.ok().eTag(detail.item().version()).body(detail);
     }
 
+    /** 201 the first time, 200 on a replayed id. */
     @PostMapping("/assessments")
-    @ResponseStatus(HttpStatus.CREATED)
-    public AssessmentService.Row create(@RequestBody(required = false) Map<String, Object> body) {
-        return assessments.create(trainerId(), body);
+    public ResponseEntity<AssessmentItem> create(@Valid @RequestBody CreateAssessmentRequest body) {
+        var made = assessments.create(trainerId(), body);
+        return ResponseEntity.status(made.created() ? HttpStatus.CREATED : HttpStatus.OK).body(made.item());
     }
 
+    /** Record readings and answers — save for later, finish, or correct. If-Match required. */
+    @PutMapping("/assessments/{id}/entry")
+    public ResponseEntity<AssessmentDetail> entry(
+            @PathVariable UUID id,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody EntryRequest body) {
+        var detail = entries.put(trainerId(), id, ifMatch, body);
+        return ResponseEntity.ok().eTag(detail.item().version()).body(detail);
+    }
+
+    /** Move the date; If-Match honoured when sent. */
     @PatchMapping("/assessments/{id}")
-    public AssessmentService.Row patch(@PathVariable UUID id, @RequestBody(required = false) Map<String, Object> body) {
-        return assessments.patch(trainerId(), id, body);
+    public ResponseEntity<AssessmentItem> move(
+            @PathVariable UUID id,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody MoveAssessmentRequest body) {
+        var moved = assessments.move(trainerId(), id, ifMatch, body);
+        return ResponseEntity.ok().eTag(moved.version()).body(moved);
     }
 
     @DeleteMapping("/assessments/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable UUID id) {
-        assessments.delete(trainerId(), id);
+    public AssessmentService.Deleted delete(@PathVariable UUID id) {
+        return assessments.delete(trainerId(), id);
     }
 
     /* ── templates ────────────────────────────────────────────────────────── */
 
+    /** The shelf. Answers If-None-Match with 304. */
     @GetMapping("/assessment-templates")
-    public List<AssessmentTemplateService.TemplateResponse> templates() {
-        return templates.list(trainerId());
+    public ResponseEntity<Items<TemplateItem>> templates(WebRequest request) {
+        var shelf = templates.list(trainerId());
+        String etag = Integer.toHexString(shelf.stream()
+                .map(t -> t.id() + ":" + t.version() + ":" + t.liveCycles()).toList().hashCode());
+        if (request.checkNotModified(etag)) return null;
+        return ResponseEntity.ok().eTag(etag).cacheControl(CacheControl.noCache().cachePrivate()).body(Items.of(shelf));
     }
 
-    @GetMapping("/assessment-templates/{id}")
-    public AssessmentTemplateService.TemplateResponse template(@PathVariable UUID id) {
-        return templates.get(trainerId(), id);
-    }
-
+    /** 201 the first time, 200 on a replayed id. */
     @PostMapping("/assessment-templates")
-    @ResponseStatus(HttpStatus.CREATED)
-    public AssessmentTemplateService.TemplateResponse createTemplate(@RequestBody(required = false) Map<String, Object> body) {
-        return templates.create(trainerId(), body);
+    public ResponseEntity<TemplateItem> createTemplate(@Valid @RequestBody TemplateRequest body) {
+        var made = templates.create(trainerId(), body);
+        return ResponseEntity.status(made.created() ? HttpStatus.CREATED : HttpStatus.OK)
+                .eTag(made.template().version()).body(made.template());
     }
 
+    /** The whole form. If-Match required. */
     @PutMapping("/assessment-templates/{id}")
-    public AssessmentTemplateService.TemplateResponse updateTemplate(
-            @PathVariable UUID id, @RequestBody(required = false) Map<String, Object> body) {
-        return templates.update(trainerId(), id, body);
+    public ResponseEntity<TemplateItem> updateTemplate(
+            @PathVariable UUID id,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody TemplateRequest body) {
+        var saved = templates.update(trainerId(), id, ifMatch, body);
+        return ResponseEntity.ok().eTag(saved.version()).body(saved);
     }
 
     @DeleteMapping("/assessment-templates/{id}")
@@ -92,8 +136,46 @@ public class AssessmentController {
     /* ── the catalogue ────────────────────────────────────────────────────── */
 
     @GetMapping("/assessment-catalog")
-    public AssessmentService.Catalog catalog() {
-        return assessments.catalog();
+    public ResponseEntity<Catalog> catalog(WebRequest request) {
+        if (request.checkNotModified(CATALOG_ETAG)) return null;
+        return ResponseEntity.ok().eTag(CATALOG_ETAG).cacheControl(CacheControl.noCache().cachePrivate()).body(assessments.catalog());
+    }
+
+    /* ── cycles ───────────────────────────────────────────────────────────── */
+
+    @GetMapping("/assessment-schedules")
+    public Items<ScheduleItem> schedules(@RequestParam(required = false) UUID clientId) {
+        return Items.of(schedules.forClient(trainerId(), clientId));
+    }
+
+    /** 201 the first time, 200 on a replayed id — which books nothing more. */
+    @PostMapping("/assessment-schedules")
+    public ResponseEntity<ScheduleItem> createSchedule(@Valid @RequestBody CreateScheduleRequest body) {
+        var made = schedules.create(trainerId(), body);
+        return ResponseEntity.status(made.created() ? HttpStatus.CREATED : HttpStatus.OK)
+                .eTag(made.schedule().version()).body(made.schedule());
+    }
+
+    /** Move or re-pace; If-Match honoured when sent. */
+    @PatchMapping("/assessment-schedules/{id}")
+    public ResponseEntity<ScheduleItem> patchSchedule(
+            @PathVariable UUID id,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
+            @Valid @RequestBody UpdateScheduleRequest body) {
+        var saved = schedules.patch(trainerId(), id, ifMatch, body);
+        return ResponseEntity.ok().eTag(saved.version()).body(saved);
+    }
+
+    @PostMapping("/assessment-schedules/{id}/end")
+    public ResponseEntity<ScheduleItem> endSchedule(@PathVariable UUID id, @RequestBody(required = false) EmptyBody body) {
+        var ended = schedules.end(trainerId(), id);
+        return ResponseEntity.ok().eTag(ended.version()).body(ended);
+    }
+
+    @DeleteMapping("/assessment-schedules/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteSchedule(@PathVariable UUID id) {
+        schedules.delete(trainerId(), id);
     }
 
     private UUID trainerId() {

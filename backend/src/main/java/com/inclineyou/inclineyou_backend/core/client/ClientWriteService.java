@@ -88,8 +88,7 @@ public class ClientWriteService {
      * An absent one passes: on a PATCH it is honoured when sent, not required.
      */
     static boolean stale(String ifMatch, String version) {
-        if (ifMatch == null || ifMatch.isBlank() || "*".equals(ifMatch.strip())) return false;
-        return !ifMatch.strip().replaceFirst("^W/", "").replace("\"", "").equals(version);
+        return com.inclineyou.inclineyou_backend.shared.wire.IfMatch.stale(ifMatch, version);
     }
 
     /** A replay of this trainer's own id answers the row; the id anywhere else is a clash. */
