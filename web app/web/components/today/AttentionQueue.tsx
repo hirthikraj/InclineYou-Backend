@@ -850,14 +850,19 @@ function Row({
         the one control on the row whose consequence is that the row goes away.
       */}
       <td className="q__x">
-        <button
-          className="q__x-b"
-          type="button"
-          onClick={onChoose}
-          aria-label={`Snooze or dismiss ${item.clientName}’s row`}
-        >
-          <Ellipsis size={16} />
-        </button>
+        {/* No snooze on an assessment row (R31): the attention_dismissal_band
+            constraint has no room for it, and "not now" would really mean
+            "change the date". The cell stays so the verbs down the list align. */}
+        {item.kind !== 'assess' && (
+          <button
+            className="q__x-b"
+            type="button"
+            onClick={onChoose}
+            aria-label={`Snooze or dismiss ${item.clientName}’s row`}
+          >
+            <Ellipsis size={16} />
+          </button>
+        )}
       </td>
     </tr>
   );

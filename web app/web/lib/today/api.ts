@@ -473,6 +473,19 @@ export const getToday = cache(async (): Promise<TodayData> => {
     })),
   };
 
+  /* Only the earliest owed assessment per client is used (L10) — for the hero's
+     chip and for the queue's row. */
+  const owed: Record<string, OwedAssessment> = {};
+  for (const a of assessments) {
+    const seen = owed[a.clientId];
+    if (!seen || a.dueOn < seen.dueOn) {
+      owed[a.clientId] = {
+        id: a.id, clientId: a.clientId, name: a.name, dueOn: a.dueOn, missed: a.state === 'missed',
+      };
+    }
+  }
+  input.assessments = Object.values(owed);
+
   const deck = buildDeck(input, now);
 
   /*
@@ -550,17 +563,6 @@ export const getToday = cache(async (): Promise<TodayData> => {
       dead: DEAD_SESSION.has((s.status ?? '').toLowerCase()),
     })),
   };
-
-  /* Only the earliest owed assessment per client is used (L10). */
-  const owed: Record<string, OwedAssessment> = {};
-  for (const a of assessments) {
-    const seen = owed[a.clientId];
-    if (!seen || a.dueOn < seen.dueOn) {
-      owed[a.clientId] = {
-        id: a.id, clientId: a.clientId, name: a.name, dueOn: a.dueOn, missed: a.state === 'missed',
-      };
-    }
-  }
 
   return {
     deck,

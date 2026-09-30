@@ -281,6 +281,17 @@ export const ATTENTION_BANDS = [
   /* ── 5 · training, and no plan to train to. ────────────────────────────── */
   'no-program',
 
+  /* ── 5b · an assessment the trainer owes a tape for. ───────────────────── */
+  /*
+   * Housekeeping, like `no-program` and `unmarked`: nobody is at risk and the
+   * only person who can clear it is the trainer. It ranks with them and is NOT
+   * in `RISK_BANDS`. It is also the one band that cannot be snoozed — the
+   * `attention_dismissal_band` check constraint has no room for it (R31) and
+   * "not now" on it would really mean "change the date", which the row sends
+   * you to do. It clears itself when the assessment is taken or moved.
+   */
+  'assessment-due',
+
   /* ── 6 · yesterday's sessions nobody marked. ───────────────────────────── */
   /*
    * BELOW the five above and above the two below, which is the position the
@@ -329,6 +340,7 @@ export const DECK_BANDS: AttentionBand[] = [
   'missed',
   'quiet',
   'no-program',
+  'assessment-due',
   'unmarked',
   'milestone',
   'log-open',
@@ -460,6 +472,12 @@ export function missedLine(count: number): string {
 }
 
 /** `Training with no program assigned`. One fact, no number to state. */
+/** `Monthly check due today` · `Monthly check due 2 days ago`. */
+export function assessmentLine(name: string, daysLate: number): string {
+  if (daysLate <= 0) return `${name} due today`;
+  return `${name} due ${daysLate} day${daysLate === 1 ? '' : 's'} ago`;
+}
+
 export function noProgramLine(): string {
   return 'Training with no program assigned';
 }
@@ -720,6 +738,20 @@ export interface DeckInput {
    * money card reads it rather than summing payment rows (api-contract R4).
    */
   moneySummary?: DeckMoneyMonth[];
+  /**
+   * Today L10 — the earliest assessment each client owes today or earlier.
+   * Optional for the same reason `nudges` is: a failed read degrades the queue,
+   * never the screen.
+   */
+  assessments?: DeckAssessment[];
+}
+
+/** One owed assessment, as the queue reads it. `dueOn` is a `yyyy-MM-dd` calendar date. */
+export interface DeckAssessment {
+  id: string;
+  clientId: string;
+  name: string;
+  dueOn: string;
 }
 
 /** One month of `GET /v1/money/summary`, numbers already parsed. */
@@ -797,7 +829,8 @@ export type AttentionKind =
   | 'missed'
   | 'no-program'
   | 'unmarked'
-  | 'milestone';
+  | 'milestone'
+  | 'assess';
 
 export interface AttentionItem {
   key: string;
@@ -1490,6 +1523,41 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
       // the sort already does.
       weight: attentionWeight('no-program'),
       at: firstBooking ?? now,
+    });
+  }
+
+  /* --- an assessment due, and the client is not in today ---
+   *
+   * When they ARE in today the hero card carries an *Assessment due* chip on the
+   * very session the tape comes out in (MUST-21), so a row as well would say it
+   * twice. Only ACTIVE clients: a paused or archived client is not somebody to
+   * measure. The verb navigates to the take screen, and there is no dismissal —
+   * see the band's note. */
+  const inToday = new Set(
+    input.sessions
+      .filter((s) => s.scheduledAt >= startOfDay(now) && s.scheduledAt < startOfDay(now) + DAY_MS)
+      .filter((s) => !DEAD_SESSION.has(lower(s.status)))
+      .map((s) => s.clientId),
+  );
+  const activeById = new Map(input.clients.map((c) => [c.id, c]));
+  for (const a of input.assessments ?? []) {
+    const client = activeById.get(a.clientId);
+    if (!client || lower(client.status) !== 'active' || inToday.has(a.clientId)) continue;
+    const dueAt = new Date(`${a.dueOn}T00:00:00`).getTime();
+    const daysLate = Math.max(0, Math.round((startOfDay(now) - dueAt) / DAY_MS));
+    items.push({
+      key: `assess:${a.id}`,
+      kind: 'assess',
+      band: 'assessment-due',
+      clientId: a.clientId,
+      clientName: client.name?.trim() || 'Client',
+      line: assessmentLine(a.name, daysLate),
+      severity: attentionSeverity('assessment-due'),
+      action: 'Take',
+      href: `/clients/assessments/${a.id}/take?from=${encodeURIComponent(a.clientId)}`,
+      // The longer it has been owed, the nearer the top of its band.
+      weight: attentionWeight('assessment-due', daysLate),
+      at: dueAt,
     });
   }
 

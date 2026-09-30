@@ -42,6 +42,8 @@ export const TEMPLATE_FOR_KIND: Record<AttentionKind, NudgeTemplateName | null> 
   'no-program': null,
   unmarked: null,
   log: null,
+  // Nothing is sent: the trainer takes the assessment in the session.
+  assess: null,
 };
 
 /**
