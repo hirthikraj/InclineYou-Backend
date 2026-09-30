@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { TopBar } from '@/components/shell/TopBar';
 import type { ClientFilePayload, ClientNoteWire, TabOptions } from '@/lib/clients/client-api';
 import type { ProgressView } from '@/lib/log/log';
-import type { AssessmentWire } from '@/lib/assessments/vocab';
+import type { AssessmentWire, ScheduleWire, TemplateWire } from '@/lib/assessments/vocab';
 
 import { Header, HeaderDetail } from './Header';
 import { PinnedStrip } from './PinnedStrip';
@@ -74,6 +74,9 @@ export interface ClientFileProps {
    * coaching.
    */
   assessments?: AssessmentWire[] | null;
+  /** This client's cycles and the trainer's forms — `null` where the read failed. */
+  schedules?: ScheduleWire[] | null;
+  templates?: TemplateWire[] | null;
 }
 
 export function ClientFile({
@@ -82,6 +85,8 @@ export function ClientFile({
   tab,
   progress = null,
   assessments = null,
+  schedules = null,
+  templates = null,
   options = {},
 }: ClientFileProps) {
   /* ── THE STRIP STANDS DOWN ON THE TAB THAT OWNS ITS CONTENTS ─────────────
@@ -206,7 +211,13 @@ export function ClientFile({
             <ProgressTab clientId={client.id} progress={progress} />
           )}
           {tab === 'assessments' && (
-            <ChecksTab clientId={client.id} clientName={client.name} rows={assessments} />
+            <ChecksTab
+              clientId={client.id}
+              clientName={client.name}
+              rows={assessments}
+              schedules={schedules}
+              templates={templates}
+            />
           )}
           {tab === 'sessions' && (
             <SessionsTab

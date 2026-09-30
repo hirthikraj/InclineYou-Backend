@@ -20,7 +20,7 @@ export async function ClientFilePage({
   clientId: string;
   tab: ClientTab;
   options?: TabOptions;
-  extra?: Promise<Partial<Pick<ClientFileProps, 'progress' | 'assessments'>>>;
+  extra?: Promise<Partial<Pick<ClientFileProps, 'progress' | 'assessments' | 'schedules' | 'templates'>>>;
 }) {
   const [file, more] = await Promise.all([requireClientFile(clientId, tab, options), extra ?? {}]);
   if (!file.ok) {

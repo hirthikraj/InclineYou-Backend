@@ -5,12 +5,14 @@ import { redirect } from 'next/navigation';
 import { getToken } from '@/lib/auth/session';
 import type { Query } from './address';
 import type { AssessmentDetailWire } from './detail';
-import type { AssessmentWire } from './vocab';
+import type { AssessmentWire, ScheduleWire, TemplateWire } from './vocab';
 import {
   AssessmentsApiError,
   getAssessment,
   getClientAssessments,
   getAssessments,
+  getClientSchedules,
+  getTemplates,
   getAssessmentTemplates,
   type AssessmentsData,
   type TemplatesData,
@@ -101,6 +103,34 @@ export async function loadClientAssessments(clientId: string): Promise<Assessmen
   if (!(await getToken())) redirect('/sign-in');
   try {
     return await getClientAssessments(clientId);
+  } catch (error) {
+    if (error instanceof AssessmentsApiError) {
+      if (error.status === 401 || error.status === 403) redirect('/sign-in');
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** The client file's cycles. `null` on failure — see `loadClientAssessments`. */
+export async function loadClientSchedules(clientId: string): Promise<ScheduleWire[] | null> {
+  if (!(await getToken())) redirect('/sign-in');
+  try {
+    return await getClientSchedules(clientId);
+  } catch (error) {
+    if (error instanceof AssessmentsApiError) {
+      if (error.status === 401 || error.status === 403) redirect('/sign-in');
+      return null;
+    }
+    throw error;
+  }
+}
+
+/** The shelf, for the client file's *Assign* sheet. `null` on failure, like its siblings. */
+export async function loadTemplates(): Promise<TemplateWire[] | null> {
+  if (!(await getToken())) redirect('/sign-in');
+  try {
+    return await getTemplates();
   } catch (error) {
     if (error instanceof AssessmentsApiError) {
       if (error.status === 401 || error.status === 403) redirect('/sign-in');

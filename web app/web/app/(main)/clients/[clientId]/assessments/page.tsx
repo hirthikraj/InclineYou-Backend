@@ -1,5 +1,5 @@
 import { ClientFilePage } from '@/components/clients/file/ClientFilePage';
-import { loadClientAssessments } from '@/lib/assessments/guard';
+import { loadClientAssessments, loadClientSchedules, loadTemplates } from '@/lib/assessments/guard';
 
 /** The Assessments tab's list is loaded beside the header, not inside the file's payload. */
 export const dynamic = 'force-dynamic';
@@ -10,7 +10,11 @@ export default async function Page({ params }: { params: Promise<{ clientId: str
     <ClientFilePage
       clientId={clientId}
       tab="assessments"
-      extra={loadClientAssessments(clientId).then((assessments) => ({ assessments }))}
+      extra={Promise.all([
+        loadClientAssessments(clientId),
+        loadClientSchedules(clientId),
+        loadTemplates(),
+      ]).then(([assessments, schedules, templates]) => ({ assessments, schedules, templates }))}
     />
   );
 }

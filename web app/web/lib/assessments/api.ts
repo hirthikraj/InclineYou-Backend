@@ -1,11 +1,10 @@
 import 'server-only';
 
-import { getToken } from '@/lib/auth/session';
-import { listAll } from '@/lib/http/client';
+import { api, ApiError, listAll } from '@/lib/http/client';
 import { PAGE_SIZE, type Query } from './address';
 import type { AssessmentDetailWire } from './detail';
 import { STATUSES_FOR } from './vocab';
-import type { AssessmentWire, CatalogWire, TemplateWire } from './vocab';
+import type { AssessmentWire, CatalogWire, ScheduleWire, TemplateWire } from './vocab';
 
 /**
  * A row of `GET /v1/clients?view=legacy` — the pre-v1 shape this screen still
@@ -24,9 +23,6 @@ export interface ClientWire {
   updatedAt: number;
 }
 
-const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
-const TIMEOUT_MS = 8_000;
-
 export class AssessmentsApiError extends Error {
   constructor(readonly status: number | null) {
     super(`inclineyou api ${status ?? 'unreachable'}`);
@@ -34,24 +30,18 @@ export class AssessmentsApiError extends Error {
   }
 }
 
+/**
+ * The shared client does the work (bearer, `x-inclineyou-client: web`, timeout,
+ * the dev log); this only keeps the screen's own error type, which `guard.ts`
+ * reads to tell *unreachable* from *refused*.
+ */
 async function request<T>(path: string): Promise<T> {
-  const token = await getToken();
-  if (!token) throw new AssessmentsApiError(401);
-
-  let res: Response;
   try {
-    res = await fetch(`${BASE}${path}`, {
-      headers: { authorization: `Bearer ${token}` },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch {
-    throw new AssessmentsApiError(null);
+    return await api<T>(path);
+  } catch (error) {
+    if (error instanceof ApiError) throw new AssessmentsApiError(error.status);
+    throw error;
   }
-  if (!res.ok) throw new AssessmentsApiError(res.status);
-
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T;
 }
 
 /**
@@ -85,6 +75,11 @@ interface Page {
   grandTotal?: number;
 }
 
+/** `GET /v1/assessment-templates` — a bounded envelope, no cursor. */
+interface Shelf {
+  items: TemplateWire[];
+}
+
 export interface AssessmentsData {
   rows: AssessmentWire[];
   /** The count AFTER the filters, which is what the pager divides. */
@@ -108,7 +103,6 @@ function listPath(q: Query): string {
   const states = STATUSES_FOR[q.status];
   // `state`, not `status` — the value is derived, not a column (1.1).
   if (states.length > 0) p.set('state', states.join(','));
-  if (q.read !== 'all') p.set('read', q.read);
   if (q.clientId) p.set('clientId', q.clientId);
   if (q.q.trim()) p.set('q', q.q.trim());
   p.set('limit', String(PAGE_SIZE));
@@ -144,7 +138,7 @@ export async function getAssessments(q: Query): Promise<AssessmentsData> {
   const [page, all, templates, catalog, clients] = await Promise.all([
     pageOf(q),
     lenient<Page>('/v1/assessments?limit=1&includeTotal=true', { items: [], nextCursor: null, total: 0 }),
-    lenient<TemplateWire[]>('/v1/assessment-templates', []),
+    lenient<Shelf>('/v1/assessment-templates', { items: [] }),
     lenient<CatalogWire | null>('/v1/assessment-catalog', null),
     lenient<ClientWire[]>('/v1/clients?view=legacy', []),
   ]);
@@ -153,7 +147,7 @@ export async function getAssessments(q: Query): Promise<AssessmentsData> {
     rows: page.items,
     total: page.total ?? 0,
     grandTotal: all.total ?? 0,
-    templates,
+    templates: templates.items,
     catalog,
     clients,
     now: Date.now(),
@@ -171,12 +165,12 @@ export interface TemplatesData {
 
 export async function getAssessmentTemplates(): Promise<TemplatesData> {
   const [templates, catalog, all, clients] = await Promise.all([
-    request<TemplateWire[]>('/v1/assessment-templates'),
+    request<Shelf>('/v1/assessment-templates'),
     lenient<CatalogWire | null>('/v1/assessment-catalog', null),
     lenient<Page>('/v1/assessments?limit=1&includeTotal=true', { items: [], nextCursor: null, total: 0 }),
     lenient<ClientWire[]>('/v1/clients?view=legacy', []),
   ]);
-  return { templates, catalog, assessmentTotal: all.total ?? 0, clients, now: Date.now() };
+  return { templates: templates.items, catalog, assessmentTotal: all.total ?? 0, clients, now: Date.now() };
 }
 
 /**
@@ -203,7 +197,7 @@ export async function getAssessment(id: string): Promise<AssessmentDetailWire> {
 /**
  * ONE CLIENT'S CHECK-INS — the client file's own tab.
  *
- * `size=200` and no paging, which is the difference between this read and the
+ * `limit=200` and followed to its end, which is the difference between this read and the
  * list's. The list is the whole book and pages at twenty; this is one person,
  * and a client on a check-in every eight weeks reaches twenty after three
  * years. A pager on a tab that will hold four rows for most of a client's life
@@ -219,4 +213,21 @@ export async function getClientAssessments(clientId: string): Promise<Assessment
     `/v1/assessments?clientId=${encodeURIComponent(clientId)}&limit=200`,
     (p) => request<Page>(p),
   );
+}
+
+/**
+ * One client's cycles, live first then ended. `null` on failure for the reason
+ * `loadClientAssessments` gives: an empty list where the read failed would say
+ * *this client is on no cycle*.
+ */
+export async function getClientSchedules(clientId: string): Promise<ScheduleWire[]> {
+  const res = await request<{ items: ScheduleWire[] }>(
+    `/v1/assessment-schedules?clientId=${encodeURIComponent(clientId)}`,
+  );
+  return res.items;
+}
+
+/** The trainer's shelf on its own — the client file's *Assign* sheet needs the forms and nothing else. */
+export async function getTemplates(): Promise<TemplateWire[]> {
+  return (await request<Shelf>('/v1/assessment-templates')).items;
 }

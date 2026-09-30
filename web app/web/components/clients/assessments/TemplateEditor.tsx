@@ -138,7 +138,7 @@ export function TemplateEditor({
     const draft: TemplateDraft = { name, description, measurements, questions };
     startSave(async () => {
       const result = template
-        ? await saveTemplate(template.id, draft)
+        ? await saveTemplate(template.id, template.version, draft)
         : await createTemplate(draft);
       if (!result.ok) {
         setError(result.message ?? 'That did not save.');
@@ -285,7 +285,7 @@ export function TemplateEditor({
 
 /* ══════════════════════════════════════════════════ the measurement picker ══ */
 
-interface Def { key: string; label: string; group: string; unit: string; metric: string | null }
+interface Def { key: string; label: string; group: string; unit: string; charted: boolean }
 
 /**
  * WHAT IS BEING COLLECTED, THEN WHAT COULD BE.
@@ -421,7 +421,7 @@ function MeasurementGroup({
                     words. See `MeasurementDefRow` for why it is not hidden. */}
                 <span className="asm-add__u">
                   {row.unit}
-                  {row.metric ? ' · on the chart' : ''}
+                  {row.charted ? ' · on the chart' : ''}
                 </span>
               </button>
             </li>

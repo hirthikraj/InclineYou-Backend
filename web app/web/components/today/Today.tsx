@@ -16,6 +16,7 @@ import { AttentionQueue } from './AttentionQueue';
 import { useHeartbeat, useNow } from './Clock';
 import { FirstRun } from './FirstRun';
 import { Hero } from './Hero';
+import { OwedAssessmentsProvider } from './OwedAssessments';
 import { usePaletteRows } from '@/components/shell/PaletteHost';
 import { Glance, PhoneStack, TodayList } from './PhoneStack';
 import { LastContactProvider } from '@/components/nudge/LastContact';
@@ -82,7 +83,7 @@ import { Button } from '@/web-components/ui/Button';
  */
 export function Today({ data }: { data: TodayData }) {
   const router = useRouter();
-  const { deck, trainer, hours, rates, book, renewTerms, openLogs, now: serverNow } = data;
+  const { deck, trainer, hours, rates, book, renewTerms, openLogs, assessments, now: serverNow } = data;
 
   const now = useNow(serverNow);
   const refresh = useCallback(() => router.refresh(), [router]);
@@ -178,6 +179,7 @@ export function Today({ data }: { data: TodayData }) {
 
   return (
     <LastContactProvider map={data.lastContact} now={data.now}>
+      <OwedAssessmentsProvider value={assessments}>
       <TopBar crumb="Today" />
 
       <main className="main" id="main-content">
@@ -331,6 +333,7 @@ export function Today({ data }: { data: TodayData }) {
           }}
         />
       )}
+      </OwedAssessmentsProvider>
     </LastContactProvider>
   );
 }

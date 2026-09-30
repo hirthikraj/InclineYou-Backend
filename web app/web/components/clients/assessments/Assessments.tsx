@@ -1,11 +1,10 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import type { AssessmentsData } from '@/lib/assessments/api';
-import { setRead } from '@/lib/assessments/actions';
 import {
   PAGE_SIZE,
   assessmentsHref,
@@ -25,8 +24,6 @@ import { TopBar } from '@/components/shell/TopBar';
 import { PageTabs } from '@/components/shell/PageTabs';
 import { Avatar } from '@/web-components/ui/Avatar';
 import { Button } from '@/web-components/ui/Button';
-import { CheckboxCell } from '@/web-components/ui/Checkbox';
-import { BulkBar } from '@/web-components/ui/BulkBar';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 import { Facet } from '@/web-components/ui/Facet';
 import { PageHeader } from '@/web-components/ui/PageHeader';
@@ -35,7 +32,7 @@ import { RowMenu } from '@/web-components/ui/RowMenu';
 import { SearchField } from '@/web-components/ui/SearchField';
 import { Table, Row, type Column } from '@/web-components/ui/Table';
 import { Tag } from '@/web-components/ui/Tag';
-import { Checklist, Envelope, Plus } from './Icons';
+import { Checklist, Plus } from './Icons';
 import { ScheduleSheet } from './ScheduleSheet';
 
 /**
@@ -66,9 +63,7 @@ import { ScheduleSheet } from './ScheduleSheet';
 export function Assessments({ data, query }: { data: AssessmentsData; query: Query }) {
   const router = useRouter();
   const [search, setSearch] = useState(query.q);
-  const [picked, setPicked] = useState<string[]>([]);
   const [scheduling, setScheduling] = useState(false);
-  const [busy, startWrite] = useTransition();
 
   const names = useMemo(
     () => new Map(data.clients.map((c) => [c.id, c.name])),
@@ -77,7 +72,6 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
 
   /** Every write to the address goes through here. `refine` puts you on page one. */
   const go = (patch: Partial<Query>) => {
-    setPicked([]);
     router.push(assessmentsHref(refine(query, patch)));
   };
 
@@ -91,18 +85,7 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
     go({ q: search });
   };
 
-  const unread = data.rows.filter((r) => r.unread);
-
   const rows = data.rows;
-  const anyPicked = picked.length > 0;
-
-  function markRead(ids: string[], read: boolean) {
-    startWrite(async () => {
-      for (const id of ids) await setRead(id, read);
-      setPicked([]);
-      router.refresh();
-    });
-  }
 
   return (
     <>
@@ -115,7 +98,6 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
           sub={
             <>
               {data.grandTotal} in the book
-              {unread.length > 0 && ` · ${unread.length} unread on this page`}
             </>
           }
           actions={
@@ -196,45 +178,8 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                 onChange={(next) => go({ status: (next[0] as StatusFilter) ?? 'all' })}
                 options={STATUS_FILTERS}
               />
-              <Facet
-                label="Read status"
-                single
-                selected={query.read === 'all' ? [] : [query.read]}
-                onChange={(next) => go({ read: (next[0] as Query['read']) ?? 'all' })}
-                options={[
-                  { value: 'unread', label: 'Unread' },
-                  { value: 'read', label: 'Read' },
-                ]}
-              />
             </div>
           </div>
-
-          {anyPicked && (
-            <BulkBar
-              inline
-              count={picked.length}
-              total={rows.length}
-              noun="assessments"
-              one="assessment"
-              onSelectAll={() => setPicked(rows.map((r) => r.id))}
-              actions={
-                <>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    disabled={busy}
-                    onClick={() => markRead(picked, true)}
-                  >
-                    <Envelope size={14} />
-                    Mark read
-                  </Button>
-                  <Button variant="ghost" size="sm" onClick={() => setPicked([])}>
-                    Clear
-                  </Button>
-                </>
-              }
-            />
-          )}
 
           {rows.length === 0 ? (
             <Empty query={query} onClear={() => { setSearch(''); router.push('/clients/assessments'); }} />
@@ -247,22 +192,10 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
               >
                 {rows.map((r) => {
                   const client = names.get(r.clientId) ?? 'A client';
-                  const when = new Date(r.dueAt);
+                  const when = new Date(`${r.dueOn}T00:00:00`);
                   return (
                     <Row
                       key={r.id}
-                      selected={picked.includes(r.id)}
-                      select={
-                        <CheckboxCell
-                          label={`Select ${client}'s ${r.name}`}
-                          checked={picked.includes(r.id)}
-                          onChange={() =>
-                            setPicked((v) =>
-                              v.includes(r.id) ? v.filter((x) => x !== r.id) : [...v, r.id],
-                            )
-                          }
-                        />
-                      }
                       cells={[
                         {
                           key: 'date',
@@ -270,28 +203,7 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                           label: 'Date',
                           content: (
                             <span className="asm__d">
-                              <b>
-                                {/* THE UNREAD MARK, on the date's own line — a
-                                    dot in the cell's gutter rather than a bold
-                                    row, since weight on the whole row would
-                                    make *I have not opened it* the loudest
-                                    thing in a table a trainer scans for *who
-                                    has not answered*. */}
-                                <span
-                                  className={r.unread ? 'asm__dot' : 'asm__dot asm__dot--off'}
-                                  aria-hidden="true"
-                                />
-                                {/* THE WORD, CLIPPED RATHER THAN DROPPED —
-                                    trap 5, and it is what let the status cell
-                                    stop saying it. *Done · unread* measured
-                                    122px into a 104px cell and `.tag` is
-                                    `nowrap`; the dot is the sighted mark and
-                                    this is the same fact for a reader, said
-                                    once, on the row it belongs to. */}
-                                {r.unread && <span className="vh">Unread. </span>}
-                                {DATE.format(when)}
-                              </b>
-                              <em>{TIME.format(when)}</em>
+                              <b>{DATE.format(when)}</b>
                             </span>
                           ),
                         },
@@ -337,21 +249,21 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                           className: 'asm-c-n',
                           numeric: true,
                           label: 'Measurements',
-                          content: <Count block={r.measurements} status={r.status} />,
+                          content: <Count block={r.measurements} status={r.state} />,
                         },
                         {
                           key: 'questions',
                           className: 'asm-c-n',
                           numeric: true,
                           label: 'Questions',
-                          content: <Count block={r.questions} status={r.status} />,
+                          content: <Count block={r.questions} status={r.state} />,
                         },
                         {
                           key: 'status',
                           className: 'asm-c-status',
                           label: 'Status',
                           content: (
-                            <Tag tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Tag>
+                            <Tag tone={STATUS_TONE[r.state]}>{STATUS_LABEL[r.state]}</Tag>
                           ),
                         },
                         {
@@ -372,12 +284,13 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                                   label: 'Open the client file',
                                   href: `/clients/${r.clientId}`,
                                 },
-                                {
-                                  key: 'read',
-                                  label: r.readAt ? 'Mark unread' : 'Mark read',
-                                  disabled: r.status !== 'done',
-                                  onSelect: () => markRead([r.id], !r.readAt),
-                                },
+                                ...(r.state === 'done'
+                                  ? []
+                                  : [{
+                                      key: 'take',
+                                      label: 'Take it now',
+                                      href: `/clients/assessments/${r.id}/take`,
+                                    }]),
                               ]}
                             />
                           ),
@@ -422,7 +335,6 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
 /* ─────────────────────────────────────────────────────────────── the cells ── */
 
 const DATE = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-const TIME = new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit', hour12: true });
 
 /**
  * `12 / 15`, `3`, or nothing at all.
@@ -447,7 +359,6 @@ function Count({
 }
 
 const COLUMNS: Column[] = [
-  { key: 'sel', bare: true, className: 'sel asm-c-sel', label: '' },
   { key: 'date', label: 'Date', className: 'asm-c-date' },
   { key: 'client', label: 'Client', className: 'asm-c-who' },
   { key: 'name', label: 'Assessment', className: 'asm-c-name' },
@@ -469,7 +380,7 @@ const COLUMNS: Column[] = [
  */
 function Empty({ query, onClear }: { query: Query; onClear: () => void }) {
   const filtered =
-    query.status !== 'all' || query.read !== 'all' || query.clientId !== null || query.q.trim() !== '';
+    query.status !== 'all' || query.clientId !== null || query.q.trim() !== '';
 
   if (query.page > 0) {
     return (

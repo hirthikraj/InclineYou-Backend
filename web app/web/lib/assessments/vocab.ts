@@ -13,7 +13,14 @@
 
 /* ────────────────────────────────────────────────────────── the wire ── */
 
-export type AssessmentStatus = 'booked' | 'waiting' | 'missed' | 'done';
+/**
+ * THREE STATES ON THE 1.1 WIRE. `waiting` (sent to the client, not back) is
+ * next release's, with the portal: nothing is ever sent in v1, so nothing is
+ * ever waiting. The field is `state` now and not `status` — it is derived from
+ * `completedAt` and `dueOn`, never stored, and `status` is a stored column
+ * everywhere else on this wire (R37).
+ */
+export type AssessmentStatus = 'booked' | 'missed' | 'done';
 
 export type AnswerKind = 'yesno' | 'rating' | 'text' | 'choice';
 
@@ -37,30 +44,55 @@ export interface TemplateWire {
   description: string | null;
   measurements: { on: boolean; keys: string[] };
   questions: { on: boolean; items: QuestionWire[] };
-  createdAt: string;
-  updatedAt: string;
+  /** Clients on a live cycle of it right now — "on 6 clients", and the delete warning. */
+  liveCycles: number;
+  /** Epoch ms, like every instant on the 1.1 wire. */
+  createdAt: number;
+  updatedAt: number;
+  /** Opaque; goes back as `If-Match` on the PUT, so an edit made in another tab is a 412 and not a silent overwrite. */
+  version: string;
 }
 
+/** The list item (contract Assessments L1). */
 export interface AssessmentWire {
   id: string;
   clientId: string;
-  templateId: string | null;
+  templateId: string;
+  scheduleId: string | null;
   name: string;
-  dueAt: string;
-  sentAt: string | null;
-  completedAt: string | null;
-  readAt: string | null;
+  /** A calendar date, `yyyy-MM-dd`, in the workspace's zone — not an instant. */
+  dueOn: string;
   /**
    * DERIVED ON THE SERVER, and read here rather than worked out again.
    *
-   * `mock/router.ts`'s `assessmentView` carries the argument: the pair that
-   * would disagree if both sides derived it is a count on a filter chip and
-   * the rows that chip selects.
+   * The pair that would disagree if both sides derived it is a count on a
+   * filter chip and the rows that chip selects.
    */
-  status: AssessmentStatus;
-  unread: boolean;
+  state: AssessmentStatus;
+  /** Epoch ms; null until done. */
+  completedAt: number | null;
+  /** `'trainer'` in v1, once done. */
+  enteredBy: string | null;
   measurements: { got: number; asked: number };
   questions: { got: number; asked: number };
+  createdAt: number;
+  version: string;
+}
+
+/** A client's cycle on one template (contract Assessments L5). */
+export interface ScheduleWire {
+  id: string;
+  clientId: string;
+  templateId: string;
+  templateName: string;
+  intervalDays: number;
+  nextDueOn: string;
+  endedAt: number | null;
+  /** The one not yet done — what *Take* opens. */
+  openAssessmentId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  version: string;
 }
 
 export interface MeasurementWire {
@@ -68,8 +100,8 @@ export interface MeasurementWire {
   label: string;
   group: string;
   unit: string;
-  /** The V5 metric id this charts as, or null where it reaches no chart. */
-  metric: string | null;
+  /** Whether the client file draws a series for it (the six V5 ids). */
+  charted: boolean;
 }
 
 export interface CatalogWire {
@@ -93,7 +125,6 @@ export interface CatalogWire {
  */
 export const STATUS_LABEL: Record<AssessmentStatus, string> = {
   booked: 'Booked',
-  waiting: 'Waiting',
   missed: 'Missed',
   done: 'Done',
 };
@@ -109,7 +140,6 @@ export const STATUS_LABEL: Record<AssessmentStatus, string> = {
  */
 export const STATUS_TONE: Record<AssessmentStatus, 'neutral' | 'ok' | 'warn'> = {
   booked: 'neutral',
-  waiting: 'neutral',
   missed: 'warn',
   done: 'ok',
 };
@@ -123,7 +153,7 @@ export const STATUS_TONE: Record<AssessmentStatus, 'neutral' | 'ok' | 'warn'> = 
  * one written-down ordering of the four states themselves — the next screen
  * that lists them, rather than filters by them, wants exactly this.
  */
-export const STATUS_ORDER: AssessmentStatus[] = ['missed', 'waiting', 'booked', 'done'];
+export const STATUS_ORDER: AssessmentStatus[] = ['missed', 'booked', 'done'];
 
 /* ───────────────────────────────────────────────── what the filter offers ── */
 
@@ -166,7 +196,7 @@ export const STATUSES_FOR: Record<StatusFilter, AssessmentStatus[]> = {
   all: [],
   done: ['done'],
   missed: ['missed'],
-  incoming: ['booked', 'waiting'],
+  incoming: ['booked'],
 };
 
 /**

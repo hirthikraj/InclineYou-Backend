@@ -22,6 +22,7 @@ import {
 import { Elapsed, Relative, elapsedMinutes, minutesUntil } from './Clock';
 import { NudgeButton } from '@/components/nudge/NudgeButton';
 import { Tag } from '@/web-components/ui/Tag';
+import { useOwedAssessment } from './OwedAssessments';
 import { Button } from '@/web-components/ui/Button';
 import { HeroCard } from '@/web-components/ui/HeroCard';
 
@@ -101,12 +102,29 @@ function SessionChips({
       : gymName?.trim()
         ? `${MODE_LABELS.floor} · ${gymName.trim()}`
         : MODE_LABELS.floor;
+  const owed = useOwedAssessment(session.clientId);
   return (
     <>
       <Tag>
         <Pin size={12} />
         {place}
       </Tag>
+      {owed && (
+        /*
+          THE ASSESSMENT CHIP, AND IT GOES STRAIGHT TO THE TAPE. In v1 there is no
+          portal, so an assessment is taken by the trainer in the session: this
+          client is in front of them and owes one, which is exactly when the
+          take screen is wanted. `?from=` makes the way back the client's own
+          file. *Overdue* is the only state that takes a tone — a date that has
+          merely arrived is a fact, not a problem.
+        */
+        <Tag
+          href={`/clients/assessments/${owed.id}/take?from=${encodeURIComponent(session.clientId)}`}
+          tone={owed.missed ? 'warn' : undefined}
+        >
+          {owed.missed ? 'Assessment overdue' : 'Assessment due'}
+        </Tag>
+      )}
       {session.hasNote && (
         /*
           A LINK, NOT A LABEL, AND THAT IS THE WHOLE VALUE OF IT.

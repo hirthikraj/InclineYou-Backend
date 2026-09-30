@@ -1,9 +1,11 @@
 'use client';
 
-import Link from 'next/link';
+import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { Chevron } from '@/components/shell/Icons';
+import { ScheduleSheet } from '@/components/clients/assessments/ScheduleSheet';
+import { endCycle } from '@/lib/assessments/actions';
 import { assessmentHref } from '@/lib/assessments/address';
 import {
   STATUS_LABEL,
@@ -11,6 +13,8 @@ import {
   blockCount,
   type AssessmentStatus,
   type AssessmentWire,
+  type ScheduleWire,
+  type TemplateWire,
 } from '@/lib/assessments/vocab';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
@@ -53,12 +57,20 @@ export function ChecksTab({
   clientId,
   clientName,
   rows,
+  schedules,
+  templates,
 }: {
   clientId: string;
   clientName: string;
   /** `null` where the read failed — see `loadClientAssessments`. */
   rows: AssessmentWire[] | null;
+  /** This client's cycles, live first. `null` where the read failed. */
+  schedules: ScheduleWire[] | null;
+  /** The trainer's forms, for *Assign*. */
+  templates: TemplateWire[] | null;
 }) {
+  const router = useRouter();
+  const [assigning, setAssigning] = useState(false);
   if (rows === null) {
     return (
       <div className="cfchk">
@@ -79,29 +91,59 @@ export function ChecksTab({
      the top — its date IS its urgency, and a check-in missed in March is not
      more pressing than one due on Friday. The tag says which is which. */
   const owed = rows
-    .filter((r) => r.status !== 'done')
+    .filter((r) => r.state !== 'done')
     .slice()
-    .sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt));
+    .sort((a, b) => a.dueOn.localeCompare(b.dueOn));
 
   /* Back, newest first — on `completedAt`, because the point of the row is the
      day the tape was read and a check-in dated the 1st and answered on the 9th
      belongs where it was answered. */
   const back = rows
-    .filter((r) => r.status === 'done')
+    .filter((r) => r.state === 'done')
     .slice()
-    .sort((a, b) => Date.parse(b.completedAt ?? b.dueAt) - Date.parse(a.completedAt ?? a.dueAt));
+    .sort((a, b) => whenOf(b) - whenOf(a));
 
-  if (rows.length === 0) return <Nothing clientName={clientName} />;
+  const assign = (
+    <div className="cfchk__bar">
+      <Button variant="primary" onClick={() => setAssigning(true)} disabled={templates === null}>
+        Assign an assessment
+      </Button>
+    </div>
+  );
+  const sheet = assigning && templates && (
+    <ScheduleSheet
+      clients={[]}
+      clientId={clientId}
+      templates={templates}
+      onClose={(booked) => {
+        setAssigning(false);
+        if (booked) router.refresh();
+      }}
+    />
+  );
+
+  if (rows.length === 0 && (schedules?.length ?? 0) === 0) {
+    return (
+      <>
+        <Nothing clientName={clientName} />
+        {assign}
+        {sheet}
+      </>
+    );
+  }
 
   return (
     <div className="cfchk">
+      {assign}
+      {sheet}
+      {schedules && schedules.length > 0 && <Cycles rows={schedules} clientId={clientId} />}
       {owed.length > 0 && (
         <Section
           title="Outstanding"
           caption={`${owed.length} check-ins asked for and not back yet, soonest first`}
           n={owed.length}
           rows={owed}
-          when={(r) => r.dueAt}
+          when={(r) => Date.parse(`${r.dueOn}T00:00:00`)}
           clientId={clientId}
         />
       )}
@@ -111,22 +153,10 @@ export function ChecksTab({
           caption={`${back.length} check-ins ${clientName} has sent back, newest first`}
           n={back.length}
           rows={back}
-          when={(r) => r.completedAt ?? r.dueAt}
+          when={whenOf}
           clientId={clientId}
         />
       )}
-      {/* The one verb this tab does not own. Scheduling a check-in picks a
-          template and a date, which is `ScheduleSheet` on the Assessments
-          screen — and a second copy of a two-step form is the drift the
-          catalogue exists to stop. A link is the honest version of a button
-          that would only open another screen. */}
-      <p className="cfchk__foot">
-        Check-ins are scheduled from{' '}
-        <Link href={`/clients/assessments?client=${encodeURIComponent(clientId)}`}>
-          Clients · Assessments
-        </Link>
-        , where this client&rsquo;s are already filtered.
-      </p>
     </div>
   );
 }
@@ -143,7 +173,7 @@ function Section({
   caption: string;
   n: number;
   rows: AssessmentWire[];
-  when: (r: AssessmentWire) => string;
+  when: (r: AssessmentWire) => number;
   /* THE ROWS OPEN THE CHECK-IN INSIDE THIS FILE, which is the whole of why
      this prop is threaded down: `/clients/:clientId/assessments/:id` rather
      than the book-wide `/clients/assessments/:id`. A row clicked in a person's
@@ -179,7 +209,7 @@ function Section({
                  with an onClick forgets. */
               role="link"
               tabIndex={0}
-              aria-label={`Open ${r.name}, ${longDateStr(Date.parse(when(r)))}`}
+              aria-label={`Open ${r.name}, ${longDateStr(when(r))}`}
               onClick={() => router.push(assessmentHref(r.id, 'summary', null, clientId))}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
@@ -189,12 +219,7 @@ function Section({
               }}
               header={
                 <span className="cfchk__d">
-                  {longDateStr(Date.parse(when(r)))}
-                  {r.unread && (
-                    <em className="cfchk__new">
-                      <span className="vh">Unread. </span>New
-                    </em>
-                  )}
+                  {longDateStr(when(r))}
                 </span>
               }
               cells={[
@@ -211,20 +236,20 @@ function Section({
                   label: 'Measurements',
                   numeric: true,
                   className: 'cfchk__c-n',
-                  content: <Count block={r.measurements} status={r.status} />,
+                  content: <Count block={r.measurements} status={r.state} />,
                 },
                 {
                   key: 'questions',
                   label: 'Questions',
                   numeric: true,
                   className: 'cfchk__c-n',
-                  content: <Count block={r.questions} status={r.status} />,
+                  content: <Count block={r.questions} status={r.state} />,
                 },
                 {
                   key: 'status',
                   label: 'Status',
                   className: 'cfchk__c-st',
-                  content: <Tag tone={STATUS_TONE[r.status]}>{STATUS_LABEL[r.status]}</Tag>,
+                  content: <Tag tone={STATUS_TONE[r.state]}>{STATUS_LABEL[r.state]}</Tag>,
                 },
                 {
                   key: 'go',
@@ -238,6 +263,62 @@ function Section({
             />
           ))}
         </Table>
+      </Card.Body>
+    </Card>
+  );
+}
+
+/** The day it counts for, as ms: when it was done, else when it is due. */
+function whenOf(r: AssessmentWire): number {
+  return r.completedAt ?? Date.parse(`${r.dueOn}T00:00:00`);
+}
+
+/**
+ * THE CYCLES — a client on an assessment every N weeks. Each live one shows
+ * what is next and how to take it; ending one books nothing more (an
+ * assessment somebody has already started stays takeable).
+ */
+function Cycles({ rows, clientId }: { rows: ScheduleWire[]; clientId: string }) {
+  const router = useRouter();
+  const [busy, start] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const live = rows.filter((c) => c.endedAt === null);
+  if (live.length === 0) return null;
+
+  function end(id: string) {
+    setError(null);
+    start(async () => {
+      const res = await endCycle(id, clientId);
+      if (!res.ok) setError(res.message ?? 'That did not save.');
+      else router.refresh();
+    });
+  }
+
+  return (
+    <Card className="cfchk__card">
+      <Card.Head title="Cycles" level={3}>
+        <CountBadge n={live.length} label={`${live.length} live cycles`} />
+      </Card.Head>
+      <Card.Body>
+        {error && <Message tone="err">{error}</Message>}
+        <ul className="cfchk__cycles">
+          {live.map((c) => (
+            <li key={c.id} className="cfchk__cycle">
+              <span>
+                <b>{c.templateName}</b> · every {c.intervalDays} days · next{' '}
+                {longDateStr(Date.parse(`${c.nextDueOn}T00:00:00`))}
+              </span>
+              {c.openAssessmentId && (
+                <Button variant="secondary" size="sm" href={`/clients/assessments/${c.openAssessmentId}/take`}>
+                  Take it
+                </Button>
+              )}
+              <Button variant="ghost" size="sm" disabled={busy} onClick={() => end(c.id)}>
+                End cycle
+              </Button>
+            </li>
+          ))}
+        </ul>
       </Card.Body>
     </Card>
   );

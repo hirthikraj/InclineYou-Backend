@@ -32,7 +32,7 @@ export function CompareSelect({
   className,
 }: {
   /** Every check-in this client has had back, newest first. */
-  returned: { id: string; at: string }[];
+  returned: { id: string; at: number }[];
   /** The one being read. Dropped from the options. */
   currentId: string;
   value: string | null;

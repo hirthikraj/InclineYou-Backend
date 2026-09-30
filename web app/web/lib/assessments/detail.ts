@@ -19,7 +19,7 @@
  * the trainer's, and they are the one reading it.
  */
 
-import type { AnswerKind, AssessmentWire, QuestionWire } from './vocab';
+import type { AnswerKind, AssessmentWire, QuestionWire, ScheduleWire } from './vocab';
 
 /* ────────────────────────────────────────────────────────────── the wire ── */
 
@@ -29,8 +29,8 @@ export interface ReadingWire {
   label: string;
   group: string;
   unit: string;
-  /** The V5 metric id this charts as, or null. See `MeasurementDefRow`. */
-  metric: string | null;
+  /** Whether the client file draws a series for it. */
+  charted: boolean;
   value: number;
 }
 
@@ -45,22 +45,22 @@ export interface AnswerWire {
   questionId: string;
   text: string;
   kind: AnswerKind;
-  scale: number | null;
-  options: { id: string; text: string }[];
-  allowMultiple: boolean;
-  yes: boolean | null;
-  rating: number | null;
-  answer: string | null;
-  optionIds: string[];
+  /* The server leaves out what a kind does not use, so each of these is
+     absent rather than null off its own kind. */
+  scale?: number | null;
+  yes?: boolean | null;
+  rating?: number | null;
+  answer?: string | null;
+  optionIds?: string[];
   /** The chosen options' own words, resolved on the server. */
-  chosen: string[];
+  chosen?: string[];
 }
 
 /** One reading in the record, and which check-in it came back on. */
 export interface PointWire {
   assessmentId: string;
-  /** `completedAt` — when the tape was read, not when it was asked for. */
-  at: string;
+  /** `completedAt`, epoch ms — when the tape was read, not when it was asked for. */
+  at: number;
   value: number;
 }
 
@@ -72,7 +72,12 @@ export interface HistoryWire {
 
 export interface AssessmentDetailWire extends AssessmentWire {
   client: { id: string; name: string; status: string } | null;
-  template: { id: string; name: string; description: string | null } | null;
+  /** `deleted`: the template was retired since — the form on this page is the assessment's own copy and still opens. */
+  template: { id: string; name: string; description: string | null; deleted: boolean };
+  /** The cycle it belongs to; null for a one-off. */
+  schedule: ScheduleWire | null;
+  /** The raw entry, to prefill the take screen. */
+  entry: { readings: Record<string, number>; answers: Record<string, AnswerEntry> };
   /** What the template asks for — the whole content of a check-in not back yet. */
   asked: {
     measurements: { key: string; label: string; group: string; unit: string }[];
@@ -82,7 +87,15 @@ export interface AssessmentDetailWire extends AssessmentWire {
   answers: AnswerWire[];
   history: HistoryWire[];
   /** Every check-in this client has had back, newest first. */
-  returned: { id: string; name: string; at: string }[];
+  returned: { id: string; name: string; at: number }[];
+}
+
+/** One stored answer — only the field its question's kind uses is present. */
+export interface AnswerEntry {
+  yes?: boolean;
+  rating?: number;
+  text?: string;
+  optionIds?: string[];
 }
 
 /* ───────────────────────────────────────────────────────── the arithmetic ── */
@@ -110,7 +123,7 @@ export function signed(d: number): string {
 }
 
 export interface Reading {
-  at: string;
+  at: number;
   value: number;
   assessmentId: string;
 }
@@ -194,11 +207,11 @@ function round1(n: number): number {
  * skipped it* and *they wrote nothing*.
  */
 export function answerText(a: AnswerWire): string | null {
-  if (a.kind === 'yesno') return a.yes === null ? null : a.yes ? 'Yes' : 'No';
+  if (a.kind === 'yesno') return a.yes == null ? null : a.yes ? 'Yes' : 'No';
   if (a.kind === 'rating')
-    return a.rating === null ? null : `${a.rating} out of ${a.scale ?? 10}`;
+    return a.rating == null ? null : `${a.rating} out of ${a.scale ?? 10}`;
   if (a.kind === 'choice') {
-    const words = [...a.chosen];
+    const words = [...(a.chosen ?? [])];
     if (a.answer) words.push(a.answer);
     return words.length === 0 ? null : words.join(' · ');
   }

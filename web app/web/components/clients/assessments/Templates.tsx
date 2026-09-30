@@ -209,9 +209,11 @@ export function Templates({ data }: { data: TemplatesData }) {
             cancel={{ label: 'Keep it', onClick: () => setAsking(null) }}
           >
             <p style={{ margin: 0 }}>
-              Check-ins you have already sent keep their questions and their answers — an
-              assessment stopped being this template the moment it went out. What goes is the
-              blueprint, so you cannot send it again.
+              Assessments you have already given keep their own copy of the form — their
+              measurements and answers stay exactly as they are. What goes is the blueprint, so
+              you cannot give it again.
+              {asking.liveCycles > 0 &&
+                ` It is on ${asking.liveCycles} ${asking.liveCycles === 1 ? 'client' : 'clients'}' cycle${asking.liveCycles === 1 ? '' : 's'}; deleting it ends ${asking.liveCycles === 1 ? 'that cycle' : 'those cycles'}, and nothing more is booked from ${asking.liveCycles === 1 ? 'it' : 'them'}.`}
             </p>
           </Modal>
         </ModalHost>

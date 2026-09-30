@@ -1,9 +1,9 @@
 'use client';
 
-import { useMemo, useTransition } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { setRead } from '@/lib/assessments/actions';
+import { deleteAssessment, moveAssessment } from '@/lib/assessments/actions';
 import { assessmentHref, assessmentTabs, type AssessmentTab } from '@/lib/assessments/address';
 import {
   answerText,
@@ -14,7 +14,7 @@ import {
   type ReadingWire,
 } from '@/lib/assessments/detail';
 import { STATUS_LABEL, STATUS_TONE } from '@/lib/assessments/vocab';
-import { Calendar, Clock, Warn } from '@/components/shell/Icons';
+import { Calendar, Warn } from '@/components/shell/Icons';
 import { TopBar } from '@/components/shell/TopBar';
 import { PageTabs } from '@/components/shell/PageTabs';
 import { Avatar } from '@/web-components/ui/Avatar';
@@ -28,9 +28,9 @@ import { Message } from '@/web-components/ui/Message';
 import { Meter } from '@/web-components/ui/Meter';
 import { PageHeader } from '@/web-components/ui/PageHeader';
 import { Tag } from '@/web-components/ui/Tag';
+import { TextField } from '@/web-components/ui/Field';
 import { CompareSelect } from './CompareSelect';
 import { ReadingBar, type Track } from './ReadingBar';
-import { Envelope } from './Icons';
 import { MeasurePanel } from './MeasurePanel';
 
 /**
@@ -113,7 +113,7 @@ export function Assessment({
   const [busy, startWrite] = useTransition();
 
   const client = data.client;
-  const done = data.status === 'done';
+  const done = data.state === 'done';
   const hasTapes = data.readings.length > 0;
   /* A Measurements tab on a check-in with no tapes in it is a tab that opens
      on nothing. The strip stands down rather than drawing a door to an empty
@@ -122,7 +122,7 @@ export function Assessment({
      the Summary, which is the whole of what that check-in is. */
   const current: AssessmentTab = hasTapes ? tab : 'summary';
 
-  const when = new Date(data.completedAt ?? data.dueAt);
+  const when = new Date(data.completedAt ?? Date.parse(`${data.dueOn}T00:00:00`));
 
   /* `replace`, not `push`. Trying four earlier check-ins against this one is
      one question asked four ways, and on `push` it is four presses of Back to
@@ -148,10 +148,30 @@ export function Assessment({
     return { at: against.at, values };
   }, [compareId, data.history, data.returned]);
 
-  function mark(read: boolean) {
+  const [moving, setMoving] = useState(false);
+  const [date, setDate] = useState(data.dueOn);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  /** The list this came from — the file's own tab inside a file, the book-wide list otherwise. */
+  const back = within ? `/clients/${within}/assessments` : '/clients/assessments';
+
+  function reschedule() {
+    setError(null);
     startWrite(async () => {
-      await setRead(data.id, read);
+      const res = await moveAssessment(data.id, data.version, date, data.clientId);
+      if (!res.ok) return setError(res.message ?? 'That did not save.');
+      setMoving(false);
       router.refresh();
+    });
+  }
+
+  function remove() {
+    setError(null);
+    startWrite(async () => {
+      const res = await deleteAssessment(data.id, data.clientId);
+      if (!res.ok) return setError(res.message ?? 'That did not save.');
+      router.push(back);
     });
   }
 
@@ -230,38 +250,49 @@ export function Assessment({
               <span className="asmv__when">
                 {done ? 'Answered' : 'Due'} {DATE.format(when)}
               </span>
-              <Tag tone={STATUS_TONE[data.status]}>{STATUS_LABEL[data.status]}</Tag>
-              {data.unread && <Tag tone="acc">Unread</Tag>}
+              <Tag tone={STATUS_TONE[data.state]}>{STATUS_LABEL[data.state]}</Tag>
+              {data.schedule && !data.schedule.endedAt && (
+                <Tag>Every {data.schedule.intervalDays} days</Tag>
+              )}
             </span>
           }
           actions={
             <>
-              {/* ONE VERB AND IT IS THE ONE THIS SCREEN OWNS.
-
-                  The reference leads with *Send a message to Luna*, which this
-                  product does not have as a one-press act from here — messaging
-                  a client runs through the nudge deck, where a message carries a
-                  template and a seven-day cooldown behind it, and spending that
-                  on *nice work* is the thing `lib/nudges/cooldown.ts` exists to
-                  stop. Marking a returned check-in read is the act a trainer
-                  performs ON this screen, and the one the list's row menu can
-                  only do blind.
-
-                  AND THERE IS NO *Client file* BUTTON, which is the house rule
-                  rather than an omission: the client's own NAME in the subtitle
-                  is that door, ~20px to the left of where the button would sit
-                  — the same sentence that took *Back to templates* off the
-                  certified preview and *Client file* off both session screens.
-                  A verb pointing where a link on the same header already points
-                  is a control spent on a second copy. */}
+              {/* THE VERBS THIS SCREEN OWNS. In v1 nothing is sent to the client
+                  and nothing comes back on its own: the trainer TAKES the
+                  assessment in the session, so the lead verb on one that is not
+                  done is *Take*, and on a done one it is *Correct* (the same
+                  screen, prefilled — a reading exists only here, so this is the
+                  only way one is ever corrected). Date and delete are the
+                  housekeeping; delete asks twice, in place, rather than in a
+                  dialog. */}
+              {!done && (
+                <Button variant="primary" href={`/clients/assessments/${data.id}/take`}>
+                  Take it
+                </Button>
+              )}
               {done && (
-                <Button
-                  variant="secondary"
-                  disabled={busy}
-                  onClick={() => mark(data.readAt === null)}
-                >
-                  <Envelope size={14} />
-                  {data.readAt === null ? 'Mark read' : 'Mark unread'}
+                <Button variant="secondary" href={`/clients/assessments/${data.id}/take`}>
+                  Correct readings
+                </Button>
+              )}
+              {!done && (
+                <Button variant="secondary" disabled={busy} onClick={() => setMoving((v) => !v)}>
+                  Change date
+                </Button>
+              )}
+              {confirmDelete ? (
+                <>
+                  <Button variant="danger" disabled={busy} onClick={remove}>
+                    Delete for good
+                  </Button>
+                  <Button variant="ghost" disabled={busy} onClick={() => setConfirmDelete(false)}>
+                    Keep it
+                  </Button>
+                </>
+              ) : (
+                <Button variant="ghost" disabled={busy} onClick={() => setConfirmDelete(true)}>
+                  Delete
                 </Button>
               )}
             </>
@@ -283,6 +314,15 @@ export function Assessment({
         </PageHeader>
 
         <div className="asmv__body">
+          {error && <Message tone="err">{error}</Message>}
+          {moving && (
+            <div className="asmv__move">
+              <TextField type="date" label="New date" value={date} onChange={(e) => setDate(e.target.value)} />
+              <Button variant="primary" disabled={busy || !date} onClick={reschedule}>
+                Save date
+              </Button>
+            </div>
+          )}
           {current === 'measurements' ? (
             <MeasurePanel
               data={data}
@@ -317,11 +357,11 @@ function Summary({
   onCompare,
 }: {
   data: AssessmentDetailWire;
-  compare: { at: string; values: Map<string, number> } | null;
+  compare: { at: number; values: Map<string, number> } | null;
   compareId: string | null;
   onCompare: (id: string | null) => void;
 }) {
-  if (data.status !== 'done') return <NotBack data={data} />;
+  if (data.state !== 'done') return <NotBack data={data} />;
 
   const answeredCount = data.answers.filter(answered).length;
 
@@ -412,7 +452,7 @@ function Summary({
 function Answer({ a }: { a: AnswerWire }) {
   const said = answerText(a);
   if (said === null) return <FactList.Blank />;
-  if (a.kind !== 'rating' || a.rating === null) return <>{said}</>;
+  if (a.kind !== 'rating' || a.rating == null) return <>{said}</>;
 
   const scale = a.scale ?? 10;
   return (
@@ -423,7 +463,7 @@ function Answer({ a }: { a: AnswerWire }) {
           which is the product deciding how somebody's month went. */}
       <Meter
         className="asmv__abar"
-        segments={[{ tone: 'acc', value: a.rating, label: 'answered' }]}
+        segments={[{ tone: 'acc', value: a.rating ?? 0, label: 'answered' }]}
         total={scale}
         label={`${a.text} — ${a.rating} out of ${scale}`}
       />
@@ -482,7 +522,7 @@ function Tapes({
 }: {
   data: AssessmentDetailWire;
   rows: ReadingWire[];
-  compare: { at: string; values: Map<string, number> } | null;
+  compare: { at: number; values: Map<string, number> } | null;
 }) {
   /* The track and the move, per measurement, taken once rather than per row.
      `history` is in the payload already and already sorted oldest first, so
@@ -490,7 +530,7 @@ function Tapes({
      dates, and no second definition of *previous* to disagree with
      `measureStats` on the other tab. */
   const track = useMemo(() => {
-    const m = new Map<string, Track & { previous: number | null; previousAt: string | null }>();
+    const m = new Map<string, Track & { previous: number | null; previousAt: number | null }>();
     for (const h of data.history) {
       if (h.points.length === 0) continue;
       let low = h.points[0].value;
@@ -621,12 +661,11 @@ function Tapes({
  */
 function NotBack({ data }: { data: AssessmentDetailWire }) {
   const name = data.client?.name.split(' ')[0] ?? 'Your client';
+  const due = DATE.format(new Date(`${data.dueOn}T00:00:00`));
   const said =
-    data.status === 'booked'
-      ? `On the board for ${DATE.format(new Date(data.dueAt))}. ${name} has not been asked yet.`
-      : data.status === 'waiting'
-        ? `Sent. ${name} has until ${DATE.format(new Date(data.dueAt))} to find twenty minutes for it.`
-        : `${DATE.format(new Date(data.dueAt))} went past with nothing back from ${name}.`;
+    data.state === 'booked'
+      ? `On the board for ${due}. Take it in the session — ${name} has not been measured yet.`
+      : `${due} went past and nothing has been taken for ${name}.`;
 
   const tapes = data.asked.measurements;
   const questions = data.asked.questions;
@@ -645,16 +684,8 @@ function NotBack({ data }: { data: AssessmentDetailWire }) {
           three lines up. */}
       <Message
         className="asmv__note"
-        tone={data.status === 'missed' ? 'warn' : undefined}
-        icon={
-          data.status === 'booked' ? (
-            <Calendar size={15} />
-          ) : data.status === 'waiting' ? (
-            <Clock size={15} />
-          ) : (
-            <Warn size={15} />
-          )
-        }
+        tone={data.state === 'missed' ? 'warn' : undefined}
+        icon={data.state === 'booked' ? <Calendar size={15} /> : <Warn size={15} />}
       >
         {said}
       </Message>

@@ -2,16 +2,14 @@
 
 import { revalidatePath } from 'next/cache';
 
-import { getToken } from '@/lib/auth/session';
-import type { QuestionWire, TemplateWire } from './vocab';
-
-const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
-const TIMEOUT_MS = 8_000;
+import { api, ApiError } from '@/lib/http/client';
+import type { AnswerEntry, AssessmentDetailWire } from './detail';
+import type { AssessmentWire, QuestionWire, ScheduleWire, TemplateWire } from './vocab';
 
 /**
  * THE ASSESSMENT WRITE PATH.
  *
- * Five verbs against three routes, and one shape of failure. What is worth
+ * One verb per route on the 1.1 wire, and one shape of failure. What is worth
  * stating before any of them is the thing the model already says twice: **a
  * template is a blueprint and an assessment is a copy of one.** Nothing here
  * reaches from a template into a check-in already sent — editing a template a
@@ -38,59 +36,38 @@ const TIMEOUT_MS = 8_000;
 export interface WriteResult<T = void> {
   ok: boolean;
   message?: string;
+  /** The refusal's `code`, for a caller that branches (`PRECONDITION_FAILED`, `NOTHING_ENTERED`). */
+  code?: string;
   data?: T;
 }
 
-class WriteError extends Error {
-  constructor(readonly status: number | null) {
-    super(`inclineyou api ${status ?? 'unreachable'}`);
-  }
-}
-
-async function send<T>(path: string, method: string, body?: unknown): Promise<T | null> {
-  const token = await getToken();
-  if (!token) throw new WriteError(401);
-
-  let res: Response;
-  try {
-    res = await fetch(`${BASE}${path}`, {
-      method,
-      headers: {
-        authorization: `Bearer ${token}`,
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      cache: 'no-store',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch {
-    throw new WriteError(null);
-  }
-  if (!res.ok) throw new WriteError(res.status);
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T | null;
-}
-
+/**
+ * A failure, in the trainer's words.
+ *
+ * The 1.1 backend sends the sentence it means (`detail`, RFC 7807) and a
+ * `code`, so a 400 or a 409 now says WHAT was wrong — *readings.hip: this
+ * assessment does not ask for it* — instead of the pre-1.1 "was refused".
+ * That sentence is shown when there is one; the status-shaped fallbacks below
+ * are only for the cases where nothing answered or the body had none.
+ */
 function fail(error: unknown, subject: string): WriteResult<never> {
-  if (error instanceof WriteError) {
-    if (error.status === null) {
-      return { ok: false, message: `${subject} could not reach the server. Nothing changed.` };
-    }
-    if (error.status === 401 || error.status === 403) {
-      return { ok: false, message: 'Your session expired. Sign in again.' };
-    }
-    if (error.status === 404) {
-      return { ok: false, message: `${subject}: that row is no longer there.` };
-    }
-    /* Trap 31 — this backend answers a `ResponseStatusException` with no
-       `detail`, so the service's own sentence never arrives. What is said here
-       is what the CLIENT knew before it sent, which is the only honest thing
-       available until the endpoint grows a typed exception. */
-    if (error.status === 400) {
-      return { ok: false, message: `${subject} was refused. Check the name and try again.` };
-    }
+  if (!(error instanceof ApiError)) throw error;
+  const { status, problem } = error;
+  const code = problem.code;
+  if (status === null) {
+    return { ok: false, code, message: `${subject} could not reach the server. Nothing changed.` };
   }
-  return { ok: false, message: `${subject} did not save. Nothing changed.` };
+  if (status === 401) return { ok: false, code, message: 'Your session expired. Sign in again.' };
+  if (status === 412 || code === 'PRECONDITION_FAILED') {
+    return {
+      ok: false,
+      code: 'PRECONDITION_FAILED',
+      message: 'Changed on another device or tab. Reload to see it — nothing was overwritten.',
+    };
+  }
+  if (status === 404) return { ok: false, code, message: `${subject}: that row is no longer there.` };
+  if (problem.detail && status >= 400 && status < 500) return { ok: false, code, message: problem.detail };
+  return { ok: false, code, message: `${subject} did not save. Nothing changed.` };
 }
 
 /**
@@ -102,9 +79,11 @@ function fail(error: unknown, subject: string): WriteResult<never> {
  * not looking at. Revalidating the page they happened to be on would leave the
  * strip's own badge stale — which is the badge that sent them there.
  */
-function refresh(): void {
+function refresh(clientId?: string): void {
   revalidatePath('/clients/assessments');
   revalidatePath('/clients/assessments/templates');
+  revalidatePath('/clients/assessments/[id]', 'page');
+  if (clientId) revalidatePath(`/clients/${clientId}/assessments`);
 }
 
 export interface TemplateDraft {
@@ -114,13 +93,15 @@ export interface TemplateDraft {
   questions: { on: boolean; items: QuestionWire[] };
 }
 
+/** `description` is sent as null when blank: the wire stores *none* as null. */
+function body(draft: TemplateDraft) {
+  return { ...draft, name: draft.name.trim(), description: draft.description.trim() || null };
+}
+
 /**
  * The name is the one field with a rule, and it is checked HERE as well as on
- * the server.
- *
- * Not because the server cannot be trusted — because of trap 31 again: an empty
- * name refused over the wire comes back as *was refused*, and refused over a
- * name is the one case where the caller can say something better.
+ * the server — an empty name is the one refusal the client can word better
+ * than a generic 400 and save the round trip for.
  */
 function checkName(name: string): string | null {
   const trimmed = name.trim();
@@ -133,38 +114,38 @@ export async function createTemplate(draft: TemplateDraft): Promise<WriteResult<
   const bad = checkName(draft.name);
   if (bad) return { ok: false, message: bad };
   try {
-    const row = await send<TemplateWire>('/v1/assessment-templates', 'POST', {
-      ...draft,
-      name: draft.name.trim(),
-    });
+    const row = await api<TemplateWire>('/v1/assessment-templates', { method: 'POST', body: body(draft) });
     refresh();
-    return { ok: true, data: row ?? undefined };
+    return { ok: true, data: row };
   } catch (error) {
     return fail(error, 'That assessment');
   }
 }
 
 /**
- * A WHOLE-BODY REPLACE, never a patch of one block.
+ * A WHOLE-BODY REPLACE, never a patch of one block, and CONDITIONAL.
  *
  * The editor holds the entire draft in the browser and saves it as a unit —
- * `WorkoutBuilder`'s rule, and the mock's own note says why: two granularities
- * of write against one jsonb blob is how a half-saved template happens. The
- * cost is the ordinary one: two trainers editing one template, last save wins.
+ * two granularities of write against one jsonb blob is how a half-saved
+ * template happens. `version` is the one the editor loaded, sent as `If-Match`:
+ * a form edited in another tab since is a 412 the editor can name, not a
+ * last-save-wins that quietly drops the other tab's questions.
  */
 export async function saveTemplate(
   id: string,
+  version: string,
   draft: TemplateDraft,
 ): Promise<WriteResult<TemplateWire>> {
   const bad = checkName(draft.name);
   if (bad) return { ok: false, message: bad };
   try {
-    const row = await send<TemplateWire>(`/v1/assessment-templates/${id}`, 'PUT', {
-      ...draft,
-      name: draft.name.trim(),
+    const row = await api<TemplateWire>(`/v1/assessment-templates/${id}`, {
+      method: 'PUT',
+      body: body(draft),
+      headers: { 'if-match': `"${version}"` },
     });
     refresh();
-    return { ok: true, data: row ?? undefined };
+    return { ok: true, data: row };
   } catch (error) {
     return fail(error, 'That assessment');
   }
@@ -172,7 +153,7 @@ export async function saveTemplate(
 
 export async function deleteTemplate(id: string): Promise<WriteResult> {
   try {
-    await send(`/v1/assessment-templates/${id}`, 'DELETE');
+    await api(`/v1/assessment-templates/${id}`, { method: 'DELETE' });
     refresh();
     return { ok: true };
   } catch (error) {
@@ -181,53 +162,157 @@ export async function deleteTemplate(id: string): Promise<WriteResult> {
 }
 
 /**
- * Put a check-in on the board.
- *
- * `sendNow` is the trainer's call and not a consequence of the date — the
- * mock's own POST handler carries the argument: a check-in dated three weeks
- * out that goes out today is a client who has three weeks to find twenty
- * minutes for it, which is the whole point of scheduling one.
+ * Give a client one assessment — for a date, or (`dueOn` today) to take now.
+ * `dueOn` is a calendar date and is left out for *today in the workspace's
+ * zone*, which the server knows and this server's clock does not. Sending to
+ * the client is not in v1, so there is no `sendNow`: the backend refuses the
+ * key by name.
  */
 export async function scheduleAssessment(input: {
   clientId: string;
   templateId: string;
-  dueAt: string;
-  sendNow: boolean;
-}): Promise<WriteResult> {
+  dueOn?: string;
+}): Promise<WriteResult<AssessmentWire>> {
   if (!input.clientId) return { ok: false, message: 'Pick a client first.' };
   if (!input.templateId) return { ok: false, message: 'Pick an assessment first.' };
   try {
-    await send('/v1/assessments', 'POST', input);
-    refresh();
+    const row = await api<AssessmentWire>('/v1/assessments', {
+      method: 'POST',
+      body: { id: crypto.randomUUID(), ...input },
+    });
+    refresh(input.clientId);
+    return { ok: true, data: row };
+  } catch (error) {
+    return fail(error, 'That assessment');
+  }
+}
+
+/** Put a client on a cycle — every `intervalDays`, the first one booked now. */
+export async function startCycle(input: {
+  clientId: string;
+  templateId: string;
+  intervalDays: number;
+  firstDueOn?: string;
+}): Promise<WriteResult<ScheduleWire>> {
+  if (!input.clientId) return { ok: false, message: 'Pick a client first.' };
+  if (!input.templateId) return { ok: false, message: 'Pick an assessment first.' };
+  try {
+    const row = await api<ScheduleWire>('/v1/assessment-schedules', {
+      method: 'POST',
+      body: { id: crypto.randomUUID(), ...input },
+    });
+    refresh(input.clientId);
+    return { ok: true, data: row };
+  } catch (error) {
+    return fail(error, 'That cycle');
+  }
+}
+
+/** `nextDueOn` and/or `intervalDays`. Ending is its own verb. */
+export async function updateCycle(
+  id: string,
+  version: string,
+  change: { nextDueOn?: string; intervalDays?: number },
+  clientId?: string,
+): Promise<WriteResult<ScheduleWire>> {
+  try {
+    const row = await api<ScheduleWire>(`/v1/assessment-schedules/${id}`, {
+      method: 'PATCH',
+      body: change,
+      headers: { 'if-match': `"${version}"` },
+    });
+    refresh(clientId);
+    return { ok: true, data: row };
+  } catch (error) {
+    return fail(error, 'That cycle');
+  }
+}
+
+export async function endCycle(id: string, clientId?: string): Promise<WriteResult<ScheduleWire>> {
+  try {
+    const row = await api<ScheduleWire>(`/v1/assessment-schedules/${id}/end`, { method: 'POST', body: {} });
+    refresh(clientId);
+    return { ok: true, data: row };
+  } catch (error) {
+    return fail(error, 'That cycle');
+  }
+}
+
+export async function deleteCycle(id: string, clientId?: string): Promise<WriteResult> {
+  try {
+    await api(`/v1/assessment-schedules/${id}`, { method: 'DELETE' });
+    refresh(clientId);
     return { ok: true };
   } catch (error) {
-    return fail(error, 'That check-in');
+    return fail(error, 'That cycle');
+  }
+}
+
+/** Move an assessment's date. A cycle's open one also moves the cycle's next date. */
+export async function moveAssessment(
+  id: string,
+  version: string,
+  dueOn: string,
+  clientId?: string,
+): Promise<WriteResult<AssessmentWire>> {
+  try {
+    const row = await api<AssessmentWire>(`/v1/assessments/${id}`, {
+      method: 'PATCH',
+      body: { dueOn },
+      headers: { 'if-match': `"${version}"` },
+    });
+    refresh(clientId);
+    return { ok: true, data: row };
+  } catch (error) {
+    return fail(error, 'That assessment');
   }
 }
 
 /**
- * Mark a returned check-in read, or park it unread again.
- *
- * Both directions are real. The bell's panel already works this way, and for
- * the same reason: a state that can only be entered is a state a trainer stops
- * using the moment they open one row by accident.
+ * Remove an assessment. On a cycle's open one the server books the next at
+ * `dueOn + interval` and sends it back, so the list can show it.
  */
-export async function setRead(id: string, read: boolean): Promise<WriteResult> {
+export async function deleteAssessment(
+  id: string,
+  clientId?: string,
+): Promise<WriteResult<{ next: AssessmentWire | null }>> {
   try {
-    await send(`/v1/assessments/${id}`, 'PATCH', { read });
-    refresh();
-    return { ok: true };
+    const res = await api<{ next: AssessmentWire | null }>(`/v1/assessments/${id}`, { method: 'DELETE' });
+    refresh(clientId);
+    return { ok: true, data: res };
   } catch (error) {
-    return fail(error, 'That check-in');
+    return fail(error, 'That assessment');
   }
 }
 
-export async function deleteAssessment(id: string): Promise<WriteResult> {
+/**
+ * THE TAKE SCREEN'S ONE WRITE — save for later, finish, or correct.
+ *
+ * The whole entry is replaced, so `version` (the one the take screen loaded,
+ * then the one each save returned) is REQUIRED as `If-Match`: a second tab
+ * saving over a newer entry would silently lose real measurements. On
+ * success the full detail comes back with its new version, which the caller
+ * keeps for the next save.
+ */
+export async function saveEntry(
+  id: string,
+  version: string,
+  entry: {
+    readings: Record<string, number>;
+    answers: Record<string, AnswerEntry>;
+    complete: boolean;
+  },
+  clientId?: string,
+): Promise<WriteResult<AssessmentDetailWire>> {
   try {
-    await send(`/v1/assessments/${id}`, 'DELETE');
-    refresh();
-    return { ok: true };
+    const row = await api<AssessmentDetailWire>(`/v1/assessments/${id}/entry`, {
+      method: 'PUT',
+      body: entry,
+      headers: { 'if-match': `"${version}"` },
+    });
+    refresh(clientId);
+    return { ok: true, data: row };
   } catch (error) {
-    return fail(error, 'That check-in');
+    return fail(error, 'That entry');
   }
 }

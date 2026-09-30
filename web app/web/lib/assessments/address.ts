@@ -50,20 +50,17 @@ export function assessmentsTabs(
 /** How many rows a page of the list holds. */
 export const PAGE_SIZE = 20;
 
-export type ReadFilter = 'all' | 'read' | 'unread';
-
 export interface Query {
   /** One of four, `all` included — `StatusFilter` carries why it is not the
    *  four stored states and not a set. */
   status: StatusFilter;
-  read: ReadFilter;
   /** A client id, or null for the whole roster. */
   clientId: string | null;
   q: string;
   page: number;
 }
 
-export const NO_QUERY: Query = { status: 'all', read: 'all', clientId: null, q: '', page: 0 };
+export const NO_QUERY: Query = { status: 'all', clientId: null, q: '', page: 0 };
 
 type Param = string | string[] | undefined;
 
@@ -86,11 +83,6 @@ export function parseStatus(v: Param): StatusFilter {
   return FILTERS.has(s) ? (s as StatusFilter) : 'all';
 }
 
-export function parseRead(v: Param): ReadFilter {
-  const s = one(v);
-  return s === 'read' || s === 'unread' ? s : 'all';
-}
-
 export function parseClientId(v: Param): string | null {
   const s = one(v).trim();
   return s === '' ? null : s;
@@ -104,7 +96,6 @@ export function parsePage(v: Param): number {
 export function parseQuery(params: Record<string, Param>): Query {
   return {
     status: parseStatus(params.status),
-    read: parseRead(params.read),
     clientId: parseClientId(params.client),
     q: one(params.q).slice(0, 80),
     page: parsePage(params.page),
@@ -116,13 +107,12 @@ export function parseQuery(params: Record<string, Param>): Query {
  *
  * Every default is OMITTED, which is what keeps `/clients/assessments` the
  * canonical address of the unfiltered list. A screen that wrote
- * `?status=&read=all&page=0` would have two URLs for one view, and the one a
+ * `?status=&page=0` would have two URLs for one view, and the one a
  * trainer copied out of the bar would be the ugly one.
  */
 export function assessmentsHref(q: Query): string {
   const p = new URLSearchParams();
   if (q.status !== 'all') p.set('status', q.status);
-  if (q.read !== 'all') p.set('read', q.read);
   if (q.clientId) p.set('client', q.clientId);
   if (q.q.trim()) p.set('q', q.q.trim());
   if (q.page > 0) p.set('page', String(q.page));
@@ -144,7 +134,7 @@ export function refine(q: Query, patch: Partial<Query>): Query {
 
 /** How many facets are set — the figure on the phone's *Filter* chip. */
 export function facetCount(q: Query): number {
-  return (q.status === 'all' ? 0 : 1) + (q.read === 'all' ? 0 : 1) + (q.clientId ? 1 : 0);
+  return (q.status === 'all' ? 0 : 1) + (q.clientId ? 1 : 0);
 }
 
 /* ───────────────────────────────────────── one check-in, and its two tabs ── */

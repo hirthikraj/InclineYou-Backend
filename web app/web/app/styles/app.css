@@ -22935,3 +22935,14 @@ button.pchk__r:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2
      rule to stop short of the card's own edge the way `.tbl`'s cells did. */
   .pgmv tbody tr{padding-left:var(--w-cardpad);padding-right:var(--w-cardpad)}
 }
+
+/* Assessments · the client file's tab: the Assign bar and the live cycles */
+.cfchk__bar{display:flex;justify-content:flex-end;margin-bottom:12px}
+.cfchk__cycles{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.cfchk__cycle{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.cfchk__cycle > span{flex:1 1 240px}
+
+/* Assessments · the take screen: one sheet, top to bottom */
+.asmt__list{display:flex;flex-direction:column;gap:20px}
+.asmt__note{margin:16px 0 0;color:var(--muted, #6b7380);font-size:13px}
+.asmt__q{margin:0 0 8px;font-weight:500}

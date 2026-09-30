@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 
-import { scheduleAssessment } from '@/lib/assessments/actions';
+import { scheduleAssessment, startCycle } from '@/lib/assessments/actions';
 import { templateShape, type TemplateWire } from '@/lib/assessments/vocab';
 import type { ClientWire } from '@/lib/assessments/api';
 import { Button } from '@/web-components/ui/Button';
-import { Checkbox } from '@/web-components/ui/Checkbox';
 import { Message } from '@/web-components/ui/Message';
 import { Modal, ModalHost } from '@/web-components/ui/Modal';
 import { Select } from '@/web-components/ui/Select';
@@ -15,56 +15,70 @@ import { TextField } from '@/web-components/ui/Field';
 /**
  * PUT A CHECK-IN ON THE BOARD — three answers and a switch.
  *
- * Who, which blueprint, and when. The fourth control is the one that is not
- * obvious: **send it now, or leave it booked.** `sendNow` is the trainer's call
- * rather than a consequence of the date — a check-in dated three weeks out that
- * goes out today is a client who has three weeks to find twenty minutes for it,
- * which is the whole point of scheduling one. It defaults to on, because the
- * other case is the rarer one and a screen that defaults to *booked* produces a
- * row nobody is waiting on.
+ * Who, which blueprint, and when — once, or on a cycle.
+ *
+ * **Nothing is sent to the client in v1** (there is no portal), so the old
+ * *send it now* switch is gone: the trainer takes the assessment in the session.
+ * That is what the other two buttons are for — *Put it on the board* books it
+ * for the day, and *Take it now* books it for today and opens the take screen.
+ * A cycle books the first one in the same write and the server books each next
+ * one when the last is finished.
  *
  * ── A DIALOG, NOT A ROUTE, AND NOT A DRAWER ─────────────────────────────────
  *
  * Three fields is not a screen, and a drawer would be the add-client flow's
  * shape — that one books a week and assigns a plan. This writes one row.
  */
+const EVERY = [
+  { value: 'once', label: 'Once', days: 0 },
+  { value: '14', label: 'Every 2 weeks', days: 14 },
+  { value: '28', label: 'Every 4 weeks', days: 28 },
+  { value: '42', label: 'Every 6 weeks', days: 42 },
+  { value: '56', label: 'Every 8 weeks', days: 56 },
+  { value: '84', label: 'Every 12 weeks', days: 84 },
+];
+
 export function ScheduleSheet({
   clients,
   templates,
+  clientId: presetClient,
   onClose,
 }: {
+  /** Not read when `clientId` is given. */
   clients: ClientWire[];
   templates: TemplateWire[];
+  /** The client file this was opened from — the person is not asked twice. */
+  clientId?: string;
   onClose: (booked: boolean) => void;
 }) {
+  const router = useRouter();
   const roster = clients.filter((c) => c.status !== 'archived');
-  const [clientId, setClientId] = useState('');
+  const [clientId, setClientId] = useState(presetClient ?? '');
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? '');
   const [date, setDate] = useState(defaultDate());
-  const [sendNow, setSendNow] = useState(true);
+  const [every, setEvery] = useState('once');
   const [error, setError] = useState<string | null>(null);
   const [busy, start] = useTransition();
 
   const chosen = templates.find((t) => t.id === templateId) ?? null;
+  const days = EVERY.find((e) => e.value === every)?.days ?? 0;
 
-  function book() {
+  /** `takeNow` books for TODAY (the server's own, in the workspace's zone) and opens the take screen. */
+  function book(takeNow: boolean) {
     setError(null);
     start(async () => {
-      const result = await scheduleAssessment({
-        clientId,
-        templateId,
-        /* Local midday, not midnight. A date typed as `2026-10-11` becomes an
-           instant, and midnight local in IST is `18:30Z` on the day BEFORE —
-           so a row booked for the 11th reads as the 10th to anything printing
-           the UTC day. Midday cannot cross a date line in either direction. */
-        dueAt: new Date(`${date}T12:00:00`).toISOString(),
-        sendNow,
-      });
+      const result =
+        days > 0 && !takeNow
+          ? await startCycle({ clientId, templateId, intervalDays: days, firstDueOn: date })
+          : await scheduleAssessment({ clientId, templateId, dueOn: takeNow ? undefined : date });
       if (!result.ok) {
         setError(result.message ?? 'That did not save.');
         return;
       }
       onClose(true);
+      if (takeNow && result.data && 'id' in result.data) {
+        router.push(`/clients/assessments/${result.data.id}/take`);
+      }
     });
   }
 
@@ -76,8 +90,13 @@ export function ScheduleSheet({
         foot={
           <>
             <Button variant="ghost" onClick={() => onClose(false)} disabled={busy}>Cancel</Button>
-            <Button variant="primary" onClick={book} disabled={busy || !clientId || !templateId}>
-              {busy ? 'Booking…' : sendNow ? 'Send it' : 'Put it on the board'}
+            {days === 0 && (
+              <Button variant="secondary" onClick={() => book(true)} disabled={busy || !clientId || !templateId}>
+                Take it now
+              </Button>
+            )}
+            <Button variant="primary" onClick={() => book(false)} disabled={busy || !clientId || !templateId}>
+              {busy ? 'Booking…' : days > 0 ? 'Start the cycle' : 'Put it on the board'}
             </Button>
           </>
         }
@@ -91,14 +110,16 @@ export function ScheduleSheet({
           </p>
         ) : (
           <>
-            <Select
-              className="asm-sched-who"
-              label="Client"
-              value={clientId}
-              placeholder="Pick a client"
-              onChange={(e) => setClientId(e.target.value)}
-              options={roster.map((c) => ({ value: c.id, label: c.name }))}
-            />
+            {!presetClient && (
+              <Select
+                className="asm-sched-who"
+                label="Client"
+                value={clientId}
+                placeholder="Pick a client"
+                onChange={(e) => setClientId(e.target.value)}
+                options={roster.map((c) => ({ value: c.id, label: c.name }))}
+              />
+            )}
             <Select
               className="mt3"
               label="Assessment"
@@ -110,19 +131,21 @@ export function ScheduleSheet({
                  sentence the Templates tab prints on the row. */
               hint={chosen ? templateShape(chosen) : undefined}
             />
+            <Select
+              className="mt3"
+              label="How often"
+              value={every}
+              onChange={(e) => setEvery(e.target.value)}
+              options={EVERY.map((e) => ({ value: e.value, label: e.label }))}
+              hint={days > 0 ? 'The next one is booked from the day each is finished.' : undefined}
+            />
             <TextField
               className="mt3"
               type="date"
-              label="Due on"
+              label={days > 0 ? 'First due on' : 'Due on'}
               value={date}
-              hint="The day you expect it back — usually the session you will have a tape in your hand."
+              hint="The session you will have a tape in your hand."
               onChange={(e) => setDate(e.target.value)}
-            />
-            <Checkbox
-              className="mt3"
-              label="Send it to the client now"
-              checked={sendNow}
-              onChange={() => setSendNow(!sendNow)}
             />
           </>
         )}

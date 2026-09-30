@@ -50,7 +50,7 @@ export function MeasurePanel({
 }: {
   data: AssessmentDetailWire;
   compareId: string | null;
-  compare: { at: string; values: Map<string, number> } | null;
+  compare: { at: number; values: Map<string, number> } | null;
   onCompare: (id: string | null) => void;
 }) {
   /* The first tape in the catalogue's own order, which is body weight wherever
@@ -178,7 +178,7 @@ export function MeasurePanel({
           <CardBody>
             {only ? (
               <Message>
-                One reading, taken on {DATE.format(new Date(stats.points[0]?.at ?? data.dueAt))}.
+                One reading, taken on {DATE.format(new Date(stats.points[0]?.at ?? Date.parse(`${data.dueOn}T00:00:00`)))}.
                 The next check-in is what makes this a measurement rather than a
                 number.
               </Message>
