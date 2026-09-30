@@ -29,8 +29,8 @@ public class ClientSummaryService {
     private final ClientJdbcRepository repo;
 
     /** Archived is left out unless asked for — Today has no use for them, Clients counts them. */
-    private static final List<String> DEFAULT_STATUSES = List.of("active", "paused", "inactive");
-    private static final Set<String> STATUSES = Set.of("active", "paused", "inactive", "archived");
+    private static final List<String> DEFAULT_STATUSES = List.of("active", "paused", "inactive", "prospect");
+    private static final Set<String> STATUSES = Set.of("active", "paused", "inactive", "archived", "prospect");
 
     /**
      * @param status comma list of client statuses, or {@code all}. Unknown names

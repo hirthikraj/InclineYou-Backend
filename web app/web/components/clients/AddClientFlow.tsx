@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 
-import type { NewClientData, WorkingHourWire, ClientScheduleWire } from '@/lib/clients/new-api';
+import type { NewClientData, WorkingHourWire, ClientScheduleWire, UpcomingSessionWire } from '@/lib/clients/new-api';
 import {
   checkPhone,
   createClient,
@@ -13,8 +13,9 @@ import {
   applyTemplate,
   type WeeklySlot,
 } from '@/lib/clients/new-actions';
+import { bookSession } from '@/lib/schedule/actions';
 import { Glyph } from '@/components/shell/Icons';
-import { avatarToken, initials, rupees } from '@/lib/today/time';
+import { avatarToken, initials, rupees, isoWeekday, startOfDay, dayStamp, DAY_MS } from '@/lib/today/time';
 import { packSubtitle, type Pack } from '@/lib/setup/money';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
@@ -50,7 +51,7 @@ function PackIcon({ size = 20 }: { size?: number }) {
 
 /* ───────────────────────────────────────── the ridge, as geometry ──
 
-   Four rungs climbing left to right inside a fixed 472×46 viewBox. The SVG is
+   Rungs climbing left to right inside a fixed 472×46 viewBox. The SVG is
    drawn at width:100% with the box unchanged, so it scales uniformly with the
    drawer (512px on desktop, the whole screen under 900px) and every number
    below stays a constant. The trace carries pathLength="100", which turns the
@@ -62,33 +63,60 @@ function PackIcon({ size = 20 }: { size?: number }) {
    hold air at the two rungs where the halo is not. `.ascent__ridge` is
    `overflow:visible` instead and the halo paints over the margin above and the
    label row below, both of which are empty where it lands; the BAND still
-   clips, so nothing escapes the dark plate.                                */
+   clips, so nothing escapes the dark plate.
 
-const RUNG_X = [59, 177, 295, 413];
-const RUNG_Y = [33, 24, 15, 6];
-const RIDGE_PATH = RUNG_X.map((x, i) => `${x},${RUNG_Y[i]}`).join(' ');
+   THE RUNG COUNT IS NO LONGER FIXED. A prospect's ascent is three rungs (Who,
+   Type, Demo); an active client's is five (…Money, Week, Plan) — so the four
+   endpoints below are the two ends of the SAME climb, and every rung in
+   between is interpolated across them rather than hand-placed. */
+
+const RIDGE_X0 = 59;
+const RIDGE_X1 = 413;
+const RIDGE_Y0 = 33;
+const RIDGE_Y1 = 6;
 const BASE_Y = 45;
 
+/** `n` rungs, evenly spaced across the ridge's fixed span. */
+function rungGeometry(n: number): { x: number[]; y: number[] } {
+  if (n <= 1) return { x: [RIDGE_X0], y: [RIDGE_Y0] };
+  const x = Array.from({ length: n }, (_, i) => RIDGE_X0 + ((RIDGE_X1 - RIDGE_X0) * i) / (n - 1));
+  const y = Array.from({ length: n }, (_, i) => RIDGE_Y0 + ((RIDGE_Y1 - RIDGE_Y0) * i) / (n - 1));
+  return { x, y };
+}
+
 /** Where the climber sits for a progress fraction in [0,1]. */
-function climberAt(p: number): { x: number; y: number } {
-  const span = Math.min(Math.max(p, 0), 1) * (RUNG_X.length - 1);
-  const i = Math.min(Math.floor(span), RUNG_X.length - 2);
+function climberAt(p: number, rungX: number[], rungY: number[]): { x: number; y: number } {
+  const span = Math.min(Math.max(p, 0), 1) * (rungX.length - 1);
+  const i = Math.min(Math.floor(span), rungX.length - 2);
   const t = span - i;
   return {
-    x: RUNG_X[i] + (RUNG_X[i + 1] - RUNG_X[i]) * t,
-    y: RUNG_Y[i] + (RUNG_Y[i + 1] - RUNG_Y[i]) * t,
+    x: rungX[i] + (rungX[i + 1] - rungX[i]) * t,
+    y: rungY[i] + (rungY[i + 1] - rungY[i]) * t,
   };
 }
 
-/* ─────────────────────────────────────────────────── steps ── */
+/* ─────────────────────────────────────────────────── steps ──
 
-type Step = 1 | 2 | 3 | 4;
+   Who and Type are common to both paths and keep step numbers 1 and 2 either
+   way, so picking Prospect or Active on step 2 never renumbers the step you
+   are standing on — only what step 3 turns out to be, and whether there is a
+   4 and a 5 at all. */
 
-const STEP_DEFS = [
-  { n: 1 as Step, label: 'Who', optional: false },
-  { n: 2 as Step, label: 'Money', optional: false },
-  { n: 3 as Step, label: 'Week', optional: true },
-  { n: 4 as Step, label: 'Plan', optional: true },
+type Step = 1 | 2 | 3 | 4 | 5;
+type StepDef = { n: Step; label: string; optional: boolean };
+
+const STEP_DEFS_PROSPECT: StepDef[] = [
+  { n: 1, label: 'Who', optional: false },
+  { n: 2, label: 'Type', optional: false },
+  { n: 3, label: 'Demo', optional: true },
+];
+
+const STEP_DEFS_ACTIVE: StepDef[] = [
+  { n: 1, label: 'Who', optional: false },
+  { n: 2, label: 'Type', optional: false },
+  { n: 3, label: 'Money', optional: false },
+  { n: 4, label: 'Week', optional: true },
+  { n: 5, label: 'Plan', optional: true },
 ];
 
 /* ─────────────────────────────────────────────────── slot helpers ── */
@@ -130,6 +158,55 @@ function heldBy(weekday: number, time: string, clients: ClientScheduleWire[]): s
   return null;
 }
 
+/* ──────────────────────────────────────── the demo step's slot grid ──
+
+   A demo is a ONE-TIME booking on a real date, not a standing slot — so this
+   grid is keyed by an actual calendar day rather than a recurring weekday, and
+   it books straight onto `scheduled_session` (`bookSession`) rather than onto
+   `client_schedule_slot` the way the Week step's picks do.
+
+   `isoWeekday` already answers 0 = Monday … 6 = Sunday — `working_hours`'s own
+   convention — so, unlike `slotsForDay` above, a real date needs no `- 1`
+   translation to look up its working-hours row. */
+
+/** How long a demo runs. Fixed and unasked, so adding a prospect stays fast. */
+const DEMO_DURATION_MINUTES = 30;
+
+/** The next `count` calendar dates, at local midnight, starting from `from`. */
+function nextDates(count: number, from: number): number[] {
+  const start = startOfDay(from);
+  return Array.from({ length: count }, (_, i) => start + i * DAY_MS);
+}
+
+/** A day-midnight and a minute-of-day → the local instant, never by addition —
+ *  see `lib/clients/booking.ts`'s `atLocal` for why arithmetic on minutes is
+ *  the wrong tool anywhere daylight saving exists. */
+function instantAt(dayAt: number, minute: number): number {
+  const d = new Date(dayAt);
+  d.setHours(0, 0, 0, 0);
+  d.setMinutes(minute);
+  return d.getTime();
+}
+
+function demoSlotsForDate(dateAt: number, hours: WorkingHourWire[]) {
+  const hw = hours.find(h => h.weekday === isoWeekday(dateAt));
+  if (!hw) return [];
+  const slots: Array<{ time: string; at: number }> = [];
+  for (let m = hw.startMinute; m + DEMO_DURATION_MINUTES <= hw.endMinute; m += 30) {
+    const h = Math.floor(m / 60).toString().padStart(2, '0');
+    const min = (m % 60).toString().padStart(2, '0');
+    slots.push({ time: `${h}:${min}`, at: instantAt(dateAt, m) });
+  }
+  return slots;
+}
+
+/** The database's own clash rule (`scheduled_session`'s review note):
+ *  `a.start < b.end AND a.end > b.start`. */
+function demoSlotTaken(at: number, durationMinutes: number, sessions: UpcomingSessionWire[]): boolean {
+  const end = at + durationMinutes * 60_000;
+  return sessions.some(s => at < s.endsAt && end > s.scheduledAt);
+}
+
 /* ─────────────────────────────────────────────────── phone helpers ── */
 
 function cleanPhone(raw: string): string {
@@ -143,9 +220,15 @@ function displayPhone(raw: string): string {
   return `${digits.slice(0, 5)} ${digits.slice(5, 10)}`;
 }
 
-/* ─────────────────────────────────────────────────── work-mode data ── */
+/* ─────────────────────────────────────────────────── client-type data ──
 
-const WORK_MODE_INFO: Record<string, { label: string; sub: string; tag: string; tagClass: string }> = {
+   No `both` any more (decided with the trainer): `client.client_type` is one
+   of the two, never a third thing, and the database enforces it — a gym pack
+   sold to an independent client is `422 PACK_OWNER_MISMATCH`. Asking it as its
+   own question on step 2, before either price list is drawn, is the UI saying
+   the same thing the column already does: a client is one or the other. */
+
+const CLIENT_TYPE_INFO: Record<'independent' | 'gym', { label: string; sub: string; tag: string; tagClass: string }> = {
   independent: {
     label: 'Independent',
     sub: 'They collect. Their own packs, price editable on the sale.',
@@ -158,24 +241,22 @@ const WORK_MODE_INFO: Record<string, { label: string; sub: string; tag: string; 
     tag: 'asks for a share',
     tagClass: 'tag tag--warn',
   },
-  both: {
-    label: 'Both',
-    sub: 'Asks first — gym client, or one of your own?',
-    tag: 'asks for a share',
-    tagClass: 'tag tag--warn',
+};
+
+const CLIENT_TYPES = ['independent', 'gym'] as const;
+
+const STATUS_INFO: Record<'prospect' | 'active', { label: string; sub: string }> = {
+  prospect: {
+    label: 'Prospect',
+    sub: "Hasn't committed yet — offer a one-time demo, nothing else.",
+  },
+  active: {
+    label: 'Active client',
+    sub: 'Ready to start — set up their pack, weekly slots and a plan.',
   },
 };
 
-const ALL_MODES = ['independent', 'gym', 'both'] as const;
-
-type WorkMode = (typeof ALL_MODES)[number];
-
-/** Which of the two price lists a mode puts on screen. */
-const LISTS_FOR: Record<WorkMode, { own: boolean; gym: boolean }> = {
-  independent: { own: true, gym: false },
-  gym: { own: false, gym: true },
-  both: { own: true, gym: true },
-};
+const STATUSES = ['prospect', 'active'] as const;
 
 /* ───────────────────────────────────── leaving to set a price list, and back ──
 
@@ -191,7 +272,7 @@ const LISTS_FOR: Record<WorkMode, { own: boolean; gym: boolean }> = {
    Both shells come back to `/clients/new` — the route, even when the trainer
    left from the roster's drawer. A drawer is local state on `Clients.tsx` with
    nothing in the URL to reopen it, and the route IS the same flow: the same
-   component, the same four steps, the same draft. See `AddClientFlow`'s header
+   component, the same steps, the same draft. See `AddClientFlow`'s header
    for why there is one implementation and two shells. */
 
 const DRAFT_KEY = 'incline.add-client.draft';
@@ -204,9 +285,13 @@ export const PACKS_DETOUR = 'new-client';
 interface Draft {
   name: string;
   phone: string;
+  /** Only the active path ever detours to Business, so a restored draft is
+   *  always active — kept anyway so a stale draft written before this shape
+   *  changed still parses (see `parseDraft`). */
+  status: 'prospect' | 'active' | null;
   deliveryMode: 'floor' | 'remote';
   trainerSplit: number;
-  packMode: WorkMode | null;
+  clientType: 'independent' | 'gym' | null;
   /** The pack they picked. Re-checked against the live list on the way back in
    *  — the whole point of the detour is that the price list changed while they
    *  were away, so a retired pack must not survive as a selection. */
@@ -291,15 +376,17 @@ function parseDraft(raw: string): Draft | null {
     return {
       name: d.name,
       phone: d.phone,
+      /* Always active in practice (only that path detours to Business), but a
+         draft written before this field existed has none — read as active
+         rather than refused, since that is the only path it could have been. */
+      status: d.status === 'prospect' ? 'prospect' : 'active',
       deliveryMode: d.deliveryMode === 'remote' ? 'remote' : 'floor',
       trainerSplit:
         typeof d.trainerSplit === 'number' && d.trainerSplit >= 0 && d.trainerSplit <= 100
           ? d.trainerSplit
           : 60,
-      packMode:
-        d.packMode === 'independent' || d.packMode === 'gym' || d.packMode === 'both'
-          ? d.packMode
-          : null,
+      clientType:
+        d.clientType === 'independent' || d.clientType === 'gym' ? d.clientType : null,
       packId: typeof d.packId === 'string' ? d.packId : null,
     };
   } catch {
@@ -467,11 +554,14 @@ export function AddClientFlow({
   const [rosterMatch, setRosterMatch] = useState<{ id: string; name: string } | null>(null);
   const [dismissedRosterWarn, setDismissedRosterWarn] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<'floor' | 'remote'>('floor');
-  /* Whose packs THIS client buys from, seeded with the profile's answer.
-     Null when the profile has never been asked — the three rows then start with
-     nothing selected, which is the state the screenshot was taken in and the
-     reason the rows looked broken: they were never controls. */
-  const [packMode, setPackMode] = useState<WorkMode | null>(data.trainer.workMode);
+  /* Prospect or active — step 2's first question. Never sent to the server:
+     it only decides which steps this drawer shows next (Demo, or Money → Week
+     → Plan). No default, same reasoning as `clientType` below. */
+  const [status, setStatus] = useState<'prospect' | 'active' | null>(null);
+  /* independent | gym — `client.client_type`, asked explicitly and with no
+     default (R18): a default is how a gym member ends up silently booked as
+     the trainer's own. */
+  const [clientType, setClientType] = useState<'independent' | 'gym' | null>(null);
   /* The one pack they are buying, or none. A single id and not a set, because
      the answer is "which pack" — two live packs on one client is the state
      `PackPanel` exists to prevent, and the server closes the older one on the
@@ -480,11 +570,20 @@ export function AddClientFlow({
   const [trainerSplit, setTrainerSplit] = useState<number>(
     data.trainer.gymSharePercent !== null ? 100 - data.trainer.gymSharePercent : 60,
   );
+  /* The demo slot picked on step 3 of the prospect path — an instant, or none
+     if they mean to skip it. */
+  const [demoAt, setDemoAt] = useState<number | null>(null);
   const [createdClientId, setCreatedClientId] = useState<string | null>(null);
-  /* Minted when the flow opens (api-contract Clients A5, A7, Programs A5): a
-     retried Continue, Sell or Apply replays the same id and the server answers
-     with the row the first attempt made, so nothing is made twice. */
-  const [ids] = useState(() => ({ client: crypto.randomUUID(), pack: crypto.randomUUID(), plan: crypto.randomUUID() }));
+  /* Minted when the flow opens (api-contract Clients A5, A7, Programs A5, Today
+     A1): a retried Continue, Sell, Apply or Book replays the same id and the
+     server answers with the row the first attempt made, so nothing is made
+     twice. */
+  const [ids] = useState(() => ({
+    client: crypto.randomUUID(),
+    pack: crypto.randomUUID(),
+    plan: crypto.randomUUID(),
+    demo: crypto.randomUUID(),
+  }));
   /** `schedule.version` from the create, then from each save — step 3's If-Match. */
   const [scheduleVersion, setScheduleVersion] = useState<string | null>(null);
   /**
@@ -541,18 +640,22 @@ export function AddClientFlow({
     if (draft) {
       setName(draft.name);
       setPhone(draft.phone);
+      /* Only the active path ever detours to Business (Money is the one step
+         with a "set up your packs" empty state), so this is always active in
+         practice — `parseDraft` already reads a missing/legacy value that way. */
+      setStatus(draft.status);
+      setClientType(draft.clientType);
       setDeliveryMode(draft.deliveryMode);
       setTrainerSplit(draft.trainerSplit);
-      setPackMode(draft.packMode);
-      /* Validated against the list as it stands NOW, and against the mode's own
-         two lists: the trainer left to change this price list, so the pack they
-         had picked may have been retired while they were gone. */
-      const lists = draft.packMode ? LISTS_FOR[draft.packMode] : { own: false, gym: false };
+      /* Validated against the list as it stands NOW: the trainer left to
+         change this price list, so the pack they had picked may have been
+         retired while they were gone. */
       const still = data.packs.some(
-        pk => pk.id === draft.packId && (pk.owner === 'gym' ? lists.gym : lists.own),
+        pk => pk.id === draft.packId && (pk.owner === 'gym' ? draft.clientType === 'gym' : draft.clientType === 'independent'),
       );
       setPackId(still ? draft.packId : null);
-      setStep(2);
+      setStep(3);
+      setMaxStep(3);
     }
   }
 
@@ -620,13 +723,7 @@ export function AddClientFlow({
   }, [phone, doPhoneCheck]);
 
   /* derived */
-  /* The SELECTED mode and no longer the profile's, which is the whole of what
-     picking *Gym* on a profile that says *Independent* has to mean: the counter
-     collects for this one, so there is a share to ask for. A trainer who
-     changes nothing gets the old answer, because the selection is seeded with
-     the profile. */
-  const showSplit =
-    (packMode === 'gym' || packMode === 'both') && deliveryMode === 'floor';
+  const showSplit = clientType === 'gym' && deliveryMode === 'floor';
   const gymShare = 100 - trainerSplit;
 
   /* The two price lists, split by whose they are. Already ordered and already
@@ -634,43 +731,37 @@ export function AddClientFlow({
   const ownPacks = useMemo(() => data.packs.filter(p => p.owner === 'trainer'), [data.packs]);
   const gymPacks = useMemo(() => data.packs.filter(p => p.owner === 'gym'), [data.packs]);
 
-  const lists = packMode ? LISTS_FOR[packMode] : { own: false, gym: false };
+  /* Which ONE list Money draws — `clientType` is already fixed by step 2 (Type)
+     by the time Money renders, so there is no third "both" case any more. */
+  const showOwn = clientType === 'independent';
+  const showGym = clientType === 'gym';
   const gymLabel = data.trainer.gymName ?? 'The gym';
-  const shownPackCount =
-    (lists.own ? ownPacks.length : 0) + (lists.gym ? gymPacks.length : 0);
+  const shownPackCount = (showOwn ? ownPacks.length : 0) + (showGym ? gymPacks.length : 0);
 
   /* The pick, resolved against what is ON SCREEN rather than against the whole
      price list. Everything downstream reads THIS and never `packId`, so a
-     selection that has stopped being visible — the mode changed, the pack was
-     retired during the detour — can never be the thing that gets sold. */
+     selection that has stopped being visible — `clientType` changed on a Back
+     to step 2, the pack was retired during the detour — can never be the thing
+     that gets sold. */
   const picked = useMemo(() => {
     if (!packId) return null;
     const pack = data.packs.find(pk => pk.id === packId);
     if (!pack) return null;
-    return (pack.owner === 'gym' ? lists.gym : lists.own) ? pack : null;
-  }, [packId, data.packs, lists.gym, lists.own]);
+    return (pack.owner === 'gym' ? showGym : showOwn) ? pack : null;
+  }, [packId, data.packs, showGym, showOwn]);
 
-  /* ONE pack, across BOTH lists. The two groups are two price lists and not two
-     questions — on `both` a client buys from the gym's counter or from yours,
-     never from each in one sale — so the state is a single id and picking in
-     one group replaces a pick in the other by construction. */
   const pickPack = useCallback((id: string | null) => setPackId(id), []);
 
-  /* client_type (R18): a gym client buys the gym's packs, so the pick decides;
-     with no pick, the mode does. */
-  const clientType: 'independent' | 'gym' =
-    picked ? (picked.owner === 'gym' ? 'gym' : 'independent') : packMode === 'gym' ? 'gym' : 'independent';
-
-  /* Changing whose packs they buy drops a pick the new mode cannot show, in the
-     handler rather than in an effect: an effect would paint one frame with a
-     gym pack selected under a list that no longer contains it. */
-  const choosePackMode = useCallback((mode: WorkMode) => {
-    setPackMode(mode);
+  /* Changing independent/gym on step 2 drops a pick the new type cannot show,
+     in the handler rather than in an effect: an effect would paint one frame
+     with a gym pack selected under a list that no longer contains it. */
+  const chooseClientType = useCallback((type: 'independent' | 'gym') => {
+    setClientType(type);
     setPackId(prev => {
       if (!prev) return null;
       const pack = data.packs.find(pk => pk.id === prev);
       if (!pack) return null;
-      return (pack.owner === 'gym' ? LISTS_FOR[mode].gym : LISTS_FOR[mode].own) ? prev : null;
+      return (pack.owner === 'gym') === (type === 'gym') ? prev : null;
     });
   }, [data.packs]);
 
@@ -684,17 +775,22 @@ export function AddClientFlow({
    * away and named.
    */
   const goDefinePacks = useCallback(() => {
-    writeDraft({ name, phone, deliveryMode, trainerSplit, packMode, packId });
+    writeDraft({ name, phone, status, deliveryMode, trainerSplit, clientType, packId });
     /* The drawer has to close before the route under it changes, or the dialog
        is left open over the screen it navigated to. */
     onClose?.();
     router.push(`/business/packages?from=${PACKS_DETOUR}`);
-  }, [name, phone, deliveryMode, trainerSplit, packMode, packId, onClose, router]);
+  }, [name, phone, status, deliveryMode, trainerSplit, clientType, packId, onClose, router]);
 
   const eligibleTemplates =
     weekdays.size > 0
       ? data.templates.filter(t => (t.dayLabels?.length ?? 0) === weekdays.size)
       : data.templates;
+
+  /* The demo picker's 14 real dates, snapshotted once at mount — not
+     recomputed every render, which would slide "today" out of the list the
+     instant the clock ticked past midnight mid-session. */
+  const [demoDates] = useState(() => nextDates(14, Date.now()));
 
   /* ── what the band says ────────────────────────────────────────────────
      The head's whole argument is that a trainer filling four steps wants to
@@ -709,7 +805,7 @@ export function AddClientFlow({
      and the warning agree with each other on the very first frame. */
   const phoneIsOwn = committed !== null && digits === committed.phone;
 
-  const status = useMemo((): { text: React.ReactNode; tone?: 'ok' | 'warn' | 'bad'; key: string } => {
+  const band = useMemo((): { text: React.ReactNode; tone?: 'ok' | 'warn' | 'bad'; key: string } => {
     if (createdClientId) return { key: 'made', tone: 'ok', text: 'On your roster · finishing the setup', };
     /* Short, and deliberately NOT the field's own hint. It used to read *Start
        with the name they already go by*, which needs 263px of a 254px line at
@@ -730,10 +826,17 @@ export function AddClientFlow({
        a branch that misleads the next reader about what this memo answers. */
   }, [createdClientId, trimmed, digits, phone, phoneCheck]);
 
+  /* The step list for the path chosen — Who and Type are shared, so this only
+     changes what step 3 onward looks like. Active is the shape shown before a
+     choice is made: the common case, and no shorter than the prospect one. */
+  const stepDefs = status === 'prospect' ? STEP_DEFS_PROSPECT : STEP_DEFS_ACTIVE;
+  const { x: rungX, y: rungY } = useMemo(() => rungGeometry(stepDefs.length), [stepDefs.length]);
+  const ridgePath = useMemo(() => rungX.map((x, i) => `${x},${rungY[i]}`).join(' '), [rungX, rungY]);
+
   /* Progress is the fraction of the ridge that is behind you: rung 1 is the
      start line, not one quarter done. */
-  const progress = (step - 1) / (STEP_DEFS.length - 1);
-  const climber = climberAt(progress);
+  const progress = (step - 1) / (stepDefs.length - 1);
+  const climber = climberAt(progress, rungX, rungY);
 
   /* ── STEP NAVIGATION — BOTH WAYS, AND THAT IS THE CHANGE ─────────────────
    *
@@ -762,6 +865,23 @@ export function AddClientFlow({
     setStep(target);
     setMaxStep(prev => (target > prev ? target : prev));
   };
+
+  /**
+   * Picking Prospect after having already reached Money, Week or Plan under
+   * Active shortens the ridge out from under wherever you were standing — so
+   * this clamps both `step` and `maxStep` down to the prospect path's last
+   * rung. Anything already saved (a pack sold, a schedule written) stays
+   * saved; only where the drawer is NOW moves. The other direction
+   * (prospect → active) never needs clamping — five rungs hold three's worth
+   * of progress with room to spare.
+   */
+  const chooseStatus = useCallback((next: 'prospect' | 'active') => {
+    setStatus(next);
+    if (next !== 'prospect') return;
+    const cap = STEP_DEFS_PROSPECT[STEP_DEFS_PROSPECT.length - 1].n;
+    setMaxStep(prev => (prev > cap ? cap : prev));
+    setStep(prev => (prev > cap ? cap : prev));
+  }, []);
 
   /* step 1 — and on a return visit it SAVES rather than merely advancing. */
   const handleStep1Continue = async () => {
@@ -795,100 +915,53 @@ export function AddClientFlow({
     }
   };
 
-  /* step 2 — and it is TWO writes now, in an order that matters.
+  /**
+   * step 2 (Type) — creates the client, on the FIRST time through.
    *
-   * The client is created first and the pack is sold against the id that comes
-   * back, because `POST /v1/clients/{id}/packages` needs somebody to sell to.
-   * Which makes the second write the one that can fail on its own, and there is
-   * exactly one honest thing to do when it does: the client EXISTS, going back
-   * to step 2 is already refused once `createdClientId` is set, and dropping
-   * the trainer back on a form for somebody who is on their roster would invite
-   * them to add the person twice. So the flow continues and the banner says
-   * what did not happen, in the server's own words — `assignPackage` prefers
-   * `PackageRuleException`'s sentence over one of ours for that reason.
-   *
-   * `includePack` is the Skip button's whole meaning. Its label has always read
-   * *sell it on the day they pay*, which was a promise about a control that did
-   * not exist yet; it is literally what this argument does now.
+   * Who a prospect is training with is still `client.client_type`, so the
+   * client is made here rather than after Money: a prospect never reaches
+   * Money at all, and the row has to exist before step 3 can book a demo
+   * against it. Nothing about a pack rides on this write any more — that is
+   * Money's own step now, and only the active path ever runs it.
    */
-  const handleCreateClient = async (includeSplit: boolean, includePack: boolean) => {
+  const handleTypeContinue = async () => {
+    if (!status) { setError('Choose prospect or active client.'); return; }
+    if (!clientType) { setError('Choose independent or gym.'); return; }
+    setError(null);
+
+    if (!createdClientId || !committed) {
+      if (submitting) return;
+      setSubmitting(true);
+      try {
+        const created = await createClient({
+          id: ids.client,
+          name: name.trim(),
+          phone: digits,
+          clientType,
+          status,
+          deliveryMode,
+        });
+        setCreatedClientId(created.id);
+        setScheduleVersion(created.scheduleVersion);
+        setCommitted({ name: trimmed, phone: digits, deliveryMode, clientType, packId: null });
+        goTo(3);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Something went wrong.');
+      } finally {
+        setSubmitting(false);
+      }
+      return;
+    }
+
+    /* A return visit — `status` never left the browser, so the only field
+       that could have changed is `clientType`, and only that is worth a
+       write. */
+    if (clientType === committed.clientType) { goTo(3); return; }
     if (submitting) return;
     setSubmitting(true);
-    setError(null);
     try {
-      const created = await createClient({
-        id: ids.client,
-        name: name.trim(),
-        phone: digits,
-        clientType,
-        deliveryMode,
-      });
-      setCreatedClientId(created.id);
-      setScheduleVersion(created.scheduleVersion);
-      setCommitted({ name: trimmed, phone: digits, deliveryMode, clientType, packId: null });
-
-      if (includePack && picked) {
-        /* `packId` alone is a complete sale: the pack's own terms are copied on
-           the server. The split rides on a gym pack's sale (R3). */
-        const sale = await sellPack(created.id, {
-          id: ids.pack,
-          packId: picked.id,
-          trainerSharePercent: includeSplit && showSplit && picked.owner === 'gym' ? trainerSplit : undefined,
-        });
-        if (sale.ok) {
-          setCommitted(prev => (prev ? { ...prev, packId: picked.id } : prev));
-        } else {
-          setError(
-            `${sale.message ?? 'That pack did not go through.'} ` +
-              `${trimmed} is on your roster — sell them a pack from their file.`,
-          );
-        }
-      }
-      goTo(3);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong.');
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  /**
-   * Step 2, SECOND time round — the row exists, so nothing here may create one.
-   *
-   * Three fields and three different kinds of thing. Delivery and the split are
-   * columns on the client and go back through the same partial PUT step 1 uses.
-   * The pack is not: selling a second one CLOSES the first server-side (the
-   * mock does it, and `PackPanel` exists because two live packs on one person
-   * is the state this product refuses), which would leave a dead package and a
-   * pending invoice behind a trainer who only meant to change their mind. So a
-   * sale is offered exactly once from this screen and the picker states that
-   * afterwards rather than re-arming.
-   */
-  const handleStep2Save = async () => {
-    if (!createdClientId || !committed || submitting) return;
-    setError(null);
-
-    /* Delivery is the schedule's, so it rides on step 3's save; the split is
-       the sale's. Only the client type is a field on the client. */
-    const detailsDirty = clientType !== committed.clientType;
-    const sellNow = committed.packId === null && picked !== null;
-    if (!detailsDirty && !sellNow) { goTo(3); return; }
-
-    setSubmitting(true);
-    try {
-      if (detailsDirty) {
-        await updateClientDetails(createdClientId, { clientType });
-        setCommitted(prev => (prev ? { ...prev, clientType } : prev));
-      }
-      if (sellNow && picked) {
-        const sale = await sellPack(createdClientId, {
-          id: ids.pack,
-          packId: picked.id,
-          trainerSharePercent: showSplit && picked.owner === 'gym' ? trainerSplit : undefined,
-        });
-        if (sale.ok) setCommitted(prev => (prev ? { ...prev, packId: picked.id } : prev));
-        else setError(sale.message ?? 'That pack did not go through. Nothing else changed.');
-      }
+      await updateClientDetails(createdClientId, { clientType });
+      setCommitted(prev => (prev ? { ...prev, clientType } : prev));
       goTo(3);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That did not save. Nothing changed.');
@@ -897,8 +970,65 @@ export function AddClientFlow({
     }
   };
 
-  /* step 3 */
-  const handleStep3Continue = async () => {
+  /**
+   * step 3, active path (Money) — the client always exists by now, so this is
+   * always the "second time round" shape the old step 2 only reached on a
+   * return visit: nothing here may create a client, and a sale is offered
+   * exactly once — selling a second pack CLOSES the first server-side (the
+   * state `PackPanel` exists to prevent), so the picker states a sold pack
+   * afterwards rather than re-arming.
+   */
+  const handleMoneyContinue = async () => {
+    if (!createdClientId || !committed || submitting) return;
+    setError(null);
+    const sellNow = committed.packId === null && picked !== null;
+    if (!sellNow) { goTo(4); return; }
+
+    setSubmitting(true);
+    try {
+      const sale = await sellPack(createdClientId, {
+        id: ids.pack,
+        packId: picked!.id,
+        trainerSharePercent: showSplit && picked!.owner === 'gym' ? trainerSplit : undefined,
+      });
+      if (sale.ok) setCommitted(prev => (prev ? { ...prev, packId: picked!.id } : prev));
+      else setError(sale.message ?? 'That pack did not go through. Nothing else changed.');
+      goTo(4);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /**
+   * step 3, prospect path (Demo) — a real date and time, booked by hand onto
+   * `scheduled_session` exactly the way `BookPanel` books one: no pack, no
+   * weekly slot, no program. Skipping is just `goToClient` (below) with
+   * nothing sent.
+   */
+  const handleBookDemo = async () => {
+    if (!createdClientId || demoAt === null || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await bookSession({
+        requestId: ids.demo,
+        clientId: createdClientId,
+        scheduledAt: demoAt,
+        durationMinutes: DEMO_DURATION_MINUTES,
+      });
+      if (!result.ok) { setError(result.message ?? 'The booking did not go through. Nothing changed.'); return; }
+      goToClient();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /* step 4, active path only (Week) */
+  const handleWeekContinue = async () => {
     if (!createdClientId || !scheduleVersion || submitting) return;
     /* Program days in week order (R45): the first slot books Day 1. */
     const slots = Object.entries(selectedSlots)
@@ -906,14 +1036,14 @@ export function AddClientFlow({
       .map(([wd, time], idx) => ({ weekday: Number(wd), start: time, programDay: idx + 1 })) satisfies WeeklySlot[];
 
     const modeChanged = committed !== null && deliveryMode !== committed.deliveryMode;
-    if (slots.length === 0 && !modeChanged) { goTo(4); return; }
+    if (slots.length === 0 && !modeChanged) { goTo(5); return; }
     setSubmitting(true);
     setError(null);
     try {
       const saved = await saveSchedule(createdClientId, scheduleVersion, { deliveryMode, slots });
       setScheduleVersion(saved.version);
       setCommitted(prev => (prev ? { ...prev, deliveryMode } : prev));
-      goTo(4);
+      goTo(5);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
@@ -975,13 +1105,13 @@ export function AddClientFlow({
                   does not, because `aria-label` on `role="dialog"` names it.
                   The band IS the header on both, so there is no second copy. */}
               <Title className="ascent__name">{trimmed || 'Add a client'}</Title>
-              <span className="ascent__sub" data-tone={status.tone}>
-                <span key={status.key}>{status.text}</span>
+              <span className="ascent__sub" data-tone={band.tone}>
+                <span key={band.key}>{band.text}</span>
               </span>
             </span>
 
             <span className="ascent__count" aria-hidden="true">
-              <b>{String(step).padStart(2, '0')}</b>/{String(STEP_DEFS.length).padStart(2, '0')}
+              <b>{String(step).padStart(2, '0')}</b>/{String(stepDefs.length).padStart(2, '0')}
             </span>
 
             {/* One control, two meanings, and the name says which: the dialog
@@ -1001,25 +1131,25 @@ export function AddClientFlow({
             className="ascent__ridge"
             viewBox="0 0 472 46"
             role="img"
-            aria-label={`Step ${step} of ${STEP_DEFS.length}: ${STEP_DEFS[step - 1].label}`}
+            aria-label={`Step ${step} of ${stepDefs.length}: ${stepDefs[step - 1].label}`}
             style={{ ['--p' as string]: progress }}
           >
             <line className="ridge__base" x1="0" y1={BASE_Y} x2="472" y2={BASE_Y} />
-            {RUNG_X.map((x, i) => (
-              <line key={`d${x}`} className="ridge__drop" x1={x} y1={RUNG_Y[i] + 7} x2={x} y2={BASE_Y} />
+            {rungX.map((x, i) => (
+              <line key={`d${x}`} className="ridge__drop" x1={x} y1={rungY[i] + 7} x2={x} y2={BASE_Y} />
             ))}
 
-            <polyline className="ridge__track" points={RIDGE_PATH} />
-            <polyline className="ridge__trace" points={RIDGE_PATH} pathLength={100} />
+            <polyline className="ridge__track" points={ridgePath} />
+            <polyline className="ridge__trace" points={ridgePath} pathLength={100} />
 
-            {RUNG_X.map((x, i) => {
+            {rungX.map((x, i) => {
               const done = i + 1 < step;
               return (
                 <g key={`n${x}`}>
-                  <circle className="ridge__node" data-on={done ? '1' : '0'} cx={x} cy={RUNG_Y[i]} r={done ? 6.5 : 4.5} />
+                  <circle className="ridge__node" data-on={done ? '1' : '0'} cx={x} cy={rungY[i]} r={done ? 6.5 : 4.5} />
                   <path
                     className="ridge__tick"
-                    d={`M${x - 3.1} ${RUNG_Y[i]} l2.2 2.3 l4.1 -4.6`}
+                    d={`M${x - 3.1} ${rungY[i]} l2.2 2.3 l4.1 -4.6`}
                   />
                 </g>
               );
@@ -1037,8 +1167,16 @@ export function AddClientFlow({
           </svg>
 
           {/* line three · the rungs */}
-          <div className="ascent__rungs" role="list" aria-label="Onboarding steps">
-            {STEP_DEFS.map(s => {
+          {/* `.ascent__rungs`' own CSS hardcodes `repeat(4, 1fr)` — true for
+              every step count until this flow branched. The inline style
+              overrides it for the two counts that now exist. */}
+          <div
+            className="ascent__rungs"
+            role="list"
+            aria-label="Onboarding steps"
+            style={{ gridTemplateColumns: `repeat(${stepDefs.length}, 1fr)` }}
+          >
+            {stepDefs.map(s => {
               const done = s.n < step;
               const active = s.n === step;
               /* Any step already REACHED, in either direction — see `goStep`.
@@ -1209,41 +1347,47 @@ export function AddClientFlow({
               </>
             )}
 
-            {/* STEP 2 — MONEY */}
+            {/* STEP 2 — TYPE */}
             {step === 2 && (
               <>
-                {/* ── WHOSE PACKS ──────────────────────────────────────────
-                    These three used to be `<div>`s with an `aria-selected` and
-                    no handler — a radio list that drew the profile's answer and
-                    could not be answered. On a profile that had never been
-                    asked, `workMode` is null, so all three sat unfilled and the
-                    section read as three broken buttons. They are buttons now,
-                    and pressing one is what puts a price list on the screen. */}
                 <div style={{ ['--i' as string]: 0 }}>
-                  <Sec
-                    k="Whose packs they buy"
-                    n={packMode ? WORK_MODE_INFO[packMode].label : 'pick one'}
-                  />
-                  <div className="lgl" role="group" aria-label="Whose packs this client buys">
-                    {ALL_MODES.map(mode => {
-                      const info = WORK_MODE_INFO[mode];
-                      const active = packMode === mode;
+                  <Sec k="Where do they stand" n={status ? STATUS_INFO[status].label : 'pick one'} />
+                  <div className="lgl" role="group" aria-label="Prospect or active client">
+                    {STATUSES.map(s => {
+                      const info = STATUS_INFO[s];
+                      const active = status === s;
                       return (
                         <button
-                          key={mode}
+                          key={s}
                           className="lrow"
                           type="button"
-                          /* `aria-pressed` and not `role="radio"`, which the
-                             first version of this used and which cost the row
-                             its GROUND: §04 paints `.lgl .lrow[aria-pressed]`
-                             and has no rule for `aria-checked`, so the picked
-                             row lost the fill the `<div aria-selected>` it
-                             replaced used to get. It is also the answer
-                             `/packages` settled on for this same question —
-                             see `Chip`'s note on why a toggle button is not a
-                             radio. */
                           aria-pressed={active}
-                          onClick={() => choosePackMode(mode)}
+                          onClick={() => chooseStatus(s)}
+                        >
+                          <span className={`rad${active ? ' rad--on' : ''}`} />
+                          <span className="lrow__m">
+                            <span className="lrow__t">{info.label}</span>
+                            <span className="lrow__s">{info.sub}</span>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div style={{ ['--i' as string]: 1 }}>
+                  <Sec k="Independent or gym" n={clientType ? CLIENT_TYPE_INFO[clientType].label : 'pick one'} />
+                  <div className="lgl" role="group" aria-label="Independent or gym client">
+                    {CLIENT_TYPES.map(ct => {
+                      const info = CLIENT_TYPE_INFO[ct];
+                      const active = clientType === ct;
+                      return (
+                        <button
+                          key={ct}
+                          className="lrow"
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => chooseClientType(ct)}
                         >
                           <span className={`rad${active ? ' rad--on' : ''}`} />
                           <span className="lrow__m">
@@ -1256,27 +1400,106 @@ export function AddClientFlow({
                     })}
                   </div>
                   <p className="small" style={{ marginTop: 6 }}>
-                    {data.trainer.workMode
-                      ? <>Your profile says <b>{WORK_MODE_INFO[data.trainer.workMode].label}</b> — change it here for this client alone.</>
-                      : <>Your profile has never been asked. Whatever you pick here applies to this client alone.</>}
+                    Never both — a gym client buys from the counter&apos;s list, an
+                    independent one from yours, and this decides which.
                   </p>
                 </div>
 
-                {/* ── THE PRICE LIST THAT PICK JUST NAMED ─────────────────────
-                    One list for *Independent* or *Gym*, both for *Both*. A list
-                    with nothing on it is the case that leaves this screen — see
-                    `goDefinePacks`. */}
-                <div style={{ ['--i' as string]: 1 }}>
+                <div className="why" style={{ padding: '10px 14px', ['--i' as string]: 2 }}>
+                  <p className="why__k" style={{ marginBottom: 2 }}>
+                    {createdClientId ? 'Continue saves what you changed' : 'Continue creates the client'}
+                  </p>
+                  <p style={{ margin: 0 }}>
+                    {status === 'prospect'
+                      ? 'A prospect skips packs, the weekly plan and a program — the next step offers a one-time demo instead.'
+                      : 'An active client moves on to their pack, weekly slots and a program — all three still leave-for-later.'}
+                  </p>
+                </div>
+              </>
+            )}
+
+            {/* STEP 3, PROSPECT PATH — DEMO */}
+            {step === 3 && status === 'prospect' && (
+              <>
+                <div style={{ ['--i' as string]: 0 }}>
+                  <Sec k="Book a demo?" n={demoAt !== null ? 'one picked' : 'optional'} />
+                  <p className="small" style={{ marginTop: -4 }}>
+                    A single {DEMO_DURATION_MINUTES}-minute session, no pack and
+                    no weekly plan — just a date on your diary. Skip if they are
+                    not ready to try one yet.
+                  </p>
+                </div>
+
+                {demoDates.map((dateAt, i) => {
+                  const allSlots = demoSlotsForDate(dateAt, data.workingHours);
+                  if (allSlots.length === 0) {
+                    return (
+                      <div key={dateAt} style={{ ['--i' as string]: i + 1 }}>
+                        <Sec k={dayStamp(dateAt)} n="no working hours set for this day" />
+                      </div>
+                    );
+                  }
+                  /* Today's own hours may already be behind you — a 6am slot
+                     offered at 3pm is not a demo anybody can walk into. Every
+                     later date in the list is still wholly in the future, so
+                     this can only empty out the first row. */
+                  const slots = allSlots.filter(s => s.at > Date.now());
+                  if (slots.length === 0) {
+                    return (
+                      <div key={dateAt} style={{ ['--i' as string]: i + 1 }}>
+                        <Sec k={dayStamp(dateAt)} n="already past" />
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={dateAt} style={{ ['--i' as string]: i + 1 }}>
+                      <Sec k={dayStamp(dateAt)} n={demoAt !== null && slots.some(s => s.at === demoAt) ? 'picked' : undefined} />
+                      <div className="slots">
+                        {slots.map(slot => {
+                          const taken = demoSlotTaken(slot.at, DEMO_DURATION_MINUTES, data.sessions);
+                          const isPicked = demoAt === slot.at;
+                          if (taken) {
+                            return (
+                              <span key={slot.time} className="slot slot--held" aria-disabled="true">
+                                {slot.time}
+                                <small>booked</small>
+                              </span>
+                            );
+                          }
+                          return (
+                            <button
+                              key={slot.time}
+                              className={`slot${isPicked ? ' slot--on' : ''}`}
+                              type="button"
+                              onClick={() => setDemoAt(isPicked ? null : slot.at)}
+                            >
+                              {slot.time}
+                              <small>{isPicked ? 'picked' : 'free'}</small>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+
+            {/* STEP 3, ACTIVE PATH — MONEY */}
+            {step === 3 && status !== 'prospect' && (
+              <>
+                {/* ── THE PRICE LIST STEP 2 ALREADY NAMED ─────────────────────
+                    One list, never both (R18) — `clientType` was fixed a step
+                    ago. A list with nothing on it is the case that leaves this
+                    screen — see `goDefinePacks`. */}
+                <div style={{ ['--i' as string]: 0 }}>
                   <Sec
                     k="What you can sell them"
-                    n={
-                      picked
-                        ? '1 picked'
-                        : packMode
-                          ? `${shownPackCount} pack${shownPackCount === 1 ? '' : 's'}`
-                          : undefined
-                    }
+                    n={picked ? '1 picked' : `${shownPackCount} pack${shownPackCount === 1 ? '' : 's'}`}
                   />
+                  <p className="small" style={{ marginTop: -4, marginBottom: 10 }}>
+                    Selling {showGym ? <>{gymLabel}&apos;s</> : 'your own'} packs to this client.
+                  </p>
 
                   {/* SOLD. The picker does not come back, and the sentence
                       says why rather than leaving a disabled list to be pressed
@@ -1304,84 +1527,62 @@ export function AddClientFlow({
                     </p>
                   )}
 
-                  {!committed?.packId && !packMode && (
-                    <Card bare>
-                      <EmptyState
-                        inCard
-                        icon={<PackIcon size={22} />}
-                        title="Pick one above"
-                        body="Independent shows your own price list, Gym shows the counter's, Both shows the two of them."
+                  {!committed?.packId && showOwn && (
+                    ownPacks.length > 0 ? (
+                      <PriceList
+                        packs={ownPacks}
+                        label="Your own packs"
+                        pickedId={packId}
+                        onPick={pickPack}
                       />
-                    </Card>
+                    ) : (
+                      <Card bare>
+                        <EmptyState
+                          inCard
+                          icon={<PackIcon size={22} />}
+                          title="Your price list is empty"
+                          body="Nothing to sell them yet. Define what you charge — a session pack, a monthly fee, a single — and come back; this client is kept exactly as you left it."
+                          action={
+                            <Button variant="primary" size="sm" onClick={goDefinePacks}>
+                              Set up your packs <ArrowIcon />
+                            </Button>
+                          }
+                        />
+                      </Card>
+                    )
                   )}
 
-                  {!committed?.packId && lists.own && (
-                    <>
-                      {/* The sub-heading is drawn only on *Both*, where two
-                          lists are stacked and an unlabelled one is a price a
-                          trainer cannot attribute. On the single-list modes the
-                          section above already said whose it is. */}
-                      {lists.gym && <p className="small" style={{ margin: '10px 0 6px' }}>Your own</p>}
-                      {ownPacks.length > 0 ? (
-                        <PriceList
-                          packs={ownPacks}
-                          label="Your own packs"
-                          pickedId={packId}
-                          onPick={pickPack}
+                  {!committed?.packId && showGym && (
+                    gymPacks.length > 0 ? (
+                      <PriceList
+                        packs={gymPacks}
+                        label={`${gymLabel}'s packs`}
+                        pickedId={packId}
+                        onPick={pickPack}
+                      />
+                    ) : (
+                      <Card bare>
+                        <EmptyState
+                          inCard
+                          icon={<PackIcon size={22} />}
+                          title={`Nothing from ${gymLabel} yet`}
+                          body="The counter's prices are not on file. Add what they charge and you can pick it on the day this client pays; nothing you have typed here is lost."
+                          action={
+                            <Button variant="primary" size="sm" onClick={goDefinePacks}>
+                              Set up the gym&apos;s packs <ArrowIcon />
+                            </Button>
+                          }
                         />
-                      ) : (
-                        <Card bare>
-                          <EmptyState
-                            inCard
-                            icon={<PackIcon size={22} />}
-                            title="Your price list is empty"
-                            body="Nothing to sell them yet. Define what you charge — a session pack, a monthly fee, a single — and come back; this client is kept exactly as you left it."
-                            action={
-                              <Button variant="primary" size="sm" onClick={goDefinePacks}>
-                                Set up your packs <ArrowIcon />
-                              </Button>
-                            }
-                          />
-                        </Card>
-                      )}
-                    </>
-                  )}
-
-                  {!committed?.packId && lists.gym && (
-                    <>
-                      {lists.own && <p className="small" style={{ margin: '14px 0 6px' }}>{gymLabel}</p>}
-                      {gymPacks.length > 0 ? (
-                        <PriceList
-                          packs={gymPacks}
-                          label={`${gymLabel}'s packs`}
-                          pickedId={packId}
-                          onPick={pickPack}
-                        />
-                      ) : (
-                        <Card bare>
-                          <EmptyState
-                            inCard
-                            icon={<PackIcon size={22} />}
-                            title={`Nothing from ${gymLabel} yet`}
-                            body="The counter's prices are not on file. Add what they charge and you can pick it on the day this client pays; nothing you have typed here is lost."
-                            action={
-                              <Button variant="primary" size="sm" onClick={goDefinePacks}>
-                                Set up the gym&apos;s packs <ArrowIcon />
-                              </Button>
-                            }
-                          />
-                        </Card>
-                      )}
-                    </>
+                      </Card>
+                    )
                   )}
 
                   {/* ── WHAT THE PICK COMMITS TO, AND THE WAY OUT OF IT ───────
                       A pressed row can be pressed again to clear it and nobody
-                      guesses that, and this step still carries a Skip — so
-                      *Clear* is drawn rather than left to be discovered. The
-                      sentence beside it is the consequence in the future tense:
-                      the sale does not happen here, it happens on Continue, and
-                      this is the last moment it is still free to change. */}
+                      guesses that. The sentence beside it is the consequence in
+                      the future tense: the sale does not happen here, it
+                      happens on Continue, and this is the last moment it is
+                      still free to change. */}
                   {!committed?.packId && picked && (
                     <div
                       className="small"
@@ -1408,7 +1609,7 @@ export function AddClientFlow({
                   )}
                 </div>
 
-                <div style={{ ['--i' as string]: 2 }}>
+                <div style={{ ['--i' as string]: 1 }}>
                   <Sec k="Where they train" />
                   <div className="wk">
                     {(['floor', 'remote'] as const).map(mode => (
@@ -1430,7 +1631,7 @@ export function AddClientFlow({
                 </div>
 
                 {showSplit && (
-                  <div style={{ ['--i' as string]: 3 }}>
+                  <div style={{ ['--i' as string]: 2 }}>
                     <Sec k="The split" n={`${trainerSplit} / ${gymShare}`} />
                     <Card>
                       <KeyValueRow k={<>What <b>you</b> keep</>}>
@@ -1451,41 +1652,24 @@ export function AddClientFlow({
                   </div>
                 )}
 
-                {/* `/clients/new` carried two `.why` cards here and both were
-                    addressed to a reviewer rather than to a trainer — one
-                    explained `trainerSplitPercent` in a `<code>` tag, which the
-                    card's own *What you keep* / *The gym's share, therefore*
-                    pair already says, and the other explained `POST /v1/clients`.
-                    The FIRST is a duplicate and is gone. The SECOND is a real
-                    promise about what the next press does, so it is kept — in
-                    the trainer's words, and next to the button that does it. */}
-                <div className="why" style={{ padding: '10px 14px', ['--i' as string]: 4 }}>
+                <div className="why" style={{ padding: '10px 14px', ['--i' as string]: 3 }}>
                   <p className="why__k" style={{ marginBottom: 2 }}>
-                    {createdClientId ? 'Continue saves what you changed' : 'Continue creates the client'}
+                    {committed?.packId === null && picked ? 'Continue sells the pack' : 'Continue moves on'}
                   </p>
                   <p style={{ margin: 0 }}>
-                    {createdClientId ? (
-                      <>
-                        {trimmed || 'They'} is already on your roster — nothing here can
-                        add them twice. The week and the plan are still the two steps you
-                        can leave for later.
-                      </>
-                    ) : (
-                      <>
-                        Stop after this and they are still on your roster — the week
-                        and the plan are the two steps you can leave for later.{' '}
-                        {picked
-                          ? <>It also puts <b>{picked.name}</b> on their file.</>
-                          : 'The pack itself is sold on the day they pay.'}
-                      </>
-                    )}
+                    {trimmed || 'They'} is already on your roster — nothing here can
+                    add them twice. The week and the plan are still the two steps
+                    you can leave for later.{' '}
+                    {committed?.packId === null && picked
+                      ? <>It puts <b>{picked.name}</b> on their file.</>
+                      : 'The pack itself can still be sold on the day they pay.'}
                   </p>
                 </div>
               </>
             )}
 
-            {/* STEP 3 — WEEK */}
-            {step === 3 && (
+            {/* STEP 4 — WEEK */}
+            {step === 4 && (
               <>
                 <div style={{ ['--i' as string]: 0 }}>
                   <Sec k="Which days" n={weekdays.size ? `${weekdays.size} picked` : 'none yet'} />
@@ -1579,8 +1763,8 @@ export function AddClientFlow({
               </>
             )}
 
-            {/* STEP 4 — PLAN */}
-            {step === 4 && (
+            {/* STEP 5 — PLAN */}
+            {step === 5 && (
               <>
                 {eligibleTemplates.length === 0 ? (
                   <EmptyState
@@ -1657,10 +1841,8 @@ export function AddClientFlow({
               <Button
                 variant="primary"
                 className="adfoot__go"
-                disabled={submitting}
-                onClick={() =>
-                  void (createdClientId ? handleStep2Save() : handleCreateClient(true, true))
-                }
+                disabled={submitting || !status || !clientType}
+                onClick={() => void handleTypeContinue()}
               >
                 {submitting
                   ? 'Saving…'
@@ -1669,62 +1851,74 @@ export function AddClientFlow({
               <Button variant="ghost" disabled={submitting} onClick={() => goStep(1)}>
                 Back
               </Button>
-              {/* The Skip is about CREATING with less, so it goes once there is
-                  nothing left to create — on a return visit the only thing it
-                  could mean is *discard my edits*, and Back already does that
-                  without claiming to be a step. */}
-              {!createdClientId && (
-              <Button
-                variant="ghost"
-                disabled={submitting}
-                onClick={() => void handleCreateClient(false, false)}
-                /* The name is the whole sentence at EVERY width; only the ink
-                   changes. Below 900px the clause is 238px of a 360px foot and
-                   it restates the `.why` card sixty pixels above it — an eye
-                   has already read it there, a screen reader has not. Visible
-                   text is a subset of the name, so SC 2.5.3 holds. */
-                aria-label="Skip — sell it on the day they pay"
-              >
-                {/* TWO SPANS, ONE EVER VISIBLE, and that is not fussiness.
-                    `.btn` is `inline-flex` with `gap:7px` for an icon beside a
-                    label, so a label split into a text node plus a span becomes
-                    two flex ITEMS and the 7px gap replaces the word space —
-                    the `.msg` / `.who` / `.kv` trap this project has recorded
-                    three times, and it was live on the desk for one commit.
-                    Exactly one of these is ever `display:none`'d away, so the
-                    button always holds a single flex item and no width pays a
-                    gap it did not ask for. */}
-                <span className="adfoot__short">Skip</span>
-                <span className="adfoot__why">Skip — sell it on the day they pay</span>
-              </Button>
-              )}
             </>
           )}
 
-          {step === 3 && (
+          {step === 3 && status === 'prospect' && (
             <>
-              <Button
-                variant="primary"
-                className="adfoot__go"
-                disabled={submitting}
-                onClick={() => void handleStep3Continue()}
-              >
-                {submitting ? 'Saving…' : <>Continue <ArrowIcon /></>}
-              </Button>
+              {demoAt !== null && (
+                <Button
+                  variant="primary"
+                  className="adfoot__go"
+                  disabled={submitting}
+                  onClick={() => void handleBookDemo()}
+                >
+                  {submitting ? 'Booking…' : <>Book demo &amp; finish <ArrowIcon /></>}
+                </Button>
+              )}
               <Button variant="ghost" disabled={submitting} onClick={() => goStep(2)}>
                 Back
               </Button>
               <Button
                 variant="ghost"
                 disabled={submitting}
-                onClick={() => goTo(4)}
+                onClick={goToClient}
+              >
+                {demoAt !== null ? 'Skip for now' : 'Finish'}
+              </Button>
+            </>
+          )}
+
+          {step === 3 && status !== 'prospect' && (
+            <>
+              <Button
+                variant="primary"
+                className="adfoot__go"
+                disabled={submitting}
+                onClick={() => void handleMoneyContinue()}
+              >
+                {submitting ? 'Saving…' : <>Continue <ArrowIcon /></>}
+              </Button>
+              <Button variant="ghost" disabled={submitting} onClick={() => goStep(2)}>
+                Back
+              </Button>
+            </>
+          )}
+
+          {step === 4 && (
+            <>
+              <Button
+                variant="primary"
+                className="adfoot__go"
+                disabled={submitting}
+                onClick={() => void handleWeekContinue()}
+              >
+                {submitting ? 'Saving…' : <>Continue <ArrowIcon /></>}
+              </Button>
+              <Button variant="ghost" disabled={submitting} onClick={() => goStep(3)}>
+                Back
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={submitting}
+                onClick={() => goTo(5)}
               >
                 Skip for now
               </Button>
             </>
           )}
 
-          {step === 4 && (
+          {step === 5 && (
             <>
               {eligibleTemplates.length > 0 && selectedTemplateId && (
                 <Button
@@ -1736,7 +1930,7 @@ export function AddClientFlow({
                   {submitting ? 'Applying…' : <>Apply and finish <ArrowIcon /></>}
                 </Button>
               )}
-              <Button variant="ghost" disabled={submitting} onClick={() => goStep(3)}>
+              <Button variant="ghost" disabled={submitting} onClick={() => goStep(4)}>
                 Back
               </Button>
               <Button

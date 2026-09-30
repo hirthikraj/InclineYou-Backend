@@ -185,6 +185,14 @@ public class PackageSaleService {
         // Nothing inserted: the id belongs to a row this trainer cannot see.
         if (inserted == 0) throw ApiException.idConflict();
         UUID made = UUID.fromString((String) p.get("id"));
+
+        // A prospect who is sold a pack has, by that act, become an active
+        // client — the same rule ClientScheduleService applies when they are
+        // given a real weekly plan instead.
+        if ("prospect".equals(client.get("status"))) {
+            jdbc.update("UPDATE client SET status = 'active' WHERE id = :cid::uuid AND status = 'prospect'", p);
+        }
+
         log.info("package sold trainer={} client={} package={} fromPack={}", trainerId, clientId, made, packId != null);
         return new Sold(reads.one(trainerId, made).orElseThrow(), true);
     }

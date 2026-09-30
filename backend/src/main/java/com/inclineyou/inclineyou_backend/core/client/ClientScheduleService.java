@@ -106,8 +106,16 @@ public class ClientScheduleService {
             relink.addAll(made);
         }
         linkWorkouts(clientId, relink, zone);
-        log.info("schedule saved trainer={} client={} slots={} booked={} cancelled={}",
-                trainerId, clientId, req.slots().size(), booked, cancelled);
+
+        // A prospect who is given a real weekly plan has, by that act, become an
+        // active client — nobody is asked to say so a second time on a separate
+        // screen. An empty slot list (a delivery-mode-only save) does not count:
+        // that is not yet a plan.
+        boolean activated = "prospect".equals(client.status()) && !req.slots().isEmpty();
+        if (activated) repo.activateProspect(clientId);
+
+        log.info("schedule saved trainer={} client={} slots={} booked={} cancelled={} activated={}",
+                trainerId, clientId, req.slots().size(), booked, cancelled, activated);
 
         var summary = summaries.one(trainerId, clientId).orElseThrow();
         return new ScheduleSaved(summary.schedule(), summary.slots(), booked, cancelled,

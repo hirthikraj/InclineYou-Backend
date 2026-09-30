@@ -38,9 +38,12 @@ public class ClientScheduleJdbcRepository {
         public boolean archived() { return "archived".equals(status); }
         public boolean paused() { return "paused".equals(status); }
 
-        /** Slot booking skips a paused client and one whose membership is removed (R21, CLIENT_NOT_BOOKABLE). */
+        /** Slot booking skips a paused client and one whose membership is removed (R21, CLIENT_NOT_BOOKABLE).
+         *  A prospect is bookable too — they are the one status this can move OFF of, onto active, the day
+         *  a weekly plan actually gets set. */
         public boolean bookable() {
-            return ("active".equals(status) || "inactive".equals(status)) && !"removed".equals(membershipStatus);
+            return ("active".equals(status) || "inactive".equals(status) || "prospect".equals(status))
+                    && !"removed".equals(membershipStatus);
         }
     }
 
@@ -95,6 +98,12 @@ public class ClientScheduleJdbcRepository {
                        delivery_mode = :mode, updated_at = now()
                 WHERE client_id = :cid::uuid
                 """, p);
+    }
+
+    /** A prospect given a real weekly plan becomes an active client (see the caller). */
+    public void activateProspect(UUID clientId) {
+        jdbc.update("UPDATE client SET status = 'active' WHERE id = :cid::uuid AND status = 'prospect'",
+                Map.of("cid", clientId.toString()));
     }
 
     // ── slots ──────────────────────────────────────────────────────────────────

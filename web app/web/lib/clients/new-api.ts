@@ -4,6 +4,7 @@ import { cache } from 'react';
 
 import { api, ApiError, type ListEnvelope } from '@/lib/http/client';
 import type { Pack, PackType } from '@/lib/setup/money';
+import { DAY_MS } from '@/lib/today/time';
 
 import { ClientsApiError, getClients, getMe } from './api';
 
@@ -69,6 +70,14 @@ interface TemplateV1 {
   workouts: string[];
 }
 
+/** `SessionReadService.SessionRow`, trimmed to what the demo picker's clash
+ *  check needs. */
+interface SessionV1 {
+  scheduledAt: number;
+  endsAt: number;
+  status: string;
+}
+
 /* ------------------------------------------ the shapes the flow draws ── */
 
 export interface WorkingHourWire {
@@ -95,12 +104,17 @@ export interface TemplateWire {
   dayLabels: string[];
 }
 
+/** A trainer's other booking, trimmed to what the demo step's clash check
+ *  needs to grey out an already-taken slot. */
+export interface UpcomingSessionWire {
+  scheduledAt: number;
+  endsAt: number;
+}
+
 export interface NewClientData {
   trainer: {
     id: string;
     name: string;
-    /** `both` when the trainer has a gym on file: step 2 then asks own or gym (R18). */
-    workMode: 'independent' | 'gym' | 'both' | null;
     gymName: string | null;
     gymSharePercent: number | null;
   };
@@ -109,6 +123,10 @@ export interface NewClientData {
   /** The ACTIVE price list, both owners. */
   packs: Pack[];
   templates: TemplateWire[];
+  /** The trainer's other bookings over the demo picker's 14-day window —
+   *  read-only quietly (see below): a failed fetch just means nothing greys
+   *  out, not that a client cannot be added. */
+  sessions: UpcomingSessionWire[];
   setupComplete: boolean;
   trainerName: string;
   trainerPhone: string | null;
@@ -122,8 +140,22 @@ function packType(p: PackWire): PackType {
   return p.sessions === 1 ? 'single' : 'session_pack';
 }
 
+/** `yyyy-MM-dd` for a local-calendar instant — `/v1/sessions`' `from`/`to`. */
+function isoDate(at: number): string {
+  const d = new Date(at);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+/** The demo picker shows 14 days; one extra on each side covers the server
+ *  resolving the day boundary in the trainer's own timezone rather than this
+ *  server's. */
+const DEMO_WINDOW_DAYS = 14;
+
 export const getNewClientData = cache(async (): Promise<NewClientData> => {
-  const [me, hours, clients, templates, packs] = await Promise.all([
+  const now = Date.now();
+  const [me, hours, clients, templates, packs, sessions] = await Promise.all([
     // L1 and L3 are the roster's own cached reads, so /clients fetches each once.
     shared(getMe()),
     get<ListEnvelope<WorkingHourV1>>('/v1/working-hours'),
@@ -132,13 +164,18 @@ export const getNewClientData = cache(async (): Promise<NewClientData> => {
     /* The one read allowed to fail quietly: the price list decides what step 2
        can DRAW, not whether a client can be added. */
     get<ListEnvelope<PackWire>>('/v1/packs').catch((): ListEnvelope<PackWire> => ({ items: [] })),
+    /* Also allowed to fail quietly: greying out an already-booked demo slot is
+       a courtesy, not a gate — a trainer can still double-book by hand, the
+       same as `BookPanel` allows everywhere else. */
+    get<ListEnvelope<SessionV1>>(
+      `/v1/sessions?from=${isoDate(now - DAY_MS)}&to=${isoDate(now + (DEMO_WINDOW_DAYS + 1) * DAY_MS)}`,
+    ).catch((): ListEnvelope<SessionV1> => ({ items: [] })),
   ]);
 
   return {
     trainer: {
       id: me.id,
       name: me.name ?? '',
-      workMode: me.gymName ? 'both' : 'independent',
       gymName: me.gymName,
       // The split is set per pack sale now (R3); the flow's default stands in.
       gymSharePercent: null,
@@ -173,6 +210,9 @@ export const getNewClientData = cache(async (): Promise<NewClientData> => {
       description: t.description,
       dayLabels: Array.from({ length: t.days }, (_, i) => t.workouts[i] ?? `Day ${i + 1}`),
     })),
+    sessions: (sessions?.items ?? [])
+      .filter((s) => s.status !== 'cancelled')
+      .map((s) => ({ scheduledAt: s.scheduledAt, endsAt: s.endsAt })),
     setupComplete: me.setupCompletedAt !== null,
     trainerName: me.name ?? '',
     trainerPhone: me.phone,

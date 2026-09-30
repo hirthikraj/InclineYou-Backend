@@ -106,7 +106,7 @@ const DEAD_PACKAGE = new Set(['cancelled', 'canceled', 'completed', 'expired', '
 
 /* -------------------------------------------------------------------- types */
 
-export type RosterStatus = 'active' | 'paused' | 'invited' | 'archived' | 'inactive';
+export type RosterStatus = 'active' | 'paused' | 'invited' | 'archived' | 'inactive' | 'prospect';
 export type AttentionKind =
   | 'setup'
   | 'overdue'
@@ -344,6 +344,7 @@ function readStatus(raw: string): RosterStatus {
   if (value === 'invited') return 'invited';
   if (value === 'archived') return 'archived';
   if (value === 'inactive') return 'inactive';
+  if (value === 'prospect') return 'prospect';
   return 'active';
 }
 
@@ -813,6 +814,7 @@ function readTag(input: {
   hasAttended: boolean;
 }): ClientTag {
   if (input.status === 'paused') return 'paused';
+  if (input.status === 'prospect') return 'prospect';
   if (input.status === 'invited' && !input.hasAttended) return 'prospect';
   /* `inactive` is the server's own word for a roster row nobody has touched;
    * it is the same thing this screen calls lapsed, so it is not a seventh tag. */

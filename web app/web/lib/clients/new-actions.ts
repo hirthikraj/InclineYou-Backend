@@ -52,6 +52,10 @@ export interface CreateClientInput {
   name: string;
   phone: string;
   clientType: 'independent' | 'gym';
+  /** Omitted = active, the server's own default. The add flow's Type step
+   *  sends `prospect` explicitly; nothing else creates a client any other
+   *  status. */
+  status?: 'active' | 'prospect';
   deliveryMode: 'floor' | 'remote';
 }
 
@@ -71,6 +75,7 @@ export async function createClient(input: CreateClientInput): Promise<CreatedCli
         name: input.name,
         phone: e164(input.phone),
         clientType: input.clientType,
+        status: input.status,
         schedule: { deliveryMode: input.deliveryMode },
       },
     });

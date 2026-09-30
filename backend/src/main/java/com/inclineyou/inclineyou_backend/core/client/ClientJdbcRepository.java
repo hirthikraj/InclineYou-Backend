@@ -75,9 +75,10 @@ public class ClientJdbcRepository {
         p.put("phone", req.phone());
         p.put("dob", req.dateOfBirth() == null ? null : Date.valueOf(req.dateOfBirth()));
         p.put("type", req.clientType());
+        p.put("status", req.status());
         jdbc.update("""
-                INSERT INTO client (id, trainer_id, name, phone, date_of_birth, client_type)
-                VALUES (:cid::uuid, :tid::uuid, :name, :phone, :dob, :type)
+                INSERT INTO client (id, trainer_id, name, phone, date_of_birth, client_type, status)
+                VALUES (:cid::uuid, :tid::uuid, :name, :phone, :dob, :type, :status)
                 """, p);
     }
 

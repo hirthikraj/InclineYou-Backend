@@ -25,11 +25,16 @@ public record CreateClientRequest(
         LocalDate dateOfBirth,
         @NotNull(message = "independent or gym, required")
         @Pattern(regexp = "independent|gym", message = "independent or gym, required") String clientType,
+        /* Null = active, the default before this existed. The only other
+         * status a client is ever CREATED into is prospect — paused, inactive
+         * and archived are all reached later, through their own verbs. */
+        @Pattern(regexp = "active|prospect", message = "active or prospect") String status,
         @Valid Schedule schedule
 ) {
     public CreateClientRequest {
         name = Text.strip(name);
         phone = Text.orNull(phone);
+        status = status == null || status.isBlank() ? "active" : status;
     }
 
     /** The {@code client_schedule} defaults the add flow's step 2 collects. */
