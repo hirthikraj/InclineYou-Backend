@@ -1,540 +1,159 @@
 package com.inclineyou.inclineyou_backend.core.exercise;
 
-import jakarta.validation.constraints.NotBlank;
+import com.inclineyou.inclineyou_backend.core.exercise.ExerciseJdbcRepository.After;
+import com.inclineyou.inclineyou_backend.core.exercise.ExerciseJdbcRepository.Filter;
+import com.inclineyou.inclineyou_backend.core.exercise.ExerciseJdbcRepository.Hit;
+import com.inclineyou.inclineyou_backend.core.exercise.dto.ExerciseItem;
+import com.inclineyou.inclineyou_backend.core.exercise.dto.ExerciseMeta;
+import com.inclineyou.inclineyou_backend.core.exercise.dto.ExercisePage;
+import com.inclineyou.inclineyou_backend.core.exercise.dto.ExerciseRequest;
+import com.inclineyou.inclineyou_backend.core.exercise.dto.PatchExerciseRequest;
+import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
+import com.inclineyou.inclineyou_backend.shared.wire.Cursor;
+import com.inclineyou.inclineyou_backend.shared.wire.IfMatch;
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
-import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.server.ResponseStatusException;
 
-import java.sql.Timestamp;
-import java.time.Instant;
-import java.util.*;
-import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 
+/**
+ * The exercise library (api-contract 1.1, Programs L6 and A9–A10): the global,
+ * text-only library plus the trainer's own custom exercises.
+ *
+ * <p>Searching is a typeahead over ~1,300 rows, per keystroke, and pages by
+ * keyset. Without a {@code q} the order is {@code name, id}. With one it is
+ * relevance — an exact-prefix match first, then trigram similarity (rounded to
+ * four places, so it can be compared again on the next page) — then
+ * {@code name, id}; the cursor carries all of those.
+ *
+ * <p>Only customs are writable. A global id answers 404 to a PATCH or DELETE, the
+ * same "not yours" as everywhere else. A retired custom leaves search and the
+ * pickers and frees its name, but a plan or a past log that holds its id still
+ * resolves the name — reads of those never filter on {@code deleted_at}.
+ */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ExerciseService {
 
-    private final NamedParameterJdbcTemplate jdbc;
-    /** Static, not injected — see WorkingHoursService on why a mapper bean is not assumed. */
-    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
-            new com.fasterxml.jackson.databind.ObjectMapper();
+    private static final int DEFAULT_LIMIT = 50;
+    private static final int MAX_LIMIT = 200;
+    private static final int MAX_Q = 100;
 
-    // ── DTOs ──────────────────────────────────────────────────────────────────
+    private final ExerciseJdbcRepository repo;
 
-    public record ExerciseResponse(
-            String id,
-            String name,
-            String muscleGroup,
-            /** "chest", "upper legs" — the ten-way split the library groups by. Null on custom. */
-            String bodyPart,
-            /** "pectorals", "quads" — the primary muscle. Mirrors muscleGroup on seeded rows. */
-            String target,
-            String equipment,
-            String movementPattern,
-            String description,
-            /** 180×180 JPG thumbnail. © Gym visual — https://gymvisual.com/ */
-            String imageUrl,
-            /** 180×180 animation GIF, the demo loop. Same attribution as imageUrl. */
-            String videoUrl,
-            String level,
-            boolean isCustom,
-            long createdAt,
-            /*
-             * V12's `log_type` — 'weight_reps' | 'reps'. NULL on every seeded row
-             * and read as 'weight_reps', which is what all of them are.
-             *
-             * It decides whether the log grid draws a load field or the words
-             * "no load", and whether the record test runs its reps branch — where
-             * there is no plate step, so every real record is a loud one. The
-             * column has existed since V12 and travels in the sync envelope, so
-             * the phone reads it out of SQLite; this DTO never carried it, which
-             * left the web INFERRING the answer from whether past sets had a load.
-             * That inference is a good guess and it is still a guess, and it has
-             * nothing at all to go on for an exercise nobody has logged yet.
-             *
-             * APPENDED LAST — the additive-only contract, not tidiness.
-             */
-            String logType,
-            /*
-             * ── APPENDED BY V9 ───────────────────────────────────────────────
-             * 'published' | 'draft'. Drafts exist only on custom rows.
-             */
-            String status,
-            /** Muscles worked besides {@code target}. Never null — [] until authored. */
-            List<String> secondaryTargets,
-            /**
-             * Short coaching cues. Never null — [] until authored, and
-             * deliberately unseeded: see V9 on why a generated cue must not be
-             * served as a real one.
-             */
-            List<String> formCues
-    ) {}
+    /** What a create answers with: the exercise, and whether this call made it (201) or found it (200). */
+    public record Made(ExerciseItem exercise, boolean created) {}
 
-    public record SearchResult(List<ExerciseResponse> exercises, int total) {}
+    @Transactional(readOnly = true)
+    public ExercisePage search(UUID trainerId, String q, String bodyPart, String equipment, String level,
+                               Boolean custom, Integer limit, String cursor, boolean includeTotal) {
+        int size = Cursor.limit(limit, DEFAULT_LIMIT, MAX_LIMIT);
+        String text = q == null || q.isBlank() ? null : q.strip();
+        if (text != null && text.length() > MAX_Q) throw ApiException.validation("q: at most " + MAX_Q + " characters");
+        var filter = new Filter(text, blankToNull(bodyPart), blankToNull(equipment), blankToNull(level), custom);
 
-    /** One card on the library's *By categories* view. */
-    public record Category(String muscleGroup, int count) {}
-
-    /**
-     * The *By categories* view — V9. {@code total} is every non-draft row the
-     * caller can see; {@code uncategorised} is the part of it with no muscle
-     * group, which gets no card of its own.
-     */
-    public record CategoriesResponse(List<Category> categories, int total, int uncategorised) {}
-
-    /**
-     * The filter vocabularies, read off the library rather than hard-coded.
-     *
-     * <p>{@code levels} comes back empty since V21: the current dataset does not
-     * grade exercises beginner/expert. The list and the {@code level} filter stay
-     * on the API — an empty vocabulary renders as no filter, whereas a removed
-     * field breaks whichever client asks for it next.
-     */
-    public record MetaResponse(
-            List<String> muscleGroups,
-            List<String> bodyParts,
-            List<String> targets,
-            List<String> equipment,
-            List<String> levels
-    ) {}
-
-    public record CreateExerciseRequest(
-            @NotBlank String name,
-            String muscleGroup,
-            String equipment,
-            String movementPattern,
-            String description,
-            String imageUrl,
-            String videoUrl,
-            /*
-             * 'weight_reps' | 'reps'; null defaults to 'weight_reps', the same
-             * default the sync push applies (SyncService, custom exercise insert).
-             *
-             * Set once at creation and never updated, because V12 says so: every
-             * set already recorded against an exercise stops making sense if this
-             * changes. Without it on this request a custom exercise created over
-             * REST could only ever be a weight exercise, so the web had no way to
-             * add a chin-up — which the phone has been able to do since V12.
-             */
-            String logType,
-            /* ---- V9 ---- */
-            /** The primary muscle. Optional; the library's filter reads it. */
-            String target,
-            /**
-             * Only the literal 'draft' makes a draft; anything else — null, a
-             * typo — is published, because a movement silently filed as a draft
-             * is one that vanishes from the library its author is looking at.
-             */
-            String status
-    ) {}
-
-    // ── Search ────────────────────────────────────────────────────────────────
-
-    /**
-     * The most exercises {@code ?ids=} will resolve in one call.
-     *
-     * <p>A ceiling rather than a silent truncation: a caller that asks for 800
-     * names and gets 600 has no way to tell which 200 are missing, and would draw
-     * a set log with a blank where the exercise should be. Over the limit is a
-     * {@code 400} saying so. Six hundred is already far past the real caller —
-     * the largest genuine ask is a session's movements plus a client's history,
-     * which is tens.
-     */
-    private static final int MAX_IDS = 600;
-
-    public SearchResult search(UUID trainerId, String ids, String q, String source, String muscleGroup,
-                               String bodyPart, String target, String equipment, String level,
-                               int page, int size) {
-        size = Math.min(size, 100);
-
-        var params = new HashMap<String, Object>();
-        params.put("tid",    trainerId.toString());
-        params.put("limit",  size);
-        params.put("offset", (long) page * size);
-
-        // Build WHERE dynamically — avoids null-param type inference issues with ILIKE
-        var conditions = new ArrayList<String>();
-        conditions.add("deleted_at IS NULL");
-        conditions.add("(origin = 'inclineyou' OR trainer_id = :tid::uuid)");
-
-        /*
-         * ?ids=a,b,c — resolve a known handful of UUIDs to their rows.
-         *
-         * The phone holds the library in SQLite and joins locally; this half
-         * holds nothing, so every screen that draws a set log, a program row or
-         * a plan had to pull the whole library (`?size=2000`) to turn six UUIDs
-         * into six names. One request, but the largest response the API serves,
-         * asked for on load, on every one of those screens.
-         *
-         * Two things this must not do, both of which would be worse than the
-         * problem it solves:
-         *
-         *   · A malformed id must never silently drop out of the filter. Ids
-         *     are parsed strictly and an unparseable one is a 400 — the
-         *     alternative returns a shorter list that looks complete.
-         *   · An `ids` param that resolves to nothing must return NOTHING. If an
-         *     empty id set fell through to "no filter" the caller would get the
-         *     entire library back for an empty basket, which is the exact
-         *     response this parameter exists to stop.
-         *
-         * Paging is ignored when it is present — the caller named the rows it
-         * wants, so a `size=20` default silently keeping the first twenty of
-         * thirty named ids is the same missing-name bug in another costume.
-         */
-        boolean byIds = ids != null && !ids.isBlank();
-        if (byIds) {
-            var parsed = parseIds(ids);
-            if (parsed.isEmpty()) return new SearchResult(List.of(), 0);
-            params.put("ids", parsed);
-            conditions.add("id IN (:ids)");
+        List<Hit> hits = repo.search(trainerId, filter, after(cursor, text != null), size);
+        boolean more = hits.size() > size;
+        List<Hit> page = more ? hits.subList(0, size) : hits;
+        String next = null;
+        if (more) {
+            Hit last = page.getLast();
+            String key = text != null ? last.tier() + "|" + last.similarity() + "|" + last.item().name() : last.item().name();
+            next = Cursor.encode(key, last.item().id());
         }
-
-        /*
-         * ?source= — V9. Not applied to an `ids` read: a caller that named its
-         * rows is resolving names for a log or a plan, and a draft that is
-         * already in one must still come back with its name.
-         */
-        if (!byIds) conditions.add(sourcePredicate(source));
-
-        /*
-         * `q` matches the four columns a trainer actually searches by — "quads"
-         * and "hinge" find movements whose names say neither. Not `description`:
-         * prose matches everything and ranks nothing.
-         */
-        if (q != null && !q.isBlank()) {
-            params.put("q", q.strip());
-            conditions.add("(name ILIKE '%' || :q || '%' OR target ILIKE '%' || :q || '%'"
-                    + " OR movement_pattern ILIKE '%' || :q || '%' OR body_part ILIKE '%' || :q || '%')");
-        }
-        if (muscleGroup != null && !muscleGroup.isBlank()) {
-            params.put("muscleGroup", muscleGroup);
-            conditions.add("muscle_group = :muscleGroup");
-        }
-        if (bodyPart != null && !bodyPart.isBlank()) {
-            params.put("bodyPart", bodyPart);
-            conditions.add("body_part = :bodyPart");
-        }
-        if (target != null && !target.isBlank()) {
-            params.put("target", target);
-            conditions.add("target = :target");
-        }
-        if (equipment != null && !equipment.isBlank()) {
-            params.put("equipment", equipment);
-            conditions.add("equipment = :equipment");
-        }
-        if (level != null && !level.isBlank()) {
-            params.put("level", level);
-            conditions.add("level = :level");
-        }
-
-        String where = "WHERE " + String.join(" AND ", conditions);
-
-        var rows = jdbc.queryForList(
-                "SELECT " + EXERCISE_COLUMNS +
-                " FROM exercise " + where +
-                " ORDER BY (origin <> 'inclineyou') ASC, name ASC" +
-                (byIds ? "" : " LIMIT :limit OFFSET :offset"),
-                params);
-
-        var exercises = rows.stream().map(this::toResponse).toList();
-
-        // With `ids` the answer is what came back — counting the same predicate a
-        // second time would only ever restate `exercises.size()`, and one of the
-        // two would be a lie the moment a row was deleted between the queries.
-        if (byIds) return new SearchResult(exercises, exercises.size());
-
-        Integer total = jdbc.queryForObject(
-                "SELECT COUNT(*) FROM exercise " + where, params, Integer.class);
-
-        return new SearchResult(exercises, total == null ? 0 : total);
+        return new ExercisePage(page.stream().map(Hit::item).toList(), next,
+                includeTotal ? repo.count(trainerId, filter) : null);
     }
 
-    /**
-     * The library a trainer is browsing, by where a row came from.
-     *
-     * <ul>
-     *   <li>{@code incline} — the catalogue ({@code origin = 'inclineyou'});</li>
-     *   <li>{@code mine} — their own finished movements;</li>
-     *   <li>{@code draft} — their own unfinished ones (drafts exist only on
-     *       custom rows, so this cannot surface anybody else's);</li>
-     *   <li>anything else, including absent — everything but drafts. An unknown
-     *       value falls through to the default rather than answering an empty
-     *       library, which would read as "you have no exercises".</li>
-     * </ul>
-     * Always inside the caller-visibility predicate above, so {@code mine} and
-     * {@code draft} can never reach another trainer's rows.
-     */
-    private static String sourcePredicate(String source) {
-        String s = source == null ? "" : source.strip().toLowerCase();
-        return switch (s) {
-            case "incline" -> "origin = 'inclineyou' AND status <> 'draft'";
-            case "mine"    -> "origin = 'trainer' AND status <> 'draft'";
-            case "draft"   -> "origin = 'trainer' AND status = 'draft'";
-            default        -> "status <> 'draft'";
-        };
+    @Transactional(readOnly = true)
+    public ExerciseMeta meta(UUID trainerId) {
+        return new ExerciseMeta(repo.facet(trainerId, "body_part"), repo.facet(trainerId, "equipment"),
+                repo.facet(trainerId, "level"), repo.total(trainerId));
     }
 
-    /**
-     * The one row of columns every read of this table selects. {@code image_url}
-     * and {@code video_url} are gone from the table (V22 — text-only library) but
-     * stay on the DTO as null: a response field is never removed.
-     */
-    private static final String EXERCISE_COLUMNS =
-            "id::text, name, muscle_group, body_part, target, equipment, movement_pattern, " +
-            "description, level, origin, created_at, log_type, " +
-            "status, secondary_targets::text, form_cues::text";
-
-    // ── One exercise ──────────────────────────────────────────────────────────
-
-    /**
-     * One row, whole — V9, for the exercise info panel. Visible means what the
-     * list means (the catalogue, or the caller's own custom rows, drafts
-     * included); anything else is a 404, not a 403, so the route cannot confirm
-     * that somebody else's private movement exists.
-     */
-    public ExerciseResponse get(UUID trainerId, UUID id) {
-        var rows = jdbc.queryForList(
-                "SELECT " + EXERCISE_COLUMNS + " FROM exercise" +
-                " WHERE id = :id::uuid AND deleted_at IS NULL" +
-                " AND (origin = 'inclineyou' OR trainer_id = :tid::uuid)",
-                Map.of("id", id.toString(), "tid", trainerId.toString()));
-        if (rows.isEmpty()) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Exercise not found");
-        return toResponse(rows.get(0));
+    @Transactional(readOnly = true)
+    public ExerciseItem get(UUID trainerId, UUID id) {
+        return repo.find(trainerId, id).orElseThrow(() -> ApiException.notFound("That exercise is not in the library."));
     }
-
-    // ── Categories ────────────────────────────────────────────────────────────
-
-    /**
-     * The *By categories* view — V9.
-     *
-     * <p>Counts the CALLER's library: the catalogue plus their own custom rows,
-     * drafts excluded, which is exactly what the default list read shows — so a
-     * card saying 34 opens a list of 34.
-     *
-     * <p>Ordered by the catalogue's muscle-group list ({@code /v1/exercises/meta}'s
-     * order), <b>never by count</b>: a grid that reshuffles every time a trainer
-     * adds a movement is one nobody can find their way around by position. A
-     * group only a custom row uses comes after the catalogue's, alphabetically.
-     * Empty groups get no card, and rows with no group are counted in
-     * {@code uncategorised} rather than drawn as a card called "null".
-     */
-    public CategoriesResponse categories(UUID trainerId) {
-        var rows = jdbc.queryForList("""
-                SELECT muscle_group, count(*) AS n,
-                       bool_or(origin = 'inclineyou') AS in_catalogue
-                FROM exercise
-                WHERE deleted_at IS NULL AND status <> 'draft'
-                  AND (origin = 'inclineyou' OR trainer_id = :tid::uuid)
-                GROUP BY muscle_group
-                """, Map.of("tid", trainerId.toString()));
-
-        var catalogueOrder = meta().muscleGroups();
-        int total = 0;
-        int uncategorised = 0;
-        var cards = new ArrayList<Category>();
-        for (var r : rows) {
-            int n = ((Number) r.get("n")).intValue();
-            total += n;
-            String group = str(r.get("muscle_group"));
-            if (group == null || group.isBlank()) uncategorised += n;
-            else if (n > 0) cards.add(new Category(group, n));
-        }
-        cards.sort(Comparator
-                .comparingInt((Category c) -> {
-                    int i = catalogueOrder.indexOf(c.muscleGroup());
-                    return i < 0 ? Integer.MAX_VALUE : i;
-                })
-                .thenComparing(Category::muscleGroup, String.CASE_INSENSITIVE_ORDER));
-        return new CategoriesResponse(cards, total, uncategorised);
-    }
-
-    private ExerciseResponse toResponse(Map<String, Object> r) {
-        return new ExerciseResponse(
-                str(r.get("id")),
-                str(r.get("name")),
-                str(r.get("muscle_group")),
-                str(r.get("body_part")),
-                str(r.get("target")),
-                str(r.get("equipment")),
-                str(r.get("movement_pattern")),
-                str(r.get("description")),
-                null,
-                null,
-                str(r.get("level")),
-                !"inclineyou".equals(str(r.get("origin"))),
-                toEpochMilli(r.get("created_at")),
-                str(r.get("log_type")),
-                r.get("status") == null ? "published" : str(r.get("status")),
-                stringList(r.get("secondary_targets")),
-                stringList(r.get("form_cues")));
-    }
-
-    /**
-     * A JSONB list of strings, or [] — never null, because the web types both
-     * lists as present arrays. A value that is not a list of strings (a
-     * hand-edited row) also reads as [] rather than failing the whole page.
-     */
-    private List<String> stringList(Object raw) {
-        if (raw == null) return List.of();
-        try {
-            var parsed = JSON.readValue(raw.toString(), Object.class);
-            if (!(parsed instanceof List<?> list)) return List.of();
-            var out = new ArrayList<String>();
-            for (Object o : list) if (o instanceof String s && !s.isBlank()) out.add(s);
-            return out;
-        } catch (Exception e) {
-            return List.of();
-        }
-    }
-
-    /**
-     * Splits `a,b,c` into UUIDs. Blank segments are tolerated — a trailing comma
-     * from a join is a formatting slip, not a missing row — but a segment with
-     * characters in it that is not a UUID is a 400. See the note in search().
-     */
-    private List<UUID> parseIds(String raw) {
-        var out = new ArrayList<UUID>();
-        for (String part : raw.split(",")) {
-            String token = part.strip();
-            if (token.isEmpty()) continue;
-            try {
-                out.add(UUID.fromString(token));
-            } catch (IllegalArgumentException e) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Not an exercise id: " + token);
-            }
-        }
-        if (out.size() > MAX_IDS) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Too many ids: " + out.size() + " (max " + MAX_IDS + ")");
-        }
-        return out;
-    }
-
-    // ── Meta ──────────────────────────────────────────────────────────────────
-
-    public MetaResponse meta() {
-        var groups = stringColumn("""
-                SELECT DISTINCT muscle_group AS val FROM exercise
-                WHERE origin = 'inclineyou' AND deleted_at IS NULL AND muscle_group IS NOT NULL
-                ORDER BY val
-                """);
-
-        var parts = stringColumn("""
-                SELECT DISTINCT body_part AS val FROM exercise
-                WHERE origin = 'inclineyou' AND deleted_at IS NULL AND body_part IS NOT NULL
-                ORDER BY val
-                """);
-
-        var targets = stringColumn("""
-                SELECT DISTINCT target AS val FROM exercise
-                WHERE origin = 'inclineyou' AND deleted_at IS NULL AND target IS NOT NULL
-                ORDER BY val
-                """);
-
-        var equips = stringColumn("""
-                SELECT DISTINCT equipment AS val FROM exercise
-                WHERE origin = 'inclineyou' AND deleted_at IS NULL AND equipment IS NOT NULL
-                ORDER BY val
-                """);
-
-        // Empty since V21 — see MetaResponse. Kept so the shape does not change.
-        var levels = stringColumn("""
-                SELECT DISTINCT level AS val FROM exercise
-                WHERE origin = 'inclineyou' AND deleted_at IS NULL AND level IS NOT NULL
-                ORDER BY val
-                """);
-
-        return new MetaResponse(groups, parts, targets, equips, levels);
-    }
-
-    // ── Custom exercise create ─────────────────────────────────────────────────
 
     @Transactional
-    public ExerciseResponse createCustom(UUID trainerId, CreateExerciseRequest req) {
-        UUID id = UUID.randomUUID();
-        Instant now = Instant.now();
-
-        var params = new HashMap<String, Object>();
-        params.put("id",              id.toString());
-        params.put("tid",             trainerId.toString());
-        params.put("name",            req.name());
-        params.put("muscleGroup",     req.muscleGroup());
-        params.put("equipment",       req.equipment());
-        params.put("movementPattern", req.movementPattern());
-        params.put("description",     req.description());
-        params.put("logType",         logType(req.logType()));
-        params.put("target",          target(req.target()));
-        params.put("status",          "draft".equals(req.status()) ? "draft" : "published");
-        params.put("now",             Timestamp.from(now));
-
-        // tenant_id is left unstamped on purpose — `stamp_tenant_id_if_trainer`
-        // (a BEFORE INSERT trigger) fills it from the active workspace or the
-        // trainer's home tenant, which is what `exercise_origin_ownership`
-        // requires alongside origin = 'trainer'.
-        jdbc.update("""
-                INSERT INTO exercise (id, name, muscle_group, equipment, movement_pattern,
-                    description, log_type, target, status,
-                    origin, trainer_id, created_at, updated_at)
-                VALUES (:id::uuid, :name, :muscleGroup, :equipment, :movementPattern,
-                    :description, :logType, :target, :status,
-                    'trainer', :tid::uuid, :now, :now)
-                """, params);
-
-        // bodyPart stays null: it is the seeded library's ten-way taxonomy, and
-        // asking a trainer inventing "Ananya's shoulder rehab" to place it there
-        // is a form to fill in for the library's benefit, not theirs. `target` is
-        // different since V9 — the redesigned form asks for it as the primary
-        // muscle, and it is what the library's filter reads. A custom movement
-        // gets no generated cues or secondary targets: [] until somebody writes
-        // them. imageUrl/videoUrl are always null now — V22 dropped the columns.
-        return new ExerciseResponse(
-                id.toString(), req.name(), req.muscleGroup(), null, target(req.target()), req.equipment(),
-                req.movementPattern(), req.description(), null, null,
-                null, true, now.toEpochMilli(), logType(req.logType()),
-                (String) params.get("status"), List.of(), List.of()
-        );
+    public Made create(UUID trainerId, ExerciseRequest body) {
+        UUID id = body.id() == null ? UUID.randomUUID() : body.id();
+        var existing = repo.ownership(trainerId, id);
+        if (existing.isPresent()) {
+            if (!existing.get()) throw ApiException.idConflict();
+            return new Made(get(trainerId, id), false);
+        }
+        requireFreeName(trainerId, body.name(), null);
+        try {
+            repo.insert(id, trainerId, body);
+        } catch (DuplicateKeyException e) {
+            throw taken(e);
+        }
+        log.info("custom exercise created trainer={} exercise={}", trainerId, id);
+        return new Made(get(trainerId, id), true);
     }
 
-    /**
-     * 'weight_reps' | 'reps'. Anything else — including null — becomes
-     * 'weight_reps', matching the sync push's `strOrDefault` on the same column
-     * rather than 400ing. Two writers of one column that disagree about an
-     * unrecognised value would give the same custom exercise two log types
-     * depending on which half created it.
-     */
-    private static String logType(String raw) {
-        if (raw == null) return "weight_reps";
-        String value = raw.trim().toLowerCase();
-        return value.equals("reps") ? "reps" : "weight_reps";
+    /** If-Match is honoured when sent (412), not required: a PATCH sends only what changed. */
+    @Transactional
+    public ExerciseItem patch(UUID trainerId, UUID id, String ifMatch, PatchExerciseRequest body) {
+        if (body.isEmpty()) throw ApiException.validation("body: nothing to change");
+        ExerciseItem row = repo.lockCustom(trainerId, id).orElseThrow(() -> ApiException.notFound("That exercise is not yours."));
+        IfMatch.check(ifMatch, row.version(), "This exercise changed since you opened it. Reload it and make the change again.");
+        if (body.name() != null) requireFreeName(trainerId, body.name().value(), id);
+        try {
+            repo.update(id, body);
+        } catch (DuplicateKeyException e) {
+            throw taken(e);
+        }
+        return get(trainerId, id);
     }
 
-    /** Trimmed, blank as null, cut at the column's 50 like the other short fields. */
-    private static String target(String raw) {
-        if (raw == null || raw.isBlank()) return null;
-        String value = raw.strip();
-        return value.length() > 50 ? value.substring(0, 50) : value;
+    /** Soft, and again is 204 again. Anything that is not the trainer's own custom is 404. */
+    @Transactional
+    public void delete(UUID trainerId, UUID id) {
+        var owner = repo.ownership(trainerId, id);
+        if (owner.isEmpty()) throw ApiException.notFound("That exercise is not yours.");
+        if (!owner.get()) {
+            if (repo.retired(trainerId, id)) return;
+            throw ApiException.notFound("That exercise is not yours.");
+        }
+        repo.retire(id);
+        log.info("custom exercise retired trainer={} exercise={}", trainerId, id);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private List<String> stringColumn(String sql) {
-        return jdbc.queryForList(sql, Map.of())
-                .stream().map(r -> str(r.get("val"))).toList();
+    private void requireFreeName(UUID trainerId, String name, UUID except) {
+        if (repo.nameTaken(trainerId, name, except)) throw nameTaken();
     }
 
-    private String str(Object v) {
-        return v == null ? null : v.toString();
+    private static ApiException nameTaken() {
+        return ApiException.conflict("EXERCISE_NAME_TAKEN", "You already have an exercise with that name.");
     }
 
-    private long toEpochMilli(Object v) {
-        if (v instanceof java.sql.Timestamp ts)           return ts.toInstant().toEpochMilli();
-        if (v instanceof java.time.OffsetDateTime odt)    return odt.toInstant().toEpochMilli();
-        if (v instanceof java.time.LocalDateTime ldt)     return ldt.toInstant(java.time.ZoneOffset.UTC).toEpochMilli();
-        if (v instanceof java.time.Instant i)             return i.toEpochMilli();
-        return 0L;
+    /** A unique violation is the name (the race past the check) unless it was the id. */
+    private static ApiException taken(DuplicateKeyException e) {
+        return String.valueOf(e.getMessage()).contains("uq_exercise_custom_name") ? nameTaken() : ApiException.idConflict();
+    }
+
+    /** The previous page's last row, read back out of the cursor; a cursor this server did not make is a 400. */
+    private static After after(String raw, boolean ranked) {
+        Cursor c = Cursor.decode(raw);
+        if (c == null) return null;
+        try {
+            if (!ranked) return new After(0, "0", c.key(), c.id());
+            String[] parts = c.key().split("\\|", 3);
+            return new After(Integer.parseInt(parts[0]), new java.math.BigDecimal(parts[1]).toPlainString(), parts[2], c.id());
+        } catch (RuntimeException e) {
+            throw ApiException.validation("cursor: not a cursor from this list");
+        }
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.strip();
     }
 }

@@ -41,10 +41,12 @@ docker compose -f ../docker-compose.yml up -d   # Postgres 16 + Redis 7
 ./scripts/seed-sample-month.sh <phone>          # 6 clients, one month — the small seed
 ./scripts/seed-full-demo.sh <phone>             # 44 clients, every feature — the big seed
 ./scripts/seed-realistic-20.sh <phone>          # 20 clients, a plausible week — the realistic seed
+./scripts/seed-certified-programs.sh          # 4 InclineYou library programs (is_sample) — no phone, the library has no owner
+./scripts/seed-program-data.sh <phone>          # exercises for the client plans, 6 templates, 4 standalone workouts — layer it on a trainer seed
 python3 scripts/refresh-schema-xml.py           # schema.xml + schema.html from the live db; --check to test
 ```
 
-The three seed scripts are alternatives, not layers — running one over another
+The three trainer seed scripts are alternatives, not layers — running one over another
 duplicates working hours and price lists. All are scoped to the trainer whose
 phone you pass, which must be the phone signed in on the device.
 
@@ -192,7 +194,7 @@ historical labels, not files.** `V30 gave the sold package pause/resume` still
 tells you why `paused_at` is a column; it no longer points at a migration you
 can open. `git log` has them.
 
-**25 Sep 2026 — rebuilt as a fresh v1.** `V1__init_schema.sql` was replaced by a new baseline that builds the 41 tables approved in `../release/proposed-schema.html` (that page carries the reasoning; later-release tables are in `../release/later-schema.html`). The old baseline and `V2`–`V22` are archived in `db-archive/pre-v1-2026-09-25/` — `V4`–`V22` were never in git, so that folder is their only copy. **`V2__slot_program_day_and_cancel_reason.sql` (28 Sep 2026) added `client_schedule_slot.program_day` (R45) and `scheduled_session.cancel_reason` (R68); the next migration is `V3`.** Until every module is adapted, `ddl-auto` is `none` (put `validate` back when the five entities match), and `SCHEMA.md`, `API.md` and the three seed scripts describe the old schema. A stale `target/classes/db/migration` from an earlier build will make Flyway run the archived files — run `./mvnw clean` first.
+**25 Sep 2026 — rebuilt as a fresh v1.** `V1__init_schema.sql` was replaced by a new baseline that builds the 41 tables approved in `../release/proposed-schema.html` (that page carries the reasoning; later-release tables are in `../release/later-schema.html`). The old baseline and `V2`–`V22` are archived in `db-archive/pre-v1-2026-09-25/` — `V4`–`V22` were never in git, so that folder is their only copy. **`V2__slot_program_day_and_cancel_reason.sql` (28 Sep 2026) added `client_schedule_slot.program_day` (R45) and `scheduled_session.cancel_reason` (R68); `V3`–`V6` followed (V5, 30 Sep, adds `certified_program_count_use()`; V6 the exercise trigram index and custom-name uniqueness); the next migration is `V7`.** Until every module is adapted, `ddl-auto` is `none` (put `validate` back when the five entities match), and `SCHEMA.md`, `API.md` and the three seed scripts describe the old schema. A stale `target/classes/db/migration` from an earlier build will make Flyway run the archived files — run `./mvnw clean` first.
 
 From here the law is what it always was: **never edit a migration that has
 run** — append a new `V{n}__name.sql`. Never drop or repurpose a column, and

@@ -1,131 +1,122 @@
 package com.inclineyou.inclineyou_backend.core.program;
 
+import com.inclineyou.inclineyou_backend.core.program.dto.ApplyRequest;
+import com.inclineyou.inclineyou_backend.core.program.dto.Assignment;
+import com.inclineyou.inclineyou_backend.core.program.dto.PatchProgramRequest;
+import com.inclineyou.inclineyou_backend.core.program.dto.ProgramItem;
+import com.inclineyou.inclineyou_backend.core.program.dto.ProgramRequest;
+import com.inclineyou.inclineyou_backend.core.program.dto.Resynced;
+import com.inclineyou.inclineyou_backend.shared.wire.EmptyBody;
+import com.inclineyou.inclineyou_backend.shared.wire.Items;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.context.request.WebRequest;
 
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * Programs (api-contract 1.1): the trainer's templates and client plans, the
+ * InclineYou library, and the verbs that copy, save, retire and apply them.
+ * Three kinds of program, one table — the routes differ by who may touch what:
+ * a library id answers only under {@code /certified}, and 404 everywhere else.
+ */
 @RestController
 @RequestMapping("/v1/programs")
 @RequiredArgsConstructor
 public class ProgramController {
 
-    private final ProgramService programService;
-    private final ProgramTemplateService templates;
+    private final ProgramReadService read;
+    private final ProgramWriteService write;
+    private final ProgramApplyService apply;
 
-    /** Pre-v1, for the Programs screen until its pass. A clientId goes to {@link #forClient}. */
+    /** L1 — summaries, no tree. {@code clientId} adds {@code progress}, for the client file. */
     @GetMapping
-    public List<ProgramService.ProgramResponse> list() {
-        return programService.list(trainerId(), null);
+    public Items<ProgramItem> list(@RequestParam(required = false) String kind,
+                                   @RequestParam(required = false) UUID clientId,
+                                   @RequestParam(required = false) String status) {
+        return Items.of(read.list(trainerId(), kind, clientId, status));
     }
 
-    /** api-contract 1.1 Client file — the client's programs, active first, with progress. */
-    @GetMapping(params = "clientId")
-    public com.inclineyou.inclineyou_backend.shared.wire.Items<ProgramTemplateService.ClientProgram> forClient(
-            @RequestParam UUID clientId) {
-        return com.inclineyou.inclineyou_backend.shared.wire.Items.of(templates.forClient(trainerId(), clientId));
+    /** L2 — the library, a curated shelf that changes only when the library does: 304 on a repeat. */
+    @GetMapping("/certified")
+    public ResponseEntity<Items<ProgramItem>> certified(WebRequest request) {
+        List<ProgramItem> items = read.certified(trainerId());
+        String etag = "\"" + Integer.toHexString(items.hashCode()) + "\"";
+        if (request.checkNotModified(etag)) return null;
+        return ResponseEntity.ok().eTag(etag).body(Items.of(items));
     }
 
-    /** api-contract Clients, add-client step 4 — what can be applied. */
-    @GetMapping(params = "kind=template")
-    public com.inclineyou.inclineyou_backend.shared.wire.Items<ProgramTemplateService.Template> templates() {
-        return com.inclineyou.inclineyou_backend.shared.wire.Items.of(templates.templates(trainerId()));
+    @GetMapping("/certified/{id}")
+    public ProgramItem certifiedOne(@PathVariable UUID id) {
+        return read.certifiedOne(trainerId(), id);
     }
 
-    /** Programs A5 — 201 with the new plan, 200 on a replayed id. */
-    @PostMapping("/{templateId}/apply")
-    public org.springframework.http.ResponseEntity<ProgramTemplateService.Plan> apply(
-            @PathVariable UUID templateId,
-            @RequestBody(required = false) java.util.Map<String, Object> body) {
-        var applied = templates.apply(trainerId(), templateId, body);
-        return org.springframework.http.ResponseEntity.status(applied.created() ? HttpStatus.CREATED : HttpStatus.OK)
-                .body(applied.plan());
-    }
-
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public ProgramService.ProgramResponse create(
-            @Valid @RequestBody ProgramService.CreateProgramRequest req) {
-        return programService.create(trainerId(), req);
-    }
-
+    /** L3 — one program with its whole tree; the version rides as the ETag. */
     @GetMapping("/{id}")
-    public ProgramService.ProgramResponse get(@PathVariable UUID id) {
-        return programService.get(id, trainerId());
+    public ResponseEntity<ProgramItem> get(@PathVariable UUID id) {
+        ProgramItem item = read.get(trainerId(), id);
+        return ResponseEntity.ok().eTag(item.version()).body(item);
     }
 
+    @GetMapping("/{id}/assignments")
+    public Items<Assignment> assignments(@PathVariable UUID id) {
+        return Items.of(read.assignments(trainerId(), id));
+    }
+
+    /** A1 / A4 — from scratch, or {@code copyFrom}. 201, or 200 on a replayed id. */
+    @PostMapping
+    public ResponseEntity<ProgramItem> create(@Valid @RequestBody ProgramRequest body) {
+        var made = write.create(trainerId(), body);
+        return ResponseEntity.status(made.created() ? HttpStatus.CREATED : HttpStatus.OK)
+                .eTag(made.program().version()).body(made.program());
+    }
+
+    /** A2 — the whole tree, conditional: 428 without If-Match, 412 PROGRAM_REVISED when stale. */
     @PutMapping("/{id}")
-    public ProgramService.ProgramResponse update(@PathVariable UUID id,
-                                                  @RequestBody ProgramService.UpdateProgramRequest req) {
-        return programService.update(id, trainerId(), req);
+    public ResponseEntity<ProgramItem> put(@PathVariable UUID id,
+                                           @RequestHeader(value = "If-Match", required = false) String ifMatch,
+                                           @Valid @RequestBody ProgramRequest body) {
+        ProgramItem saved = write.put(trainerId(), id, ifMatch, body);
+        return ResponseEntity.ok().eTag(saved.version()).body(saved);
+    }
+
+    /** A3 — a plan's status, or a name, goal or dates; If-Match honoured when sent. */
+    @PatchMapping("/{id}")
+    public ResponseEntity<ProgramItem> patch(@PathVariable UUID id,
+                                             @RequestHeader(value = "If-Match", required = false) String ifMatch,
+                                             @Valid @RequestBody PatchProgramRequest body) {
+        ProgramItem item = write.patch(trainerId(), id, ifMatch, body);
+        return ResponseEntity.ok().eTag(item.version()).body(item);
     }
 
     @DeleteMapping("/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable UUID id) {
-        programService.delete(id, trainerId());
+        write.delete(trainerId(), id);
     }
 
-    @GetMapping("/{id}/exercises")
-    public List<ProgramService.ProgramExerciseResponse> listExercises(@PathVariable UUID id) {
-        return programService.listExercises(id, trainerId());
+    /** A5 — 201 with the new plan and {@code linkedSessions}, 200 on a replayed id. */
+    @PostMapping("/{templateId}/apply")
+    public ResponseEntity<ProgramItem> apply(@PathVariable UUID templateId, @Valid @RequestBody ApplyRequest body) {
+        var applied = apply.apply(trainerId(), templateId, body);
+        return ResponseEntity.status(applied.created() ? HttpStatus.CREATED : HttpStatus.OK)
+                .eTag(applied.plan().version()).body(applied.plan());
     }
 
-    /**
-     * THE CLIENT PLAN BUILDER'S SAVE — the whole prescription in one PUT.
-     *
-     * `PUT /v1/templates/{id}` is its twin on the blueprint, and the two screens
-     * are the same board pointed at two tables. See
-     * {@link ProgramService#replaceExercises}: it writes the rows and the copy's
-     * own shape, and deliberately does not touch `synced_at`.
-     */
-    @PutMapping("/{id}/exercises")
-    public List<ProgramService.ProgramExerciseResponse> replaceExercises(
-            @PathVariable UUID id,
-            @RequestBody ProgramService.ReplaceExercisesRequest req) {
-        return programService.replaceExercises(id, trainerId(), req);
-    }
-
-    @PostMapping("/{id}/exercises")
-    @ResponseStatus(HttpStatus.CREATED)
-    public ProgramService.ProgramExerciseResponse addExercise(
-            @PathVariable UUID id,
-            @Valid @RequestBody ProgramService.ProgramExerciseRequest req) {
-        return programService.addExercise(id, trainerId(), req);
-    }
-
-    @PutMapping("/{id}/exercises/{exId}")
-    public ProgramService.ProgramExerciseResponse updateExercise(
-            @PathVariable UUID id,
-            @PathVariable UUID exId,
-            @RequestBody ProgramService.UpdateProgramExerciseRequest req) {
-        return programService.updateExercise(id, exId, trainerId(), req);
-    }
-
-    @DeleteMapping("/{id}/exercises/{exId}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void removeExercise(@PathVariable UUID id, @PathVariable UUID exId) {
-        programService.removeExercise(id, exId, trainerId());
-    }
-
-    /**
-     * Push the template's current blueprint onto this client's copy.
-     *
-     * Explicit, one program at a time, and never automatic — a copy is a copy,
-     * which is the reason `template` and `program` are two tables. See
-     * {@link ProgramService#resync} for what it does and does not touch.
-     */
+    /** A6 — take the source template's latest tree; conditional on the plan's version. */
     @PostMapping("/{id}/resync")
-    public ProgramService.ResyncResult resync(@PathVariable UUID id) {
-        return programService.resync(id, trainerId());
+    public Resynced resync(@PathVariable UUID id,
+                           @RequestHeader(value = "If-Match", required = false) String ifMatch,
+                           @RequestBody(required = false) EmptyBody body) {
+        return write.resync(trainerId(), id, ifMatch);
     }
 
     private UUID trainerId() {
-        return UUID.fromString(
-                SecurityContextHolder.getContext().getAuthentication().getName());
+        return UUID.fromString(SecurityContextHolder.getContext().getAuthentication().getName());
     }
 }

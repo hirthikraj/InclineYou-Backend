@@ -103,7 +103,7 @@ forty-two produced; the app's eighteen WatermelonDB steps are now schema v1 with
 an empty migrations list. Both sets of old files are in git history, and the
 V-numbers quoted throughout these notes (V26, V30, V33 …) are **historical
 labels for decisions, not files on disk** — they still name the argument, they
-no longer name a migration you can open. **Rebuilt again on 25 Sep 2026 as a fresh v1.** The schema was redesigned table by table and approved in `release/proposed-schema.html` (41 tables); `backend/src/main/resources/db/migration/V1__init_schema.sql` now builds exactly those, and the previous baseline plus `V2`–`V22` are archived, never run, in `backend/db-archive/pre-v1-2026-09-25/`. Tables held for a later release are in `release/later-schema.html`. The local database was dropped and rebuilt from the new V1. **`V2` (28 Sep 2026) added `client_schedule_slot.program_day` and `scheduled_session.cancel_reason`; the next backend migration is `V3`.** The application code is being adapted to the new schema module by module, so until that is done `SCHEMA.md`, `API.md`, the seed scripts and much of the service code describe the OLD schema, `spring.jpa.hibernate.ddl-auto` is temporarily `none`, and the backend CI job is expected to fail.
+no longer name a migration you can open. **Rebuilt again on 25 Sep 2026 as a fresh v1.** The schema was redesigned table by table and approved in `release/proposed-schema.html` (41 tables); `backend/src/main/resources/db/migration/V1__init_schema.sql` now builds exactly those, and the previous baseline plus `V2`–`V22` are archived, never run, in `backend/db-archive/pre-v1-2026-09-25/`. Tables held for a later release are in `release/later-schema.html`. The local database was dropped and rebuilt from the new V1. **`V2` (28 Sep 2026) added `client_schedule_slot.program_day` and `scheduled_session.cancel_reason`; `V3`–`V6` followed (V5, 30 Sep, adds `certified_program_count_use()`; V6 the exercise trigram index and custom-name uniqueness); the next backend migration is `V7`.** The application code is being adapted to the new schema module by module, so until that is done `SCHEMA.md`, `API.md`, the seed scripts and much of the service code describe the OLD schema, `spring.jpa.hibernate.ddl-auto` is temporarily `none`, and the backend CI job is expected to fail.
 
 **From the baseline, schema evolution is additive-only, on both sides, in
 lockstep.** The backend's Flyway migrations
@@ -413,7 +413,7 @@ level is the checklist and is also what `docker compose` reads.
   moves authority to a new `user_role` table, reversing the "one phone = one role"
   decision of V18 — it is written up as V28, and since the forty-two migrations
   were flattened into one baseline its numbers are a **dependency order, not
-  file names**: the next free number is `V3`, and `IDENTITY.md`'s plan wants the
+  file names**: the next free number is `V7`, and `IDENTITY.md`'s plan wants the
   same range, so whichever lands first takes it and the other gets renumbered),
   and
   **a gym-sent reminder has to be a `nudge_log` row**, because the
