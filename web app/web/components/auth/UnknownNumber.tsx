@@ -47,7 +47,14 @@ import { Button } from '@/web-components/ui/Button';
  * on the screen — *typed it wrong?* — matters: one wrong digit produces this
  * screen and looks exactly like being a new user.
  */
-export function UnknownNumber({ phone }: { phone: string | null }) {
+export function UnknownNumber({
+  phone,
+  policyVersion,
+}: {
+  phone: string | null;
+  /** The privacy notice in force, which pressing "I’m a trainer" accepts. */
+  policyVersion: string;
+}) {
   const router = useRouter();
   const [howOpen, setHowOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -117,6 +124,12 @@ export function UnknownNumber({ phone }: { phone: string | null }) {
           disabled={pending}
         />
       </div>
+
+      {/* Pressing the first button IS the acceptance (`POST /v1/trainers` carries the
+          version), so the screen says so where it can be read before it is pressed. */}
+      <p className="small" style={{ marginTop: 12, color: 'var(--tx-ink-3)' }}>
+        Opening an account means you accept our privacy notice (version {policyVersion}).
+      </p>
 
       {/*
         `aria-live` on the container rather than on a conditional element, for the

@@ -29,19 +29,12 @@ export const ATTEMPTS_WARN_FROM = 3;
 
 /**
  * TRAI allocates only the 6, 7, 8 and 9 series to mobile, so a number outside
- * them can never receive an SMS and there is nothing to retry. Identical to
- * `AuthController.PHONE_PATTERN` — checking the length instead used to send a
+ * them can never receive a message and there is nothing to retry. The server's
+ * `SendOtpRequest.PHONE_PATTERN` is this with the `+91` the wire carries — checking the length instead used to send a
  * number starting 5 to the server and render its 400 as "couldn't send the
  * code. Try again.", which names nothing and invites the same number again.
  */
 export const PHONE_PATTERN = /^[6-9]\d{9}$/;
-
-/**
- * The second delivery path needs a BSP on the backend that is not wired.
- * `OtpChannel` is `sms | whatsapp`, and `/v1/auth/otp/request` ignores the
- * second value today. Flip this the day it does not.
- */
-export const WHATSAPP_OTP_ENABLED = false;
 
 /**
  * The second IDENTITY, and it is further off than the second delivery path.
@@ -61,7 +54,10 @@ export const WHATSAPP_OTP_ENABLED = false;
  */
 export const GOOGLE_SIGN_IN_ENABLED = false;
 
-/** After this many resends, the screen stops offering only "resend". */
+/**
+ * After this many resends — or as soon as the request's delivery status says
+ * `failed` — the screen stops offering only "resend".
+ */
 export const SECOND_PATH_AFTER_RESENDS = 2;
 
 /** Support number for the hand-signed-in route, e.g. 919876543210. */

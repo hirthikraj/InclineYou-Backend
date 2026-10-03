@@ -4,37 +4,42 @@ import { redirect } from 'next/navigation';
 
 import { dropSkipped } from '@/lib/setup/skipped';
 import {
+  acceptPolicy,
   claimTrainerAccount,
-  isAlreadyTrainer,
-  isApiFailure,
+  endSession,
+  getDelivery,
+  isClientSignInUnavailable,
   readSendFailure,
   readVerifyFailure,
+  refusalCode,
   requestOtp,
-  switchToClientMode,
   verifyOtp,
 } from './api';
 import { CODE_LENGTH, PHONE_PATTERN } from './policy';
 import {
   clearActiveClient,
   clearPendingPhone,
+  clearPolicyVersion,
+  clearRequestId,
+  clearSitting,
   clearToken,
   clearWall,
   destinationFor,
-  liveMemberships,
-  needsSetup,
-  roleOf,
-  setActiveClient,
+  getPolicyVersion,
+  getRequestId,
+  needsConsent,
   setPendingPhone,
+  setActiveClient,
+  setPolicyVersion,
+  setRequestId,
   setToken,
-  setWall,
 } from './session';
 import type {
   ClaimResult,
+  DeliveryStatus,
   Membership,
   RequestResult,
-  Role,
   VerifyResult,
-  WallKind,
 } from './types';
 
 /**
@@ -47,10 +52,11 @@ import type {
 export async function sendCode(phoneInput: string): Promise<RequestResult> {
   const phone = phoneInput.replace(/\D/g, '');
 
-  // The same regex as `AuthController.PHONE_PATTERN`. Checked here as well as
-  // on the server because a number outside the 6–9 series can never receive an
-  // SMS, and letting it through renders the server's 400 as a failure the
-  // trainer would otherwise read as a connection problem.
+  // The same regex as the server's `SendOtpRequest.PHONE_PATTERN`, less the +91.
+  // Checked here as well as on the server because a number outside the 6–9
+  // series can never receive a message, and letting it through renders the
+  // server's 400 as a failure the trainer would otherwise read as a connection
+  // problem.
   if (!PHONE_PATTERN.test(phone)) {
     return {
       ok: false,
@@ -58,16 +64,19 @@ export async function sendCode(phoneInput: string): Promise<RequestResult> {
     };
   }
 
+  let issued;
   try {
-    await requestOtp(phone);
+    issued = await requestOtp(phone);
   } catch (err) {
     return { ok: false, failure: readSendFailure(err) };
   }
 
   // Only after the send succeeded: the verify screen exists to receive a code
-  // that is actually on its way.
+  // that is actually on its way. The request id replaces any earlier one — a
+  // newer request retires the older, so only the latest can be verified.
+  await setRequestId(issued.requestId);
   await setPendingPhone(phone);
-  return { ok: true };
+  return { ok: true, resendAfterSeconds: issued.resendAfterSeconds };
 }
 
 /**
@@ -82,106 +91,80 @@ export async function resendCode(phoneInput: string): Promise<RequestResult> {
 /**
  * Exchange a code for a session.
  *
- * The JWT is set as an httpOnly cookie here and is deliberately absent from
- * what this returns: the browser is told where to go, not what it was given.
+ * The credential is set as an httpOnly cookie here and is deliberately absent
+ * from what this returns: the browser is told where to go, not what it was
+ * given. The code is checked against the REQUEST it was sent for, whose id the
+ * browser never held — it is in a cookie `sendCode` set.
  */
-export async function verifyCode(phoneInput: string, otp: string): Promise<VerifyResult> {
-  const phone = phoneInput.replace(/\D/g, '');
+export async function verifyCode(otp: string): Promise<VerifyResult> {
   const code = otp.replace(/\D/g, '');
 
   // Shape, checked before the code is — the same guard, and for the same
-  // reason, as `AuthController.OTP_PATTERN`: nothing that fails this could ever
-  // have been the code we sent, so refusing it must not spend one of the three
-  // attempts a trainer gets.
+  // reason, as the server's: nothing that fails this could ever have been the
+  // code we sent, so refusing it must not spend one of the three attempts a
+  // trainer gets.
   if (code.length !== CODE_LENGTH) {
     return { ok: false, failure: { kind: 'unknown' } };
   }
-  if (!PHONE_PATTERN.test(phone)) {
-    return { ok: false, failure: { kind: 'unknown' } };
-  }
+
+  // No request in flight: a reload after the cookie lapsed. There is nothing to
+  // verify against, and the honest answer is the same as a lapsed code.
+  const requestId = await getRequestId();
+  if (!requestId) return { ok: false, failure: { kind: 'expired' } };
 
   let session;
   try {
-    session = await verifyOtp(phone, code);
+    session = await verifyOtp(requestId, code);
   } catch (err) {
+    if (isClientSignInUnavailable(err)) {
+      // The code was right and the number is only somebody's client. Nothing was
+      // minted; this is a wall, not a failure, and it spends nothing now either.
+      await clearRequestId();
+      await clearPendingPhone();
+      return { ok: true, next: '/sign-in/client', role: 'client', trainerName: null };
+    }
     return { ok: false, failure: readVerifyFailure(err) };
   }
 
-  const next = destinationFor(session);
-  if (!next || !session.token) {
-    // Nothing to sign in with and no screen that fits — a failure rather than a
-    // blank app. `gym_admin` is the live case: reserved, and nothing builds it.
-    return { ok: false, failure: { kind: 'unknown' } };
-  }
-
-  await setToken(session.token);
+  await setToken(session.token, session.expiresAt);
   await clearPendingPhone();
+  await clearRequestId();
 
-  /*
-   * A client with exactly one live roster never sees the picker — "everybody
-   * else resolves silently and goes straight through", which is the rule the
-   * design states twice. But `/me/today` still has to know WHICH roster, because
-   * a client token is bound to the phone rather than to a membership.
-   *
-   * So the one case that skips the screen has its answer written here instead.
-   * Without this, the silent path would land on a portal with no roster selected
-   * and the multi-roster path would be the only one that worked — which is the
-   * shape of bug that only shows up for the majority of users.
-   */
-  /*
-   * WHICH WALL, IF ANY — recorded here because here is the only place it is
-   * known. `clientView` mints an `invited` token for a real invite, an
-   * unacknowledged removal AND a fully unattached number, so the claim cannot
-   * tell them apart afterwards; the response can. See `WallKind`.
-   *
-   * Cleared on every other destination, so a wall from an earlier sitting on this
-   * browser cannot be read by a later one.
-   */
-  const wall = wallFor(roleOf(session));
-  if (wall) await setWall(wall);
-  else await clearWall();
-
-  if (roleOf(session) === 'client') {
-    const live = liveMemberships(session);
-    if (live.length === 1) await setActiveClient(live[0].clientId);
-    // Two or more: `/sign-in/role` sets it. Deliberately NOT preselected here —
-    // a cookie written before the person chose would make a reload of the picker
-    // look like it had already been answered.
-    else await clearActiveClient();
+  // The notice in force, for the two screens that must send it back. Kept for a
+  // new number and for a trainer whose acceptance is out of date; dropped
+  // otherwise, so a stale one cannot outlive its use.
+  if (session.role === 'pending' || needsConsent(session)) {
+    await setPolicyVersion(session.currentPolicyVersion);
   } else {
-    // A trainer's sign-in must not inherit a roster from a previous client
-    // session on this browser.
-    await clearActiveClient();
+    await clearPolicyVersion();
   }
 
   return {
     ok: true,
-    next,
-    role: roleOf(session),
-    trainerName: session.trainerName ?? null,
+    next: destinationFor(session),
+    role: session.role,
+    trainerName: session.trainerName,
   };
+}
+
+/**
+ * Where the WhatsApp message is, for the verify screen's "Didn't get it?" line.
+ * Null when there is nothing to report — no request in flight, or the server no
+ * longer knows it (used, superseded, expired), which is not an error to draw.
+ */
+export async function checkDelivery(): Promise<DeliveryStatus | null> {
+  const requestId = await getRequestId();
+  if (!requestId) return null;
+  try {
+    return (await getDelivery(requestId)).deliveryStatus;
+  } catch {
+    return null;
+  }
 }
 
 /** "change number" on the verify screen. Drops the pending number and nothing else. */
 export async function forgetPendingPhone(): Promise<void> {
   await clearPendingPhone();
-}
-
-/**
- * Is this sign-in a wall, and which one.
- *
- * Off the ROLE rather than off the route `destinationFor` returned, and the
- * difference is not cosmetic: the first version matched route strings in a table,
- * so a renamed route or a typo'd key would silently stop recording the wall — and
- * the screen that reads it would then send everybody back to sign-in, which looks
- * like a broken screen rather than a missing cookie.
- *
- * `WallKind`'s three values are three of `Role`'s, deliberately spelled the same,
- * so this is a narrowing check the compiler enforces instead of a lookup that can
- * miss.
- */
-function wallFor(role: Role): WallKind | null {
-  return role === 'unattached' || role === 'removed' || role === 'paused' ? role : null;
 }
 
 /* ─────────────────────────────────────────────────────── frame 3a · 7a ──── */
@@ -202,22 +185,19 @@ function wallFor(role: Role): WallKind | null {
  * was split from the sign-in) and its setup is already stamped complete.
  */
 export async function claimTrainer(): Promise<ClaimResult> {
+  // The notice in force, as verify named it. Gone means the pending sitting
+  // lapsed — the same state as a pending token past its fifteen minutes.
+  const version = await getPolicyVersion();
+  if (!version) return { ok: false, message: LAPSED };
+
   let session;
   try {
-    session = await claimTrainerAccount();
+    session = await claimTrainerAccount(version);
   } catch (err) {
-    if (isAlreadyTrainer(err)) {
-      /*
-       * The server says this token is already a trainer's — its subject is a
-       * UUID, not a phone. Nothing was created and nothing needs to be: the
-       * cookie already holds a working trainer token, so the recovery is to use
-       * it rather than to report a failure for a state that is fine.
-       *
-       * Reachable by pressing the button twice quickly, and by coming back to
-       * this URL after claiming.
-       */
-      return { ok: true, next: '/today' };
-    }
+    const code = refusalCode(err);
+    // The pending token is good for fifteen minutes. Past that, or once the
+    // notice has moved on, nothing was created and starting again is the fix.
+    if (code === 'SESSION_EXPIRED' || code === 'CONSENT_REQUIRED') return { ok: false, message: LAPSED };
     // Deliberately one sentence and not a taxonomy. The failure modes here are a
     // dropped connection and a 500, both of which mean "try again" — and the one
     // thing worth promising is what did NOT happen, because the button creates an
@@ -229,20 +209,35 @@ export async function claimTrainer(): Promise<ClaimResult> {
     };
   }
 
-  if (!session.token) {
-    // Belt and braces: `claimTrainer` always mints one, and a response without a
-    // token would leave the pending cookie in place and the screen claiming
-    // success.
-    return { ok: false, message: 'We could not set that up just now. Please try again.' };
-  }
-
-  await setToken(session.token);
+  // The session replaces the pending token in the cookie, which is what turns
+  // "verified" into "signed in".
+  await setToken(session.token, session.expiresAt);
   await clearPendingPhone();
+  await clearPolicyVersion();
 
-  return {
-    ok: true,
-    next: destinationFor(session) ?? (needsSetup(session) ? '/setup' : '/today'),
-  };
+  return { ok: true, next: destinationFor(session) };
+}
+
+const LAPSED =
+  'That sign-in timed out, so nothing was created. Use a different number to start again — it takes a minute.';
+
+/**
+ * "I accept" on `/sign-in/consent` — the privacy notice has changed since they
+ * last accepted it. Idempotent on the server (the original date is kept), so a
+ * double press is harmless.
+ */
+export async function acceptNotice(): Promise<ClaimResult> {
+  const version = await getPolicyVersion();
+  if (!version) return { ok: false, message: 'That screen timed out. Sign in again to see the notice.' };
+  try {
+    await acceptPolicy(version);
+  } catch {
+    return { ok: false, message: 'We could not record that just now. Nothing changed — try again.' };
+  }
+  await clearPolicyVersion();
+  // Onboarding may still be owed; the root fork knows, and it is not this
+  // action's to decide.
+  return { ok: true, next: '/' };
 }
 
 /**
@@ -261,6 +256,8 @@ export async function claimTrainer(): Promise<ClaimResult> {
  */
 export async function abandonPending(): Promise<void> {
   await clearToken();
+  await clearRequestId();
+  await clearPolicyVersion();
   await clearPendingPhone();
   await clearActiveClient();
   await clearWall();
@@ -271,49 +268,41 @@ export async function abandonPending(): Promise<void> {
 /**
  * Sign out, from the rail's account menu.
  *
- * ═══════════════════════════════════════════════════════════════════════════
- * THERE IS NO SERVER CALL, AND THERE IS NOTHING TO CALL
+ * The session is REVOKED on the server first — `DELETE /v1/auth/sessions/current`
+ * — so a token that was copied out of this browser stops working now rather than
+ * at its expiry. That is the point of the web having a revocable session at all.
  *
- * `backend/API.md` has no `POST /v1/auth/logout` and needs none: the JWT is a
- * self-contained 7-day bearer token with no server-side session behind it and no
- * revocation list, so signing out is exactly and only *forgetting the token*.
- * Anything else here would be a request that could fail and leave the trainer
- * looking at a screen that says it signed them out and did not.
- *
- * Which makes the cookie jar the whole of it — and every cookie has to go, not
- * just the token. The next person to open this browser may be a different trainer
- * on a shared gym desktop, and `inclineyou_client` (which roster), `inclineyou_wall` (which
- * refusal) and `inclineyou_setup_skipped` (which steps were passed on) are all facts
- * about the sitting that just ended. `inclineyou_setup_skipped` is the one that would
+ * Then every cookie goes, and not just the token. The next person to open this
+ * browser may be a different trainer on a shared gym desktop, and
+ * `inclineyou_client` (which roster), `inclineyou_wall` (which refusal) and
+ * `inclineyou_setup_skipped` (which steps were passed on) are all facts about the
+ * sitting that just ended. `inclineyou_setup_skipped` is the one that would
  * bite: a 24-hour cookie left behind makes the NEXT trainer's onboarding skip
  * steps they never saw.
  *
- * ═══════════════════════════════════════════════════════════════════════════
- * AND THE PHONE'S SIGN-OUT SCREEN HAS NO WEB EQUIVALENT — BY THE ONLINE RULE
+ * The revoke is best effort and never blocks the rest. A server that cannot be
+ * reached must not leave somebody unable to sign out of a shared machine — and
+ * the cookie being gone is what ends THIS browser's session either way.
  *
+ * AND THE PHONE'S SIGN-OUT SCREEN HAS NO WEB EQUIVALENT — BY THE ONLINE RULE.
  * `app/src/screens/main/drawer/SignOutScreen.tsx` is a whole screen because on a
  * phone sign-out is destructive: it wipes the local database, so unsynced writes
- * are lost, and "an alert cannot show *what* is unsynced ... a queued nudge log
- * is worth losing and a recorded payment is not."
- *
- * None of that is true here. This half is online-only, there is no local
- * database, and every write has already reached the server or already failed in
- * front of the trainer. So the design set's `Sign out&hellip;` — whose ellipsis
- * its own note explains as "it leads to a screen that lists what is still queued
- * rather than to a dialog that cannot name it" — cannot lead there, because there
- * is no queue to list — so the web row drops the ellipsis and reads `Sign out`.
- * See `AccountMenu.tsx` for the confirm step it leads to instead, and why a
- * one-click row would still be wrong.
+ * are lost. None of that is true here: this half is online-only, there is no
+ * local database, and every write has already reached the server or already
+ * failed in front of the trainer. See `AccountMenu.tsx` for the confirm step it
+ * leads to instead.
  *
  * `redirect` rather than a returned path: this is called as a form action, so the
  * navigation is the framework's and happens whether or not the browser is still
  * running the script that submitted it.
  */
 export async function signOut(): Promise<void> {
-  await clearToken();
-  await clearActiveClient();
-  await clearWall();
-  await clearPendingPhone();
+  try {
+    await endSession();
+  } catch {
+    // Unreachable, or already gone. Either way there is nothing left to end.
+  }
+  await clearSitting();
   await dropSkipped();
 
   // `/sign-in` and not `/`: the root fork reads the token to choose a screen, and
@@ -324,91 +313,20 @@ export async function signOut(): Promise<void> {
 /* ─────────────────────────────────────────────────────── frame 2a · 5a ──── */
 
 /**
- * Read every roster this client is on, fresh.
+ * Read every roster this client is on — NOT SERVED IN v1.
  *
- * ── A POST USED AS A READ, AND WHY THAT IS THE RIGHT CALL HERE ───────────────
- *
- * There is no GET that answers "which rosters is this number on". A client
- * token's subject is the phone, and the only read scoped to a membership —
- * `/v1/client/sync/pull` — needs the `clientId` this screen exists to choose. So
- * the options are a POST that returns them, or carrying the list forward from the
- * verify response in a cookie.
- *
- * The POST wins on the thing that matters most for a PICKER: freshness. A cookie
- * written at verify would offer a roster that ended between two sign-ins, and
- * finding that out after you tap is exactly what the cards' proof lines exist to
- * prevent. `POST /v1/auth/mode/client` is documented as "any authenticated token"
- * and returns "every live roster this number is on, same as any other client
- * sign-in" — which is this screen's input, exactly.
- *
- * The side effect is a fresh client token of the same scope, and the previous one
- * is left to expire. Swapping a client token for an equivalent client token is a
- * no-op semantically; it is the same call the phone makes to change mode.
+ * It was a `POST /v1/auth/mode/client`, which returned "every live roster this
+ * number is on". That route went with the rest of client sign-in: a number that
+ * is only somebody's client is refused at verify (`CLIENT_SIGN_IN_UNAVAILABLE`),
+ * and a trainer who is also a client signs in as the trainer with no mode
+ * switch. So there is nothing to ask, and `/sign-in/role` and the portal's
+ * roster switch, which both read this, find no rosters. They stay built behind
+ * the release flag (WEB_LAUNCH.md MUST-19) and come back with the portal.
  */
 export async function loadRosters(): Promise<
   { ok: true; memberships: Membership[]; name: string | null } | { ok: false }
 > {
-  let session;
-  try {
-    session = await switchToClientMode();
-  } catch (err) {
-    /*
-     * ONLY the failures this call can actually have.
-     *
-     * The first version caught everything, and the everything it caught was a
-     * bug in this function: it also called `setToken`, and **a cookie cannot be
-     * written during a render** — only in a Server Action or a Route Handler. So
-     * Next threw, the catch turned it into `{ ok: false }`, and the page quietly
-     * redirected to `/me/today`. A screen that silently went somewhere else for a
-     * reason no log named.
-     *
-     * The token write is gone (see below) and the catch is now narrow: a refusal
-     * or an unreachable server is an answer this screen can render, and anything
-     * else is a defect that belongs in the error boundary rather than in a
-     * redirect.
-     */
-    if (isApiFailure(err)) return { ok: false };
-    throw err;
-  }
-
-  /*
-   * THE FRESH TOKEN IS DISCARDED, ON PURPOSE.
-   *
-   * `mode/client` mints one as its side effect. Storing it is what broke this
-   * function, and it turns out to be unnecessary: a client token is bound to the
-   * PHONE and not to a membership, so the token already in the cookie has exactly
-   * the same scope as the one just minted. Nothing is gained by swapping them,
-   * and the one left unstored is simply left to expire — which is what API.md
-   * already says happens to the loser of a mode switch.
-   */
-  {
-    const memberships = session.clientOf ?? [];
-    return {
-      ok: true,
-      memberships,
-      /*
-       * The client's OWN name, and only when every roster agrees on it.
-       *
-       * The backend answers `trainerName: null` for a client sign-in, so the
-       * design's "Welcome back, {FIRST}" cannot be built from what it assumed —
-       * see the note on the page. What IS available is `clientName`, which is
-       * what each trainer typed. Two trainers can have typed different things,
-       * and greeting somebody by a coin flip between two spellings of their own
-       * name is worse than not greeting them, so disagreement falls back to the
-       * plain greeting.
-       */
-      name: agreedName(memberships),
-    };
-  }
-}
-
-function agreedName(memberships: Membership[]): string | null {
-  const names = new Set(
-    memberships.map((m) => m.clientName?.trim()).filter((n): n is string => !!n),
-  );
-  if (names.size !== 1) return null;
-  const full = [...names][0];
-  return full.split(/\s+/)[0] || null;
+  return { ok: false };
 }
 
 /**

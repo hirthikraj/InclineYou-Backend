@@ -2,21 +2,28 @@ import 'server-only';
 
 import { cookies } from 'next/headers';
 
-import type { AuthResponse, Membership, Role, WallKind } from './types';
+import type { AuthResponse, WallKind } from './types';
 
 /**
- * Where the JWT lives.
+ * Where the credential lives.
  *
  * httpOnly, so it does not exist in browser JavaScript at all — not "hard to
- * read", absent. This is the posture the mobile app gets from the keychain and
- * the one a client-side bundle cannot have, since a token in localStorage is a
- * token any injected script can post elsewhere. It is a 7-day bearer token
- * (`app.jwt.expiry-minutes: 10080`), so the exposure it would carry is a week.
+ * read", absent. After sign-in it is an opaque `xs_…` session token: the server
+ * stores only its SHA-256 and can revoke it at any moment, which is what makes
+ * "sign out" and the devices list real. Before a new number has claimed an
+ * account it is instead a 15-minute JWT that can call exactly one route
+ * (`POST /v1/trainers`).
  */
 const TOKEN_COOKIE = 'inclineyou_token';
 
-/** app.jwt.expiry-minutes: 10080. The cookie should not outlive the token in it. */
-const TOKEN_MAX_AGE = 7 * 24 * 60 * 60;
+/**
+ * A session is 30 days after LAST USE, sliding (api-contract R61) — the server
+ * moves `expires_at` out as it is used and this cookie cannot, so it is set to
+ * the sliding window's length and the server's answer is the real one. A cookie
+ * that outlives a session costs one bounce through `/sign-in/expired`; one that
+ * expired first would sign out somebody the server still trusts.
+ */
+const SESSION_MAX_AGE = 30 * 24 * 60 * 60;
 
 /**
  * The number a code was sent to, held between /sign-in and /sign-in/verify.
@@ -74,7 +81,14 @@ const WALL_MAX_AGE = 30 * 60;
 
 const SECURE = process.env.NODE_ENV === 'production';
 
-export async function setToken(token: string): Promise<void> {
+/**
+ * @param expiresAt epoch ms from the sign-in response. Honoured only for a token
+ *                  that dies sooner than a session does — the pending one — so
+ *                  the cookie never outlives the 15 minutes the token has.
+ */
+export async function setToken(token: string, expiresAt?: number | null): Promise<void> {
+  const untilExpiry = expiresAt ? Math.floor((expiresAt - Date.now()) / 1000) : SESSION_MAX_AGE;
+  const maxAge = Math.max(1, Math.min(SESSION_MAX_AGE, untilExpiry));
   (await cookies()).set(TOKEN_COOKIE, token, {
     httpOnly: true,
     secure: SECURE,
@@ -83,7 +97,7 @@ export async function setToken(token: string): Promise<void> {
     // navigation, which signs the trainer out for arriving from a message.
     sameSite: 'lax',
     path: '/',
-    maxAge: TOKEN_MAX_AGE,
+    maxAge,
   });
 }
 
@@ -113,13 +127,70 @@ export async function clearPendingPhone(): Promise<void> {
   (await cookies()).delete(PENDING_COOKIE);
 }
 
+/**
+ * The sign-in request a code was asked for — `otp/request`'s `requestId`.
+ *
+ * Verify and the delivery read take this and not the phone number (api-contract
+ * R93: no endpoint answers questions about an arbitrary number), so it is what
+ * the verify screen holds between the two calls. httpOnly, unlike the pending
+ * phone beside it: nothing in the browser needs to read it, and the id is one
+ * half of "may I spend an attempt on this code".
+ */
+const REQUEST_COOKIE = 'inclineyou_otp_request';
+
+export async function setRequestId(requestId: string): Promise<void> {
+  (await cookies()).set(REQUEST_COOKIE, requestId, {
+    httpOnly: true,
+    secure: SECURE,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: PENDING_MAX_AGE,
+  });
+}
+
+export async function getRequestId(): Promise<string | null> {
+  return (await cookies()).get(REQUEST_COOKIE)?.value ?? null;
+}
+
+export async function clearRequestId(): Promise<void> {
+  (await cookies()).delete(REQUEST_COOKIE);
+}
+
+/**
+ * The privacy-notice version in force, as the verify response named it —
+ * `currentPolicyVersion`. Kept for the two screens that have to send it back:
+ * `/sign-in/new` (`POST /v1/trainers`) and `/sign-in/consent`. It is the
+ * server's answer and not a constant here, so a notice that changes between a
+ * deploy and a sign-in cannot be accepted at the wrong version. Lives as long as
+ * the pending token does.
+ */
+const POLICY_COOKIE = 'inclineyou_policy_version';
+
+export async function setPolicyVersion(version: string): Promise<void> {
+  (await cookies()).set(POLICY_COOKIE, version, {
+    httpOnly: true,
+    secure: SECURE,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: PENDING_MAX_AGE,
+  });
+}
+
+export async function getPolicyVersion(): Promise<string | null> {
+  return (await cookies()).get(POLICY_COOKIE)?.value ?? null;
+}
+
+export async function clearPolicyVersion(): Promise<void> {
+  (await cookies()).delete(POLICY_COOKIE);
+}
+
 export async function setActiveClient(clientId: string): Promise<void> {
   (await cookies()).set(CLIENT_COOKIE, clientId, {
     httpOnly: true,
     secure: SECURE,
     sameSite: 'lax',
     path: '/',
-    maxAge: TOKEN_MAX_AGE,
+    maxAge: SESSION_MAX_AGE,
   });
 }
 
@@ -152,105 +223,42 @@ export async function clearWall(): Promise<void> {
 }
 
 /**
- * Absent `role` means a backend before V14, and every sign-in one of those ever
- * answered was a trainer's — so absence reads as trainer rather than as an error.
- */
-export function roleOf(res: AuthResponse): Role {
-  return res.role ?? 'trainer';
-}
-
-/**
- * Does this sign-in owe us trainer setup?
- *
- * `setupComplete` is the real answer and survives a reinstall, a second browser
- * and a flow abandoned halfway. `isNewUser` only ever meant "first verify for
- * this number", and stays as the fallback for a backend older than V8.
+ * Does this sign-in owe us trainer setup? `setupCompletedAt` is null until
+ * onboarding is finished, and survives a reinstall, a second browser and a flow
+ * abandoned halfway.
  */
 export function needsSetup(res: AuthResponse): boolean {
-  return res.setupComplete === undefined ? res.isNewUser : !res.setupComplete;
+  return res.setupCompletedAt === null;
 }
 
-/** Is this roster on hold? Absence of `status` means an older backend, so: no. */
-export function isPaused(m: Membership): boolean {
-  return m.status?.toLowerCase() === 'paused';
-}
-
-/**
- * The rosters that are actually running.
- *
- * A paused one is still real — the history is in it, and the picker still lists
- * it — but it is never what sign-in should CHOOSE for somebody who also has a
- * live one. Exported because `destinationFor` and `verifyCode` have to agree
- * about what "one roster" means: if they disagreed, a client with one live and
- * one paused membership would be sent to the picker by one and resolved silently
- * by the other.
- *
- * Note `clientOf` on a client's response also carries outstanding INVITES — see
- * `clientView` in `AuthService`, which returns every non-removed, non-declined
- * row. `isLive` on the server means accepted or paused, and this mirrors it by
- * excluding only the paused ones from the live count, so an invite still shows in
- * the picker as a roster you can open. That is correct: being invited by a second
- * trainer is a real second book, and it is exactly the ambiguity this screen is
- * for.
- */
-export function liveMemberships(res: AuthResponse): Membership[] {
-  return (res.clientOf ?? []).filter((m) => !isPaused(m));
+/** The notice in force is not the one they accepted — they owe `/sign-in/consent` first. */
+export function needsConsent(res: AuthResponse): boolean {
+  return res.privacyPolicyVersion !== null && res.privacyPolicyVersion !== res.currentPolicyVersion;
 }
 
 /**
- * Which screen this sign-in is owed — the web's copy of the branch in
- * `app/src/screens/auth/OtpScreen.tsx`, and deliberately the same order.
- *
- * `null` means there is nothing to open, which is a failure rather than a blank
- * app and the caller renders it as one.
+ * Which screen this sign-in is owed — api-contract *Sign in*: a new number
+ * (`pending`) goes to `/sign-in/new`; otherwise a notice that has changed goes
+ * to `/sign-in/consent`, then unfinished onboarding to `/setup`, otherwise
+ * `/today`.
  */
-export function destinationFor(res: AuthResponse): string | null {
-  const role = roleOf(res);
-  const memberships = res.clientOf ?? [];
-  // A paused roster still opens, but it is not what sign-in should choose for
-  // somebody who also has a live one. Via the shared helper rather than inline,
-  // so this and `verifyCode`'s "exactly one roster" test cannot drift apart.
-  const live = liveMemberships(res);
-
-  // LEGACY · a backend from before the pause fix answers with no token and
-  // nothing else to open. Only reachable during a rolling deploy.
-  if (role === 'paused' && res.paused) return '/sign-in/paused';
-
-  // 3a · verified, and on nobody's roster. The token is good for one thing.
-  if (role === 'pending' && res.token) return '/sign-in/new';
-
-  // 3b · V18 · a trainer named this number and it has never answered. The token
-  // opens no sync scope, so nothing is signed in until they do.
-  if (role === 'invited' && res.token) {
-    const invite = memberships.find((m) => m.membershipStatus === 'invited');
-    if (invite) return `/invite/${invite.clientId}`;
-  }
-
-  // V18 · a trainer ended it. Shown once — the acknowledgement is what retires
-  // it, because the server row is kept forever.
-  if (role === 'removed' && res.token && res.removed) return '/sign-in/removed';
-
-  // V18 · a client with nothing live. Deliberately not 3a: this number's role is
-  // client, and offering it a coaching account is the wrong turn 3a exists to avoid.
-  if (role === 'unattached') return '/sign-in/unattached';
-
-  // Reserved and not built. Better an honest stop than a trainer's Today
-  // rendered over somebody else's data.
-  if (role === 'gym_admin') return null;
-
-  if (!res.token) return null;
-
-  // 2a · skip the picker whenever it can be skipped. It earns its place for
-  // exactly one case — a client training with two people right now, which is
-  // genuinely ambiguous about which book to open. A trainer who is ALSO a
-  // client elsewhere (trainer/client duality, allowed again 23 Aug 2026) is
-  // not ambiguous the same way: the home role — `trainer` here — is the
-  // default, and `res.clientOf` is what a built `/today` would read to offer
-  // a mode switch, the same way the app's drawer does. This function only
-  // returns a path, not that data, so whatever eventually renders `/today`
-  // reads `clientOf` from its own fetch of the session rather than from here.
-  if (role === 'client' && live.length > 1) return '/sign-in/role';
-
-  if (role === 'client') return '/me/today';
+export function destinationFor(res: AuthResponse): string {
+  if (res.role === 'pending') return '/sign-in/new';
+  if (needsConsent(res)) return '/sign-in/consent';
   return needsSetup(res) ? '/setup' : '/today';
+}
+
+/**
+ * Forget everything this sitting knew — what `signOut` and the stale-session
+ * route both end with. Every cookie has to go and not just the token: the next
+ * person to open this browser may be a different trainer on a shared gym
+ * desktop.
+ */
+export async function clearSitting(): Promise<void> {
+  await clearToken();
+  await clearRequestId();
+  await clearPolicyVersion();
+  await clearPendingPhone();
+  await clearActiveClient();
+  await clearWall();
 }

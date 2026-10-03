@@ -18,7 +18,9 @@ export const metadata = { title: 'Enter the code · InclineYou' };
  * job, not a form with nothing behind it.
  */
 export default async function VerifyPage() {
-  if (await getToken()) redirect('/today');
+  // Signed in already (or part-way through becoming a trainer): the root fork
+  // sends each credential where it works.
+  if (await getToken()) redirect('/');
 
   const phone = await getPendingPhone();
   if (!phone) redirect('/sign-in');

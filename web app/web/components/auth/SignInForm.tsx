@@ -14,6 +14,10 @@ import { Button } from '@/web-components/ui/Button';
 /**
  * Frame 1a · the number.
  *
+ * `notice` is why the trainer is here instead of in the app — a session the server
+ * ended (`/sign-in/expired`). It lives in the same slot as the field's refusals but
+ * is about neither control, so it never paints the number box red.
+ *
  * One field, one button, and the headline IS the field's label — there is no
  * caption above the box repeating it, which is why the input is labelled by the
  * `h2`. The button is dead until ten digits are present, so nobody presses it
@@ -44,10 +48,10 @@ import { Button } from '@/web-components/ui/Button';
  * field already owns, in one sentence that names the state and points at the
  * control that does work.
  */
-export function SignInForm() {
+export function SignInForm({ notice = null }: { notice?: Message | null }) {
   const router = useRouter();
   const [phone, setPhone] = useState('');
-  const [message, setMessage] = useState<Message | null>(null);
+  const [message, setMessage] = useState<Message | null>(notice);
   /* WHICH CONTROL THE MESSAGE IS ABOUT, AND IT IS NOT DECORATION.
      The slot is shared — it sits under the field because that is where the
      field's own refusals belong, and the Google button points at it with
@@ -57,7 +61,7 @@ export function SignInForm() {
      painted the phone box red and told a screen reader the number was invalid.
      Nothing was wrong with the number; it was usually empty. §UIUX rule 5 is
      explicit — red is for errors, never for a valid state. */
-  const [about, setAbout] = useState<'phone' | 'google'>('phone');
+  const [about, setAbout] = useState<'phone' | 'google' | 'session'>(notice ? 'session' : 'phone');
   const [pending, startTransition] = useTransition();
   const fieldErr = message !== null && about === 'phone';
 
@@ -195,7 +199,7 @@ export function SignInForm() {
       </Button>
 
       <TrustLine>
-        We send a 6-digit code by <b>SMS</b>. It is the only thing we will ever send this number
+        We send a 6-digit code on <b>WhatsApp</b>. It is the only thing we will ever send this number
         without being asked, and <b>we will never ring you and ask you to read it back</b>.
       </TrustLine>
 
@@ -212,6 +216,6 @@ export function SignInForm() {
  * the server's 400 came back as "couldn't send the code. Try again.", which
  * names nothing, blames the connection for a typo, and invites the same number
  * again. TRAI allocates only the 6–9 series to mobile, so a number outside them
- * can never receive an SMS and there is nothing to retry.
+ * can never receive a WhatsApp message and there is nothing to retry.
  */
 export const ACCEPTED_NUMBER = PHONE_PATTERN;

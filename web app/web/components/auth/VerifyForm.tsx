@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 
-import { forgetPendingPhone, resendCode, verifyCode } from '@/lib/auth/actions';
+import { checkDelivery, forgetPendingPhone, resendCode, verifyCode } from '@/lib/auth/actions';
 import { CODE_SENT, type Message, sendMessage, verifyMessage } from '@/lib/auth/copy';
 import {
   CODE_LENGTH,
@@ -13,8 +13,8 @@ import {
   mmss,
   resendDelay,
 } from '@/lib/auth/policy';
-import type { OtpFailure, SendFailure } from '@/lib/auth/types';
-import { IconCall, IconWhatsApp } from './Icons';
+import type { DeliveryStatus, OtpFailure, SendFailure } from '@/lib/auth/types';
+import { IconWhatsApp } from './Icons';
 import { MessageSlot } from './MessageSlot';
 import { OtpInput } from './OtpInput';
 import { TrustLine } from './TrustLine';
@@ -37,6 +37,8 @@ export function VerifyForm({ phone }: { phone: string }) {
   const [slots, setSlots] = useState<'idle' | 'err' | 'ok'>('idle');
   const [pending, startTransition] = useTransition();
 
+  /** Where the WhatsApp message is — null until the server has said. */
+  const [delivery, setDelivery] = useState<DeliveryStatus | null>(null);
   /** How many resends have been spent. Paces the ladder, and opens the foot. */
   const [resends, setResends] = useState(0);
   /** Seconds until resend is allowed again. The first wait starts on arrival. */
@@ -50,6 +52,27 @@ export function VerifyForm({ phone }: { phone: string }) {
   const waiting = useRef<OtpFailure | SendFailure | null>(null);
 
   const locked = lockLeft > 0;
+
+  /* ── live delivery status ──────────────────────────────────────────────
+     Asked every few seconds while the screen is up, and never once it is
+     settled: `failed` is an answer, and `delivered`/`read` need no more
+     asking. A refusal or a gone request comes back as null and draws
+     nothing — there is no state here worth an error. The request id is in a
+     cookie, so this holds only the status. */
+  useEffect(() => {
+    if (delivery === 'failed' || delivery === 'delivered' || delivery === 'read') return;
+    let live = true;
+    const poll = async () => {
+      const status = await checkDelivery();
+      if (live && status) setDelivery(status);
+    };
+    void poll();
+    const id = setInterval(poll, 4000);
+    return () => {
+      live = false;
+      clearInterval(id);
+    };
+  }, [delivery, resends]);
 
   /* ── one ticker, two countdowns ────────────────────────────────────────
      A single interval rather than one per counter: two intervals drift apart
@@ -88,7 +111,7 @@ export function VerifyForm({ phone }: { phone: string }) {
   const submit = useCallback(() => {
     if (code.length !== CODE_LENGTH || pending || locked) return;
     startTransition(async () => {
-      const result = await verifyCode(phone, code);
+      const result = await verifyCode(code);
       if (result.ok) {
         setSlots('ok');
         setMessage(null);
@@ -112,7 +135,7 @@ export function VerifyForm({ phone }: { phone: string }) {
       setSlots(failure.kind === 'wrong' ? 'err' : 'idle');
       setMessage(verifyMessage(failure));
     });
-  }, [code, pending, locked, phone, router]);
+  }, [code, pending, locked, router]);
 
   function resend() {
     if (cooldown > 0 || pending) return;
@@ -132,7 +155,9 @@ export function VerifyForm({ phone }: { phone: string }) {
         setMessage(CODE_SENT);
         setSlots('idle');
         setCode('');
-        setCooldown(resendDelay(spent));
+        // The server's own next rung, not the local mirror's guess.
+        setCooldown(result.resendAfterSeconds > 0 ? result.resendAfterSeconds : resendDelay(spent));
+        setDelivery(null);
         return;
       }
 
@@ -155,11 +180,13 @@ export function VerifyForm({ phone }: { phone: string }) {
     router.push('/sign-in');
   }
 
-  // §06 · the second path opens after the SECOND resend, not the first. Two
-  // resends is roughly two minutes of the ladder, which is past the honest p95
-  // for an Indian transactional SMS — before that, waiting is still the right
-  // advice and a wall of alternatives is noise.
-  const secondPathOpen = resends >= SECOND_PATH_AFTER_RESENDS;
+  // §06 · the second path opens after the SECOND resend, not the first — or as
+  // soon as the server says WhatsApp could not deliver this one. Two resends is
+  // roughly two minutes of the ladder, which is past the honest p95 for a
+  // WhatsApp message; before that, waiting is still the right advice and a wall
+  // of alternatives is noise. A `failed` status is the opposite case: waiting
+  // cannot help, so the way out is shown at once.
+    const secondPathOpen = resends >= SECOND_PATH_AFTER_RESENDS || delivery === 'failed';
 
   return (
     <>
@@ -167,7 +194,7 @@ export function VerifyForm({ phone }: { phone: string }) {
         Enter the code
       </h2>
       <p className="stp__sub" style={{ marginTop: 8 }}>
-        Sent by SMS to {formatPhone(phone)} ·{' '}
+        Sent on WhatsApp to {formatPhone(phone)} ·{' '}
         <a
           className="authwrap__lnk"
           href="/sign-in"
@@ -213,6 +240,11 @@ export function VerifyForm({ phone }: { phone: string }) {
           {cooldown > 0 ? `Resend in ${mmss(cooldown)}` : 'Resend the code'}
         </Button>
       </div>
+      {delivery ? (
+        <p className="small" role="status" style={{ marginTop: 6, color: 'var(--tx-ink-3)' }}>
+          {deliveryLine(delivery)}
+        </p>
+      ) : null}
 
       <div style={{ marginTop: 16 }}>
         <Button
@@ -239,18 +271,30 @@ export function VerifyForm({ phone }: { phone: string }) {
   );
 }
 
+/** What the delivery status means to the person waiting, in one line. */
+function deliveryLine(status: DeliveryStatus): string {
+  switch (status) {
+    case 'queued':
+      return 'Sending the code…';
+    case 'sent':
+      return 'Sent — it should arrive on WhatsApp in a few seconds.';
+    case 'delivered':
+    case 'read':
+      return 'Delivered to WhatsApp.';
+    case 'failed':
+      return 'WhatsApp could not deliver that code.';
+    default:
+      return '';
+  }
+}
+
 /**
- * §06 · when the SMS does not arrive.
+ * §06 · when the message does not arrive.
  *
- * Three routes are drawn and two of them do not exist. WhatsApp has a flag
- * (`WHATSAPP_OTP_ENABLED`) that is `false`; voice — the control the mobile
- * design put in its 8b, and the one most products skip — has no endpoint and no
- * channel value at all, since `OtpChannel` is `sms | whatsapp`.
- *
- * They are drawn because deleting them would hide two decisions, and labelled
- * because a live button that cannot work is worse than a dead one that says so.
- * On the 2026 delivery numbers — 92–98% for transactional SMS — this panel is
- * the only thing standing between a few percent of trainers and no way in.
+ * WhatsApp is the only channel (decided 24 Sep 2026 — no SMS), so the old
+ * panel's "send it on WhatsApp instead" and "call me" alternatives are gone: the
+ * first is what already happened and the second never had an endpoint. What is
+ * left is the route that works, and it is a person.
  */
 function SecondPaths() {
   const support = SUPPORT_WHATSAPP_NUMBER;
@@ -266,28 +310,13 @@ function SecondPaths() {
       }}
     >
       <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-ink)' }}>
-        Still nothing after two resends. Here is every other way in.
+        Still no code? There is one more way in.
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 11 }}>
-        <Button variant="secondary" style={{ width: '100%' }} disabled>
-          <IconWhatsApp size={15} />
-          Send the code on WhatsApp
-          <Tag tone="warn" style={{ marginLeft: 'auto' }}>
-            not wired
-          </Tag>
-        </Button>
-        <Button variant="secondary" style={{ width: '100%' }} disabled>
-          <IconCall size={15} />
-          Call me with the code
-          <Tag tone="danger" style={{ marginLeft: 'auto' }}>
-            no endpoint
-          </Tag>
-        </Button>
         {/* An anchor when it can go somewhere, a dead button when it cannot.
             An <a> with no href is not focusable and not announced as a
             control, so an unconfigured support number would leave the ONE
-            working route here invisible to a keyboard — worse than the two
-            above it, which at least say why they are dead. */}
+            working route here invisible to a keyboard. */}
         {support ? (
           <Button
             href={`https://wa.me/${support}`}
@@ -309,14 +338,6 @@ function SecondPaths() {
           </Button>
         )}
       </div>
-      <p className="small" style={{ marginTop: 11, color: 'var(--tx-ink-3)' }}>
-        Only the third one works today, and it is a person. <b>WhatsApp</b> has a flag
-        (<code>WHATSAPP_OTP_ENABLED</code>) that is <code>false</code>. <b>Voice</b> was specified
-        in the mobile design and has no endpoint at all — <code>OtpChannel</code> is{' '}
-        <code>sms | whatsapp</code>, two values. Both are drawn because deleting them would hide
-        two decisions; both are labelled because a live button that cannot work is worse than a
-        dead one that says so.
-      </p>
     </div>
   );
 }

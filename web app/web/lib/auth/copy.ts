@@ -139,6 +139,32 @@ export function sendMessage(failure: SendFailure, secondsLeft?: number): Message
 }
 
 /**
+ * Why somebody is looking at the phone field instead of their diary. The server
+ * said `SESSION_EXPIRED` or `SESSION_REVOKED` and `/sign-in/expired` cleared the
+ * cookie; this is the sentence that explains it. Amber, because nothing the
+ * trainer did is wrong.
+ */
+export function sessionNotice(why: string | undefined): Message | null {
+  if (why === 'revoked') {
+    return {
+      tone: 'warn',
+      icon: 'lock',
+      lead: 'You were signed out.',
+      rest: 'This session was ended from another device or after an account change. Sign in again to carry on.',
+    };
+  }
+  if (why === 'expired') {
+    return {
+      tone: 'warn',
+      icon: 'clock',
+      lead: 'Your session has expired.',
+      rest: 'Sign in again to carry on.',
+    };
+  }
+  return null;
+}
+
+/**
  * The one nobody designs. Without an explicit confirmation people press resend
  * three more times, burn the day's ceiling of 10 and land in a lockout for no
  * reason — so it is a state of the message slot rather than a toast.

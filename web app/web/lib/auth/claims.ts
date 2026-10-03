@@ -16,13 +16,13 @@ import type { Role } from './types';
  *   · which number to print back to the person who typed it one screen ago.
  *
  * Every actual permission is still the server's. A pending token cannot read
- * `/v1/trainers/me` however this file describes it, and `POST /v1/auth/trainer`
- * refuses a subject that is not a phone. So a forged claim buys the forger a
+ * `/v1/trainers/me` however this file describes it, and `POST /v1/trainers`
+ * refuses anything but a live pending token or a trainer's own session. So a forged claim buys the forger a
  * screen they cannot use — and the cookie is `httpOnly` and signed by us, so
  * forging it means attacking your own browser.
  *
  * The alternative was a request. There is no *who am I* endpoint a pending token
- * can call, so it would have to be `POST /v1/auth/trainer` — the one call that
+ * can call, so it would have to be `POST /v1/trainers` — the one call that
  * has a side effect, made to find out whether the screen should offer it. That is
  * worse than reading a claim we minted.
  *
@@ -63,6 +63,13 @@ const ROLES = new Set<string>([
  */
 export function readClaims(token: string | null): SessionClaims | null {
   if (!token) return null;
+
+  // An opaque session token (`xs_…`) says nothing about itself — that is its
+  // point. Only a trainer is ever given one on the web (a client-only number is
+  // refused at verify and a new number gets the pending JWT below), so the
+  // prefix is the whole answer. Whether the SESSION is still alive is the
+  // server's, asked on `/sign-in` and by every guarded read.
+  if (token.startsWith('xs_')) return { sub: null, phone: null, role: 'trainer', exp: null };
 
   const parts = token.split('.');
   if (parts.length !== 3) return null;

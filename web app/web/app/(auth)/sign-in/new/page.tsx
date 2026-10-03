@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { AuthShell } from '@/components/auth/AuthShell';
 import { UnknownNumber } from '@/components/auth/UnknownNumber';
 import { formatPhone, readClaims } from '@/lib/auth/claims';
-import { getPendingPhone, getToken } from '@/lib/auth/session';
+import { getPendingPhone, getPolicyVersion, getToken } from '@/lib/auth/session';
 
 export const metadata = { title: 'We don’t know this number · InclineYou' };
 
@@ -19,8 +19,8 @@ export const metadata = { title: 'We don’t know this number · InclineYou' };
  *
  * A token that is NOT pending has to be turned away too, and that case is real
  * rather than theoretical: a trainer whose cookie is live and who types this URL,
- * or a bookmark kept from a first session. `POST /v1/auth/trainer` would answer
- * 400 for them, so the screen would draw two exits of which the important one
+ * or a bookmark kept from a first session. `POST /v1/trainers` would answer
+ * 200 for them without creating anything, so the screen would draw two exits of which the important one
  * cannot work — which is the "live button that cannot work" defect, on the one
  * screen where the button creates an account.
  *
@@ -58,13 +58,18 @@ export default async function Page() {
    */
   const phone = formatPhone((await getPendingPhone()) ?? claims.phone);
 
+  // The notice the button accepts, as verify named it. Gone means the pending
+  // sitting lapsed, and so has the 15-minute token behind it.
+  const policyVersion = await getPolicyVersion();
+  if (!policyVersion) redirect('/sign-in');
+
   return (
     <AuthShell
       eyebrow="New number"
       lead="Everyone starts here."
       quote="Clients are added by their trainer; trainers open their own account. Either way it begins with this number."
     >
-      <UnknownNumber phone={phone} />
+      <UnknownNumber phone={phone} policyVersion={policyVersion} />
     </AuthShell>
   );
 }

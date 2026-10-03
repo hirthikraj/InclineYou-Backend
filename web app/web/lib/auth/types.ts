@@ -1,5 +1,5 @@
 /**
- * The wire types for `/v1/auth`, from `AuthService.AuthResponse` and the
+ * The wire types for sign-in, from api-contract v1.1 *Sign in* and the
  * `ProblemDetail`s in `exception/GlobalExceptionHandler.java`.
  *
  * Optionality here mirrors `app/src/api/auth.ts`, and it is not defensive
@@ -60,31 +60,46 @@ export interface Membership {
   pausedOn?: string | null;
 }
 
+/**
+ * What `POST /v1/auth/otp/verify` and `POST /v1/trainers` answer — api-contract
+ * *Sign in*. Instants are epoch milliseconds.
+ *
+ * Only two roles are ever minted in v1: a trainer, or `pending` (a number with
+ * no account yet). A number that is only somebody's client is refused with
+ * `403 CLIENT_SIGN_IN_UNAVAILABLE` and gets no credential at all.
+ */
 export interface AuthResponse {
-  /** Null only on the legacy `paused` role. Every live path returns a token. */
-  token: string | null;
-  trainerId: string | null;
+  /** On the web an opaque `xs_…` session; a `pending` sign-in gets a 15-minute JWT instead. */
+  token: string;
+  /** `web_session.id` — "this device" in Settings. Null for the pending JWT, which has no row. */
+  sessionId: string | null;
+  expiresAt: number;
+  role: 'trainer' | 'pending';
   isNewUser: boolean;
-  /** Absent on a backend older than V8. */
-  setupComplete?: boolean;
-  /** Absent on a backend older than V14, and every sign-in one of those answered was a trainer's. */
-  role?: Role;
-  trainerName?: string | null;
-  /**
-   * Every LIVE roster this number is on. Populated for `role: 'trainer'` too,
-   * now that a phone can hold a trainer account and be somebody else's client
-   * at once — see `destinationFor` in `./session` and the two mode-switch
-   * calls in `./api`.
-   */
-  clientOf?: Membership[];
-  paused?: { trainerName: string; trainerPhone: string | null; pausedOn: string | null } | null;
-  removed?: {
-    clientId: string;
-    trainerName: string | null;
-    trainerPhone: string | null;
-    removedOn: string | null;
-  } | null;
+  trainerId: string | null;
+  trainerName: string | null;
+  /** Null until onboarding is finished — the only answer to "does this trainer owe setup". */
+  setupCompletedAt: number | null;
+  /** What this number accepted. Null for a number with no account. */
+  privacyPolicyVersion: string | null;
+  /** What is in force. A mismatch with the above sends them to `/sign-in/consent`. */
+  currentPolicyVersion: string;
 }
+
+/** `POST /v1/auth/otp/request` → 200. The id carries no phone number. */
+export interface OtpRequested {
+  requestId: string;
+  expiresAt: number;
+  /** The next rung of the resend ladder, as the server computes it. */
+  resendAfterSeconds: number;
+}
+
+/**
+ * Where the WhatsApp message is, for the "Didn't get it?" line.
+ * `delivered` and `read` are for a provider webhook that is not wired yet, so
+ * today a request goes `queued → sent` or `failed`.
+ */
+export type DeliveryStatus = 'queued' | 'sent' | 'delivered' | 'read' | 'failed';
 
 /**
  * What the browser is told after a verify. Deliberately NOT `AuthResponse`:
@@ -95,7 +110,9 @@ export type VerifyResult =
   | { ok: true; next: string; role: Role; trainerName: string | null }
   | { ok: false; failure: OtpFailure };
 
-export type RequestResult = { ok: true } | { ok: false; failure: SendFailure };
+export type RequestResult =
+  | { ok: true; resendAfterSeconds: number }
+  | { ok: false; failure: SendFailure };
 
 /**
  * What frame 3a's "I'm a trainer" answers with.
@@ -126,9 +143,9 @@ export type ClaimResult = { ok: true; next: string } | { ok: false; message: str
  * 30-second wait into a ten-minute lockout screen.
  */
 export type OtpFailure =
-  /** 422 · OTP_WRONG — a digit was mistyped. Spends an attempt. */
+  /** 401 · OTP_WRONG — a digit was mistyped. Spends an attempt. */
   | { kind: 'wrong'; attemptsLeft: number | null }
-  /** 410 · OTP_EXPIRED — the clock's doing, not the trainer's. Spends nothing. */
+  /** 401 · OTP_EXPIRED, or 404 OTP_REQUEST_NOT_FOUND (superseded or used) — the clock's doing, not the trainer's. Spends nothing. */
   | { kind: 'expired' }
   /** 429 · OTP_LOCKED — three wrong codes. Owes a countdown. */
   | { kind: 'locked'; retryAfterSeconds: number }
@@ -139,9 +156,9 @@ export type OtpFailure =
 export type SendFailure =
   /** 429 · OTP_THROTTLED — too many codes asked for, not too many wrong. Spends nothing. */
   | { kind: 'throttled'; retryAfterSeconds: number }
-  /** 429 · OTP_LOCKED — asking for a code on a locked number. Sends no SMS. */
+  /** 429 · OTP_LOCKED — asking for a code on a locked number. Sends no message. */
   | { kind: 'locked'; retryAfterSeconds: number }
-  /** 400 · the number failed `^[6-9]\d{9}$` at the server. */
+  /** 400 · PHONE_INVALID — the number failed `^\+91[6-9]\d{9}$` at the server. */
   | { kind: 'invalid'; detail: string | null }
   | { kind: 'offline' }
   | { kind: 'unknown' };
