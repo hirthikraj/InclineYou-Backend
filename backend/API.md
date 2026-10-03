@@ -2989,6 +2989,31 @@ over REST, as the team screens do.
 
 ---
 
+## Business v1.1 (3 Oct 2026)
+
+Built on the v1 schema; money is always a decimal string and every response states its `currency`. All are STANDARD tier and read the active workspace only (RLS). Contract: `release/api-contract-v1.1.html`, Business.
+
+| Route | What it does |
+| --- | --- |
+| `GET /v1/money/summary` | Adds `takeHome` to every month and to `total` (collected less the gym's part of paid payments). |
+| `GET /v1/money/activity?from&to&limit&cursor` | `sold` · `paid` · `write_off` · `refund`, newest first, keyset on `(at, id)`. Limit 8 default, 100 max. |
+| `GET /v1/payments/export?from&to&…` | CSV, streamed page by page. `from` and `to` required, 3 years max (`RANGE_TOO_LARGE`). Cells starting `= + - @` are prefixed with `'`. |
+| `GET /v1/money/gym?from&to` | `stats`, `shares[]` (per pack: `sold`, `billed`, `trainerTake`, `gymCut`, `gymSharePercent`, `gymShareAmount`) and `settlement` (null until pay terms exist). 24 months max. |
+| `GET · POST /v1/gym-arrangements`, `PATCH · DELETE /{id}` | Pay terms with a gym. Errors `ARRANGEMENT_NEEDS_GYM` · `ARRANGEMENT_OVERLAP` · `ARRANGEMENT_STARTED` · `ID_CONFLICT`. |
+| `GET · POST /v1/trainer-payouts`, `PATCH · DELETE /{id}` | What the gym paid. `ARRANGEMENT_REQUIRED` with no running terms; `receivedAt` never in the future. |
+| `GET /v1/reports/practice?months=12` | Months, headline (`retentionPercent`, `takeHome`), top ten clients with `collected` and `yours`. 24 months max. |
+| `POST /v1/packs` · `PATCH /v1/packs/{id}` · `DELETE /v1/packs/{id}` | Price list on the v1 columns: `service`, `basis`, `sessions`, `validityDays`, `trainerSharePercent` | `trainerShareAmount`. Unknown keys (including the old `type`) are 400. DELETE only for a pack never sold. |
+
+`PackRow` (`GET /v1/packs`) gains `gymSharePercent` and `gymShareAmount`: what the gym keeps, derived and never stored.
+
+### Gym directory (V8, 3 Oct 2026)
+
+`PATCH /v1/trainers/me` accepts `gymPlace: {placeId, name, address?, city?, lat?, lng?, mapLink?} | null` — the gym picked from the web's place search (the web's server reads Places; this backend never calls out). `placeId` (≤300) and `name` (≤120) are required; `lat` and `lng` come together, within ±90 / ±180; `mapLink` must be http(s). Setting it adds the place to the shared directory (or reuses the row with that `placeId`; blanks are filled, nothing is overwritten), links the profile, and snapshots `gymName = name`. `null` clears the link **and** `gymName`. `gymName` alone stays free text and **unlinks**; sending both is 400 `VALIDATION`. A gym needs `gym_floor` among `trainingModes`, else 400 `GYM_NEEDS_FLOOR` (was a bare `VALIDATION`). Arrangements and payouts recorded earlier under the same typed name join the place when it is picked.
+
+`GET /v1/trainers/me` and `GET /v1/me` return `gymPlace: {id, placeId, name, address, city, mapLink} | null`. Arrangement and payout rows carry `gymPlaceId`. Settlement keys on the place when there is one, else on the case-insensitive name, so a rename cannot split one gym's balance. Support reads `gym_place_stats` with `scripts/gym-stats.sh` — trainers and active clients per gym, counts only.
+
+New error codes: `PACK_NAME_TAKEN` · `PACK_SOLD` · `GYM_PACK_NEEDS_GYM` · `PACK_OWNER_IMMUTABLE` · `ARRANGEMENT_NEEDS_GYM` · `ARRANGEMENT_OVERLAP` · `ARRANGEMENT_STARTED` · `ARRANGEMENT_REQUIRED`.
+
 ## Reports
 
 `report/ReportController.java` — both **`MESSAGING` tier** where noted.

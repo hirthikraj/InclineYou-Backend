@@ -1904,7 +1904,21 @@ and its one statement is scoped to the caller's own `trainer_id`) and
 `subscription` (V21 — a seat is a **coaching trainer**, and one trainer coaches
 in several workspaces, so a tenant-scoped subscription would bill one person
 twice. The request role may SELECT and UPDATE it, scoped in code by the caller's
-own `trainer_id`; only the trigger creates a row).
+own `trainer_id`; only the trigger creates a row) and
+`gym_place` (V8, 3 Oct 2026 — the **gym directory**: one row per physical gym a
+trainer picked from the Places search, shared by every trainer in every
+workspace who works there, which is the point, since counting them is what it is
+for. A tenant tier would make each trainer's copy a different gym. It is
+narrowed instead: RLS is on, and the one policy lets the request role SELECT only
+the place its own `trainer_business.gym_place_id` points at; the role holds no
+INSERT, UPDATE or DELETE and the only door in is `upsert_gym_place()`, a definer
+function that adds a place or fills blanks and never overwrites; the stats view
+`gym_place_stats` is owner-only and holds counts, never a person. It is
+`gym_place` and not `gym` because `gym` is reserved for the Ring 2 gym
+organisation account — a `gym_place` must never authorise anything, find "a
+gym's clients" or move money. `trainer_business`, `gym_arrangement` and
+`trainer_payout` carry a nullable `gym_place_id`; `gym_name` stays as the typed
+snapshot).
 
 **Any new table that is not in one of the four tiers must be added to that list
 with its reason, or it is an oversight.**
