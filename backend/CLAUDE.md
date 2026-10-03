@@ -139,6 +139,15 @@ the figures a message quotes), `NudgeReadService` (`GET /v1/nudges`) and `NudgeD
 (they wrote and read `template_name`/`status`, which v1 does not have, and no caller was left) and `NudgeRuleException`
 with them.
 
+`session/` is on the same shape (3 Oct 2026): `SessionJdbcRepository` (the L4 row and window, and the booking's lookups) and
+`SessionStateJdbcRepository` (the locked row, every status verb, the two batch routes and the `package_adjustment` charge),
+under `SessionReadService`, `SessionBookingService`, `SessionWriteService` (the batches), `SessionStateService` (the verbs) and
+`SessionChargeService` (which pack pays, and taking a charge back — one place, so a charged no-show and a done cannot pick
+different packs), with the records in `session/dto/`. The legacy `ScheduledSessionService` (pre-v1 columns) is deleted;
+`GET /v1/sessions/{id}` answers the L4 row. `PATCH` keeps a `Map` body on purpose — presence of a key is the contract — and
+validates it into a typed `SessionEdit` at the service's entry. `SessionDiaryTest` pins the read, the booking and the PATCH;
+`SessionStateTest` the verbs.
+
 ### Persistence is deliberately split
 
 Only five things are JPA entities — `AppUser`, `Trainer`, `Client`, `BodyMetric`,

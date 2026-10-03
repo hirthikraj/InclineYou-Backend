@@ -1,5 +1,13 @@
 package com.inclineyou.inclineyou_backend.core.session;
 
+import com.inclineyou.inclineyou_backend.core.session.dto.BookRequest;
+import com.inclineyou.inclineyou_backend.core.session.dto.EndResults;
+import com.inclineyou.inclineyou_backend.core.session.dto.MarkResult;
+import com.inclineyou.inclineyou_backend.core.session.dto.MarkResults;
+import com.inclineyou.inclineyou_backend.core.session.dto.NoShowResult;
+import com.inclineyou.inclineyou_backend.core.session.dto.Reopened;
+import com.inclineyou.inclineyou_backend.core.session.dto.SessionIdsRequest;
+import com.inclineyou.inclineyou_backend.core.session.dto.SessionRow;
 import lombok.RequiredArgsConstructor;
 import com.inclineyou.inclineyou_backend.shared.wire.Page;
 import org.springframework.http.HttpStatus;
@@ -15,7 +23,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ScheduledSessionController {
 
-    private final ScheduledSessionService service;
     private final SessionReadService reads;
     private final SessionWriteService writes;
     private final SessionBookingService bookings;
@@ -30,7 +37,7 @@ public class ScheduledSessionController {
      * exclusive; keyset-paged on (scheduledAt, id), 500 a page by default.
      */
     @GetMapping
-    public Page<SessionReadService.SessionRow> list(
+    public Page<SessionRow> list(
             Authentication auth,
             @RequestParam(required = false) String clientId,
             @RequestParam(required = false) String from,
@@ -45,18 +52,18 @@ public class ScheduledSessionController {
 
     /** api-contract Today — close logs left open on sessions that are over. */
     @PostMapping("/end")
-    public SessionWriteService.EndResults end(
+    public EndResults end(
             Authentication auth,
-            @RequestBody(required = false) SessionWriteService.SessionIdsRequest req
+            @RequestBody(required = false) SessionIdsRequest req
     ) {
         return writes.end(trainerId(auth), req);
     }
 
     /** api-contract Today — mark past sessions delivered, charging the pack; one outcome per session. */
     @PostMapping("/done")
-    public SessionWriteService.MarkResults markDoneBatch(
+    public MarkResults markDoneBatch(
             Authentication auth,
-            @RequestBody(required = false) SessionWriteService.SessionIdsRequest req
+            @RequestBody(required = false) SessionIdsRequest req
     ) {
         return writes.markDone(trainerId(auth), req);
     }
@@ -66,25 +73,24 @@ public class ScheduledSessionController {
      * {@code id} answers 200 with the session as it now is.
      */
     @PostMapping
-    public ResponseEntity<SessionReadService.SessionRow> create(
+    public ResponseEntity<SessionRow> create(
             Authentication auth,
-            @RequestBody(required = false) SessionBookingService.BookRequest req
+            @RequestBody(required = false) BookRequest req
     ) {
         var booked = bookings.book(trainerId(auth), req);
         return ResponseEntity.status(booked.created() ? HttpStatus.CREATED : HttpStatus.OK).body(booked.session());
     }
 
+    /** One session in the L4 shape — the row the list draws — with its version as the ETag {@code PATCH} takes. */
     @GetMapping("/{id}")
-    public ScheduledSessionService.SessionResponse get(
-            Authentication auth,
-            @PathVariable UUID id
-    ) {
-        return service.get(id, trainerId(auth));
+    public ResponseEntity<SessionRow> get(Authentication auth, @PathVariable UUID id) {
+        SessionRow row = reads.get(trainerId(auth), id);
+        return ResponseEntity.ok().eTag(row.version()).body(row);
     }
 
     /** api-contract Schedule — move a session, or change its length, mode or note. */
     @PatchMapping("/{id}")
-    public ResponseEntity<SessionReadService.SessionRow> patch(
+    public ResponseEntity<SessionRow> patch(
             Authentication auth,
             @PathVariable UUID id,
             @RequestHeader(value = "If-Match", required = false) String ifMatch,
@@ -103,7 +109,7 @@ public class ScheduledSessionController {
 
     /** api-contract Schedule — mark one session delivered; the batch's item shape. */
     @PostMapping("/{id}/done")
-    public SessionWriteService.MarkResult markDone(
+    public MarkResult markDone(
             Authentication auth,
             @PathVariable UUID id,
             @RequestBody(required = false) Map<String, Object> body
@@ -113,7 +119,7 @@ public class ScheduledSessionController {
 
     /** api-contract Schedule — record a no-show, and whether it costs a pack session. */
     @PostMapping("/{id}/no-show")
-    public SessionStateService.NoShowResult noShow(
+    public NoShowResult noShow(
             Authentication auth,
             @PathVariable UUID id,
             @RequestBody(required = false) Map<String, Object> body
@@ -123,7 +129,7 @@ public class ScheduledSessionController {
 
     /** api-contract Schedule — cancel a booking; the row stays in the diary. */
     @PostMapping("/{id}/cancel")
-    public SessionReadService.SessionRow cancel(
+    public SessionRow cancel(
             Authentication auth,
             @PathVariable UUID id,
             @RequestBody(required = false) Map<String, Object> body
@@ -133,7 +139,7 @@ public class ScheduledSessionController {
 
     /** api-contract Schedule — undo a done, no-show or cancel, reversing its charge. */
     @PostMapping("/{id}/reopen")
-    public SessionStateService.Reopened reopen(
+    public Reopened reopen(
             Authentication auth,
             @PathVariable UUID id,
             @RequestBody(required = false) Map<String, Object> body

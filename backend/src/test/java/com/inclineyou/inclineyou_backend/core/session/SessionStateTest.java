@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.session;
 
+import com.inclineyou.inclineyou_backend.core.session.dto.SessionIdsRequest;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import com.inclineyou.inclineyou_backend.core.tenant.CurrentScope;
 import com.inclineyou.inclineyou_backend.core.tenant.TenantScope;
@@ -163,7 +164,7 @@ class SessionStateTest {
         jdbc.update("UPDATE scheduled_session SET started_at = now() WHERE id = :s::uuid", Map.of("s", early.toString()));
         var future = session(Duration.ofHours(-5));
 
-        var r = writes.markDone(trainer, new SessionWriteService.SessionIdsRequest(List.of(early.toString(), future.toString()))).results();
+        var r = writes.markDone(trainer, new SessionIdsRequest(List.of(early.toString(), future.toString()))).results();
         assertEquals("done", r.get(0).outcome());
         assertEquals("skipped", r.get(1).outcome());
         assertEquals("SESSION_NOT_STARTED", r.get(1).reason());

@@ -2,6 +2,8 @@ package com.inclineyou.inclineyou_backend.core.sessionlog;
 
 import com.inclineyou.inclineyou_backend.core.session.SessionBookingService;
 import com.inclineyou.inclineyou_backend.core.session.SessionReadService;
+import com.inclineyou.inclineyou_backend.core.session.dto.BookRequest;
+import com.inclineyou.inclineyou_backend.core.session.dto.SessionRow;
 import com.inclineyou.inclineyou_backend.core.sessionlog.dto.EndRequest;
 import com.inclineyou.inclineyou_backend.core.sessionlog.dto.SessionLog;
 import com.inclineyou.inclineyou_backend.core.sessionlog.dto.StartRequest;
@@ -55,7 +57,7 @@ public class SessionStartService {
     public Created<SessionLog> walkIn(UUID trainerId, WalkInRequest req) {
         if (req == null) throw ApiException.validation("body: required");
         long minute = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
-        var booked = bookings.book(trainerId, new SessionBookingService.BookRequest(req.id(), req.clientId(), minute,
+        var booked = bookings.book(trainerId, new BookRequest(req.id(), req.clientId(), minute,
                 req.durationMinutes(), req.workoutId(), null, null));
         UUID sid = UUID.fromString(booked.session().id());
         startLocked(trainerId, sid, Instant.now());
@@ -83,7 +85,7 @@ public class SessionStartService {
      * Finish does that next, and Mark done closes an open log itself.
      */
     @Transactional
-    public SessionReadService.SessionRow end(UUID trainerId, UUID sessionId, EndRequest req) {
+    public SessionRow end(UUID trainerId, UUID sessionId, EndRequest req) {
         var head = repo.head(trainerId, sessionId, true).orElseThrow(SessionLogReadService::notYours);
         if (head.startedAt() == null) {
             throw ApiException.conflict("SESSION_NOT_STARTED", "This session's log was never opened, so there is nothing to close.");

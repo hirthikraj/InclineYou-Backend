@@ -1,6 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.sessionlog;
 
-import com.inclineyou.inclineyou_backend.core.session.SessionReadService;
+import com.inclineyou.inclineyou_backend.core.session.dto.SessionRow;
 import com.inclineyou.inclineyou_backend.core.sessionlog.dto.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -56,7 +56,7 @@ public class SessionLogController {
 
     /** Close the log. Idempotent; does not mark the session done or charge the pack. */
     @PostMapping("/{id}/end")
-    public SessionReadService.SessionRow end(@PathVariable UUID id, @RequestBody(required = false) EndRequest req) {
+    public SessionRow end(@PathVariable UUID id, @RequestBody(required = false) EndRequest req) {
         return starts.end(trainerId(), id, req);
     }
 

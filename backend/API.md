@@ -2036,59 +2036,10 @@ Body: `scheduledAt` (required, epoch ms), `clientId` (required), `programId`,
 `durationMinutes`, `notes`, `dayLabel`, `templateDay`, `deliveryMode`
 (`floor` | `remote`; null means "use whatever this client usually does").
 
-### `GET /v1/sessions/{id}` · `PUT /v1/sessions/{id}` · `DELETE /v1/sessions/{id}` → `204`
-**Purpose:** read, reschedule and cancel one booking. `PUT` can move
-`scheduledAt`, change `status`, `durationMinutes`, `notes` or `deliveryMode` —
-and settle the session against the client's pack with **`packDelta`**.
+### `GET /v1/sessions/{id}` → `200`
+One session in the L4 shape — the same row `GET /v1/sessions` draws (booking, `workout`, `startedAt` / `endedAt`, `log` totals, `charge`) — with its `version` as the `ETag` that `PATCH` takes as `If-Match`. `404` when it is not this trainer's live session. (3 Oct 2026: it used to answer a pre-v1 shape from columns v1 does not have, a 500 for every session.)
 
-Every session response carries **`packDelta`** and **`packPackageId`** — V10's
-columns, what this session took and from which pack. `0` and null mean it cost
-nothing, which is a different fact from costing one and has to be drawable as
-one: *Marked no-show* and *Marked no-show · pack −1*.
-
-**`packDelta` on the request is `-1` or `0`, and nothing else.** Until it
-existed, `POST /v1/sessions/{id}/done` was the only endpoint anywhere that
-touched `sessions_remaining`, so a session marked `no_show` over REST wrote a
-status and left the money alone — while the phone's `markNotTrained` had always
-settled the pack in the same write.
-
-It is a request field rather than a rule the server applies to `no_show` on its
-own, and that is the decision: **whether a missed session burns one is a
-commercial question the trainer settles with the client**, not an invariant. The
-server's job is to make the answer expressible, and exact however many times it
-is asked.
-
-Four rules, which are the server's copy of the phone's `settlePack`, quadrant
-for quadrant — the pack reflects the session's *current outcome*, never the
-running total of every button ever pressed:
-
-| already charged | asked for | what happens |
-| --- | --- | --- |
-| yes | `-1` | nothing moves; the **original stamp is kept**, so an undo still credits the pack it took from |
-| yes | `0` | put back, capped at the pack's own `sessions_total` |
-| no | `-1` | one comes off the oldest chargeable pack |
-| no | `0` | nothing moves |
-
-Closing a session is not a one-way door — it can be finished from the log, from
-the diary and from its detail screen, then re-decided — and every one of those
-paths used to subtract one more. A twelve-session pack with one session
-delivered could read nine.
-
-Two guards, both `400`:
-- **Any delta but `-1` or `0`.** A route that can set an arbitrary count can
-  bill four sessions for one no-show, and can silently undo a charge the 24-hour
-  undo exists to reverse properly. It is why `PATCH /v1/packages/{id}` with a
-  `sessionsRemaining` was deliberately never built.
-- **A `done` session.** That outcome owns its charge in `/done`, which also
-  opens the workout log; two front doors to one outcome is the double-charge
-  shape again. `cancelled` is accepted because the refund quadrant is exactly
-  what a done-then-cancelled session needs.
-
-A **paused pack is not chargeable** (V30) — the session is marked and costs
-nothing, exactly as it already does for a client with no pack at all, and the
-zero is stamped rather than left null so a resume cannot bill it late. Omitting
-`packDelta` leaves the pack untouched, so every caller that predates the field —
-every reschedule, every note edit — is unaffected.
+`PUT /v1/sessions/{id}` is gone: move or change a session with `PATCH /v1/sessions/{id}`, and take a booking back with `DELETE /v1/sessions/{id}` → `204` (see Schedule).
 
 ### `POST /v1/sessions/{id}/done`
 **Purpose:** mark a booked session complete — the bridge from *planned* to
