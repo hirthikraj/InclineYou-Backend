@@ -10,8 +10,7 @@ import org.springframework.web.bind.annotation.*;
 
 /**
  * {@code /v1/auth/sessions} — the one path shape for signed-in devices
- * (api-contract v1.1, Settings A10). It replaces the singular
- * {@link SessionController}, which stays only until the web has moved.
+ * (api-contract v1.1, Settings A10).
  *
  * <p>Authenticated, any role: a client signed in on the web has browsers too.
  * {@code SecurityConfig} carries the rule, because everything else under

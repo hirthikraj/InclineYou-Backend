@@ -126,11 +126,6 @@ public class SessionTokenIssuer implements AuthTokenIssuer {
         return handles(rawToken) && sessions.moveToTenant(hash(rawToken), tenantId);
     }
 
-    /** Every credential this subject holds, ended now. */
-    public int revokeAllFor(String subject) {
-        return sessions.revokeAllForSubject(subject, Instant.now(), SessionStore.SIGN_OUT_ALL);
-    }
-
     /** SHA-256 hex of a raw token — what {@code web_session.token_hash} stores and what a step-up ticket binds to. */
     public static String hash(String token) {
         try {

@@ -4,13 +4,10 @@ import com.inclineyou.inclineyou_backend.core.auth.AuthTokenFilter;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.ConfirmNewPhoneRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.NewPhoneRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.PhoneChangedResponse;
-import com.inclineyou.inclineyou_backend.core.trainer.dto.StepUpTicketResponse;
-import com.inclineyou.inclineyou_backend.core.trainer.dto.VerifyCurrentPhoneRequest;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
@@ -38,7 +35,6 @@ import java.util.UUID;
 public class AccountController {
 
     private final AccountService service;
-    private final StepUpService stepUp;
 
     /** 1 · the new number, checked before a message is spent on it. 204. */
     @PostMapping("/request")
@@ -51,26 +47,6 @@ public class AccountController {
     @PostMapping("/confirm")
     public PhoneChangedResponse confirm(@Valid @RequestBody ConfirmNewPhoneRequest body, HttpServletRequest request) {
         return service.confirmNewPhone(trainerId(), body, rawToken(request));
-    }
-
-    /**
-     * DEPRECATED (3 Oct 2026) — replaced by {@code POST /v1/auth/step-up} with purpose
-     * {@code phone_change}; remove after the web migration. Kept so the web's current
-     * Change-number flow works unchanged.
-     */
-    @PostMapping("/challenge")
-    public ResponseEntity<Void> challenge() {
-        stepUp.send(trainerId(), StepUpService.PHONE_CHANGE);
-        return ResponseEntity.ok().build();
-    }
-
-    /**
-     * DEPRECATED (3 Oct 2026) — replaced by {@code POST /v1/auth/step-up/verify}; remove
-     * after the web migration. Answers the same ticket the new route does.
-     */
-    @PostMapping("/verify")
-    public StepUpTicketResponse verify(@Valid @RequestBody VerifyCurrentPhoneRequest body, HttpServletRequest request) {
-        return stepUp.verify(trainerId(), StepUpService.PHONE_CHANGE, body.otp(), rawToken(request));
     }
 
     private UUID trainerId() {

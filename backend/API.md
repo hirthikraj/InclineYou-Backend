@@ -23,7 +23,7 @@ and indexes — see [`SCHEMA.md`](SCHEMA.md).
 | --- | --- | --- | --- |
 | [Health](#health) | `/health` | 1 | Reviewed
 | [Auth & membership](#auth--membership) | `/v1/auth` | 8 | Reviewed
-| [Sessions (web sign-in)](#sessions-web-sign-in) | `/v1/auth/session` | 3 | V41 · **deprecated** by [Settings v1.1](#settings-v11--account--sign-in-3-oct-2026)
+| [Sessions (web sign-in)](#sessions-web-sign-in) | `/v1/auth/sessions` | 3 | V41 · reshaped by [Settings v1.1](#settings-v11--account--sign-in-3-oct-2026)
 | [Settings v1.1 — account & sign-in](#settings-v11--account--sign-in-3-oct-2026) | `/v1/auth/step-up` · `/v1/auth/sessions` · `/v1/trainers/me/phone` · `DELETE /v1/trainers/me` | 9 | v1.1
 | [Workspaces](#workspaces) | `/v1/tenants` | 8 | V37–V42
 | [Trainer profile](#trainer-profile) | `/v1/trainers` | 2 | Reviewed
@@ -319,7 +319,7 @@ live membership anywhere for this number.
 
 ## Sessions (web sign-in)
 
-> **Deprecated 3 Oct 2026** — `GET/DELETE /v1/auth/session` and `/all` are replaced by `/v1/auth/sessions` ([Settings v1.1](#settings-v11--account--sign-in-3-oct-2026)); kept until the web has moved. They now stamp `revoked_reason` (`sign_out` / `sign_out_all`), which the table's CHECK requires.
+> **3 Oct 2026** — the list and sign-out routes are `/v1/auth/sessions` ([Settings v1.1](#settings-v11--account--sign-in-3-oct-2026)). The singular `GET/DELETE /v1/auth/session` and `/all` were removed the same day, once the web no longer called them.
 
 **Two kinds of credential, one interface.** `AuthTokenService` picks; nothing
 below it can tell which answered.
@@ -344,26 +344,6 @@ function, not a KDF on the hot path of every request.
 `tokenKind` — `jwt` or `session`. Nothing on the server branches on it; the web
 needs to know it holds something revocable and the phone needs to know it holds
 something that works with no signal.
-
-### `GET /v1/auth/session`
-
-Every live session for this caller. Empty for a JWT caller, and honestly so —
-a JWT is stored nowhere and cannot be listed.
-
-```json
-[{ "id": "…", "userAgent": "Mozilla/5.0 …", "issuedAt": 1756500000000,
-   "lastSeenAt": 1756512000000, "expiresAt": 1756758000000, "current": true }]
-```
-
-### `DELETE /v1/auth/session` → `200`
-
-Sign out here. `{ "tokenKind": "session", "revoked": true }` — `revoked` is
-**false** for a JWT, which the client should still discard locally. A button that
-appears to work is worse than one that says what it did.
-
-### `DELETE /v1/auth/session/all` → `200`
-
-`{ "sessionsEnded": 3 }`. Every browser, now.
 
 ---
 
@@ -644,15 +624,15 @@ the same three errors with the same `code`s and the same `retryAfterSeconds`.
 
 ### Changing the number you sign in with
 
-> **Superseded 3 Oct 2026 by [Settings v1.1](#settings-v11--account--sign-in-3-oct-2026)** — the proof of the *current* number is now one shared **step-up** (`/v1/auth/step-up`), `confirm` no longer returns a token, and deletion is confirmed by a ticket, not the typed number. `/phone/challenge`, `/phone/verify` and the typed-number DELETE body below still answer, as **deprecated**, until the web migrates.
+> **Superseded 3 Oct 2026 by [Settings v1.1](#settings-v11--account--sign-in-3-oct-2026)** — the proof of the *current* number is now one shared **step-up** (`/v1/auth/step-up`), `confirm` no longer returns a token, and deletion is confirmed by a ticket, not the typed number. `/phone/challenge` and `/phone/verify` were removed on 3 Oct; the typed-number DELETE body below still answers, as **deprecated**, until the web sends the ticket.
 
-Four calls, and **two numbers are proved, not one**.
+Four calls (the first two are the shared step-up), and **two numbers are proved, not one**.
 
 ```
-POST /v1/trainers/me/phone/challenge                     → 200, no body
-POST /v1/trainers/me/phone/verify    {otp}               → {ticket}
-POST /v1/trainers/me/phone/request   {ticket, phone}     → 200, no body
-POST /v1/trainers/me/phone/confirm   {ticket, phone, otp}→ {phone, token}
+POST /v1/auth/step-up                {purpose: phone_change}  → 204   (code to the OLD number)
+POST /v1/auth/step-up/verify         {purpose, otp}           → {ticket, expiresAt}
+POST /v1/trainers/me/phone/request   {ticket, phone}          → 204    (code to the NEW number)
+POST /v1/trainers/me/phone/confirm   {ticket, phone, otp}     → {phone}
 ```
 
 The **old** number is proved because a bearer token is seven days long and lives
@@ -2930,16 +2910,16 @@ Contract: `release/api-contract-v1.1.html`, Settings (A9–A10). `core/trainer/S
 | --- | --- |
 | `GET /v1/auth/sessions` → `{items: [{id, userAgent, issuedAt, lastSeenAt, current}]}` | Live sessions of the caller, newest activity first; times are epoch ms; exactly one row has `current: true`. Empty for a JWT caller (a JWT is stored nowhere). |
 | `DELETE /v1/auth/sessions/{id}` → `204` | End one (`sign_out`). **Idempotent**: an id that is not yours, already ended or never existed is a quiet `204` — nothing to leak, nothing to retry. A non-UUID is 400 `VALIDATION`. |
-| `DELETE /v1/auth/sessions/current` → `204` | Sign out this browser (what `DELETE /v1/auth/session` did). |
+| `DELETE /v1/auth/sessions/current` → `204` | Sign out this browser (sign-out). |
 | `DELETE /v1/auth/sessions?scope=others` → `204` | End every session but this one (`sign_out_all`). Any other `scope`, or none, is 400 `VALIDATION`. |
 
 ### Closing the account
 
 `DELETE /v1/trainers/me` → `204`, header **`X-Step-Up-Ticket: <ticket>`** (purpose `account_deletion`), **no body**. Soft delete on `trainer` and `app_user`, **every** session ended (`sign_out_all`), the number **not** released (see *The account* above — unchanged). No ticket → `403 STEP_UP_REQUIRED`. A second call is `404`. **Deprecated transitional path:** with no ticket header and the old body `{confirmPhone}` the typed-number confirmation still works (`400 DELETE_NOT_CONFIRMED` on a mismatch); remove once the web sends the ticket.
 
-### Deprecated, still answering (remove after the web migration)
+### Removed (3 Oct 2026)
 
-`POST /v1/trainers/me/phone/challenge` → `200` and `POST /v1/trainers/me/phone/verify` `{otp}` → `{ticket, expiresAt}` now delegate to the `phone_change` step-up (same ticket as the new routes, so the web's current flow keeps working); `GET/DELETE /v1/auth/session` and `/all`; the typed-number body on `DELETE /v1/trainers/me`. **Breaking, no shim:** `phone/confirm` answers `{phone}` only — the old `token` field is gone.
+`POST /v1/trainers/me/phone/challenge`, `POST /v1/trainers/me/phone/verify`, `GET /v1/auth/session`, `DELETE /v1/auth/session` and `DELETE /v1/auth/session/all` — the web calls none of them. Their replacements are `/v1/auth/step-up[/verify]` and `/v1/auth/sessions`. Still answering, deprecated: the typed-number body on `DELETE /v1/trainers/me`. **Breaking, no shim:** `phone/confirm` answers `{phone}` only — the old `token` field is gone.
 
 ## Settings v1.1 — profile, working week & messages
 3 Oct 2026 · `core/trainer` + `core/nudge` · the contract's Settings group (api-contract-v1.1). The account half — step-up, phone change, signed-in browsers, delete — is documented under [The account](#the-account).

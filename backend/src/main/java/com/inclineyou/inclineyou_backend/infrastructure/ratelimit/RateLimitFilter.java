@@ -133,8 +133,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // their token, not a sign-in attempt: the AUTH tier counts per IP and exists to slow guessing
         // and OTP spend, so a trainer with a few tabs open should not share it. (The prefix would
         // otherwise put these under /v1/auth/ below.)
-        if (path.equals("/v1/auth/sessions") || path.startsWith("/v1/auth/sessions/")
-                || path.equals("/v1/auth/session") || path.startsWith("/v1/auth/session/")) {
+        if (path.equals("/v1/auth/sessions") || path.startsWith("/v1/auth/sessions/")) {
             return Tier.STANDARD;
         }
         if (path.startsWith("/v1/auth/")) return Tier.AUTH;
