@@ -62,7 +62,29 @@ export interface LogSet {
   rpe?: number | null;
   notes?: string | null;
   createdAt: number;
+  /**
+   * Set ONLY by the console's adapter, for a set whose effort is a length of time or a distance —
+   * which `loadKg`/`reps` cannot carry (a plank is `0 reps`). `effort` is that figure (seconds, or
+   * metres) and `family` says which. Absent on every set Progress and the exercise page build, so
+   * for weight × reps and reps-only data nothing below changes by a byte.
+   */
+  family?: EffortFamily;
+  effort?: number | null;
 }
+
+/** The two effort kinds the original record rule cannot rank: how long, and how far. */
+export type EffortFamily = 'time' | 'distance';
+
+/**
+ * HOW MUCH BETTER A TIME OR A DISTANCE HAS TO BE TO BE WORTH SENDING — the plate step's counterpart.
+ *
+ * `PLATE_STEP_KG` is the smallest jump in the room that is a session's worth of progress for a load;
+ * a hold that is two seconds longer or a carry that is two metres further is the same kind of
+ * not-quite-news. Five seconds and five metres: below it the record is real and QUIET (kept in the
+ * history, off the phone), at or above it the record is LOUD. One place, so the judge, the sentences
+ * and the tests cannot disagree about it.
+ */
+export const EFFORT_RECORD_STEP: Record<EffortFamily, number> = { time: 5, distance: 5 };
 
 export interface LogWorkout {
   id: string;
@@ -429,11 +451,21 @@ export function volumeOf(sets: { loadKg?: number | null; reps?: number | null }[
  * This one is heaviest, because it is the set a record is judged on and a coach
  * saying "their best set" at the rack means the heaviest one.
  */
-export function topSet<T extends { loadKg?: number | null; reps?: number | null }>(
+export function topSet<T extends { loadKg?: number | null; reps?: number | null; family?: EffortFamily; effort?: number | null }>(
   sets: T[],
   logType: LogType,
 ): T | null {
   if (!sets.length) return null;
+  // A hold or a carry: the longest, then (for a carry) the heavier. Only ever reached by sets the
+  // console's adapter marked with a family, so the two original rules below are untouched.
+  if (sets.some((s) => s.family)) {
+    return sets.reduce((best, s) => {
+      const a = s.effort ?? 0;
+      const b = best.effort ?? 0;
+      if (a !== b) return a > b ? s : best;
+      return (s.loadKg ?? 0) > (best.loadKg ?? 0) ? s : best;
+    });
+  }
   return sets.reduce((best, s) => {
     if (logType === 'reps') return (s.reps ?? 0) > (best.reps ?? 0) ? s : best;
     const a = s.loadKg ?? 0;
@@ -455,6 +487,11 @@ export interface Judged {
   reps: number | null;
   /** Numeric improvement, in kg for a loud record and in reps for a quiet one. */
   by: number;
+  /** Only for a time or distance set: what it was, what it beat, and the unit `by` is in. */
+  family?: EffortFamily;
+  effort?: number | null;
+  wasEffort?: number | null;
+  byUnit?: 's' | 'm' | 'kg';
 }
 
 const NOTHING: Judged = {
@@ -486,6 +523,8 @@ export function judge(
   if (!history.length) {
     return { ...NOTHING, kind: 'first', setId: top.id, load: top.loadKg ?? null, reps: top.reps ?? null };
   }
+
+  if (top.family) return judgeEffort(top, history, plateStep);
 
   if (logType === 'reps') {
     const best = history.reduce((max, s) => Math.max(max, s.reps ?? 0), 0);
@@ -535,6 +574,76 @@ export function judge(
     }
   }
 
+  return NOTHING;
+}
+
+/**
+ * THE SAME THREE TESTS, FOR A HOLD OR A CARRY.
+ *
+ * `judge` reads kilograms and reps; a plank has neither, so it used to compare `0 reps` with `0 reps`
+ * and say MATCHED for a hold that went from 50 s to 1:05. The tests are the old tests, with the
+ * figure that matters in the place of reps:
+ *
+ *   1. an earlier session in the same family has to exist — else it is the number to beat (`first`);
+ *   2. it has to BEAT the best — equal is `matched`, shorter is nothing;
+ *   3. only the top set is checked.
+ *
+ * TIME: only the time counts. LONGER than the best is a record, `loud` from `EFFORT_RECORD_STEP.time`
+ * seconds up and `quiet` below it — the plate step's idea.
+ * DISTANCE: the distance leads, as the load leads for a lift. FURTHER than the best, carried at no
+ * less than the weight that best was carried at, is a record (the step is the metres above); the
+ * SAME distance at a heavier weight is a record too, loud from one plate up and quiet below it. Further
+ * but lighter, or heavier but shorter, beats nothing — neither is the same carry done better.
+ */
+function judgeEffort(top: LogSet, history: LogSet[], plateStep: number): Judged {
+  const family = top.family as EffortFamily;
+  const before = history.filter((s) => s.family === family && s.effort != null);
+  const effort = top.effort ?? 0;
+  const load = top.loadKg ?? 0;
+  if (!before.length) {
+    return { ...NOTHING, kind: 'first', setId: top.id, load: top.loadKg ?? null, family, effort };
+  }
+
+  const bestEffort = before.reduce((max, s) => Math.max(max, s.effort ?? 0), 0);
+  const unit = family === 'time' ? 's' : 'm';
+  const base = { setId: top.id, wasReps: null, reps: null, family, effort } as const;
+
+  if (family === 'time') {
+    if (effort > bestEffort) {
+      const by = effort - bestEffort;
+      return {
+        ...base, kind: by + 1e-9 >= EFFORT_RECORD_STEP.time ? 'record' : 'quiet',
+        wasLoad: null, load: top.loadKg ?? null, by, wasEffort: bestEffort, byUnit: unit,
+      };
+    }
+    if (effort === bestEffort) {
+      return { ...base, kind: 'matched', wasLoad: null, load: top.loadKg ?? null, by: 0, wasEffort: bestEffort };
+    }
+    return NOTHING;
+  }
+
+  // Distance. The weight the best distance was carried at: the heaviest of those carries.
+  const wasLoad = before.filter((s) => (s.effort ?? 0) === bestEffort).reduce((max, s) => Math.max(max, s.loadKg ?? 0), 0);
+  if (effort > bestEffort) {
+    if (load + 1e-9 < wasLoad) return NOTHING;
+    const by = effort - bestEffort;
+    return {
+      ...base, kind: by + 1e-9 >= EFFORT_RECORD_STEP.distance ? 'record' : 'quiet',
+      wasLoad, load, by, wasEffort: bestEffort, byUnit: unit,
+    };
+  }
+  if (effort === bestEffort) {
+    if (load > wasLoad) {
+      const by = load - wasLoad;
+      return {
+        ...base, kind: by + 1e-9 >= plateStep ? 'record' : 'quiet',
+        wasLoad, load, by, wasEffort: bestEffort, byUnit: 'kg',
+      };
+    }
+    if (load === wasLoad) {
+      return { ...base, kind: 'matched', wasLoad, load, by: 0, wasEffort: bestEffort };
+    }
+  }
   return NOTHING;
 }
 
@@ -1230,6 +1339,12 @@ export interface HistorySet {
   number: number;
   load: string;
   reps: string;
+  /**
+   * The set in words when it is in a kind `load`/`reps` cannot carry (a hold, a carry, a percentage) —
+   * set by the console's adapter only. Absent for weight × reps and reps-only, and always absent on
+   * Progress's and the exercise page's history, so what they draw is unchanged.
+   */
+  said?: string;
   rpe: number | null;
   note: string | null;
   pr: boolean;
@@ -1324,7 +1439,9 @@ export function walkForward(
     const verdict = judge(own, seen, logType, plateStep);
     const date = dateOf[workoutId] ?? '';
     const top = topSet(own, logType);
-    const figure = top ? (logType === 'reps' ? (top.reps ?? 0) : (top.loadKg ?? 0)) : null;
+    const figure = top
+      ? (top.family ? (top.effort ?? 0) : logType === 'reps' ? (top.reps ?? 0) : (top.loadKg ?? 0))
+      : null;
 
     sessions.push({
       workoutId,
@@ -1752,110 +1869,4 @@ export interface PickView {
   open: PickRow[];
   booked: PickRow[];
   everybody: PickRow[];
-}
-
-const DEAD_SESSION = new Set(['done', 'no_show', 'noshow', 'cancelled', 'canceled', 'skipped']);
-
-/**
- * FRAME 5a — ONE QUESTION, ASKED ONCE.
- *
- * Not what kind of workout, not which program, not when — all three are
- * answerable from **who**, and asking is how a two-tap action becomes a five-tap
- * one.
- *
- * **The third group is the finding.** Every logger in the teardown assumes a
- * workout belongs to a booking or a saved routine; ABC Trainerize is the only
- * one that lets a trainer log on the web at all and it requires the session to
- * be on the client's calendar first. In a gym where the trainer is on the floor,
- * a client turning up on a day they do not normally train is a Tuesday — and
- * logging is allowed to happen before programming exists. Before booking, too.
- *
- * **Still open is first** because a trainer who logs four clients a morning has
- * logs on the go, and coming back to one is the commonest reason to press this
- * at all. Nothing is started from that group: it goes straight back in.
- */
-export function buildPicker(input: LogInput, now: number): PickView {
-  const nameOf = new Map(input.clients.map((c) => [c.id, c.name?.trim() || 'Client'] as const));
-  const todayIso = isoDay(now);
-
-  const setsByWorkout = new Map<string, LogSet[]>();
-  for (const set of input.sets) {
-    const arr = setsByWorkout.get(set.workoutSessionId) ?? [];
-    arr.push(set);
-    setsByWorkout.set(set.workoutSessionId, arr);
-  }
-
-  const spoken = new Set<string>();
-
-  /* 1 · still open — a log with no `endedAt`, whatever day it was started. */
-  const open: PickRow[] = input.workouts
-    .filter((w) => w.endedAt == null && nameOf.has(w.clientId))
-    .sort((a, b) => b.startedAt - a.startedAt)
-    .map((w) => {
-      const sets = setsByWorkout.get(w.id) ?? [];
-      spoken.add(w.clientId);
-      return {
-        clientId: w.clientId,
-        name: nameOf.get(w.clientId) ?? 'Client',
-        meta: sets.length
-          ? `${sets.length} set${sets.length === 1 ? '' : 's'} in · ${volumeOf(sets).toLocaleString('en-IN')} kg`
-          : `Started ${shortDate(w.sessionDate)} · nothing logged`,
-        href: `/sessions/${w.scheduledSessionId ?? w.id}/log`,
-        verb: 'Carry on',
-        sessionId: w.scheduledSessionId ?? null,
-      };
-    });
-
-  /* 2 · booked today — opens against the booking, so the log carries its id. */
-  const booked: PickRow[] = input.sessions
-    .filter(
-      (s) =>
-        isoDay(s.scheduledAt) === todayIso &&
-        !DEAD_SESSION.has(s.status.toLowerCase()) &&
-        nameOf.has(s.clientId) &&
-        !spoken.has(s.clientId),
-    )
-    .sort((a, b) => a.scheduledAt - b.scheduledAt)
-    .map((s) => {
-      spoken.add(s.clientId);
-      const at = new Date(s.scheduledAt);
-      return {
-        clientId: s.clientId,
-        name: nameOf.get(s.clientId) ?? 'Client',
-        meta: `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}${s.dayLabel ? ` · ${s.dayLabel}` : ''}`,
-        href: `/sessions/${s.id}/log`,
-        verb: 'Start',
-        sessionId: s.id,
-      };
-    });
-
-  /* 3 · everybody else, by who trained most recently — because those are the
-     people most likely to be standing in front of you. */
-  const lastByClient = new Map<string, string>();
-  for (const w of input.workouts) {
-    if (!(setsByWorkout.get(w.id) ?? []).length) continue;
-    const held = lastByClient.get(w.clientId);
-    if (!held || w.sessionDate > held) lastByClient.set(w.clientId, w.sessionDate);
-  }
-
-  const everybody: PickRow[] = input.clients
-    .filter((c) => !spoken.has(c.id))
-    .map((c) => ({
-      clientId: c.id,
-      name: c.name?.trim() || 'Client',
-      meta: lastByClient.has(c.id)
-        ? `Last trained ${shortDate(lastByClient.get(c.id) as string)}`
-        : 'Never logged',
-      href: `/sessions/new?clientId=${c.id}`,
-      verb: 'Log',
-      sessionId: null,
-    }))
-    .sort((a, b) => {
-      const da = lastByClient.get(a.clientId) ?? '';
-      const db = lastByClient.get(b.clientId) ?? '';
-      if (da !== db) return da < db ? 1 : -1;
-      return a.name.localeCompare(b.name);
-    });
-
-  return { open, booked, everybody };
 }

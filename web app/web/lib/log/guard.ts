@@ -3,11 +3,8 @@ import 'server-only';
 import { redirect } from 'next/navigation';
 
 import { getToken } from '@/lib/auth/session';
-import {
-  getConsole, getExerciseHistory, getFinish, getPicker, getProgress, getUnstarted, LogApiError,
-} from './api';
-import type { ConsoleData, FinishData } from './api';
-import type { HistoryView, PickView, ProgressRange, ProgressView } from './log';
+import { getExerciseHistory, getProgress, LogApiError } from './api';
+import type { HistoryView, ProgressRange, ProgressView } from './log';
 
 /**
  * The same shape every other guard on this half uses, and the same predicate
@@ -15,9 +12,9 @@ import type { HistoryView, PickView, ProgressRange, ProgressView } from './log';
  * and anything else is a bug that must not be swallowed into "the server said
  * no". `/today`'s error path is where that lesson was learned.
  *
- * `not_started` is this file's own fourth answer, and it is not a failure. A
- * booking with no log behind it is the ordinary state of every session before
- * six in the morning; the console offers to start one.
+ * The console's guard (and its `not_started` answer) moved to
+ * `lib/sessionlog/guard.ts` with the console; what is left here is the Progress
+ * pass's.
  */
 export type Result<T> =
   | { ok: true; data: T }
@@ -44,29 +41,6 @@ async function guard<T>(load: () => Promise<T | null>): Promise<Result<T>> {
 
   if (data === null) return { ok: false, kind: 'not_found' };
   return { ok: true, data };
-}
-
-export type ConsoleResult =
-  | Result<ConsoleData>
-  | { ok: false; kind: 'not_started'; start: Awaited<ReturnType<typeof getUnstarted>> };
-
-export async function requireConsole(routeId: string): Promise<ConsoleResult> {
-  const result = await guard(() => getConsole(routeId));
-  if (result.ok || result.kind !== 'not_found') return result;
-
-  /* No log against this id. Either it is a booking nobody has started, or it is
-     nothing at all — and the two are different screens. */
-  const unstarted = await guard(() => getUnstarted(routeId));
-  if (!unstarted.ok) return unstarted;
-  return { ok: false, kind: 'not_started', start: unstarted.data };
-}
-
-export function requireFinish(routeId: string): Promise<Result<FinishData>> {
-  return guard(() => getFinish(routeId));
-}
-
-export function requirePicker(): Promise<Result<PickView>> {
-  return guard(() => getPicker());
 }
 
 export function requireExerciseHistory(
