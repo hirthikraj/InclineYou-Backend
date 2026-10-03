@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { HistoryView } from '@/lib/log/log';
 import { PLATE_STEP_KG, trim1, walkForward } from '@/lib/log/log';
-import { updateSet } from '@/lib/log/actions';
+import { updateSet } from '@/lib/sessionlog/actions';
 import { TopBar } from '@/components/shell/TopBar';
 import { Back, Chart, Note, Tick, Warn } from './Icons';
 import { Button } from '@/web-components/ui/Button';
