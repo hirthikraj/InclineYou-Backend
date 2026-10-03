@@ -1,5 +1,7 @@
 package com.inclineyou.inclineyou_backend.core.attention;
 
+import com.inclineyou.inclineyou_backend.core.attention.dto.DismissRequest;
+import com.inclineyou.inclineyou_backend.core.attention.dto.DismissalResponse;
 import com.inclineyou.inclineyou_backend.shared.wire.Items;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -35,7 +37,7 @@ public class AttentionDismissalController {
     }
 
     @GetMapping
-    public Items<AttentionDismissalService.DismissalResponse> list(Authentication auth) {
+    public Items<DismissalResponse> list(Authentication auth) {
         // Bounded — one row per client per kind at most — so {items} and no cursor.
         return Items.of(service.list(trainerId(auth)));
     }
@@ -46,11 +48,11 @@ public class AttentionDismissalController {
      * snooze or makes it permanent. 200 with the row either way.
      */
     @PutMapping("/{clientId}/{kind}")
-    public AttentionDismissalService.DismissalResponse dismiss(
+    public DismissalResponse dismiss(
             Authentication auth,
             @PathVariable UUID clientId,
             @PathVariable String kind,
-            @Valid @RequestBody AttentionDismissalService.DismissRequest req
+            @Valid @RequestBody DismissRequest req
     ) {
         return service.dismiss(trainerId(auth), clientId, kind, req);
     }

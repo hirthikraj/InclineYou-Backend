@@ -1,63 +1,38 @@
 package com.inclineyou.inclineyou_backend.core.push;
 
-import com.inclineyou.inclineyou_backend.core.trainer.TrainerRepository;
-import jakarta.validation.constraints.NotBlank;
+import com.inclineyou.inclineyou_backend.core.push.dto.RegisterTokenBody;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
-import org.springframework.web.server.ResponseStatusException;
 
 import java.util.UUID;
 
-import static org.springframework.http.HttpStatus.NOT_FOUND;
-
 /**
- * Device push-token registration. The app posts its native FCM token here after
- * every sign-in and on every token refresh.
+ * Device push-token registration. The app posts its native FCM token here after every sign-in and on every token
+ * refresh.
  */
 @RestController
 @RequestMapping("/v1/devices")
 @RequiredArgsConstructor
-@Slf4j
 public class DeviceController {
 
-    private final TrainerRepository trainerRepo;
-
-    public record RegisterTokenBody(@NotBlank String token, String platform) {}
+    private final DeviceService devices;
 
     @PostMapping("/token")
-    @Transactional
-    public ResponseEntity<Void> register(@RequestBody RegisterTokenBody body) {
-        if (body.token() == null || body.token().isBlank()) {
-            return ResponseEntity.badRequest().build();
-        }
-
-        var trainerId = currentTrainerId();
-        var trainer = trainerRepo.findById(trainerId)
-                .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Trainer not found"));
-
-        trainer.setFcmToken(body.token());
-        trainerRepo.save(trainer);
-        log.debug("registered {} push token for trainer {}", body.platform(), trainerId);
-
-        return ResponseEntity.noContent().build();
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void register(@Valid @RequestBody RegisterTokenBody body) {
+        devices.register(currentTrainerId(), body);
     }
 
     @DeleteMapping("/token")
-    @Transactional
-    public ResponseEntity<Void> unregister() {
-        trainerRepo.findById(currentTrainerId()).ifPresent(t -> {
-            t.setFcmToken(null);
-            trainerRepo.save(t);
-        });
-        return ResponseEntity.noContent().build();
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unregister() {
+        devices.unregister(currentTrainerId());
     }
 
     private UUID currentTrainerId() {
-        return UUID.fromString(
-                SecurityContextHolder.getContext().getAuthentication().getName());
+        return UUID.fromString(SecurityContextHolder.getContext().getAuthentication().getName());
     }
 }
