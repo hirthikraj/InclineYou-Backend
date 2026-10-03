@@ -8,6 +8,7 @@ import type { Workspace } from '@/lib/workspace/types';
 import { sectionFor, type RailKey } from './nav';
 import { PaletteHost } from './PaletteHost';
 import { Rail } from './Rail';
+import { NavFlagsProvider } from './NavFlags';
 import { SectionPane } from './SectionPane';
 import { usePaneCollapsed, usePaneCollapseShortcut } from './paneCollapse';
 import { usePanePreview } from './panePreview';
@@ -77,6 +78,7 @@ export function AppShell({
   workspaces,
   activeWorkspaceId,
   defaultWorkspaceId,
+  hasGym,
   children,
 }: {
   trainerName: string;
@@ -90,6 +92,8 @@ export function AppShell({
   /** The one the app opens in. Never empty — `resolveWorkspaces` falls back to
    *  the solo book, so exactly one row in the menu is ever starred. */
   defaultWorkspaceId: string;
+  /** A gym is on the trainer's profile — switches on the pages that exist only for one. */
+  hasGym: boolean;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -151,6 +155,7 @@ export function AppShell({
   }, [pathname]);
 
   return (
+    <NavFlagsProvider value={{ hasGym }}>
     <div
       className={`app app--rail-min${section ? ' app--pane' : ''}${
         section && paneCollapsed ? ' app--pane-min' : ''
@@ -238,5 +243,6 @@ export function AppShell({
       </PaletteHost>
       </WorkspaceHost>
     </div>
+    </NavFlagsProvider>
   );
 }

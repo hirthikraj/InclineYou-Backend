@@ -1,52 +1,25 @@
 'use client';
 
-import type { MoneyData } from '@/lib/money/api';
-import type { ReportsData } from '@/lib/business/report-api';
-import { buildPracticeReport } from '@/lib/business/report';
+import { useMemo } from 'react';
+
+import { buildReport } from '@/lib/business/report';
+import type { Practice } from '@/lib/business/types';
 import { TopBar } from '@/components/shell/TopBar';
 import { ReportsTab } from './ReportsTab';
 import { BizHeader } from './BizHeader';
 
 /**
- * REPORTS — the practice's own year, and the door to the client-facing card.
+ * `/business/reports` — the practice's year, drawn from one response.
  *
- * `ReportsTab.tsx` is unchanged and carries the argument for why those two
- * things share a page and share no figure. What this file adds is the header and
- * the page's own fetch, which used to be a branch in `Business.tsx`'s
- * `Promise.all` guarded by `tab === 'reports'`.
- *
- * ── THE BRANCH BECOMING A ROUTE IS THE POINT ─────────────────────────────────
- *
- * That guard existed because this is the largest read on the trainer half after
- * the exercise library — a year of the diary plus every workout log — and the
- * old screen would otherwise have paid for it to draw a ledger. A conditional
- * fetch inside a `Promise.all`, with a `null` threaded through two components and
- * a `reports && !reports.ok` branch to catch a refusal for a call that may not
- * have happened, is a lot of machinery to express *only load this on one tab*.
- * A route expresses it for free: the fetch lives on the page that wants it, and
- * the five pages that do not never mention it.
- *
- * The picker is not drawn. This page spans its own fixed twelve months, and a
- * control above it offering August would change nothing on the screen.
+ * It used to be the expensive page in the section: a year of the diary, every
+ * workout log and the whole payments book pulled in to be folded in the browser.
+ * It is `GET /v1/reports/practice` now — twelve month rows, a headline and the top
+ * ten clients — so the page is cheap to open and the arithmetic left here is
+ * ratios of figures the server already added up. `lib/business/report.ts` says
+ * what that cost the page, figure by figure.
  */
-export function ReportsPage({
-  data,
-  reports,
-}: {
-  data: MoneyData;
-  reports: ReportsData;
-}) {
-  /* Both halves read the same rows — the year of the diary this page fetched,
-     plus the payments book — so the input is assembled once here rather than
-     twice inside the JSX. */
-  const input = {
-    clients: reports.clients,
-    sessions: reports.sessions,
-    workouts: reports.workouts,
-    payments: data.payments,
-    now: reports.now,
-  };
-  const practice = buildPracticeReport(input);
+export function ReportsPage({ practice }: { practice: Practice }) {
+  const report = useMemo(() => buildReport(practice), [practice]);
 
   return (
     <>
@@ -59,7 +32,7 @@ export function ReportsPage({
         />
 
         <div className="body">
-          <ReportsTab report={practice} />
+          <ReportsTab report={report} />
         </div>
       </main>
     </>

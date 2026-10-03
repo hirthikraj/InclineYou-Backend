@@ -1,6 +1,8 @@
 'use client';
 
 
+import Link from 'next/link';
+
 import {
   changePercent,
   wholeMonthAverage,
@@ -67,10 +69,10 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
     );
   }
 
-  const revenueChange = changePercent(h.revenue, h.revenuePrev);
-  const clientChange = h.activeClients - h.activeClientsPrev;
+  const revenueChange = changePercent(h.earned, h.earnedPrev);
+  const clientChange = h.activeNow - h.activePrev;
   const totalJoined = report.joined.reduce((s, v) => s + v, 0);
-  const totalLost = report.lost.reduce((s, v) => s + v, 0);
+  const totalLost = report.archived.reduce((s, v) => s + v, 0);
   const totalDelivered = report.delivered.reduce((s, v) => s + v, 0);
 
   /**
@@ -82,14 +84,16 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
    * they paste into whatever they use to think about a year.
    */
   const exportMonths = () => {
-    const head = ['Month', 'Revenue (your share)', 'Sessions delivered', 'Active clients', 'New clients', 'Clients lost'];
+    const head = ['Month', 'Billed', 'Collected', 'Your take-home', 'Sessions delivered', 'Active clients', 'New clients', 'Clients archived'];
     const rows = months.map((m, i) => [
       `${m.label} ${m.year}`,
-      String(report.revenue[i]),
+      String(report.billed[i]),
+      String(report.collected[i]),
+      String(report.takeHome[i]),
       String(report.delivered[i]),
       String(report.active[i]),
       String(report.joined[i]),
-      String(report.lost[i]),
+      String(report.archived[i]),
     ]);
     downloadCsv(
       csvFilename('practice', `${months[0].label}-${months[months.length - 1].label}-${months[months.length - 1].year}`),
@@ -99,62 +103,41 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
 
   return (
     <>
-      {/* ── Every rate here is a rate of what is KNOWN, and this is what makes
-             that true. `webapp-reports.html`'s own rule: a past session nobody
-             closed off is evidence the trainer was on a gym floor, not evidence
-             the client stayed away — so it is in no denominator, and the screen
-             names the hole rather than absorbing it. One wrong red figure is all
-             it takes for a trainer to stop believing the tile. ── */}
-      {h.unmarked > 0 && (
-        <div className="msg msg--warn" style={{ marginBottom: 12 }}>
-          <span>
-            <b>{h.unmarked} session{h.unmarked === 1 ? '' : 's'}</b> in the last 90 days
-            {h.unmarked === 1 ? ' was' : ' were'} never marked done or no-show.
-            {h.unmarked === 1 ? ' It is' : ' They are'} in no figure on this screen —
-            not in attendance, and not in sessions delivered.
-          </span>
-          <Button href="/today" variant="secondary" size="sm" style={{ marginLeft: 'auto' }}>
-            Close them off
-          </Button>
-        </div>
-      )}
-
       {/* ── 1 · the four figures ────────────────────────────────────────────── */}
       <div className="stats stats--4 rptstats">
         <Stat
-          label="You earned · 90 days"
-          value={rupees(h.revenue)}
+          label="You earned · 3 months"
+          value={rupees(h.earned)}
           detail={revenueChange === null
             ? 'No comparable quarter behind it'
             : <>
-                <b>{growthLabel(revenueChange)}</b> on the quarter before
-                {' · '}{rupees(h.revenuePrev)}
+                <b>{growthLabel(revenueChange)}</b> on the 3 months before
+                {' · '}{rupees(h.earnedPrev)}
               </>}
           tone="acc"
         />
 
         <Stat
-          label="Training now · 30 days"
-          value={h.activeClients}
-          detail={clientChange === 0
-            ? 'Same as the 30 days before'
-            : <><b>{clientChange > 0 ? '+' : '−'}{Math.abs(clientChange)}</b> on the 30 days before</>}
+          label="Training this month"
+          value={h.activeNow}
+          detail={h.prevLabel
+            ? <>{h.activePrev} in {h.prevLabel}{clientChange !== 0 && <> · <b>{clientChange > 0 ? '+' : '−'}{Math.abs(clientChange)}</b></>}</>
+            : 'So far this month'}
         />
 
         {/* Retention has no `stat--danger` variant and that is on purpose: a
-            trainer's honest retention over a quarter is often 60-something, and
-            painting the truth red every month is how a figure stops being read.
-            The sentence beneath is what makes it actionable. */}
+            trainer's honest retention over a year is often 60-something, and
+            painting the truth red every month is how a figure stops being read. */}
         <Stat
-          label="Retention"
+          label="Retention · 12 months"
           value={h.retention === null ? '—' : `${h.retention}%`}
           detail={h.retention === null
-            ? 'Nobody was training three months ago'
-            : <><b>{h.retentionKept} of {h.retentionBase}</b> training 3 months ago are still here</>}
+            ? 'Nobody was on your books a year ago'
+            : 'Of the clients you had a year ago, still on your books'}
         />
 
         <Stat
-          label="Attendance · 90 days"
+          label="Attendance · 3 months"
           value={h.attendance === null ? '—' : `${h.attendance}%`}
           detail={h.attendance === null
             ? 'Nothing settled yet'
@@ -175,20 +158,20 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
                 CSV
               </Button></>} className="mny__hd">
             
-            <Tag>Your share, as it landed</Tag>
+            <Tag>{report.hasGym ? 'Your take-home, as it landed' : 'As it landed'}</Tag>
             
           </Card.Head>
           <Card.Body className="rptchart">
             <MonthBars
               months={months}
-              values={report.revenue}
+              values={report.takeHome}
               format={(v) => rupeesShort(v)}
               title={(m, v) => `${m.label} ${m.year}: ${rupees(v)}${m.isCurrent ? ' so far' : ''}`}
-              average={wholeMonthAverage(report.revenue, months)}
+              average={wholeMonthAverage(report.takeHome, months)}
             />
             <p className="small" style={{ color: 'var(--tx-ink-3)', marginTop: 12, lineHeight: 1.6 }}>
-              Money that <b>arrived</b>, by the month it arrived in, with the gym&rsquo;s cut
-              already out. The dashed line is the average of the whole months —
+              Money that <b>arrived</b>, by the month it arrived in
+              {report.hasGym ? <>, with the gym&rsquo;s cut already out</> : null}. The dashed line is the average of the whole months —
               this month is not in it, because an average dragged down by the 2nd
               lies for four weeks.
             </p>
@@ -200,23 +183,33 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
           <Card.Body>
             <KeyValueRow k="Sessions delivered">{totalDelivered}</KeyValueRow>
             <KeyValueRow k="Busiest month">
-              {months[report.delivered.indexOf(Math.max(...report.delivered))]?.label ?? '—'}
-              {' · '}{Math.max(...report.delivered)}
+              {h.busiestMonth ?? '—'}
+              {h.busiestMonth && <>{' · '}{Math.max(...report.delivered)}</>}
             </KeyValueRow>
             <KeyValueRow k="Clients gained">{totalJoined > 0 ? `+${totalJoined}` : '0'}</KeyValueRow>
-            <KeyValueRow k="Clients lost">{totalLost > 0 ? `−${totalLost}` : '0'}</KeyValueRow>
+            <KeyValueRow k="Clients archived">{totalLost > 0 ? `−${totalLost}` : '0'}</KeyValueRow>
             <KeyValueRow k="Net">
               {totalJoined - totalLost > 0 ? '+' : totalJoined - totalLost < 0 ? '−' : ''}
               {Math.abs(totalJoined - totalLost)}
             </KeyValueRow>
-            <KeyValueRow k="Revenue, 12 months">{rupees(report.revenue.reduce((s, v) => s + v, 0))}</KeyValueRow>
+            {report.hasGym ? (
+              <>
+                <KeyValueRow k="Billed, 12 months">{rupees(report.billed.reduce((s, v) => s + v, 0))}</KeyValueRow>
+                <KeyValueRow k="Collected, 12 months">{rupees(report.collected.reduce((s, v) => s + v, 0))}</KeyValueRow>
+                <KeyValueRow k="Your take-home">{rupees(report.takeHome.reduce((s, v) => s + v, 0))}</KeyValueRow>
+              </>
+            ) : (
+              <KeyValueRow k="Revenue, 12 months">{rupees(report.takeHome.reduce((s, v) => s + v, 0))}</KeyValueRow>
+            )}
+            {h.sessionsPerClientWeek !== null && (
+              <KeyValueRow k="Sessions per client a week">{h.sessionsPerClientWeek}</KeyValueRow>
+            )}
           </Card.Body>
           <Card.Body style={{ borderTop: '1px solid var(--tx-line)' }}>
             <p className="small" style={{ lineHeight: 1.6 }}>
-              <b>Lost</b> is inferred, because nothing records a client leaving — it is
-              somebody whose last session was that month and who has not trained in
-              the 30 days since. So the most recent month or two cannot report it
-              yet, and reads zero rather than guessing.
+              <b>Archived</b> is a client you moved off your books that month — a decision you
+              made, so it can be read for the most recent months too. A client who simply
+              stopped coming and was never archived is not counted here.
             </p>
           </Card.Body>
         </Card>
@@ -256,7 +249,7 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
               format={(v) => String(v)}
               title={(m, v) =>
                 `${m.label} ${m.year}: ${v} client${v === 1 ? '' : 's'}` +
-                ` · ${report.joined[months.indexOf(m)]} new, ${report.lost[months.indexOf(m)]} lost`
+                ` · ${report.joined[months.indexOf(m)]} new, ${report.archived[months.indexOf(m)]} archived`
               }
               tone="quiet"
             />
@@ -277,28 +270,60 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
                        measured 3.1:1 against the card — under 1.4.3. The quiet
                        step is carried one rung up instead, where both ends pass
                        (5.9:1 and 7.4:1) and the difference is still visible. */
-                    color: report.joined[i] === 0 && report.lost[i] === 0
+                    color: report.joined[i] === 0 && report.archived[i] === 0
                       ? 'var(--tx-ink-3)'
                       : 'var(--tx-ink-2)',
                   }}
-                  title={`${m.label} ${m.year}: ${report.joined[i]} joined, ${report.lost[i]} lost`}
+                  title={`${m.label} ${m.year}: ${report.joined[i]} joined, ${report.archived[i]} archived`}
                 >
                   {m.label}{' '}
                   {report.joined[i] > 0 && (
                     <b style={{ color: 'var(--tx-accent-text)' }}>+{report.joined[i]}</b>
                   )}
-                  {report.lost[i] > 0 && (
+                  {report.archived[i] > 0 && (
                     <b style={{ color: 'var(--tx-danger)' }}>
-                      {report.joined[i] > 0 ? ' ' : ''}−{report.lost[i]}
+                      {report.joined[i] > 0 ? ' ' : ''}−{report.archived[i]}
                     </b>
                   )}
-                  {report.joined[i] === 0 && report.lost[i] === 0 && '·'}
+                  {report.joined[i] === 0 && report.archived[i] === 0 && '·'}
                 </span>
               ))}
             </div>
           </Card.Body>
         </Card>
       </div>
+
+      {report.topClients.length > 0 && (
+        <Card className="mt4">
+          <Card.Head title="Who the income comes from">
+            <Tag>Last 12 months</Tag>
+          </Card.Head>
+          <Card.Body flush>
+            <div className="tblwrap">
+              <table className="tbl pk__tbl">
+                <thead>
+                  <tr>
+                    <th>Client</th>
+                    <th className="num">Sessions</th>
+                    <th className="num">Paid</th>
+                    {report.hasGym && <th className="num">Yours</th>}
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.topClients.map((c) => (
+                    <tr key={c.clientId}>
+                      <td data-l=""><Link className="who" href={`/clients/${c.clientId}`}><b>{c.name}</b></Link></td>
+                      <td className="num" data-l="Sessions">{c.sessions}</td>
+                      <td className="num" data-l="Paid">{rupees(c.collected)}</td>
+                      {report.hasGym && <td className="num" data-l="Yours">{rupees(c.yours)}</td>}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card.Body>
+        </Card>
+      )}
     </>
   );
 }

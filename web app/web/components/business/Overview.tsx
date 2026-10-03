@@ -1,21 +1,25 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
-import type { MoneyData } from '@/lib/money/api';
-import { computeTrend, computeUpcoming } from '@/lib/money/compute';
-import { periodProse, periodRange, periodTag } from '@/lib/money/period';
+import { loadSummary } from '@/lib/business/actions';
 import {
+  activityLines,
   computeActions,
-  computeActivity,
-  computeClientMetrics,
+  computeConcentration,
   computePeakMonth,
   computeRenewals,
+  computeUpcoming,
   RENEWAL_WINDOW_DAYS,
+  trendBars,
   type ActionItem,
-  type ActivityItem,
+  type ActivityLine,
+  type Concentration,
   type RenewalItem,
 } from '@/lib/business/overview';
+import { summaryQuery, type MoneySummary, type OverviewData } from '@/lib/business/types';
+import { currentMonth, periodProse, periodTag } from '@/lib/money/period';
 import { relativePast, rupees } from '@/lib/today/time';
 import { TopBar } from '@/components/shell/TopBar';
 import { TrendChart } from '@/components/money/TrendChart';
@@ -91,22 +95,48 @@ import { usePeriodScope } from './PeriodScope';
  * is the line between a summary and a second copy of a table, and it is the line
  * the deleted *Pending* tab was on the wrong side of.
  */
-export function Overview({ data }: { data: MoneyData }) {
+export function Overview({ data }: { data: OverviewData }) {
   const { period } = usePeriodScope();
-  const range = periodRange(period, data.now);
 
-  const actions = computeActions(data.payments, data.packages, data.clients, data.now);
-  const activity = computeActivity(data.payments, data.packages, data.clients, SHOWN);
-  const renewals = computeRenewals(data.packages, data.clients, data.now);
-  const metrics = computeClientMetrics(data.payments, data.clients, range);
-  const peak = computePeakMonth(data.payments, data.now);
+  /* The period is state in a layout, so the server rendered the CURRENT month and
+     anything else is fetched here. Only the summary depends on the picker — the
+     year, the feed, the packs and the client names do not — so a change costs one
+     request, and the page keeps showing the old figures (dimmed by `stale`) until
+     the new ones arrive rather than blanking. */
+  const wanted = summaryQuery(period);
+  const [loaded, setLoaded] = useState<{ key: string; summary: MoneySummary }>(
+    () => ({ key: summaryQuery(currentMonth(data.now)), summary: data.period }),
+  );
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    if (wanted === loaded.key) return;
+    let cancelled = false;
+    loadSummary(period).then((res) => {
+      if (cancelled) return;
+      if (res.ok) { setFailed(false); setLoaded({ key: wanted, summary: res.data }); }
+      else setFailed(true);
+    });
+    return () => { cancelled = true; };
+  }, [wanted, loaded.key, period]);
+
+  const summary = loaded.summary;
+  const stale = wanted !== loaded.key && !failed;
+
+  const actions = computeActions(data.packages, data.names, data.today, data.now);
+  const activity = activityLines(data.activity);
+  const renewals = computeRenewals(data.packages, data.names, data.today);
   const upcoming = computeUpcoming(data.packages);
-  /* Six bars, fixed, ignoring the picker — `computeTrend`'s own docstring argues
-     the ceiling, and the section says so out loud so the one block on this page
-     that does not move with the picker is not read as a bug. */
-  const trend = computeTrend(data.payments, data.now, 6);
+  /* Six bars, fixed, ignoring the picker — the section says so out loud so the one
+     block on this page that does not move with the picker is not read as a bug. */
+  const trend = trendBars(data.year);
+  const peak = computePeakMonth(data.year);
+  const concentration = data.topClients
+    ? computeConcentration(data.topClients.rows, data.topClients.totalYours)
+    : null;
 
-  const nothingAtAll = data.payments.length === 0 && data.packages.length === 0;
+  const nothingAtAll = data.year.total.packagesSold === 0 && data.year.total.paymentsCount === 0
+    && data.packages.length === 0;
 
   return (
     <>
@@ -115,13 +145,16 @@ export function Overview({ data }: { data: MoneyData }) {
         <BizHeader
           title="Overview"
           subtitle={
-            actions.count > 0
-              ? <>{actions.count} thing{actions.count === 1 ? '' : 's'} need{actions.count === 1 ? 's' : ''} you · {rupees(metrics.revenue)} earned in {periodProse(period)}</>
-              : <>Nothing outstanding · {rupees(metrics.revenue)} earned in {periodProse(period)}</>
+            <>
+              {actions.count > 0
+                ? <>{actions.count} thing{actions.count === 1 ? '' : 's'} need{actions.count === 1 ? 's' : ''} you</>
+                : <>Nothing outstanding</>}
+              {' · '}{rupees(summary.total.takeHome)} {data.hasGym ? 'to you' : 'collected'} in {periodProse(period)}
+            </>
           }
         />
 
-        <div className="body">
+        <div className="body" aria-busy={stale}>
           {nothingAtAll ? (
             <EmptyState
               icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -139,27 +172,10 @@ export function Overview({ data }: { data: MoneyData }) {
             <>
               <NeedsYou actions={actions} now={data.now} />
 
-              {/* TWO SECTIONS ON ONE BAND, AND IT IS A MEASUREMENT.
-                  MEASURED 20 Sep 2026 at 1568×709, which gives `.body` 1245×586:
-                  the five sections stacked ran to **2,023px**, three and a half
-                  windows of scrolling on the page whose whole claim is that it
-                  is a glance. *What happened* was 484 of it and *Running out*
-                  190, each using about a third of a 1245px row and leaving the
-                  other two thirds empty — so the page was paying in HEIGHT for
-                  width it was not spending.
-
-                  They are the pair that can share a band because they are the
-                  matched pair: one is what already happened and one is what is
-                  about to, both are short lists of people, and a trainer reads
-                  them in one look. The other three cannot — *Needs you* is a
-                  queue with a verb on every row, and the last two are figures
-                  and a chart that want the full measure.
-
-                  `.grid2` collapses at 900px. The short one leaves whitespace
-                  under it rather than a void, because a `.slab` is a rule and a
-                  heading with no box — there is no card edge for the surplus to
-                  show up inside. That is the difference between this and the
-                  two-track card grids that had to lift their odd child out. */}
+              {/* TWO SECTIONS ON ONE BAND — measured 20 Sep 2026 (see git history of
+                  this file for the numbers): they are the matched pair, one is what
+                  already happened and one is what is about to, both short lists of
+                  people. `.grid2` collapses at 900px. */}
               <div className="grid2">
                 <WhatHappened items={activity} now={data.now} />
                 <RunningOut
@@ -170,7 +186,14 @@ export function Overview({ data }: { data: MoneyData }) {
                 />
               </div>
 
-              <WhereFrom metrics={metrics} period={periodTag(period)} />
+              <WhereFrom
+                summary={summary}
+                tag={periodTag(period)}
+                hasGym={data.hasGym}
+                stale={stale}
+                failed={failed}
+                concentration={concentration}
+              />
               <OverTime trend={trend} peak={peak} />
             </>
           )}
@@ -316,7 +339,7 @@ function ActionRow({ item, now }: { item: ActionItem; now: number }) {
  * A `Timeline` and not a table, because the answer to *what happened* is an
  * order, not a set of columns.
  */
-function WhatHappened({ items, now }: { items: ActivityItem[]; now: number }) {
+function WhatHappened({ items, now }: { items: ActivityLine[]; now: number }) {
   return (
     <Slab
       title="What happened"
@@ -339,13 +362,13 @@ function WhatHappened({ items, now }: { items: ActivityItem[]; now: number }) {
               title={<>{it.clientName} {it.text}</>}
               /* Quiet ink for a write-off: it records an absence, which is
                  exactly what `dim` is for. */
-              dim={it.kind === 'writeoff'}
+              dim={it.kind === 'write_off'}
               aside={
-                it.kind === 'raised' ? <Tag className="tag--warn">Unpaid</Tag>
-                : it.kind === 'writeoff' ? <Tag>Written off</Tag>
+                it.kind === 'write_off' ? <Tag>Written off</Tag>
+                : it.kind === 'refund' ? <Tag>Refunded</Tag>
                 : undefined
               }
-              meta={it.amount !== null ? rupees(it.amount) : undefined}
+              meta={it.kind !== 'sold' ? rupees(it.amount ?? 0) : undefined}
             />
           ))}
         </Timeline>
@@ -437,78 +460,111 @@ function RunningOut({
 /* --------------------------------------------------------------- where from */
 
 /**
- * SECTION 4 — which clients ARE the income.
+ * SECTION 4 — how the period went, and which clients ARE the income.
  *
- * Four figures and a ranked five, all of the trainer's OWN share with the gym's
- * cut already off — `computeClientMetrics` argues for that, and the short version
- * is that a top-client list ranked on gross promotes whoever happens to train on
- * a gym floor.
+ * ── TWO WINDOWS ON ONE SLAB, AND EACH ONE SAYS WHICH ─────────────────────────
  *
- * ── THE FOURTH FIGURE IS THE ONE NOBODY ASKS FOR ─────────────────────────────
+ * The four tiles obey the period picker: they are `GET /v1/money/summary` for the
+ * span. The ranked list under them is the practice report's top ten, which takes
+ * `months=N` and no dates — so it is the last TWELVE months and its heading says
+ * so, rather than appearing to follow a control it cannot. That is a wire gap
+ * (`/v1/reports/practice` has no `from`/`to`), recorded in the build report.
  *
- * *Paying clients*, *average per client* and *the biggest one* are the three a
- * trainer would list. The fourth is what share of the income the top three are,
- * and it is here because it is the only figure on this page that can be BAD news
- * at the same time as the other three are good: a strong month where 70% of it
- * came from three people is one phone call away from being a weak one. It is
- * toned by that threshold rather than drawn flat.
+ * ── TAKE-HOME FIRST, AND ONLY WHEN THERE IS A GYM ────────────────────────────
+ *
+ * On a gym package the trainer's cut is the package's own share, so what a
+ * trainer banks is not what they billed. The first tile is the figure they are
+ * actually asking about — what arrived, the gym's part already off — with the
+ * gym's cut named under it. For a trainer with no gym it would be the same
+ * number as *Collected* on Transactions, so it is not drawn: a figure that is
+ * only ever a copy of another page's is the thing this page's rule forbids.
+ *
+ * *Collection rate* and *Overdue* are the two a pack-based coach reads to know
+ * whether the books are healthy: the first is a ratio the server does not state
+ * and the second is `now.overdue`, as of today and not of the span.
  */
 function WhereFrom({
-  metrics, period,
+  summary, tag, hasGym, stale, failed, concentration,
 }: {
-  metrics: ReturnType<typeof computeClientMetrics>;
-  period: string;
+  summary: MoneySummary;
+  tag: string;
+  hasGym: boolean;
+  stale: boolean;
+  failed: boolean;
+  concentration: Concentration | null;
 }) {
-  const quiet = metrics.totalClients - metrics.payingClients;
+  const t = summary.total;
+  const rate = t.billed > 0 ? Math.min(100, Math.round((t.collected / t.billed) * 100)) : null;
+  const trend = t.trendPercent;
+  const showGym = hasGym && t.gymCut > 0;
+  const tileCount = showGym ? 4 : 3;
 
   return (
-    <Slab title="Where the money comes from">
-      {/* `.mnystats` steps 4 → 2 → 1 below the desk; without it the count is
-          pinned at four and every figure clips at 390px. See app.css. */}
-      <div className="stats stats--4 mnystats" style={{ marginTop: 0 }}>
+    <Slab title={`Where the money comes from · ${tag}`}>
+      {failed && (
+        <p className="msg msg--err" role="status" style={{ marginBottom: 10 }}>
+          <span>That period did not load, so these figures are for the one before.</span>
+        </p>
+      )}
+      <div
+        className={`stats stats--${tileCount} mnystats`}
+        style={{ marginTop: 0, opacity: stale ? 0.6 : 1 }}
+      >
+        {showGym && (
+          <Stat
+            label={<>Your take-home · {tag}</>}
+            value={rupees(t.takeHome)}
+            tone="acc"
+            /* Collected-basis figures only. The old line said "after the gym's cut
+               of ₹3,200 on ₹87,500 billed" under a take-home of what had ARRIVED,
+               so the three numbers on the tile could not be made to add up: one
+               was money in, one was money sold. The gym's cut OF BILLED is stated
+               where billed is — under the collection rate. */
+            detail={<>Collected {rupees(t.collected)}, less the gym&#8217;s {rupees(Math.max(0, t.collected - t.takeHome))}</>}
+          />
+        )}
         <Stat
-          label={<>Paying clients · {period}</>}
-          value={metrics.payingClients === 0 ? '—' : String(metrics.payingClients)}
-          detail={
-            metrics.payingClients === 0
-              ? 'Nobody settled anything'
-              : quiet > 0
-                ? `${quiet} active client${quiet === 1 ? '' : 's'} paid nothing`
-                : 'Everyone on the books paid'
-          }
-          tone="acc"
+          label="Collection rate"
+          value={rate === null ? '—' : `${rate}%`}
+          tone={rate !== null && rate < 70 ? 'warn' : 'acc'}
+          detail={rate === null
+            ? 'Nothing billed in this period'
+            : <>
+                of {rupees(t.billed)} billed has come in
+                {showGym && <> · gym&#8217;s cut of billed {rupees(t.gymCut)}</>}
+                <span className="meter" style={{ marginTop: 8 }} aria-hidden="true">
+                  <i style={{ width: `${rate}%` }}></i>
+                </span>
+              </>}
         />
         <Stat
-          label="Average per client"
-          value={metrics.averagePerClient > 0 ? rupees(metrics.averagePerClient) : '—'}
-          detail={metrics.payingClients > 0
-            ? `${rupees(metrics.revenue)} across ${metrics.payingClients}`
-            : 'Nothing to average'}
+          label="Overdue now"
+          value={summary.now.overdue > 0 ? rupees(summary.now.overdue) : '—'}
+          tone={summary.now.overdue > 0 ? 'warn' : 'neutral'}
+          detail={summary.now.overdue > 0
+            ? `${summary.now.clientsOverdue} client${summary.now.clientsOverdue === 1 ? '' : 's'} · ${summary.now.clientsOwing} owe something in all`
+            : 'Nobody is past their due date'}
+          href={summary.now.overdue > 0 ? '/business/transactions?filter=owed' : undefined}
         />
         <Stat
-          label="Your biggest client"
-          value={metrics.top[0] ? rupees(metrics.top[0].revenue) : '—'}
-          detail={metrics.top[0]
-            ? `${metrics.top[0].name} · ${metrics.top[0].share}% of the period`
-            : 'No payments in this period'}
-          href={metrics.top[0] ? `/clients/${metrics.top[0].clientId}` : undefined}
-        />
-        <Stat
-          label="Top three are"
-          value={metrics.topThreeShare > 0 ? `${metrics.topThreeShare}%` : '—'}
-          detail={metrics.topThreeShare >= 60
-            ? 'Most of your income rests on three people'
-            : 'Your income is spread across the roster'}
-          /* Ranked, not mixed: over 60% is the figure worth a colour, and under
-             it the tile stays neutral rather than claiming good news. */
-          tone={metrics.topThreeShare >= 60 ? 'warn' : 'neutral'}
+          label="Billed against the period before"
+          /* A percentage only when there is something billed NOW to compare. Billing
+             nothing against a busy month is arithmetically −100%, which reads as a
+             collapse on a 3rd of the month when it is simply the 3rd. */
+          value={t.billed > 0 && trend !== null ? `${trend > 0 ? '+' : ''}${trend}%` : '—'}
+          tone={t.billed > 0 && trend !== null && trend < 0 ? 'warn' : 'neutral'}
+          detail={t.billed <= 0
+            ? 'Nothing billed this period'
+            : trend === null
+              ? 'No earlier period to compare to'
+              : `${t.packagesSold} pack${t.packagesSold === 1 ? '' : 's'} sold`}
         />
       </div>
 
-      {metrics.top.length > 0 && (
-        <Card as="section" title="Top clients" className="mt3">
+      {concentration && concentration.top.length > 0 && (
+        <Card as="section" title="Top clients · last 12 months" className="mt3">
           <div className="col" style={{ gap: 12 }}>
-            {metrics.top.map((c) => (
+            {concentration.top.map((c) => (
               <div key={c.clientId}>
                 <KeyValueRow
                   k={
@@ -519,21 +575,13 @@ function WhereFrom({
                   }
                   style={{ border: 0, marginBottom: 5 }}
                 >
-                  {rupees(c.revenue)}
+                  {rupees(c.yours)}
                 </KeyValueRow>
-                {/* The bar is the SHARE, and it is here to make the RANKING
-                    readable at a glance — a column of rupee figures is not. The
-                    percentage is not printed beside it: the top one is already
-                    on the tile above, and the rest are a shape rather than a set
-                    of numbers to read.
-
-                    `describe={false}` and a `label` that names the person: the
-                    default announcement would append *"this client 34%"* to a
-                    row that has just said the name and the figure in words, and
-                    the one thing the bar adds — where they stand in the five —
-                    is in the label. */}
+                {/* The bar is the SHARE, there to make the ranking readable at a
+                    glance. `describe={false}` and a label naming the person: the
+                    default announcement would repeat what the row just said. */}
                 <Meter
-                  label={`${c.name}’s share of the period — ${c.share}%`}
+                  label={`${c.name}’s share of the last twelve months — ${c.share}%`}
                   describe={false}
                   segments={[{ tone: 'acc', value: Math.max(2, c.share) }]}
                   total={100}
@@ -541,6 +589,11 @@ function WhereFrom({
               </div>
             ))}
           </div>
+          <p className="small" style={{ marginTop: 12 }}>
+            {concentration.topThreeShare >= 60
+              ? `Your top three are ${concentration.topThreeShare}% of the year — most of your income rests on three people.`
+              : `Your top three are ${concentration.topThreeShare}% of the year — your income is spread across the roster.`}
+          </p>
         </Card>
       )}
     </Slab>
@@ -566,7 +619,7 @@ function WhereFrom({
 function OverTime({
   trend, peak,
 }: {
-  trend: ReturnType<typeof computeTrend>;
+  trend: ReturnType<typeof trendBars>;
   peak: ReturnType<typeof computePeakMonth>;
 }) {
   return (

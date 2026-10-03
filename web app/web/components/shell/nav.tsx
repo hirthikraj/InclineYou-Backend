@@ -1,7 +1,7 @@
 import type React from 'react';
 
 import {
-  Calendar, Chart, Dots6, Dumbbell, Gear, Grid, Home, Note, Ruler,
+  Calendar, Chart, Dots6, Dumbbell, Gear, Grid, Home, Ruler,
   Rupee, Stack, User, Users, Wallet,
 } from './Icons';
 
@@ -154,6 +154,8 @@ export interface SectionPage {
   icon: React.ReactNode;
   label: string;
   href: string;
+  /** Drawn only when the trainer's profile has it — see `NavFlags.tsx`. */
+  needs?: 'gym';
 }
 
 export const PRIMARY: Destination[] = [
@@ -275,7 +277,9 @@ export const PRIMARY: Destination[] = [
       { key: 'overview', icon: <Grid size={17} />, label: 'Overview', href: '/business' },
       { key: 'transactions', icon: <Rupee size={17} />, label: 'Transactions', href: '/business/transactions' },
       { key: 'packages', icon: <Stack size={17} />, label: 'Packages', href: '/business/packages' },
-      { key: 'gst', icon: <Note size={17} />, label: 'GST', href: '/business/gst' },
+      /* Only for a trainer with a gym: the split on the gym's money and what the gym
+         owes them. `NavFlags.tsx` hides the row; the route stays reachable. */
+      { key: 'gym', icon: <Wallet size={17} />, label: 'Gym share', href: '/business/gym', needs: 'gym' },
       { key: 'reports', icon: <Chart size={17} />, label: 'Reports', href: '/business/reports' },
     ],
   },

@@ -1,6 +1,6 @@
 import { Transactions } from '@/components/business/Transactions';
 import { Unavailable } from '@/components/today/Unavailable';
-import { requireMoney } from '@/lib/money/guard';
+import { requireLedger } from '@/lib/business/guard';
 
 /**
  * `/business/transactions` — the ledger, with *Pending* and *Write-offs* folded
@@ -18,7 +18,7 @@ export default async function Page(props: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const q = await props.searchParams;
-  const money = await requireMoney();
+  const money = await requireLedger();
 
   if (!money.ok) {
     return (
@@ -39,7 +39,7 @@ export default async function Page(props: {
 
   return (
     <Transactions
-      data={money.data}
+      start={{ now: money.now, hasGym: money.hasGym, hasAnyPayments: money.hasAnyPayments, summary: money.summary, page: money.page }}
       recordFor={typeof q.record === 'string' ? q.record : null}
       initialFilter={filter}
     />

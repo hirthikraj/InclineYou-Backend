@@ -1,3 +1,4 @@
+import { useNavFlags, visiblePages } from './NavFlags';
 import Link from 'next/link';
 
 import { activePageKey, type Destination } from './nav';
@@ -92,7 +93,7 @@ export function SectionPane({
    */
   hover?: { hold: () => void; leave: () => void };
 }) {
-  const pages = section.pages ?? [];
+  const pages = visiblePages(section.pages ?? [], useNavFlags());
   const active = activePageKey(pages, pathname);
 
   return (

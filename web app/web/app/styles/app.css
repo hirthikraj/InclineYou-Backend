@@ -22946,3 +22946,22 @@ button.pchk__r:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2
 .asmt__list{display:flex;flex-direction:column;gap:20px}
 .asmt__note{margin:16px 0 0;color:var(--muted, #6b7380);font-size:13px}
 .asmt__q{margin:0 0 8px;font-weight:500}
+
+
+/* THE GYM PRICE LIST FITS ITS CARD (3 Oct 2026, from the Chrome run).
+   With the right-hand column beside it the left track is ~690px, and the gym list
+   has six columns — package, their price, your part · gym keeps, per session,
+   on it · sold, and the verbs — in a table whose every cell is `white-space:nowrap`
+   (§11). That is ~760px, so `.tblwrap`'s horizontal scroll took over and *Remove*,
+   the one verb a trainer scans for, sat behind it. The same argument the queue's
+   and `.pk__tbl`'s notes make about the column holding the actions.
+   Two changes, both only above 620px (below it `.pk__tbl`'s own reflow rules): the
+   gym cells may wrap, and the combined split cell is two lines (JSX) instead of
+   one long one. The verbs keep their buttons whole and wrap between them. */
+@media (min-width:621px){
+  .tblwrap > .pk__tbl--gym{min-width:0}
+  .pk__tbl--gym th,.pk__tbl--gym td{white-space:normal}
+  .pk__tbl--gym td.num{white-space:nowrap}
+  .pk__tbl--gym td.pk__acts .row{flex-wrap:wrap;justify-content:flex-end}
+  .pk__tbl--gym td.pk__acts .btn{white-space:nowrap}
+}

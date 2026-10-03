@@ -25,61 +25,11 @@
  * August into the 8th of June for every row where the day is twelve or under.
  */
 
-import type { LedgerRow, OwedRow } from './compute';
-import { methodLabel } from './compute';
-
-/**
- * RFC 4180 quoting, applied to everything rather than only where it is needed.
- *
- * A client called `Sharma, Rohit` and a note reading `paid 2,000 — rest Tuesday`
- * both break a naive join, and both are ordinary. Quoting unconditionally costs
- * two characters a cell and removes the class of bug entirely.
- */
-function cell(v: string | number | null | undefined): string {
-  if (v === null || v === undefined) return '""';
-  return `"${String(v).replace(/"/g, '""')}"`;
-}
-
 /** `2026-08-06` — sortable, and unambiguous in every spreadsheet locale. */
 export function isoDate(ms: number): string {
   const d = new Date(ms);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
-function toCsv(headers: string[], rows: (string | number | null)[][]): string {
-  /*
-   * A UTF-8 BOM, on purpose. Excel on Windows reads a BOM-less UTF-8 file as
-   * the system code page, which mangles every name outside ASCII — and this is
-   * an app for Indian trainers whose rosters are full of them.
-   */
-  const body = [headers, ...rows].map((r) => r.map(cell).join(',')).join('\r\n');
-  return `﻿${body}\r\n`;
-}
-
-export function ledgerCsv(rows: LedgerRow[]): string {
-  return toCsv(
-    ['Date', 'Client', 'Method', 'Collected by', 'Amount', 'Gym share', 'Yours', 'Status', 'Reference', 'Note'],
-    rows.map((r) => [
-      isoDate(r.date),
-      r.clientName,
-      methodLabel(r.method),
-      r.collectedBy ?? 'trainer',
-      r.amount,
-      r.gymShareAmount ?? 0,
-      r.amount - (r.gymShareAmount ?? 0),
-      r.status,
-      r.upiReference ?? '',
-      r.note ?? '',
-    ]),
-  );
-}
-
-export function owedCsv(rows: OwedRow[]): string {
-  return toCsv(
-    ['Client', 'For', 'Amount', 'Days overdue', 'Raised on'],
-    rows.map((r) => [r.clientName, r.packageName, r.amount, r.daysLate, isoDate(r.raisedAt)]),
-  );
 }
 
 /**

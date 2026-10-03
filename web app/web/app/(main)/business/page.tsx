@@ -2,7 +2,7 @@ import { permanentRedirect, redirect } from 'next/navigation';
 
 import { Overview } from '@/components/business/Overview';
 import { Unavailable } from '@/components/today/Unavailable';
-import { requireMoney } from '@/lib/money/guard';
+import { requireOverview } from '@/lib/business/guard';
 
 /**
  * BUSINESS — the section's front page, and it is no longer a seven-tab screen.
@@ -45,7 +45,7 @@ export const metadata = { title: 'Business · InclineYou' };
 const MOVED: Record<string, string> = {
   ledger: '/business/transactions',
   packages: '/business/packages',
-  gst: '/business/gst',
+  gst: '/business',
   reports: '/business/reports',
 };
 
@@ -77,7 +77,7 @@ export default async function Page(props: {
     redirect(`/business/transactions?record=${encodeURIComponent(q.record)}`);
   }
 
-  const money = await requireMoney();
+  const money = await requireOverview();
 
   if (!money.ok) {
     return (

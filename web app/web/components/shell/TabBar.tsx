@@ -16,6 +16,7 @@ import {
 } from './nav';
 import { Check, Dots6, Out, Plus } from './Icons';
 import { AddSheet } from './AddSheet';
+import { useNavFlags, visiblePages } from './NavFlags';
 import { Avatar } from '@/web-components/ui/Avatar';
 
 /**
@@ -532,6 +533,7 @@ function MoreSheet({
    * usual reason: *Assessments* is not named here, so a third page under
    * Clients appears in this sheet on the commit that adds it.
    */
+  const flags = useNavFlags();
   const reachable = new Set(BAR.map((b) => b.href));
   const sections = PRIMARY.filter((d) => (d.pages?.length ?? 0) > 1);
 
@@ -556,7 +558,7 @@ function MoreSheet({
    * rows is already doing that job with the label the rail uses.
    */
   const section = (d: Destination) => {
-    const pages = (d.pages ?? []).filter((p) => !reachable.has(p.href));
+    const pages = visiblePages(d.pages ?? [], flags).filter((p) => !reachable.has(p.href));
     /* A section whose every page is a bar tab has nothing to add here, and a
        heading over nothing is a heading over nothing. Cannot happen today —
        Clients keeps *Assessments* — and it is the shape of this list changing

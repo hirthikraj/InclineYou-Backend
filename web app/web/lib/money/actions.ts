@@ -4,7 +4,9 @@ import { revalidatePath } from 'next/cache';
 
 import {
   ClientDetailApiError,
+  deletePayment as deleteV1,
   markPaymentPaid as markPaidV1,
+  patchPayment as patchV1,
   recordPayment as recordV1,
   writeOffPayment as writeOffV1,
 } from '@/lib/clients/client-api';
@@ -154,6 +156,75 @@ export async function writeOffPayment(
     return { ok: true };
   } catch (error) {
     return fail(error, 'The write-off');
+  }
+}
+
+/**
+ * The sentences for the refusals a correction can meet. The server's own `detail`
+ * wins when it sends one; these are for the ones that arrive without — and for
+ * 412, which is the screen's fault and not the trainer's: another tab or the
+ * client's file changed the row after this list was drawn.
+ */
+function correctionFail(error: unknown, subject: string): MoneyWriteResult {
+  if (error instanceof ClientDetailApiError) {
+    if (error.status === 412) {
+      return { ok: false, message: `${subject}: this payment changed since the list was loaded. It has been refreshed — look again and retry.` };
+    }
+    if (!error.detail) {
+      if (error.code === 'PAYMENT_FROZEN') return { ok: false, message: 'A refund cannot be changed or removed.' };
+      if (error.code === 'PACKAGE_CLOSED') return { ok: false, message: 'That package was refunded, so its payments are closed.' };
+      if (error.code === 'PAYMENT_OVER_DUE') return { ok: false, message: 'That is more than is still owed on the package.' };
+      if (error.status === 404) return { ok: false, message: `${subject}: that payment was not found. It may already be removed.` };
+    }
+  }
+  return fail(error, subject);
+}
+
+/**
+ * CORRECT A PAYMENT TYPED WRONG — `PATCH /v1/payments/{id}`.
+ *
+ * Only the keys that changed are sent, so a correction to the note cannot
+ * re-send a stale amount. The row's `version` rides as `If-Match`: an edit made
+ * on a screen another tab has since moved on from is refused (412) instead of
+ * quietly overwriting the newer figure. Which fields exist depends on the row's
+ * status and is the screen's to offer; the server refuses the rest.
+ */
+export async function editPayment(
+  paymentId: string,
+  version: string,
+  changes: { amount?: number; method?: string | null; reference?: string | null; paidAt?: number; note?: string | null },
+): Promise<MoneyWriteResult> {
+  const patch: Parameters<typeof patchV1>[1] = {};
+  if (changes.amount !== undefined) patch.amount = changes.amount.toFixed(2);
+  if (changes.method !== undefined) patch.method = v1Method(changes.method);
+  if (changes.reference !== undefined) patch.reference = changes.reference;
+  if (changes.paidAt !== undefined) patch.paidAt = changes.paidAt;
+  if (changes.note !== undefined) patch.note = changes.note;
+  try {
+    await patchV1(paymentId, patch, version || undefined);
+    refresh();
+    return { ok: true };
+  } catch (error) {
+    // A stale screen has to be re-read, whatever the sentence says.
+    refresh();
+    return correctionFail(error, 'The correction');
+  }
+}
+
+/**
+ * REMOVE A PAYMENT RECORDED BY MISTAKE — `DELETE /v1/payments/{id}`.
+ *
+ * Soft on the server and idempotent (a repeat is 204), so a double tap is
+ * harmless. It is a correction and not a refund: no money moved because of it,
+ * the row simply was never true, and what is owed moves back to what it was.
+ */
+export async function removePayment(paymentId: string): Promise<MoneyWriteResult> {
+  try {
+    await deleteV1(paymentId);
+    refresh();
+    return { ok: true };
+  } catch (error) {
+    return correctionFail(error, 'The removal');
   }
 }
 

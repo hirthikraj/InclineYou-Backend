@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 
-import type { MoneyClient, MoneyPackage, MoneyTrainer } from '@/lib/money/api';
+import { loadClientsForPanel, loadPackagesForPanel } from '@/lib/business/actions';
+import type { PickableClient, PickablePackage } from '@/lib/business/types';
 import { recordPayment, type MoneyWriteResult } from '@/lib/money/actions';
 import { rupees } from '@/lib/today/time';
 import { Checkbox } from '@/web-components/ui/Checkbox';
@@ -14,65 +15,55 @@ import { Field, TextField } from '@/web-components/ui/Field';
 import { KeyValueRow } from '@/web-components/ui/KeyValue';
 import { Why } from '@/web-components/ui/Why';
 
+/**
+ * RECORD PAYMENT — a side panel, and it reads its own data.
+ *
+ * ── IT NO LONGER BORROWS THE PAGE'S BOOK ─────────────────────────────────────
+ *
+ * It used to be handed every client and every package the trainer had, and worked
+ * the gym's cut out from ONE trainer-wide percentage. Both are gone. The panel
+ * asks for the client list when it opens and for a client's packages when one is
+ * chosen, so the page behind it holds a screenful and not the book.
+ *
+ * ── THE SPLIT COMES FROM THE PACKAGE, NEVER FROM A TYPED PERCENTAGE ──────────
+ *
+ * On a gym package the trainer's cut varies with the price — it is a percentage OR
+ * a flat amount set on each package — so there is no single rate to multiply by.
+ * Once a package is chosen, the panel shows what THAT package's own share makes of
+ * the amount in the box: gym = amount − trainer share, derived and never typed. A
+ * package with no share (an independent client\'s) shows no split at all, because
+ * the trainer keeps all of it and a card saying so is noise.
+ *
+ * ── AND THE WAY IT WAS COLLECTED FOLLOWS THE CLIENT ──────────────────────────
+ *
+ * A gym client\'s money goes through the gym\'s front office, so there is no
+ * method to pick and none is sent; the database stamps `collected_by` from the
+ * client\'s type. An independent client\'s offers UPI, cash and bank, and no *Gym
+ * front office* chip — which used to be offered to everyone, and recorded a
+ * trainer-collected payment against a client who owed the gym.
+ */
+
 interface Props {
-  clients: MoneyClient[];
-  packages: MoneyPackage[];
-  trainer: MoneyTrainer;
-  /**
-   * Who this is for, when the panel was opened from somewhere that already knew.
-   *
-   * `?record=<clientId>` on `/business` sets it, and one caller uses that: *Sell a
-   * pack* / *Renew the pack* on a client's file. Those were links to `/money`,
-   * which landed the trainer on a month view with this panel shut and the client's
-   * name in their head rather than in the form — the fifth click of a four-click
-   * job, and the one where the wrong name gets picked.
-   *
-   * Seeded, not pinned: the select stays enabled, because arriving here with the
-   * wrong person chosen has to be recoverable without going back.
-   */
   initialClientId?: string | null;
   onClose: () => void;
+  /** After a payment is saved: the page behind re-reads itself. */
+  onRecorded: () => void;
 }
 
-/**
- * The four ways a personal trainer in India is actually paid.
- *
- * `bank` is the brief's third mode and is new here — the column is free text
- * (`VARCHAR(30)`, V1) so it needed no migration, and `methodLabel` maps it.
- * `gym` is the fourth and is not a payment rail at all: it is *who collected*,
- * which is the thing that drives the share split, and it stays in this row
- * because from the trainer's side it is one of four answers to "how did it come
- * in".
- */
-type Method = 'upi' | 'cash' | 'bank' | 'gym';
-type CollectedBy = 'trainer' | 'gym';
+type Method = 'upi' | 'cash' | 'bank';
 
 const METHOD_LABEL: Record<Method, string> = {
   upi: 'UPI to me',
   cash: 'Cash',
   bank: 'Bank transfer',
-  gym: 'Gym front office',
 };
 
-/** `2026-08-29` in the LOCAL zone — `toISOString()` is UTC and lands a trainer
- *  in IST on yesterday's date for the first five and a half hours of every day. */
 function localDate(ms: number): string {
   const d = new Date(ms);
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
-/**
- * The instant to stamp on the row for a date the trainer picked.
- *
- * Midday, not midnight, and not the raw parse: `new Date('2026-08-29')` is
- * parsed as UTC midnight, which is 05:30 on the 29th in IST but the 28th in
- * every zone west of London. Local midday is the one choice that lands on the
- * chosen day everywhere.
- *
- * Today keeps the real clock time, because a payment recorded now happened now
- * and the payments list orders by it.
- */
 function paidAtFor(dateStr: string, now: number): number {
   if (dateStr === localDate(now)) return now;
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -80,128 +71,92 @@ function paidAtFor(dateStr: string, now: number): number {
   return new Date(y, m - 1, d, 12, 0, 0, 0).getTime();
 }
 
-/**
- * A pack you can still put money against — WHICH IS NOT THE SAME AS A LIVE ONE.
- *
- * This panel used to offer `status === 'active'` packs, which worked only
- * because nothing in the product ever moved a pack off 'active'. V30's lifecycle
- * sweep now closes a pack the moment its sessions run out or its validity
- * lapses, and that would have quietly broken the commonest debt in this
- * business: a client finishes all twelve sessions and still owes for four of
- * them. Under the old predicate their pack would vanish from this list and the
- * money could never be recorded against it.
- *
- * So the question is *is there money pending on it*, not *is it running*.
- * A finished pack with a balance stays here until the balance is nil; a live one
- * is always here, because a client can pay a deposit on the day they buy.
- *
- * `amountDue` is the server's figure (`PackageService.PACKAGE_COLUMNS`), so it
- * already counts both spellings of a collected payment and subtracts write-offs
- * — a written-off debt has stopped being chased, and a panel that kept offering
- * it would be asking the trainer to collect something they let go.
- */
-function isBillable(p: MoneyPackage): boolean {
-  return p.status === 'active' || p.amountDue > 0;
+/** The trainer\'s fraction of a package\'s price, or null when the package has no share (all of it is theirs). */
+function trainerRatio(p: PickablePackage): number | null {
+  if (p.trainerSharePercent !== null) return p.trainerSharePercent / 100;
+  if (p.trainerShareAmount !== null && p.amount > 0) return Math.min(1, p.trainerShareAmount / p.amount);
+  return null;
 }
 
-export function RecordPanel({
-  clients,
-  packages,
-  trainer,
-  initialClientId = null,
-  onClose,
-}: Props) {
-  /* ── THE PANEL OWNS ITS SCRIM NOW, AND THAT IS WHAT THE EXIT NEEDED ────────
-   *
-   * `Business.tsx` used to render the scrim beside this panel, as siblings under
-   * one `recordPanelOpen`. That was fine while closing was instant and wrong the
-   * moment it stopped being: the wash and the surface leave together, and only
-   * this component knows when "leaving" has finished. Two owners meant the scrim
-   * would blink out on the click while the panel was still gliding.
-   *
-   * So the scrim moved in, which is also what every other panel in this app
-   * already does. `lib/ui/dismiss.ts` holds both for as long as the transition
-   * they can see actually runs. */
+export function RecordPanel({ initialClientId = null, onClose, onRecorded }: Props) {
   const { closing, dismiss, dismissThen, ref: panelRef } = useDismiss<HTMLElement>(onClose);
 
+  const [clients, setClients] = useState<PickableClient[] | null>(null);
+  const [clientsFailed, setClientsFailed] = useState<string | null>(null);
+  /* One client's packages at a time, tagged with whose they are so a slow answer
+     for the PREVIOUS choice can never be drawn under the current one. */
+  const [loaded, setLoaded] = useState<{ clientId: string; packages: PickablePackage[] } | null>(null);
+  const [packagesFailed, setPackagesFailed] = useState<string | null>(null);
+
   const [clientId, setClientId] = useState(initialClientId ?? '');
-  /*
-   * The pack is seeded too when the client has exactly one running, which is the
-   * common case and the one the caller is coming from — `Sell a pack` on a file
-   * with a live pack means `renew this one`. Two live packs is ambiguous and left
-   * blank rather than guessed; `handlePackageChange` fills the amount either way.
-   */
-  const seededPackage = initialClientId
-    ? packages.filter((p) => p.clientId === initialClientId && isBillable(p))
-    : [];
-  const [packageId, setPackageId] = useState(
-    seededPackage.length === 1 ? seededPackage[0].id : '',
-  );
-  const [amount, setAmount] = useState(
-    seededPackage.length === 1 && seededPackage[0].amountDue > 0
-      ? String(seededPackage[0].amountDue)
-      : '',
-  );
+  const [packageId, setPackageId] = useState('');
+  const [amount, setAmount] = useState('');
   const [method, setMethod] = useState<Method>('upi');
   const [reference, setReference] = useState('');
   const [note, setNote] = useState('');
-  /*
-   * The date the money changed hands, defaulted to today and almost never
-   * touched — which is the whole design of this field. Trainers catch up on a
-   * Sunday, and "they paid on Thursday" has to be recordable without it becoming a
-   * step in the common path. It writes `paid_at`, so a back-dated payment lands
-   * in the right bar of the trend chart.
-   */
   const [today] = useState(() => localDate(Date.now()));
   const [paidOn, setPaidOn] = useState(today);
-  /*
-   * The one case that is still genuinely pending: a UPI request sent to a client
-   * who has not paid it yet. It used to be the ONLY case — this panel wrote every
-   * row `pending` and nothing on the web could confirm one, so a trainer handed
-   * cash recorded a debt and the payments list's *Collected* never moved. Now it is a
-   * deliberate opt-in, off by default, and offered only where it is real.
-   */
   const [awaiting, setAwaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const activeClients = clients.filter((c) => c.status === 'active' || c.status === 'invited');
-  const selectedClient = activeClients.find((c) => c.id === clientId);
-  const clientPackages = packages.filter((p) => p.clientId === clientId && isBillable(p));
-  const selectedPackage = clientPackages.find((p) => p.id === packageId);
+  /* A package is billable when it is running or still owes — a finished pack can
+     still be owed for. The server's `amountDue` is the only measure of "owes". */
+  const fetchPackages = (id: string) => {
+    void loadPackagesForPanel(id).then((res) => {
+      if (!res.ok) { setPackagesFailed(res.message); return; }
+      setLoaded({ clientId: id, packages: res.data });
+      /* The one-package case is the common one: a client on a single running pack
+         has nothing to choose, so it is chosen and the amount is what is owed. */
+      if (res.data.length === 1) {
+        setPackageId(res.data[0].id);
+        setAmount(res.data[0].amountDue > 0 ? String(res.data[0].amountDue) : '');
+      }
+    });
+  };
+
+  useEffect(() => {
+    void loadClientsForPanel().then((res) => {
+      if (res.ok) setClients(res.data);
+      else setClientsFailed(res.message);
+    });
+    if (initialClientId) fetchPackages(initialClientId);
+    // Once, on open — `fetchPackages` only closes over setters.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const selectedClient = clients?.find((c) => c.id === clientId);
+  const isGymClient = selectedClient?.clientType === 'gym';
+  const clientPackages = loaded?.clientId === clientId ? loaded.packages : null;
+  const selectedPackage = clientPackages?.find((p) => p.id === packageId);
 
   const amountNum = parseFloat(amount) || 0;
-  const gymSharePercent = trainer.gymSharePercent ?? 0;
-  const collectedBy: CollectedBy = method === 'gym' ? 'gym' : 'trainer';
-  const isFloor = collectedBy === 'gym' || method === 'gym';
-  const gymCut = isFloor ? Math.round(amountNum * (gymSharePercent / 100)) : 0;
-  const yours = amountNum - gymCut;
+  const ratio = selectedPackage ? trainerRatio(selectedPackage) : null;
+  const yours = ratio === null ? amountNum : Math.round(amountNum * ratio);
+  const gymCut = amountNum - yours;
+  const hasSplit = ratio !== null;
 
-  // Auto-fill amount from package
   const handleClientChange = (id: string) => {
     setClientId(id);
     setPackageId('');
     setAmount('');
     setReference('');
     setNote('');
+    setLoaded(null);
+    setPackagesFailed(null);
+    if (id) fetchPackages(id);
   };
 
-  /**
-   * Seeds the BALANCE, not the sticker price.
-   *
-   * It used to fill in `pkg.amount` — the whole pack — whatever had already been
-   * collected against it. On a pack half paid for, the panel opened with double
-   * what was owed already typed in, and the fastest path through the form
-   * recorded it. `amountDue` is what is left, which is what the trainer is
-   * standing there to collect; a pack that is square seeds blank rather than
-   * zero, because ₹0 in a required money field is a thing to delete before you
-   * can type.
-   */
   const handlePackageChange = (id: string) => {
     setPackageId(id);
-    const pkg = packages.find((p) => p.id === id);
+    const pkg = clientPackages?.find((p) => p.id === id);
     setAmount(pkg && pkg.amountDue > 0 ? String(pkg.amountDue) : '');
   };
+
+  /* The way it came in. A gym client has none to choose: the front office took it. */
+  const sentMethod: Method | null = isGymClient ? null : method;
+  const showAwaiting = isGymClient || method === 'upi' || method === 'bank';
+  const isAwaiting = showAwaiting && awaiting;
 
   const handleSave = () => {
     if (!packageId) { setError('Select a package first.'); return; }
@@ -212,31 +167,21 @@ export function RecordPanel({
       const result: MoneyWriteResult = await recordPayment({
         packageId,
         amount: amountNum,
-        method,
-        collectedBy,
-        /* Omitted only when the trainer says the money has not arrived — that is
-           what leaves the row `pending` for `PATCH /confirm` to settle later. */
-        paidAt: showAwaiting && awaiting ? undefined : paidAtFor(paidOn, Date.now()),
-        upiReference: reference || undefined,
+        method: sentMethod,
+        /* A payment that has not arrived is recorded `pending` — no `paidAt` —
+           and is settled later from its row. */
+        paidAt: isAwaiting ? undefined : paidAtFor(paidOn, Date.now()),
+        upiReference: sentMethod && sentMethod !== 'cash' ? reference || undefined : undefined,
         note: note || undefined,
       });
       if (result.ok) {
-        /* A recorded payment leaves the way Cancel does. Only the success branch
-           — a failure keeps the panel open with its message. */
+        onRecorded();
         dismissThen(onClose);
       } else {
         setError(result.message ?? 'Something went wrong.');
       }
     });
   };
-
-  const hasGym = trainer.gymName !== null && gymSharePercent > 0;
-
-  /* Cash in a hand and a gym counter's slip are settled by the time they are
-     typed; only a UPI or bank request can be pending. Offering "not arrived
-     yet" against cash would be offering a state that cannot happen. */
-  const showAwaiting = method === 'upi' || method === 'bank';
-  const isAwaiting = showAwaiting && awaiting;
 
   return (
     /* `.rp-panel` and NOT a `style` attribute, which is what this was. An inline
@@ -277,18 +222,23 @@ export function RecordPanel({
           {(a) => (
             <select className="ctl" {...a} value={clientId} onChange={(e) => handleClientChange(e.target.value)}>
             <option value="">Select a client…</option>
-            {activeClients.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
+            {(clients ?? []).map((c) => (
+              <option key={c.id} value={c.id}>{c.name}{c.clientType === 'gym' ? ' · gym client' : ''}</option>
             ))}
           </select>
           )}
         </Field>
+        {clientsFailed && <p className="msg msg--err" style={{ marginTop: 6 }}><span>{clientsFailed}</span></p>}
 
         {/* Package picker */}
         {clientId && (
           <div className="fld mt3">
             <label className="fld__l" htmlFor="rp-package">Package</label>
-            {clientPackages.length === 0 ? (
+            {packagesFailed ? (
+              <p className="msg msg--err" style={{ marginTop: 4 }}><span>{packagesFailed}</span></p>
+            ) : clientPackages === null ? (
+              <p className="small" style={{ color: 'var(--tx-ink-3)', marginTop: 4 }}>Loading their packages…</p>
+            ) : clientPackages.length === 0 ? (
               <p className="small" style={{ color: 'var(--tx-ink-3)', marginTop: 4 }}>
                 Nothing to record against {selectedClient?.name} — no pack running
                 and nothing pending on the ones that finished. Sell a pack from
@@ -310,9 +260,7 @@ export function RecordPanel({
                     p.status === 'active'
                       ? `${p.sessionsRemaining ?? '?'} left`
                       : `finished · ${rupees(p.amountDue)} still pending`;
-                  const label = p.type === 'single'
-                    ? `Single session · ${rupees(p.amount)}`
-                    : `${p.sessionsTotal ?? '?'}-session pack · ${rupees(p.amount)} · ${tail}`;
+                  const label = `${p.name} · ${rupees(p.amount)} · ${tail}`;
                   return <option key={p.id} value={p.id}>{label}</option>;
                 })}
               </select>
@@ -350,11 +298,22 @@ export function RecordPanel({
                 <span>{rupees(selectedPackage.amountDue - amountNum)} will still be pending</span>
               </p>
             )}
+            {selectedPackage && amountNum > selectedPackage.amountDue && (
+              <p className="msg msg--err" style={{ marginTop: 6 }}>
+                {/* The database caps a package at its price, so this would be refused —
+                    said here, where it can be fixed, rather than after the press. */}
+                <span>
+                  {selectedPackage.amountDue > 0
+                    ? `Only ${rupees(selectedPackage.amountDue)} is owed on this package.`
+                    : 'Nothing is owed on this package.'}
+                </span>
+              </p>
+            )}
           </div>
         )}
 
-        {/* Payment method */}
-        {packageId && (
+        {/* Payment method — only for a client who pays the trainer directly. */}
+        {packageId && !isGymClient && (
           <div className="mt3">
             <p className="fld__l" style={{ marginBottom: 8 }}>How</p>
             <div
@@ -363,17 +322,19 @@ export function RecordPanel({
               aria-label="How the money came in"
               style={{ flexWrap: 'wrap' }}
             >
-              {(['upi', 'cash', 'bank', 'gym'] as Method[]).map((m) => (
-                <Chip
-                  pressed={method === m}
-                  key={m}
-                  onClick={() => setMethod(m)}
-                >
+              {(['upi', 'cash', 'bank'] as Method[]).map((m) => (
+                <Chip pressed={method === m} key={m} onClick={() => setMethod(m)}>
                   {METHOD_LABEL[m]}
                 </Chip>
               ))}
             </div>
           </div>
+        )}
+        {packageId && isGymClient && (
+          <p className="small mt3" style={{ color: 'var(--tx-ink-3)' }}>
+            {selectedClient?.name} pays the gym&#8217;s front office, so there is no method to pick —
+            this records that the gym has the money.
+          </p>
         )}
 
         {/* When it arrived, and whether it has.
@@ -422,7 +383,7 @@ export function RecordPanel({
         )}
 
         {/* Reference — UPI and bank both have one worth keeping */}
-        {(method === 'upi' || method === 'bank') && packageId && (
+        {!isGymClient && (method === 'upi' || method === 'bank') && packageId && (
           <div className="fld mt3">
             <label className="fld__l" htmlFor="rp-ref">
               {method === 'bank' ? 'Transaction reference (optional)' : 'UPI reference (optional)'}
@@ -454,25 +415,19 @@ export function RecordPanel({
           />
         )}
 
-        {/* Gym split computation. Hidden while awaiting: the cut is stamped when
-            the money is confirmed, and showing a split for a payment that has not
-            happened states a fact about a month that has not closed. */}
-        {hasGym && amountNum > 0 && packageId && !isAwaiting && (
+        {/* The split, from THIS package's own share. Hidden while awaiting: the cut is
+            stamped when the money is confirmed, and showing a split for a payment
+            that has not happened states a fact about a month that has not closed. */}
+        {hasSplit && amountNum > 0 && packageId && !isAwaiting && (
           <Card tone="acc" className="mt4">
             <Card.Body style={{ padding: '12px 14px' }}>
               <KeyValueRow k="Billed" style={{ border: 0, padding: '4px 0' }}>{rupees(amountNum)}</KeyValueRow>
-              {isFloor && (
-                <KeyValueRow
-                  k={<>Gym&#8217;s {gymSharePercent}%</>}
-                  valueClassName="warn"
-                  style={{ border: 0, padding: '4px 0' }}
-                >−{rupees(gymCut)}</KeyValueRow>
-              )}
-              <KeyValueRow
-                k="You keep"
-                valueClassName="acc"
-                style={{ border: 0, padding: '4px 0' }}
-              >{rupees(yours)}</KeyValueRow>
+              <KeyValueRow k="Gym keeps" valueClassName="warn" style={{ border: 0, padding: '4px 0' }}>
+                −{rupees(gymCut)}
+              </KeyValueRow>
+              <KeyValueRow k="You get" valueClassName="acc" style={{ border: 0, padding: '4px 0' }}>
+                {rupees(yours)}
+              </KeyValueRow>
             </Card.Body>
           </Card>
         )}

@@ -1,5 +1,5 @@
 import { AppShell } from '@/components/shell/AppShell';
-import { getRoster, getTrainerName } from '@/lib/shell/api';
+import { getRoster, getTrainerIdentity, getTrainerName } from '@/lib/shell/api';
 import { listWorkspaces, resolveWorkspaces } from '@/lib/workspace/api';
 
 /**
@@ -23,10 +23,13 @@ export default async function MainLayout({
      and `listWorkspaces` both read `/v1/trainers/me` through `getTrainerIdentity`,
      which is `cache()`d per request, so the two of them are ONE round trip plus
      `/v1/team`. */
-  const [trainerName, roster, workspaces] = await Promise.all([
+  const [trainerName, roster, workspaces, identity] = await Promise.all([
     getTrainerName(),
     getRoster(),
     listWorkspaces(),
+    /* `cache()`d with `getTrainerName`, so this is the same one request: the gym
+       on the profile is what shows the *Gym share* page in Business. */
+    getTrainerIdentity(),
   ]);
   /* After, not beside: both cookies are resolved AGAINST the list, so a trainer
      who has left a team is returned to their own book rather than left holding
@@ -40,6 +43,7 @@ export default async function MainLayout({
       workspaces={workspaces}
       activeWorkspaceId={activeId}
       defaultWorkspaceId={defaultId}
+      hasGym={identity.gymName !== ''}
     >
       {children}
     </AppShell>
