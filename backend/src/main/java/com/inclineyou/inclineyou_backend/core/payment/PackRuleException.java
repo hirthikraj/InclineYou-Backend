@@ -44,37 +44,7 @@ public class PackRuleException extends RuntimeException {
         this.code = code;
     }
 
-    /* ── 400: the request cannot be carried out as written ─────────────────── */
-
-    public static PackRuleException needsPrice() {
-        return new PackRuleException(HttpStatus.BAD_REQUEST, "PACK_NEEDS_PRICE",
-                "A pack needs a price.");
-    }
-
-    public static PackRuleException needsName() {
-        return new PackRuleException(HttpStatus.BAD_REQUEST, "PACK_NEEDS_NAME",
-                "A pack needs a name.");
-    }
-
-    public static PackRuleException needsSessions() {
-        return new PackRuleException(HttpStatus.BAD_REQUEST, "PACK_NEEDS_SESSIONS",
-                "How many sessions is in this pack?");
-    }
-
-    public static PackRuleException unknownValue(String field, String value) {
-        return new PackRuleException(HttpStatus.BAD_REQUEST, "PACK_FIELD_INVALID",
-                "Unknown %s: %s".formatted(field, value));
-    }
-
-    public static PackRuleException notText(String field) {
-        return new PackRuleException(HttpStatus.BAD_REQUEST, "PACK_FIELD_INVALID",
-                "%s must be text.".formatted(field));
-    }
-
-    public static PackRuleException unknownField(String field) {
-        return new PackRuleException(HttpStatus.BAD_REQUEST, "PACK_FIELD_UNKNOWN",
-                "Unknown field: " + field);
-    }
+    /* ── 400 ───────────────────────────────────────────────────────────────── */
 
     /**
      * Named rather than ignored. A caller sending {@code owner} believes it is
@@ -84,6 +54,25 @@ public class PackRuleException extends RuntimeException {
     public static PackRuleException ownerImmutable() {
         return new PackRuleException(HttpStatus.BAD_REQUEST, "PACK_OWNER_IMMUTABLE",
                 "A pack's owner cannot be changed — it would re-attribute every package sold from it.");
+    }
+
+    /* ── 409: well-formed, and the price list's state says no ──────────────── */
+
+    public static PackRuleException nameTaken() {
+        return new PackRuleException(HttpStatus.CONFLICT, "PACK_NAME_TAKEN",
+                "You already have a pack with that name.");
+    }
+
+    /** Sold packs are archived, not deleted — {@code package.pack_id} points at them. */
+    public static PackRuleException sold() {
+        return new PackRuleException(HttpStatus.CONFLICT, "PACK_SOLD",
+                "That pack has been sold, so it can't be deleted. Archive it instead.");
+    }
+
+    /** A state the trainer can change (set a gym name in Settings), so 409 and not 422. */
+    public static PackRuleException gymNeeded() {
+        return new PackRuleException(HttpStatus.CONFLICT, "GYM_PACK_NEEDS_GYM",
+                "Set the gym you work at in Settings before adding a gym pack.");
     }
 
     /* ── 404: as far as this trainer is concerned, it is not there ─────────── */

@@ -1,8 +1,8 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
-import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,9 +17,8 @@ import java.util.UUID;
  *
  * Trainer-scoped by {@code SecurityConfig}'s `anyRequest().hasRole("TRAINER")`
  * and by `WHERE trainer_id` inside every statement — belt and braces, the same
- * as every other controller here. There is no DELETE: retiring is
- * `PATCH {"status":"inactive"}`, because a price a package points at can never
- * be removed without rewriting a sale.
+ * as every other controller here. DELETE is only for a pack nothing
+ * was sold from; retiring a sold one is `PATCH {"status":"inactive"}`.
  */
 @RestController
 @RequiredArgsConstructor
@@ -44,28 +43,33 @@ public class PackController {
         return com.inclineyou.inclineyou_backend.shared.wire.Items.of(service.list(trainerId(), status, owner, include));
     }
 
+    /** 201 the first time, 200 on a replayed id; the version rides as the ETag. */
     @PostMapping("/v1/packs")
-    @ResponseStatus(HttpStatus.CREATED)
-    public PackService.PackResponse createPack(@Valid @RequestBody PackService.CreatePackRequest req) {
-        return service.createPack(trainerId(), req);
+    public ResponseEntity<PackService.PackRow> createPack(@RequestBody(required = false) Map<String, Object> body) {
+        var made = service.create(trainerId(), body);
+        return ResponseEntity.status(made.created() ? HttpStatus.CREATED : HttpStatus.OK)
+                .eTag("\"" + made.row().version() + "\"").body(made.row());
     }
 
     /**
-     * Partial **by key presence**, not by null: a key you send is applied — `null`
-     * included — and a key you omit is untouched. So retiring is
-     * `{"status":"inactive"}` and nothing else, and `{"validityDays":null}`
-     * genuinely clears an expiry rather than silently keeping it.
-     *
-     * The body is a raw `Map` for exactly that reason; {@code PackService.PATCHABLE}
-     * carries the argument, the whitelist, and why `owner` is refused rather than
-     * ignored.
+     * Any subset, by key presence — a key sent is applied (null included), one
+     * omitted is untouched. Archive is {@code {"status":"inactive"}}.
      */
     @PatchMapping("/v1/packs/{packId}")
-    public PackService.PackResponse updatePack(
-            @PathVariable String packId,
+    public ResponseEntity<PackService.PackRow> updatePack(
+            @PathVariable UUID packId,
+            @RequestHeader(value = "If-Match", required = false) String ifMatch,
             @RequestBody(required = false) Map<String, Object> body
     ) {
-        return service.updatePack(trainerId(), packId, body);
+        var row = service.patch(trainerId(), packId, ifMatch, body);
+        return ResponseEntity.ok().eTag("\"" + row.version() + "\"").body(row);
+    }
+
+    /** Soft delete, only for a pack nothing was sold from (409 PACK_SOLD); 204, and 204 again. */
+    @DeleteMapping("/v1/packs/{packId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deletePack(@PathVariable UUID packId) {
+        service.delete(trainerId(), packId);
     }
 
     private UUID trainerId() {
