@@ -51,6 +51,20 @@ public interface AuthTokenIssuer {
     Optional<AuthPrincipal> resolve(String rawToken);
 
     /**
+     * The credential as {@link #issue} described it, for a token that is already
+     * out there — what a repeated sign-up answers with instead of minting a
+     * second session. Empty when the token no longer resolves.
+     */
+    Optional<IssuedToken> describe(String rawToken);
+
+    /**
+     * Why {@link #resolve} came back empty, when that is knowable: {@code
+     * SESSION_EXPIRED} or {@code SESSION_REVOKED}. Null for a token that was
+     * never ours — a forged or unknown one stays indistinguishable from none.
+     */
+    String failureCode(String rawToken);
+
+    /**
      * End this credential now.
      *
      * <p>Honest asymmetry: a session is revoked, a JWT cannot be and says so by

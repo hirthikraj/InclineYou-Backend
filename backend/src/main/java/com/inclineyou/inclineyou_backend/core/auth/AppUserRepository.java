@@ -28,101 +28,40 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
 
 
     /**
-     * Everything sign-in needs, in one round trip.
+     * Everything sign-in needs, in one round trip: the role, and the trainer's
+     * setup state.
      *
-     * The shape is the point. Role alone does not decide the screen — a client
-     * can be invited, accepted, paused or removed, and each is a different
-     * destination — so a lookup that returned only {@code app_user.role} would
-     * owe a second query to find out which. The joins answer both at once.
-     *
-     * Two LEFT JOINs, and they stay LEFT: an `app_user` row with no matching
-     * trainer or client is not corrupt, it is somebody mid-flow — a client who
-     * declined, a trainer whose row was soft-deleted — and an INNER JOIN would
-     * turn them into "unknown number" and offer them a brand-new account.
-     *
-     * Ad-hoc entity joins, because there is no association to map for either:
-     * `client` still only carries a phone, not an `app_user_id`, so that half
-     * joins on the number the way it always did; `trainer` now HAS the FK
-     * (`app_user_id`, since the 25 Sep 2026 schema rebuild), so that half
-     * joins on it rather than on phone.
-     *
-     * Rows multiply by membership — one person on two trainers' rosters is two
-     * rows and one human being. That is still one round trip, and the caller
-     * folds them back into a single identity with a list of rosters.
-     *
-     * What this deliberately does NOT select: specialities, certifications,
-     * languages, UPI, goals, metadata. None of it decides a route. The dashboard
-     * fetches the profile once it knows which dashboard it is.
+     * <p>The trainer join stays a LEFT JOIN: an `app_user` row whose trainer was
+     * soft-deleted is not corrupt, it is a number with no account, and an INNER
+     * JOIN would turn it into "unknown number". Deliberately selects nothing of
+     * the profile — none of it decides a route.
      */
     @Query("""
-            SELECT u.id                AS userId,
-                   u.phone             AS phone,
+            SELECT u.phone             AS phone,
                    u.role              AS role,
-                   u.privacyAcceptedAt AS privacyAcceptedAt,
+                   u.privacyPolicyVersion AS privacyPolicyVersion,
                    t.id                AS trainerId,
                    t.setupCompletedAt  AS setupCompletedAt,
-                   t.name              AS trainerOwnName,
-                   c.id                AS clientId,
-                   c.trainerId         AS clientTrainerId,
-                   c.name              AS clientName,
-                   c.status            AS status,
-                   c.membershipStatus  AS membershipStatus,
-                   c.pausedAt          AS pausedAt,
-                   c.removedAt         AS removedAt,
-                   c.removedAckAt      AS removedAckAt,
-                   ct.name             AS coachName,
-                   ctb.gymName         AS coachGymName,
-                   ctu.phone           AS coachPhone
+                   t.name              AS trainerOwnName
             FROM AppUser u
             LEFT JOIN Trainer t
                    ON t.appUserId = u.id
                   AND t.deletedAt IS NULL
-            LEFT JOIN Client c
-                   ON c.phone = u.phone
-                  AND c.deletedAt IS NULL
-            LEFT JOIN Trainer ct
-                   ON ct.id = c.trainerId
-                  AND ct.deletedAt IS NULL
-            LEFT JOIN TrainerBusiness ctb
-                   ON ctb.trainerId = ct.id
-            LEFT JOIN AppUser ctu
-                   ON ctu.id = ct.appUserId
             WHERE u.phone = :phone
               AND u.deletedAt IS NULL
-            ORDER BY c.createdAt ASC
             """)
     List<Identity> findIdentityByPhone(@Param("phone") String phone);
 
-    /**
-     * One row of the sign-in join: the person, plus at most one of their
-     * memberships. A trainer with no rosters produces exactly one row whose
-     * client fields are all null.
-     */
+    /** One row of the sign-in join: the person, and their trainer account if they have one. */
     interface Identity {
-        UUID getUserId();
-        /** The signed-in number itself — not to be confused with {@link #getCoachPhone()}. */
         String getPhone();
         String getRole();
-        Instant getPrivacyAcceptedAt();
+        /** The privacy notice version they accepted, or null. */
+        String getPrivacyPolicyVersion();
 
         /* Set only when this number owns a trainer account. */
         UUID getTrainerId();
         Instant getSetupCompletedAt();
         String getTrainerOwnName();
-
-        /* Set only when this row carries a membership. */
-        UUID getClientId();
-        UUID getClientTrainerId();
-        String getClientName();
-        String getStatus();
-        String getMembershipStatus();
-        Instant getPausedAt();
-        Instant getRemovedAt();
-        Instant getRemovedAckAt();
-
-        /* The coach on THIS membership — null on a row that has no membership. */
-        String getCoachName();
-        String getCoachGymName();
-        String getCoachPhone();
     }
 }

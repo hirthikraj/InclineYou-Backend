@@ -86,6 +86,20 @@ public class OtpSendLimiter {
         }
     }
 
+    /**
+     * How long the caller must wait before asking for the next code, read right
+     * after one was sent — the next rung of the ladder, which is what the
+     * resend countdown draws. 0 when no ladder is configured.
+     */
+    public int resendAfterSeconds(String phone, Instant now) {
+        var otp = props.getOtp();
+        var ladder = otp.getResendLadderSeconds();
+        if (ladder == null || ladder.isEmpty()) return 0;
+        Instant windowStart = now.minus(Duration.ofMinutes(otp.getSendWindowMinutes()));
+        long sent = Math.max(1, store.countSendsSince(phone, windowStart));
+        return ladder.get((int) Math.min(sent, ladder.size()) - 1);
+    }
+
     /** Rounded up, and never 0 — "retry after 0 seconds" reads as "retry now". */
     static int secondsUntil(Instant now, Instant when) {
         long millis = Duration.between(now, when).toMillis();

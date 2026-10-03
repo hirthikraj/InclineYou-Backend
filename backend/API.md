@@ -22,36 +22,27 @@ and indexes — see [`SCHEMA.md`](SCHEMA.md).
 | Area | Base | Endpoints | Status |
 | --- | --- | --- | --- |
 | [Health](#health) | `/health` | 1 | Reviewed
-| [Auth & membership](#auth--membership) | `/v1/auth` | 8 | Reviewed
+| [Auth](#auth) | `/v1/auth` | 3 | Reviewed
 | [Sessions (web sign-in)](#sessions-web-sign-in) | `/v1/auth/sessions` | 3 | V41 · reshaped by [Settings v1.1](#settings-v11--account--sign-in-3-oct-2026)
 | [Settings v1.1 — account & sign-in](#settings-v11--account--sign-in-3-oct-2026) | `/v1/auth/step-up` · `/v1/auth/sessions` · `/v1/trainers/me/phone` · `DELETE /v1/trainers/me` | 9 | v1.1
-| [Workspaces](#workspaces) | `/v1/tenants` | 8 | V37–V42
 | [Trainer profile](#trainer-profile) | `/v1/trainers` | 2 | Reviewed
 | [The account](#the-account) | `/v1/trainers/me/phone`, `/v1/trainers/me` | 5 | V36
 | [Settings v1.1 — profile, working week & messages](#settings-v11--profile-working-week--messages) | `/v1/trainers/me/consent` · `/setup/complete` · `PATCH /v1/working-hours` · `/v1/nudge-templates` | 6 | v1.1
 | [Working hours](#working-hours) | `/v1/working-hours` | 2 |
-| [Team coaching](#team-coaching) | `/v1/team` | 29 |
 | [Clients](#clients) | `/v1/clients` | 10 |
 | [Progress](#progress) | `/v1/clients/{clientId}/progress` | 1 |
 | [Exercises](#exercises) | `/v1/exercises` | 5 | V9
 | [Measuring cycle — V5](#measuring-cycle--v5) | — (fields on `/v1/clients`, `/v1/trainers/me`) | 0 | V5, V22
 | [Assessments — V14](#assessments--v14) | `/v1/assessments`, `/v1/assessment-templates`, `/v1/assessment-catalog` | 11 | V14
-| [Templates](#templates) | `/v1/templates` (incl. `/certified`) | 11 | V11
 | [Programs](#programs) | `/v1/programs` | 11 |
 | [Workout templates](#workout-templates) | `/v1/workout-templates` | 5 | V13
 | [Scheduled sessions (diary)](#scheduled-sessions-diary) | `/v1/sessions` | 6 |
-| [Workout sessions & set logs](#workout-sessions--set-logs) | `/v1/workouts` — **removed** | 0 |
 | [Packs (the price list)](#packs-the-price-list) | `/v1/packs` | 3 |
 | [Packages & payments (money book)](#packages--payments-money-book) | `/v1/clients/{id}/packages`, `/v1/packages`, `/v1/payments` | 14 |
 | [Nudges](#nudges) | `/v1/clients/{clientId}/nudges`, `/v1/nudges`, `/v1/nudge-templates` | 5 |
 | [Attention dismissals](#attention-dismissals) | `/v1/attention/dismissals` | 3 |
-| [Reports](#reports) | `/v1/clients/{clientId}/report` | 1 |
-| [Push devices](#push-devices) | `/v1/devices` | 2 |
-| [Trainer sync](#trainer-sync) | `/v1/sync` | 2 |
-| [Client sync](#client-sync) | `/v1/client/sync` | 2 |
-| [Client portal](#client-portal--v1me) | `/v1/me` | 34 | modules 11a–11e
 
-**Total: 200 endpoints.** (26 Sep 2026: the trainer's bell — the three `/v1/notifications` routes — and `POST /v1/programs/{id}/notify` were removed; there is no notification service in v1. 23 Sep 2026: V8 added `PATCH /v1/payments/{id}/write-off` and `POST /v1/payments/{id}/invoice`; V9 added `GET /v1/exercises/categories` and `GET /v1/exercises/{id}`; V11 added the three `/v1/templates/certified` routes; V13 added the five `/v1/workout-templates` routes; V14 added the eleven assessment routes; V15 added the three bell routes; module 11a added the sixteen `/v1/me` reads 11b the four workout writes 11c the three client writes, 11d the portal bell, `PATCH /v1/me/prefs` and `POST /v1/programs/{id}/notify`, and 11e the seven account routes; and V5's two sitting routes were removed with its table; V5's four body-assessment routes were missing from this table and are now counted. The total had read 129 while its own rows summed to 141 — it is now the sum of the rows.)
+**The wire contract is `release/api-contract-v1.1.html`; where this file and it differ, the contract wins.** This file keeps the per-route notes for the v1 trainer web app; the team, workspace-switcher, client-portal, sync, push-device and report routes were removed from the backend and from here.
 
 ---
 
@@ -61,18 +52,9 @@ Enforced in `config/SecurityConfig.java`, in this order — first match wins:
 
 | Path | Requirement |
 | --- | --- |
-| `/v1/auth/trainer` | any authenticated token |
-| `/v1/auth/mode/**` | any authenticated token |
-| `/v1/auth/membership/**` | `ROLE_INVITED` |
+| `POST /v1/trainers` | any authenticated token — the `pending` token's one route |
 | `/v1/auth/**`, `/health` | public |
-| `/v1/client/**` | `ROLE_CLIENT` |
-| `/v1/me`, `/v1/me/**` | `ROLE_CLIENT` — the client portal (module 11) |
 | everything else | `ROLE_TRAINER` |
-
-`/v1/team/**` deliberately has **no rule of its own** — it falls through to
-`ROLE_TRAINER`, and the role checks *inside* a team (owner / admin / coach) are
-`team/TeamScope.java`'s job rather than the security chain's, because they depend
-on a database row and not on a path. See [Team coaching](#team-coaching).
 
 Sessions are stateless; CSRF, form login and HTTP Basic are all disabled.
 Trainer-scoped endpoints read the token subject as the trainer UUID and every
@@ -88,8 +70,7 @@ a chatty sync does not spend an ordinary request's budget:
 | Tier | Applies to | Default |
 | --- | --- | --- |
 | `AUTH` | `/v1/auth/**` | 300 / 60s |
-| `SYNC` | `/v1/sync/**`, `/v1/client/sync/**` | 60 / 60s |
-| `MESSAGING` | `POST …/nudges`, `POST /v1/team/invites` | 10 / 60s |
+| `MESSAGING` | `POST …/nudges` | 10 / 60s |
 | `STANDARD` | everything else — including every route V6–V15 added (write-off, invoice, exercise categories and by-id, the certified shelf, workout templates), none of which sends a message | 120 / 60s |
 | *(exempt)* | `/health` | — |
 
@@ -113,56 +94,27 @@ branches on (`exception/GlobalExceptionHandler.java`):
 
 | `code` | Status | Meaning |
 | --- | --- | --- |
-| `OTP_WRONG` | 422 | Code did not match; an attempt was spent. |
-| `OTP_EXPIRED` | 410 | Code was valid and has since lapsed. |
+| `OTP_WRONG` | 401 | Code did not match; an attempt was spent. Carries `attemptsLeft`. |
+| `OTP_EXPIRED` | 401 | Code was valid and has since lapsed. |
+| `OTP_REQUEST_NOT_FOUND` | 404 | The sign-in `requestId` is unknown, used, expired or superseded. |
+| `PHONE_INVALID` | 400 | Fails the phone format. |
+| `CONSENT_REQUIRED` | 400 | A missing or outdated privacy-policy version on `POST /v1/trainers`. |
+| `CLIENT_SIGN_IN_UNAVAILABLE` | 403 | The number is only a client's, and client sign-in is not open. |
+| `SESSION_EXPIRED` | 401 | The session (or pending token) is past its expiry. |
+| `SESSION_REVOKED` | 401 | The session was signed out elsewhere or by an account change. |
 | `OTP_LOCKED` | 429 | Too many wrong codes — number locked, carries a countdown. |
 | `OTP_THROTTLED` | 429 | Codes requested too fast — carries the real wait. |
 | `PHONE_IS_TRAINER` | 409 | That's the caller's own number — trainer/client duality is allowed for everyone else's. |
 | `PHONE_ON_ANOTHER_ROSTER` | 409 | That number is another coach's client **in this workspace**. Narrowed by V38: it used to mean "anywhere in the product", which made it impossible for one person to be a client of a private trainer and, separately, a client at a gym. |
 | `RATE_LIMITED` | 429 | Tier budget exhausted. |
-| `PHONE_ON_YOUR_ROSTER` | 409 | That number is already on the caller's own roster. |
-| `PHONE_ALREADY_IN_TEAM` | 409 | That number is already in a coaching team. |
-| `PHONE_ALREADY_INVITED` | 409 | This team already has an invite out to that number. |
-| `PHONE_IS_SELF` | 422 | You cannot invite your own number. |
-| `ALREADY_IN_TEAM` | 409 | The caller is already in a team. |
-| `TEAM_SEAT_LIMIT` | 409 | No free seats; carries `seatLimit`. |
-| `TEAM_INVITE_EXPIRED` | 410 | Older than the expiry window; ask for a new one. |
-| `NOT_TEAM_ADMIN` | 403 | The action needs `owner` or `admin`. |
-| `NOT_TEAM_OWNER` | 403 | The action needs `owner`. |
-| `TEAM_MEMBERSHIP_REQUIRED` | 403 | The caller is in no team. |
-| `MEMBER_NOT_IN_TEAM` | 404 | That coach is not an active member of the caller's team. |
-| `CLIENT_NOT_IN_TEAM` | 404 | That client's coach is not in the caller's team. |
-| `TEMPLATE_NOT_IN_TEAM` | 404 | That program is not in the caller's team library. |
-| `PROGRAM_NOT_IN_TEAM` | 404 | That plan's coach is not in the caller's team. |
-| `EXERCISE_NOT_IN_TEAM` | 404 | Not a team custom exercise; the seeded library is not editable. |
-| `TEAM_RANGE_INVALID` | 422 | The revenue date range ends before it starts. |
-| `CANNOT_REMOVE_OWNER` | 422 | Transfer ownership first. |
-| `CANNOT_DEMOTE_OWNER` | 422 | The owner's role is changed by transferring, not editing. |
-| `TEAM_ROLE_INVALID` | 422 | A member can be made `admin` or `coach`, nothing else. |
 | `TEAM_READ_ONLY` | — | Sync-push rejection reason, not an HTTP status. |
 | `NO_WORKSPACE` | 422 | The caller belongs to no workspace yet. |
-| `NOT_A_MEMBER` | 404 | That workspace, or that row in it, is not the caller's — the *404, not 403* rule, one rung up. |
-| `NOT_TENANT_ADMIN` | 403 | The action needs `owner`, `admin` or `gym_admin` **in that workspace**. |
-| `SWITCHING_DISABLED` | 422 | `app.tenant.switching-enabled=false`. |
-| `CANNOT_LEAVE_OWN` | 422 | You cannot leave your own practice. |
-| `PHONE_IN_THIS_WORKSPACE` | 409 | Another coach in this workspace already has that number. |
-| `NOT_A_COACH_HERE` | 422 | The receiving trainer does not coach in this workspace. |
 | `VALIDATION` | 400 | A field was refused; `detail` names it and says why (`gender: must be one of …`, `dateOfBirth: that date is in the future`, `paidAt: …`, an empty note). **Branch on the field in `detail` only for display** — the code is shared on purpose, so a new field needs no new code. Thrown by `AccountRuleException`, `ClientRuleException`, `PackageRuleException`, `WorkoutRuleException` and `AssessmentRuleException`. |
-| `ALREADY_COLLECTED` | 409 | **V8.** Write-off refused: the payment was already collected (`paid` / `confirmed`). |
 | `WRITTEN_OFF` | 409 | **V8.** The payment was written off — it cannot be invoiced, and it cannot be confirmed. |
-| `GYM_COLLECTED` | 409 | **V8.** Invoice refused: the gym is the collector of record and raises its own receipt. |
-| `NOT_PAID` | 409 | **V8.** Invoice refused: the payment is still pending, and the bill prints *Paid on*. |
-| `PAYMENT_NOT_FOUND` | 404 | **V8.** Not one of the caller's payments, or not in the active workspace. |
 | `PACKAGE_NOT_FOUND` | 404 | Not one of the caller's packages. |
-| `CLIENT_NOT_FOUND` | 404 | Not on the caller's roster (money-book routes). |
 | `PACKAGE_NEEDS_PRICE` · `PACKAGE_NEEDS_SESSIONS` · `PACKAGE_FIELD_INVALID` | 400 | A sale that cannot be written as sent — no price, no session count on a session pack, an unknown enum value or a malformed date. |
-| `PACKAGE_BAD_EXTENSION` | 400 | An extension outside 1–365 days. |
 | `PACKAGE_BAD_SESSION_COUNT` · `PACKAGE_NO_CHANGE` | 400 | A V4 count correction out of range, or to the count it already has. |
-| `PACKAGE_NO_EXPIRY` | 409 | Extending a pack that has no expiry date. |
-| `PACKAGE_FEWER_THAN_DELIVERED` | 409 | Correcting a count below the sessions already delivered. |
-| `PACKAGE_NOT_COUNTED` | 409 | Correcting sessions on a pack that does not count them. |
 | `PACKAGE_ALREADY_PAUSED` · `PACKAGE_NOT_PAUSED` | 409 | Pause on a paused pack, resume on a running one. |
-| `PACKAGE_NOT_LIVE` | 409 | Pause / resume / extend on a pack that has finished — renew instead. |
 | `PACK_NEEDS_NAME` · `PACK_NEEDS_PRICE` · `PACK_NEEDS_SESSIONS` · `PACK_FIELD_INVALID` · `PACK_FIELD_UNKNOWN` | 400 | A price-list entry that cannot be written as sent. |
 | `PACK_OWNER_IMMUTABLE` | 400 | A pack's `owner` cannot change — it would re-attribute every package sold from it. |
 | `PACK_NOT_FOUND` | 404 | Not on the caller's price list. |
@@ -173,29 +125,10 @@ branches on (`exception/GlobalExceptionHandler.java`):
 | ~~`NUDGE_CLIENT_NOT_FOUND`~~ | — | Retired 3 Oct 2026 with `POST …/nudge`. `POST …/nudges` answers a plain 404 for a client not on the roster. |
 | ~~`NUDGE_NO_PHONE`~~ | — | Retired 3 Oct 2026 with `POST …/nudge`: `POST …/nudges` answers `409 CLIENT_NO_PHONE` — adding a number makes the same request work. |
 | `EMAIL_INVALID` · `EMAIL_TOO_LONG` | 400 | V36's contact address is not shaped like one, or is over 254 characters. |
-| `DELETE_NOT_CONFIRMED` | 400 | Closing the account (deprecated typed path): the typed confirmation is not this account's number. |
 | `STEP_UP_REQUIRED` | 403 | A dangerous act (change number, close account) without a valid step-up ticket for it. See *Settings v1.1*. |
 | `TICKET_EXPIRED` | 401 | The step-up ticket was right but has aged out or been spent — start the step-up again. |
 | `PHONE_INVALID` | 400 | The new number is not an E.164 Indian mobile. |
-| `ASSESSMENT_NOT_FOUND` | 404 | **V14.** Not one of the caller's sent assessments, or deleted. (V5 used this code for a body reading; that is now `READING_NOT_FOUND`. V5 never shipped, so no build reads the old meaning.) |
-| `ASSESSMENT_TEMPLATE_NOT_FOUND` | 404 | **V14.** Not one of the caller's assessment templates, or deleted. |
-| `READING_NOT_FOUND` | 404 | **Retired by V22** with the routes that raised it (`PUT` / `DELETE /v1/clients/{id}/body-metrics/{metricId}`). Nothing returns it; the code is kept out of reuse. |
-| `SCHEDULE_MISMATCH` | 400 | `POST /v1/templates/{id}/apply`: the schedule — sent, or derived from the client's standing week — does not name the template's days one-for-one. `detail` names the numbers. |
-| `SCHEDULE_INVALID` | 400 | `apply`: a slot on no weekday, two slots on one weekday, or a time that is not `HH:mm`. |
-| `CERTIFIED_READ_ONLY` | 403 | **V11.** `PUT` / `DELETE /v1/templates/{id}` aimed at a certified program — copy it and edit the copy. |
-| `CERTIFIED_COPY_FIRST` | 409 | **V11.** `apply` aimed at a certified program — a client is only ever put on a copy. |
-| `CERTIFIED_NOT_FOUND` | 404 | **V11.** No such certified program, or it has been retired. |
-| `WORKOUT_NOT_FOUND` | 404 | **V13.** Not one of the caller's saved workouts, or deleted. |
-| `NOT_A_CLIENT` | 403 | **Portal.** Signed in as a client, but the number is on no live roster. |
-| `NOT_YOURS` | 403 | **Portal.** `?clientId=` is not one of this number's rows — the same answer whether it exists or not. |
-| `NOT_FOUND` | 404 | **Portal.** An `{id}` route on something that is not this client's (a plan, a workout, an assessment); `detail` is the sentence the page prints. |
 | `SESSION_CANCELLED` | 409 | **Portal 11b.** Starting a workout against a cancelled session. |
-| `WORKOUT_CLOSED` | 409 | **Portal 11b.** A set or a swap on a finished workout. |
-| `NOT_APPROVED` | 422 | **Portal 11b.** A swap to anything but the trainer's approved alternative. |
-| `ALREADY_STARTED` | 409 | **Portal 11b.** A swap of a movement that already has a logged set. |
-| `ALREADY_IN_WORKOUT` | 409 | **Portal 11b.** A swap to a movement already in today's log. |
-| `CLOSED` | 409 | **Portal 11c.** Answering or submitting an assessment already sent back. |
-| `EMPTY` | 400 | **Portal 11c.** Submitting an assessment with nothing answered. |
 | `PHONE_UNCHANGED` · `PHONE_TAKEN` · `PHONE_CHANGE_UNPROVEN` | 400 · 409 · 401 | Also returned by the **portal's** number change (11e), with the trainer's meanings. `PHONE_TAKEN` never says who holds the number. |
 
 The rows from `VALIDATION` down were added on 23 Sep 2026: the six V8 codes are
@@ -235,87 +168,99 @@ serving traffic correctly.
 
 ---
 
-## Auth & membership
+## Auth
 
-`auth/AuthController.java` — phone-OTP sign-in and the invite lifecycle.
+`auth/AuthController.java` — phone-OTP sign-in and claiming a trainer account. A number that is only a client's is refused on verify with `403 CLIENT_SIGN_IN_UNAVAILABLE` (the client portal is not in v1).
 
 ### `POST /v1/auth/otp/request`
-**Purpose:** send a one-time code to a phone number. *Public.*
+**Purpose:** send a sign-in code to a phone number over WhatsApp. *Public.* `AUTH` tier.
 
-Body: `{ "phone": "9876543210" }` — must match `^[6-9]\d{9}$` (TRAI allocates
-only the 6–9 series to mobile). Returns `200` with no body.
+Body: `{ "phone": "+919876543210" }` — `+91`, then a mobile number starting 6–9.
+Anything else is `400 PHONE_INVALID`.
+
+Returns `200`:
+
+```json
+{ "requestId": "0b6f…", "expiresAt": 1790300600000, "resendAfterSeconds": 30 }
+```
+
+`requestId` is the `otp_request` row's id: random, carrying no phone number. The
+web keeps it in its httpOnly sign-in cookie and sends it, not the number, to
+verify and to the status read. A new request for the same number **supersedes** the
+previous one — only the latest id can be verified. `resendAfterSeconds` is the
+next rung of the resend ladder, for the countdown. The answer is the same
+whether or not the number has an account.
 
 Throttled per number by a resend ladder (30s / 60s / 120s inside a 60-minute
-window) with a hard ceiling of 10 sends per rolling 24 hours. Breaching either
-yields `OTP_THROTTLED`.
+window) with a ceiling of 10 sends per rolling 24 hours — `429 OTP_THROTTLED`
+with `retryAfterSeconds`. A number serving a wrong-code lock is
+`429 OTP_LOCKED`; both carry `Retry-After`.
+
+### `GET /v1/auth/otp/requests/{requestId}`
+**Purpose:** did the WhatsApp message arrive — the "Didn't get it?" screen. *Public.*
+
+Returns `{ "deliveryStatus": "sent", "deliveryError": null, "expiresAt": … }`;
+`deliveryStatus` is `queued | sent | delivered | read | failed`. The row goes
+`queued → sent` when the sender takes the code and `failed` (with
+`deliveryError`) when it refuses; `delivered` and `read` are for the provider's
+webhook, which is not wired. Keyed by the id the caller was given, never by a
+number, so it answers nothing about an arbitrary phone. Unknown, expired,
+used, superseded or malformed ids are all `404 OTP_REQUEST_NOT_FOUND`.
 
 ### `POST /v1/auth/otp/verify`
-**Purpose:** exchange a code for a JWT. *Public.* This is the only endpoint that
-mints tokens.
+**Purpose:** check the code, and open a session. *Public.* With
+`X-InclineYou-Client: web` the credential is a revocable session; without it, a JWT.
 
-Body: `{ "phone": "9876543210", "otp": "123456" }`. The OTP must match `^\d{6}$` —
-shape is checked *before* the code, so a typo cannot spend one of the three
-attempts a trainer gets. Phone validation is identical to `/otp/request` so one
-bad number cannot get two different answers.
+Body: `{ "requestId": "0b6f…", "otp": "123456" }`. The code is checked against the
+request it was sent for. Its shape (`^\d{6}$`) is checked *before* the code, so a
+typo cannot spend one of the three attempts. The wrong-attempt lock stays keyed on
+the **number** behind the request, so asking for a fresh request does not reset it.
 
-Returns `AuthResponse`:
+Returns `AuthResponse` (instants are epoch ms):
 
 | Field | Meaning |
 | --- | --- |
-| `token` | the bearer JWT |
-| `trainerId` | subject when the caller is a trainer |
-| `isNewUser`, `setupComplete` | whether onboarding is owed |
-| `role` | `trainer` \| `client` \| `pending` \| `invited` \| `removed` \| `unattached` \| `gym_admin` — which screen this sign-in is owed |
-| `trainerName` | for "Welcome back, Ravi"; null before setup |
-| `clientOf[]` | every LIVE roster this number is on (`Membership`) — populated for a `trainer` role too, now that trainer/client duality is allowed |
-| `pausedInfo` / `removedInfo` | who paused/ended it and when |
+| `token` | the bearer credential — opaque (`xs_…`) on the web |
+| `sessionId` | `web_session.id`, "this device" in Settings; null for a JWT |
+| `expiresAt` | when the credential stops working |
+| `role` | `trainer` \| `pending` (a new number). A number that is only a client's never gets here |
+| `isNewUser` | true for `pending` |
+| `trainerId`, `trainerName` | null on `pending`; the name is null before setup |
+| `setupCompletedAt` | null until onboarding is finished |
+| `privacyPolicyVersion` | what they accepted; null on `pending` |
+| `currentPolicyVersion` | what is in force — a mismatch sends them to the consent screen |
 
-`role` is the *home* role — which screen sign-in opens into by default, not an
-exclusivity lock. A phone can own a trainer account and also be a live client
-on somebody else's roster; `clientOf[]` on a trainer's response is how that
-surfaces, and `POST /v1/auth/mode/trainer` / `mode/client` (below) switch
-between them without a fresh sign-in.
+A `pending` token is a 15-minute JWT (also on the web: `web_session` needs an
+`app_user` row, which a new number does not have yet) and opens exactly one
+route, `POST /v1/trainers`.
 
-`Membership` carries both `status` (the *trainer's* view: `active` / `paused` /
-`archived` / `inactive`) and `membershipStatus` (the *client's* own answer:
-`invited` / `accepted` / `declined` / `paused` / `removed`). They are kept apart
-because they answer to different people and can legitimately disagree.
+Errors: `401 OTP_WRONG` `{attemptsLeft}` · `401 OTP_EXPIRED` ·
+`404 OTP_REQUEST_NOT_FOUND` · `429 OTP_LOCKED` `{retryAfterSeconds}` ·
+`403 CLIENT_SIGN_IN_UNAVAILABLE` — a number that is only a client's (the portal
+is not in v1); a number that is both signs in as the trainer.
 
-### `POST /v1/auth/trainer`
-**Purpose:** claim the signed-in number as a trainer account. *Any authenticated
-token.* Returns a fresh `AuthResponse` carrying the upgraded role.
+### `POST /v1/trainers`
+**Purpose:** become a trainer — the new-number sign-up. *`pending` token, or a trainer's own session.*
 
-### `POST /v1/auth/membership/{clientId}/accept`
-**Purpose:** the client accepts a trainer's invite. *`ROLE_INVITED`.* Also stamps
-the privacy acceptance the screen carried. Returns a re-issued `AuthResponse`.
+Body: `{ "privacyPolicyVersion": "2026-09" }` — must equal `currentPolicyVersion`;
+missing or outdated is `400 CONSENT_REQUIRED`. Creates the `app_user` (privacy
+pair stamped once) and the `trainer`; the database triggers provision the
+solo workspace, the practice row and the trial. Answers the verify shape with
+`role: "trainer"` and a revocable session: **`201`** the first time.
 
-### `POST /v1/auth/membership/{clientId}/decline`
-**Purpose:** the client declines. *`ROLE_INVITED`.* The row is kept rather than
-deleted — the trainer's roster should say what happened.
+Idempotent by target state: the pending token replayed, or a call from a session
+that already belongs to a trainer, answers **`200`** with the account that exists
+(the latter with its own credential echoed — no second session is minted). A
+phone that is already somebody's client can claim too; the existing row becomes
+the trainer's.
 
-### `POST /v1/auth/membership/{clientId}/ack-removal`
-**Purpose:** "OK" on the removal notice. *`ROLE_INVITED`.* The local data wipe
-happens on the phone; this is only what stops the notice being redrawn at every
-future sign-in.
+No live pending token or session is `401 SESSION_EXPIRED`.
 
-### `POST /v1/auth/mode/trainer`
-**Purpose:** switch a signed-in session into trainer mode. *Any authenticated
-token.* For a phone that is currently signed in as a client (or mid-invite) but
-also owns a trainer account. 404s (no body beyond the standard error shape) if
-this number owns no trainer account. Mints a fresh trainer token and returns
-the same `AuthResponse` shape a trainer's own sign-in gets, `clientOf[]`
-included; the caller's previous token is simply left to expire.
-
-### `POST /v1/auth/mode/client`
-**Purpose:** switch a signed-in session into client mode. *Any authenticated
-token.* For a trainer whose own number also holds a **live** (accepted or
-paused) membership on somebody else's roster. No body — a client token is
-bound to the phone, not to one relationship, so the response carries every
-live roster this number is on, same as any other client sign-in; the app's
-existing multi-roster picker disambiguates from there. 404s if there is no
-live membership anywhere for this number.
-
----
+### Stale credentials
+Any endpoint answers `401` with `code: SESSION_EXPIRED` for a session past
+`expires_at` (or an expired pending JWT) and `SESSION_REVOKED` for one that was
+signed out elsewhere or by an account change. A forged or unknown token is a bare
+`401`, indistinguishable from none.
 
 ## Sessions (web sign-in)
 
@@ -340,134 +285,7 @@ must not be a set of live credentials. SHA-256 rather than bcrypt because this i
 256 bits of `SecureRandom` with no structure to guess, so it wants a fast one-way
 function, not a KDF on the hot path of every request.
 
-`POST /v1/auth/otp/verify` is unchanged except that the response now carries
-`tokenKind` — `jwt` or `session`. Nothing on the server branches on it; the web
-needs to know it holds something revocable and the phone needs to know it holds
-something that works with no signal.
-
----
-
-## Workspaces
-
-**One person belongs to several workspaces.** A trainer coaches privately *and*
-at a gym with different clients; one human can be a client under two separate
-arrangements. `tenant` is the workspace, `tenant_member` is the many-to-many, and
-every row in the product carries an **immutable** `tenant_id` stamped where it
-was created.
-
-Two things follow that the client has to understand:
-
-- **`X-InclineYou-View: focused`** narrows reads to the active workspace. Absent or
-  `combined` (the default) spans every workspace the caller belongs to, which is
-  what puts a 07:00 private client and an 18:00 gym client on one Today screen.
-- **The money book ignores that header entirely.** Packages, payments, packs and
-  settlements are always the active workspace alone, enforced by the database
-  (tier 2 in `V42__row_level_security.sql`), so a total is never a mix of two
-  businesses.
-
-### `GET /v1/tenants`
-
-The switcher. Home first, then by name.
-
-```json
-[{ "id": "…", "type": "solo", "name": "Priya's practice", "role": "owner",
-   "home": true, "active": true, "administers": true,
-   "revenueSharePercent": null, "assignmentMarginPercent": null }]
-```
-
-`type` is `solo` · `team` · `gym`. `revenueSharePercent` **null means 100%**,
-which is the only correct answer for a solo workspace.
-
-### `POST /v1/tenants/{id}/activate`
-
-Stand somewhere else. Body `{ "remember": true }` also makes it the workspace the
-app opens in next time.
-
-```json
-{ "tenantId": "…", "token": null, "tokenKind": "session" }
-```
-
-**`token` is null when the existing credential still works** — the web case,
-because moving a session is an `UPDATE`. The client must not read null as a
-sign-out. A JWT caller gets a fresh token here and should replace the one it has.
-
-`404 NOT_A_MEMBER` for a workspace that is not one of the caller's — deliberately
-not a 403, per the *404, not 403* rule.
-
-### `GET /v1/tenants/{id}/members`
-
-Everyone who works here, with their `clientCount` **in this workspace** — a coach
-may hold twelve here and four somewhere else, and the second number is none of
-this workspace's business.
-
-### `PATCH /v1/tenants/{id}/members/{memberId}/shares` → `204`
-
-`{ "revenueSharePercent": 70, "assignmentMarginPercent": 5 }`. Owner/admin only.
-**Null means leave it alone**, the same contract `/v1/trainers/me` uses — a PATCH
-naming one percentage cannot blank the other.
-
-Changes apply from now. Every handover already recorded keeps the margin frozen
-onto its `client_assignment` row, for the reason V11 froze `share_percent` onto a
-payment: an admin who renegotiates in March must not restate what they earned in
-January.
-
-### `PATCH /v1/tenants/{id}/members/{memberId}/role` → `204`
-
-`{ "role": "admin" }`. The owner's role is not editable here.
-
-### `GET /v1/tenants/{id}/revenue?from=&to=`
-
-Role decides the shape:
-
-| Role | Sees |
-| --- | --- |
-| `owner` · `admin` · `gym_admin` | the workspace total **and** the split per coach |
-| `coach` | their own line, and **no total** — not a rank, not a share of something |
-
-Everyone also gets `myShare` (their collections × their percentage) and
-`myPlacementMargin` (what their placements earned, at the margin frozen on each
-client, excluding clients they placed with themselves).
-
-**Collected means `paid` OR `confirmed`** — REST writes the first, sync has
-carried the second since V1, and counting one halves a trainer's month.
-
-Note this is a *different* endpoint from `GET /v1/team/revenue`, which stays
-owner-only and totals-only for a V26 team. This one is workspace-shaped and is
-the version a gym uses.
-
-### `GET /v1/tenants/{id}/stale-clients`
-
-Everyone here with no working coach, oldest first, with the outstanding balance —
-because a client who has paid for eight sessions and has nobody to take them is a
-refund waiting to happen.
-
-### `POST /v1/tenants/{id}/members/{trainerId}/unavailable` → `200`
-
-`{ "clientsNeedingACoach": 12 }`. A coach has stopped working here.
-
-**It marks `client.stale_at` and touches nothing else.** `status` is untouched,
-so every `WHERE status = 'active'` read on the server and on every phone in the
-field keeps counting them — a stale client is still an active client; what is
-missing is a coach. V30 made exactly this call for `paused_at`.
-
-Their clients in **other** workspaces are not affected. Those are a different
-tenant and were never in scope, which is the whole reason leaving a gym is cheap.
-
-### `POST /v1/tenants/{id}/clients/{clientId}/assign` → `204`
-
-`{ "toTrainerId": "…", "note": "…", "reason": "trainer_left" }`
-
-Gives a client a coach. **The client keeps everything** — measurements, logged
-sessions, payments and their plan are the same rows before and after. What
-changes hands is the forward-looking work: `client.trainer_id`, the current
-program, and sessions from today onward. Logged workouts and collected payments
-keep their original `trainer_id`, because they record who did the work and who
-took the money.
-
-`tenant_id` does not change and cannot: a handover happens *inside* a workspace,
-and the immutability trigger refuses anything else.
-
-`422 NOT_A_COACH_HERE` if the receiving trainer does not work in this workspace.
+`POST /v1/auth/otp/verify` mints either, by the same header; the response's `sessionId` is non-null exactly when the credential is a session.
 
 ---
 
@@ -669,7 +487,6 @@ Refusals, each with a `code` and a sentence in `detail`:
 | --- | --- | --- |
 | `PHONE_UNCHANGED` | 400 | the new number is the one they are already on |
 | `PHONE_TAKEN` | 409 | somebody already holds it — **it does not say who**, or this endpoint would answer *is this number on InclineYou* for any number in India |
-| `PHONE_CHANGE_UNPROVEN` | 401 | no ticket, a forged one, or one that aged out — go back to step 1 |
 | `OTP_WRONG` · `OTP_EXPIRED` · `OTP_LOCKED` · `OTP_THROTTLED` | as at sign-in | the same three, from the same service |
 
 Availability is checked at **step 3 and again at step 4**: once so that a number
@@ -749,353 +566,6 @@ log ever recorded, on a screen that is opened every morning and left open.
 Writes stay where they were: setup pushes these rows through `/v1/sync/push`, and
 the per-day editor is in the diary on the phone. A permission-shaped table with
 two write paths is how the two halves drift.
-
----
-
-## Team coaching
-
-`team/TeamController.java` — a senior trainer running a team of trainers. Full
-design in `agent/InclineYou_team_coaching_prd.md`. **All three phases are built**:
-forming a team, who is in it, the shared exercise pool, team-wide client reads,
-client reassignment, the shared program library, admins editing a teammate's plan
-in place, and the owner's revenue roll-up.
-
-Everything here is `ROLE_TRAINER` and `STANDARD` tier, except
-`POST /v1/team/invites`, which is `MESSAGING`.
-
-**The governing idea:** *a team is a visibility grant, never a change of owner.*
-Every row keeps its `trainer_id` and every existing endpoint keeps filtering on
-it — not one of the 63 endpoints that predate this section changed what it
-returns. What a team adds is a resolver (`TeamScope`) that widens the *set* of
-trainer ids an owner or admin may **read** from `{me}` to `{me + my team}`. Reads
-widen; ownership does not move. Which is also why joining a team changes nothing
-about a coach's clients, programs or money, and leaving changes nothing back.
-
-**Two things a team never grants**, both deliberate:
-- **A teammate's money book.** `package`, `payment` and `gym_settlement` are never
-  returned under any `/v1/team/**` path except
-  [`GET /v1/team/revenue`](#get-v1teamrevenue), which is **owner-only and totals
-  only** — no payment row, no client name. Everywhere else the split a coach
-  negotiated with a gym is not the next coach's business, and there is a test
-  asserting the absence.
-- **Offline access to team-wide data.** Only `team` and `team_member` enter sync
-  (see [Trainer sync](#trainer-sync)); teammates' clients are online-only REST.
-  An offline copy leaves with the phone, and an admin removed on Tuesday must not
-  still hold forty clients' history on Wednesday.
-
-**Roles.** `owner` · `admin` · `coach`. The owner is not a fourth kind of admin —
-it is the admin who cannot be removed. Admins may invite, remove coaches, and
-promote coaches; only the owner may remove or demote an *admin*, edit the team,
-transfer ownership, or delete the team. Two admins able to demote each other in a
-race is an incident with no upside.
-
-**Kill switch.** `TEAM_ENABLED=false` makes every endpoint here `404` and stops
-any caller's read scope widening — two mechanisms, because they answer two
-different questions.
-
-### `GET /v1/team`
-**Purpose:** the caller's team, their role in it, and seat usage.
-
-Returns `id`, `name`, `logoUrl`, `seatLimit`, `activeMembers`, `pendingInvites`,
-`ownerTrainerId`, `myRole`, `createdAt`, `updatedAt`.
-
-**`204` when the caller is in no team** — that is the normal state for almost
-every trainer, and it is not an error.
-
-### `POST /v1/team` → `201`
-**Purpose:** create a team and become its owner. Body: `name` (required),
-`seatLimit` (optional; defaults from `app.team.default-seat-limit`, 5).
-
-`409 ALREADY_IN_TEAM` if the caller is already in one — one team per trainer,
-enforced by a partial unique index, for the same reason `app_user.role` is
-exclusive.
-
-### `PATCH /v1/team` · `DELETE /v1/team` → `204`
-**Purpose:** edit `name` / `logoUrl` / `seatLimit`; or end the team. **Owner only.**
-
-A seat limit below the current headcount is allowed: it only gates future
-accepts. Deleting soft-deletes the team and every membership — and touches no
-client data, ever. Every coach walks away with exactly what they walked in with.
-
-### `POST /v1/team/transfer-ownership`
-**Purpose:** hand the team over. Body: `{ "memberId": "…" }`. **Owner only.**
-
-The old owner becomes an `admin` in the same transaction. Standing down happens
-first, which is both the honest order of events and the only order the
-one-active-owner index permits.
-
-### `GET /v1/team/members`
-**Purpose:** the coach list, ordered as a hierarchy (owner, admins, coaches) with
-each coach's live client count. Pending invites appear here too — a pending
-invite to a number with no InclineYou account has a `phone` and a null `name`, because
-the number is all we know about them.
-
-### `POST /v1/team/invites` → `201` · **`MESSAGING` tier — 10/min**
-**Purpose:** invite a coach by phone. Body: `{ "phone": "…" }`. **Admin+.**
-
-Returns the new member row plus `whatsappUrl` (a `wa.me` deep link) and
-`message`. The backend does not send messages — it never has, `NudgeService`
-works the same way — so the invitation travels by the inviter's own WhatsApp,
-from their own number, which is also why a coach believes it.
-
-`MESSAGING` tier because it spends a message, and here that ceiling doubles as
-the anti-spam control: an invite puts a message in front of somebody who never
-asked for one.
-
-**The invite may precede the account.** If the number has no trainer account, the
-row is written against the phone with a null `trainer_id` and bound the first time
-that number signs in — which makes an invitation an acquisition channel and not
-merely an internal permission grant. A number that is already somebody's client
-can be invited too — trainer/client duality is allowed — and accepts the same
-way anyone without an account does: claim a trainer account
-(`POST /v1/auth/trainer`) first if they have not already, which coexists with
-their client memberships rather than replacing them.
-
-Refusals come from `team/TeamPhoneGuard.java`: `PHONE_ALREADY_IN_TEAM`,
-`PHONE_ALREADY_INVITED`, `PHONE_IS_SELF`. Like `ClientPhoneGuard`, **the message
-never names the other team** — "already coaching at Iron House" would hand any
-gym owner with a phone book a way to enumerate a competitor's staff one number
-at a time.
-
-A *declined* invite or an *ended* membership does not block a fresh invite. A
-rule that outlives the refusal it describes strands people forever.
-
-### `POST /v1/team/invites/phone-availability`
-**Purpose:** ask whether a number is invitable before anything is written.
-**Admin+.** Body `{ "phone": "…" }` → `{ available, code, message }`.
-
-Same shape and the same two design choices as
-[`/v1/clients/phone-availability`](#post-v1clientsphone-availability): a `200`
-because nothing failed, and a POST because a phone number does not belong in a
-URL that every proxy on the path will log.
-
-### `DELETE /v1/team/invites/{id}` → `204`
-**Purpose:** revoke a pending invite. **Admin+.** `404 MEMBER_NOT_IN_TEAM` if it
-is not this team's, or has already been answered.
-
-### `PATCH /v1/team/members/{id}/role`
-**Purpose:** promote or demote. Body `{ "role": "admin" | "coach" }`. **Admin+**,
-except that touching an `admin` is **owner only**.
-
-`owner` is not an assignable value (`422 TEAM_ROLE_INVALID`) — making somebody the
-owner also demotes the current one and rewrites `team.owner_trainer_id`, which is
-a transfer and not a role edit.
-
-### `DELETE /v1/team/members/{id}` → `204`
-**Purpose:** remove a coach. **Admin+**; removing an `admin` is owner only; the
-owner cannot be removed at all (`422 CANNOT_REMOVE_OWNER`).
-
-**Removal ends visibility, not ownership — their clients stay theirs.** If the
-gym wants the clients to stay with the gym, an admin reassigns them first,
-deliberately (Phase 2), which writes an audit row. Forty clients silently
-changing hands as a side effect of a removal nobody wrote down is the outcome
-this refuses to make possible.
-
-### `DELETE /v1/team/members/me` → `204`
-**Purpose:** leave. Any non-owner, any time. Their clients stay theirs.
-
-### `GET /v1/team/invitations`
-**Purpose:** invitations addressed to the caller — bound to their trainer id, or
-matched on their phone for an invite that predates the account.
-
-Returns `id`, `teamId`, `teamName`, `invitedByName`, `invitedAt`, `expiresAt`.
-Expired ones are omitted rather than shown greyed out: there is nothing the
-invitee can do with one.
-
-Read over REST rather than through sync, and that is the rule and not an
-omission — an invitation is a permission change, and a permission change that can
-be answered offline and replayed later can be replayed *after the grant was
-revoked*.
-
-### `POST /v1/team/invitations/{id}/accept`
-**Purpose:** join. Returns the team, as `GET /v1/team` would.
-
-Seats are checked **here rather than at invite time**, because seats are consumed
-by people and not by intentions: an owner may invite six for five seats and the
-first five in get them. `409 TEAM_SEAT_LIMIT` carries `seatLimit`.
-`410 TEAM_INVITE_EXPIRED` past `app.team.invite-expiry-days` (14).
-`409 ALREADY_IN_TEAM` if the caller joined somewhere else in the meantime — the
-unique index is the arbiter of two simultaneous accepts.
-
-Nothing about the caller's existing clients, programs or money changes. That is
-what makes it safe to say yes to.
-
-### `POST /v1/team/invitations/{id}/decline` → `204`
-**Purpose:** say no. The row is bound to the trainer id on the way out as well as
-in, so the history can say *who* declined and not just that a number did.
-
-### `GET /v1/team/clients`
-**Purpose:** the team's whole roster, grouped by the coach who owns each client.
-**Admin+.**
-
-Returns `[{ trainerId, coachName, role, clients[] }]`, the caller's own group
-first. Each client carries `lastSessionAt`, `upcomingSessions` and
-`hasActiveProgram` — the three facts an admin is actually reading the screen for,
-which is "is anybody being dropped".
-
-Grouped server-side because the grouping *is* the answer. **Online-only:** this is
-not in sync and must not be (see [Trainer sync](#trainer-sync)).
-
-### `GET /v1/team/clients/{id}`
-**Purpose:** one teammate's client — profile, programs, recent sessions,
-measurements. **Admin+.**
-
-**No money, at any role.** `package`, `payment` and `gym_settlement` are never
-referenced under this path; there is a test that asserts their absence from the
-response. The body carries `moneyHidden: true` so the app can *say* so — a coach
-who inherits a client and finds an empty money book will read it as data loss
-unless told the money stayed with the coach who collected it.
-
-`404 CLIENT_NOT_IN_TEAM` for a client whose coach is outside the caller's team,
-which is the standing cross-trainer 404 and not a new rule.
-
-### `POST /v1/team/clients/{id}/reassign`
-**Purpose:** move a client to another coach in the team. **Admin+.**
-
-Body: `{ "toTrainerId": "…", "programAction": "keep" | "clear", "note": "…" }`.
-Returns `{ programsMoved, sessionsMoved, noop, … }`.
-
-**The plan moves, the history stays.**
-
-| Moves | Stays |
-| --- | --- |
-| `client` — the assignment itself | `workout_session`, `workout_exercise`, `set_log` |
-| `program` (when `keep`; soft-deleted when `clear`) | `scheduled_session` — past, and any `done`/`cancelled` |
-| `scheduled_session` — **future `scheduled` rows only** | `package`, `payment`, `gym_settlement` |
-| | `weekly_report`, `nudge_log` |
-
-A logged session is a statement about who ran it, and the money went to a
-specific coach under a specific split; rewriting either makes two coaches' books
-wrong at once. Tomorrow's session, by contrast, is the new coach's job and has to
-appear in *their* diary.
-
-`nudge_rule` is deliberately **not** touched. There is no such thing as a
-client-scoped nudge rule — the table is one row per trainer per kind with a
-unique index on the pair — so "moving" them would take rules that were never
-about this client and collide with that index on arrival. **V32's
-`nudge_template` is the same shape and the same answer**: it is one row per
-trainer per template name, it is the trainer's wording rather than a fact about
-anybody, and a reassignment has nothing to move.
-
-`membership_status` is untouched too: a client who agreed to be coached by the gym
-does not get re-invited because the gym changed who delivers it. They get a push.
-
-Reassigning to the current coach answers `200` with `noop: true` and writes
-nothing, including no audit row.
-
-### `GET /v1/team/clients/{id}/assignments`
-**Purpose:** every move this client has been through, newest first, with who did
-it and what happened to the plan. **Admin+.** Append-only; there is no delete.
-
-### `GET /v1/team/templates`
-**Purpose:** every template belonging to an active member of the team, the
-caller's own included and flagged `mine`. **Any member.**
-
-Not admin-gated, deliberately: the library is the one team-wide read a plain
-coach gets, and it is most of what a coach joins a team for. Each row carries
-`days`, `exercises` and `clientsOnIt` so the shelf can show shape rather than
-just a name.
-
-### `GET /v1/team/programs/{id}`
-**Purpose:** a teammate's plan with its exercises. **Admin+.**
-
-Answers for the caller's own programs too, flagged `teammates: false`, so the
-roster can link to a plan without first working out whose it is.
-
-`404 PROGRAM_NOT_IN_TEAM` outside the caller's team.
-
-### `PATCH /v1/team/programs/{id}`
-**Purpose:** the plan's name, goal or status. **Admin+.**
-
-There is deliberately no create and no delete. Giving a teammate's client a whole
-new plan, or taking their plan away, are handover-shaped decisions — and the
-handover exists, and is audited.
-
-### `POST /v1/team/programs/{id}/exercises` → `201` · `PATCH …/{exId}` · `DELETE …/{exId}` → `204`
-**Purpose:** change what a teammate's client actually does. **Admin+.**
-
-The case this exists for: the coach is off sick, their client is on the floor, and
-the plan says 5×5 back squat for a shoulder that is not having it. Handing the
-client over permanently is the wrong answer to one swapped exercise.
-
-Body carries `sets`, `reps`, **`durationSeconds`** (V25 — a hold rather than a
-count; the older `/v1/programs/**` endpoints predate this field and drop it),
-`restSeconds`, `targetLoad`, `notes`, `dayOfWeek`, `week`, `orderIndex`. Absent
-fields are left as they were.
-
-**Every edit writes a `team_activity` row and pushes to the coach whose client it
-is.** That is what makes the capability acceptable; see
-[`GET /v1/team/activity`](#get-v1teamactivity). Editing your *own* client writes
-nothing — there is nobody to account to, and a `CHECK` constraint refuses such a
-row anyway.
-
-Removal is a soft delete, so the tombstone reaches the owning coach's phone.
-Nothing else is needed for an edit to sync: the program's `trainer_id` never
-moved, so the coach's own filter still matches and `updated_at` carries it.
-
-### `PATCH /v1/team/exercises/{id}` → `204`
-**Purpose:** fix a team custom exercise for everybody. **Admin+.**
-
-Custom exercises are the one thing shared *in place* rather than copied — they
-ride sync — which is what makes editing one the right shape: a typo in "Barbell
-Squt" is wrong in every program in the team that points at it, and a copy would
-fix none of them. `404 EXERCISE_NOT_IN_TEAM` for a seeded library row, which
-belongs to nobody and is the same for every trainer in the product.
-
-### `GET /v1/team/activity?clientId=…`
-**Purpose:** who changed what, on whose clients. **Any member.**
-
-Not admin-gated, and that is the point: the coach whose plan was edited is the
-reason this record exists, and a log only its authors could read would be an
-account of nothing. **The scope inverts by role, server-side** — a coach sees the
-crossings that happened to them, an admin sees the team's — so the app cannot get
-it wrong by omitting a parameter.
-
-`summary` is prose written at the moment of the edit and stored, not rebuilt on
-read: rebuilding it from current state would produce a different sentence every
-time the plan changed again. `team_activity` is append-only; there is no delete.
-
-### `GET /v1/team/revenue?from=YYYY-MM-DD&to=YYYY-MM-DD`
-**Purpose:** what the team took, per coach. **Owner only** — `403 NOT_TEAM_OWNER`
-for an admin.
-
-Returns `{ from, to, teamCollected, teamGymShare, coaches: [{ trainerId,
-coachName, role, collected, gymShare, payments, payingClients }] }`. Defaults to
-the current month.
-
-**The single carve-out in the rule that no role sees a teammate's money**, kept
-narrow by four limits, each closing a way this could have become a general
-money-reading power:
-
-- **owner only**, not admins — an admin runs the roster, the numbers belong to
-  whoever owns the business;
-- **totals only** — a sum, a count, and how many clients paid;
-- **no client is ever named**, so "who paid what" is not derivable;
-- **no `gym_settlement`** — a coach's arrangement with a gym stays theirs.
-  `payment.gym_share_amount` is included because it was recorded on the payment
-  at the time (V11) and is the owner's half of that same transaction.
-
-The range reads `paid_at`, not `created_at`: cash taken on Saturday and recorded
-on Monday belongs to Saturday, which is the whole reason that column exists.
-Pending money is not revenue. A coach who took nothing appears as a zero rather
-than vanishing — a missing row reads as "no data" and sends an owner hunting for
-a bug.
-
-**This endpoint narrowed a promise the app makes.** Phase 1's invitation screen
-said nobody in a team could see what another coach had collected; the app's copy
-changed in the same commit that shipped this, rather than after somebody noticed.
-
-### `POST /v1/team/templates/{id}/copy` → `201`
-**Purpose:** copy a teammate's template into the caller's own book. **Any member.**
-
-A copy, not a share. A template two coaches use and one coach edits is a template
-that changed under the other's clients without either of them touching it — the
-bug this product already refuses one level down, where assigning a template
-copies it onto the client. Ordinal day slots (V24) are what make a copy
-self-contained: the blueprint travels inside `structure`, so there are no
-children to clone and nothing can be half-copied.
-
-The new row reaches the caller's phone through the ordinary `templates` sync.
 
 ---
 
@@ -1574,263 +1044,6 @@ against an exercise stops making sense if it changes.
 
 ---
 
-## Templates
-
-`template/TemplateController.java` — reusable program blueprints, not tied to any
-client.
-
-### `GET /v1/templates`
-**Purpose:** the trainer's template shelf.
-
-A `TemplateResponse` carries `id`, `name`, `goal`, `description`, `exercises[]`,
-`dayLabels`, `createdAt`, `updatedAt`, and — appended in the V31 pass —
-`weeks`, `trainingDays[]`, `assignedCount` and `activeAssignedCount`, and —
-appended 23 Sep 2026 — **`assignedClients[]`**.
-
-**`source` and `copiedFrom` (V11), appended after it.** `source` is `own` on every
-row of this shelf — a copy of a certified program is the trainer's own the moment
-it exists — and the certified list answers `certified` in the same field.
-`copiedFrom` is `{id, name, updatedAt}` of the certified original, **frozen at
-copy time** (so it still names the original after it is retired), or null.
-`updatedAt` older than the original's current one is how the builder says *the
-original was revised since you copied it*; nothing is ever propagated.
-
-**`assignedClients` is `{id, name}[]`, the shelf's avatar cluster**: at most **6**
-of the clients on an **active** copy, one entry per client, ordered by name and
-then id so it is a total order and never reshuffles between loads. It is a
-**sample, never a count** — `activeAssignedCount` is the authority for "+N
-more", and nothing may derive a count from the array's length. It lists **only
-the caller's own clients**: a template's copies can sit with a teammate after a
-reassignment, and a coach must not read a teammate's client names off a shelf.
-Read in one query for the whole shelf, on the list and on `GET /{id}`.
-
-**`exercises[]` is camelCase, as documented here, and that is newer than this
-document.** Until 28 Aug 2026 the field was a raw `List<Map<String,Object>>`
-handed straight out of the `template.structure` jsonb, so it answered with the
-STORAGE spelling — `exercise_id`, `day_of_week`, `rest_seconds` — while this
-page had always said `exerciseId`. Its only REST consumer read every field as
-absent and drew every template as "0 days a week" with nothing in it. The
-storage format is unchanged and stays snake_case, because the phone's
-`parseBlueprint` keys on it; only the DTO was fixed.
-
-### `POST /v1/templates` → `201`
-**Purpose:** save a template.
-
-Body: `name` (required), `goal`, `description`, `exercises[]`, `dayLabels`,
-`weeks`, `trainingDays[]`.
-
-Each exercise entry carries `exerciseId`, `sets`, `reps`, `restSeconds`,
-`targetLoad`, `notes`, `dayOfWeek`, `orderIndex`, `week`, `durationSeconds`,
-V31's `tempo`, `altExerciseId`, `groupId` and `setDetail[]`, and V10's
-**`workoutId`** and **`workoutName`**.
-
-**A day holds named workouts (V10).** `workoutId` says which block on its day an
-entry belongs to — "Upper A", then "Conditioning" — and `workoutName` is what the
-block is called. The id is a **local handle the builder mints**, not a reference
-to a workout template (pouring a workout into a day re-mints ids on purpose), so
-the server stores it and never resolves it. Both are optional: an entry with
-neither is its day's single unnamed block, which is every entry written before
-V10. Trimmed, blank as null, and cut to 64 / 120 characters — the widths of the
-client copy's columns. They live in `template.structure`, so the blueprint needed
-no migration, and `duplicate` carries them because it copies the blob as stored.
-
-`week` and `durationSeconds` are **not new columns** — both have been in the
-blueprint JSON and copied by `apply` since V20 and V25 — but neither had a field
-on the request record, so Jackson dropped them on every write and a multi-week
-or timed template could not be authored over REST at all.
-
-`weeks` and `trainingDays` are the same story on the template row itself:
-`template.weeks` (V20) and `template.training_days` (V24) were readable through
-sync and unwritable over REST, so every web-authored template left both NULL and
-its day layout had to be inferred from wherever exercises had landed. `dayOfWeek`
-is an **ordinal slot** — Day 1, Day 2 — never a weekday.
-
-`setDetail[]` is one object per set, `{reps, durationSeconds, toFailure}`, and it
-is only sent when the sets differ from each other. While they agree, `sets` and
-`reps` say it and `setDetail` is absent, which is what a pre-V31 reader
-understands. When they diverge, `reps` is written null and `sets` keeps the
-count — incomplete but true, never a number that is wrong for half the sets.
-
-### `GET /v1/templates/{id}` · `PUT /v1/templates/{id}` · `DELETE /v1/templates/{id}` → `204`
-**Purpose:** read, edit and remove one template.
-
-`PUT` is a partial update per field, and `exercises` replaces the whole blueprint
-when present — `template.structure` is a single jsonb column, so there is no row
-to patch.
-
-A **certified program's id** sent to `PUT` or `DELETE` is `403
-CERTIFIED_READ_ONLY`, and to `POST /{id}/apply` is `409 CERTIFIED_COPY_FIRST` —
-named rather than answered with a bare 404, because the id is real and the
-trainer is one *Copy* away from what they meant.
-
-### `POST /v1/templates/{id}/duplicate` → `201`
-**Purpose:** copy a blueprint, so a trainer can tweak one for a client without
-touching the version other clients are already on.
-
-Body: optional `{ "name": "…" }`. Without one the copy is named
-`"<name> (copy)"`, then `"(copy 2)"` — numbered rather than allowed to collide,
-because a shelf is chosen from by name.
-
-The structure is copied **as stored**, not through the DTO, so a key this build
-has no field for survives the copy. The copy carries no assignments: it is a new
-blueprint with nobody on it, which is exactly what makes it safe to edit.
-
-### `GET /v1/templates/{id}/assignments`
-**Purpose:** who is on a copy of this template.
-
-Returns `programId`, `clientId`, `clientName`, `programName`, `startDate`,
-`endDate`, `status`, `createdAt`, `updatedAt`, `behindTemplate`, `divergence`.
-
-`behindTemplate` compares the program's **`synced_at`** against the template's
-`updated_at`. **It was `updated_at` before V2 and that read is now wrong**: a
-copy the trainer tuned this morning has the newer stamp and has taken nothing,
-so it reported itself up to date having never received the edit. A copy that
-differs from its blueprint is the NORMAL state — per-client adjustment is what
-the two tables are for — so this is a fact for the trainer to act on, never an
-error, and nothing repairs it automatically. `POST /v1/programs/{id}/resync` is
-the only thing that does, and only when asked.
-
-`divergence` (V2) is what the copy SAYS that the blueprint does not, which is a
-different question from the clock above and the one the trainer needs: a resync
-replaces the whole prescription, so pushing a tidied blueprint to thirteen
-clients deletes per-client work, and this is what lets the screen name it first.
-
-```
-{ "added": 0, "removed": 0, "swapped": 1, "changed": 0, "noted": 1,
-  "alts": 0, "shape": 1, "total": 3,
-  "lines": [ { "kind": "swapped", "week": 1, "day": 2,
-               "text": "Tuesday · Push · Bench Press → Dumbbell Press" } ] }
-```
-
-Four things about it are decisions rather than details:
-
-- **rows pair by movement within a lane, never by position.** A copy's row ids
-  were minted by `apply`, so an id-keyed diff reports every row as both added
-  and removed, and a positional one reports four changes for one inserted row.
-- **one out, one in, same lane is a SWAP** — the injury substitution, and as a
-  removal plus an addition it reads as two changes and loses the fact that one
-  replaced the other.
-- **a cue is its own kind** (`noted`), not a re-prescription. Folding
-  `program_exercise.notes` into the prescription reported every copy in the book
-  as re-prescribed against a blueprint it agreed with on every number.
-- **the blueprint is translated into the client's week first.** A template's day
-  is an ordinal slot and a copy's is a weekday; comparing them unmapped reports
-  every row on both sides. Where a program has **no** `schedule` to translate
-  through, the lines say `Day 1` rather than naming a weekday nothing can
-  derive.
-
-### `POST /v1/templates/{id}/apply` → `201`
-**Purpose:** the point of templates — instantiate one as a live program for a
-client, copying every exercise row across in one transaction.
-
-Body: `clientId` (required), `schedule[]` (optional since 23 Sep 2026), plus
-optional `name`, `goal`, `startDate`, `endDate` overrides. Returns a
-`ProgramSummary` for the program that was created.
-
-`schedule[]` is `{day, weekday, time}` per ordinal slot — the translation from
-"Day 2" to "Wednesday at 06:30", which is the client's choice and not the
-template's. It must cover **exactly** the template's day slots, one distinct
-weekday each, `time` as 24-hour `HH:mm`. A plan silently missing a day, or with a
-day nobody scheduled, is worse than an error, so anything else is refused:
-
-| Refusal | Answer |
-| --- | --- |
-| the wrong number of days, or a slot covered twice / not at all | `400 SCHEDULE_MISMATCH`, `detail` naming the numbers |
-| a slot on no weekday, two slots on one weekday, a time that is not `HH:mm` | `400 SCHEDULE_INVALID` |
-
-Both are typed now (`ProgramRuleException`); until 23 Sep 2026 they were bare
-`ResponseStatusException`s whose sentence never reached a screen.
-
-**No `schedule` sent: the client's standing week is the schedule.** The
-redesigned add-a-client flow agrees the days on step 3 and then applies the plan
-with `{clientId}` alone. The server pairs `client.weekly_schedule` with the
-template's days **by position** — the client's k-th slot (by weekday, then time)
-takes the template's k-th training day — and the rest of apply runs exactly as if
-that schedule had been sent, including storing it in `program.schedule`. A week
-with a different number of days, or no week at all, is `400 SCHEDULE_MISMATCH`
-with a sentence naming both numbers: the trainer has to choose which day goes.
-An explicit `schedule` always wins.
-
-**Apply ends the caller's previous plan for that client.** In the same
-transaction, every other `active` program **this trainer** has for the client
-becomes `completed`, with `endDate` set to today (IST) unless it had already
-ended earlier. Before this, re-planning a client left two plans `active` and
-every screen reading "the active program" drew whichever came back first. It is
-scoped by `trainer_id` — *a team widens reads; it never moves ownership*, so a
-teammate's plan on a reassigned client is never ended here. The diary's rhythm
-sessions are re-pointed at the new plan by the same reconcile as before.
-
-**The result is a snapshot.** Nothing reaches back through `program.template_id`
-to rewrite it, so editing the blueprint afterwards changes the blueprint and
-nothing else.
-
-### Certified programs · V11
-
-Programs **InclineYou authors**, which a trainer browses, previews and **copies**.
-Three decisions are fixed: they are authored in-house; using one copies it; and
-**nothing propagates** — a copy is the trainer's own template from the moment it
-exists, and revising the original changes only the original.
-
-They live in their own table, `certified_template`, not in `template`: a
-certified row stamped with any one workspace would be invisible to every other
-under tier-1 RLS. It is a catalogue — readable from every workspace, writable by
-no request — so rows arrive by migration. **The two rows today are samples**
-(`certified.sample: true`, `reviewedAt: null`), written 23 Sep 2026 so the shelf
-has something to render; see `SCHEMA.md`.
-
-The literal paths are declared before `/{id}` — before they existed,
-`GET /v1/templates/certified` bound `certified` to the UUID-typed `{id}` and
-answered **400**, not 404.
-
-#### `GET /v1/templates/certified`
-**Purpose:** the shelf, and the "start from" chooser.
-
-Each item is a **`TemplateWire`** — the same shape `GET /v1/templates` answers, so
-one renderer serves both — with:
-
-| Field | On a certified item |
-| --- | --- |
-| `exercises` | `[]` — never sent on the list |
-| `exerciseCount` | the blueprint's entry count |
-| `assignedCount`, `activeAssignedCount`, `assignedClients` | `0`, `0`, `[]` — nobody is ever on the original |
-| `source` / `copiedFrom` | `certified` / `null` |
-| `certified` | `{ summary, level, equipment, reviewedAt, usedCount, sample }` |
-| `mine` | `{ id, copiedAt, stale }` — the **caller's** newest copy, or `null` |
-
-`level` is `beginner` · `intermediate` · `advanced`; `equipment` is `full-gym` ·
-`dumbbells` · `bodyweight`. **`reviewedAt` is when a qualified human reviewed the
-program, not `updated_at`**, and is null until one has. `sample` (appended beyond
-the mock's shape) is true for a placeholder, and a screen should say so.
-`stale` means the original's `updated_at` is later than the copy's frozen
-`copiedFrom.updatedAt` (compared at millisecond precision). The list is never
-emptied for a new account and never filtered by what the caller has copied;
-it is ordered beginner → advanced, then by name.
-
-#### `GET /v1/templates/certified/{id}`
-**Purpose:** the preview. The same item **with** `exercises` — the full blueprint,
-V31 fields and V10's named workouts included. `404 CERTIFIED_NOT_FOUND` when the
-id is unknown or retired.
-
-**The blueprint is resolved on read.** A certified blueprint names each movement
-by the catalogue's stable `source_id` (`gymvisual-0025`), because catalogue UUIDs
-are minted per database by the seeder after migrations run; the server maps them
-to this database's `exercise.id` in one query, so `exerciseId` on the wire is an
-ordinary library id. An entry whose movement is not in the library is dropped
-rather than drawn blank.
-
-#### `POST /v1/templates/certified/{id}/copy` → `201`
-**Purpose:** use one. Body (optional): `{ "name"?: string }` — the original's name
-is kept by default, with no "(copy)" suffix. Returns the new **`TemplateResponse`**.
-
-One transaction: a trainer-owned template with the blueprint copied **verbatim**
-(`groupId`, `setDetail`, the named workouts, `dayLabels`, `trainingDays`,
-`weeks`), `source: own`, `copiedFrom` frozen as at this moment, and the original's
-`usedCount` incremented — which nothing else ever moves. Copying twice makes two
-copies; `mine` reports the newest. The copy is then an ordinary template:
-editable, deletable, assignable.
-
----
-
 ## Programs
 
 `program/ProgramController.java` — a client's live training plan.
@@ -2050,10 +1263,6 @@ Body (optional): `workoutNotes`, `sessionDate` (ISO `yyyy-MM-dd`; defaults to
 today).
 
 ---
-
-## Workout sessions & set logs
-
-**Removed.** `/v1/workouts` no longer exists. The eight writes went on 3 Oct 2026 and the five reads (`GET /v1/workouts`, `/sets`, `/{id}`, `/{id}/sets`, `/{id}/exercises`) went with the Progress pass the same day. The log is the session: read it through [Log session v1.1](#log-session-v11-3-oct-2026) (`GET /v1/sessions/{id}/log`), list sessions with `GET /v1/sessions` (each row carries `startedAt`, `endedAt` and `log` totals), and read a client's sets through `GET /v1/clients/{id}/set-history`.
 
 ## Packs (the price list)
 
@@ -2819,338 +2028,6 @@ Was `PUT`, and before that a push through the sync envelope. Body `{ "days": [{ 
 
 ### `errors[]` on every `VALIDATION`
 Additive: a `400 VALIDATION` body gains `"errors": [{ "field", "code", "message" }]` beside `detail` — one entry per bean-validation failure, per `"field: sentence"` service refusal, and per unreadable body (`code` is `unknown_field` or `invalid`). `detail` is unchanged, so nothing that reads it notices.
-
-## Reports
-
-`report/ReportController.java` — one read, `STANDARD` tier.
-
-### `GET /v1/clients/{clientId}/report`
-**Purpose:** an on-demand text report for one client, generated live from their
-sessions, sets and assessments. Returns `{ "report": "…" }` — plain text, ready to
-paste into WhatsApp. Nothing is stored and nothing is sent.
-
-What it says (all on the v1 schema, 3 Oct 2026): the client and the date; **sessions in the last four weeks**
-— `done` against everything not cancelled, with the adherence percentage; the **latest body weight** from the
-last assessment that took one; up to **five personal records**, one per exercise, the heaviest done
-`weight × reps` set the client has logged (a bodyweight or timed set has no kilogram figure and so no record;
-the history is the client's, not whoever ran the session), printed as `57.5 kg × 7 reps`; and the **next
-session** with its workout's name. A client that is not this trainer's, or is deleted, reads as the sentence
-`Report unavailable — client not found.` with a `200`, not a 404 — the text is the whole contract.
-
-**Removed 3 Oct 2026: `POST /v1/clients/{clientId}/report/weekly` and the Monday 08:00 job.** They wrote and
-read `weekly_report`, a table the v1 schema does not have, and queued a server-side WhatsApp nudge, which the
-product's *nothing sends* rule rules out. The stored weekly report belonged to the client portal, which is out
-of v1; both come back, with a migration, when it ships. The `MESSAGING`-tier rule for `…/report/weekly` went
-with them.
-
----
-
-## Push devices
-
-`push/DeviceController.java` — FCM token registration.
-
-### `POST /v1/devices/token` → `204`
-**Purpose:** register the device's native FCM token. The app posts here after
-every sign-in and on every token refresh.
-
-Body: `{ "token": "…", "platform": "android" | "ios" }`. Blank token → `400`;
-unknown trainer → `404`.
-
-### `DELETE /v1/devices/token` → `204`
-**Purpose:** deregister on sign-out, so a shared or handed-on phone stops
-receiving another trainer's notifications. Idempotent — a missing trainer is not
-an error.
-
----
-
-## Trainer sync
-
-`sync/SyncController.java` — the WatermelonDB sync protocol. This is how the
-offline-first app actually moves data; the REST endpoints above are the
-online-only path. **`SYNC` tier — 60/min.**
-
-### `GET /v1/sync/pull?lastPulledAt=…&libraryPulledAt=…`
-**Purpose:** everything that changed for this trainer since the cursor.
-
-`lastPulledAt` is epoch ms; omit or pass `0` for a full initial sync. Returns
-`{ timestamp, libraryTimestamp, changes: { <table>: { created[], updated[], deleted[] } } }`.
-
-**`libraryPulledAt` is a second, independent cursor, for the shared exercise
-library alone** — the `exercises` rows with `is_custom = false`. Optional; store
-`libraryTimestamp` from the response and send it back here. Omitting it is
-supported and is what older builds do.
-
-It exists because the library is the one collection in this pull that is not the
-caller's data. Every other table is scoped by `trainer_id`, so "what changed
-since your cursor" and "what of yours changed" are the same question. The library
-belongs to nobody: it changes only when `ExerciseSeeder` runs, so a single cursor
-over it answers *"has the library been re-imported since you last synced"* —
-almost always no — and never the question a device is actually asking, which is
-*"do I hold it at all"*. A phone whose cursor is newer than the last import can
-therefore be handed a complete workout log and **none of the exercises naming
-it**, and every row in the log renders the app's "An exercise not on this phone
-yet". Two cursors separate the two questions: send `libraryPulledAt=0` to mean
-"I have none of it", and advance it only when the library is applied.
-
-A caller that never sends it is still correct. `exercises` also carries the
-exercise behind any row **in this same pull** that names one — a
-`program_exercise`, a `workout_exercise` (both sides of a swap), a `set_log` or an
-`exercise_favourite`. That clause is bounded by what is already being sent, so a
-steady-state pull adds nothing, and it is what makes a log renderable on a device
-that never asked for a library cursor.
-
-`GET /v1/client/sync/pull` takes the same second cursor, and carries the same
-referential clause over the three tables a client can have — see its own entry
-below.
-
-Tables pulled: `clients`, `exercises`, `templates`, `programs`,
-`program_exercises`, `scheduled_sessions`, `workout_sessions`, `set_logs`,
-`workout_exercises`, `packages`, `payments`, `nudge_logs`, `working_hours`,
-`time_blocks`, `packs`, `gym_settlements`, `nudge_rules`, `exercise_favourites`,
-`batches`, `weekly_reports`, `teams`, `team_members`.
-
-`teams` and `team_members` are the **only** team data that goes offline, and they
-are here because they are the UI chrome: without them the app cannot draw "Iron
-House · you are an admin", and both are read on every drawer open. Teammates'
-clients, programs, sessions and money are deliberately **not** synced — see
-[Team coaching](#team-coaching).
-
-Both are **pull-only**, and a push carrying either is refused per record with
-`"code": "TEAM_READ_ONLY"` rather than dropped. Every write to them is a
-permission change, and a permission change authored offline is one that gets
-replayed at an unknown later time — potentially after the grant was revoked.
-
-`exercises` widened with V26: a custom exercise created by **any active member of
-the caller's team** now rides the caller's cursor. It has to — a program copied
-from a teammate points at their exercise rows, and a phone without them opens that
-program on the gym floor and draws blank lines. Custom exercises are a few
-hundred bytes each; teammates' clients are not, and that is the whole line being
-drawn. Writing is unchanged: a coach still only ever writes their own. Leaving a
-team emits deletions for the exercises that left scope, because those rows did not
-change — the caller's relationship to them did.
-
-**Reassignment changes what a device holds, and the pull carries both halves.**
-When a client moves between coaches (V26 Phase 2):
-
-- The **new** coach's pull picks up the client, their programs, those programs'
-  exercises and the future sessions. The child rows are `updated_at`-stamped by
-  the reassignment on purpose — nothing about a program exercise changed except
-  who may see it, and sync is a cursor over `updated_at`, so without the stamp
-  they would never arrive.
-- The **old** coach's pull names the moved `programs`, `program_exercises` and
-  `scheduled_sessions` in `deleted`. Those rows stop *matching* their filter
-  rather than becoming deleted, so without this they would sit on that phone
-  forever — live, editable, and invisible to the server. This fires on the first
-  reassignment any team performs.
-- The old coach **keeps the client row**, projected with `status: "archived"`.
-  Tombstoning it would be the obvious move and is wrong: that device still holds
-  their `payment`, `package` and `workout_session` rows for this person — history
-  that stays theirs by design — and every one resolves a name through
-  `client_id`. `archived` is exactly what this is from their side, so the roster,
-  the deck and the diary drop them with no screen having to learn a new concept,
-  while the money book keeps working. Safe because both write paths in
-  `pushClients` end in `WHERE client.trainer_id = :tid`, so a phone echoing the
-  projected row back is a no-op.
-
-`weekly_reports` is **pull-only and must stay that way** — the scheduled job
-writes them, and a phone that could rewrite a sent report would make every one of
-them arguable. The trainer reads the same rows the client does, so the two sides
-never drift.
-
-### `POST /v1/sync/push`
-**Purpose:** apply the phone's local changes. Body is the WatermelonDB
-`{ changes: { <table>: { created, updated, deleted } } }` envelope.
-
-Returns `200` with `{ "rejected": [ { table, id, field, code, message, kept } ] }` —
-empty on the overwhelming majority of pushes.
-
-This used to answer `204` ("everything you sent, we took"), which is no longer
-true: a roster row whose phone belongs to a trainer or to another trainer's
-client is refused while everything around it lands. A silent refusal is the worst
-option — the record sits on the phone looking synced and exists nowhere else — so
-the push names what it would not take, per record, in words the app can put on
-screen. `kept: true` means the rest of the record landed and only that field was
-left as it was.
-
-Tables accepted on push are the pull list **minus** `weekly_reports`, `teams` and
-`team_members`.
-
-**`attention_dismissal` (V28) is in neither list, deliberately.** It is
-online-only REST — see [Attention dismissals](#attention-dismissals) — for V26's
-reason about the team tables: a silence authored on a phone with no signal is one
-replayed at an unknown later time, against a queue whose whole value is that the
-trainer trusts what it is showing them right now.
-
----
-
-## Client sync
-
-`sync/ClientSyncController.java` — the client half of sync (FR-11).
-**`ROLE_CLIENT` · `SYNC` tier — 60/min.**
-
-These are separate routes rather than a flag on the trainer's, because the two
-differ in the only way that matters: who the caller is allowed to be.
-`/v1/sync/**` is gated to `ROLE_TRAINER` and reads the token subject as a trainer
-id; these are gated to `ROLE_CLIENT` and read it as a phone. A client token
-therefore cannot reach a roster even if a route were mistyped, and vice versa.
-
-`clientId` is a **request parameter rather than a token claim**, on purpose: the
-same person can be on two trainers' rosters, so one sign-in can legitimately hold
-two client records. It is untrusted input, re-checked against the token's phone on
-every single request.
-
-### `GET /v1/client/sync/pull?clientId=…&lastPulledAt=…&libraryPulledAt=…`
-**Purpose:** the client's own slice of the data — scoped by a SQL wall, not by
-trust in the parameter.
-
-Tables: `clients`, `coaches`, `exercises`, `templates`, `programs`,
-`program_exercises`, `scheduled_sessions`, `workout_sessions`,
-`workout_exercises`, `set_logs`, `packages`, `payments`,
-`weekly_reports`.
-
-`libraryPulledAt` is the shared exercise library's own cursor, exactly as on
-[`/v1/sync/pull`](#get-v1syncpulllastpulledatlibrarypulledat) and for the same
-reason. Optional; store `libraryTimestamp` from the response and send it back.
-A caller that omits it is still correct: `exercises` also carries the exercise
-behind any row **in this same pull** that names one — a `program_exercise`, a
-`workout_exercise` (both sides of a swap) or a `set_log`. Three sources, not the
-trainer pull's five: a client has no `exercise_favourite` rows, and no custom
-exercises of their own.
-
-### `POST /v1/client/sync/push?clientId=…` → `204`
-**Purpose:** apply what the client logged on their own phone.
-
-Only three tables are accepted — `workout_sessions`, `workout_exercises`,
-`set_logs` — plus session confirmations. (`body_metrics` left both sync
-directions with its table in V22; a push still carrying it is dropped and
-logged.) Anything else in the
-envelope is dropped and logged as "not a client's to write". A client can record
-what they did; they cannot edit the program, the roster, or the money.
-
----
-
-## Client portal — `/v1/me`
-
-`portal/PortalController.java` — module 11a, **reads**. The web's `/me/*` pages:
-the client's own view of their coaching. **`ROLE_CLIENT` only**; the token's
-subject is the phone. Until this, a client's whole API was `/v1/client/sync/*`,
-the offline phone's protocol. Timestamps are **epoch ms**, except the assessment
-routes, which are **ISO** like the trainer's side.
-
-**Which roster.** One phone can be a client of two trainers (two `client` rows,
-possibly in two workspaces). Every route takes an optional **`?clientId=`**, which
-the web appends from its roster cookie when there is more than one. Resolution
-(`PortalScope`): no live row for the phone → **`403 NOT_A_CLIENT`**; a `clientId`
-that is not one of the phone's rows → **`403 NOT_YOURS`**; no `clientId` → the
-single row, or else the most recently **accepted** (then newest, then id — a total
-order). A row is live when it and its trainer are not deleted and its membership
-is not `declined` — the same set the tier-4 policies admit. Not-yours on an `{id}`
-route is **`404 NOT_FOUND`**, so it cannot confirm somebody else's row exists.
-
-**Nothing of the trainer's side of the arrangement is on this wire.** Every read
-is projected field by field: no `collected_by`, gym share or UPI reference on a
-payment, no pack charge on a session, no split percentages on the client.
-
-| Route | Returns |
-| --- | --- |
-| `GET /v1/me` | `{ client: {id, name, phone, goal, membershipStatus, deliveryMode, sessionsPerWeek, sessionDurationMinutes, weeklySchedule, startedAt, health}, trainer: {id, name, phone, gymName, headline, mapLink}, rosters: [{clientId, clientName, trainerName}], prefs }`. `trainer` is **the resolved roster's**; `trainer.phone` is exposed on purpose (the portal's WhatsApp links). `startedAt` is `accepted_at`, else `created_at`. `health` is `client.metadata.health` or `""`; the client corrects it with `PATCH /v1/me` (11e). **`prefs`** is the stored `client_prefs` row (11d), or the defaults when there is none: `hideWeight: false`, every `notify` switch on, `nominee: null`. |
-| `GET /v1/me/sessions?from&to` | `[{ id, scheduledAt, durationMinutes, status, dayLabel, templateDay, deliveryMode, location, workoutId }]`, **half-open** `[from, to)` in epoch ms (a missing bound is unbounded), oldest first. `location` is `trainer.gym_name`, or null for a remote session; `workoutId` is the log started from it. |
-| `GET /v1/me/program` | The live plan — the newest `active` one — as `Program`, or a JSON **`null`** (200) when none. |
-| `GET /v1/me/programs` | Every **non-active** plan, newest first: `{ id, name, goal, startDate, endDate, weeks, status, trainingDays, dayCount, exerciseCount, workoutCount }`. `workoutCount` is the workouts logged on it, **or null when there is no record to count from** (no workouts at all, or the block ended before the oldest one) — never a guessed 0. No adherence figure, by rule. |
-| `GET /v1/me/programs/{id}` | One plan, live or finished; `404 "That plan is not here."` |
-| `GET /v1/me/workouts?limit` | Newest first: `{ id, sessionDate, startedAt, endedAt, setCount, volumeKg, exerciseCount, effort }`. `volumeKg` is Σ load × reps, rounded; `exerciseCount` counts movements with a set; `effort` is the client's feedback on it (11b), or null. |
-| `GET /v1/me/workouts/{id}` | `{ id, sessionDate, startedAt, endedAt, dayLabel, programName, deliveryMode, scheduledAt, notes, feedback: {effort, note, at} | null, exercises: [{ exercise, targetSets, targetReps, targetLoad, restSeconds, swappedFromExerciseId, alternative, sets: [{id, setNumber, loadKg, reps, rpe}], lastTime }] }`. Movements are the live `workout_exercise` cards in order, plus any movement with sets and no card (a log from before cards existed). `cue`, `targetLoad` and `alternative` come from the plan's row for that movement (on the session's day where known). `lastTime` is the previous workout's sets for it and the all-time best load and reps, or null. `404 "No such workout."` |
-| `GET /v1/me/sets` | Every set the client has logged, oldest first — **unwindowed**, because a personal best is a claim about all of it: `[{ exerciseId, setNumber, loadKg, reps, sessionDate, createdAt }]`. |
-| `GET /v1/me/exercises?ids=` | `Exercise[]` for the given ids, **narrowed to movements in this client's own set logs** so the route cannot be walked to list the library; unknown ids are dropped, no ids is `[]`. |
-| `GET /v1/me/metrics` | Every body reading, oldest first: `[{ id, metricType, value, unit, recordedAt }]` — **out of the client's returned assessments** since V22, the same six ids and the same shape rules as `GET /v1/clients/{id}/body-metrics` (`id` is the assessment's). |
-| `GET /v1/me/packages` | Newest first: `{ id, name, type, sessionsTotal, sessionsRemaining, amount, amountPaid, amountDue, status, startDate, endDate, pausedAt }`. `name` is the pack's, else *Session pack*; `amountDue = amount − collected − written off`, floored at 0. `pausedAt` is added beyond the mock — a paused pack reading as live is a small lie. |
-| `GET /v1/me/payments` | Newest first: `{ id, amount, method, status, paidAt, createdAt }` — nothing else. |
-| `GET /v1/me/messages` | Newest first, two sources: `client_message` rows (`{id, body, kind, at, readAt, trainerName}`) and the trainer's notes about this client marked **`sharedWithClient`** (`kind: note`, `at` = last edit, `readAt` always null). A private note never appears. |
-| `GET /v1/me/milestones` | Newest first: `{ id, kind, label, value, at }`. Never windowed. |
-| `GET /v1/me/assessments` | **Sent** ones only, newest due first: `{ id, name, dueAt, sentAt, completedAt, status, measurements: {got, asked}, questions: {got, asked} }` (ISO). `status` is the client's three — `done`, else `late` once due (still answerable), else `open`. An open one whose template is gone is dropped. |
-| `GET /v1/me/assessments/{id}` | The row plus `{ description, asked: {measurements, questions}, readings, answers }`. **What is asked comes from the live template**, with no bank fallback. Unsent or not theirs → `404 "No such assessment."` |
-
-### Logging a workout — module 11b
-
-The log is the **same** `workout_session` / `workout_exercise` / `set_log` rows the
-trainer's console and the phone write, so a session the trainer opened and one the
-client opened are one log. Every insert carries the resolved client row's
-`tenant_id` (a client on two rosters writes into the right book). Each returns the
-`Workout` read above unless stated.
-
-| Route | Behaviour |
-| --- | --- |
-| `POST /v1/me/workouts` `{ sessionId? }` | **Resume before create**: an open log for this session — or, with none, an open no-session log dated today — answers **200** as it stands, whoever opened it. Otherwise **201** with a new log (`logged_by: client`) against the live plan, seeded with the plan's rows for **the session's slot** (mapped to the copy's weekday through `program.schedule`), or for today's weekday with no session. Not the client's session → `404`; a cancelled one → `409 SESSION_CANCELLED`. |
-| `POST /v1/me/workouts/{id}/sets` `{ exerciseId, setNumber, loadKg, reps }` | **Upsert on (workout, movement, set number)** — 201 when new, 200 when the same set number is saved again, so a double tap cannot make two sets. Returns `{ id, setNumber, loadKg, reps, rpe }`. The movement must be a **live card in this log** (`400 VALIDATION exerciseId: not in this workout` — the mock accepted any library movement); `setNumber` 1–50, `loadKg` 0–1000, `reps` 0–1000; a finished log → `409 WORKOUT_CLOSED`. |
-| `POST /v1/me/workouts/{id}/swap` `{ exerciseId, toExerciseId }` | Only to the plan row's **approved alternative** (`422 NOT_APPROVED` otherwise) and only **before any set** of it is logged (`409 ALREADY_STARTED`). The card keeps its target sets, takes the plan's reps and records `swappedFromExerciseId`. A movement not in the log → `404`; one already in it → `409 ALREADY_IN_WORKOUT`. |
-| `POST /v1/me/workouts/{id}/finish` `{ effort?, note? }` | **Idempotent** — only the first call closes the log (`endedAt`); every call upserts the feedback it carries into `workout_feedback` (`effort` `easy` · `right` · `hard`, else `400`). **It marks no session and charges no pack** (product decision, 23 Sep 2026): the booked session stays `scheduled` for the trainer, and shows as unmarked on Today. On the call that closes it, **every 25th finished workout mints a milestone** — "25th session with {trainer's first name}" — and a retry cannot mint it twice. |
-
-### What the client writes about themselves — module 11c
-
-| Route | Behaviour |
-| --- | --- |
-| `POST /v1/me/assessments/{id}/answers` | One answer per call: `{ kind: 'measurement', key, value?, clear? }` or `{ kind: 'question', questionId, yes? \| rating? \| text? \| optionIds?, clear? }`. Returns the assessment (as `GET …/{id}`). **The replacement is validated in full before the old answer is removed**, so a refused save leaves what the client already gave. The key or question must be one the **live template** asks (`400 VALIDATION`); a measurement is a finite number > 0; a question is checked by kind — `yesno` a boolean, `rating` a whole number 1–scale (default 10), `text` non-empty, `choice` at least one known option id, or its own text **only when `allowCustom`**, and a single-answer choice keeps the first id. Fields that do not belong to the kind are stored null. `clear: true` withdraws the answer. Readings and answers are kept in the template's order. Unsent or not theirs → `404`; already sent back → `409 CLOSED`; an unknown `kind` → `400`. |
-| `POST /v1/me/assessments/{id}/submit` | Send it back: `completedAt` now, `readAt` cleared so the trainer sees it **unread**. **A partial submission is allowed**; nothing answered at all → `400 EMPTY`; already sent → `409 CLOSED`. It does **not** ring the trainer's bell — returned assessments are read on the assessments list. |
-| ~~`POST /v1/me/metrics`~~ | **Removed in V22** (`405`). The weigh-in was a loose reading, and a body is now measured in an assessment and nowhere else. |
-
-### The client's settings and bell — module 11d
-
-`client_prefs` is **the one table the trainer's half never reads** (no staff
-policy at all). The client's bell holds facts the trainer's actions produced.
-
-| Route | Behaviour |
-| --- | --- |
-| `PATCH /v1/me/prefs` | `{ hideWeight?, notify?: Partial<{programUpdated, sessionReminder, trainerNote, personalBest, packChanged}>, nominee?: {name, phone} \| null }` → the full `prefs`. The row is **created on the first write** with the all-on defaults; `notify` is **merged**, not replaced; `nominee: null` clears it, an absent key leaves it. A nominee needs a trimmed `name` (`400 VALIDATION nominee.name: required`, clipped to 80) and a **10-digit** number (formatting and a `+91` prefix are stripped; else `400`). `hideWeight` is a display switch — nothing refuses a write because of it. The nominee is a third person's data (DPDP §14): stored as specified, dropped with the prefs when the client leaves, and never contacted by the product. |
-| `GET /v1/me/notifications` | The last **21 days**, newest first: `[{ id, kind, amount, subjectAt, text, at, readAt }]` — `kind` `note` · `plan` · `session` · `pack` · `best`; no `clientId`; no `?unread` filter. Rows are facts; the portal writes the sentence and drops a kind it does not know. |
-| `POST /v1/me/notifications/{id}/read` | `{ id, readAt }` — idempotent, never un-reads; not theirs → `404`. |
-| `POST /v1/me/notifications/read` | Marks every unread row in one request → `{ readAt }`. |
-
-**What rings the client's bell** — trainer writes, each gated **at the moment of
-sending** by the matching switch (a switched-off kind writes no row, so switching
-it back on refills nothing), through `mint_client_notification()`:
-
-| Trainer write | `kind` · `text` · other fields | Switch |
-| --- | --- | --- |
-| `POST /v1/sessions` (a future session) | `session` · `booked` · `subjectAt` = the slot | `sessionReminder` |
-| a booking run by the diary (a sale, a renewal, `apply`, a new standing week) | `session` · `booked` — **one** row naming the **first** session booked | `sessionReminder` |
-| `PUT /v1/sessions/{id}` moving it / cancelling it | `session` · `moved` (new slot) / `cancelled` | `sessionReminder` |
-| `DELETE /v1/sessions/{id}` (a future, scheduled one) | `session` · `cancelled` | `sessionReminder` |
-| `POST /v1/clients/{id}/packages` / `POST /v1/packages/{id}/renew` | `pack` · `sold` / `renewed` · `amount` | `packChanged` |
-| a payment recorded as collected, or confirmed | `pack` · the method · `amount` | `packChanged` |
-| `POST /v1/templates/{id}/apply` | `plan` · the plan's name · `subjectAt == at` (a **new** plan) | `programUpdated` |
-| `PUT /v1/programs/{id}` changing name, goal or dates; `POST /v1/programs/{id}/notify` | `plan` · the name · `subjectAt` = the plan's creation (**changed**) | `programUpdated` |
-| the portal's `/finish` minting a milestone | `best` · the milestone's label | `personalBest` |
-
-Notes, a pending payment, a status marked after the fact and a row edit on
-`PUT …/exercises` ring nothing. The phone's sync push rings nothing either — only
-these REST writes do.
-
-### The client's account — module 11e
-
-| Route | Behaviour |
-| --- | --- |
-| `POST /v1/me/phone/challenge` → `204` | A code to the **current** number (the OTP service's waits, ceiling and lock apply unchanged). |
-| `POST /v1/me/phone/verify` `{ otp }` | That code back → `{ ticket }`, a ten-minute signed proof bound to this roster row and this number. A wrong code is the OTP service's own `422 OTP_WRONG` / `OTP_EXPIRED` / `OTP_LOCKED`. |
-| `POST /v1/me/phone/request` `{ ticket, phone }` → `204` | Checked **before** an SMS is spent: a 10-digit mobile (`400 VALIDATION`), a real move (`400 PHONE_UNCHANGED`), and nobody on InclineYou holding it — a trainer, an identity row, or any live roster in any workspace (`409 PHONE_TAKEN`, never saying whose). Then a code to the new number. A missing, forged or stale ticket → `401 PHONE_CHANGE_UNPROVEN`. |
-| `POST /v1/me/phone/confirm` `{ ticket, phone, otp }` | The new number's code; the number moves on **every client row that carries it** (every roster, every workspace, a declined one included) and on the identity row, in one transaction → `{ phone, token }`. **Store the token**: the old credential's phone no longer resolves (`NOT_A_CLIENT`). |
-| `PATCH /v1/me` `{ health }` | Corrects `health` (`client.metadata.health`, ≤ 2,000) → `{ id, phone, health }`. **A `phone` is refused** (`400`) — a number moves only through the two-code ladder above. `health` is health data under the product's standing rule, accepted by the product owner's recorded decision (23 Sep 2026: include it now, strip health collection later if required). |
-| `GET /v1/me/export` | One JSON document: `{ exportedAt, client, trainer, sessions, workouts, sets, measurements, packages, payments, messagesFromTrainer, feedback, milestones, assessments, settings }`. **Field-listed throughout** — the client row without the trainer's or team's arrangement (split and margin percentages, assignment, staleness), payments as `{id, packageId, amount, method, status, upiReference, paidAt, note, createdAt}` without the gym's side. The trainer's **private** notes are not in it; shared notes are, as messages. `settings` is the prefs row, or null. |
-| `DELETE /v1/me` `{ confirmation }` → `204` | **Leaving this trainer — a membership exit, not an erasure** (product decision, 23 Sep 2026). The typed number is re-checked on its last ten digits (`400 DELETE_NOT_CONFIRMED`). Soft-deleted: this roster's `client` row, its prefs (the **nominee erased**), its bell, its assessments, its workout feedback, and its **future** bookings. **Kept as the trainer's records:** payments, packages, logged workouts, past sessions and the trainer's notes. Other rosters on the same number are untouched. A DPDP erasure is separate, policy-first work. |
-
-`Program` is `{ id, name, goal, startDate, endDate, weeks, status, week, dayLabels,
-trainingDays, days: [{ templateDay, label, exercises: [{ exercise, sets, reps,
-targetLoad, restSeconds }] }] }`. **Its days are keyed by the client's day SLOTS**,
-not by weekday: a client's copy stores weekdays (V2's translation at apply) while
-sessions carry the template's ordinal `templateDay`, so each weekday is mapped
-back through `program.schedule` — and `days[].templateDay`, `trainingDays` and the
-keys of `dayLabels` agree with the sessions. A plan written from scratch has no
-schedule and keeps weekdays. A multi-week plan shows one week: `week` (weeks since
-start, clamped) on a live plan, week 1 on a finished one. `Exercise` is `{ id,
-name, muscleGroup, equipment, logType, cue, formCues, steps }` — `cue` is the
-plan's note, `steps` the library description, `formCues` `[]` until authored; no
-clip, by product decision.
-
----
 
 ## Notes for callers
 

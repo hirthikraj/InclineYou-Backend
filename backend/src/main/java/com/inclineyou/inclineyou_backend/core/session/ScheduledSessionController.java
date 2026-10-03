@@ -81,13 +81,6 @@ public class ScheduledSessionController {
         return ResponseEntity.status(booked.created() ? HttpStatus.CREATED : HttpStatus.OK).body(booked.session());
     }
 
-    /** One session in the L4 shape — the row the list draws — with its version as the ETag {@code PATCH} takes. */
-    @GetMapping("/{id}")
-    public ResponseEntity<SessionRow> get(Authentication auth, @PathVariable UUID id) {
-        SessionRow row = reads.get(trainerId(auth), id);
-        return ResponseEntity.ok().eTag(row.version()).body(row);
-    }
-
     /** api-contract Schedule — move a session, or change its length, mode or note. */
     @PatchMapping("/{id}")
     public ResponseEntity<SessionRow> patch(

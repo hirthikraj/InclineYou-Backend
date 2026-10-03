@@ -12,5 +12,7 @@ import java.time.Instant;
  *                  knows it holds something that works offline. Nothing branches
  *                  on it server-side.
  * @param expiresAt when it stops working
+ * @param sessionId {@code web_session.id} — "this device" in Settings. Null for a
+ *                  JWT, which has no row.
  */
-public record IssuedToken(String value, String kind, Instant expiresAt) {}
+public record IssuedToken(String value, String kind, Instant expiresAt, String sessionId) {}

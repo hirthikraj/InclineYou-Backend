@@ -16,11 +16,9 @@ import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -47,10 +45,6 @@ public class ClientJdbcRepository {
 
     /** The client's own fields the file header draws beside the summary. */
     public record OwnFields(String dateOfBirth, BigDecimal heightCm, String activityLevel, String goal) {}
-
-    /** A client's rhythm for the legacy row: the {@code client_schedule} row and its live slots. */
-    public record Rhythm(Integer sessionsPerWeek, Integer sessionDurationMinutes, String deliveryMode,
-                         List<Map<String, Object>> weeklySchedule) {}
 
     // ── ownership ──────────────────────────────────────────────────────────────
 
@@ -374,75 +368,6 @@ public class ClientJdbcRepository {
         return out;
     }
 
-    // ── the legacy row ─────────────────────────────────────────────────────────
-
-    /** Schedule rows and live slots for a batch of clients, in two queries. */
-    public Map<UUID, Rhythm> rhythms(List<String> clientIds) {
-        var p = Map.of("ids", clientIds);
-        var slots = new HashMap<UUID, List<Map<String, Object>>>();
-        jdbc.query("""
-                SELECT client_id::text AS client_id, weekday, to_char(start_time, 'HH24:MI') AS start_hm
-                FROM client_schedule_slot
-                WHERE client_id::text IN (:ids) AND deleted_at IS NULL
-                ORDER BY client_id, weekday, start_time
-                """, p, rs -> {
-            var list = slots.computeIfAbsent(UUID.fromString(rs.getString("client_id")), k -> new ArrayList<>());
-            list.add(Map.of("templateDay", list.size() + 1,
-                            "weekday", rs.getInt("weekday"),
-                            "time", rs.getString("start_hm")));
-        });
-        var out = new HashMap<UUID, Rhythm>();
-        jdbc.query("""
-                SELECT client_id::text AS client_id, sessions_per_week, session_duration_minutes, delivery_mode
-                FROM client_schedule WHERE client_id::text IN (:ids)
-                """, p, rs -> {
-            UUID id = UUID.fromString(rs.getString("client_id"));
-            out.put(id, new Rhythm(intOrNull(rs, "sessions_per_week"), intOrNull(rs, "session_duration_minutes"),
-                    rs.getString("delivery_mode"), slots.getOrDefault(id, List.of())));
-        });
-        return out;
-    }
-
-    public Set<UUID> withPaymentDue(UUID trainerId, List<String> clientIds) {
-        return clientIdSet("""
-                SELECT DISTINCT client_id::text AS client_id FROM payment
-                WHERE trainer_id = :tid::uuid
-                  AND client_id::text IN (:ids)
-                  AND status = 'pending'
-                  AND deleted_at IS NULL
-                """, trainerId, clientIds);
-    }
-
-    public Set<UUID> withPackLow(UUID trainerId, List<String> clientIds) {
-        return clientIdSet("""
-                SELECT DISTINCT client_id::text AS client_id FROM package
-                WHERE trainer_id = :tid::uuid
-                  AND client_id::text IN (:ids)
-                  AND status = 'active'
-                  AND sessions_remaining IS NOT NULL
-                  AND sessions_remaining <= 2
-                  AND deleted_at IS NULL
-                """, trainerId, clientIds);
-    }
-
-    public Set<UUID> withPlanExpiring(UUID trainerId, List<String> clientIds) {
-        return clientIdSet("""
-                SELECT DISTINCT client_id::text AS client_id FROM program
-                WHERE trainer_id = :tid::uuid
-                  AND client_id::text IN (:ids)
-                  AND status = 'active'
-                  AND end_date IS NOT NULL
-                  AND end_date BETWEEN CURRENT_DATE AND CURRENT_DATE + INTERVAL '7 days'
-                  AND deleted_at IS NULL
-                """, trainerId, clientIds);
-    }
-
-    private Set<UUID> clientIdSet(String sql, UUID trainerId, List<String> clientIds) {
-        var out = new HashSet<UUID>();
-        jdbc.query(sql, Map.of("tid", trainerId.toString(), "ids", clientIds),
-                rs -> { out.add(UUID.fromString(rs.getString("client_id"))); });
-        return out;
-    }
 
     // ── helpers ────────────────────────────────────────────────────────────────
 

@@ -25,21 +25,8 @@ public class JwtService {
 
     /** The role a token was minted for. Absent on tokens issued before V14. */
     public static final String ROLE_TRAINER = "trainer";
-    public static final String ROLE_CLIENT = "client";
     /** Verified the number, and it is on nobody's roster yet — screen 7a. */
     public static final String ROLE_PENDING = "pending";
-    /**
-     * Proved the number, and has a membership question outstanding — an invite
-     * to answer, or a removal to acknowledge.
-     *
-     * Good for exactly those three calls and nothing else. It is minted for
-     * somebody who has been named by a trainer but has not agreed to anything,
-     * so it must not open a sync scope: until they accept, there is a person in
-     * this database who has never heard of us, and handing their training
-     * history to an unanswered invite would be the disclosure the invite exists
-     * to ask permission for.
-     */
-    public static final String ROLE_INVITED = "invited";
 
     /**
      * Proof that the person at this keyboard just received a code on the number
@@ -89,10 +76,6 @@ public class JwtService {
     public static final String PURPOSE_CLAIM = "purpose";
     public static final String SESSION_CLAIM = "sess";
 
-    public String generate(UUID trainerId, String phone) {
-        return build(trainerId.toString(), phone, ROLE_TRAINER);
-    }
-
     /**
      * A ticket saying {@code trainerId} proved {@code currentPhone} just now.
      *
@@ -117,41 +100,12 @@ public class JwtService {
     }
 
     /**
-     * A client token's subject is the PHONE, not a client id — and deliberately.
-     *
-     * The same person can be on two trainers' rosters, which is two client rows
-     * and one human being. Binding the token to the phone lets one sign-in cover
-     * both memberships, and makes the authorisation check on every client
-     * request the same single question: is this client row's phone the phone
-     * that proved it owns this number. A client id in the subject would have to
-     * be re-minted to switch trainers, and a token per membership is a token to
-     * get wrong.
-     */
-    public String generateClient(String phone) {
-        return build(phone, phone, ROLE_CLIENT);
-    }
-
-    /**
      * How long a {@code pending} token lives: long enough to read the notice and
      * press "I'm a trainer", not the seven days a working credential gets. It
      * is also what the web holds before it claims — see
      * {@code AuthTokenService.issue} — so its lifetime is its exposure.
      */
     public static final int PENDING_MINUTES = 15;
-
-    /** For 7a — enough to claim a trainer account with, and nothing else. */
-    public String generatePending(String phone) {
-        return build(phone, phone, ROLE_PENDING);
-    }
-
-    /**
-     * For the invite and removal screens — enough to answer a membership
-     * question with, and nothing else. Subject is the phone, like the client
-     * token, because the membership being answered is identified by it.
-     */
-    public String generateInvited(String phone) {
-        return build(phone, phone, ROLE_INVITED);
-    }
 
     private String build(String subject, String phone, String role) {
         return build(subject, phone, role, null, expiryMs(role));
@@ -237,7 +191,4 @@ public class JwtService {
                 .getPayload();
     }
 
-    public UUID extractTrainerId(String token) {
-        return UUID.fromString(parse(token).getSubject());
-    }
 }

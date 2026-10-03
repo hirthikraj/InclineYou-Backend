@@ -17,7 +17,7 @@ import java.util.UUID;
 @Repository
 public interface OtpRequestRepository extends JpaRepository<OtpRequest, UUID> {
 
-    @Query("SELECT o FROM OtpRequest o WHERE o.phone = :phone AND o.verified = false ORDER BY o.createdAt DESC LIMIT 1")
+    @Query("SELECT o FROM OtpRequest o WHERE o.phone = :phone AND o.consumedAt IS NULL ORDER BY o.createdAt DESC LIMIT 1")
     Optional<OtpRequest> findLatestUnverified(@Param("phone") String phone);
 
     /**
@@ -31,7 +31,7 @@ public interface OtpRequestRepository extends JpaRepository<OtpRequest, UUID> {
      * window that matters most in this file.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("SELECT o FROM OtpRequest o WHERE o.phone = :phone AND o.verified = false ORDER BY o.createdAt DESC LIMIT 1")
+    @Query("SELECT o FROM OtpRequest o WHERE o.phone = :phone AND o.consumedAt IS NULL ORDER BY o.createdAt DESC LIMIT 1")
     Optional<OtpRequest> findLatestUnverifiedForUpdate(@Param("phone") String phone);
 
     /**
@@ -67,6 +67,31 @@ public interface OtpRequestRepository extends JpaRepository<OtpRequest, UUID> {
      */
     @Query("SELECT MIN(o.createdAt) FROM OtpRequest o WHERE o.phone = :phone AND o.createdAt > :since")
     Instant oldestSentSince(@Param("phone") String phone, @Param("since") Instant since);
+
+    /**
+     * A new request for a number retires every code still open on it, so only the
+     * latest {@code requestId} can ever be verified (api-contract, otp/request).
+     * Retired is {@code consumed_at}: the schema has one column for "this code can
+     * no longer be used", and why it cannot is not a question anything asks.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE OtpRequest o SET o.consumedAt = :now WHERE o.phone = :phone AND o.consumedAt IS NULL")
+    int supersede(@Param("phone") String phone, @Param("now") Instant now);
+
+    /** queued → sent, once the sender has taken the code. Any other state is left alone. */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE OtpRequest o SET o.deliveryStatus = 'sent' WHERE o.id = :id AND o.deliveryStatus = 'queued'")
+    int markSent(@Param("id") UUID id);
+
+    /** The sender refused the code. The schema ties {@code delivery_error} to {@code failed}. */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE OtpRequest o SET o.deliveryStatus = 'failed', o.deliveryError = :error WHERE o.id = :id")
+    int markFailed(@Param("id") UUID id, @Param("error") String error);
+
+    /** The right code was given — it must not work twice (AUTH-29). */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE OtpRequest o SET o.consumedAt = :now WHERE o.id = :id AND o.consumedAt IS NULL")
+    int consume(@Param("id") UUID id, @Param("now") Instant now);
 
     /** {@link OtpRequestSweeper}'s purge: old rows, never one whose lock is still running. */
     @Modifying

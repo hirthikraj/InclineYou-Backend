@@ -185,10 +185,6 @@ public final class NudgeTemplateCatalog {
         return name == null ? null : BY_NAME.get(name);
     }
 
-    public static boolean isKnown(String name) {
-        return find(name) != null;
-    }
-
     /**
      * The fallback for an unknown template name.
      *

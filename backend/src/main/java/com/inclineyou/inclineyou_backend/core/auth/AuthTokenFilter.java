@@ -66,6 +66,8 @@ public class AuthTokenFilter extends OncePerRequestFilter {
     public static final String VIEW_HEADER = "X-InclineYou-View";
     public static final String SESSION_COOKIE = "inclineyou_session";
     public static final String TOKEN_ATTRIBUTE = "inclineyou.rawToken";
+    /** Why a presented credential did not work — {@code SESSION_EXPIRED} or {@code SESSION_REVOKED} — for the 401 that follows. */
+    public static final String AUTH_FAILURE_ATTRIBUTE = "inclineyou.authFailure";
 
     private final SecurityContextRepository securityContextRepository =
             new RequestAttributeSecurityContextRepository();
@@ -77,7 +79,12 @@ public class AuthTokenFilter extends OncePerRequestFilter {
         String raw = extractToken(request);
         try {
             if (raw != null) {
-                tokens.resolve(raw).ifPresent(principal -> authenticate(request, response, raw, principal));
+                tokens.resolve(raw).ifPresentOrElse(
+                        principal -> authenticate(request, response, raw, principal),
+                        () -> {
+                            String why = tokens.failureCode(raw);
+                            if (why != null) request.setAttribute(AUTH_FAILURE_ATTRIBUTE, why);
+                        });
             }
             chain.doFilter(request, response);
         } finally {
@@ -108,21 +115,10 @@ public class AuthTokenFilter extends OncePerRequestFilter {
     }
 
     private TenantContext tenantContextFor(AuthPrincipal p, boolean combined) {
-        if (JwtService.ROLE_CLIENT.equals(p.role())) {
-            // A client is not staff of anything. They get their own rows through
-            // tier 4 and the catalogue of the workspaces they train in — never
-            // tier 1, which would be the whole roster.
-            var clientIds = tenantScope.clientIdsFor(p.phone());
-            var tenantIds = tenantScope.clientTenantIdsFor(p.phone());
-            return TenantContext.client(p.phone(),
-                    tenantIds.isEmpty() ? null : tenantIds.getFirst(), tenantIds, clientIds);
-        }
-
         if (!JwtService.ROLE_TRAINER.equals(p.role())) {
-            // `pending`, `invited` and `phone_change` have proved a number and
-            // belong to no workspace. The bootstrap context lets them look up
-            // their own memberships — which is exactly what the invite screen
-            // asks — and nothing else.
+            // `pending` and the step-up ticket have proved a number and belong
+            // to no workspace. The bootstrap context lets them look up their
+            // own memberships and nothing else.
             return TenantContext.bootstrap(p.phone());
         }
 

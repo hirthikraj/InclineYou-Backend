@@ -2,7 +2,6 @@ package com.inclineyou.inclineyou_backend.core.client;
 
 import com.inclineyou.inclineyou_backend.core.client.dto.ArchiveRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.ClientDetail;
-import com.inclineyou.inclineyou_backend.core.client.dto.ClientResponse;
 import com.inclineyou.inclineyou_backend.core.client.dto.ClientSummary;
 import com.inclineyou.inclineyou_backend.core.client.dto.CreateClientRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.CreateNoteRequest;
@@ -28,7 +27,6 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.context.request.WebRequest;
 
-import java.util.List;
 import java.util.UUID;
 
 /**
@@ -41,7 +39,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ClientController {
 
-    private final ClientService clientService;
     private final ClientSummaryService summaryService;
     private final ClientWriteService writes;
     private final ClientStateService states;
@@ -59,18 +56,9 @@ public class ClientController {
             @RequestParam(required = false) String view,
             @RequestParam(required = false) String status) {
         if (view != null && !"summary".equals(view)) {
-            throw ApiException.validation("view: summary or legacy");
+            throw ApiException.validation("view: summary");
         }
         return Items.of(summaryService.list(trainerId(), status));
-    }
-
-    /**
-     * The pre-v1 row, kept only for the screens not yet on the summary. A bare
-     * array, as it always was: it is deleted, not evolved, once they move.
-     */
-    @GetMapping(params = "view=legacy")
-    public List<ClientResponse> legacy() {
-        return clientService.list(trainerId());
     }
 
     /* ── api-contract 1.1 Clients ─────────────────────────────────────────── */

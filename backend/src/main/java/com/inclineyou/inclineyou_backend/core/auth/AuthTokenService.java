@@ -59,7 +59,7 @@ public class AuthTokenService {
          * needs an `app_user` row (the number has none until it claims) and its
          * role check admits trainer, client and gym_admin only. The JWT is
          * short-lived (JwtService.PENDING_MINUTES) and opens exactly one route,
-         * POST /v1/auth/trainer, which reads no data — so being unrevocable for
+         * POST /v1/trainers, which reads no data — so being unrevocable for
          * a quarter of an hour costs nothing. Claiming creates the app_user and
          * mints the ordinary revocable session.
          */
@@ -89,6 +89,24 @@ public class AuthTokenService {
             if (issuer.handles(rawToken)) return issuer.resolve(rawToken);
         }
         return Optional.empty();
+    }
+
+    /** {@link AuthTokenIssuer#describe}, for whichever issuer owns the token. */
+    public Optional<IssuedToken> describe(String rawToken) {
+        if (rawToken == null || rawToken.isBlank()) return Optional.empty();
+        for (AuthTokenIssuer issuer : issuers) {
+            if (issuer.handles(rawToken)) return issuer.describe(rawToken);
+        }
+        return Optional.empty();
+    }
+
+    /** {@code SESSION_EXPIRED}, {@code SESSION_REVOKED}, or null — see {@link AuthTokenIssuer#failureCode}. */
+    public String failureCode(String rawToken) {
+        if (rawToken == null || rawToken.isBlank()) return null;
+        for (AuthTokenIssuer issuer : issuers) {
+            if (issuer.handles(rawToken)) return issuer.failureCode(rawToken);
+        }
+        return null;
     }
 
     public void revoke(String rawToken) {

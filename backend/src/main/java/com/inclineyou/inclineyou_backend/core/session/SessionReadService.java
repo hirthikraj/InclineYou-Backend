@@ -95,8 +95,4 @@ public class SessionReadService {
         return repo.one(trainerId, sessionId);
     }
 
-    /** {@code GET /v1/sessions/{id}}: the same row the list draws, 404 when it is not this trainer's live session. */
-    public SessionRow get(UUID trainerId, UUID sessionId) {
-        return repo.one(trainerId, sessionId).orElseThrow(() -> ApiException.notFound("That session is not in your diary."));
-    }
 }

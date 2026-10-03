@@ -1,6 +1,7 @@
 package com.inclineyou.inclineyou_backend.core.auth;
 
 import com.inclineyou.inclineyou_backend.infrastructure.config.AppProperties;
+import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -14,6 +15,7 @@ import org.mockito.quality.Strictness;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 
 import java.time.Instant;
+import java.util.UUID;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,6 +50,7 @@ class OtpServiceTest {
     @Mock OtpStore store;
     @Mock OtpSendLimiter limiter;
     @Mock OtpSender sender;
+    @Mock OtpRequestLedger ledger;
     @Mock BCryptPasswordEncoder bcrypt;
 
     AppProperties props;
@@ -61,7 +64,16 @@ class OtpServiceTest {
         props.getOtp().setLockMinutes(10);
 
         when(bcrypt.encode(anyString())).thenReturn(HASH);
-        otp = new OtpService(store, limiter, sender, props, bcrypt);
+        when(ledger.open(anyString(), anyString(), anyString(), any(Instant.class))).thenAnswer(inv -> {
+            var r = new OtpRequest();
+            r.setId(java.util.UUID.randomUUID());
+            r.setPhone(inv.getArgument(0));
+            r.setPurpose(inv.getArgument(1));
+            r.setOtpHash(inv.getArgument(2));
+            r.setExpiresAt(inv.getArgument(3));
+            return r;
+        });
+        otp = new OtpService(store, limiter, sender, ledger, props, bcrypt);
     }
 
     /* ---------------------------------------------------------------- send */
@@ -73,7 +85,7 @@ class OtpServiceTest {
         @Test
         @DisplayName("the code is stored hashed and never in the clear")
         void storedHashed() {
-            otp.send(PHONE);
+            otp.send(PHONE, OtpRequest.SIGN_IN);
 
             var code = ArgumentCaptor.forClass(String.class);
             verify(store).saveCode(eq(PHONE), code.capture(), any(Instant.class));
@@ -83,7 +95,7 @@ class OtpServiceTest {
         @Test
         @DisplayName("the send is recorded, or the ladder has nothing to count")
         void sendIsRecorded() {
-            otp.send(PHONE);
+            otp.send(PHONE, OtpRequest.SIGN_IN);
             verify(store).recordSend(eq(PHONE), any(Instant.class));
         }
 
@@ -93,7 +105,7 @@ class OtpServiceTest {
             org.mockito.Mockito.doThrow(new OtpThrottledException(30))
                     .when(limiter).check(anyString(), any(Instant.class));
 
-            assertThatThrownBy(() -> otp.send(PHONE)).isInstanceOf(OtpThrottledException.class);
+            assertThatThrownBy(() -> otp.send(PHONE, OtpRequest.SIGN_IN)).isInstanceOf(OtpThrottledException.class);
 
             verify(store, never()).saveCode(anyString(), anyString(), any(Instant.class));
             verify(sender, never()).send(anyString(), anyString());
@@ -106,7 +118,7 @@ class OtpServiceTest {
             // to be the one that answers — and it is checked first.
             when(store.lockedUntil(PHONE)).thenReturn(Instant.now().plusSeconds(300));
 
-            assertThatThrownBy(() -> otp.send(PHONE)).isInstanceOf(OtpLockedException.class);
+            assertThatThrownBy(() -> otp.send(PHONE, OtpRequest.SIGN_IN)).isInstanceOf(OtpLockedException.class);
             verify(store, never()).saveCode(anyString(), anyString(), any(Instant.class));
             verify(limiter, never()).check(anyString(), any(Instant.class));
         }
@@ -116,7 +128,7 @@ class OtpServiceTest {
         void expiredLockIsSimplyOver() {
             when(store.lockedUntil(PHONE)).thenReturn(Instant.now().minusSeconds(1));
 
-            assertThatCode(() -> otp.send(PHONE)).doesNotThrowAnyException();
+            assertThatCode(() -> otp.send(PHONE, OtpRequest.SIGN_IN)).doesNotThrowAnyException();
             verify(store).saveCode(eq(PHONE), anyString(), any(Instant.class));
         }
     }
@@ -218,6 +230,120 @@ class OtpServiceTest {
                     .extracting(e -> ((OtpLockedException) e).getRetryAfterSeconds())
                     .satisfies(s -> assertThat((int) s).isBetween(419, 420));
             verify(store, never()).activeCode(anyString());
+        }
+    }
+
+    /* ------------------------------------------------------------ requests */
+
+    @Nested
+    @DisplayName("a code and the request it belongs to")
+    class Requests {
+
+        private final UUID id = UUID.randomUUID();
+
+        @Test
+        @DisplayName("the send answers the id, the expiry and the next rung of the ladder; the row goes queued → sent")
+        void sendAnswers() {
+            when(limiter.resendAfterSeconds(eq(PHONE), any(Instant.class))).thenReturn(60);
+
+            var issued = otp.send(PHONE, OtpRequest.SIGN_IN);
+
+            assertThat(issued.requestId()).isNotNull();
+            assertThat(issued.resendAfterSeconds()).isEqualTo(60);
+            assertThat(issued.expiresAt()).isAfter(Instant.now().plusSeconds(590));
+            verify(ledger).open(eq(PHONE), eq(OtpRequest.SIGN_IN), eq(HASH), any(Instant.class));
+            verify(ledger).sent(issued.requestId());
+        }
+
+        @Test
+        @DisplayName("a sender that refuses marks the request failed, and the failure still surfaces")
+        void senderFailure() {
+            org.mockito.Mockito.doThrow(new UnsupportedOperationException("no provider"))
+                    .when(sender).send(anyString(), anyString());
+
+            assertThatThrownBy(() -> otp.send(PHONE, OtpRequest.SIGN_IN))
+                    .isInstanceOf(UnsupportedOperationException.class);
+
+            verify(ledger).failed(any(UUID.class), eq("provider_error"));
+            verify(ledger, never()).sent(any(UUID.class));
+        }
+
+        @Test
+        @DisplayName("verifying by request id answers the number it was for, and retires the request")
+        void verifyRequest() {
+            when(ledger.find(id)).thenReturn(Optional.of(open(OtpRequest.SIGN_IN, null)));
+            liveCode(0);
+            when(bcrypt.matches(anyString(), anyString())).thenReturn(true);
+
+            assertThat(otp.verifyRequest(id, "123456")).isEqualTo(PHONE);
+            verify(ledger).consume(id);
+            verify(store).consume(PHONE);
+        }
+
+        @Test
+        @DisplayName("unknown, used, superseded or another purpose's request is OTP_REQUEST_NOT_FOUND")
+        void notFound() {
+            when(ledger.find(id)).thenReturn(Optional.empty());
+            assertThatThrownBy(() -> otp.verifyRequest(id, "123456")).isInstanceOf(ApiException.class);
+
+            when(ledger.find(id)).thenReturn(Optional.of(open(OtpRequest.SIGN_IN, Instant.now())));
+            assertThatThrownBy(() -> otp.verifyRequest(id, "123456")).isInstanceOf(ApiException.class);
+
+            when(ledger.find(id)).thenReturn(Optional.of(open(OtpRequest.CHANGE_PHONE_NEW, null)));
+            assertThatThrownBy(() -> otp.verifyRequest(id, "123456")).isInstanceOf(ApiException.class);
+
+            verify(store, never()).activeCode(anyString());
+        }
+
+        @Test
+        @DisplayName("a request past its expiry is OTP_EXPIRED and spends no attempt")
+        void expired() {
+            var r = open(OtpRequest.SIGN_IN, null);
+            r.setExpiresAt(Instant.now().minusSeconds(1));
+            when(ledger.find(id)).thenReturn(Optional.of(r));
+            liveCode(0);
+
+            assertThatThrownBy(() -> otp.verifyRequest(id, "123456")).isInstanceOf(OtpExpiredException.class);
+            verify(store, never()).recordWrongAttempt(anyString());
+        }
+
+        @Test
+        @DisplayName("a wrong code leaves the request open for another try")
+        void wrongKeepsRequestOpen() {
+            when(ledger.find(id)).thenReturn(Optional.of(open(OtpRequest.SIGN_IN, null)));
+            liveCode(0);
+            when(store.recordWrongAttempt(PHONE)).thenReturn(1);
+            when(bcrypt.matches(anyString(), anyString())).thenReturn(false);
+
+            assertThatThrownBy(() -> otp.verifyRequest(id, "000000")).isInstanceOf(InvalidOtpException.class);
+            verify(ledger, never()).consume(any(UUID.class));
+        }
+
+        @Test
+        @DisplayName("delivery reads the row's status; an aged-out or retired request is not found")
+        void delivery() {
+            var r = open(OtpRequest.SIGN_IN, null);
+            r.setDeliveryStatus("failed");
+            r.setDeliveryError("provider_error");
+            when(ledger.find(id)).thenReturn(Optional.of(r));
+
+            var d = otp.delivery(id);
+            assertThat(d.status()).isEqualTo("failed");
+            assertThat(d.error()).isEqualTo("provider_error");
+
+            r.setExpiresAt(Instant.now().minusSeconds(1));
+            assertThatThrownBy(() -> otp.delivery(id)).isInstanceOf(ApiException.class);
+        }
+
+        private OtpRequest open(String purpose, Instant consumedAt) {
+            var r = new OtpRequest();
+            r.setId(id);
+            r.setPhone(PHONE);
+            r.setPurpose(purpose);
+            r.setExpiresAt(Instant.now().plusSeconds(600));
+            r.setConsumedAt(consumedAt);
+            r.setDeliveryStatus("sent");
+            return r;
         }
     }
 

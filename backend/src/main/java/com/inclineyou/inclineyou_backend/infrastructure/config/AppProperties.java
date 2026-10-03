@@ -15,11 +15,9 @@ public class AppProperties {
     private Jwt jwt = new Jwt();
     private Otp otp = new Otp();
     private Seed seed = new Seed();
-    private Fcm fcm = new Fcm();
     private RateLimit rateLimit = new RateLimit();
     private Redis redis = new Redis();
     private Session session = new Session();
-    private Tenant tenant = new Tenant();
     private Database database = new Database();
     private Security security = new Security();
     private Privacy privacy = new Privacy();
@@ -100,21 +98,6 @@ public class AppProperties {
         /** Off and the sweeper never runs — for a read-only replica or a test. */
         private boolean sweepEnabled = true;
     }
-
-    @Getter
-    @Setter
-    public static class Tenant {
-        /**
-         * The kill switch for the workspace switcher, NOT for isolation.
-         *
-         * <p>Off, and every caller resolves to their home workspace and cannot
-         * move — which is exactly the behaviour before tenancy existed. It does
-         * not and must not disable row-level security: that lives in the
-         * database and in which role the pool connects as.
-         */
-        private boolean switchingEnabled = true;
-    }
-
 
     /**
      * Whether Redis is used at all.
@@ -282,16 +265,5 @@ public class AppProperties {
         public double ratePerSecond() {
             return windowSeconds <= 0 ? limit : (double) limit / windowSeconds;
         }
-    }
-
-    @Getter
-    @Setter
-    public static class Fcm {
-        /**
-         * Firebase service-account JSON. Either a filesystem path, a classpath:
-         * resource, or the raw JSON itself (which is what Railway env vars hold).
-         * Blank disables push — the backend logs instead of sending.
-         */
-        private String credentials = "";
     }
 }

@@ -172,9 +172,6 @@ app:
       resource: seed/exercises.json
       # Text only. Upstream's thumbnails and demo GIFs are © Gym visual and need a
       # licence we do not hold, so no media is seeded and there is no base URL.
-  fcm:
-    # Raw service-account JSON, a file path, or classpath:… — blank disables push.
-    credentials: ${FCM_CREDENTIALS:}
 
 # ── The `dev` profile ────────────────────────────────────────────────────────
 # Activated by `./mvnw spring-boot:run` (spring-boot-maven-plugin, see pom.xml)

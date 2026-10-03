@@ -1,13 +1,16 @@
 package com.inclineyou.inclineyou_backend.core.auth;
 
 import com.inclineyou.inclineyou_backend.infrastructure.config.AppProperties;
+import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.UUID;
 
 /**
  * Issue a code, and check one.
@@ -44,6 +47,7 @@ public class OtpService {
     private final OtpStore store;
     private final OtpSendLimiter limiter;
     private final OtpSender sender;
+    private final OtpRequestLedger ledger;
     private final AppProperties props;
     private final BCryptPasswordEncoder bcrypt;
     private final SecureRandom secureRandom = new SecureRandom();
@@ -65,15 +69,79 @@ public class OtpService {
         }
     }
 
-    public void send(String phone) {
+    /** A code that went out: the id to come back with, when it dies, and when another may be asked for. */
+    public record Issued(UUID requestId, Instant expiresAt, int resendAfterSeconds) {}
+
+    /** What the "Didn't get it?" screen shows for one request. */
+    public record Delivery(String status, String error, Instant expiresAt) {}
+
+    /**
+     * Issue a code for {@code purpose} ({@link OtpRequest#SIGN_IN},
+     * {@link OtpRequest#CHANGE_PHONE_OLD}, {@link OtpRequest#CHANGE_PHONE_NEW}).
+     *
+     * <p>Throttling comes first and costs nothing: a refused send writes no row,
+     * stores no code and dispatches nothing.
+     */
+    public Issued send(String phone, String purpose) {
         Instant now = Instant.now();
         requireUnlocked(phone, now);
         limiter.check(phone, now);
         String otp = String.format("%06d", secureRandom.nextInt(1_000_000));
         Instant expiresAt = now.plusSeconds(props.getOtp().getExpiryMinutes() * 60L);
-        store.saveCode(phone, bcrypt.encode(otp), expiresAt);
+        String hash = bcrypt.encode(otp);
+        OtpRequest request = ledger.open(phone, purpose, hash, expiresAt);
+        store.saveCode(phone, hash, expiresAt);
         store.recordSend(phone, now);
-        sender.send(phone, otp);
+        try {
+            sender.send(phone, otp);
+        } catch (RuntimeException e) {
+            // The request exists and nothing will ever arrive for it: say so on the row, so the screen polling it can offer the second path, then let the failure through as it always did.
+            ledger.failed(request.getId(), "provider_error");
+            throw e;
+        }
+        ledger.sent(request.getId());
+        return new Issued(request.getId(), expiresAt, limiter.resendAfterSeconds(phone, now));
+    }
+
+    /**
+     * The delivery state of a sign-in request, for whoever holds its id.
+     *
+     * @throws ApiException 404 {@code OTP_REQUEST_NOT_FOUND} — unknown, expired or superseded
+     */
+    public Delivery delivery(UUID requestId) {
+        OtpRequest r = openSignIn(requestId);
+        if (r.getExpiresAt().isBefore(Instant.now())) throw requestNotFound();
+        return new Delivery(r.getDeliveryStatus(), r.getDeliveryError(), r.getExpiresAt());
+    }
+
+    /**
+     * Check a sign-in code against the request it was sent for.
+     *
+     * @return the number the request was for — the caller never sent one
+     * @throws ApiException         404 {@code OTP_REQUEST_NOT_FOUND}
+     * @throws OtpLockedException   the number is serving a wait
+     * @throws OtpExpiredException  the request has aged out
+     * @throws InvalidOtpException  wrong; always carries attemptsLeft
+     */
+    public String verifyRequest(UUID requestId, String otp) {
+        OtpRequest r = openSignIn(requestId);
+        String phone = r.getPhone();
+        check(phone, otp, Instant.now(), r.getExpiresAt());
+        ledger.consume(requestId);
+        return phone;
+    }
+
+    /** A request that exists, is for sign-in and has not been used or superseded. */
+    private OtpRequest openSignIn(UUID requestId) {
+        return ledger.find(requestId)
+                .filter(r -> OtpRequest.SIGN_IN.equals(r.getPurpose()))
+                .filter(r -> r.getConsumedAt() == null)
+                .orElseThrow(OtpService::requestNotFound);
+    }
+
+    public static ApiException requestNotFound() {
+        return new ApiException(HttpStatus.NOT_FOUND, "OTP_REQUEST_NOT_FOUND",
+                "That sign-in request is unknown, expired or superseded.");
     }
 
     /**
@@ -82,14 +150,18 @@ public class OtpService {
      * @throws InvalidOtpException  wrong; always carries attemptsLeft
      */
     public void verify(String phone, String otp) {
-        Instant now = Instant.now();
+        check(phone, otp, Instant.now(), null);
+    }
 
+    /** The sequence both entry points share; {@code requestExpiry} is the request's own, when there is one. */
+    private void check(String phone, String otp, Instant now, Instant requestExpiry) {
         // 1. Is this number serving a wait?
         requireUnlocked(phone, now);
 
         // 2. The live code, if there is one.
         OtpStore.Code code = store.activeCode(phone).orElse(null);
-        if (code == null || code.expiresAt().isBefore(now)) {
+        if (code == null || code.expiresAt().isBefore(now)
+                || (requestExpiry != null && requestExpiry.isBefore(now))) {
             throw new OtpExpiredException();
         }
 

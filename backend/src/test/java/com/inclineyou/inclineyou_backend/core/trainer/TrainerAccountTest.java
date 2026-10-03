@@ -397,27 +397,6 @@ class TrainerAccountTest {
     }
 
     @Test
-    @DisplayName("DEPRECATED: the number typed back still confirms, in any format the app prints it")
-    void legacyDeleteByTypedNumber() throws Exception {
-        mvc.perform(delete("/v1/trainers/me")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(Map.of("confirmPhone", "9999999999"))))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("DELETE_NOT_CONFIRMED"));
-
-        assertThat(deletedAtOfTrainer(me)).isNull();
-
-        String bare = MINE.substring(3); // strip the "+91" MINE already carries
-        String asShown = "+91 " + bare.substring(0, 5) + " " + bare.substring(5);
-        mvc.perform(delete("/v1/trainers/me")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(Map.of("confirmPhone", asShown))))
-                .andExpect(status().isNoContent());
-
-        assertThat(deletedAtOfTrainer(me)).isNotNull();
-    }
-
-    @Test
     @DisplayName("both rows are stamped, and the number is NOT released")
     void deleteStampsBothAndKeepsTheNumber() throws Exception {
         String ticket = stepUpTicket(MINE, "account_deletion");

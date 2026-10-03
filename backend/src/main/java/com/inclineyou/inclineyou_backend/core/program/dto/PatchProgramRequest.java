@@ -35,8 +35,4 @@ public record PatchProgramRequest(
                 && endDate == null;
     }
 
-    /** True when something other than the status is being edited — that is what bumps the program's version. */
-    public boolean editsContent() {
-        return name != null || goal != null || description != null || startDate != null || endDate != null;
-    }
 }

@@ -148,6 +148,29 @@ class OtpSendLimiterTest {
         }
     }
 
+    /* ------------------------------------------- what the screen counts down */
+
+    @Nested
+    @DisplayName("the wait quoted right after a send")
+    class NextWait {
+
+        @Test
+        @DisplayName("after the first code the next wait is the 30s rung, then 60, then 120, and it stays there")
+        void climbs() {
+            for (int[] sentAndWait : new int[][]{{1, 30}, {2, 60}, {3, 120}, {9, 120}}) {
+                when(store.countSendsSince(eq(PHONE), any(Instant.class))).thenReturn((long) sentAndWait[0]);
+                assertThat(limiter.resendAfterSeconds(PHONE, Instant.now())).isEqualTo(sentAndWait[1]);
+            }
+        }
+
+        @Test
+        @DisplayName("an empty ladder quotes no wait")
+        void noLadder() {
+            props.getOtp().setResendLadderSeconds(List.of());
+            assertThat(limiter.resendAfterSeconds(PHONE, Instant.now())).isZero();
+        }
+    }
+
     /* ------------------------------------------------------ the day's cap */
 
     @Nested

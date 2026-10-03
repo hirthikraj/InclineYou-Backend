@@ -45,7 +45,7 @@ public class JwtTokenIssuer implements AuthTokenIssuer {
     @Override
     public IssuedToken issue(AuthPrincipal p, TokenContext context) {
         String token = jwtService.build(p.subject(), p.phone(), p.role(), p.tenantId());
-        return new IssuedToken(token, KIND, jwtService.parse(token).getExpiration().toInstant());
+        return new IssuedToken(token, KIND, jwtService.parse(token).getExpiration().toInstant(), null);
     }
 
     @Override
@@ -61,6 +61,23 @@ public class JwtTokenIssuer implements AuthTokenIssuer {
         } catch (JwtException | IllegalArgumentException e) {
             log.warn("JWT parse failed: {}", e.getMessage());
             return Optional.empty();
+        }
+    }
+
+    @Override
+    public Optional<IssuedToken> describe(String rawToken) {
+        return resolve(rawToken).map(p -> new IssuedToken(rawToken, KIND, p.expiresAt(), null));
+    }
+
+    @Override
+    public String failureCode(String rawToken) {
+        try {
+            jwtService.parse(rawToken);
+            return null;
+        } catch (io.jsonwebtoken.ExpiredJwtException e) {
+            return "SESSION_EXPIRED";
+        } catch (JwtException | IllegalArgumentException e) {
+            return null;
         }
     }
 

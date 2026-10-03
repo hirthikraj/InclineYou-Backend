@@ -19,8 +19,12 @@ public class OtpRequest {
     @Column(updatable = false, nullable = false)
     private UUID id;
 
-    @Column(nullable = false, length = 15)
+    @Column(nullable = false, length = 16)
     private String phone;
+
+    /** {@code sign_in} | {@code change_phone_old} | {@code change_phone_new} — the schema's CHECK. */
+    @Column(nullable = false, length = 20)
+    private String purpose;
 
     @Column(name = "otp_hash", nullable = false)
     private String otpHash;
@@ -28,8 +32,12 @@ public class OtpRequest {
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
 
-    @Column(nullable = false)
-    private boolean verified;
+    /**
+     * When the code stopped being usable: spent by a right answer, or superseded
+     * by a newer request for the same number. Null is the only live state.
+     */
+    @Column(name = "consumed_at")
+    private Instant consumedAt;
 
     @Column(name = "wrong_attempts", nullable = false)
     private int wrongAttempts;
@@ -47,8 +55,24 @@ public class OtpRequest {
     @Column(name = "locked_until")
     private Instant lockedUntil;
 
+    /** The WhatsApp provider's id for the message, once a provider is wired. */
+    @Column(name = "provider_message_id", length = 100)
+    private String providerMessageId;
+
+    /** {@code queued} | {@code sent} | {@code delivered} | {@code read} | {@code failed}. */
+    @Column(name = "delivery_status", length = 12)
+    private String deliveryStatus;
+
+    /** Why delivery failed; the schema allows it only when {@code deliveryStatus} is {@code failed}. */
+    @Column(name = "delivery_error", length = 64)
+    private String deliveryError;
+
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;
+
+    public static final String SIGN_IN = "sign_in";
+    public static final String CHANGE_PHONE_OLD = "change_phone_old";
+    public static final String CHANGE_PHONE_NEW = "change_phone_new";
 
     @PrePersist
     void onCreate() {

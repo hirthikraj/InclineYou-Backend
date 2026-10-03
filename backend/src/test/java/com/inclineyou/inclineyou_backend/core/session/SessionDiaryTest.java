@@ -274,15 +274,6 @@ class SessionDiaryTest {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("SESSION_CLIENT_TIME_TAKEN"));
     }
 
-    @Test
-    @DisplayName("GET /v1/sessions/{id} is the same row as the list, with its version as the ETag; somebody else's is a 404")
-    void getOne() throws Exception {
-        UUID s = session("2026-10-20T09:00:00+05:30", w1, "scheduled");
-        mvc.perform(get("/v1/sessions/" + s)).andExpect(status().isOk()).andExpect(header().exists("ETag"))
-                .andExpect(jsonPath("$.id").value(s.toString())).andExpect(jsonPath("$.workout.name").value("Day A"));
-        mvc.perform(get("/v1/sessions/" + UUID.randomUUID())).andExpect(status().isNotFound());
-    }
-
     /* ------------------------------------------------------------- fixtures */
 
     private ResultActions list(String from, String to) throws Exception {

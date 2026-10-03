@@ -3,6 +3,7 @@ package com.inclineyou.inclineyou_backend.core.trainer;
 import com.inclineyou.inclineyou_backend.core.auth.AppUser;
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
 import com.inclineyou.inclineyou_backend.core.auth.JwtService;
+import com.inclineyou.inclineyou_backend.core.auth.OtpRequest;
 import com.inclineyou.inclineyou_backend.core.auth.OtpService;
 import com.inclineyou.inclineyou_backend.core.auth.SessionTokenIssuer;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.StepUpTicketResponse;
@@ -50,7 +51,7 @@ public class StepUpService {
     /** A code to the CURRENT number. Throws OtpLocked / OtpThrottled as sign-in does. */
     public void send(UUID trainerId, String purpose) {
         requirePurpose(purpose);
-        otpService.send(currentPhone(trainerId));
+        otpService.send(currentPhone(trainerId), OtpRequest.CHANGE_PHONE_OLD);
     }
 
     /**

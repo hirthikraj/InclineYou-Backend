@@ -30,19 +30,14 @@ public class JpaOtpStore implements OtpStore {
     private final OtpRequestRepository otpRepo;
 
     /**
-     * A new row per code, matching the old shape.
+     * No-op: {@link OtpRequestLedger#open} wrote the row, and the row is the code.
      *
-     * `activeCode` reads the latest unverified row, so writing a new one is what
-     * makes a resend supersede the code before it (AUTH-28).
+     * `activeCode` reads the latest open row for the number, and opening a request
+     * retires the one before it, which is what makes a resend supersede (AUTH-28).
      */
     @Override
-    @Transactional
     public void saveCode(String phone, String hash, Instant expiresAt) {
-        OtpRequest req = new OtpRequest();
-        req.setPhone(phone);
-        req.setOtpHash(hash);
-        req.setExpiresAt(expiresAt);
-        otpRepo.save(req);
+        // deliberately empty — see the javadoc
     }
 
     @Override
@@ -72,7 +67,7 @@ public class JpaOtpStore implements OtpStore {
     @Transactional
     public void consume(String phone) {
         otpRepo.findLatestUnverified(phone).ifPresent(req -> {
-            req.setVerified(true);
+            req.setConsumedAt(Instant.now());
             otpRepo.save(req);
         });
     }
@@ -96,10 +91,15 @@ public class JpaOtpStore implements OtpStore {
         OtpRequest req = otpRepo.findLatestUnverified(phone).orElseGet(() -> {
             OtpRequest carrier = new OtpRequest();
             carrier.setPhone(phone);
+            carrier.setPurpose(OtpRequest.SIGN_IN);
             carrier.setOtpHash(LOCK_ONLY_HASH);
-            // Already expired, so if this row is ever read as "the latest code"
-            // the answer is "send a new one" rather than a code nobody can guess.
-            carrier.setExpiresAt(Instant.now());
+            // The schema wants expires_at after created_at and consumed_at not
+            // before it, so "already dead" is a second in the future on both:
+            // consumed, so it is never the open code, and expired the moment
+            // anybody looks.
+            Instant dead = Instant.now().plusSeconds(1);
+            carrier.setExpiresAt(dead);
+            carrier.setConsumedAt(dead);
             return carrier;
         });
         req.setLockedUntil(until);

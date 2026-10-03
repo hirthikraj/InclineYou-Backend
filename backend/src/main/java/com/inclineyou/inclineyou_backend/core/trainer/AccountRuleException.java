@@ -112,19 +112,6 @@ public class AccountRuleException extends RuntimeException {
 
     /* ── the proof ─────────────────────────────────────────────────────────── */
 
-    /**
-     * No ticket, a forged one, or one that has aged out.
-     *
-     * <p>401 rather than 400: what is missing is a proof, and the recovery is to
-     * prove it again rather than to fix the request. The sentence says which
-     * step to go back to, because "unauthorized" on a screen the trainer is
-     * demonstrably signed in to reads as a bug.
-     */
-    public static AccountRuleException proveCurrentFirst() {
-        return new AccountRuleException(HttpStatus.UNAUTHORIZED, "PHONE_CHANGE_UNPROVEN",
-                "Confirm your current number again — that step timed out.");
-    }
-
     /* ── the step-up proof (api-contract v1.1, Settings A9) ───────────────── */
 
     /**
@@ -158,15 +145,4 @@ public class AccountRuleException extends RuntimeException {
 
     /* ── closing the account ───────────────────────────────────────────────── */
 
-    /**
-     * The typed confirmation is not this trainer's number.
-     *
-     * <p>The confirmation is the whole safety mechanism on a soft delete that
-     * cannot be undone from inside the product, so a mismatch is refused loudly
-     * rather than treated as an empty field.
-     */
-    public static AccountRuleException confirmationMismatch() {
-        return new AccountRuleException(HttpStatus.BAD_REQUEST, "DELETE_NOT_CONFIRMED",
-                "That is not the number on this account. Type it exactly to confirm.");
-    }
 }

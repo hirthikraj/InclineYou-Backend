@@ -24,8 +24,4 @@ record AssessmentRow(UUID id, UUID clientId, UUID templateId, UUID scheduleId, S
         return completedAt != null;
     }
 
-    /** Nothing entered yet — the state in which a template edit may still refresh the form. */
-    boolean untouched() {
-        return completedAt == null && "{}".equals(readings) && "{}".equals(answers);
-    }
 }

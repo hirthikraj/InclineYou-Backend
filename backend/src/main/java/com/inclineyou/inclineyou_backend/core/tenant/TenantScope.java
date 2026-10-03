@@ -67,22 +67,6 @@ public class TenantScope {
                     .findFirst();
         }
 
-        /** The caller's role in the workspace they are standing in. */
-        public String activeRole() {
-            return active().map(Membership::role).orElse(TenantRole.COACH);
-        }
-
-        public boolean administersActive() {
-            return TenantRole.administers(activeRole());
-        }
-
-        public boolean ownsActive() {
-            return TenantRole.OWNER.equals(activeRole());
-        }
-
-        public boolean isMemberOf(UUID tenantId) {
-            return memberships.stream().anyMatch(m -> m.tenantId().equals(tenantId));
-        }
     }
 
     public record Membership(
@@ -91,9 +75,7 @@ public class TenantScope {
             String tenantName,
             String tenantType,
             String role,
-            boolean home,
-            java.math.BigDecimal revenueSharePercent,
-            java.math.BigDecimal assignmentMarginPercent
+            boolean home
     ) {}
 
     /**
@@ -143,15 +125,4 @@ public class TenantScope {
         return repo.homeTenantOf(trainerId).orElse(null);
     }
 
-    /** The client rows behind a phone — the client lens, plural by requirement. */
-    public List<UUID> clientIdsFor(String phone) {
-        if (phone == null || phone.isBlank()) return List.of();
-        return repo.clientIdsFor(phone);
-    }
-
-    /** The workspaces those client rows are coached in. */
-    public List<UUID> clientTenantIdsFor(String phone) {
-        if (phone == null || phone.isBlank()) return List.of();
-        return repo.clientTenantIdsFor(phone);
-    }
 }

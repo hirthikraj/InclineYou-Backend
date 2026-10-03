@@ -6,7 +6,6 @@ import com.inclineyou.inclineyou_backend.core.auth.OtpLockedException;
 import com.inclineyou.inclineyou_backend.core.auth.OtpThrottledException;
 import com.inclineyou.inclineyou_backend.core.client.ClientRuleException;
 import com.inclineyou.inclineyou_backend.core.client.PhoneUnavailableException;
-import com.inclineyou.inclineyou_backend.core.assessment.AssessmentRuleException;
 import com.inclineyou.inclineyou_backend.core.attention.AttentionRuleException;
 import com.inclineyou.inclineyou_backend.core.payment.PackRuleException;
 import com.inclineyou.inclineyou_backend.core.trainer.AccountRuleException;
@@ -50,23 +49,23 @@ public class GlobalExceptionHandler {
         return Map.of("field", field, "code", code, "message", message);
     }
 
+    /** 401 for a wrong code (api-contract, Sign in): the credential offered did not check out. */
     @ExceptionHandler(InvalidOtpException.class)
     ProblemDetail handleInvalidOtp(InvalidOtpException ex) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_CONTENT, ex.getMessage());
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
         pd.setProperty("code", "OTP_WRONG");
         pd.setProperty("attemptsLeft", ex.getAttemptsLeft());
         return pd;
     }
 
     /**
-     * 410 rather than 422: the code was valid and is now gone. The client reads
-     * `code` first, so the status only has to be something it can't confuse with
-     * a wrong code — which is the whole point, since the two look identical to a
-     * trainer and have opposite recoveries.
+     * Also 401, and told apart from a wrong code by `code` alone: the two look
+     * identical to a trainer and have opposite recoveries, so the client reads
+     * `code` first.
      */
     @ExceptionHandler(OtpExpiredException.class)
     ProblemDetail handleOtpExpired(OtpExpiredException ex) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.GONE, ex.getMessage());
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.UNAUTHORIZED, ex.getMessage());
         pd.setProperty("code", "OTP_EXPIRED");
         return pd;
     }
@@ -135,18 +134,6 @@ public class GlobalExceptionHandler {
     /** A dismissal the queue cannot record — `BAND_KIND_MISMATCH`. */
     @ExceptionHandler(AttentionRuleException.class)
     ResponseEntity<ProblemDetail> handleAttentionRule(AttentionRuleException ex) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
-        pd.setProperty("code", ex.getCode());
-        return ResponseEntity.status(ex.getStatus()).body(pd);
-    }
-
-    /**
-     * V5 · measuring rules. Same shape as the two above: the status varies (400
-     * for a request that cannot be carried out, 404 for a reading this trainer
-     * cannot see) and `code` is what the screen branches on.
-     */
-    @ExceptionHandler(AssessmentRuleException.class)
-    ResponseEntity<ProblemDetail> handleAssessmentRule(AssessmentRuleException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
         pd.setProperty("code", ex.getCode());
         return ResponseEntity.status(ex.getStatus()).body(pd);

@@ -4,6 +4,9 @@ import com.inclineyou.inclineyou_backend.core.auth.AuthTokenFilter;
 import com.inclineyou.inclineyou_backend.infrastructure.ratelimit.RateLimitFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -19,6 +22,12 @@ import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.header.HeaderWriterFilter;
 import org.springframework.security.web.transport.HttpsRedirectFilter;
 
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.security.core.AuthenticationException;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 
 @Configuration
@@ -91,14 +100,12 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .securityContext(ctx -> ctx.securityContextRepository(securityContextRepository()))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/v1/auth/trainer").authenticated()
-                        .requestMatchers("/v1/auth/mode/**").authenticated()
+                        // Become a trainer: the pending token's one route (and a trainer's own repeat call).
+                        .requestMatchers(HttpMethod.POST, "/v1/trainers").authenticated()
                         // v1.1: the signed-in browsers (any role), and the step-up proof (trainers only).
                         // Both sit under /v1/auth/, which is otherwise public, so they must be named.
                         .requestMatchers("/v1/auth/sessions", "/v1/auth/sessions/**").authenticated()
                         .requestMatchers("/v1/auth/step-up", "/v1/auth/step-up/**").hasRole("TRAINER")
-                        .requestMatchers("/v1/tenants/**").authenticated()
-                        .requestMatchers("/v1/auth/membership/**").hasRole("INVITED")
                         .requestMatchers("/v1/auth/**", "/health").permitAll()
                         // The client portal (module 11, /v1/me/* and /v1/client/**)
                         // is out of v1 scope (WEB_LAUNCH.md §3) and its controllers
@@ -110,10 +117,44 @@ public class SecurityConfig {
                         .anyRequest().hasRole("TRAINER")
                 )
                 .exceptionHandling(ex -> ex
-                        .authenticationEntryPoint((req, res, e) -> res.sendError(401, "Unauthorized"))
+                        .authenticationEntryPoint(SecurityConfig::unauthorized)
                 )
                 .addFilterBefore(authTokenFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(rateLimitFilter, AuthTokenFilter.class)
                 .build();
+    }
+
+    /**
+     * A 401, with the reason when it is knowable: {@code SESSION_EXPIRED} or
+     * {@code SESSION_REVOKED} for a credential that was ours and has stopped
+     * working (api-contract, Sign in), which is what lets the web say which one
+     * happened instead of just "sign in". Anything else — no credential, a
+     * forged or unknown one — stays a bare 401, indistinguishable from each
+     * other. The one exception is {@code POST /v1/trainers}, whose only valid
+     * caller is a live 15-minute pending token: without one the answer is
+     * {@code SESSION_EXPIRED}, as the contract says.
+     *
+     * <p>Written by hand for the reason {@code RateLimitFilter#refuse} is: a
+     * filter's failure never reaches {@code @RestControllerAdvice}.
+     */
+    private static void unauthorized(HttpServletRequest req, HttpServletResponse res,
+                                     AuthenticationException e) throws IOException {
+        Object why = req.getAttribute(AuthTokenFilter.AUTH_FAILURE_ATTRIBUTE);
+        if (why == null && "POST".equals(req.getMethod()) && "/v1/trainers".equals(req.getRequestURI())) {
+            why = "SESSION_EXPIRED";
+        }
+        if (why == null) {
+            res.sendError(HttpStatus.UNAUTHORIZED.value(), "Unauthorized");
+            return;
+        }
+        String detail = "SESSION_REVOKED".equals(why)
+                ? "This session was signed out. Sign in again."
+                : "This session has expired. Sign in again.";
+        res.setStatus(HttpStatus.UNAUTHORIZED.value());
+        res.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+        res.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        res.getWriter().write("""
+                {"type":"about:blank","title":"Unauthorized","status":401,\
+                "detail":"%s","code":"%s"}""".formatted(detail, why));
     }
 }

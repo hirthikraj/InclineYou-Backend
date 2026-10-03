@@ -2,12 +2,12 @@ package com.inclineyou.inclineyou_backend.core.trainer;
 
 import com.inclineyou.inclineyou_backend.core.auth.AppUser;
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
+import com.inclineyou.inclineyou_backend.core.auth.OtpRequest;
 import com.inclineyou.inclineyou_backend.core.auth.OtpService;
 import com.inclineyou.inclineyou_backend.core.auth.SessionStore;
 import com.inclineyou.inclineyou_backend.core.auth.SessionTokenIssuer;
 import com.inclineyou.inclineyou_backend.core.auth.dto.SendOtpRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.ConfirmNewPhoneRequest;
-import com.inclineyou.inclineyou_backend.core.trainer.dto.DeleteAccountRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.NewPhoneRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.PhoneChangedResponse;
 import lombok.RequiredArgsConstructor;
@@ -102,7 +102,7 @@ public class AccountService {
         stepUp.require(req.ticket(), StepUpService.PHONE_CHANGE, trainerId, rawToken);
         String newPhone = requireValidPhone(req.phone());
         requireAvailable(phoneOf(load(trainerId)), newPhone);
-        otpService.send(newPhone);
+        otpService.send(newPhone, OtpRequest.CHANGE_PHONE_NEW);
     }
 
     /**
@@ -140,16 +140,13 @@ public class AccountService {
      * Soft delete on both tables and every session ended, behind a step-up ticket
      * (header {@code X-Step-Up-Ticket}, purpose {@code account_deletion}).
      *
-     * <p><b>DEPRECATED transitional path:</b> with no ticket but the old body
-     * ({@code confirmPhone}) the number-typed-back confirmation still works, so the
-     * web's current Delete keeps working until it moves. Remove after the web
-     * migration; with neither, the answer is {@code 403 STEP_UP_REQUIRED}.
+     * <p>No ticket is {@code 403 STEP_UP_REQUIRED}.
      *
      * <p>Idempotent by way of {@link #load}: a second call finds no live trainer
      * and 404s, which is the honest answer to deleting something already gone.
      */
     @Transactional
-    public void deleteAccount(UUID trainerId, String ticket, DeleteAccountRequest legacy, String rawToken) {
+    public void deleteAccount(UUID trainerId, String ticket, String rawToken) {
         Trainer t = load(trainerId);
         AppUser user = appUserRepo.findById(t.getAppUserId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
@@ -157,8 +154,6 @@ public class AccountService {
 
         if (ticket != null && !ticket.isBlank()) {
             stepUp.require(ticket, StepUpService.ACCOUNT_DELETION, trainerId, rawToken);
-        } else if (legacy != null && legacy.confirmPhone() != null) {
-            requireTypedPhone(legacy.confirmPhone(), phone);
         } else {
             throw AccountRuleException.stepUpRequired();
         }
@@ -212,14 +207,6 @@ public class AccountService {
     private void requireAvailable(String currentPhone, String newPhone) {
         if (newPhone.equals(currentPhone)) throw AccountRuleException.samePhone();
         if (appUserRepo.findByPhone(newPhone).isPresent()) throw AccountRuleException.phoneTaken();
-    }
-
-    /** The legacy typed confirmation, compared on the last ten digits so formatting does not matter. */
-    private static void requireTypedPhone(String confirmPhone, String phone) {
-        String typed = confirmPhone.replaceAll("\\D", "");
-        if (typed.length() < 10 || !typed.endsWith(last10(phone))) {
-            throw AccountRuleException.confirmationMismatch();
-        }
     }
 
     /** The hash of the session this request came in on — the one to keep. Null for a JWT caller. */

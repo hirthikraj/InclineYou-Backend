@@ -86,14 +86,15 @@ public class SessionTokenIssuer implements AuthTokenIssuer {
                 .map(com.inclineyou.inclineyou_backend.core.auth.AppUser::getId)
                 .orElse(null);
 
+        UUID sessionId = UUID.randomUUID();
         sessions.save(new SessionStore.Session(
-                UUID.randomUUID(), hash(token),
+                sessionId, hash(token),
                 p.subject(), p.phone(), p.role(),
                 appUserId, p.tenantId(),
                 now, now, expires, null,
                 context == null ? null : context.truncatedUserAgent()));
 
-        return new IssuedToken(token, KIND, expires);
+        return new IssuedToken(token, KIND, expires, sessionId.toString());
     }
 
     @Override
@@ -109,6 +110,23 @@ public class SessionTokenIssuer implements AuthTokenIssuer {
                     return new AuthPrincipal(
                             s.subject(), s.phone(), s.role(), s.tenantId(), s.expiresAt());
                 });
+    }
+
+    @Override
+    public Optional<IssuedToken> describe(String rawToken) {
+        if (!handles(rawToken)) return Optional.empty();
+        return sessions.find(hash(rawToken))
+                .filter(s -> s.live(Instant.now()))
+                .map(s -> new IssuedToken(rawToken, KIND, s.expiresAt(), s.id().toString()));
+    }
+
+    @Override
+    public String failureCode(String rawToken) {
+        if (!handles(rawToken)) return null;
+        return sessions.find(hash(rawToken)).map(s -> {
+            if (s.revokedAt() != null) return "SESSION_REVOKED";
+            return s.expiresAt().isAfter(Instant.now()) ? null : "SESSION_EXPIRED";
+        }).orElse(null);
     }
 
     @Override

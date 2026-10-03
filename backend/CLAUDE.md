@@ -18,7 +18,9 @@ and has its own `CLAUDE.md`.
   phone columns, or the three RLS policies that match on `app_phone()` — a
   recycled Indian number currently has no correct outcome, and that file says
   why.
-- `API.md` — the complete endpoint reference, the authorization table, the rate-limit
+- `../../release/api-contract-v1.1.html` — **the final v1 wire contract**; the backend serves
+  exactly its routes. Where `API.md` and it differ, the contract wins.
+- `API.md` — per-route notes, the authorization table, the rate-limit
   tiers, and the error `code` catalogue. **Keep it in sync with any endpoint change.**
 - `SCHEMA.md` — the same thing for the database: all 46 tables, every column with
   the migration that added it, all 53 foreign keys, the uniqueness and check
@@ -98,9 +100,9 @@ blueprint, so copy from one of the other two.
 
 - `core/` — one vertical slice per feature: `assessment` · `attention` · `auth`
   · `client` · `exercise` · `nudge` · `payment` · `program` · `progress` ·
-  `push` · `report` · `session` · `template` · `tenant` · `trainer` ·
-  `workout`. A slice owns its JPA entities and Spring Data repositories too
-  (`Client` in `core/client`, `Trainer` + `TrainerBusiness` in `core/trainer`,
+  `session` · `sessionlog` · `tenant` · `trainer` · `workout`. A slice owns
+  its JPA entities and Spring Data repositories too
+  (`Trainer` + `TrainerBusiness` in `core/trainer`,
   `AppUser` + `OtpRequest` in `core/auth`) — there is no global `entity/` or
   `repository/` package any more.
 - `infrastructure/` — `config` (security, Redis, health, `AppProperties`),
@@ -124,12 +126,22 @@ for "owed today" rather than copying it; and money formatting and the workspace 
 PATCH routes keep a raw `Map` body on purpose — presence of a key is the contract (absent = leave,
 null = clear), which a record cannot say — and validate it into typed values at the service's entry.
 
-`report/` is on the same shape and on the v1 schema (3 Oct 2026): `ReportJdbcRepository` (the four
-reads behind `GET /v1/clients/{id}/report`), `ReportService` (what the figures mean and the wording),
-records in `report/dto/`. The **weekly report went with the fix**: `weekly_report` is not in the approved v1
-schema, its reader (the client portal) is out of v1, and its Monday job queued a server-side WhatsApp, which
-*nothing sends* rules out — so `POST …/report/weekly`, `WeeklyReportJob`/`Writer` and their repository are
-deleted (git has them), to return with a migration when the portal does. `progress/` is on the shape too
+**The v1 cut (3 Oct 2026).** The backend carries exactly the routes in `../../release/api-contract-v1.1.html`
+and nothing else. Removed in that pass, all of it in git history: the workspace routes under `/v1/tenants`
+(switch, members, shares, revenue, stale clients, assign — `TenantScope`, `TenantContext` and `WorkspaceClock`
+stay, they are the RLS plumbing under every request); `/v1/devices` and the FCM push service (and the
+`firebase-admin` dependency and `FCM_CREDENTIALS`); `GET /v1/clients/{id}/report` (the web builds its printable
+card from `set-history`); `GET /v1/clients?view=legacy` and `GET /v1/sessions/{id}`; `POST /v1/auth/membership/**`
+and `/mode/**` and every client-portal branch of sign-in — a number that is only a client's is now `403
+CLIENT_SIGN_IN_UNAVAILABLE`, and `AuthResponse` no longer carries `clientOf` / `paused` / `removed`; and the typed-number
+body on `DELETE /v1/trainers/me`, which now takes the step-up ticket alone. The `Client` JPA entity went with
+the legacy roster. **Sign-in was then moved onto the v1.1 contract** (same day): `otp/request` answers a `requestId`,
+`GET /v1/auth/otp/requests/{id}` reads delivery status, `otp/verify` takes `{requestId, otp}` and answers the
+contract's shape, `POST /v1/trainers` replaced `POST /v1/auth/trainer`, and a stale session is `401
+SESSION_EXPIRED` / `SESSION_REVOKED`. Every request is an `otp_request` row (`OtpRequestLedger`) whichever store holds
+the live state — Redis, or Postgres when it is down, where the row *is* the code; a newer request retires the older by
+setting `consumed_at`. `OTP_WRONG` and `OTP_EXPIRED` are now 401. Not wired: the provider's delivery webhook (so
+`delivered` / `read` never appear) and `requestId` on errors / `X-Request-Id`, which is wire-wide and not sign-in's. `progress/` is on the shape too`progress/` is on the shape too
 (`SetHistoryJdbcRepository`, `SetHistoryService`, records in `progress/dto/`).
 
 `nudge/` is on the same shape and on the v1 `nudge_log` (3 Oct 2026): `NudgeLogJdbcRepository` (the append-only log and
@@ -149,8 +161,7 @@ validates it into a typed `SessionEdit` at the service's entry. `SessionDiaryTes
 `SessionStateTest` the verbs.
 
 **Every slice is now on this shape (3 Oct 2026): no class in `core/` outside a `*JdbcRepository` holds SQL.** The last ones:
-`attention/` (`AttentionDismissalJdbcRepository`, records in `attention/dto/`), `push/` (`DeviceService` — the controller no
-longer touches `TrainerRepository`), `assessment/` (`AssessmentListJdbcRepository` for the list, `MetricReadingsJdbcRepository`
+`attention/` (`AttentionDismissalJdbcRepository`, records in `attention/dto/`), `assessment/` (`AssessmentListJdbcRepository` for the list, `MetricReadingsJdbcRepository`
 under `MetricReadings`, which keeps only the catalogue's units) and `client/` (`ClientPhoneJdbcRepository` under
 `ClientPhoneGuard`, which keeps the codes and the sentences). The "created or found" wrappers and the wire records that were
 nested in services (`Made`, `Created`, `Applied`, `TemplateResponse` …) moved to each slice's `dto/` under distinct names. What
@@ -160,9 +171,9 @@ is that slice's repository under another name), the JPA entities and their Sprin
 
 ### Persistence is deliberately split
 
-Only five things are JPA entities — `AppUser`, `Trainer`, `Client`, `BodyMetric`,
+Only four things are JPA entities — `AppUser`, `Trainer`, `TrainerBusiness`,
 `OtpRequest`. Everything else (programs, sessions, packages, payments, set logs,
-reports, nudges, the sync endpoints) is hand-written SQL through
+nudges) is hand-written SQL through
 `NamedParameterJdbcTemplate`. Follow whichever the surrounding service already
 uses; do not "upgrade" a JDBC service to JPA.
 
@@ -340,12 +351,11 @@ list and the five invariants its author must not break.
 `DELETE` sets `deleted_at`; nothing is hard-deleted, because sync has to
 propagate the tombstone to every device. Every read filters `deleted_at IS NULL`.
 
-### Offline-first is the real write path
+### The web writes straight to the server
 
-The app writes locally and reconciles through `/v1/sync/pull` + `/v1/sync/push`
-(and `/v1/client/sync/**` for clients). The REST endpoints are the online
-complement. A push that refuses a record returns a structured rejection the app
-repairs against — see `sync/SyncService.java` and `sync/SyncRows.java`.
+v1 is the trainer web app, which is online-only: there is no sync endpoint, and
+the phone's offline-first protocol is out of this backend until that build
+returns.
 
 ## Security
 
@@ -430,7 +440,7 @@ Everything is env-overridable in `application.yml` under `app.*`, and
 `.env.example` at the repo root lists every variable with its default —
 `docker compose` reads that same file, Spring Boot does not (`set -a; source
 .env; set +a`). Notable kill switches: `REDIS_ENABLED`, `RATE_LIMIT_ENABLED`,
-`SEED_EXERCISES`, `FCM_CREDENTIALS` (blank disables push), `FORWARD_HEADERS`
+`SEED_EXERCISES`, `FORWARD_HEADERS`
 (`framework` behind Railway's proxy, or every trainer shares one rate-limit
 bucket). The database's two identities are `APP_DB_*` and `MIGRATION_DB_*` —
 see *Two ownership axes* above.
