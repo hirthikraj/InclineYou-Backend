@@ -23,6 +23,7 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -89,78 +90,127 @@ class NudgeTemplateTest {
 
     /* ─────────────────────────────────────────────────────── the library ── */
 
+    private static final String PUT_BODY = "{\"body\":\"%s\"}";
+
     @Test
-    @DisplayName("a trainer who has never opened the library gets the catalogue, marked default")
+    @DisplayName("v1.1: all eight, in the check order, each default with a null version")
     void defaultsComeFromTheCatalogue() throws Exception {
         mvc.perform(get("/v1/nudge-templates"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(NudgeTemplateCatalog.all().size()))
-                .andExpect(jsonPath("$[0].name").value("renewal"))
-                .andExpect(jsonPath("$[0].isDefault").value(true))
-                .andExpect(jsonPath("$[0].label").value("Renewal"))
-                /* The variables are on the wire because the web holds no copy of
-                   them — the editor prints what comes down here. */
-                .andExpect(jsonPath("$[0].variables[0].token").value("{name}"));
+                .andExpect(header().exists("ETag"))
+                .andExpect(jsonPath("$.items.length()").value(8))
+                .andExpect(jsonPath("$.items[0].name").value("payment_reminder"))
+                .andExpect(jsonPath("$.items[1].name").value("renewal"))
+                .andExpect(jsonPath("$.items[7].name").value("check_in"))
+                .andExpect(jsonPath("$.items[1].isDefault").value(true))
+                .andExpect(jsonPath("$.items[1].version").value(org.hamcrest.Matchers.nullValue()))
+                /* The variables are on the wire because the web holds no copy of them. */
+                .andExpect(jsonPath("$.items[1].variables[0].token").value("{name}"))
+                .andExpect(jsonPath("$.items[1].variables[0].label").exists());
     }
 
     @Test
-    @DisplayName("saving a body overrides the default; resetting puts the live default back")
+    @DisplayName("the list is conditional: If-None-Match with its ETag is a 304, and a save changes the ETag")
+    void listIsCacheable() throws Exception {
+        String etag = mvc.perform(get("/v1/nudge-templates")).andReturn().getResponse().getHeader("ETag");
+        mvc.perform(get("/v1/nudge-templates").header("If-None-Match", etag))
+                .andExpect(status().isNotModified());
+
+        mvc.perform(put("/v1/nudge-templates/renewal").header("If-Match", "*")
+                        .contentType(MediaType.APPLICATION_JSON).content(PUT_BODY.formatted("Oi {name}")))
+                .andExpect(status().isOk());
+        mvc.perform(get("/v1/nudge-templates").header("If-None-Match", etag))
+                .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("saving needs If-Match: * creates the first override, a version rewords it, stale is 412, missing is 428")
     void saveThenReset() throws Exception {
         mvc.perform(put("/v1/nudge-templates/renewal")
+                        .contentType(MediaType.APPLICATION_JSON).content(PUT_BODY.formatted("No header")))
+                .andExpect(status().isPreconditionRequired())
+                .andExpect(jsonPath("$.code").value("PRECONDITION_REQUIRED"));
+
+        String v1 = com.jayway.jsonpath.JsonPath.read(mvc.perform(put("/v1/nudge-templates/renewal").header("If-Match", "*")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"body\":\"Oi {name}, {count} left. Another block?\"}"))
+                        .content(PUT_BODY.formatted("Oi {name}, {count} left. Another block?")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.isDefault").value(false))
-                .andExpect(jsonPath("$.body").value("Oi {name}, {count} left. Another block?"));
+                .andExpect(jsonPath("$.body").value("Oi {name}, {count} left. Another block?"))
+                .andReturn().getResponse().getContentAsString(), "$.version");
+        assertThat(v1).isNotBlank();
 
-        mvc.perform(get("/v1/nudge-templates"))
-                .andExpect(jsonPath("$[0].isDefault").value(false));
+        /* "*" means "there is no override yet" — one now exists. */
+        mvc.perform(put("/v1/nudge-templates/renewal").header("If-Match", "*")
+                        .contentType(MediaType.APPLICATION_JSON).content(PUT_BODY.formatted("Second tab")))
+                .andExpect(status().isPreconditionFailed());
 
-        /* A second save is an upsert, not a conflict — the unique index V32
-           declares is what makes that true, and a 409 here means it was dropped. */
-        mvc.perform(put("/v1/nudge-templates/renewal")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"body\":\"Second thoughts, {name}?\"}"))
+        mvc.perform(put("/v1/nudge-templates/renewal").header("If-Match", "\"0\"")
+                        .contentType(MediaType.APPLICATION_JSON).content(PUT_BODY.formatted("Stale")))
+                .andExpect(status().isPreconditionFailed())
+                .andExpect(jsonPath("$.code").value("PRECONDITION_FAILED"));
+
+        mvc.perform(put("/v1/nudge-templates/renewal").header("If-Match", "\"" + v1 + "\"")
+                        .contentType(MediaType.APPLICATION_JSON).content(PUT_BODY.formatted("Second thoughts, {name}?")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.body").value("Second thoughts, {name}?"));
+
+        mvc.perform(get("/v1/nudge-templates"))
+                .andExpect(jsonPath("$.items[1].isDefault").value(false))
+                .andExpect(jsonPath("$.items[1].version").exists());
 
         mvc.perform(delete("/v1/nudge-templates/renewal"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.isDefault").value(true))
-                .andExpect(jsonPath("$.body")
-                        .value(NudgeTemplateCatalog.find("renewal").body()));
+                .andExpect(jsonPath("$.version").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.body").value(NudgeTemplateCatalog.find("renewal").body()));
+
+        /* Idempotent: a second reset is still 200 with the built-in wording. */
+        mvc.perform(delete("/v1/nudge-templates/renewal"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.isDefault").value(true));
     }
 
     @Test
-    @DisplayName("an empty body is a refusal with a sentence, not a stored empty message")
-    void emptyBodyIsRefused() throws Exception {
-        mvc.perform(put("/v1/nudge-templates/renewal")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"body\":\"   \"}"))
+    @DisplayName("a blank body is a 400 VALIDATION, and a token the template does not fill is UNKNOWN_VARIABLE")
+    void bodyRules() throws Exception {
+        mvc.perform(put("/v1/nudge-templates/renewal").header("If-Match", "*")
+                        .contentType(MediaType.APPLICATION_JSON).content(PUT_BODY.formatted("   ")))
                 .andExpect(status().isBadRequest())
-                /* The sentence has to reach the trainer, not only the log — the
-                   reason `NudgeRuleException` exists rather than
-                   `ResponseStatusException`. */
-                .andExpect(jsonPath("$.code").value("NUDGE_TEMPLATE_EMPTY"))
+                .andExpect(jsonPath("$.code").value("VALIDATION"))
                 .andExpect(jsonPath("$.detail").exists());
+
+        mvc.perform(put("/v1/nudge-templates/renewal").header("If-Match", "*")
+                        .contentType(MediaType.APPLICATION_JSON).content(PUT_BODY.formatted("Hi {nmae}")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("UNKNOWN_VARIABLE"));
+
+        /* {amount} is the payment template's, not the renewal's. */
+        mvc.perform(put("/v1/nudge-templates/renewal").header("If-Match", "*")
+                        .contentType(MediaType.APPLICATION_JSON).content(PUT_BODY.formatted("Pay {amount}")))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("UNKNOWN_VARIABLE"));
+
+        mvc.perform(put("/v1/nudge-templates/renewal").header("If-Match", "*")
+                        .contentType(MediaType.APPLICATION_JSON).content(PUT_BODY.formatted("x".repeat(1001))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION"));
     }
 
     @Test
-    @DisplayName("an unknown template name is refused rather than silently stored")
+    @DisplayName("an unknown template name is a plain 404")
     void unknownTemplateIsRefused() throws Exception {
-        mvc.perform(put("/v1/nudge-templates/birthday")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"body\":\"Happy birthday {name}\"}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("NUDGE_TEMPLATE_UNKNOWN"));
+        mvc.perform(put("/v1/nudge-templates/birthday").header("If-Match", "*")
+                        .contentType(MediaType.APPLICATION_JSON).content(PUT_BODY.formatted("Happy birthday {name}")))
+                .andExpect(status().isNotFound());
+        mvc.perform(delete("/v1/nudge-templates/birthday")).andExpect(status().isNotFound());
     }
 
     @Test
     @DisplayName("one trainer's wording is invisible to another")
     void overridesArePerTrainer() throws Exception {
-        mvc.perform(put("/v1/nudge-templates/check_in")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"body\":\"Yo {name}\"}"))
+        mvc.perform(put("/v1/nudge-templates/check_in").header("If-Match", "*")
+                        .contentType(MediaType.APPLICATION_JSON).content(PUT_BODY.formatted("Yo {name}")))
                 .andExpect(status().isOk());
 
         signedInAs(other);

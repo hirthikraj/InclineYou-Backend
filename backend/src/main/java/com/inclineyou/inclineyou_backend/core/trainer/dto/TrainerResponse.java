@@ -1,6 +1,5 @@
 package com.inclineyou.inclineyou_backend.core.trainer.dto;
 
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -15,7 +14,8 @@ public record TrainerResponse(
         List<String> certifications,
         List<String> languages,
         boolean setupComplete,
-        Instant setupCompletedAt,
+        /** Epoch ms; null until setup is finished (v1.1 — the ISO strings are gone). */
+        Long setupCompletedAt,
         String gymName,
         Map<String, Object> preferences,
         /* ---- identity (V33). Null means never answered. ---- */
@@ -60,5 +60,12 @@ public record TrainerResponse(
         /* ---- V6. Null means never asked; "undisclosed" is an answer. ---- */
         String gender,
         /* ---- V8. The directory place gymName was picked from; null for free text or no gym. ---- */
-        GymPlaceView gymPlace
+        GymPlaceView gymPlace,
+        /* ---- v1.1 (3 Oct). The person's consent, and the profile's version. ---- */
+        /** The privacy notice this person accepted (app_user — consent is on the person, R59). */
+        String privacyPolicyVersion,
+        /** Epoch ms of that acceptance — evidence, so it never moves on a retry. */
+        Long privacyAcceptedAt,
+        /** The later of trainer.updated_at and trainer_business.updated_at as epoch ms; also the ETag. */
+        String version
 ) {}

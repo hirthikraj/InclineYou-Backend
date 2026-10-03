@@ -5,7 +5,9 @@ import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.GymPlaceInput;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.TrainerResponse;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.UpdateTrainerRequest;
+import com.inclineyou.inclineyou_backend.infrastructure.config.AppProperties;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
+import com.inclineyou.inclineyou_backend.shared.wire.IfMatch;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -42,6 +44,10 @@ import java.util.UUID;
 public class TrainerService {
 
 
+    /** One line beside an avatar; the bio fits the 200 words it asks for. Refused over, never truncated. */
+    private static final int MAX_HEADLINE = 80;
+    private static final int MAX_BIO = 1200;
+
     private static final int MAX_LIST = 25;
     private static final int MAX_ITEM_LENGTH = 80;
 
@@ -65,6 +71,8 @@ public class TrainerService {
     private final TrainerBusinessRepository businessRepo;
     private final AppUserRepository appUserRepo;
     private final GymPlaceJdbcRepository gymPlaces;
+    private final TrainerJdbcRepository sql;
+    private final AppProperties props;
 
 
 
@@ -72,10 +80,16 @@ public class TrainerService {
         return toResponse(load(trainerId), loadBusiness(trainerId));
     }
 
+    /**
+     * {@code ifMatch} is honoured when sent — a PATCH sends only what changed, so a write
+     * without the header simply goes through — and a stale one is 412 before anything is touched.
+     */
     @Transactional
-    public TrainerResponse update(UUID trainerId, UpdateTrainerRequest req) {
+    public TrainerResponse update(UUID trainerId, UpdateTrainerRequest req, String ifMatch) {
         Trainer t = load(trainerId);
         TrainerBusiness b = loadBusiness(trainerId);
+        IfMatch.check(ifMatch, String.valueOf(sql.profileVersion(trainerId)),
+                "Your profile changed since you opened it. Reload and try again.");
 
         if (req.name() != null && !req.name().isBlank()) t.setName(trim(req.name(), 100));
         if (req.email() != null) {
@@ -83,9 +97,6 @@ public class TrainerService {
         }
         if (req.gender() != null) {
             t.setGender(req.gender().isBlank() ? null : gender(req.gender()));
-        }
-        if (Boolean.TRUE.equals(req.completeSetup()) && t.getSetupCompletedAt() == null) {
-            t.setSetupCompletedAt(Instant.now());
         }
 
         if (req.upiVpa() != null) b.setUpiVpa(req.upiVpa().isBlank() ? null : trim(req.upiVpa(), 100));
@@ -119,12 +130,28 @@ public class TrainerService {
                 gymPlaces.adoptUnlinked(trainerId, id, before, place.name());
             }
         }
-        // `trainer_business_gym_needs_floor` refuses a gym name whose training
-        // modes don't include `gym_floor` — checked here so the trainer gets a
-        // sentence rather than a raw constraint violation from the UPDATE below.
+        // `trainer_business_gym_needs_floor` refuses a gym name whose training modes don't include
+        // `gym_floor`. Naming a gym without the floor is the trainer's mistake (400, a sentence);
+        // DROPPING the floor from a profile that has a gym is a decision, and it takes the gym with
+        // it in the same write — the save confirmation says so (v1.1).
         if (b.getGymName() != null
                 && (b.getTrainingModes() == null || !b.getTrainingModes().contains("gym_floor"))) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "GYM_NEEDS_FLOOR", "gymName: trainingModes must include gym_floor");
+            boolean namesAGym = (req.gymName() != null && !req.gymName().isBlank())
+                    || (req.gymPlace() != null && req.gymPlace().value() != null);
+            if (req.trainingModes() != null && !namesAGym) {
+                b.setGymName(null);
+                b.setGymPlaceId(null);
+            } else {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "GYM_NEEDS_FLOOR", "gymName: trainingModes must include gym_floor");
+            }
+        }
+        if (req.headline() != null && req.headline().length() > MAX_HEADLINE) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PROFILE_TOO_LONG",
+                    "headline: at most " + MAX_HEADLINE + " characters — shorten it, it is not cut for you");
+        }
+        if (req.bio() != null && req.bio().length() > MAX_BIO) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "PROFILE_TOO_LONG",
+                    "bio: at most " + MAX_BIO + " characters — shorten it, it is not cut for you");
         }
         if (req.headline() != null) {
             b.setHeadline(req.headline().isBlank() ? null : req.headline());
@@ -147,9 +174,53 @@ public class TrainerService {
         if (req.preferences() != null) mergePrefs(t, req.preferences());
 
         Trainer saved = repo.save(t);
-        // Flushed, not merely saved: the place read-back below is policied by the row this writes.
+        // Flushed, not merely saved: the place read-back below is policied by the row this writes,
+        // and the version is read from the database's own updated_at after it.
         TrainerBusiness savedBusiness = businessRepo.saveAndFlush(b);
         return toResponse(saved, savedBusiness);
+    }
+
+    /**
+     * {@code POST /v1/trainers/me/setup/complete} — stamps {@code setup_completed_at} once. It is
+     * never un-stamped, and a second call answers 200 with the ORIGINAL instant: finishing setup is
+     * a fact about the trainer, not a toggle (v1.1 — it used to ride on PATCH as {@code completeSetup}).
+     */
+    @Transactional
+    public TrainerResponse completeSetup(UUID trainerId) {
+        Trainer t = load(trainerId);
+        if (t.getSetupCompletedAt() == null) repo.saveAndFlush(stampSetup(t));
+        return toResponse(load(trainerId), loadBusiness(trainerId));
+    }
+
+    private Trainer stampSetup(Trainer t) {
+        t.setSetupCompletedAt(Instant.now());
+        return t;
+    }
+
+    /**
+     * {@code POST /v1/trainers/me/consent} — accept the privacy notice in force. The pair
+     * ({@code privacy_policy_version}, {@code privacy_accepted_at}) lives on {@code app_user}: consent
+     * belongs to the person, not to the trainer row (R59), and the schema's
+     * {@code app_user_privacy_pair} check makes it one write. Accepting the version already accepted
+     * is 200 and keeps the original date — the date is evidence and must not move on a retry. Any
+     * version other than the one in force is {@code CONSENT_REQUIRED}: the screen was stale.
+     */
+    @Transactional
+    public TrainerResponse acceptPrivacy(UUID trainerId, String policyVersion) {
+        String inForce = props.getPrivacy().getPolicyVersion();
+        if (policyVersion == null || !policyVersion.strip().equals(inForce)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "CONSENT_REQUIRED",
+                    "policyVersion: the privacy notice in force is " + inForce + ". Reload the notice and accept that one.");
+        }
+        Trainer t = load(trainerId);
+        AppUser user = appUserRepo.findById(t.getAppUserId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
+        if (!inForce.equals(user.getPrivacyPolicyVersion()) || user.getPrivacyAcceptedAt() == null) {
+            user.setPrivacyPolicyVersion(inForce);
+            user.setPrivacyAcceptedAt(Instant.now());
+            appUserRepo.saveAndFlush(user);
+        }
+        return toResponse(t, loadBusiness(trainerId));
     }
 
     /** Trims, and refuses what the directory could not hold — checked here so the trainer meets a sentence. */
@@ -193,9 +264,8 @@ public class TrainerService {
                         "trainer_business missing for trainer " + trainerId));
     }
 
-    private String phoneOf(Trainer t) {
+    private AppUser appUserOf(Trainer t) {
         return appUserRepo.findById(t.getAppUserId())
-                .map(AppUser::getPhone)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
     }
 
@@ -281,9 +351,10 @@ public class TrainerService {
     }
 
     private TrainerResponse toResponse(Trainer t, TrainerBusiness b) {
+        AppUser user = appUserOf(t);
         return new TrainerResponse(
                 t.getId().toString(),
-                phoneOf(t),
+                user.getPhone(),
                 t.getName(),
                 b.getUpiVpa(),
                 b.getExperienceBand(),
@@ -291,7 +362,7 @@ public class TrainerService {
                 orEmpty(b.getCertifications()),
                 orEmpty(b.getLanguages()),
                 t.getSetupCompletedAt() != null,
-                t.getSetupCompletedAt(),
+                t.getSetupCompletedAt() == null ? null : t.getSetupCompletedAt().toEpochMilli(),
                 b.getGymName(),
                 prefsOf(t),
                 b.getHeadline(),
@@ -307,7 +378,10 @@ public class TrainerService {
                 SocialLink.handleOf(b.getYoutubeUrl()),
                 t.getEmail(),
                 t.getGender(),
-                gymPlaces.find(b.getGymPlaceId()).orElse(null)
+                gymPlaces.find(b.getGymPlaceId()).orElse(null),
+                user.getPrivacyPolicyVersion(),
+                user.getPrivacyAcceptedAt() == null ? null : user.getPrivacyAcceptedAt().toEpochMilli(),
+                String.valueOf(sql.profileVersion(t.getId()))
         );
     }
 

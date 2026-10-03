@@ -22,6 +22,7 @@ public class AppProperties {
     private Tenant tenant = new Tenant();
     private Database database = new Database();
     private Security security = new Security();
+    private Privacy privacy = new Privacy();
 
     /**
      * Transport security — the parts of it that are ours rather than the
@@ -133,6 +134,19 @@ public class AppProperties {
     public static class Jwt {
         private String secret;
         private int expiryMinutes;
+    }
+
+    /**
+     * The privacy notice in force. {@code POST /v1/trainers/me/consent} accepts
+     * exactly this version and refuses any other with {@code CONSENT_REQUIRED}: a
+     * screen showing an older notice is stale, and recording consent to words the
+     * person was not shown is not consent. A new notice is a config change, and
+     * every trainer is then asked once more.
+     */
+    @Getter
+    @Setter
+    public static class Privacy {
+        private String policyVersion = "2026-09";
     }
 
     @Getter

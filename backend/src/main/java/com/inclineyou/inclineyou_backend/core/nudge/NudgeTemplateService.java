@@ -1,58 +1,57 @@
 package com.inclineyou.inclineyou_backend.core.nudge;
 
+import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
+import com.inclineyou.inclineyou_backend.shared.wire.IfMatch;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * The template library — the trainer's own wording for each of the eight nudges.
  *
  * <h2>An OVERRIDE table, not a seeded one</h2>
  *
- * A trainer who has never opened this screen has no rows here at all, and every
- * button in the app sends {@link NudgeTemplateCatalog}'s default. Seeding eight
- * rows on signup was the obvious alternative and it is the wrong one: it freezes
- * today's copy into every account that ever existed, so improving a default
- * sentence — and these are sentences a trainer sends to somebody they see three
- * times a week — would reach nobody. Resetting a template is a DELETE for the
- * same reason: it puts the trainer back on the live default rather than on a copy
- * of whatever the default happened to be the day they signed up.
+ * A trainer who has never opened this screen has no rows, and every button in the app sends
+ * {@link NudgeTemplateCatalog}'s default. Seeding eight rows on signup would freeze today's copy
+ * into every account, so improving a default sentence would reach nobody; resetting is a DELETE for
+ * the same reason — it puts the trainer back on the live default.
  *
- * <h2>What the read returns, and why it is not just the bodies</h2>
+ * <h2>Versions</h2>
  *
- * {@code GET} merges the catalogue with the overrides and returns all eight,
- * every one carrying its label, its purpose, its variables and whether the body
- * is the trainer's or the built-in. The web holds NO copy of any of it. That is
- * the point: the resend ladder in this product exists in three places and the
- * root {@code CLAUDE.md} opens with the warning, so a ninth template — or a
- * reworded default — is a backend change and nothing else.
+ * A template's {@code version} is its override row's {@code updated_at} as epoch ms, and
+ * {@code null} while it is the built-in wording. A PUT replaces the whole body, so it must carry
+ * {@code If-Match}: the version it read, or {@code *} to create the first override (412 if somebody
+ * else already did).
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class NudgeTemplateService {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final NudgeTemplateJdbcRepository repo;
+
+    /** Six sentences, not an essay: a reminder that has to be scrolled gets skimmed. */
+    public static final int MAX_BODY = 1000;
+
+    /** The library's order — the nudge_template_name check's, which is the contract's. */
+    private static final List<String> ORDER = List.of("payment_reminder", "renewal", "missed_session",
+            "re_engagement", "session_reminder", "session_summary", "well_done", "check_in");
+
+    private static final Pattern TOKEN = Pattern.compile("\\{[^{}\\s]*}");
 
     /**
-     * Long enough for six sentences, short enough that nobody pastes an essay.
-     * A reminder that has to be scrolled is a reminder that gets skimmed.
-     */
-    public static final int MAX_BODY = 600;
-
-    /**
-     * @param body       the wording that will actually be sent
-     * @param isDefault  false once the trainer has saved their own. The editor
-     *                   draws *Reset* only when this is false, which is the only
-     *                   honest way to offer it — a Reset on an untouched template
-     *                   is a button that does nothing.
+     * @param isDefault false once the trainer has saved their own — the editor draws Reset only then.
+     * @param version   the override's version, null while built-in.
      */
     public record TemplateResponse(
             String name,
@@ -60,118 +59,107 @@ public class NudgeTemplateService {
             String purpose,
             String body,
             boolean isDefault,
-            List<VariableResponse> variables
+            List<VariableResponse> variables,
+            String version
     ) {}
 
-    public record VariableResponse(String token, String meaning) {}
+    /** {@code label} is the contract's word; {@code meaning} is what 1.0 called it and stays for old callers. */
+    public record VariableResponse(String token, String label, String meaning) {}
 
     public record SaveTemplateRequest(String body) {}
 
     /* ── read ─────────────────────────────────────────────────────────────── */
 
+    /** All eight, always, in the library's order. */
     public List<TemplateResponse> list(UUID trainerId) {
-        Map<String, String> overrides = overridesFor(trainerId);
+        Map<String, NudgeTemplateJdbcRepository.Override> overrides = repo.overrides(trainerId);
         List<TemplateResponse> out = new ArrayList<>();
+        for (String name : ORDER) {
+            var t = NudgeTemplateCatalog.find(name);
+            if (t != null) out.add(row(t, overrides.get(name)));
+        }
+        // A template the catalogue grows before ORDER does still shows, after the eight.
         for (var t : NudgeTemplateCatalog.all()) {
-            String override = overrides.get(t.name());
-            out.add(new TemplateResponse(
-                    t.name(),
-                    t.label(),
-                    t.purpose(),
-                    override != null ? override : t.body(),
-                    override == null,
-                    t.variables().stream()
-                            .map(v -> new VariableResponse(v.token(), v.meaning()))
-                            .toList()
-            ));
+            if (!ORDER.contains(t.name())) out.add(row(t, overrides.get(t.name())));
         }
         return out;
     }
 
+    /** The list's ETag: every version, in order — it changes when any one template does. */
+    public static String listVersion(List<TemplateResponse> rows) {
+        return Integer.toHexString(rows.stream().map(r -> r.name() + ":" + r.version()).collect(Collectors.joining("|")).hashCode());
+    }
+
     /**
-     * Every override this trainer has, by template name. Read whole rather than
-     * one at a time: there are at most eight rows, and {@link NudgeService}
-     * needs exactly one of them per send — a per-name query there would be one
-     * round trip on the hot path to save reading seven short strings.
+     * Every override's wording by name — what {@link NudgeService} renders from. Read whole: there
+     * are at most eight, and a per-name query on the hot path would save reading seven short strings.
      */
     public Map<String, String> overridesFor(UUID trainerId) {
-        Map<String, String> out = new HashMap<>();
-        jdbc.query("""
-                SELECT name, body FROM nudge_template
-                WHERE trainer_id = :tid::uuid AND deleted_at IS NULL
-                """,
-                Map.of("tid", trainerId.toString()),
-                rs -> { out.put(rs.getString("name"), rs.getString("body")); });
-        return out;
+        return repo.overrides(trainerId).entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().body()));
     }
 
     /* ── write ────────────────────────────────────────────────────────────── */
 
     /**
-     * Save the trainer's wording for one template.
+     * Reword one template. {@code ifMatch} is required (428); {@code *} means "there is no override
+     * yet" and is a 412 if there is one. Unknown name is a 404; a blank body 400 {@code VALIDATION};
+     * a {@code {token}} the template does not fill 400 {@code UNKNOWN_VARIABLE}.
      *
-     * <p>An upsert on {@code (trainer_id, name)} — the unique index V32 declares —
-     * so saving twice is one row and the second save is not a conflict. The name
-     * is checked against the catalogue rather than stored freely: an override for
-     * a template nothing sends is a row the trainer edits and never sees used.
-     *
-     * <p>The body is NOT validated for which variables it contains. A trainer who
-     * deletes {@code {amount}} from the payment reminder has written a payment
-     * reminder that does not name the figure, which is a legitimate thing to
-     * want; and an unknown token is left in the message verbatim rather than
-     * blanked, so a typo shows up as itself in the WhatsApp composer where the
-     * trainer can see it before they press send. Rendering silently is how a
-     * client receives "Hi , you owe .".
+     * <p>Unknown tokens are refused rather than left in the message: the library is edited months
+     * before it is read back, and a "{nmae}" caught here is one that never reaches a client.
      */
-    public TemplateResponse save(UUID trainerId, String name, String rawBody) {
+    @Transactional
+    public TemplateResponse save(UUID trainerId, String name, String rawBody, String ifMatch) {
         var template = NudgeTemplateCatalog.find(name);
-        if (template == null) throw NudgeRuleException.unknownTemplate(name);
+        if (template == null) throw ApiException.notFound("There is no template called \"" + name + "\".");
+        IfMatch.require(ifMatch, "this template");
 
-        String body = rawBody == null ? "" : rawBody.trim();
-        if (body.isEmpty()) throw NudgeRuleException.emptyBody();
-        if (body.length() > MAX_BODY) throw NudgeRuleException.bodyTooLong(MAX_BODY);
+        var current = repo.overrides(trainerId).get(name);
+        if ("*".equals(ifMatch.strip())) {
+            if (current != null) throw precondition("You already reworded this message — reload to see it.");
+        } else if (current == null || IfMatch.stale(ifMatch, String.valueOf(current.version()))) {
+            throw precondition("This message changed since you opened it — reload to see the latest.");
+        }
 
-        jdbc.update("""
-                INSERT INTO nudge_template (trainer_id, name, body)
-                VALUES (:tid::uuid, :name, :body)
-                ON CONFLICT (trainer_id, name) WHERE deleted_at IS NULL
-                DO UPDATE SET body = EXCLUDED.body, updated_at = NOW()
-                """, Map.of(
-                "tid", trainerId.toString(),
-                "name", name,
-                "body", body
-        ));
+        String body = rawBody == null ? "" : rawBody.strip();
+        if (body.isEmpty()) throw ApiException.validation("body: a template needs some words in it — use Reset to go back to the default");
+        if (body.length() > MAX_BODY) throw ApiException.validation("body: keep it under " + MAX_BODY + " characters — a long reminder does not get read");
+        Set<String> allowed = template.variables().stream().map(NudgeTemplateCatalog.Variable::token).collect(Collectors.toSet());
+        Matcher m = TOKEN.matcher(body);
+        while (m.find()) {
+            if (!allowed.contains(m.group())) {
+                throw new ApiException(org.springframework.http.HttpStatus.BAD_REQUEST, "UNKNOWN_VARIABLE",
+                        m.group() + " is not something this message fills in. You can use: "
+                                + String.join(" ", template.variables().stream().map(NudgeTemplateCatalog.Variable::token).toList()));
+            }
+        }
+
+        long version = repo.upsert(trainerId, name, body);
         log.info("nudge template saved trainer={} template={}", trainerId, name);
-
-        return new TemplateResponse(
-                template.name(), template.label(), template.purpose(), body, false,
-                template.variables().stream()
-                        .map(v -> new VariableResponse(v.token(), v.meaning()))
-                        .toList());
+        return row(template, new NudgeTemplateJdbcRepository.Override(body, version));
     }
 
     /**
-     * Back to the built-in wording.
-     *
-     * <p>A SOFT delete, like everything else in this schema, and idempotent: a
-     * reset on a template that was never overridden answers with the default and
-     * writes nothing. There is no 404 here — "put it back how it was" cannot
-     * meaningfully fail, and answering a no-op with an error would make the
-     * button look broken on the one press where it had nothing to do.
+     * Back to the built-in wording. Idempotent — resetting a template with no override is 200 with the
+     * default, because "put it back how it was" cannot meaningfully fail.
      */
+    @Transactional
     public TemplateResponse reset(UUID trainerId, String name) {
         var template = NudgeTemplateCatalog.find(name);
-        if (template == null) throw NudgeRuleException.unknownTemplate(name);
+        if (template == null) throw ApiException.notFound("There is no template called \"" + name + "\".");
+        repo.delete(trainerId, name);
+        return row(template, null);
+    }
 
-        jdbc.update("""
-                UPDATE nudge_template SET deleted_at = NOW(), updated_at = NOW()
-                WHERE trainer_id = :tid::uuid AND name = :name AND deleted_at IS NULL
-                """, Map.of("tid", trainerId.toString(), "name", name));
+    private static TemplateResponse row(NudgeTemplateCatalog.Template t, NudgeTemplateJdbcRepository.Override o) {
+        return new TemplateResponse(t.name(), t.label(), t.purpose(),
+                o != null ? o.body() : t.body(), o == null,
+                t.variables().stream().map(v -> new VariableResponse(v.token(), v.meaning(), v.meaning())).toList(),
+                o == null ? null : String.valueOf(o.version()));
+    }
 
-        return new TemplateResponse(
-                template.name(), template.label(), template.purpose(), template.body(), true,
-                template.variables().stream()
-                        .map(v -> new VariableResponse(v.token(), v.meaning()))
-                        .toList());
+    private static ApiException precondition(String message) {
+        return new ApiException(org.springframework.http.HttpStatus.PRECONDITION_FAILED, "PRECONDITION_FAILED", message);
     }
 }

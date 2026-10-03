@@ -9,7 +9,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * {@code PATCH /v1/trainers/me}. Every field is nullable and means "leave it
+ * {@code PATCH /v1/trainers/me}. {@code completeSetup} and {@code acceptPrivacyPolicy} are NOT fields
+ * any more (v1.1): they are {@code POST …/setup/complete} and {@code POST …/consent}, and sending
+ * either is a 400 for an unknown key, so an old caller fails loudly instead of silently not consenting.
+ * Every field is nullable and means "leave it
  * alone"; {@code ""} clears a string and {@code []} clears a list. That already
  * carries all three states without {@code Patch<T>}, because an empty answer is
  * never a value any of these fields may hold.
@@ -21,12 +24,12 @@ public record UpdateTrainerRequest(
         List<String> specialities,
         List<String> certifications,
         List<String> languages,
-        Boolean completeSetup,
         String gymName,
         Map<String, Object> preferences,
         /* ---- identity (V33). Null leaves alone; "" clears. ---- */
-        @Size(max = 80, message = "at most 80 characters") String headline,
-        @Size(max = 1200, message = "at most 1200 characters") String bio,
+        /** At most 80 / 1200 after trimming — refused as PROFILE_TOO_LONG by the service, never truncated. */
+        String headline,
+        String bio,
         /** Any YouTube shape; stored canonical. "" clears. */
         String introVideoUrl,
         /* ---- where and how (V34). Null leaves alone; "" / [] clears. ---- */

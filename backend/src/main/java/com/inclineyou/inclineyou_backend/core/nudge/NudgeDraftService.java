@@ -43,6 +43,7 @@ public class NudgeDraftService {
     private final NamedParameterJdbcTemplate jdbc;
     private final PackageReadService packages;
     private final WorkspaceClock clock;
+    private final NudgeTemplateJdbcRepository templates;
 
     /**
      * {@code nudge_log.reason} derived from the template, so the caller never
@@ -180,10 +181,8 @@ public class NudgeDraftService {
 
     /** The trainer's own wording if they have one, else the built-in (nudge_template is an override). */
     private String overrideFor(UUID trainerId, String template) {
-        List<String> rows = jdbc.queryForList(
-                "SELECT body FROM nudge_template WHERE trainer_id = :tid::uuid AND template = :t",
-                Map.of("tid", trainerId.toString(), "t", template), String.class);
-        if (!rows.isEmpty()) return rows.getFirst();
+        var saved = templates.overrides(trainerId).get(template);
+        if (saved != null) return saved.body();
         var t = NudgeTemplateCatalog.find(template);
         return t != null ? t.body() : NudgeTemplateCatalog.FALLBACK_BODY;
     }

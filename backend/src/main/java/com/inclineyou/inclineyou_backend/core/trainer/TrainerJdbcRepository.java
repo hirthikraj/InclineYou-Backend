@@ -39,4 +39,36 @@ public class TrainerJdbcRepository {
                         rs.getString("start_hm"),
                         rs.getString("end_hm")));
     }
+
+    /**
+     * The profile's version: the later of the two rows' {@code updated_at}, as epoch ms.
+     * It is also the ETag. Read AFTER a write has been flushed — the database's
+     * {@code set_updated_at} trigger stamps {@code trainer_business}, and the entity in memory
+     * has never seen that value.
+     */
+    public long profileVersion(UUID trainerId) {
+        Long v = jdbc.queryForObject("""
+                SELECT (extract(epoch FROM greatest(t.updated_at, b.updated_at)) * 1000)::bigint
+                FROM trainer t JOIN trainer_business b ON b.trainer_id = t.id
+                WHERE t.id = :tid::uuid
+                """, Map.of("tid", trainerId.toString()), Long.class);
+        return v == null ? 0L : v;
+    }
+
+    /** Soft-deletes every live window on these weekdays — the first half of replacing a day. */
+    public void softDeleteDays(UUID trainerId, java.util.Collection<Integer> weekdays) {
+        if (weekdays.isEmpty()) return;
+        jdbc.update("""
+                UPDATE working_hours SET deleted_at = now()
+                WHERE trainer_id = :tid::uuid AND weekday IN (:days) AND deleted_at IS NULL
+                """, Map.of("tid", trainerId.toString(), "days", weekdays));
+    }
+
+    /** One window; {@code start}/{@code end} are {@code HH:mm} wall-clock times. */
+    public void insertWindow(UUID trainerId, int weekday, String start, String end) {
+        jdbc.update("""
+                INSERT INTO working_hours (trainer_id, weekday, start_time, end_time)
+                VALUES (:tid::uuid, :day, CAST(:start AS time), CAST(:end AS time))
+                """, Map.of("tid", trainerId.toString(), "day", weekday, "start", start, "end", end));
+    }
 }

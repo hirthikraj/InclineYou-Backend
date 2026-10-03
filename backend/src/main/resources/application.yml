@@ -132,6 +132,9 @@ app:
   jwt:
     secret: ${JWT_SECRET:dev-only-secret-change-before-production-32chars}
     expiry-minutes: 10080   # 7 days
+  privacy:
+    # The notice a trainer must have accepted (POST /v1/trainers/me/consent). One string, one place.
+    policy-version: ${PRIVACY_POLICY_VERSION:2026-09}
   otp:
     expiry-minutes: 10
     sms-enabled: false       # stub in dev; set true + configure provider in prod

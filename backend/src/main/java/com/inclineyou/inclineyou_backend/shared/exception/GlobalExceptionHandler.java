@@ -24,6 +24,9 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.exc.UnrecognizedPropertyException;
 
+import java.util.List;
+import java.util.Map;
+
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -32,7 +35,20 @@ public class GlobalExceptionHandler {
     ResponseEntity<ProblemDetail> handleApi(ApiException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
         if (ex.getCode() != null) pd.setProperty("code", ex.getCode());
+        if ("VALIDATION".equals(ex.getCode())) {
+            // Every refusal in this codebase is written "field: sentence"; the wire's errors[] is that, split.
+            var m = FIELD_SENTENCE.matcher(ex.getMessage() == null ? "" : ex.getMessage());
+            if (m.matches()) pd.setProperty("errors", List.of(error(m.group(1), "invalid", m.group(2))));
+        }
         return ResponseEntity.status(ex.getStatus()).body(pd);
+    }
+
+    private static final java.util.regex.Pattern FIELD_SENTENCE =
+            java.util.regex.Pattern.compile("^([A-Za-z][A-Za-z0-9_.\\[\\]]*): (.+)$", java.util.regex.Pattern.DOTALL);
+
+    /** One entry of a VALIDATION response's {@code errors[]} — a field, a machine code, a sentence. */
+    private static Map<String, String> error(String field, String code, String message) {
+        return Map.of("field", field, "code", code, "message", message);
     }
 
     @ExceptionHandler(InvalidOtpException.class)
@@ -220,6 +236,9 @@ public class GlobalExceptionHandler {
                 .orElse("Validation failed");
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail);
         pd.setProperty("code", "VALIDATION");
+        pd.setProperty("errors", ex.getBindingResult().getFieldErrors().stream()
+                .map(e -> error(e.getField(), e.getCode() == null ? "invalid" : e.getCode(), String.valueOf(e.getDefaultMessage())))
+                .toList());
         return pd;
     }
 
@@ -231,9 +250,12 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     ProblemDetail handleUnreadable(HttpMessageNotReadableException ex) {
         String detail;
+        Map<String, String> entry = null;
         if (ex.getCause() instanceof JacksonException je && !je.getPath().isEmpty()) {
-            detail = path(je) + (je instanceof UnrecognizedPropertyException
-                    ? ": not a field this route takes" : ": not a valid value");
+            boolean unknown = je instanceof UnrecognizedPropertyException;
+            detail = path(je) + (unknown ? ": not a field this route takes" : ": not a valid value");
+            entry = error(path(je), unknown ? "unknown_field" : "invalid",
+                    unknown ? "not a field this route takes" : "not a valid value");
         } else if (ex.getCause() == null) {
             detail = "body: required";
         } else {
@@ -241,6 +263,7 @@ public class GlobalExceptionHandler {
         }
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, detail);
         pd.setProperty("code", "VALIDATION");
+        if (entry != null) pd.setProperty("errors", List.of(entry));
         return pd;
     }
 
