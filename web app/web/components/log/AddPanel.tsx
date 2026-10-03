@@ -41,12 +41,17 @@ export function AddPanel({
   recents,
   library,
   already,
+  complete = true,
+  search,
   onPick,
   onClose,
 }: {
   recents: { exerciseId: string; name: string; meta: string; isCustom: boolean }[];
   library: { id: string; name: string; muscleGroup: string | null; isCustom: boolean }[];
   already: Set<string>;
+  /** False until the whole library has arrived; until then typing also asks the server (typed-ahead). */
+  complete?: boolean;
+  search?: (q: string) => Promise<{ id: string; name: string; muscleGroup: string | null; isCustom: boolean }[]>;
   onPick: (exerciseId: string) => void;
   onClose: () => void;
 }) {
@@ -73,12 +78,27 @@ export function AddPanel({
 
   const mine = useMemo(() => library.filter((e) => e.isCustom), [library]);
 
+  /* Typed-ahead, ONLY while the library is incomplete. With the whole library here the list above
+     answers every query locally (and the chips and the count are over the same list); this is the
+     fallback for the moment before it arrives, or if it never does. */
+  const [remote, setRemote] = useState<typeof library>([]);
+  useEffect(() => {
+    const q = query.trim();
+    if (complete || !search || q.length < 2) return;
+    let off = false;
+    const timer = setTimeout(() => { void search(q).then((rows) => { if (!off) setRemote(rows); }); }, 200);
+    return () => { off = true; clearTimeout(timer); };
+  }, [query, complete, search]);
+
   /* Searching is the fallback, not the front door — so it only takes over the
      list when there is something typed in it. */
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (q.length >= 2) {
-      return library.filter((e) => e.name.toLowerCase().includes(q)).slice(0, 40);
+      const local = library.filter((e) => e.name.toLowerCase().includes(q));
+      const seen = new Set(local.map((e) => e.id));
+      const ahead = complete ? [] : remote;
+      return [...local, ...ahead.filter((e) => !seen.has(e.id))].slice(0, 40);
     }
     if (filter === 'yours') return mine.slice(0, 40);
     if (filter === 'all') return library.slice(0, 40);
@@ -86,7 +106,7 @@ export function AddPanel({
       return library.filter((e) => e.muscleGroup === filter).slice(0, 40);
     }
     return null;
-  }, [query, filter, library, mine]);
+  }, [query, filter, library, mine, remote, complete]);
 
   const recentRows = recents.filter((r) => !already.has(r.exerciseId));
 

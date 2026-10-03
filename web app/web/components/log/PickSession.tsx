@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-import { startLog } from '@/lib/log/actions';
+import { startLog } from '@/lib/sessionlog/actions';
 import { isoDay, type PickRow, type PickView } from '@/lib/log/log';
 import { TopBar } from '@/components/shell/TopBar';
 import { Button } from '@/web-components/ui/Button';
@@ -45,10 +45,10 @@ export function PickSession({ data }: { data: PickView }) {
   /**
    * Starting a log, which is not marking a session done.
    *
-   * `POST /v1/workouts` and never `POST /v1/sessions/{id}/done` — the second
-   * would decrement the client's pack before a single set was typed, which is
-   * the rule this whole screen sits under: a pack moves on done or no-show,
-   * never on booked.
+   * `POST /v1/sessions/{id}/start` (or `POST /v1/sessions/walk-in` for the third
+   * group) and never `POST /v1/sessions/{id}/done` — the second would decrement
+   * the client's pack before a single set was typed, which is the rule this whole
+   * screen sits under: a pack moves on done or no-show, never on booked.
    */
   const start = (row: PickRow) => {
     setBusy(row.clientId);

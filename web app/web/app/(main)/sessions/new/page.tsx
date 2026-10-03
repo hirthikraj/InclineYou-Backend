@@ -1,6 +1,6 @@
 import { PickSession } from '@/components/log/PickSession';
 import { Unavailable } from '@/components/today/Unavailable';
-import { requirePicker } from '@/lib/log/guard';
+import { requirePicker } from '@/lib/sessionlog/guard';
 
 /** Frame 5a · `/sessions/new` — who is this for. Three groups, and the third
     needs no booking. */

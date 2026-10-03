@@ -3,7 +3,7 @@
 import { useCallback, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { closeLog } from '@/lib/log/actions';
+import { closeLog } from '@/lib/sessionlog/actions';
 import { Button } from '@/web-components/ui/Button';
 
 /**

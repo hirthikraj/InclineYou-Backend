@@ -4,7 +4,7 @@ import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-import { startLog } from '@/lib/log/actions';
+import { startLog } from '@/lib/sessionlog/actions';
 import { isoDay, stampDate } from '@/lib/log/log';
 import { TopBar } from '@/components/shell/TopBar';
 import { Play } from '@/components/shell/Icons';
@@ -19,8 +19,8 @@ import { Why } from '@/web-components/ui/Why';
  * 404 here would be the ordinary case rendered as a bug. `/sessions/:id/log` is
  * a place; arriving before the log exists just means the place is empty.
  *
- * **Starting one does not move the pack.** `POST /v1/workouts` and never
- * `POST /v1/sessions/{id}/done` — the second creates the same log AND
+ * **Starting one does not move the pack.** `POST /v1/sessions/{id}/start` and
+ * never `POST /v1/sessions/{id}/done` — the second closes the log AND
  * decrements the pack, and §09's rule is that a pack moves on *done* or
  * *no-show*, never on *booked*. The tap that moves it is on the finish screen,
  * after the sets are in.

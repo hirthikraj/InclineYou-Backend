@@ -2,7 +2,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import type { LogExerciseView, LogSetRow } from '@/lib/log/log';
+import type { LogExerciseViewX as LogExerciseView, LogSetRowX as LogSetRow } from '@/lib/sessionlog/select';
+import { EFFORT, LOAD } from '@/lib/sessionlog/kinds';
+import { effortHead, effortText, hasLoadBox, loadHead, loadText, parseEffort, parseLoad } from './kindfields';
 import { Trash } from './Icons';
 import { useDismiss } from '@/lib/ui/dismiss';
 import { Button } from '@/web-components/ui/Button';
@@ -42,14 +44,17 @@ export function SetPanel({
 }: {
   view: LogExerciseView;
   row: LogSetRow;
-  onSave: (values: { loadKg: number | null; reps: number | null; rpe: number | null; notes: string | null }) => void;
+  onSave: (values: { load: number | null; effort: number | null; rpe: number | null; notes: string | null }) => void;
   onDelete: () => void;
   onClose: () => void;
   busy: boolean;
   message: string | null;
 }) {
-  const [load, setLoad] = useState(row.load);
-  const [reps, setReps] = useState(row.reps);
+  // The boxes hold what is logged, in the set's own kind: `80`, `1:30`, `400`.
+  const [load, setLoad] = useState(loadText(row.loadValue));
+  const [reps, setReps] = useState(effortText(row.effortKind, row.effortValue));
+  const [localMessage, setLocalMessage] = useState<string | null>(null);
+  const loadBox = hasLoadBox(row.loadKind, row.effortKind);
   const [rpe, setRpe] = useState<number | null>(row.rpe);
   const [note, setNote] = useState(row.note ?? '');
   const first = useRef<HTMLInputElement | null>(null);
@@ -70,11 +75,6 @@ export function SetPanel({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [dismiss]);
-
-  const number = (raw: string) => {
-    const value = Number.parseFloat(raw.replace(',', '.'));
-    return Number.isFinite(value) ? value : null;
-  };
 
   return (
     <>
@@ -97,13 +97,13 @@ export function SetPanel({
 
         <div className="panel__body">
           <div className="grid2">
-            {view.logType === 'weight_reps' ? (
+            {loadBox ? (
               <TextField
-                label="Load kg"
+                label={loadHead(row.loadKind)}
                 id="set-load"
                 numeric
                 ref={first}
-                inputMode="decimal"
+                inputMode={LOAD[row.loadKind].inputMode}
                 value={load}
                 onChange={(e) => setLoad(e.target.value)}
               />
@@ -116,11 +116,11 @@ export function SetPanel({
               </div>
             )}
             <TextField
-              label="Reps"
+              label={effortHead(row.effortKind)}
               id="set-reps"
               numeric
-              ref={view.logType === 'weight_reps' ? undefined : first}
-              inputMode="numeric"
+              ref={loadBox ? undefined : first}
+              inputMode={EFFORT[row.effortKind].inputMode}
               value={reps}
               onChange={(e) => setReps(e.target.value)}
             />
@@ -158,8 +158,8 @@ export function SetPanel({
             not in an inbox.
           </p>
 
-          {message ? (
-            <p className="msg msg--err" style={{ marginTop: 14 }} role="alert">{message}</p>
+          {localMessage ?? message ? (
+            <p className="msg msg--err" style={{ marginTop: 14 }} role="alert">{localMessage ?? message}</p>
           ) : null}
 
           <div style={{ marginTop: 22, borderTop: '1px solid var(--tx-line)', paddingTop: 14 }}>
@@ -188,14 +188,21 @@ export function SetPanel({
           <Button
             variant="primary"
             disabled={busy}
-            onClick={() =>
+            onClick={() => {
+              // Each box is read as its own kind's number (`1:30` is a time, `70` a percentage); a box that
+              // cannot be one is said in a sentence here and nothing is sent.
+              const l = loadBox ? parseLoad(row.loadKind, load) : ({ ok: true, value: null } as const);
+              const e = parseEffort(row.effortKind, reps);
+              const bad = [l, e].find((p) => !p.ok);
+              if (bad && !bad.ok) { setLocalMessage(bad.message); return; }
+              setLocalMessage(null);
               onSave({
-                loadKg: view.logType === 'weight_reps' ? number(load) : null,
-                reps: number(reps),
+                load: l.ok ? l.value : null,
+                effort: e.ok ? e.value : null,
                 rpe,
                 notes: note.trim() || null,
-              })
-            }
+              });
+            }}
           >
             {busy ? 'Saving…' : 'Save the set'}
           </Button>

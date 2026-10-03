@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 
 import { SessionDetail } from '@/components/sessions/SessionDetail';
 import { Unavailable } from '@/components/today/Unavailable';
-import { requireSessionDetail } from '@/lib/sessions/guard';
+import { requireSessionDetail } from '@/lib/sessionlog/detail';
 
 export const dynamic = 'force-dynamic';
 

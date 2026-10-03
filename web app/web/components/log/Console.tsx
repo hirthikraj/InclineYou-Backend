@@ -1,15 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 
-import type { ConsoleData } from '@/lib/log/api';
-import type { LogExerciseView, LogSetRow } from '@/lib/log/log';
 import { floorTime, stampDate } from '@/lib/log/log';
-import { addExercise, deleteSet, logSet, setRest, swapExercise, updateSet } from '@/lib/log/actions';
-import type { SwapScope } from '@/lib/log/result';
-import { UNDO_SECONDS } from '@/lib/log/result';
+import type { ConsoleDataX } from '@/lib/sessionlog/api';
+import {
+  addExerciseRow, addSet, exerciseLibrary, exerciseSearch, patchExerciseRow, patchSet, removeSet,
+  swapExercise, swapExerciseRow,
+  type SwapScope,
+} from '@/lib/sessionlog/actions';
+import { UNDO_SECONDS } from '@/lib/sessionlog/result';
+import {
+  applyExercise, applySetAdded, applySetDeleted, applySetWrite, buildConsoleView, buildTimelines, totalsOf,
+  type LogExerciseViewX as LogExerciseView, type LogSetRowX as LogSetRow,
+} from '@/lib/sessionlog/select';
+import type { EffortKind, LoadKind, LogWire, SetPatch, SetWire } from '@/lib/sessionlog/wire';
 import { TopBar } from '@/components/shell/TopBar';
 import { AddPanel } from './AddPanel';
 import { ExerciseList } from './ExerciseList';
@@ -17,6 +24,7 @@ import { ExerciseTimeline, HistorySheet, RecordCard } from './RecordCard';
 import { FinishLog } from './FinishLog';
 import { Chart, Dots, Info, Tick, Warn } from './Icons';
 import { Keys } from './Keys';
+import { hasLoadBox, tickNeedsNumber } from './kindfields';
 import { SetGrid, draftKey, readDraft, type Draft } from './SetGrid';
 import { SetPanel } from './SetPanel';
 import { SwapModal } from './SwapModal';
@@ -102,6 +110,18 @@ function withExtraSlots(view: LogExerciseView, extra: number): LogExerciseView {
       note: null,
       done: false,
       pr: false,
+      /* A slot that exists only in this tab: no row behind it yet (`planSetId` null), so logging it
+         ADDS a set, in the kinds the card is already counted in. */
+      planSetId: null,
+      loadKind: view.loadKind,
+      effortKind: view.effortKind,
+      planned: false,
+      target: null,
+      loadValue: null,
+      effortValue: null,
+      doneAt: null,
+      said: '',
+      targetSaid: '',
     });
   }
   return { ...view, sets, complete: false };
@@ -140,20 +160,70 @@ interface Rest {
 interface Deleted {
   exerciseId: string;
   setNumber: number;
-  loadKg: number | null;
-  reps: number | null;
+  /** What the set held, in its own kinds — Undo writes exactly this back. */
+  loadValue: number | null;
+  effortValue: number | null;
   rpe: number | null;
   notes: string | null;
+  /** A planned set is un-logged (the slot stays); an extra one is deleted (the row goes). Undo reverses whichever. */
+  planned: boolean;
+  planSetId: string | null;
+  sxId: string;
+  loadKind: LoadKind;
+  effortKind: EffortKind;
   at: number;
 }
 
-export function Console({ data }: { data: ConsoleData }) {
-  const router = useRouter();
-  const params = useSearchParams();
-  const [, startTransition] = useTransition();
+/** One set's row in the log, found by id — what an optimistic write snapshots and a failed one restores. */
+function findSet(log: LogWire, id: string): SetWire | undefined {
+  for (const e of log.exercises) {
+    const hit = e.sets.find((s) => s.id === id);
+    if (hit) return hit;
+  }
+  return undefined;
+}
 
-  const { view } = data;
-  const exercises = view.exercises;
+/** Swap one set row in place and take the totals from the sets — the same definitions the server's aggregate uses. */
+function putSet(log: LogWire, id: string, next: SetWire): LogWire {
+  const exercises = log.exercises.map((e) =>
+    e.sets.some((s) => s.id === id) ? { ...e, sets: e.sets.map((s) => (s.id === id ? next : s)) } : e,
+  );
+  return { ...log, exercises, totals: totalsOf(exercises) };
+}
+
+export function Console({ data }: { data: ConsoleDataX }) {
+  const params = useSearchParams();
+
+  /* ── THE LOG LIVES IN THIS TAB, AND A WRITE UPDATES IT IN PLACE ───────────────────
+     The page read the log once (`data.state`); every write below answers a small body
+     — the row, the totals — and is merged into this copy, and the view is rebuilt from
+     it by the same adapter that built the first one. Nothing here re-reads the page
+     after a write: a tap is one request, and the screen does not wait for a second.
+
+     `logRef` is the copy a write reads, and `update` is the only thing that changes it,
+     synchronously — so two answers arriving out of order each merge into the LATEST log
+     rather than into the one their request started from, which is what makes a fast
+     second tap safe. The state beside it is only what React renders. */
+  const sessionId = data.routeId;
+  const logRef = useRef<LogWire>(data.state.log);
+  const [log, setLogState] = useState<LogWire>(data.state.log);
+  const update = useCallback((fn: (l: LogWire) => LogWire) => {
+    const next = fn(logRef.current);
+    logRef.current = next;
+    setLogState(next);
+  }, []);
+  /* A rest chosen this session, for a card whose planned sets are all done: the server changes the
+     rest of the sets still to do, and there are none, so the strip would keep saying the old one. */
+  const [restLocal, setRestLocal] = useState<Record<string, number>>({});
+
+  const history = data.state.history;
+  const ctx = data.state.ctx;
+  const view = useMemo(() => buildConsoleView(log, history, ctx) ?? data.view, [log, history, ctx, data.view]);
+  const timelines = useMemo(() => buildTimelines(log, history, ctx), [log, history, ctx]);
+  const exercises = useMemo(
+    () => view.exercises.map((e) => (restLocal[e.exerciseId] ? { ...e, restSeconds: restLocal[e.exerciseId] } : e)),
+    [view.exercises, restLocal],
+  );
 
   const current =
     params.get('ex') && exercises.some((e) => e.exerciseId === params.get('ex'))
@@ -164,6 +234,9 @@ export function Console({ data }: { data: ConsoleData }) {
 
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [busy, setBusy] = useState<Set<string>>(new Set());
+  /* The same keys, readable synchronously: a second Enter or tap on a set whose write is still in
+     flight is ignored rather than queued, so a set is never written twice or answered out of order. */
+  const inflight = useRef<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [extra, setExtra] = useState<Record<string, number>>({});
   const [deleted, setDeleted] = useState<Deleted | null>(null);
@@ -172,6 +245,24 @@ export function Console({ data }: { data: ConsoleData }) {
   const [remaining, setRemaining] = useState(0);
   const [panelMessage, setPanelMessage] = useState<string | null>(null);
   const [swapping, setSwapping] = useState(false);
+  /* The add and swap panels search the WHOLE library (their chips and their count are over it), so it is
+     fetched once, here, after the console is up — never by the page. Until it arrives they hold the first
+     page and ask the server as the trainer types. */
+  const [library, setLibrary] = useState(data.library);
+  const [libraryComplete, setLibraryComplete] = useState(false);
+  useEffect(() => {
+    let off = false;
+    void exerciseLibrary().then((res) => {
+      if (off || !res.ok || res.data.length === 0) return;
+      setLibrary(res.data);
+      setLibraryComplete(true);
+    });
+    return () => { off = true; };
+  }, []);
+  const searchLibrary = useCallback(async (q: string) => {
+    const res = await exerciseSearch(q);
+    return res.ok ? res.data : [];
+  }, []);
   const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => () => clearTimeout(undoTimer.current), []);
@@ -252,18 +343,24 @@ export function Console({ data }: { data: ConsoleData }) {
         else next.set(key, value);
       }
       const query = next.toString();
-      router.replace(`/sessions/${data.routeId}/log${query ? `?${query}` : ''}`, { scroll: false });
+      /* `replaceState`, not `router.replace`: moving focus or opening a panel is not a reason to ask
+         the server for the page again, and the log is already here. Next folds the call into
+         `useSearchParams`, so everything that reads the URL still sees it. */
+      window.history.replaceState(null, '', `/sessions/${data.routeId}/log${query ? `?${query}` : ''}`);
     },
-    [params, router, data.routeId],
+    [params, data.routeId],
   );
 
-  const mark = (key: string, on: boolean) =>
+  const mark = (key: string, on: boolean) => {
+    if (on) inflight.current.add(key);
+    else inflight.current.delete(key);
     setBusy((held) => {
       const next = new Set(held);
       if (on) next.add(key);
       else next.delete(key);
       return next;
     });
+  };
 
   const say = (key: string, message: string | null) =>
     setErrors((held) => {
@@ -275,37 +372,124 @@ export function Console({ data }: { data: ConsoleData }) {
 
   /* ── one set ───────────────────────────────────────────────────────────── */
 
+  /** The totals, from the sets — the definitions the server's aggregate uses — after a row was merged in. */
+  const settle = (l: LogWire): LogWire => ({ ...l, totals: totalsOf(l.exercises) });
+
+  /**
+   * THE ONE PLACE A SET IS WRITTEN. A tick, Enter in a field and the panel's Save all end here.
+   *
+   * Which route it is follows what the slot IS, not what the trainer did:
+   *   · a row that is already logged → a CORRECTION, `PATCH {values}`, `done_at` untouched;
+   *   · a planned slot not yet logged → `PATCH {done: true, values}` — the values being what is typed
+   *     or what the field offers (last time's numbers); with neither, NOTHING is written and the row
+   *     says 'Put a number in the row before ticking it.' exactly as the original console did;
+   *   · a slot with no row behind it (an extra one) → `POST …/sets`, in the kinds the card is in.
+   *
+   * The row is changed in place first and put back if the server says no, so the tick is as quick
+   * as the screen has ever drawn it and a refusal still leaves nothing half-written on it.
+   */
+  const saveSet = useCallback(
+    async (
+      exerciseId: string,
+      row: LogSetRow,
+      input: { load: number | null; effort: number | null; rpe: number | null; notes?: string | null },
+    ): Promise<
+      | { ok: true; logged: boolean }
+      | { ok: false; message: string; needsValue?: boolean }
+    > => {
+      const exercise = exercises.find((e) => e.exerciseId === exerciseId);
+      if (!exercise) return { ok: false, message: 'That exercise is no longer on today’s card. Reload the session.' };
+      const hasLoad = hasLoadBox(row.loadKind, row.effortKind);
+      const nothing = input.load === null && input.effort === null;
+      const NOTHING = 'Put a number in the row before ticking it.';
+
+      if (row.planSetId) {
+        const id = row.planSetId;
+        const before = findSet(logRef.current, id);
+        if (!before) return { ok: false, message: 'That set is no longer there. Reload the session.' };
+        const wasDone = before.doneAt !== null;
+        // The old console's rule, kept: a planned slot with nothing typed and no last-time numbers to
+        // take is NOT written — the plan's own target is never silently logged by a tick.
+        if (tickNeedsNumber(wasDone, { load: input.load, effort: input.effort })) return { ok: false, message: NOTHING };
+
+        const body: SetPatch = {};
+        if (wasDone) {
+          if (hasLoad) body.loadValue = input.load;
+          body.effortValue = input.effort;
+          body.rpe = input.rpe;
+        } else {
+          body.done = true;
+          if (input.load !== null) body.loadValue = input.load;
+          if (input.effort !== null) body.effortValue = input.effort;
+          if (input.rpe !== null) body.rpe = input.rpe;
+        }
+        if (input.notes !== undefined) body.notes = input.notes;
+
+        update((l) =>
+          putSet(l, id, {
+            ...before,
+            doneAt: wasDone ? before.doneAt : Date.now(),
+            loadValue: wasDone ? (hasLoad ? input.load : before.loadValue) : input.load,
+            effortValue: wasDone ? input.effort : input.effort,
+            rpe: wasDone ? input.rpe : input.rpe,
+            notes: input.notes !== undefined ? input.notes : before.notes,
+          }),
+        );
+        const res = await patchSet(sessionId, id, body);
+        if (!res.ok) {
+          update((l) => putSet(l, id, before));
+          return { ok: false, message: res.message, needsValue: res.needsValue };
+        }
+        update((l) => settle(applySetWrite(l, res.data)));
+        return { ok: true, logged: !wasDone };
+      }
+
+      // No row behind this slot: it is an extra set.
+      if (nothing) return { ok: false, message: NOTHING };
+      const res = await addSet(sessionId, exercise.sxId, {
+        id: crypto.randomUUID(),
+        ...(input.load !== null && hasLoad ? { loadValue: input.load } : {}),
+        ...(input.effort !== null ? { effortValue: input.effort } : {}),
+        ...(input.rpe !== null ? { rpe: input.rpe } : {}),
+        ...(input.notes ? { notes: input.notes } : {}),
+        done: true,
+        loadKind: row.loadKind,
+        effortKind: row.effortKind,
+      });
+      if (!res.ok) return { ok: false, message: res.message };
+      update((l) => settle(applySetAdded(l, exercise.sxId, res.data)));
+      // The slot this tab had imagined is a real row now, so it stops being counted as an extra one.
+      setExtra((held) => ({ ...held, [exerciseId]: Math.max(0, (held[exerciseId] ?? 0) - 1) }));
+      return { ok: true, logged: true };
+    },
+    [exercises, sessionId, update],
+  );
+
   const commit = useCallback(
     (exerciseId: string, row: LogSetRow, values: Draft) => {
       const key = draftKey(exerciseId, row.number);
+      if (inflight.current.has(key)) return;
       const exercise = exercises.find((e) => e.exerciseId === exerciseId);
-      const { loadKg, reps, rpe } = readDraft(row, values, true);
+      const read = readDraft(row, values, true);
 
-      // A set with nothing in it is not a set. The row keeps its slot and says
-      // so, rather than posting a blank the history would have to explain.
-      if (reps == null && loadKg == null) {
-        say(key, 'Put a number in the row before ticking it.');
+      // A box that is not that kind's number is said in the row, and nothing is sent.
+      if (read.error) {
+        say(key, read.error);
         return;
       }
 
       say(key, null);
       mark(key, true);
-      startTransition(async () => {
-        const payload = {
-          routeId: data.routeId,
-          workoutId: view.workoutId,
-          exerciseId,
-          setNumber: row.number,
-          loadKg: exercise?.logType === 'reps' ? null : loadKg,
-          reps,
-          rpe,
-          notes: row.note,
-        };
-        const result = row.setId
-          ? await updateSet({ ...payload, setId: row.setId, clientId: view.clientId })
-          : await logSet(payload);
+      void (async () => {
+        const result = await saveSet(exerciseId, row, { load: read.load, effort: read.effort, rpe: read.rpe });
         mark(key, false);
         if (!result.ok) {
+          /* A set with nothing to copy and nothing typed is not an error to read out: the panel opens
+             so the numbers can be entered (R41's other half). */
+          if (result.needsValue) {
+            go({ ex: exerciseId, set: String(row.number) });
+            return;
+          }
           say(key, result.message);
           return;
         }
@@ -314,29 +498,42 @@ export function Console({ data }: { data: ConsoleData }) {
           delete next[key];
           return next;
         });
-        /* A new set was logged, so the rest begins — not on an edit to one that
-           already existed, which `row.setId` is exactly the test for. */
-        if (!row.setId) startRest(exercise);
-        router.refresh();
-      });
+        /* A new set was logged, so the rest begins — not on an edit to one that already was. */
+        if (result.logged) startRest(exercise);
+      })();
     },
-    [exercises, data.routeId, view.workoutId, view.clientId, router, startRest],
+    [exercises, saveSet, go, startRest],
   );
 
   const remove = useCallback(
     (exerciseId: string, row: LogSetRow) => {
-      if (!row.setId) return;
+      if (!row.setId || !row.planSetId) return;
       const key = draftKey(exerciseId, row.number);
+      if (inflight.current.has(key)) return;
+      const id = row.planSetId;
+      const before = findSet(logRef.current, id);
       mark(key, true);
-      startTransition(async () => {
-        const result = await deleteSet({
-          routeId: data.routeId,
-          workoutId: view.workoutId,
-          setId: row.setId as string,
-        });
+      void (async () => {
+        let failure: string | null = null;
+        if (row.planned) {
+          /* A planned set is SKIPPED, never deleted: the values clear and the row stays, so
+             "3 of 4 planned sets" is still true afterwards (R43). */
+          if (before) update((l) => putSet(l, id, { ...before, doneAt: null, loadValue: null, effortValue: null, rpe: null }));
+          const res = await patchSet(sessionId, id, { done: false });
+          if (res.ok) update((l) => settle(applySetWrite(l, res.data)));
+          else {
+            if (before) update((l) => putSet(l, id, before));
+            failure = res.message;
+          }
+        } else {
+          // An extra set is deleted, and the grid gives its slot up.
+          const res = await removeSet(sessionId, id);
+          if (res.ok) update((l) => settle(applySetDeleted(l, id, res.data)));
+          else failure = res.message;
+        }
         mark(key, false);
-        if (!result.ok) {
-          say(key, result.message);
+        if (failure !== null) {
+          say(key, failure);
           return;
         }
         // Un-ticking takes the rest with it. The set that started the clock
@@ -347,18 +544,22 @@ export function Console({ data }: { data: ConsoleData }) {
         setDeleted({
           exerciseId,
           setNumber: row.number,
-          loadKg: row.load ? Number(row.load) : null,
-          reps: row.reps ? Number(row.reps) : null,
-          rpe: row.rpe,
-          notes: row.note,
+          loadValue: before?.loadValue ?? row.loadValue,
+          effortValue: before?.effortValue ?? row.effortValue,
+          rpe: before?.rpe ?? row.rpe,
+          notes: before?.notes ?? row.note,
+          planned: row.planned,
+          planSetId: id,
+          sxId: exercises.find((e) => e.exerciseId === exerciseId)?.sxId ?? '',
+          loadKind: row.loadKind,
+          effortKind: row.effortKind,
           at: Date.now(),
         });
         clearTimeout(undoTimer.current);
         undoTimer.current = setTimeout(() => setDeleted(null), UNDO_SECONDS * 1000);
-        router.refresh();
-      });
+      })();
     },
-    [data.routeId, view.workoutId, router],
+    [exercises, sessionId, update],
   );
 
   const undo = useCallback(() => {
@@ -366,20 +567,24 @@ export function Console({ data }: { data: ConsoleData }) {
     const held = deleted;
     setDeleted(null);
     clearTimeout(undoTimer.current);
-    startTransition(async () => {
-      await logSet({
-        routeId: data.routeId,
-        workoutId: view.workoutId,
-        exerciseId: held.exerciseId,
-        setNumber: held.setNumber,
-        loadKg: held.loadKg,
-        reps: held.reps,
-        rpe: held.rpe,
-        notes: held.notes,
-      });
-      router.refresh();
-    });
-  }, [deleted, data.routeId, view.workoutId, router]);
+    void (async () => {
+      const values: SetPatch = {
+        ...(held.loadValue !== null ? { loadValue: held.loadValue } : {}),
+        ...(held.effortValue !== null ? { effortValue: held.effortValue } : {}),
+        ...(held.rpe !== null ? { rpe: held.rpe } : {}),
+        ...(held.notes ? { notes: held.notes } : {}),
+      };
+      if (held.planned && held.planSetId) {
+        const res = await patchSet(sessionId, held.planSetId, { done: true, ...values });
+        if (res.ok) update((l) => settle(applySetWrite(l, res.data)));
+      } else {
+        const res = await addSet(sessionId, held.sxId, {
+          id: crypto.randomUUID(), ...values, done: true, loadKind: held.loadKind, effortKind: held.effortKind,
+        });
+        if (res.ok) update((l) => settle(applySetAdded(l, held.sxId, res.data)));
+      }
+    })();
+  }, [deleted, sessionId, update]);
 
   /* ⌘Z is undo and nothing else — NN/g's do-not-override rule, and the only
      thing on this screen with anything to undo is the delete. */
@@ -415,51 +620,21 @@ export function Console({ data }: { data: ConsoleData }) {
   const histView = exercises.find((e) => e.exerciseId === histFor) ?? null;
 
   /**
-   * One card, in the shape the write takes.
+   * Frame 3a's pick — a real row, written the moment it is picked.
    *
-   * `POST /v1/workouts/{id}/exercises` is an upsert and REPLACES the row's
-   * fields, so a call that only meant to change the rest would clear the
-   * targets. Every caller here sends the whole card, and this is the one place
-   * that builds it — the same rule `updateSet` follows for the same reason.
-   */
-  const cardOf = useCallback((e: LogExerciseView) => ({
-    orderIndex: e.orderIndex,
-    source: (e.unplanned ? 'unplanned' : 'planned') as 'planned' | 'unplanned',
-    targetSets: e.targetSets,
-    targetReps: e.targetReps,
-    restSeconds: e.restSeconds,
-    /* Carried, not re-derived. Dropping it would erase a swap the first time
-       somebody set a rest on the card that recorded it. */
-    swappedFromExerciseId: e.swappedFromExerciseId,
-  }), []);
-
-  /**
-   * Frame 3a's pick — a real row now, not a query parameter.
-   *
-   * It used to append `?plus=`, because `workout_exercise` had no REST route and
-   * a card with no sets in it had nowhere to live. The card existed in one
-   * browser tab and nowhere else, so a reload lost it. Now it is written, and
-   * `?ex=` still moves focus to it because that is a place and places get URLs.
-   *
-   * Ordered last, which is where an exercise added mid-session belongs: the
-   * trainer reached for it after everything already on the card.
+   * Ordered last, which is where an exercise added mid-session belongs: the trainer reached for it
+   * after everything already on the card. `?ex=` moves focus to it at once, because that is a place
+   * and places get URLs; the card itself arrives when the server's answer is merged in, which is a
+   * moment, not a navigation.
    */
   const pickAdded = useCallback((exerciseId: string) => {
-    const orderIndex = exercises.reduce((max, e) => Math.max(max, e.orderIndex), -1) + 1;
-    startTransition(async () => {
-      await addExercise({
-        routeId: data.routeId,
-        workoutId: view.workoutId,
-        exerciseId,
-        orderIndex,
-      });
-      router.refresh();
-    });
-    const next = new URLSearchParams(params.toString());
-    next.delete('add');
-    next.set('ex', exerciseId);
-    router.replace(`/sessions/${data.routeId}/log?${next.toString()}`, { scroll: false });
-  }, [exercises, data.routeId, view.workoutId, params, router, startTransition]);
+    const position = exercises.reduce((max, e) => Math.max(max, e.orderIndex), -1) + 1;
+    void (async () => {
+      const result = await addExerciseRow(sessionId, { id: crypto.randomUUID(), exerciseId, position });
+      if (result.ok) update((l) => applyExercise(l, result.data));
+    })();
+    go({ add: null, ex: exerciseId });
+  }, [exercises, sessionId, update, go]);
 
   /* ── the strip ─────────────────────────────────────────────────────────── */
 
@@ -570,7 +745,7 @@ export function Console({ data }: { data: ConsoleData }) {
           </Strip>
 
           {view.emptyPlan ? (
-            <EmptyPlan data={data} onAdd={() => go({ add: '1' })} />
+            <EmptyPlan data={data} view={view} onAdd={() => go({ add: '1' })} />
           ) : (
             /* `.wkcw` exists ONLY to be a container query's container — a grid
                cannot query its own inline size to decide its own tracks, and
@@ -656,7 +831,7 @@ export function Console({ data }: { data: ConsoleData }) {
                     name={open.name}
                     clientId={view.clientId}
                     exerciseId={open.exerciseId}
-                    sessions={(data.timelines[open.exerciseId] ?? []).filter((s) => !s.today)}
+                    sessions={(timelines[open.exerciseId] ?? []).filter((s) => !s.today)}
                   />
                 ) : null}
                 {view.records.length > 1 ? (
@@ -686,30 +861,23 @@ export function Console({ data }: { data: ConsoleData }) {
           onDelete={() => { remove(open.exerciseId, panelRow); go({ set: null }); }}
           onSave={(values) => {
             const key = draftKey(open.exerciseId, panelRow.number);
+            if (inflight.current.has(key)) return;
             setPanelMessage(null);
             mark(key, true);
-            startTransition(async () => {
-              const payload = {
-                routeId: data.routeId,
-                workoutId: view.workoutId,
-                exerciseId: open.exerciseId,
-                setNumber: panelRow.number,
-                loadKg: values.loadKg,
-                reps: values.reps,
+            void (async () => {
+              const result = await saveSet(open.exerciseId, panelRow, {
+                load: values.load,
+                effort: values.effort,
                 rpe: values.rpe,
                 notes: values.notes,
-              };
-              const result = panelRow.setId
-                ? await updateSet({ ...payload, setId: panelRow.setId, clientId: view.clientId })
-                : await logSet(payload);
+              });
               mark(key, false);
               if (!result.ok) {
                 setPanelMessage(result.message);
                 return;
               }
               go({ set: null });
-              router.refresh();
-            });
+            })();
           }}
         />
       ) : null}
@@ -722,7 +890,7 @@ export function Console({ data }: { data: ConsoleData }) {
           /* `!s.today` for the same reason the third column filters it: today's
              sets are the table behind the sheet, and a session that prints its
              own rows back at itself is an echo rather than a comparison. */
-          sessions={(data.timelines[histView.exerciseId] ?? []).filter((s) => !s.today)}
+          sessions={(timelines[histView.exerciseId] ?? []).filter((s) => !s.today)}
           card={view.records.find((r) => r.exerciseId === histView.exerciseId) ?? null}
           onClose={() => go({ hist: null })}
         />
@@ -731,7 +899,9 @@ export function Console({ data }: { data: ConsoleData }) {
       {addOpen ? (
         <AddPanel
           recents={data.recents}
-          library={data.library}
+          library={library}
+          complete={libraryComplete}
+          search={searchLibrary}
           /* Every added card is in `exercises` now that it is a row, so the
              second list `?plus=` used to contribute has nothing left in it. */
           already={new Set(exercises.map((e) => e.exerciseId))}
@@ -743,7 +913,9 @@ export function Console({ data }: { data: ConsoleData }) {
       {swapView ? (
         <SwapModal
           fromName={swapView.name}
-          library={data.library}
+          library={library}
+          complete={libraryComplete}
+          search={searchLibrary}
           hasProgram={data.programId !== null}
           hasTemplate={data.templateId !== null}
           programWeeksLeft={data.programWeeksLeft}
@@ -753,32 +925,45 @@ export function Console({ data }: { data: ConsoleData }) {
           onClose={() => { say('swap', null); go({ swap: null }); }}
           onSwap={(toExerciseId, scope: SwapScope) => {
             setSwapping(true);
-            startTransition(async () => {
-              const result = await swapExercise({
-                routeId: data.routeId,
-                scope,
-                fromExerciseId: swapView.exerciseId,
-                toExerciseId,
-                programId: data.programId,
-                templateId: data.templateId,
-                workoutId: view.workoutId,
-                /* The replacement inherits the original's place and targets — it
-                   is standing in for it, so a swap that reset the card to three
-                   sets of nothing would lose what was prescribed. */
-                card: cardOf(swapView),
-              });
+            void (async () => {
+              let failure: string | null = null;
+              if (scope === 'template') {
+                /* The template is not today's log, and the new swap route has no scope for it, so it is
+                   the Programs routes' edit — as it was: today's card is untouched. */
+                const result = await swapExercise({
+                  routeId: sessionId,
+                  scope,
+                  fromExerciseId: swapView.exerciseId,
+                  toExerciseId,
+                  programId: data.programId,
+                  templateId: data.templateId,
+                  workoutId: view.workoutId,
+                  card: null,
+                  sxId: swapView.sxId,
+                });
+                if (!result.ok) failure = result.message;
+              } else {
+                /* Today and the plan go through the one swap route: the replacement takes the original's
+                   place and targets (or its plan alternative's, when it is one), and `scope: program` also
+                   swaps the client's plan from the next session on. */
+                const alternative = swapView.alternatives.find((a) => a.exerciseId === toExerciseId);
+                const result = await swapExerciseRow(sessionId, swapView.sxId, {
+                  toExerciseId,
+                  planRowId: alternative?.planRowId ?? null,
+                  reason: 'unavailable',
+                  scope,
+                });
+                if (result.ok) update((l) => applyExercise(l, result.data));
+                else failure = result.message;
+              }
               setSwapping(false);
-              if (!result.ok) {
-                say('swap', result.message);
+              if (failure !== null) {
+                say('swap', failure);
                 return;
               }
               say('swap', null);
-              const next = new URLSearchParams(params.toString());
-              next.delete('swap');
-              next.set('ex', toExerciseId);
-              router.replace(`/sessions/${data.routeId}/log?${next.toString()}`, { scroll: false });
-              router.refresh();
-            });
+              go({ swap: null, ex: toExerciseId });
+            })();
           }}
         />
       ) : null}
@@ -793,22 +978,17 @@ export function Console({ data }: { data: ConsoleData }) {
             const card = exercises.find((e) => e.exerciseId === exerciseId);
             setRestFor(null);
             if (!exerciseId || !card) return;
-            startTransition(async () => {
-              /* On the plan → the plan, and it is still 90 seconds next Tuesday.
-                 Off the plan → today's card, which is where V13 put
-                 `rest_seconds` precisely so an off-plan exercise could hold one.
-                 Two different answers, not a fallback. */
-              await setRest({
-                routeId: data.routeId,
-                programId: data.programId,
-                exerciseId,
+            void (async () => {
+              /* On the plan → the plan, and it is still 90 seconds next Tuesday. Off the plan → today's
+                 card only. Two different answers, not a fallback. */
+              const result = await patchExerciseRow(sessionId, card.sxId, {
                 restSeconds: seconds,
-                workoutId: view.workoutId,
-                card: cardOf(card),
-                onPlan: !card.unplanned,
+                onPlan: !card.unplanned && data.programId !== null,
               });
-              router.refresh();
-            });
+              if (!result.ok) return;
+              update((l) => applyExercise(l, result.data));
+              setRestLocal((held) => ({ ...held, [exerciseId]: seconds }));
+            })();
           }}
         />
       ) : null}
@@ -830,8 +1010,15 @@ export function Console({ data }: { data: ConsoleData }) {
  * that nobody lifted. Repeating brings the exercises and the slots; the loads
  * arrive in the Previous column, where they belong.
  */
-function EmptyPlan({ data, onAdd }: { data: ConsoleData; onAdd: () => void }) {
-  const { view } = data;
+function EmptyPlan({
+  data,
+  view,
+  onAdd,
+}: {
+  data: ConsoleDataX;
+  view: ConsoleDataX['view'];
+  onAdd: () => void;
+}) {
   return (
     <div className="wk2 wk2--pick" style={{ marginTop: 12, maxWidth: 1080 }}>
       <div>

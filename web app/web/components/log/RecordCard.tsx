@@ -39,8 +39,10 @@ function SetHistory({ name, sessions }: { name: string; sessions: HistorySession
               {i > 0 ? ' · ' : ''}
               {set.pr ? (
                 <b className="acc">
-                  {set.load === '—' ? `${set.reps} reps` : `${set.load} kg × ${set.reps}`}
+                  {set.said ?? (set.load === '—' ? `${set.reps} reps` : `${set.load} kg × ${set.reps}`)}
                 </b>
+              ) : set.said ? (
+                set.said
               ) : set.load === '—' ? (
                 `${set.reps} reps`
               ) : (

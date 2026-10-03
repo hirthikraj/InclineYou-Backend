@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation';
 import { Console } from '@/components/log/Console';
 import { StartLog } from '@/components/log/StartLog';
 import { Unavailable } from '@/components/today/Unavailable';
-import { requireConsole } from '@/lib/log/guard';
+import { requireConsole } from '@/lib/sessionlog/guard';
 
 /**
  * Frame 1a · `/sessions/:id/log` — the console.

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import type { SwapScope } from '@/lib/log/result';
+import type { SwapScope } from '@/lib/sessionlog/actions';
 import { Search } from '@/components/shell/Icons';
 import { Button } from '@/web-components/ui/Button';
 
@@ -28,6 +28,8 @@ import { Button } from '@/web-components/ui/Button';
 export function SwapModal({
   fromName,
   library,
+  complete = true,
+  search,
   hasProgram,
   hasTemplate,
   programWeeksLeft,
@@ -39,6 +41,9 @@ export function SwapModal({
 }: {
   fromName: string;
   library: { id: string; name: string; muscleGroup: string | null; isCustom: boolean }[];
+  /** False until the whole library has arrived; until then typing also asks the server (typed-ahead). */
+  complete?: boolean;
+  search?: (q: string) => Promise<{ id: string; name: string; muscleGroup: string | null; isCustom: boolean }[]>;
   hasProgram: boolean;
   hasTemplate: boolean;
   programWeeksLeft: number | null;
@@ -60,11 +65,24 @@ export function SwapModal({
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Typed-ahead only while the library is incomplete — see `AddPanel`.
+  const [remote, setRemote] = useState<typeof library>([]);
+  useEffect(() => {
+    const q = query.trim();
+    if (complete || !search || q.length < 2) return;
+    let off = false;
+    const timer = setTimeout(() => { void search(q).then((rows) => { if (!off) setRemote(rows); }); }, 200);
+    return () => { off = true; clearTimeout(timer); };
+  }, [query, complete, search]);
+
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (q.length < 2) return [];
-    return library.filter((e) => e.name.toLowerCase().includes(q)).slice(0, 6);
-  }, [query, library]);
+    const local = library.filter((e) => e.name.toLowerCase().includes(q));
+    const seen = new Set(local.map((e) => e.id));
+    const ahead = complete ? [] : remote;
+    return [...local, ...ahead.filter((e) => !seen.has(e.id))].slice(0, 6);
+  }, [query, library, remote, complete]);
 
   return (
     <>

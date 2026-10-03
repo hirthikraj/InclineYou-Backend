@@ -3,7 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import type { LogExerciseView, LogSetRow } from '@/lib/log/log';
+import type { LogExerciseViewX as LogExerciseView, LogSetRowX as LogSetRow } from '@/lib/sessionlog/select';
+import { EFFORT, LOAD, parseRpe } from '@/lib/sessionlog/kinds';
+import {
+  effortHead, effortStepLabel, effortText, hasLoadBox, loadHead, loadStepLabel, loadText,
+  parseEffort, parseLoad, stepEffort, stepLoad,
+} from './kindfields';
 import { Note, Plus, Swap, Timer, Tick } from './Icons';
 import { ActionBar } from '@/web-components/ui/ActionBar';
 import { Button } from '@/web-components/ui/Button';
@@ -80,28 +85,20 @@ export function draftKey(exerciseId: string, n: number): string {
 export function fieldValue(row: LogSetRow, draft: Draft | undefined, which: keyof Draft): string {
   const typed = draft?.[which];
   if (typed !== undefined) return typed;
-  if (which === 'load') return row.load;
-  if (which === 'reps') return row.reps;
+  if (which === 'load') return loadText(row.loadValue);
+  if (which === 'reps') return effortText(row.effortKind, row.effortValue);
   return row.rpe != null ? String(row.rpe) : '';
 }
 
 /** The number last time's column is offering, when the slot is still open. */
 function suggestion(row: LogSetRow, which: 'load' | 'reps'): string {
   if (row.done) return '';
+  // Last time's column is kilograms and repetitions — all the set history maps — so it
+  // is offered only where this set is counted in them.
+  if (which === 'load' ? !LOAD[row.loadKind].kilograms : !EFFORT[row.effortKind].repetitions) return '';
   const value = which === 'load' ? row.previousLoad : row.previousReps;
   return value != null ? String(value) : '';
 }
-
-/**
- * What the two stepped columns move by.
- *
- * 2.5 kg is a pair of 1.25 plates and the smallest real jump on a barbell in
- * an Indian commercial gym; a rep is a rep. Neither is a preference, which is
- * why neither is configurable — a stepper whose size you have to check before
- * pressing is slower than typing the number.
- */
-const LOAD_STEP = 2.5;
-const REPS_STEP = 1;
 
 /** What is actually in the field: what was typed, else what last time offers. */
 function shownValue(
@@ -111,29 +108,6 @@ function shownValue(
   said: boolean,
 ): string {
   return fieldValue(row, draft, which) || (said ? suggestion(row, which) : '');
-}
-
-/**
- * One press of a stepper.
- *
- * It steps from what the trainer can SEE, which on an untouched row is last
- * time's number — so `+` on a row offering 60 kg claims 62.5, and that is the
- * progression the column exists to make one press long. §09's rule is not
- * broken by this: the app still never puts a number in a row by itself. The
- * trainer pressed the button.
- *
- * `floor` differs by column and the difference is real. A set at 0 kg is a
- * bare bar or a bodyweight movement and happens; a set of 0 reps is not a set,
- * and `commit` would post it, because it only refuses a row where load AND
- * reps are both absent. So reps stop at 1 rather than walking to a row the
- * history would have to explain.
- */
-function stepped(shown: string, delta: number, floor: number): string {
-  const base = Number.parseFloat(shown.replace(',', '.'));
-  const next = Math.max(floor, (Number.isFinite(base) ? base : 0) + delta);
-  // 2.5 and 1 are both exact in binary, so the grid itself never drifts. A
-  // typed 61.3 can, so the result is rounded to the two decimals a gym uses.
-  return String(Math.round(next * 100) / 100);
 }
 
 /** `2:00`, `0:45`. The clock's own format, and the strip's at rest. */
@@ -204,16 +178,32 @@ function bar(remaining: number, total: number): number {
   return Math.max(0, Math.min(1, remaining / total));
 }
 
-function num(raw: string): number | null {
-  const value = Number.parseFloat(raw.replace(',', '.'));
-  return Number.isFinite(value) ? value : null;
-}
-
-export function readDraft(row: LogSetRow, draft: Draft | undefined, useSuggestion: boolean) {
-  const load = fieldValue(row, draft, 'load') || (useSuggestion ? suggestion(row, 'load') : '');
-  const reps = fieldValue(row, draft, 'reps') || (useSuggestion ? suggestion(row, 'reps') : '');
-  const rpe = fieldValue(row, draft, 'rpe');
-  return { loadKg: num(load), reps: num(reps), rpe: num(rpe) };
+/**
+ * What a row's boxes hold, as numbers — by the set's OWN kinds, so a hold is read
+ * as `1:30` and a percentage as a percentage. An untouched slot takes last time's
+ * numbers exactly as the field shows them (`useSuggestion`); `error` is the first
+ * box whose text cannot be that kind's number, said in a sentence.
+ */
+export function readDraft(row: LogSetRow, draft: Draft | undefined, useSuggestion: boolean): {
+  load: number | null;
+  effort: number | null;
+  rpe: number | null;
+  error: string | null;
+} {
+  const hasLoad = hasLoadBox(row.loadKind, row.effortKind);
+  const loadRaw = hasLoad ? fieldValue(row, draft, 'load') || (useSuggestion ? suggestion(row, 'load') : '') : '';
+  const effortRaw = fieldValue(row, draft, 'reps') || (useSuggestion ? suggestion(row, 'reps') : '');
+  const rpeRaw = fieldValue(row, draft, 'rpe');
+  const load = parseLoad(row.loadKind, loadRaw);
+  const effort = parseEffort(row.effortKind, effortRaw);
+  const rpe = parseRpe(rpeRaw);
+  const bad = [load, effort, rpe].find((p) => !p.ok);
+  return {
+    load: load.ok ? load.value : null,
+    effort: effort.ok ? effort.value : null,
+    rpe: rpe.ok ? rpe.value : null,
+    error: bad && !bad.ok ? bad.message : null,
+  };
 }
 
 export function SetGrid({
@@ -263,7 +253,8 @@ export function SetGrid({
   next: { name: string; onOpen: () => void } | null;
 }) {
   const table = useRef<HTMLTableElement | null>(null);
-  const weights = view.logType === 'weight_reps';
+  // The boxes follow the set's own kinds; for weight × reps this is exactly the old `logType` test.
+  const weights = hasLoadBox(view.loadKind, view.effortKind);
   const dock = useThumbDock();
 
   /* ── the keyboard model ─────────────────────────────────────────────────
@@ -558,8 +549,8 @@ export function SetGrid({
                 <span className="vh">Set</span>
               </th>
               <th className="prev">Last time</th>
-              <th className="num">{weights ? 'Load kg' : 'Load'}</th>
-              <th className="num">Reps</th>
+              <th className="num">{weights ? loadHead(view.loadKind) : 'Load'}</th>
+              <th className="num">{effortHead(view.effortKind)}</th>
               <th className="num">RPE</th>
               <th>
                 <span className="vh">Logged</span>
@@ -589,33 +580,33 @@ export function SetGrid({
                   <td className="prev" data-l="Last time">
                     {row.previous ?? <em>first time</em>}
                   </td>
-                  <td className="num sets__load" data-l={weights ? 'Load kg' : 'Load'}>
+                  <td className="num sets__load" data-l={weights ? loadHead(row.loadKind) : 'Load'}>
                     {weights ? (
                       <div className="nstp">
                         <Step
-                          label={`Load down ${LOAD_STEP} kg, set ${row.number}`}
+                          label={loadStepLabel(row.loadKind, -1, row.number)}
                           sign="minus"
                           onPress={() =>
                             onDraft(key, {
-                              load: stepped(shownValue(row, draft, 'load', said), -LOAD_STEP, 0),
+                              load: stepLoad(row.loadKind, shownValue(row, draft, 'load', said), -1),
                             })
                           }
                         />
                         <input
                           className={`ctl${said && !draft?.load ? ' said' : ''}`}
-                          inputMode="decimal"
+                          inputMode={LOAD[row.loadKind].inputMode}
                           autoComplete="off"
                           value={shownValue(row, draft, 'load', said)}
                           onChange={(e) => onDraft(key, { load: e.target.value })}
                           onKeyDown={onKeyDown(row)}
-                          aria-label={`Load, set ${row.number}`}
+                          aria-label={`${LOAD[row.loadKind].kilograms ? 'Load' : LOAD[row.loadKind].label}, set ${row.number}`}
                         />
                         <Step
-                          label={`Load up ${LOAD_STEP} kg, set ${row.number}`}
+                          label={loadStepLabel(row.loadKind, 1, row.number)}
                           sign="plus"
                           onPress={() =>
                             onDraft(key, {
-                              load: stepped(shownValue(row, draft, 'load', said), LOAD_STEP, 0),
+                              load: stepLoad(row.loadKind, shownValue(row, draft, 'load', said), 1),
                             })
                           }
                         />
@@ -629,32 +620,32 @@ export function SetGrid({
                       <span className="small ink3">— no load</span>
                     )}
                   </td>
-                  <td className="num sets__reps" data-l="Reps">
+                  <td className="num sets__reps" data-l={effortHead(row.effortKind)}>
                     <div className="nstp">
                       <Step
-                        label={`One rep fewer, set ${row.number}`}
+                        label={effortStepLabel(row.effortKind, -1, row.number)}
                         sign="minus"
                         onPress={() =>
                           onDraft(key, {
-                            reps: stepped(shownValue(row, draft, 'reps', said), -REPS_STEP, 1),
+                            reps: stepEffort(row.effortKind, shownValue(row, draft, 'reps', said), -1),
                           })
                         }
                       />
                       <input
                         className={`ctl${said && !draft?.reps ? ' said' : ''}`}
-                        inputMode="numeric"
+                        inputMode={EFFORT[row.effortKind].inputMode}
                         autoComplete="off"
                         value={shownValue(row, draft, 'reps', said)}
                         onChange={(e) => onDraft(key, { reps: e.target.value })}
                         onKeyDown={onKeyDown(row)}
-                        aria-label={`Reps, set ${row.number}`}
+                        aria-label={`${EFFORT[row.effortKind].label}, set ${row.number}`}
                       />
                       <Step
-                        label={`One rep more, set ${row.number}`}
+                        label={effortStepLabel(row.effortKind, 1, row.number)}
                         sign="plus"
                         onPress={() =>
                           onDraft(key, {
-                            reps: stepped(shownValue(row, draft, 'reps', said), REPS_STEP, 1),
+                            reps: stepEffort(row.effortKind, shownValue(row, draft, 'reps', said), 1),
                           })
                         }
                       />

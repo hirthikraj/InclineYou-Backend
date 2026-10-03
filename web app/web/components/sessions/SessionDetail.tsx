@@ -212,6 +212,12 @@ function prescription(sets: number | null, reps: number | null): string | null {
   return null;
 }
 
+/** `prescription`, with the effort in the plan's own words (`2 × 45 s`) when the plan's kinds are not reps. */
+function prescriptionOf(sets: number | null, reps: number | null, effortSaid?: string | null): string | null {
+  if (effortSaid == null) return prescription(sets, reps);
+  return sets != null ? `${sets} × ${effortSaid}` : effortSaid;
+}
+
 /**
  * "90s", "2 min", "2 min 30s". Rest is read at a glance or not at all.
  *
@@ -309,6 +315,10 @@ function trendOf(group: ExerciseGroup): Trend | null {
      nothing to compare it against — and a dash is the absence of one. */
   if (!last) return { tone: '', label: 'First time', up: null };
 
+  /* A hold, a carry or a percentage has no kilogram or rep delta to state, and 'Same as last' would
+     claim an equality nobody measured — so the chip is simply not drawn (the figures beside it say it). */
+  if (group.sets.some((x) => x.said !== undefined)) return null;
+
   if (top.loadKg != null && last.loadKg != null && top.loadKg !== last.loadKg) {
     const d = top.loadKg - last.loadKg;
     return { tone: d > 0 ? 'tag--ok' : 'tag--warn', label: signed(d, 'kg'), up: d > 0 };
@@ -352,7 +362,7 @@ function Spine({
   now: number;
   loggedSets: number | null;
 }) {
-  const planned = target ? prescription(target.sets, target.reps) : null;
+  const planned = target ? prescriptionOf(target.sets, target.reps, target.effortSaid) : null;
   const rest = target ? restLabel(target.restSeconds) : null;
   const short = target?.sets != null && loggedSets != null && loggedSets !== target.sets;
 
@@ -368,7 +378,7 @@ function Spine({
             {target?.load != null && (
               <>
                 {planned ? ' at ' : ''}
-                <b className="tnum">{kg(target.load)} kg</b>
+                <b className="tnum">{target.loadSaid ?? `${kg(target.load)} kg`}</b>
               </>
             )}
           </span>
@@ -388,7 +398,7 @@ function Spine({
         <>
           <span className="ex__k">Last time</span>
           <span className="ex__v">
-            <b className="tnum">{figureOf(last.loadKg, last.reps, last.setCount)}</b>
+            <b className="tnum">{last.said ?? figureOf(last.loadKg, last.reps, last.setCount)}</b>
           </span>
           <span className="ex__q">{relativeDays(now, last.at)}</span>
         </>
@@ -600,9 +610,10 @@ function LastTimeCell({ last, now }: { last: LastTime | null; now: number }) {
 
   const load = last.loadKg != null ? `${kg(last.loadKg)} kg` : null;
   const figure =
-    load && last.reps != null
+    last.said ??
+    (load && last.reps != null
       ? `${load} × ${last.reps}`
-      : load ?? (last.reps != null ? `${last.reps} reps` : `${last.setCount} sets`);
+      : load ?? (last.reps != null ? `${last.reps} reps` : `${last.setCount} sets`));
 
   /* `(now, last.at)` and not the other way round. The helper reads `to - from`,
      so passing the past date as `from` makes the difference POSITIVE and the
@@ -628,7 +639,7 @@ function PlanRow({
   hasTarget: boolean;
   done: boolean;
 }) {
-  const target = prescription(row.targetSets, row.targetReps);
+  const target = prescriptionOf(row.targetSets, row.targetReps, row.targetEffortSaid);
   const rest = restClock(row.restSeconds);
   const missed = done && row.loggedSets === 0;
 
@@ -659,7 +670,7 @@ function PlanRow({
       {hasTarget && (
         <td className="num" data-l="Target">
           {row.targetLoad != null ? (
-            <span className="tnum">{kg(row.targetLoad)} kg</span>
+            <span className="tnum">{row.targetLoadSaid ?? `${kg(row.targetLoad)} kg`}</span>
           ) : (
             <span className="ink3">—</span>
           )}
@@ -701,8 +712,12 @@ function PlanRow({
  * things the program asked for, in the order the console wrote them.
  */
 function ExerciseCard({ group, index, now }: { group: ExerciseGroup; index: number; now: number }) {
-  const hasWeights = group.sets.some((s) => s.loadKg !== null);
-  const hasReps = group.sets.some((s) => s.reps !== null);
+  /* A group with any set in a kind the two numeric columns cannot hold (a hold, a carry, a %) draws ONE
+     column of words instead — `50 s`, `24 kg × 40 m` — in the place the reps column sits, headed 'Done'.
+     Same table, same classes; only the cells' text (and that one heading) change. */
+  const said = group.sets.some((s) => s.said !== undefined);
+  const hasWeights = !said && group.sets.some((s) => s.loadKg !== null);
+  const hasReps = said || group.sets.some((s) => s.reps !== null);
   const hasRpe = group.sets.some((s) => s.rpe !== null);
   const trend = trendOf(group);
   const top = topSetOf(group.sets);
@@ -754,7 +769,7 @@ function ExerciseCard({ group, index, now }: { group: ExerciseGroup; index: numb
             <tr>
               <th className="n"></th>
               {hasWeights && <th className="num">Load kg</th>}
-              {hasReps && <th className="num">Reps</th>}
+              {hasReps && <th className="num">{said ? 'Done' : 'Reps'}</th>}
               {hasRpe && <th className="num">RPE</th>}
               {/* The sink for everything the numeric tracks give back. See
                   `.ex__sets td.ex__pr` in app.css. */}
@@ -778,7 +793,12 @@ function ExerciseCard({ group, index, now }: { group: ExerciseGroup; index: numb
                       )}
                     </td>
                   )}
-                  {hasReps && (
+                  {hasReps && said && (
+                    <td className="num">
+                      <span className="tnum">{set.said ?? '—'}</span>
+                    </td>
+                  )}
+                  {hasReps && !said && (
                     <td className="num">
                       {set.reps !== null ? (
                         <>

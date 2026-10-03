@@ -12,7 +12,7 @@
  */
 import Link from 'next/link';
 
-import type { ConsoleData } from '@/lib/log/api';
+import type { ConsoleDataX } from '@/lib/sessionlog/api';
 import { PLATE_STEP_KG, floorTime, stampDate, trim1 } from '@/lib/log/log';
 import { TopBar } from '@/components/shell/TopBar';
 import { FinishLog } from './FinishLog';
@@ -48,7 +48,7 @@ import { Why } from '@/web-components/ui/Why';
  * Its own route, because a trainer opens it after the session and wants to be
  * able to link to it.
  */
-export function Bests({ data }: { data: ConsoleData }) {
+export function Bests({ data }: { data: ConsoleDataX }) {
   const { view } = data;
   const cells = view.bests;
   const real = cells.filter((b) => b.verdict === 'record' || b.verdict === 'quiet').length;

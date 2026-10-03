@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-import type { FinishData } from '@/lib/log/api';
+import type { FinishDataX } from '@/lib/sessionlog/api';
 import { stampDate } from '@/lib/log/log';
 import { cancelSession, markDone, markNoShow } from '@/lib/schedule/actions';
 import { TopBar } from '@/components/shell/TopBar';
@@ -61,7 +61,7 @@ import { Why } from '@/web-components/ui/Why';
 
 const WA = (message: string) => `https://wa.me/?text=${encodeURIComponent(message)}`;
 
-export function Finish({ data }: { data: FinishData }) {
+export function Finish({ data }: { data: FinishDataX }) {
   const router = useRouter();
   const { view, finish, session } = data;
   /* A name does not tell you somebody's pronouns, and this screen used to spell

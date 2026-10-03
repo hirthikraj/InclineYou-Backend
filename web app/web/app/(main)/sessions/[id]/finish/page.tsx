@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 
 import { Finish } from '@/components/log/Finish';
 import { Unavailable } from '@/components/today/Unavailable';
-import { requireFinish } from '@/lib/log/guard';
+import { requireFinish } from '@/lib/sessionlog/finish-guard';
 
 /** Frame 5b · `/sessions/:id/finish` — four figures, and the pack sentence. */
 export const dynamic = 'force-dynamic';
