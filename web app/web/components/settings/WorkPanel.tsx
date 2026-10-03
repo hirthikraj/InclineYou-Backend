@@ -23,7 +23,7 @@ import { formatWindow, mergeWindows, sameWindows } from '@/lib/setup/hours';
  *
  * The reasoning for two was that the halves are two records — columns on
  * `trainer` over `PATCH /v1/trainers/me`, and rows in `working_hours` over
- * `/v1/sync/push` — with two ways of failing, and that one button would have to
+ * `PATCH /v1/working-hours` — with two ways of failing, and that one button would have to
  * either abandon the second write when the first failed or report a partial
  * success nobody reads carefully.
  *

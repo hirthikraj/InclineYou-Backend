@@ -4,6 +4,7 @@ import { cache } from 'react';
 
 import { getToken } from '@/lib/auth/session';
 import type { PlaceHit, StoredGymPlace } from '@/lib/places/types';
+import { hoursFromWire, type StoredWindow, type WorkingHourWire } from '@/lib/setup/hours-wire';
 
 /**
  * THE IDENTITY DATA LAYER — `/settings/profile`, and nothing else.
@@ -16,17 +17,12 @@ import type { PlaceHit, StoredGymPlace } from '@/lib/places/types';
  * ── WHY THIS IS NOT `lib/setup/api.ts` ──────────────────────────────────────
  *
  * Both PATCH `/v1/trainers/me`, and folding this into that file would have been
- * two fewer modules. It is separate for a reason that has already bitten this
- * codebase once: `lib/setup/api.ts` reads a **full `/v1/sync/pull`** alongside
- * the profile, because two of the eight setup steps have no REST endpoint. That
- * cost is affordable *in setup and nowhere else* — the account is new and the
- * envelope is nearly empty — and its own header says so in bold: **do not reach
- * for `pull()` on a built screen.**
- *
- * `/settings/profile` is a built screen on a live account. Importing
- * `getSetupState` to reach four columns would pull that trainer's whole
- * database to draw a bio. So this file makes the one request the screen needs,
- * and the two modules share a wire shape rather than a function.
+ * two fewer modules. It stays separate because `getSetupState` assembles the
+ * whole setup flow's state — profile, working week, price list and the skipped
+ * steps, four requests — and importing it to reach four columns would make a
+ * profile tab pay for a flow it is not in. So this file makes the one request
+ * the screen needs, and the two modules share a wire shape rather than a
+ * function.
  *
  * ── AND WHY IT CARRIES EVERY FIELD THE PROFILE SHOWS ────────────────────────
  *
@@ -100,13 +96,14 @@ export interface Identity {
   /* ---- where and how. V23, V11 and V34 — see `lib/profile/work.ts`. ---- */
 
   /**
-   * `'independent' | 'gym' | 'both'`, or `''` for never answered.
+   * `'independent' | 'gym' | 'both'` — **derived, not stored.**
    *
-   * The one field on this screen the MONEY BOOK reads. Setup asks it on the
-   * packs step because it decides which price lists exist, and add-client
-   * pre-selects who collects from it — so editing it here changes a default two
-   * screens away, which is why the panel says so out loud rather than treating
-   * it as another profile fact.
+   * `workMode` is not a field on the v1.1 trainer: the gym on the profile is what
+   * the money book keys off, so the answer is read back from it. No gym is
+   * `independent`; a gym is `both`, because the wire cannot say whether the
+   * trainer also coaches clients of their own — `gym` is a choice this screen
+   * holds only until the next load (`saveWorkPlace` hands the saved one back).
+   * See `workModeOf`.
    */
   workMode: string;
   /** Free text, and free text on purpose: most gyms in India are not on InclineYou. */
@@ -161,14 +158,12 @@ export interface IdentityPatch {
   experienceBand?: string;
   specialities?: string[];
   languages?: string[];
-  /** `''` clears the column; omitting the key leaves it. */
-  workMode?: string;
-  /** `''` clears it — and the server clears `gymSharePercent` with it. */
-  gymName?: string;
   /**
-   * A picked place, or `null` to unlink. Omitted leaves the link alone;
-   * `gymName` without it is an unlinked, typed gym.
+   * A typed, unlinked gym; `''` clears it. **Send this OR `gymPlace`, never
+   * both** — the server answers 400, because a picked place names itself.
    */
+  gymName?: string;
+  /** A picked place, or `null` to unlink (the name goes with it). Omitted leaves the gym alone. */
   gymPlace?: PlaceHit | null;
   mapLink?: string;
   trainingModes?: string[];
@@ -190,7 +185,6 @@ interface TrainerWire {
   experienceBand?: string | null;
   specialities?: string[] | null;
   languages?: string[] | null;
-  workMode?: string | null;
   gymName?: string | null;
   gymPlace?: StoredGymPlace | null;
   mapLink?: string | null;
@@ -203,19 +197,11 @@ interface TrainerWire {
 }
 
 /**
- * A `working_hours` row, from `GET /v1/working-hours`.
- *
- * The same four fields `lib/setup/api.ts` digs out of a full `/v1/sync/pull`,
- * read here from the narrow route instead — which is the whole reason this
- * screen can edit the working week at all. See `getWorkingWeek`.
+ * A `working_hours` window, from `GET /v1/working-hours`, in this half's model:
+ * weekday 0 = Monday … 6 = Sunday and minutes since midnight. The wire's 1–7 and
+ * `"HH:mm"` are converted once, in `hoursFromWire`.
  */
-export interface StoredHour {
-  id: string;
-  /** 0 = Monday … 6 = Sunday. ISO order, NOT `Date.getDay()`. */
-  weekday: number;
-  startMinute: number;
-  endMinute: number;
-}
+export type StoredHour = StoredWindow;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await getToken();
@@ -247,7 +233,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // characters"), which is not something to show anyone. Same strip as
       // `lib/setup/api.ts`.
       if (typeof body?.detail === 'string') {
-        detail = body.detail.replace(/^[A-Za-z_][\w.]*:\s*/, '').trim() || null;
+        // Brackets too, for the working week's "days[0].windows[1]: …".
+        detail = body.detail.replace(/^[A-Za-z_][\w.]*(\[\d+\][\w.]*)*:\s*/, '').trim() || null;
       }
     } catch {
       // A proxy that stripped the body. The status is all we get.
@@ -257,6 +244,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   const text = await res.text();
   return (text ? JSON.parse(text) : null) as T;
+}
+
+/**
+ * The work mode this screen shows, read off the gym. See `Identity.workMode`.
+ * Exported for the one caller that has to hand a different answer back.
+ */
+export function workModeOf(gymName: string | null | undefined): 'independent' | 'both' {
+  return gymName ? 'both' : 'independent';
 }
 
 /**
@@ -283,7 +278,7 @@ function toIdentity(t: TrainerWire): Identity {
     experienceBand: t.experienceBand ?? '',
     specialities: t.specialities ?? [],
     languages: t.languages ?? [],
-    workMode: t.workMode ?? '',
+    workMode: workModeOf(t.gymName),
     gymName: t.gymName ?? '',
     gymPlace: t.gymPlace ?? null,
     mapLink: t.mapLink ?? '',
@@ -316,14 +311,7 @@ export const getIdentity = cache(async function getIdentity(): Promise<Identity>
 });
 
 /**
- * The trainer's working week.
- *
- * `GET /v1/working-hours`, and NOT `lib/setup/api.ts`'s `getHours()`, which
- * reads the same rows out of a full `/v1/sync/pull`. That is affordable in
- * setup — the account is new and the envelope is nearly empty — and its own
- * header says in bold not to reach for it on a built screen. This is a built
- * screen on a live account, where the same call would drag down the exercise
- * library and every set log ever recorded to draw seven bars.
+ * The trainer's working week — `GET /v1/working-hours`.
  *
  * An empty list is the honest answer for a trainer who skipped the hours step,
  * and the route refuses to invent a default week for exactly the reason the
@@ -331,11 +319,7 @@ export const getIdentity = cache(async function getIdentity(): Promise<Identity>
  * and press Save on is not the same as a week the server claims they work.
  */
 export async function getWorkingWeek(): Promise<StoredHour[]> {
-  // 1.1: `{items}` envelope.
-  const rows = (await request<{ items: StoredHour[] }>('/v1/working-hours'))?.items;
-  return (rows ?? []).filter(
-    (h) => h.weekday >= 0 && h.weekday <= 6 && h.endMinute > h.startMinute,
-  );
+  return hoursFromWire((await request<{ items?: WorkingHourWire[] }>('/v1/working-hours'))?.items);
 }
 
 export async function patchIdentity(patch: IdentityPatch): Promise<Identity> {

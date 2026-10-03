@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 
 import type { PlaceHit } from '@/lib/places/types';
-import { saveWorkingHours } from '@/lib/setup/api';
+import { patchWorkingHours } from '@/lib/setup/api';
 import { SetupApiError } from '@/lib/setup/errors';
 import { mergeWindows, sameWindows, type HourWindow } from '@/lib/setup/hours';
 import { EXPERIENCE_BANDS, asWorkMode } from '@/lib/setup/options';
@@ -12,6 +12,7 @@ import {
   getWorkingWeek,
   patchIdentity,
   ProfileApiError,
+  workModeOf,
   type Identity,
 } from './api';
 import { cleanCertifications } from './certifications';
@@ -206,18 +207,31 @@ export interface WorkPlaceInput {
 /**
  * The Work & hours tab's first save — where you work, and how.
  *
+ * ── `workMode` IS NO LONGER SENT, AND THE GYM IS THE ANSWER ─────────────────
+ *
+ * The v1.1 trainer has no `workMode` (it was a defaults hint nothing branched on)
+ * and sending it is a 400 for an unknown key. The picker is still on the screen,
+ * and what it writes is the gym: *on my own* sends `gymName: ''`, which clears
+ * the name and the place link together, and *at a gym* / *both* send the gym.
+ * The mode comes back read off the gym (`workModeOf`), except that this hands the
+ * trainer's own pick back for the session, so choosing *at a gym* does not flip
+ * to *both* the moment the save lands.
+ *
+ * ── THE GYM GOES AS A NAME OR A PLACE, NEVER BOTH ───────────────────────────
+ *
+ * The server refuses `gymName` and `gymPlace` in one body, because a picked place
+ * names itself and a typed name unlinks. So a picked gym sends only `gymPlace`
+ * and a typed one only `gymName`. And a gym needs `gym_floor` among the training
+ * modes (`GYM_NEEDS_FLOOR` otherwise), so it is added in the same save when the
+ * trainer has not ticked it — the form then adopts the server's record and shows
+ * it ticked, which is the honest reading of "I work at a gym".
+ *
  * ── IT CAN CLEAR THE GYM, AND THAT IS NOT A SIDE EFFECT ─────────────────────
  *
- * Sending `gymName: ''` makes the server clear `gymSharePercent` too, in the
- * same statement — `TrainerService.update` does it deliberately, because a
- * percentage with nothing to take it is an arrangement with no counterparty.
- * So a trainer moving from *at a gym* to *on my own* loses the share figure the
- * Money screen splits by, and that is the correct outcome rather than a bug to
- * work around: the alternative is a settlement line for a gym they have left.
- *
- * The panel says so above the button before it happens. What must never happen
- * is the quiet version — keeping a hidden gym name because the fields are no
- * longer on screen, so a client reads a gym the trainer does not work at.
+ * A trainer moving from *at a gym* to *on my own* loses the gym on their profile.
+ * The panel says so above the button before it happens. What must never happen is
+ * the quiet version — keeping a hidden gym name because the fields are no longer
+ * on screen, so a client reads a gym the trainer does not work at.
  *
  * The other three are pure profile: nothing in InclineYou branches on `mapLink`,
  * `trainingModes` or `serviceAreas`, exactly like V33's identity block.
@@ -225,9 +239,8 @@ export interface WorkPlaceInput {
 export async function saveWorkPlace(input: WorkPlaceInput): Promise<SaveResult> {
   const mode = input.workMode.trim();
   // Checked against the catalogue rather than sent as typed, the same call
-  // `saveExperienceBand` makes: the column is a free VARCHAR(20) and the server
-  // would take a fourth value, after which `WORK_MODES.find` renders nothing at
-  // all on the packs step and the Money screen.
+  // `saveExperienceBand` makes: nothing stores the mode any more, but the screen
+  // that reads it back should not be handed a fourth value.
   if (mode !== '' && asWorkMode(mode) === null) {
     return { ok: false, message: 'Pick one of the three, or clear the answer.' };
   }
@@ -250,29 +263,39 @@ export async function saveWorkPlace(input: WorkPlaceInput): Promise<SaveResult> 
     };
   }
 
+  const modes = cleanList(input.trainingModes);
+  const namesAGym = gymName !== '';
+
   try {
     const identity = await patchIdentity({
       /*
-       * All five sent whole, empty values included. `''` and `[]` CLEAR, which
-       * is the correct meaning of un-answering, and a version that skipped them
-       * could add a map link and never remove one.
+       * Sent whole, empty values included. `''` and `[]` CLEAR, which is the
+       * correct meaning of un-answering, and a version that skipped them could
+       * add a map link and never remove one.
        */
-      workMode: mode,
-      gymName,
-      // Sent whole like its neighbours: `null` UNLINKS, which is what typing
-      // over a picked gym or choosing *on my own* must do. A name with no place
-      // is a gym the platform cannot count, not a broken one.
-      gymPlace: independent || gymName === '' ? null : input.gymPlace,
+      ...(namesAGym && input.gymPlace
+        ? { gymPlace: input.gymPlace }
+        : { gymName }),
       mapLink,
-      trainingModes: cleanList(input.trainingModes),
+      trainingModes: namesAGym && !modes.includes('gym_floor') ? [...modes, 'gym_floor'] : modes,
       // Free text rather than ids, so each one is normalised before the server
       // de-duplicates — "HSR  Layout" and "HSR Layout" are one area.
       serviceAreas: cleanList(input.serviceAreas.map(cleanArea)),
     });
-    // `workMode` is read by the packs step and by add-client, and `gymName`
-    // heads the gym group on the Money screen.
+    // The gym heads the gym group on the Money screen and decides whether the
+    // Packages screen draws a gym price list.
     revalidatePath('/', 'layout');
-    return { ok: true, identity };
+    return {
+      ok: true,
+      identity: {
+        ...identity,
+        // The trainer's own pick, while it agrees with the gym on file.
+        workMode:
+          identity.gymName !== '' && (mode === 'gym' || mode === 'both')
+            ? mode
+            : workModeOf(identity.gymName),
+      },
+    };
   } catch (error) {
     return { ok: false, message: messageFor(error) };
   }
@@ -358,20 +381,15 @@ export type WeekResult = { ok: true } | { ok: false; message: string };
  * flatten a Saturday that genuinely differs. The guard below is the second
  * line of that defence, not the first.
  *
- * ── AND WHY IT WRITES THROUGH THE SYNC ROUTE ────────────────────────────────
+ * ── ONE PATCH, ONLY THE DAYS THAT CHANGED ────────────────────────────────────
  *
- * `/v1/working-hours` is **read only, deliberately** — `WorkingHoursService`'s
- * own header explains that a permission-shaped table the phone also writes
- * offline is not one to give a second write path to. `/v1/sync/push` is the one
- * path that has ever written this table, from the phone and from setup, and it
- * is trainer-scoped and idempotent on the row id, which is all a single online
- * write needs. Reusing `lib/setup/api.ts`'s `saveWorkingHours` rather than
- * copying it: the pull that file's header warns about is a different function,
- * and this one is a push with nothing to drag down.
- *
- * Wholesale per weekday, not diffed — a day's hours are one idea, and the same
- * call the phone's `saveWorkingHours` makes. Days that did not change are
- * skipped entirely, so pressing Save on an untouched week is zero writes.
+ * `PATCH /v1/working-hours` replaces exactly the weekdays it names and leaves the
+ * rest alone, so the days whose stored answer already equals the new one are
+ * simply not listed — pressing Save on an untouched week is zero writes, and a
+ * Saturday that genuinely differs is never rewritten by a save that did not touch
+ * it. A day the picker unticked is listed with `windows: []`, which is a rest day.
+ * The server checks every rule before its first write, so an overlap or a window
+ * that runs backwards refuses the whole request and changes nothing.
  */
 export async function saveWorkingWeek(
   days: number[],
@@ -395,16 +413,14 @@ export async function saveWorkingWeek(
 
   try {
     const stored = await getWorkingWeek();
+    const changes: { weekday: number; windows: HourWindow[] }[] = [];
     for (let weekday = 0; weekday < 7; weekday += 1) {
       const before = mergeWindows(stored.filter((h) => h.weekday === weekday));
       const after = days.includes(weekday) ? merged : [];
       if (sameWindows(before, after)) continue;
-      await saveWorkingHours(
-        weekday,
-        after,
-        stored.filter((h) => h.weekday === weekday).map((h) => h.id),
-      );
+      changes.push({ weekday, windows: after });
     }
+    await patchWorkingHours(changes);
     // Every screen drawn on the working windows: the day ribbon, the schedule's
     // ground, and add-client's slot list.
     revalidatePath('/today');

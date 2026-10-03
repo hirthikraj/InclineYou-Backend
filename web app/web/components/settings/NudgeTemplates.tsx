@@ -122,12 +122,15 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
   const save = () => {
     setError(null);
     startTransition(async () => {
-      const result = await saveNudgeTemplate(template.name, body);
+      const result = await saveNudgeTemplate(template.name, body, template.version);
       if (result.ok && result.template) {
         setTemplate(result.template);
         setBody(result.template.body);
         setSaved(true);
       } else {
+        // Stale: take the newer version (so Save can go through) and keep the
+        // typed text — it is the one thing that must not be lost.
+        if (result.current) setTemplate(result.current);
         setError(result.message ?? 'That did not save.');
       }
     });

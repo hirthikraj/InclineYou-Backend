@@ -82,6 +82,8 @@ export interface NudgeVariable {
   /** `{name}` — braces included, so a chip can be inserted verbatim. */
   token: string;
   meaning: string;
+  /** The contract's word for it (v1.1). `meaning` carries the same text; the chips still read that. */
+  label?: string;
 }
 
 export interface NudgeTemplate {
@@ -94,6 +96,12 @@ export interface NudgeTemplate {
   /** False once they have saved their own. Gates *Reset*. */
   isDefault: boolean;
   variables: NudgeVariable[];
+  /**
+   * The override's version — its `updated_at` as epoch ms, in a string — or
+   * `null` while it is the built-in wording. It is the `If-Match` a save must
+   * carry (v1.1): the version read, or `*` to create the first override.
+   */
+  version: string | null;
 }
 
 /**

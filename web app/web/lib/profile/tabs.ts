@@ -36,7 +36,7 @@
  *
  * That tab is the one place in the profile that is not only `trainer` columns:
  * the working week is rows in `working_hours`, read from `GET /v1/working-hours`
- * and written through `/v1/sync/push`. It is still ONE form with ONE Save, which
+ * and written through `PATCH /v1/working-hours`. It is still ONE form with ONE Save, which
  * calls only the endpoints whose answers actually changed — see `WorkPanel` on
  * why two buttons was the wrong reading of that. It is also the reason
  * `/settings/hours` is now a redirect rather than a *Soon* row: the week had

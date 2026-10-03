@@ -7,7 +7,8 @@ import { getToken } from '@/lib/auth/session';
    not one behind `server-only`. See `lib/setup/errors.ts`. */
 import { SetupApiError } from './errors';
 import { type HourWindow } from './hours';
-import { asGender, asWorkMode } from './options';
+import { daysToWire, hoursFromWire, type StoredWindow, type WorkingHourWire } from './hours-wire';
+import { asGender } from './options';
 import type { Pack, PackType } from './money';
 import { termsFromType, typeFromTerms } from '@/lib/packs/vocab';
 import type { SetupState, SetupStep } from './steps';
@@ -20,7 +21,7 @@ import { readSkipped } from './skipped';
  * JWT is in an httpOnly cookie that browser JavaScript cannot read.
  *
  * ───────────────────────────────────────────────────────────────────────────
- * TWO ENDPOINTS, AND WHY THE SECOND ONE IS THE SYNC ROUTE
+ * ONE FAMILY OF REST ROUTES, NO SYNC ENVELOPE
  *
  * Six of the eight setup answers are columns on `/v1/trainers/me`, and they
  * PATCH there one step at a time. Step 1 sends TWO of those columns — `name`
@@ -28,34 +29,13 @@ import { readSkipped } from './skipped';
  * two identity fields (`bio`, `introVideoUrl`) are not in this flow at all and
  * live on Settings. See `lib/profile/api.ts`.
  *
- * The other two — **the working week and the price list** — had no REST endpoint
- * at all when this file was written. `working_hours` and `packs` existed on the
- * wire only inside the WatermelonDB envelope that `/v1/sync/push` accepts and
- * `/v1/sync/pull` returns; `grep`ping the controllers for either table found
- * `SyncController` and nothing else. So the choice on this half was: ask those
- * two questions and write them through the sync route, or drop two steps from a
- * flow the design set draws in full.
- *
- * **`packs` now HAS one** — `GET/POST/PATCH /v1/packs`, added for `/packages`,
- * the built screen that could not pay for a full pull. This file was left on the
- * sync route rather than migrated, and that is a decision and not neglect: it
- * already reads `working_hours` from the same single pull, so moving the packs
- * half would buy a second request and remove nothing. **A new screen should use
- * `lib/packs/api.ts`.** `working_hours` is still sync-only.
- *
- * This file takes the first. The envelope is a WIRE FORMAT, not a commitment to
- * offline-first: there is no local database here, no cursor kept between
- * sessions and no queue — one request per answer, synchronous, and the trainer
- * is told if it fails. `pushWorkingHours` and `pushPacks` in `SyncService` are
- * trainer-scoped (`WHERE trainer_id = :tid`) and idempotent on the row id, which
- * is exactly what a single online write needs.
- *
- * It does mean the reads are a full pull, because there is no narrower one.
- * That is affordable precisely here and nowhere else: setup is only reachable
- * while `setupComplete` is false, so the account is new and the envelope is
- * close to empty. **Do not reach for `pull()` on a built screen** — a dashboard
- * that pulled the whole account on every render is the shape of bug this
- * comment exists to prevent.
+ * The working week is `GET` / `PATCH /v1/working-hours` and the price list is
+ * `GET/POST/PATCH/DELETE /v1/packs`; finishing is its own call,
+ * `POST /v1/trainers/me/setup/complete`, and no longer a flag on the PATCH. This
+ * file used to push the first two through the WatermelonDB envelope and read them
+ * back out of a full `/v1/sync/pull`, because they had no REST route. They have
+ * one now, so there is no envelope here, no `rejected` list to read and — the
+ * point of the change — no full pull on a screen a trainer opens on a new account.
  * ───────────────────────────────────────────────────────────────────────────
  */
 const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
@@ -71,12 +51,12 @@ interface TrainerProfile {
   certifications: string[] | null;
   languages: string[] | null;
   setupComplete: boolean;
-  setupCompletedAt: string | null;
+  /** Epoch ms, stamped once by `POST …/setup/complete`. */
+  setupCompletedAt: number | null;
   /** The other half of step 1. See `GENDERS` in `options.ts`. */
   gender?: string | null;
-  workMode?: string | null;
   gymName?: string | null;
-  gymSharePercent?: number | null;
+  trainingModes?: string[] | null;
   preferences?: Record<string, unknown>;
   /* ---- identity, V33. Absent on a backend older than this. ---- */
   headline?: string | null;
@@ -109,14 +89,16 @@ export interface TrainerUpdate {
    * the way to decline, so clearing is a Settings action rather than a setup one.
    */
   gender?: string;
-  /** Stamps `setupCompletedAt`. The server never un-stamps it. */
-  completeSetup?: boolean;
-  /** 'independent' | 'gym' | 'both'. An empty string clears the answer. */
-  workMode?: string;
-  /** An empty string means "left the gym" — it clears the percentage too. */
+  /**
+   * An empty string means "left the gym". **Send this OR `gymPlace`, never both**
+   * — the server refuses the pair with a 400, because a picked gym names itself
+   * and the two would disagree about who wins.
+   */
   gymName?: string;
-  /** A picked place, or `null` to unlink. Omitted leaves the link alone. */
+  /** A picked place, or `null` to unlink (the name goes with it). Omitted leaves the gym alone. */
   gymPlace?: import('@/lib/places/types').PlaceHit | null;
+  /** Sent only with a gym: the server needs `gym_floor` among them. */
+  trainingModes?: string[];
   /**
    * V33 identity. Same null/empty rule as the rest — omitting leaves the field
    * alone, `''` clears it — with one difference from the lists above: the server
@@ -161,8 +143,9 @@ async function call<T>(path: string, init: RequestInit): Promise<T> {
       if (body && typeof body === 'object' && 'detail' in body) {
         const raw = (body as { detail?: unknown }).detail;
         // Spring prefixes the field name onto bean-validation details
-        // ("gymSharePercent: must be…"), which is not something to show anyone.
-        if (typeof raw === 'string') detail = raw.replace(/^[A-Za-z_][\w.]*:\s*/, '').trim();
+        // ("upiVpa: must be…", and for the working week "days[0].windows[1]: …"),
+        // which is not something to show anyone.
+        if (typeof raw === 'string') detail = raw.replace(/^[A-Za-z_][\w.]*(\[\d+\][\w.]*)*:\s*/, '').trim();
       }
     } catch {
       // A proxy that stripped the body. The status is all we get.
@@ -184,6 +167,18 @@ const fetchProfile = cache(async (): Promise<TrainerProfile> => {
   return call<TrainerProfile>('/v1/trainers/me', { method: 'GET' });
 });
 
+/**
+ * The training modes on file with `gym_floor` among them — what a save that names
+ * a gym must send, because the server refuses a gym without the floor
+ * (`GYM_NEEDS_FLOOR`). Read fresh rather than from the per-render memo: this runs
+ * inside a write, where a stale list would drop a mode the trainer ticked.
+ */
+export async function modesWithGymFloor(): Promise<string[]> {
+  const profile = await call<TrainerProfile>('/v1/trainers/me', { method: 'GET' });
+  const modes = profile.trainingModes ?? [];
+  return modes.includes('gym_floor') ? modes : [...modes, 'gym_floor'];
+}
+
 export async function patchProfile(patch: TrainerUpdate): Promise<void> {
   await call<TrainerProfile>('/v1/trainers/me', {
     method: 'PATCH',
@@ -191,65 +186,57 @@ export async function patchProfile(patch: TrainerUpdate): Promise<void> {
   });
 }
 
-/* ─────────────────────────────────────────── the two sync-only tables ──── */
-
-interface TableChanges {
-  created?: Record<string, unknown>[];
-  updated?: Record<string, unknown>[];
-  deleted?: string[];
+/**
+ * Stamps setup finished — `POST /v1/trainers/me/setup/complete`, no body.
+ *
+ * Its own call since v1.1 (it was `completeSetup: true` on the PATCH, which is
+ * now a 400 for an unknown key). Idempotent: a second call answers the first
+ * instant, so a retry after a dropped response cannot move the stamp.
+ */
+export async function completeSetup(): Promise<void> {
+  await call<unknown>('/v1/trainers/me/setup/complete', { method: 'POST', body: '{}' });
 }
 
-interface PullResponse {
-  timestamp: number;
-  changes: Record<string, TableChanges | undefined>;
-}
+/* ──────────────────────────────────────────────────── the working week ──── */
 
-/** A `working_hours` row as the pull returns it — `SELECT *`, so snake_case. */
-export interface StoredHour extends HourWindow {
-  id: string;
-  weekday: number;
-}
+/** A stored window, in this half's model — weekday 0–6, minutes. See `hours-wire.ts`. */
+export type StoredHour = StoredWindow;
 
 function num(v: unknown, fallback = 0): number {
   const n = typeof v === 'string' ? Number(v) : v;
   return typeof n === 'number' && Number.isFinite(n) ? n : fallback;
 }
 
-function text(v: unknown, fallback = ''): string {
-  return typeof v === 'string' ? v : fallback;
+/**
+ * The working week, from `GET /v1/working-hours`. Deduped per render like the
+ * profile, because the page and the rail both ask.
+ */
+const fetchHours = cache(async (): Promise<StoredHour[]> => {
+  const res = await call<{ items?: WorkingHourWire[] }>('/v1/working-hours', { method: 'GET' });
+  return hoursFromWire(res?.items);
+});
+
+export async function getHours(): Promise<StoredHour[]> {
+  return fetchHours();
 }
 
 /**
- * The working week and the price list, from one full pull.
+ * Replaces the windows on the listed weekdays — one `PATCH /v1/working-hours`.
  *
- * `lastPulledAt` is deliberately absent rather than 0-and-stored: this is a
- * read, not a cursor. Nothing on this half remembers where the last one got to,
- * because nothing on this half holds rows between requests.
+ * Each listed day is replaced wholesale and `windows: []` closes it; days not
+ * listed are untouched, so the caller sends only the days whose answer changed.
+ * It is one transaction server-side with every rule checked before the first
+ * write, which makes a refusal (an overlap, a window that runs backwards) leave
+ * the whole week as it was — a half-written week is not a state this can reach.
  */
-const fetchSyncTables = cache(
-  async (): Promise<{ hours: StoredHour[] }> => {
-    const res = await call<PullResponse>('/v1/sync/pull', { method: 'GET' });
-
-    const rows = (table: string): Record<string, unknown>[] => {
-      const changes = res.changes?.[table];
-      return [...(changes?.created ?? []), ...(changes?.updated ?? [])];
-    };
-
-    const hours: StoredHour[] = rows('working_hours')
-      .map((r) => ({
-        id: text(r.id),
-        weekday: num(r.weekday, -1),
-        startMinute: num(r.start_minute),
-        endMinute: num(r.end_minute),
-      }))
-      .filter((h) => h.id !== '' && h.weekday >= 0 && h.endMinute > h.startMinute);
-
-    return { hours };
-  },
-);
-
-export async function getHours(): Promise<StoredHour[]> {
-  return (await fetchSyncTables()).hours;
+export async function patchWorkingHours(
+  changes: { weekday: number; windows: HourWindow[] }[],
+): Promise<void> {
+  if (changes.length === 0) return;
+  await call<unknown>('/v1/working-hours', {
+    method: 'PATCH',
+    body: JSON.stringify(daysToWire(changes)),
+  });
 }
 
 /**
@@ -281,53 +268,6 @@ interface PackWire {
   amount: string | number;
   owner: string;
   orderIndex: number;
-}
-
-/**
- * One push. `rejected` is read rather than ignored: the endpoint answers 200
- * with a per-record refusal list, and a row named there sits nowhere at all —
- * a silent drop is the worst outcome the push protocol has, so it becomes an
- * error the screen can say out loud.
- */
-async function push(changes: Record<string, TableChanges>): Promise<void> {
-  const res = await call<{ rejected?: { table: string; message?: string }[] }>(
-    '/v1/sync/push',
-    { method: 'POST', body: JSON.stringify({ changes }) },
-  );
-  const rejected = res?.rejected ?? [];
-  if (rejected.length > 0) {
-    throw new SetupApiError(200, rejected[0]?.message ?? 'The server would not take that.');
-  }
-}
-
-/**
- * Replaces the windows on one weekday.
- *
- * Wholesale, not diffed — a day's hours are one idea, and the phone's
- * `saveWorkingHours` does the same thing for the same reason: diffing two lists
- * of intervals to save one delete is not worth the bug. Ids are client-generated
- * UUID v4 so an insert has a key the server accepts as-is, which is the same
- * contract the phone writes under.
- */
-export async function saveWorkingHours(
-  weekday: number,
-  windows: HourWindow[],
-  existingIds: string[],
-): Promise<void> {
-  const now = Date.now();
-  await push({
-    working_hours: {
-      created: windows.map((w) => ({
-        id: crypto.randomUUID(),
-        weekday,
-        start_minute: w.startMinute,
-        end_minute: w.endMinute,
-        created_at: now,
-        updated_at: now,
-      })),
-      deleted: existingIds,
-    },
-  });
 }
 
 export interface PackInput {
@@ -393,9 +333,9 @@ export async function retirePack(pack: Pack): Promise<void> {
  * both directions; this is the web's half of it.
  */
 export async function getSetupState(): Promise<SetupState> {
-  const [profile, tables, packs, skipped] = await Promise.all([
+  const [profile, hours, packs, skipped] = await Promise.all([
     fetchProfile(),
-    fetchSyncTables(),
+    fetchHours(),
     getPacks(),
     readSkipped(),
   ]);
@@ -410,9 +350,12 @@ export async function getSetupState(): Promise<SetupState> {
     certifications: profile.certifications ?? [],
     languages: profile.languages ?? [],
     upiId: profile.upiVpa ?? '',
-    workMode: asWorkMode(profile.workMode),
+    // `workMode` is not on the v1.1 wire — it was a defaults hint nothing
+    // branched on, and the gym on the profile is what the price lists key off. So
+    // the step always asks, and `PacksForm` reads a gym on file as "both".
+    workMode: null,
     gymName: profile.gymName ?? null,
-    hoursCount: tables.hours.length,
+    hoursCount: hours.length,
     packCount: packs.length,
     skipped,
     setupComplete: profile.setupComplete,

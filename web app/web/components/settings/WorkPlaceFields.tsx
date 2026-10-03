@@ -51,9 +51,9 @@ import { WORK_MODES } from '@/lib/setup/options';
  * ── AND THE ONE DESTRUCTIVE EDIT ────────────────────────────────────────────
  *
  * Choosing *on my own* takes this whole gym block off the screen and the save
- * clears `gymName` — and the server clears `gymSharePercent` in the same
- * statement, because a percentage with nobody to take it is an arrangement with
- * no counterparty. That is reported in the sentence AFTER the save rather than
+ * clears `gymName` (and the place link with it). Since v1.1 the gym's share is
+ * per pack rather than a trainer-wide percentage, so nothing else is cleared
+ * with it. That is reported in the sentence AFTER the save rather than
  * warned about before it: a `.fld__e` under the vacated fields painted the app's
  * validation red over a perfectly valid answer, and left a red block exactly
  * where a section had just correctly disappeared. What must never happen is the

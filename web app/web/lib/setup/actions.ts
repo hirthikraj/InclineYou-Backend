@@ -2,13 +2,15 @@
 
 import type { PlaceHit } from '@/lib/places/types';
 import {
+  completeSetup,
   createPack,
   getHours,
   getPacks,
   getSetupState,
+  modesWithGymFloor,
   patchProfile,
+  patchWorkingHours,
   retirePack,
-  saveWorkingHours,
   SetupApiError,
   type PackInput,
 } from './api';
@@ -159,11 +161,10 @@ export async function saveList(
 /**
  * Step 6. The working week.
  *
- * Written weekday by weekday, and only the days whose answer changed — a trainer
- * who resumes this step and edits nothing writes nothing. Each day is replaced
- * wholesale: its existing rows are named in `deleted` and the new windows are
- * created, which is what `saveWorkingHours` on the phone does and what
- * `pushWorkingHours` on the server is shaped for.
+ * One `PATCH /v1/working-hours` naming only the weekdays whose answer changed — a
+ * trainer who resumes this step and edits nothing writes nothing. Each named day
+ * is replaced wholesale by the server, and a day the picker unticked goes in
+ * with `windows: []`, which is how a rest day is spelled.
  */
 export async function saveHours(days: number[], windows: HourWindow[]): Promise<StepResult> {
   const merged = mergeWindows(windows);
@@ -180,16 +181,14 @@ export async function saveHours(days: number[], windows: HourWindow[]): Promise<
 
   try {
     const stored = await getHours();
+    const changes: { weekday: number; windows: HourWindow[] }[] = [];
     for (let weekday = 0; weekday < 7; weekday += 1) {
       const before = mergeWindows(stored.filter((h) => h.weekday === weekday));
       const after = days.includes(weekday) ? merged : [];
       if (sameWindows(before, after)) continue;
-      await saveWorkingHours(
-        weekday,
-        after,
-        stored.filter((h) => h.weekday === weekday).map((h) => h.id),
-      );
+      changes.push({ weekday, windows: after });
     }
+    await patchWorkingHours(changes);
     await answered('hours');
     return { ok: true, next: destinationAfter('hours', await getSetupState()) };
   } catch (error) {
@@ -226,14 +225,22 @@ export async function saveWorkMode(
     };
   }
   try {
-    // "On my own" with a gym on file is the trainer leaving it. An empty string
-    // clears the name AND its share percentage together, server-side — which is
-    // right: a share of nothing is not zero, it is absent.
-    await patchProfile({
-      workMode: parsed,
-      gymName: sellsGym ? trimmed : '',
-      ...(!sellsGym ? { gymPlace: null } : gymPlace !== undefined ? { gymPlace } : {}),
-    });
+    // `workMode` is not a field on the v1.1 profile, so the answer is the gym
+    // itself: "On my own" with a gym on file is the trainer leaving it (an empty
+    // name clears the name and the place link together), and a gym is a name.
+    //
+    // The server takes `gymName` OR `gymPlace`, never both — a picked place names
+    // itself, and a typed name unlinks. And a gym needs `gym_floor` among the
+    // training modes (`GYM_NEEDS_FLOOR` otherwise), so a trainer who never ticked
+    // it is not refused: it is added in the same save, as `patchTrainerGym` does
+    // on Packages.
+    if (!sellsGym) {
+      await patchProfile({ gymName: '' });
+    } else if (gymPlace) {
+      await patchProfile({ gymPlace, trainingModes: await modesWithGymFloor() });
+    } else {
+      await patchProfile({ gymName: trimmed, trainingModes: await modesWithGymFloor() });
+    }
     return { ok: true, next: '' };
   } catch (error) {
     return failure(error);
@@ -281,14 +288,16 @@ export async function leavePacks(): Promise<StepResult> {
 /**
  * Step 8. The UPI ID, and the end of the flow.
  *
- * `completeSetup: true` goes with it, in the same PATCH: the two facts are one
- * event, and a profile stamped complete by a second request that failed would
- * put a trainer on `/setup/done` with the server still asking for setup on the
- * next sign-in.
+ * Two requests since v1.1 — the UPI ID PATCHes, then `POST …/setup/complete`
+ * stamps the flow — and the ORDER is the safety: the answer lands first, so a
+ * failure of the stamp leaves a saved UPI ID and a trainer who presses Done again
+ * (the stamp is idempotent). The other order could stamp a profile whose last
+ * answer never arrived, putting a trainer on `/setup/done` with nothing saved.
  */
 export async function finishWithUpi(upiId: string): Promise<StepResult> {
   try {
-    await patchProfile({ upiVpa: upiId.trim(), completeSetup: true });
+    await patchProfile({ upiVpa: upiId.trim() });
+    await completeSetup();
     await answered('payment');
     await dropSkipped();
     return { ok: true, next: '/setup/done' };
@@ -335,7 +344,7 @@ export async function skipStep(step: SetupStep): Promise<StepResult> {
  */
 export async function finishSetup(next = '/setup/done'): Promise<StepResult> {
   try {
-    await patchProfile({ completeSetup: true });
+    await completeSetup();
     await dropSkipped();
     return { ok: true, next };
   } catch (error) {
@@ -355,7 +364,7 @@ export async function finishSetup(next = '/setup/done'): Promise<StepResult> {
  *
  * ── THE GUARD IS THE WHOLE FLOW'S ONE RULE, ENFORCED ONCE ────────────────────
  *
- * `completeSetup` is what stops the server asking for setup again, so this is
+ * The completion stamp is what stops the server asking for setup again, so this is
  * the only door out of the flow — and a trainer who walked through it without a
  * name would have an account that can never send an invite and would never be
  * asked for one again. Every caller already hides the button until step 1 is

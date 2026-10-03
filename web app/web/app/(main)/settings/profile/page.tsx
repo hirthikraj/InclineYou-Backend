@@ -13,11 +13,10 @@ export const metadata = { title: 'Your profile · InclineYou' };
  * The bar, the title and the tab strip are in `layout.tsx`. This page is the
  * panel and nothing else.
  *
- * One request, and deliberately **not** `getSetupState`. That function reads a
- * full `/v1/sync/pull` alongside the profile, because two setup steps have no
- * REST endpoint — a cost its own header calls affordable *in setup and nowhere
- * else*. Pulling a live trainer's whole database to draw a bio is exactly the
- * shape of bug that warning exists to prevent. See `lib/profile/api.ts`.
+ * One request, and deliberately **not** `getSetupState`. That function
+ * assembles the whole setup flow — profile, working week, price list, skipped
+ * steps — and a profile tab has no use for three of the four. See
+ * `lib/profile/api.ts`.
  */
 export default async function Page() {
   const identity = await getIdentity();

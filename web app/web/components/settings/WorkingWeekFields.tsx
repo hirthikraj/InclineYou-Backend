@@ -21,8 +21,9 @@ import {
  * **Controlled, like the section above it, and for the same reason**: the tab
  * has one Save, and that button has to know what changed on both halves to
  * decide which endpoints to call. This one is not even a table `WorkPanel`
- * writes the same way — it is rows in `working_hours` over `/v1/sync/push`,
- * where everything above is columns on `trainer` over `PATCH /v1/trainers/me`.
+ * writes the same way — it is rows in `working_hours` over
+ * `PATCH /v1/working-hours`, where everything above is columns on `trainer` over
+ * `PATCH /v1/trainers/me`.
  *
  * ── AN EMPTY WEEK IS A SUGGESTION, NOT A DEFAULT ────────────────────────────
  *

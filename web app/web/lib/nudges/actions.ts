@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 
-import { NudgeApiError, postNudge, resetTemplate, saveTemplate } from './api';
+import { listTemplates, NudgeApiError, postNudge, resetTemplate, saveTemplate } from './api';
 import type { NudgeSendResult, NudgeTemplate } from './types';
 
 /**
@@ -91,6 +91,13 @@ export interface TemplateWriteResult {
   ok: boolean;
   message?: string;
   template?: NudgeTemplate;
+  /**
+   * On a stale save: the row as the server holds it now. The editor adopts its
+   * `version` (and what it says about *Reset*) but keeps the typed text, so the
+   * next Save is a deliberate overwrite of the newer wording rather than a retry
+   * that fails the same way.
+   */
+  current?: NudgeTemplate;
 }
 
 /**
@@ -100,18 +107,45 @@ export interface TemplateWriteResult {
  * the *Reset* button — without a second request. The library is eight cards on
  * one screen; re-reading all of them to learn one thing about one of them is a
  * round trip for nothing.
+ *
+ * ── A SAVE CARRIES THE VERSION IT READ ──────────────────────────────────────
+ *
+ * `version` goes up as `If-Match` (`*` while the card is still the built-in
+ * wording). When the server answers 412 — another tab or device reworded the same
+ * message since this card loaded — NOTHING is written and the typed text is not
+ * lost: the row is re-read and handed back as `current`, and the sentence says
+ * what happened and what pressing Save again will do. Silently adopting the
+ * newer wording would throw away what the trainer just typed, and silently
+ * overwriting it is the failure the header exists to prevent.
  */
 export async function saveNudgeTemplate(
   name: string,
   body: string,
+  version: string | null,
 ): Promise<TemplateWriteResult> {
   try {
-    const template = await saveTemplate(name, body);
+    const template = await saveTemplate(name, body, version);
     revalidatePath('/settings/nudges');
     return { ok: true, template };
   } catch (error) {
+    if (error instanceof NudgeApiError && error.status === 412) {
+      let current: NudgeTemplate | undefined;
+      try {
+        current = (await listTemplates()).find((t) => t.name === name);
+      } catch {
+        // The message below is still true; the next Save will just 412 again.
+      }
+      return {
+        ok: false,
+        current,
+        message:
+          'This message was changed somewhere else since you opened it. Your wording is still here — press Save again to replace theirs.',
+      };
+    }
     const result = fail(error, 'The template');
-    return { ok: false, message: result.message };
+    // A `VALIDATION` refusal arrives as "body: keep it under 1000 characters …" —
+    // the field name is for a form library, not for the person typing.
+    return { ok: false, message: result.message?.replace(/^body:\s*/, '') };
   }
 }
 

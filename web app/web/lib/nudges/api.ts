@@ -102,7 +102,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
  * applied on top of it.
  */
 export async function listTemplates(): Promise<NudgeTemplate[]> {
-  const rows = await request<NudgeTemplate[]>('/v1/nudge-templates');
+  // 1.1: the `{items}` envelope, always the eight names.
+  const rows = (await request<{ items?: NudgeTemplate[] }>('/v1/nudge-templates'))?.items;
   const rank = (name: string) => {
     const i = TEMPLATE_ORDER.indexOf(name as (typeof TEMPLATE_ORDER)[number]);
     return i === -1 ? TEMPLATE_ORDER.length : i;
@@ -110,9 +111,20 @@ export async function listTemplates(): Promise<NudgeTemplate[]> {
   return [...(rows ?? [])].sort((a, b) => rank(a.name) - rank(b.name));
 }
 
-export async function saveTemplate(name: string, body: string): Promise<NudgeTemplate> {
+/**
+ * `PUT` replaces the whole body, so it carries `If-Match` (v1.1): the `version`
+ * the editor read, or `*` for a template still on the built-in wording — which
+ * creates the first override, and is a 412 if somebody else already has. Without
+ * the header the server answers 428, so there is no way to write blind.
+ */
+export async function saveTemplate(
+  name: string,
+  body: string,
+  version: string | null,
+): Promise<NudgeTemplate> {
   return request<NudgeTemplate>(`/v1/nudge-templates/${encodeURIComponent(name)}`, {
     method: 'PUT',
+    headers: { 'if-match': version ?? '*' },
     body: JSON.stringify({ body }),
   });
 }
