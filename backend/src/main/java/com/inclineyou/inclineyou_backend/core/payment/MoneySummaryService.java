@@ -60,7 +60,9 @@ public class MoneySummaryService {
             String writtenOff,
             String refunded,
             int packagesSold,
-            int paymentsCount
+            int paymentsCount,
+            /** collected less the gym's part of what was collected — cash-basis, where {@code yours} is billed-basis. */
+            String takeHome
     ) {}
 
     /** The month fields summed over the span, plus the trend on billed. */
@@ -73,6 +75,7 @@ public class MoneySummaryService {
             String refunded,
             int packagesSold,
             int paymentsCount,
+            String takeHome,
             /** Billed against the same-length span before it; null when that span billed 0. */
             Double trendPercent
     ) {}
@@ -83,7 +86,7 @@ public class MoneySummaryService {
 
     /** Mutable accumulator for one month while the grouped rows are folded in. */
     private static final class Acc {
-        BigDecimal billed = BigDecimal.ZERO, gymCut = BigDecimal.ZERO, collected = BigDecimal.ZERO,
+        BigDecimal takeHome = BigDecimal.ZERO, billed = BigDecimal.ZERO, gymCut = BigDecimal.ZERO, collected = BigDecimal.ZERO,
                 writtenOff = BigDecimal.ZERO, refunded = BigDecimal.ZERO;
         int sold, payments;
     }
@@ -132,10 +135,7 @@ public class MoneySummaryService {
         jdbc.query("""
                 SELECT to_char(start_date, 'YYYY-MM') AS m, count(*) AS sold,
                        coalesce(sum(amount), 0) AS billed,
-                       coalesce(sum(CASE
-                           WHEN trainer_share_percent IS NOT NULL THEN amount * (100 - trainer_share_percent) / 100
-                           WHEN trainer_share_amount IS NOT NULL THEN greatest(amount - trainer_share_amount, 0)
-                           ELSE 0 END), 0) AS gym_cut
+                       coalesce(sum(gym_cut(amount, trainer_share_percent, trainer_share_amount)), 0) AS gym_cut
                 FROM package
                 WHERE trainer_id = :tid::uuid AND deleted_at IS NULL
                   AND start_date >= :firstDay AND start_date < :endDay
@@ -148,16 +148,21 @@ public class MoneySummaryService {
         });
         // One pass per status column, each on its own partial index.
         for (String[] kind : new String[][]{{"paid", "paid_at"}, {"refund", "refunded_at"}, {"write_off", "written_off_at"}}) {
+            // take_home: what was collected less the gym's part of it. The share view only has rows for
+            // gym-desk payments, so a payment without one is entirely the trainer's.
             jdbc.query("""
-                    SELECT to_char(%1$s AT TIME ZONE :tz, 'YYYY-MM') AS m, count(*) AS n, sum(amount) AS total
-                    FROM payment
-                    WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND status = '%2$s'
-                      AND %1$s >= :fromAt AND %1$s < :toAt
+                    SELECT to_char(y.%1$s AT TIME ZONE :tz, 'YYYY-MM') AS m, count(*) AS n, sum(y.amount) AS total,
+                           sum(coalesce(sh.share, y.amount)) AS take_home
+                    FROM payment y
+                    LEFT JOIN payment_trainer_share sh ON sh.payment_id = y.id AND y.status = 'paid'
+                    WHERE y.trainer_id = :tid::uuid AND y.deleted_at IS NULL AND y.status = '%2$s'
+                      AND y.%1$s >= :fromAt AND y.%1$s < :toAt
                     GROUP BY 1
                     """.formatted(kind[1], kind[0]), p, rs -> {
                 var a = acc.computeIfAbsent(rs.getString("m"), k -> new Acc());
                 switch (kind[0]) {
-                    case "paid" -> { a.collected = rs.getBigDecimal("total"); a.payments = rs.getInt("n"); }
+                    case "paid" -> { a.collected = rs.getBigDecimal("total"); a.payments = rs.getInt("n");
+                                     a.takeHome = rs.getBigDecimal("take_home"); }
                     case "refund" -> a.refunded = rs.getBigDecimal("total");
                     default -> a.writtenOff = rs.getBigDecimal("total");
                 }
@@ -176,7 +181,7 @@ public class MoneySummaryService {
             }
             out.add(new Month(m.toString(), money(a.billed), money(a.collected), money(a.gymCut),
                     money(a.billed.subtract(a.gymCut)), money(a.writtenOff), money(a.refunded),
-                    a.sold, a.payments));
+                    a.sold, a.payments, money(a.takeHome)));
             sum.billed = sum.billed.add(a.billed);
             sum.gymCut = sum.gymCut.add(a.gymCut);
             sum.collected = sum.collected.add(a.collected);
@@ -184,13 +189,14 @@ public class MoneySummaryService {
             sum.refunded = sum.refunded.add(a.refunded);
             sum.sold += a.sold;
             sum.payments += a.payments;
+            sum.takeHome = sum.takeHome.add(a.takeHome);
         }
         Double trend = billedBefore.signum() == 0 ? null
                 : sum.billed.subtract(billedBefore).multiply(BigDecimal.valueOf(100))
                         .divide(billedBefore, 1, RoundingMode.HALF_UP).doubleValue();
         var total = new Total(money(sum.billed), money(sum.collected), money(sum.gymCut),
                 money(sum.billed.subtract(sum.gymCut)), money(sum.writtenOff), money(sum.refunded),
-                sum.sold, sum.payments, trend);
+                sum.sold, sum.payments, money(sum.takeHome), trend);
 
         // Now — on the same ledger L5 uses, so "owed" on a pack and "pending"
         // here cannot disagree.

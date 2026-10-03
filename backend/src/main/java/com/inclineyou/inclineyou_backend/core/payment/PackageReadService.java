@@ -192,10 +192,8 @@ public class PackageReadService {
     private static final Set<String> COLLECTORS = Set.of("trainer", "gym");
     private static final Set<String> CLIENT_TYPES = Set.of("independent", "gym");
 
-    /** The instant a payment row counts on. R85's {@code payment.book_at} column will replace this expression. */
-    private static final String BOOK_AT = """
-            (CASE y.status WHEN 'paid' THEN y.paid_at WHEN 'write_off' THEN y.written_off_at
-                           WHEN 'refund' THEN y.refunded_at ELSE y.created_at END)""";
+    /** The instant a payment row counts on — a generated column since V7 (R85), so one index serves the page. */
+    private static final String BOOK_AT = "y.book_at";
 
     public record LedgerQuery(String status, String from, String to, String method, String clientId,
                               String packageId, String collectedBy, String clientType,
@@ -212,9 +210,8 @@ public class PackageReadService {
      * a non-null {@code nextCursor} says there is more. Names and the split are
      * joined for the page only, so the join costs a page, not the book.
      *
-     * <p>Until R85's {@code payment.book_at} and {@code idx_payment_ledger} land
-     * (V2), {@code bookAt} is computed from the status, and a status-filtered
-     * page leans on the per-status indexes ({@code idx_payment_book} for paid).
+     * <p>V7's {@code payment.book_at} and {@code idx_payment_ledger} serve every
+     * page, filtered or not, in order.
      */
     public Ledger payments(UUID trainerId, LedgerQuery q) {
         var p = new HashMap<String, Object>();
