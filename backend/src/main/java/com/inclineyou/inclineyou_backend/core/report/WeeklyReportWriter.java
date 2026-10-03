@@ -1,21 +1,16 @@
 package com.inclineyou.inclineyou_backend.core.report;
 
+import com.inclineyou.inclineyou_backend.core.report.dto.WeeklyReportRow;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.sql.Date;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 /**
  * Sunday's report, written down — FR-10.2, and screen 6a of the client role.
@@ -35,7 +30,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class WeeklyReportWriter {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final WeeklyReportJdbcRepository weekly;
 
     private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
     private static final DateTimeFormatter WAS_ON = DateTimeFormatter.ofPattern("d MMMM");
@@ -63,69 +58,21 @@ public class WeeklyReportWriter {
     @Transactional
     public boolean write(UUID trainerId, UUID clientId, LocalDate weekStart) {
         LocalDate weekEnd = weekStart.plusDays(6);
-        var p = new HashMap<String, Object>();
-        p.put("tid", trainerId.toString());
-        p.put("cid", clientId.toString());
-        p.put("start", Date.valueOf(weekStart));
-        p.put("end", Date.valueOf(weekEnd));
 
-        var sessions = jdbc.queryForMap("""
-                SELECT COUNT(*) FILTER (WHERE status = 'done')        AS kept,
-                       COUNT(*) FILTER (WHERE status <> 'cancelled')  AS planned
-                FROM scheduled_session
-                WHERE client_id = :cid::uuid AND deleted_at IS NULL
-                  AND (scheduled_at AT TIME ZONE 'Asia/Kolkata')::date BETWEEN :start AND :end
-                """, p);
+        var sessions = weekly.sessions(clientId, weekStart, weekEnd);
 
-        var work = jdbc.queryForMap("""
-                SELECT COALESCE(SUM(sl.load_kg * sl.reps), 0) AS volume,
-                       COUNT(sl.id)                           AS sets
-                FROM set_log sl
-                JOIN workout_session ws ON ws.id = sl.workout_session_id
-                WHERE ws.client_id = :cid::uuid
-                  AND sl.deleted_at IS NULL AND ws.deleted_at IS NULL
-                  AND ws.session_date BETWEEN :start AND :end
-                """, p);
+        var work = weekly.work(clientId, weekStart, weekEnd);
 
         // ISO weekday numbers with a logged set on them, e.g. "2,7". Drawn as
         // seven cells, never queried, so a string is the honest storage.
-        List<Map<String, Object>> days = jdbc.queryForList("""
-                SELECT DISTINCT EXTRACT(ISODOW FROM ws.session_date)::int AS dow
-                FROM workout_session ws
-                JOIN set_log sl ON sl.workout_session_id = ws.id AND sl.deleted_at IS NULL
-                WHERE ws.client_id = :cid::uuid AND ws.deleted_at IS NULL
-                  AND ws.session_date BETWEEN :start AND :end
-                ORDER BY dow
-                """, p);
-        String trainedDays = days.stream()
-                .map(d -> d.get("dow").toString())
-                .collect(Collectors.joining(","));
+        String trainedDays = weekly.trainedDays(clientId, weekStart, weekEnd);
 
-        var bests = newBests(trainerId, clientId, p);
+        var bests = newBests(trainerId, clientId, weekStart, weekEnd);
 
-        // A HashMap, not Map.of: `best_line` is null in a week with no records,
-        // and Map.of throws on a null value.
-        var params = new HashMap<>(p);
-        params.put("kept", sessions.get("kept"));
-        params.put("planned", sessions.get("planned"));
-        params.put("trainedDays", trainedDays);
-        params.put("volume", work.get("volume"));
-        params.put("sets", work.get("sets"));
-        params.put("newBests", bests.count());
-        params.put("bestLine", nullable(bests.line()));
-        params.put("bestPrevious", nullable(bests.previous()));
-
-        int updated = jdbc.update("""
-                INSERT INTO weekly_report (id, trainer_id, client_id, week_start, week_end,
-                    sessions_kept, sessions_planned, trained_days, volume_kg, sets_done,
-                    new_bests, best_line, best_previous, sent_at, created_at, updated_at)
-                VALUES (gen_random_uuid(), :tid::uuid, :cid::uuid, :start, :end,
-                    :kept, :planned, :trainedDays, :volume, :sets,
-                    :newBests, :bestLine, :bestPrevious, NOW(), NOW(), NOW())
-                ON CONFLICT DO NOTHING
-                """, params);
-
-        return updated > 0;
+        return weekly.insertIfAbsent(new WeeklyReportRow(
+                trainerId, clientId, weekStart, weekEnd,
+                sessions.kept(), sessions.planned(), trainedDays, work.volume(), work.sets(),
+                bests.count(), nullable(bests.line()), nullable(bests.previous())));
     }
 
     private record Bests(int count, String line, String previous) {}
@@ -139,61 +86,19 @@ public class WeeklyReportWriter {
      * trainer's own plate step decides, read from the profile the settings screen
      * writes, because the count here and the gold circle there must agree.
      */
-    private Bests newBests(UUID trainerId, UUID clientId, Map<String, Object> p) {
+    private Bests newBests(UUID trainerId, UUID clientId, LocalDate weekStart, LocalDate weekEnd) {
         BigDecimal step = plateStep(trainerId);
 
-        var rows = jdbc.queryForList("""
-                WITH this_week AS (
-                    SELECT sl.exercise_id,
-                           MAX(sl.load_kg) AS best_load
-                    FROM set_log sl
-                    JOIN workout_session ws ON ws.id = sl.workout_session_id
-                    WHERE ws.client_id = :cid::uuid
-                      AND sl.deleted_at IS NULL AND ws.deleted_at IS NULL
-                      AND ws.session_date BETWEEN :start AND :end
-                      AND sl.load_kg IS NOT NULL
-                    GROUP BY sl.exercise_id
-                ),
-                before AS (
-                    SELECT sl.exercise_id,
-                           MAX(sl.load_kg) AS prior_load
-                    FROM set_log sl
-                    JOIN workout_session ws ON ws.id = sl.workout_session_id
-                    WHERE ws.client_id = :cid::uuid
-                      AND sl.deleted_at IS NULL AND ws.deleted_at IS NULL
-                      AND ws.session_date < :start
-                      AND sl.load_kg IS NOT NULL
-                    GROUP BY sl.exercise_id
-                )
-                SELECT e.name                       AS exercise,
-                       tw.best_load                 AS best_load,
-                       b.prior_load                 AS prior_load,
-                       (SELECT MAX(sl2.reps) FROM set_log sl2
-                          JOIN workout_session ws2 ON ws2.id = sl2.workout_session_id
-                         WHERE ws2.client_id = :cid::uuid AND sl2.exercise_id = tw.exercise_id
-                           AND sl2.load_kg = tw.best_load AND sl2.deleted_at IS NULL
-                           AND ws2.session_date BETWEEN :start AND :end) AS best_reps,
-                       (SELECT MAX(ws3.session_date) FROM set_log sl3
-                          JOIN workout_session ws3 ON ws3.id = sl3.workout_session_id
-                         WHERE ws3.client_id = :cid::uuid AND sl3.exercise_id = tw.exercise_id
-                           AND sl3.load_kg = b.prior_load AND sl3.deleted_at IS NULL
-                           AND ws3.session_date < :start) AS prior_on
-                FROM this_week tw
-                JOIN exercise e ON e.id = tw.exercise_id
-                LEFT JOIN before b ON b.exercise_id = tw.exercise_id
-                WHERE b.prior_load IS NOT NULL
-                  AND tw.best_load - b.prior_load >= :step
-                ORDER BY (tw.best_load - b.prior_load) DESC
-                """, merge(p, Map.of("step", step)));
+        var rows = weekly.newBests(clientId, weekStart, weekEnd, step);
 
         if (rows.isEmpty()) return new Bests(0, null, null);
 
         var top = rows.get(0);
         String line = "%s · %s kg × %s".formatted(
-                top.get("exercise"), trim(top.get("best_load")), top.get("best_reps"));
-        Object priorOn = top.get("prior_on");
+                top.exercise(), trim(top.bestLoad()), top.bestReps());
+        Object priorOn = top.priorOn();
         String previous = "Was %s kg%s".formatted(
-                trim(top.get("prior_load")),
+                trim(top.priorLoad()),
                 priorOn == null ? "" : " on " + LocalDate.parse(priorOn.toString()).format(WAS_ON));
 
         return new Bests(rows.size(), line, previous);
@@ -202,9 +107,7 @@ public class WeeklyReportWriter {
     /** `trainer.metadata.prefs.plateStepKg`, the number the phone writes there. */
     private BigDecimal plateStep(UUID trainerId) {
         try {
-            var value = jdbc.queryForObject("""
-                    SELECT (metadata -> 'prefs' ->> 'plateStepKg') FROM trainer WHERE id = :tid::uuid
-                    """, Map.of("tid", trainerId.toString()), String.class);
+            var value = weekly.plateStepKg(trainerId);
             return value == null ? DEFAULT_PLATE_STEP : new BigDecimal(value);
         } catch (Exception e) {
             return DEFAULT_PLATE_STEP;
@@ -219,11 +122,5 @@ public class WeeklyReportWriter {
 
     private static Object nullable(String s) {
         return s == null || s.isBlank() ? null : s;
-    }
-
-    private static Map<String, Object> merge(Map<String, Object> base, Map<String, Object> extra) {
-        var out = new HashMap<String, Object>(base);
-        out.putAll(extra);
-        return out;
     }
 }

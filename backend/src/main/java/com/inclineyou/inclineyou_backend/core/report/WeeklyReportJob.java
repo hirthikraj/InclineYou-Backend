@@ -2,11 +2,9 @@ package com.inclineyou.inclineyou_backend.core.report;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
 import java.util.UUID;
 
 @Component
@@ -14,7 +12,7 @@ import java.util.UUID;
 @Slf4j
 public class WeeklyReportJob {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final WeeklyReportJdbcRepository weekly;
     private final ReportService reportService;
     private final WeeklyReportWriter reportWriter;
 
@@ -23,11 +21,7 @@ public class WeeklyReportJob {
     public void runWeeklyReports() {
         log.info("WeeklyReportJob: starting");
 
-        var pairs = jdbc.queryForList("""
-                SELECT c.trainer_id, c.id AS client_id
-                FROM client c
-                WHERE c.status = 'active' AND c.deleted_at IS NULL
-                """, Map.of());
+        var pairs = weekly.activeClients();
 
         // The week that just finished, in Indian time — the job runs Monday
         // morning and reports on Monday-to-Sunday behind it.
@@ -38,8 +32,8 @@ public class WeeklyReportJob {
         int stored = 0;
         for (var pair : pairs) {
             try {
-                UUID trainerId = UUID.fromString(pair.get("trainer_id").toString());
-                UUID clientId  = UUID.fromString(pair.get("client_id").toString());
+                UUID trainerId = pair.trainerId();
+                UUID clientId  = pair.clientId();
 
                 // FR-11 · the client's own copy, stored so it can be read on a
                 // phone with no signal and so it never changes after it lands.
@@ -49,10 +43,7 @@ public class WeeklyReportJob {
 
                 String report = reportService.generateReport(trainerId, clientId);
 
-                jdbc.update("""
-                        INSERT INTO nudge_log (id, trainer_id, client_id, channel, template_name, status, sent_at, created_at, updated_at)
-                        VALUES (gen_random_uuid(), :tid::uuid, :cid::uuid, 'whatsapp', 'weekly_report', 'queued', NOW(), NOW(), NOW())
-                        """, Map.of("tid", trainerId.toString(), "cid", clientId.toString()));
+                weekly.queueNudge(trainerId, clientId);
 
                 log.debug("WeeklyReportJob: queued report client={} len={}", clientId, report.length());
                 count++;
