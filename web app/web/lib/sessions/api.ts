@@ -38,43 +38,30 @@ async function request<T>(path: string): Promise<T> {
 
 /* ─────────────────────────────────────────────────── wire shapes (minimal) ── */
 
+/** L4 · `SessionReadService.SessionRow` — the booking and, once started, its log (the log IS the session). */
 interface SessionWire {
   id: string;
   clientId: string;
-  programId: string | null;
   scheduledAt: number;
   durationMinutes: number | null;
   status: string;
-  dayLabel: string | null;
-  templateDay: number | null;
   deliveryMode: string | null;
   notes?: string | null;
+  workout: { id: string; name: string; programId: string | null; week: number | null; day: number | null } | null;
+  startedAt: number | null;
 }
 
+/** `GET /v1/clients?view=summary` — only what a row's length needs. */
 interface ClientWire {
   id: string;
-  name: string;
+  name: string | null;
   status: string;
-  sessionDurationMinutes?: number | null;
-}
-
-interface WorkoutWire {
-  id: string;
-  clientId: string;
-  programId?: string | null;
-  scheduledSessionId: string | null;
-  sessionDate: string;
-  notes: string | null;
-  endedAt: number | null;
-  createdAt: number;
+  schedule?: { sessionDurationMinutes: number | null } | null;
 }
 
 interface ProgramWire {
   id: string;
-  clientId: string;
   name: string;
-  status: string;
-  startDate: string | null;
 }
 
 /* ──────────────────────────────────────────────────────── public shapes ── */
@@ -323,13 +310,13 @@ function toRow(
   s: SessionWire,
   client: ClientWire | undefined,
   program: { name: string } | undefined,
-  workout: WorkoutWire | null,
 ): SessionRow {
+  const clientMinutes = client?.schedule?.sessionDurationMinutes;
   const minutes =
     s.durationMinutes && s.durationMinutes > 0
       ? s.durationMinutes
-      : client?.sessionDurationMinutes && client.sessionDurationMinutes > 0
-        ? client.sessionDurationMinutes
+      : clientMinutes && clientMinutes > 0
+        ? clientMinutes
         : DEFAULT_DURATION;
 
   return {
@@ -341,12 +328,13 @@ function toRow(
     minutes,
     status: (s.status ?? '').toLowerCase(),
     mode: resolveMode(s.deliveryMode),
-    programId: s.programId,
+    programId: s.workout?.programId ?? null,
     programName: program?.name?.trim() ?? null,
-    dayLabel: s.dayLabel?.trim() ?? null,
-    templateDay: s.templateDay ?? null,
-    hasLog: workout !== null,
-    workoutId: workout?.id ?? null,
+    dayLabel: s.workout?.name?.trim() ?? null,
+    templateDay: s.workout?.day ?? null,
+    // The log is the session (R2/R40): started_at is the whole answer, and the log's id is the session's.
+    hasLog: s.startedAt != null,
+    workoutId: s.startedAt != null ? s.id : null,
     notes: s.notes ?? null,
   };
 }
@@ -364,25 +352,22 @@ function toRow(
  */
 export const getSessions = cache(async (): Promise<SessionsData> => {
   const now = Date.now();
-  const from = now - 90 * 24 * 60 * 60 * 1000;
-  const to = now + 30 * 24 * 60 * 60 * 1000;
+  /* The window goes out as DATES, read by the server in the workspace's timezone. This runs on a Next
+     server whose zone may not be the trainer's, so each end is widened a day; the buckets below
+     compare instants, so the extra day only ever lands in a bucket by its real time. */
+  const day = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+  const from = day(now - 91 * 24 * 60 * 60 * 1000);
+  const to = day(now + 32 * 24 * 60 * 60 * 1000);
 
-  const [sessions, clients, workouts, programs] = await Promise.all([
+  const [sessions, clients, programs] = await Promise.all([
     listAll<SessionWire>(`/v1/sessions?from=${from}&to=${to}`, (p) => request<ListEnvelope<SessionWire>>(p)),
-    request<ClientWire[]>('/v1/clients?view=legacy'),
-    request<WorkoutWire[]>('/v1/workouts'),
-    request<ProgramWire[]>('/v1/programs'),
+    listAll<ClientWire>('/v1/clients?view=summary', (p) => request<ListEnvelope<ClientWire>>(p)),
+    // Every plan a session could belong to, finished ones included: the default is active,paused.
+    request<{ items: ProgramWire[] }>('/v1/programs?kind=client&status=active,paused,completed'),
   ]);
 
   const clientById = new Map((clients ?? []).map((c) => [c.id, c]));
-  const programById = new Map((programs ?? []).map((p) => [p.id, p]));
-
-  /* Index workouts by the scheduled session they were created from, so we know
-     which sessions have been logged without per-session fetches. */
-  const workoutBySid = new Map<string, WorkoutWire>();
-  for (const w of workouts ?? []) {
-    if (w.scheduledSessionId) workoutBySid.set(w.scheduledSessionId, w);
-  }
+  const programById = new Map((programs?.items ?? []).map((p) => [p.id, p]));
 
   const rows = (sessions ?? [])
     .filter((s) => !CANCELLED.has((s.status ?? '').toLowerCase()))
@@ -390,8 +375,7 @@ export const getSessions = cache(async (): Promise<SessionsData> => {
       toRow(
         s,
         clientById.get(s.clientId),
-        programById.get(s.programId ?? ''),
-        workoutBySid.get(s.id) ?? null,
+        programById.get(s.workout?.programId ?? ''),
       ),
     );
 
