@@ -24,7 +24,7 @@ public class NudgeTemplateJdbcRepository {
 
     /**
      * Every override this trainer has, by template name. Read whole rather than one at a time:
-     * there are at most eight rows, and {@link NudgeService} needs one of them per send.
+     * there are at most eight rows, and {@link NudgeDraftService} needs one of them per draft.
      */
     public Map<String, Override> overrides(UUID trainerId) {
         Map<String, Override> out = new HashMap<>();

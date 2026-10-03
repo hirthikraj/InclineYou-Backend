@@ -7,7 +7,7 @@ import org.springframework.http.HttpStatus;
  * A refusal whose {@code code} belongs to the wire rather than to one module —
  * api-contract 1.1 *Conventions* and the Error codes appendix.
  *
- * <p>The module exceptions ({@code PackageRuleException}, {@code NudgeRuleException}
+ * <p>The module exceptions ({@code PackageRuleException}, {@code TeamRuleException}
  * …) stay for the codes only one module can raise. These are the ones every
  * module raises the same way: a malformed field, a window past its documented
  * maximum, a client-minted id that is already somebody else's. Before 1.1 they

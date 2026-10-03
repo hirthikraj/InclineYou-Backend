@@ -6,7 +6,6 @@ import com.inclineyou.inclineyou_backend.core.auth.OtpLockedException;
 import com.inclineyou.inclineyou_backend.core.auth.OtpThrottledException;
 import com.inclineyou.inclineyou_backend.core.client.ClientRuleException;
 import com.inclineyou.inclineyou_backend.core.client.PhoneUnavailableException;
-import com.inclineyou.inclineyou_backend.core.nudge.NudgeRuleException;
 import com.inclineyou.inclineyou_backend.core.assessment.AssessmentRuleException;
 import com.inclineyou.inclineyou_backend.core.attention.AttentionRuleException;
 import com.inclineyou.inclineyou_backend.core.payment.PackRuleException;
@@ -206,23 +205,6 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(PackageRuleException.class)
     ResponseEntity<ProblemDetail> handlePackageRule(PackageRuleException ex) {
-        ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
-        pd.setProperty("code", ex.getCode());
-        return ResponseEntity.status(ex.getStatus()).body(pd);
-    }
-
-    /**
-     * A nudge rule said no — an unknown template, an empty body, a client with
-     * no number on file.
-     *
-     * <p>Same shape as the two above. The one worth knowing about is
-     * {@code NUDGE_NO_PHONE}: it is a 422 rather than a 400 because the request
-     * is perfectly well-formed and asks for something that cannot exist, and the
-     * screen turns it into "Meera has no number on file" beside a link to her
-     * file rather than into "that did not go through".
-     */
-    @ExceptionHandler(NudgeRuleException.class)
-    ResponseEntity<ProblemDetail> handleNudgeRule(NudgeRuleException ex) {
         ProblemDetail pd = ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
         pd.setProperty("code", ex.getCode());
         return ResponseEntity.status(ex.getStatus()).body(pd);

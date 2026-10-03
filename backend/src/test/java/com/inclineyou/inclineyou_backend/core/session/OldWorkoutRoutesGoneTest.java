@@ -75,4 +75,11 @@ class OldWorkoutRoutesGoneTest {
         gone("GET /v1/workouts/{id}/sets", get("/v1/workouts/" + ID + "/sets"));
         gone("GET /v1/workouts/{id}/exercises", get("/v1/workouts/" + ID + "/exercises"));
     }
+
+    @Test
+    @DisplayName("the 1.0 nudge routes are gone too: POST …/nudge and GET …/clients/{id}/nudges")
+    void oldNudgeRoutesAreGone() throws Exception {
+        gone("POST /v1/clients/{id}/nudge", post("/v1/clients/" + ID + "/nudge"));
+        gone("GET /v1/clients/{id}/nudges", get("/v1/clients/" + ID + "/nudges"));
+    }
 }

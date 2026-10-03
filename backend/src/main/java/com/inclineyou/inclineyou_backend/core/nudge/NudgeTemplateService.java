@@ -90,15 +90,6 @@ public class NudgeTemplateService {
         return Integer.toHexString(rows.stream().map(r -> r.name() + ":" + r.version()).collect(Collectors.joining("|")).hashCode());
     }
 
-    /**
-     * Every override's wording by name — what {@link NudgeService} renders from. Read whole: there
-     * are at most eight, and a per-name query on the hot path would save reading seven short strings.
-     */
-    public Map<String, String> overridesFor(UUID trainerId) {
-        return repo.overrides(trainerId).entrySet().stream()
-                .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().body()));
-    }
-
     /* ── write ────────────────────────────────────────────────────────────── */
 
     /**

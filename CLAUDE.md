@@ -185,7 +185,7 @@ Rules that touch both halves:
   neither** — the queue goes quiet about somebody already contacted rather than a
   server refusing a button, because a refusal teaches the trainer to open WhatsApp
   directly and that loses the log for everybody. `COOLDOWN_DAYS` has **four**
-  copies (`app/src/nudges/rules.ts`, `NudgeService`, `lib/nudges/cooldown.ts`,
+  copies (`app/src/nudges/rules.ts`, `NudgeReadService`, `lib/nudges/cooldown.ts`,
   imported by `lib/today/deck.ts`). **V32 is backend + web only**, like V30:
   nothing enters sync, and `nudge_rule` — the phone's five *when to raise it*
   rules, which carry a message of their own — is deliberately untouched, so a

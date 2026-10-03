@@ -10,7 +10,7 @@ import java.util.Map;
  * holding its own copy is a drift waiting to happen.
  *
  * <ul>
- *   <li>{@link NudgeService} renders a message: it needs the default body for a
+ *   <li>{@link NudgeDraftService} renders a message: it needs the default body for a
  *       trainer who has not overridden it, and the variable list to know what to
  *       look up.</li>
  *   <li>{@link NudgeTemplateService} serves the library screen: it needs the

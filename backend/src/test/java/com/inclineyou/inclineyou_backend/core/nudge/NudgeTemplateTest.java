@@ -63,7 +63,6 @@ class NudgeTemplateTest {
 
     @Autowired WebApplicationContext context;
     @Autowired NamedParameterJdbcTemplate jdbc;
-    @Autowired NudgeService nudgeService;
 
     private MockMvc mvc;
 
@@ -222,164 +221,38 @@ class NudgeTemplateTest {
 
     /* ───────────────────────────────────────────────────────── the send ─── */
 
-    @Test
-    @DisplayName("the sent message is the trainer's wording with the client's real figures in it")
-    void rendersTheOverrideWithLiveFigures() throws Exception {
-        // ₹12,000 billed, ₹6,000 collected — so ₹6,000 is what the money book
-        // would show, and it is what the message must say.
-        var pkg = packageFor(client, "12000", 3, 12);
-        payment(pkg, "6000", "paid");
-
-        mvc.perform(put("/v1/nudge-templates/payment_reminder")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"body\":\"Hi {name}, {amount} pending on your {package}.\"}"))
-                .andExpect(status().isOk());
-
-        mvc.perform(post("/v1/clients/%s/nudge".formatted(client))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"templateName\":\"payment_reminder\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.message")
-                        .value("Hi Rajalakshmi, ₹6,000 pending on your 12-session pack."))
-                /* The number is normalised to the wa.me form. A malformed one
-                   opens WhatsApp on an error page, which reads to the trainer as
-                   the app being broken — hence the 422 case below. */
-                .andExpect(jsonPath("$.whatsappUrl")
-                        .value(org.hamcrest.Matchers.startsWith("https://wa.me/919876543210?text=")));
-    }
-
-    @Test
-    @DisplayName("the drafted message is stored on the log, and read back by the history")
-    void theLogRecordsWhatWasDrafted() throws Exception {
-        mvc.perform(post("/v1/clients/%s/nudge".formatted(client))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"templateName\":\"check_in\"}"))
-                .andExpect(status().isOk());
-
-        mvc.perform(get("/v1/clients/%s/nudges".formatted(client)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].templateName").value("check_in"))
-                /* The LABEL is resolved server-side so a renamed template renames
-                   every history at once, and the web holds no copy of it. */
-                .andExpect(jsonPath("$[0].templateLabel").value("Check-in"))
-                .andExpect(jsonPath("$[0].message")
-                        .value(org.hamcrest.Matchers.containsString("Rajalakshmi")));
-
-        // …and across the roster, which is the read Today makes.
-        mvc.perform(get("/v1/nudges"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].clientName").value("Rajalakshmi Venkataraman"));
-    }
-
-    @Test
-    @DisplayName("another trainer cannot read this trainer's follow-up history")
-    void historyIsPerTrainer() throws Exception {
-        mvc.perform(post("/v1/clients/%s/nudge".formatted(client))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"templateName\":\"check_in\"}"))
-                .andExpect(status().isOk());
-
-        /* The client row is handed over — the strongest form of the case, the
-           same one `ClientNoteTest` makes: every client-level ownership check now
-           passes, and only the log's own trainer predicate stands. */
-        jdbc.update("UPDATE client SET trainer_id = :tid::uuid WHERE id = :cid::uuid",
-                Map.of("tid", other.toString(), "cid", client.toString()));
-        signedInAs(other);
-
-        mvc.perform(get("/v1/clients/%s/nudges".formatted(client)))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
-    }
-
-    @Test
-    @DisplayName("a client with no number on file is a 422 naming them, not a broken wa.me link")
-    void aClientWithNoPhoneIsRefused() throws Exception {
-        var noPhone = client(owner, "Irfan Ali", null);
-
-        mvc.perform(post("/v1/clients/%s/nudge".formatted(noPhone))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"templateName\":\"check_in\"}"))
-                .andExpect(status().isUnprocessableContent())
-                .andExpect(jsonPath("$.code").value("NUDGE_NO_PHONE"))
-                .andExpect(jsonPath("$.detail")
-                        .value(org.hamcrest.Matchers.containsString("Irfan Ali")));
-    }
-
-    @Test
-    @DisplayName("an unknown template name still drafts something rather than failing the button")
-    void unknownTemplateOnSendFallsThrough() throws Exception {
-        mvc.perform(post("/v1/clients/%s/nudge".formatted(client))
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"templateName\":\"invented_by_a_newer_build\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.message")
-                        .value(org.hamcrest.Matchers.containsString("Rajalakshmi")));
-    }
-
     /* ──────────────────────────────────────────────────── the formatting ── */
 
     @Test
     @DisplayName("the teens take 'th' — 11th, 12th, 13th, 111th")
     void ordinalsHandleTheTeens() {
-        assertThat(NudgeService.ordinal(1)).isEqualTo("1st");
-        assertThat(NudgeService.ordinal(2)).isEqualTo("2nd");
-        assertThat(NudgeService.ordinal(3)).isEqualTo("3rd");
-        assertThat(NudgeService.ordinal(11)).isEqualTo("11th");
-        assertThat(NudgeService.ordinal(12)).isEqualTo("12th");
-        assertThat(NudgeService.ordinal(13)).isEqualTo("13th");
-        assertThat(NudgeService.ordinal(21)).isEqualTo("21st");
-        assertThat(NudgeService.ordinal(100)).isEqualTo("100th");
-        assertThat(NudgeService.ordinal(111)).isEqualTo("111th");
+        assertThat(NudgeText.ordinal(1)).isEqualTo("1st");
+        assertThat(NudgeText.ordinal(2)).isEqualTo("2nd");
+        assertThat(NudgeText.ordinal(3)).isEqualTo("3rd");
+        assertThat(NudgeText.ordinal(11)).isEqualTo("11th");
+        assertThat(NudgeText.ordinal(12)).isEqualTo("12th");
+        assertThat(NudgeText.ordinal(13)).isEqualTo("13th");
+        assertThat(NudgeText.ordinal(21)).isEqualTo("21st");
+        assertThat(NudgeText.ordinal(100)).isEqualTo("100th");
+        assertThat(NudgeText.ordinal(111)).isEqualTo("111th");
     }
 
     @Test
     @DisplayName("rupees group the Indian way — ₹1,20,000, never ₹120,000")
     void rupeesUseIndianGrouping() {
-        assertThat(NudgeService.rupees(new java.math.BigDecimal("6000"))).isEqualTo("₹6,000");
-        assertThat(NudgeService.rupees(new java.math.BigDecimal("120000"))).isEqualTo("₹1,20,000");
-        assertThat(NudgeService.rupees(new java.math.BigDecimal("0"))).isEqualTo("₹0");
+        assertThat(NudgeText.rupees(new java.math.BigDecimal("6000"))).isEqualTo("₹6,000");
+        assertThat(NudgeText.rupees(new java.math.BigDecimal("120000"))).isEqualTo("₹1,20,000");
+        assertThat(NudgeText.rupees(new java.math.BigDecimal("0"))).isEqualTo("₹0");
     }
 
     @Test
     @DisplayName("an unknown token is left as itself rather than blanked")
     void unknownTokensSurvive() {
-        var out = NudgeService.interpolate("Hi {nmae}, {name}", Map.of("{name}", "Meera"));
+        var out = NudgeText.interpolate("Hi {nmae}, {name}", Map.of("{name}", "Meera"));
         assertThat(out).isEqualTo("Hi {nmae}, Meera");
     }
 
     /* ------------------------------------------------------------- fixtures */
-
-    private UUID packageFor(UUID clientId, String amount, Integer remaining, Integer total) {
-        var id = UUID.randomUUID();
-        var params = new HashMap<String, Object>();
-        params.put("id", id.toString());
-        params.put("tid", owner.toString());
-        params.put("cid", clientId.toString());
-        params.put("amount", new java.math.BigDecimal(amount));
-        params.put("remaining", remaining);
-        params.put("total", total);
-        jdbc.update("""
-                INSERT INTO package (id, trainer_id, client_id, amount, sessions_remaining,
-                                     sessions_total, status)
-                VALUES (:id::uuid, :tid::uuid, :cid::uuid, :amount, :remaining, :total, 'active')
-                """, params);
-        return id;
-    }
-
-    private void payment(UUID packageId, String amount, String status) {
-        var params = new HashMap<String, Object>();
-        params.put("tid", owner.toString());
-        params.put("cid", client.toString());
-        params.put("pid", packageId.toString());
-        params.put("amount", new java.math.BigDecimal(amount));
-        params.put("status", status);
-        jdbc.update("""
-                INSERT INTO payment (id, trainer_id, client_id, package_id, amount, status)
-                VALUES (gen_random_uuid(), :tid::uuid, :cid::uuid, :pid::uuid, :amount, :status)
-                """, params);
-    }
 
     private UUID client(UUID trainerId, String name, String phone) {
         var id = UUID.randomUUID();

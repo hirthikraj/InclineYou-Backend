@@ -1,19 +1,25 @@
 package com.inclineyou.inclineyou_backend.core.nudge;
 
-import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
+import com.inclineyou.inclineyou_backend.core.nudge.dto.Draft;
+import com.inclineyou.inclineyou_backend.core.nudge.dto.DraftClient;
+import com.inclineyou.inclineyou_backend.core.nudge.dto.DraftRequest;
+import com.inclineyou.inclineyou_backend.core.nudge.dto.Drafted;
+import com.inclineyou.inclineyou_backend.core.nudge.dto.NewNudgeLog;
 import com.inclineyou.inclineyou_backend.core.payment.PackageReadService;
 import com.inclineyou.inclineyou_backend.core.payment.dto.CurrentPackage;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
+import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,25 +28,43 @@ import java.util.UUID;
 
 /**
  * {@code POST /v1/clients/{clientId}/nudges} — draft a WhatsApp message, log it,
- * hand back a {@code wa.me} link (api-contract Today A2). On the v1
- * {@code nudge_log}; the 1.0 {@code …/nudge} route in {@link NudgeService} writes
- * columns v1 no longer has and is left for the screens that still call it.
+ * hand back a {@code wa.me} link (api-contract Today A2).
  *
- * <p>Nothing is sent: the trainer sends it from their own WhatsApp, which is the
- * product (see {@link NudgeService}). Every figure in the message is read here —
- * the amount owed comes from the package, never from the caller — so the message
- * and the money book cannot disagree.
+ * <p><b>This service has never sent a message and still does not.</b> The trainer
+ * reviews the draft and presses send from their own WhatsApp, every time. The
+ * alternative is the WhatsApp Business API, which costs money, needs Meta template
+ * review and — the part that decides it — sends from a platform number: a message
+ * from the trainer's own number lands in a thread the client already has open and
+ * gets read; one from a business number lands beside the delivery notifications and
+ * does not. Automation would make this feature worse, not better; it is v2 on purpose.
  *
- * <p>No cooldown refusal, by design: the queue goes quiet about somebody already
- * contacted, and a server that said no would teach the trainer to open WhatsApp
- * directly and lose the log for everybody.
+ * <h2>Every figure in the message is resolved HERE</h2>
+ *
+ * Never passed in by the caller. The amount in a payment reminder is read from the
+ * same ledger the money book reads, so the message and the money book cannot
+ * disagree — and a caller that could pass the text could disagree with the ledger,
+ * the one most likely to being the screen that just did some arithmetic of its own.
+ * One count per template, so {@code {count}} can never mean two things in one message
+ * (sessions left, sessions missed and sessions delivered are three different numbers).
+ *
+ * <h2>The cooldown is READ elsewhere and enforced nowhere</h2>
+ *
+ * Once per client per seven days ({@code COOLDOWN_DAYS}, see {@link NudgeReadService}) is
+ * the queue going quiet about somebody already contacted, not a 429 here. A trainer
+ * pressing <i>Remind</i> on a client they messaged on Monday knows something the product
+ * does not — the client replied, or asked to be chased again — and a refusal would teach
+ * them to open WhatsApp directly, which loses the log, and with it the cooldown, for
+ * everybody.
+ *
+ * <p>The SQL is {@link NudgeLogJdbcRepository}'s; this class decides which template takes
+ * which subject, what the words are and when a replay is a replay.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class NudgeDraftService {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final NudgeLogJdbcRepository logs;
     private final PackageReadService packages;
     private final WorkspaceClock clock;
     private final NudgeTemplateJdbcRepository templates;
@@ -65,13 +89,6 @@ public class NudgeDraftService {
     /** {@code nudge_log.message} is varchar(1000). */
     private static final int MAX_MESSAGE = 1000;
 
-    public record DraftRequest(String id, String template, String packageId, String sessionId) {}
-
-    public record Draft(String id, String message, String whatsappUrl, long sentAt) {}
-
-    /** The draft, and whether this call wrote it (201) or a replay found it (200). */
-    public record Drafted(Draft draft, boolean created) {}
-
     @Transactional
     public Drafted draft(UUID trainerId, UUID clientId, DraftRequest req) {
         if (req == null) throw ApiException.validation("body: required");
@@ -94,149 +111,99 @@ public class NudgeDraftService {
             throw ApiException.validation("sessionId: " + template + " doesn't take a session");
         }
 
-        var p = new HashMap<String, Object>();
-        p.put("tid", trainerId.toString());
-        p.put("cid", clientId.toString());
-        var clients = jdbc.queryForList("""
-                SELECT c.name, c.phone, t.name AS trainer_name
-                FROM client c JOIN trainer t ON t.id = :tid::uuid
-                WHERE c.id = :cid::uuid AND c.trainer_id = :tid::uuid AND c.deleted_at IS NULL
-                """, p);
-        if (clients.isEmpty()) throw ApiException.notFound("That client is not on your roster.");
-        var client = clients.getFirst();
-        String phone = waNumber((String) client.get("phone"));
+        DraftClient client = logs.draftClient(trainerId, clientId)
+                .orElseThrow(() -> ApiException.notFound("That client is not on your roster."));
+        String phone = NudgeText.waNumber(client.phone());
 
         // A replay is answered from the row it wrote — the stored message rebuilds
         // the same link, and no second row skews the cooldown.
         if (id != null) {
-            p.put("id", id.toString());
-            var existing = jdbc.queryForList("""
-                    SELECT trainer_id::text AS tid, client_id::text AS cid, message, sent_at
-                    FROM nudge_log WHERE id = :id::uuid
-                    """, p);
-            if (!existing.isEmpty()) {
-                var e = existing.getFirst();
-                if (!trainerId.toString().equals(e.get("tid")) || !clientId.toString().equals(e.get("cid"))) {
+            var existing = logs.byId(id);
+            if (existing.isPresent()) {
+                var e = existing.get();
+                if (!trainerId.toString().equals(e.trainerId()) || !clientId.toString().equals(e.clientId())) {
                     throw ApiException.idConflict();
                 }
-                String message = (String) e.get("message");
-                return new Drafted(new Draft(id.toString(), message, link(phone, clientName(client), message),
-                        ((java.sql.Timestamp) e.get("sent_at")).getTime()), false);
+                return new Drafted(new Draft(id.toString(), e.message(), link(phone, client.name(), e.message()),
+                        e.sentAt()), false);
             }
         }
         if (phone == null) {
             // 409, not 422 (1.1): adding a number makes the same request work.
-            throw ApiException.conflict("CLIENT_NO_PHONE", clientName(client) + " has no phone number on file.");
+            throw ApiException.conflict("CLIENT_NO_PHONE", client.name() + " has no phone number on file.");
         }
 
-        if (packageId != null) {
-            p.put("pid", packageId.toString());
-            if (jdbc.queryForList("SELECT 1 FROM package WHERE id = :pid::uuid AND client_id = :cid::uuid "
-                    + "AND trainer_id = :tid::uuid AND deleted_at IS NULL", p).isEmpty()) {
-                throw ApiException.validation("packageId: not a package of this client");
-            }
+        if (packageId != null && !logs.packageOfClient(trainerId, clientId, packageId)) {
+            throw ApiException.validation("packageId: not a package of this client");
         }
-        if (sessionId != null) {
-            p.put("sid", sessionId.toString());
-            if (jdbc.queryForList("SELECT 1 FROM scheduled_session WHERE id = :sid::uuid AND client_id = :cid::uuid "
-                    + "AND trainer_id = :tid::uuid AND deleted_at IS NULL", p).isEmpty()) {
-                throw ApiException.validation("sessionId: not a session of this client");
-            }
+        if (sessionId != null && !logs.sessionOfClient(trainerId, clientId, sessionId)) {
+            throw ApiException.validation("sessionId: not a session of this client");
         }
 
         // Day counts in the message are read on the workspace's calendar, not the
         // server's or the database's clock: "due 1 day ago" at 02:00 in Chennai
         // must not say 0 because the JVM runs in UTC.
-        var zone = clock.zone();
-        p.put("tz", zone.getId());
-        p.put("today", java.sql.Date.valueOf(WorkspaceClock.today(zone)));
-        String body = overrideFor(trainerId, template);
-        String message = NudgeService.interpolate(body, variables(p, template, packageId,
-                clientName(client), (String) client.get("trainer_name")));
+        LocalDate today = WorkspaceClock.today(clock.zone());
+        String message = NudgeText.interpolate(bodyFor(trainerId, template),
+                variables(trainerId, clientId, template, packageId, today, client));
         if (message.length() > MAX_MESSAGE) message = message.substring(0, MAX_MESSAGE);
 
-        p.put("id", (id == null ? UUID.randomUUID() : id).toString());
-        p.put("reason", reason);
-        p.put("template", template);
-        p.put("message", message);
-        p.put("pid", packageId == null ? null : packageId.toString());
-        p.put("sid", sessionId == null ? null : sessionId.toString());
-        Long sentAt;
+        UUID rowId = id == null ? UUID.randomUUID() : id;
+        long sentAt;
         try {
-            // tenant_id is stamped by the trigger. Append-only: never updated.
-            sentAt = jdbc.queryForObject("""
-                    INSERT INTO nudge_log (id, trainer_id, client_id, reason, template, channel,
-                                           package_id, session_id, message)
-                    VALUES (:id::uuid, :tid::uuid, :cid::uuid, :reason, :template, 'whatsapp_manual',
-                            :pid::uuid, :sid::uuid, :message)
-                    RETURNING (extract(epoch FROM sent_at) * 1000)::bigint
-                    """, p, Long.class);
+            sentAt = logs.append(new NewNudgeLog(rowId, trainerId, clientId, reason, template, packageId, sessionId, message));
         } catch (DuplicateKeyException e) {
             throw ApiException.idConflict();   // an id taken by a row this trainer cannot see
         }
         log.info("nudge drafted trainer={} client={} template={}", trainerId, clientId, template);
-        return new Drafted(new Draft((String) p.get("id"), message, link(phone, clientName(client), message),
-                sentAt == null ? System.currentTimeMillis() : sentAt), true);
+        return new Drafted(new Draft(rowId.toString(), message, link(phone, client.name(), message), sentAt), true);
     }
 
     /** The trainer's own wording if they have one, else the built-in (nudge_template is an override). */
-    private String overrideFor(UUID trainerId, String template) {
+    private String bodyFor(UUID trainerId, String template) {
         var saved = templates.overrides(trainerId).get(template);
         if (saved != null) return saved.body();
         var t = NudgeTemplateCatalog.find(template);
         return t != null ? t.body() : NudgeTemplateCatalog.FALLBACK_BODY;
     }
 
-    /**
-     * Every variable this template could use, read from v1 tables. One count per
-     * template, so {@code {count}} can never mean two things in one message.
-     */
-    private Map<String, String> variables(Map<String, Object> p, String template, UUID packageId,
-                                          String clientName, String trainerName) {
+    /** Every variable this template could use, read from v1 tables. */
+    private Map<String, String> variables(UUID trainerId, UUID clientId, String template, UUID packageId,
+                                          LocalDate today, DraftClient client) {
         var vars = new HashMap<String, String>();
-        vars.put("{name}", first(clientName, "there"));
-        vars.put("{trainer}", first(trainerName, "your trainer"));
+        vars.put("{name}", NudgeText.firstName(client.name(), "there"));
+        vars.put("{trainer}", NudgeText.firstName(client.trainerName(), "your trainer"));
         switch (template) {
             case "renewal" -> {
-                var pack = pack(p, packageId, false);
+                var pack = pack(trainerId, clientId, packageId);
                 int left = pack == null || pack.sessionsRemaining() == null ? 0 : pack.sessionsRemaining();
                 vars.put("{count}", String.valueOf(left));
-                vars.put("{nth}", NudgeService.ordinal(left));
+                vars.put("{nth}", NudgeText.ordinal(left));
                 vars.put("{package}", pack == null ? "pack" : pack.name());
             }
             case "payment_reminder" -> {
                 // The named package's amountDue, else everything the client owes —
                 // the same ledger L5 and the money card read.
-                var owed = owing(p, packageId);
-                vars.put("{amount}", NudgeService.rupees(owed.amount()));
+                var owed = owing(trainerId, clientId, packageId, today);
+                vars.put("{amount}", NudgeText.rupees(owed.amount()));
                 vars.put("{package}", owed.packageName());
                 vars.put("{days}", String.valueOf(owed.days()));
                 vars.put("{count}", String.valueOf(owed.days()));
             }
             case "missed_session" -> {
-                Integer n = jdbc.queryForObject("""
-                        SELECT count(*)::int FROM scheduled_session
-                        WHERE client_id = :cid::uuid AND status = 'no_show' AND deleted_at IS NULL
-                          AND scheduled_at >= now() - interval '30 days'
-                        """, p, Integer.class);
-                vars.put("{count}", String.valueOf(n == null ? 0 : n));
-                vars.put("{nth}", NudgeService.ordinal(n == null ? 0 : n));
+                int n = logs.noShowsInLast30Days(clientId);
+                vars.put("{count}", String.valueOf(n));
+                vars.put("{nth}", NudgeText.ordinal(n));
             }
             case "well_done" -> {
                 // The count L3's stats.sessionsDone reports, so the message says
                 // the number on the row the trainer pressed.
-                Integer n = jdbc.queryForObject("""
-                        SELECT count(*)::int FROM scheduled_session
-                        WHERE client_id = :cid::uuid AND status = 'done' AND deleted_at IS NULL
-                        """, p, Integer.class);
-                vars.put("{count}", String.valueOf(n == null ? 0 : n));
-                vars.put("{nth}", NudgeService.ordinal(n == null ? 0 : n));
+                int n = logs.doneSessions(clientId);
+                vars.put("{count}", String.valueOf(n));
+                vars.put("{nth}", NudgeText.ordinal(n));
             }
             case "check_in" -> {
-                Integer days = jdbc.queryForObject("""
-                        SELECT (:today - max((scheduled_at AT TIME ZONE :tz)::date))::int FROM scheduled_session
-                        WHERE client_id = :cid::uuid AND status = 'done' AND deleted_at IS NULL
-                        """, p, Integer.class);
+                Integer days = logs.daysSinceLastDone(clientId, clock.zone().getId(), today);
                 // Nothing ever delivered: a word, not "0 days", which would be a lie.
                 vars.put("{days}", days == null ? "a few" : String.valueOf(days));
             }
@@ -245,54 +212,34 @@ public class NudgeDraftService {
         return vars;
     }
 
-    private CurrentPackage pack(Map<String, Object> p, UUID packageId, boolean owingOnly) {
-        var trainer = UUID.fromString((String) p.get("tid"));
-        if (packageId != null) return packages.one(trainer, packageId).orElse(null);
-        return packages.list(trainer, true, UUID.fromString((String) p.get("cid"))).stream()
-                .filter(k -> owingOnly ? new BigDecimal(k.amountDue()).signum() > 0 : "active".equals(k.status()))
+    /** The named package, else the client's first active one. */
+    private CurrentPackage pack(UUID trainerId, UUID clientId, UUID packageId) {
+        if (packageId != null) return packages.one(trainerId, packageId).orElse(null);
+        return packages.list(trainerId, true, clientId).stream()
+                .filter(k -> "active".equals(k.status()))
                 .findFirst().orElse(null);
     }
 
     private record Owed(BigDecimal amount, String packageName, int days) {}
 
-    private Owed owing(Map<String, Object> p, UUID packageId) {
-        var trainer = UUID.fromString((String) p.get("tid"));
+    private Owed owing(UUID trainerId, UUID clientId, UUID packageId, LocalDate today) {
         List<CurrentPackage> owing = packageId != null
-                ? packages.one(trainer, packageId).stream().toList()
-                : packages.list(trainer, true, UUID.fromString((String) p.get("cid"))).stream()
+                ? packages.one(trainerId, packageId).stream().toList()
+                : packages.list(trainerId, true, clientId).stream()
                         .filter(k -> new BigDecimal(k.amountDue()).signum() > 0).toList();
         BigDecimal total = owing.stream().map(k -> new BigDecimal(k.amountDue())).reduce(BigDecimal.ZERO, BigDecimal::add);
         String name = owing.size() == 1 ? owing.getFirst().name() : "pack";
         // How long it has been outstanding: from the earliest due date still owed.
         int days = owing.stream().map(CurrentPackage::dueDate)
                 .filter(d -> d != null)
-                .map(d -> (int) Math.max(0, java.time.temporal.ChronoUnit.DAYS.between(
-                        java.time.LocalDate.parse(d), ((java.sql.Date) p.get("today")).toLocalDate())))
+                .map(d -> (int) Math.max(0, ChronoUnit.DAYS.between(LocalDate.parse(d), today)))
                 .max(Integer::compare).orElse(0);
         return new Owed(total, name, days);
-    }
-
-    private static String clientName(Map<String, Object> client) {
-        return (String) client.get("name");
     }
 
     private static String link(String phone, String clientName, String message) {
         if (phone == null) throw ApiException.conflict("CLIENT_NO_PHONE", clientName + " has no phone number on file.");
         return "https://wa.me/" + phone + "?text=" + URLEncoder.encode(message, StandardCharsets.UTF_8);
-    }
-
-    /** E.164 without the plus, as wa.me wants; ten Indian digits get their 91. Null if unusable. */
-    private static String waNumber(String phone) {
-        if (phone == null) return null;
-        String digits = phone.replaceAll("[^0-9]", "");
-        if (digits.length() == 10) return "91" + digits;
-        if (digits.length() >= 11 && digits.length() <= 15) return digits;
-        return null;
-    }
-
-    private static String first(String full, String fallback) {
-        if (full == null || full.isBlank()) return fallback;
-        return full.trim().split("\\s+")[0];
     }
 
     private static UUID uuid(String raw, String field) {

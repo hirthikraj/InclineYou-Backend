@@ -43,7 +43,7 @@ and indexes — see [`SCHEMA.md`](SCHEMA.md).
 | [Workout sessions & set logs](#workout-sessions--set-logs) | `/v1/workouts` — **removed** | 0 |
 | [Packs (the price list)](#packs-the-price-list) | `/v1/packs` | 3 |
 | [Packages & payments (money book)](#packages--payments-money-book) | `/v1/clients/{id}/packages`, `/v1/packages`, `/v1/payments` | 14 |
-| [Nudges](#nudges) | `/v1/clients/{clientId}/nudge`, `/v1/nudges`, `/v1/nudge-templates` | 6 |
+| [Nudges](#nudges) | `/v1/clients/{clientId}/nudges`, `/v1/nudges`, `/v1/nudge-templates` | 5 |
 | [Attention dismissals](#attention-dismissals) | `/v1/attention/dismissals` | 3 |
 | [Reports](#reports) | `/v1/clients/{clientId}/report` | 1 |
 | [Push devices](#push-devices) | `/v1/devices` | 2 |
@@ -89,7 +89,7 @@ a chatty sync does not spend an ordinary request's budget:
 | --- | --- | --- |
 | `AUTH` | `/v1/auth/**` | 300 / 60s |
 | `SYNC` | `/v1/sync/**`, `/v1/client/sync/**` | 60 / 60s |
-| `MESSAGING` | `POST …/nudge`, `POST …/report/weekly`, `POST /v1/team/invites` | 10 / 60s |
+| `MESSAGING` | `POST …/nudges`, `POST /v1/team/invites` | 10 / 60s |
 | `STANDARD` | everything else — including every route V6–V15 added (write-off, invoice, exercise categories and by-id, the certified shelf, workout templates), none of which sends a message | 120 / 60s |
 | *(exempt)* | `/health` | — |
 
@@ -170,8 +170,8 @@ branches on (`exception/GlobalExceptionHandler.java`):
 | `CONSENT_REQUIRED` | 400 | v1.1 — `POST /v1/trainers/me/consent` with a `policyVersion` that is missing or is not the notice in force (`app.privacy.policy-version`). |
 | `PROFILE_TOO_LONG` | 400 | v1.1 — `headline` over 80 or `bio` over 1200 on `PATCH /v1/trainers/me`; refused, never truncated. |
 | ~~`NUDGE_TEMPLATE_UNKNOWN` · `NUDGE_TEMPLATE_EMPTY` · `NUDGE_TEMPLATE_TOO_LONG`~~ | — | Retired in v1.1 by the nudge-templates rewrite: an unknown name is a plain 404, a blank or over-long body is `VALIDATION`. |
-| `NUDGE_CLIENT_NOT_FOUND` | 404 | The client is no longer on the caller's roster. |
-| `NUDGE_NO_PHONE` | 422 | The client has no phone number, so there is nowhere to send the link. |
+| ~~`NUDGE_CLIENT_NOT_FOUND`~~ | — | Retired 3 Oct 2026 with `POST …/nudge`. `POST …/nudges` answers a plain 404 for a client not on the roster. |
+| ~~`NUDGE_NO_PHONE`~~ | — | Retired 3 Oct 2026 with `POST …/nudge`: `POST …/nudges` answers `409 CLIENT_NO_PHONE` — adding a number makes the same request work. |
 | `EMAIL_INVALID` · `EMAIL_TOO_LONG` | 400 | V36's contact address is not shaped like one, or is over 254 characters. |
 | `DELETE_NOT_CONFIRMED` | 400 | Closing the account (deprecated typed path): the typed confirmation is not this account's number. |
 | `STEP_UP_REQUIRED` | 403 | A dangerous act (change number, close account) without a valid step-up ticket for it. See *Settings v1.1*. |
@@ -2577,114 +2577,79 @@ from the trainer's own number lands in a thread the client already has open,
 where one from a platform number does not. Scheduled and automatic nudges are v2,
 behind the trust tiers.
 
-### `POST /v1/clients/{clientId}/nudge`
-`nudge/NudgeController.java` · **`MESSAGING` tier — 10/min.**
+### `POST /v1/clients/{clientId}/nudges` → `201` (a replay `200`)
+`nudge/NudgeController.java` · **`MESSAGING` tier — 10/min.** On the v1 `nudge_log` (3 Oct 2026). It replaces
+`POST …/nudge`, which wrote columns v1 does not have and was removed once its callers moved.
 
-**Purpose:** draft a WhatsApp nudge for a client, and log it.
+**Purpose:** draft a WhatsApp nudge for a client, log it, and hand back the deep link.
 
-Body: `{ "templateName": "…" }`. Returns
-`{ "nudgeId", "whatsappUrl", "message", "sentAt" }` — the backend renders the
-message from the trainer's template and the client's live figures, writes a
-`nudge_log` row **carrying the rendered text** (V32's `nudge_log.message`), and
-hands back the deep link.
+Body: `{ "id"?, "template", "packageId"?, "sessionId"? }`. `id` is the caller's own UUID, so a retry finds its row
+(`200` with the stored message; the same id under another trainer or client is `409 ID_CONFLICT`). `template` is one of
+the eight names below; `re_engagement` and `session_summary` have no agreed `nudge_log.reason` yet and answer
+`400 VALIDATION` ("not available yet") rather than a guess. `packageId` is accepted only on `payment_reminder` and
+`renewal`, `sessionId` only on `missed_session`, `session_reminder` and `session_summary` (`nudge_log_subject`), and each
+must belong to this client. Returns `{ "id", "message", "whatsappUrl", "sentAt" }`.
 
-**The message is not in the request body and deliberately cannot be.** A caller
-that could supply the sentence could put a figure in it that disagrees with the
-money book, and the caller most likely to is the screen that has just done some
-arithmetic of its own. Every variable is resolved server-side, from the same rows
-the money book reads.
+The server writes the row **carrying the rendered text** (`nudge_log.message`, ≤ 1000 characters), with
+`channel = whatsapp_manual` and a `reason` it derives from the template — `payment_reminder → dues`,
+`renewal → pack_ending`, `missed_session → no_show`, `check_in → lapsed`, `well_done → manual`,
+`session_reminder → session`. The log is append-only.
 
-**The eight templates** — `NudgeTemplateCatalog`, which is the whitelist and the
-default wording in one place:
+**The message is not in the request body and deliberately cannot be.** A caller that could supply the sentence could
+put a figure in it that disagrees with the money book, and the caller most likely to is the screen that has just done
+some arithmetic of its own. Every variable is resolved server-side: `{amount}` and `{days}` come from the same package
+ledger the money card reads (`amountDue`, `dueDate`), day counts on the workspace's calendar.
+
+**Refusals:** `404` for a client not on the roster; `409 CLIENT_NO_PHONE` for a client with no usable number — adding one
+makes the same request work, and a `wa.me` link built from a malformed number opens WhatsApp on an error page; `400
+VALIDATION` for an unknown template or a malformed id. The once-per-client-per-7-days cooldown is **not** a refusal
+(see below).
+
+**The eight templates** — `NudgeTemplateCatalog`, which is the whitelist and the default wording in one place:
 
 | Template | What it is for | `{count}` means |
 | --- | --- | --- |
 | `renewal` | the pack is nearly done | sessions left |
-| `payment_reminder` | money is owed. `{amount}` is `SUM(amount − paid − written off)`, the same arithmetic as `PackageResponse.amountDue` | days outstanding |
+| `payment_reminder` | money is owed. `{amount}` is the package's `amountDue` (or everything the client owes) | days outstanding |
 | `missed_session` | they missed sessions they were booked into | no-shows in 30 days |
-| `check_in` | nothing is wrong; how is the week going | sessions delivered |
-| `re_engagement` | they stopped weeks ago. Names the gap and offers a slot | sessions delivered |
+| `check_in` | nothing is wrong; how is the week going | — (`{days}` since the last delivered session) |
+| `re_engagement` | they stopped weeks ago. Names the gap and offers a slot | — |
 | `well_done` | a milestone. `{nth}` is the ordinal — 100th, 111th | sessions delivered |
-| `session_summary` | sent after a session, while it is still in their head | sessions delivered |
+| `session_summary` | sent after a session, while it is still in their head | — |
 | `session_reminder` | tomorrow's session, confirmed the night before | — |
 
-`{count}` means a different number in each of them **on purpose**: there is
-exactly one count per template, so a trainer editing one can never be looking at
-two, and the editor prints what this one means. The other tokens are `{name}`
-(first name), `{trainer}`, `{amount}`, `{package}` (the pack's name via
-`package.pack_id → pack.name`), `{days}` and `{nth}`.
+`{count}` means a different number in each of them **on purpose**: there is exactly one count per template, so a
+trainer editing one can never be looking at two. The other tokens are `{name}` (first name), `{trainer}`, `{amount}`,
+`{package}`, `{days}` and `{nth}`. An unknown `{token}` is left exactly as typed, so a typo arrives in the trainer's own
+WhatsApp composer, in front of them, before they press send.
 
-**`well_done`'s figure IS interpolated now**, reversing what this file used to
-say. The old objection — that counting the sessions again is "a second opinion
-about a number the trainer is looking at on the row" — was a real risk, and the
-answer is to count them the way the deck counts them rather than to leave the
-number out: `workout_session` rows per client, which is exactly
-`buildAttention`'s milestone counter in `lib/today/deck.ts`.
+**There is no `DELETE`.** The product cannot know whether the trainer pressed send in WhatsApp, so it cannot honestly
+offer to un-send — and deleting the row would reopen the cooldown, which is the one thing the record exists to hold
+shut.
 
-**Two refusals, both with a sentence** (`NudgeRuleException` → `ProblemDetail`):
-`422 NUDGE_NO_PHONE` for a client with no number on file — the request is
-well-formed and asks for something that cannot exist, and a `wa.me` link built
-from a malformed number opens WhatsApp on an error page, which reads to the
-trainer as the app being broken — and `404 NUDGE_CLIENT_NOT_FOUND` for somebody
-else's client, per the standing convention.
+### `GET /v1/nudges?from&clientId&include&limit&cursor`
+**`STANDARD` tier**, and that is not an oversight. `RateLimitFilter` tiers on `POST` plus a path ending `/nudges`, so
+this GET falls through — correctly: a read of the history spends no WhatsApp and no money, and putting it in the
+ten-a-minute tier would make one dashboard load cost the trainer one of the ten messages they are actually allowed to
+draft.
 
-An unknown `templateName` still falls through to a generic line rather than a
-400: on a rolling deploy where the app knows a ninth template and the server does
-not, a trainer standing next to a client should get a WhatsApp with something in
-it, not an error on the button they just pressed.
+**Purpose:** what has been drafted, newest first — across the roster, or one client with `clientId` (the client file's
+follow-up timeline, `from` a year back). Returns `{ items: [{ id, clientId, template, reason, sentAt, message? }],
+nextCursor }`; `sentAt` is epoch ms and `message` is present **only with `include=message`** (opt-in on any query, rather
+than switched on by `clientId`, because a field that appears and disappears with a filter is a trap for every typed
+client). `from` is a date in the workspace's timezone and defaults to **7 days ago**, the cooldown window: Today reads
+this to stop raising a row about somebody the trainer messaged yesterday. Keyset on `(sentAt, id)` descending, 500 a page
+(1,000 at most). A malformed `from`, `clientId` or `include` is `400 VALIDATION`.
 
-**There is no `DELETE`.** The product cannot know whether the trainer pressed send
-in WhatsApp, so it cannot honestly offer to un-send — and deleting the row would
-reopen the cooldown, which is the one thing the record exists to hold shut. The
-sync path can soft-delete a row the phone wrote; that is a device withdrawing its
-own write, and every read here honours `deleted_at`.
+Replaces `GET /v1/clients/{id}/nudges?days&limit`, which read pre-v1 columns (`template_name`, `status`) and was removed
+3 Oct 2026 with no caller left. `templateLabel`, `templateName`, `clientName` and `status` are not on the new rows;
+`template` and `reason` are.
 
-### `GET /v1/nudges?days&limit`
-**`STANDARD` tier**, and that is not an oversight. `RateLimitFilter` tiers on
-`POST` plus a path ending `/nudge`, so these GETs fall through — correctly: a read
-of the history spends no WhatsApp and no money, and putting it in the
-ten-a-minute tier would make one dashboard load cost the trainer one of the ten
-messages they are actually allowed to send. The same call V28's dismissals made.
-
-**Purpose:** what has been sent across the roster, newest first.
-
-Returns `[{ "id", "clientId", "clientName", "templateName", "templateLabel",
-"channel", "status", "message", "sentAt" }]`. `days` defaults to **7**, the
-cooldown window, because that is what the caller that matters is asking: Today
-reads this to stop raising a row about somebody the trainer messaged yesterday.
-`message` is **null on every row written before V32** and is left as an absence
-rather than re-rendered from the template name — the wording belongs to the
-trainer now, so re-rendering March's reminder in August's words would put a
-sentence in the history that was never sent. `templateLabel` is resolved
-server-side so a renamed template renames every history at once.
-
-**This is what closes the cooldown gap.** `COOLDOWN_DAYS` — "never twice in seven
-days to the same person" — has been computed on the phone from its local
-`nudge_log` since the drawer was designed, and `nudge_log` reached the wire only
-inside the sync envelope: a reminder sent from a laptop was invisible to the
-phone's cap and vice versa. Both halves can now read the same rows.
-
-**It is still not enforced by this endpoint, and that is deliberate.** A trainer
-pressing *Remind* on somebody they messaged on Monday knows something the product
-does not — the client replied, or asked to be chased again on Thursday — and
-answering that with a 429 teaches them to open WhatsApp directly, which loses the
-log for every client rather than enforcing the cap for one. The enforcement is the
-QUEUE going quiet: `deck.ts` pushes a contacted client's row below every
-uncontacted one, so it falls behind the disclosure.
-
-One trainer-wide read rather than one per client, for the reason `GET
-/v1/packages` exists: the screen has already read the roster, and a per-client
-route on a dashboard is twenty-two requests against a 120/min ceiling.
-
-### `GET /v1/clients/{clientId}/nudges?days&limit`
-**`STANDARD` tier.** The same rows, narrowed to one client, `days` defaulting to
-**365** — the client file draws a follow-up history, and "when did I last chase
-this" is a question whose answer is often months old.
-
-Narrowed by `trainer_id` as well as `client_id`, so a coach holding a client
-somebody else wrote nudges to gets an **empty list** — the same privacy rule V29
-gave `client_note`, and for the same reason: a team widens reads over a
-teammate's roster and must not widen this.
+**It is still not enforced by this endpoint, and that is deliberate.** A trainer pressing *Remind* on somebody they
+messaged on Monday knows something the product does not — the client replied, or asked to be chased again on Thursday —
+and answering that with a 429 teaches them to open WhatsApp directly, which loses the log for every client rather than
+enforcing the cap for one. The enforcement is the QUEUE going quiet. `COOLDOWN_DAYS` has four copies
+(`app/src/nudges/rules.ts`, `NudgeReadService`, `lib/nudges/cooldown.ts`, imported by `lib/today/deck.ts`).
 
 ### `GET /v1/nudge-templates`
 `nudge/NudgeTemplateController.java` · **`STANDARD` tier.** V32; **rewritten to v1.1 (3 Oct 2026)** — see [Settings v1.1](#settings-v11--profile-working-week--messages).

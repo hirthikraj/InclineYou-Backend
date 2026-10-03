@@ -132,6 +132,13 @@ schema, its reader (the client portal) is out of v1, and its Monday job queued a
 deleted (git has them), to return with a migration when the portal does. `progress/` is on the shape too
 (`SetHistoryJdbcRepository`, `SetHistoryService`, records in `progress/dto/`).
 
+`nudge/` is on the same shape and on the v1 `nudge_log` (3 Oct 2026): `NudgeLogJdbcRepository` (the append-only log and
+the figures a message quotes), `NudgeReadService` (`GET /v1/nudges`) and `NudgeDraftService`
+(`POST /v1/clients/{id}/nudges`), `NudgeText` (substitution, Indian digit grouping, ordinals — pure), records in
+`nudge/dto/`; the template library was already layered. The 1.0 `POST …/nudge` and `GET …/clients/{id}/nudges` are gone
+(they wrote and read `template_name`/`status`, which v1 does not have, and no caller was left) and `NudgeRuleException`
+with them.
+
 ### Persistence is deliberately split
 
 Only five things are JPA entities — `AppUser`, `Trainer`, `Client`, `BodyMetric`,
