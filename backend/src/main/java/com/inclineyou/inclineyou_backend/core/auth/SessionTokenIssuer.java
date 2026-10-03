@@ -113,7 +113,7 @@ public class SessionTokenIssuer implements AuthTokenIssuer {
 
     @Override
     public void revoke(String rawToken) {
-        if (handles(rawToken)) sessions.revoke(hash(rawToken), Instant.now());
+        if (handles(rawToken)) sessions.revoke(hash(rawToken), Instant.now(), SessionStore.SIGN_OUT);
     }
 
     /**
@@ -128,10 +128,11 @@ public class SessionTokenIssuer implements AuthTokenIssuer {
 
     /** Every credential this subject holds, ended now. */
     public int revokeAllFor(String subject) {
-        return sessions.revokeAllForSubject(subject, Instant.now());
+        return sessions.revokeAllForSubject(subject, Instant.now(), SessionStore.SIGN_OUT_ALL);
     }
 
-    static String hash(String token) {
+    /** SHA-256 hex of a raw token — what {@code web_session.token_hash} stores and what a step-up ticket binds to. */
+    public static String hash(String token) {
         try {
             var digest = MessageDigest.getInstance("SHA-256");
             return HexFormat.of().formatHex(digest.digest(token.getBytes(StandardCharsets.UTF_8)));

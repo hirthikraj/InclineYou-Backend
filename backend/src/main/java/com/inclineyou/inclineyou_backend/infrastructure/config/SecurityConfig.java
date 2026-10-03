@@ -94,6 +94,10 @@ public class SecurityConfig {
                         .requestMatchers("/v1/auth/trainer").authenticated()
                         .requestMatchers("/v1/auth/mode/**").authenticated()
                         .requestMatchers("/v1/auth/session/**").authenticated()
+                        // v1.1: the signed-in browsers (any role), and the step-up proof (trainers only).
+                        // Both sit under /v1/auth/, which is otherwise public, so they must be named.
+                        .requestMatchers("/v1/auth/sessions", "/v1/auth/sessions/**").authenticated()
+                        .requestMatchers("/v1/auth/step-up", "/v1/auth/step-up/**").hasRole("TRAINER")
                         .requestMatchers("/v1/tenants/**").authenticated()
                         .requestMatchers("/v1/auth/membership/**").hasRole("INVITED")
                         .requestMatchers("/v1/auth/**", "/health").permitAll()

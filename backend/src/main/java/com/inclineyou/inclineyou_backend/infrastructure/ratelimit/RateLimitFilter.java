@@ -130,6 +130,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if ("/health".equals(path)) return null;
 
         if (path.startsWith("/v1/auth/")) return Tier.AUTH;
+        // Changing the number sends a code to the NEW number and ends in a swap of the
+        // sign-in credential: it is an authentication act, so it is counted as one
+        // (api-contract v1.1 names "the AUTH tier" for these two).
+        if (path.startsWith("/v1/trainers/me/phone/")) return Tier.AUTH;
         // Each of these spends a WhatsApp message on somebody's behalf, so the
         // 10/min ceiling is the anti-spam control and not only a cost control.
         if ("POST".equals(request.getMethod())

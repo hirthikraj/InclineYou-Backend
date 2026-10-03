@@ -21,6 +21,11 @@ import java.util.UUID;
  */
 public interface SessionStore {
 
+    /** The schema's {@code web_session_revoked_reason} values this code writes. */
+    String SIGN_OUT = "sign_out";
+    String SIGN_OUT_ALL = "sign_out_all";
+    String PHONE_CHANGED = "phone_changed";
+
     record Session(
             UUID id,
             String tokenHash,
@@ -47,10 +52,32 @@ public interface SessionStore {
     /** Advance {@code last_seen_at}. Called at most once a minute per session. */
     void touch(String tokenHash, Instant seenAt);
 
-    void revoke(String tokenHash, Instant at);
+    /**
+     * {@code reason} is one of the schema's {@code web_session_revoked_reason}
+     * values ({@link #SIGN_OUT}, {@link #SIGN_OUT_ALL}, {@link #PHONE_CHANGED}, …).
+     * The table's CHECK ties {@code revoked_at} and {@code revoked_reason} together,
+     * so a revoke without one is refused by the database — which is what the
+     * pre-reason signature of this method did to every sign-out.
+     */
+    void revoke(String tokenHash, Instant at, String reason);
 
-    /** Sign out everywhere — used when a number changes or an account closes. */
-    int revokeAllForSubject(String subject, Instant at);
+    /** Sign out everywhere — used when an account closes. */
+    int revokeAllForSubject(String subject, Instant at, String reason);
+
+    /**
+     * One session of this subject, by its id. Empty when it is not theirs, is
+     * already revoked or does not exist — the three are deliberately
+     * indistinguishable to the caller. Returns the revoked token hash so the cache
+     * in front can drop it.
+     */
+    Optional<String> revokeById(UUID sessionId, String subject, Instant at, String reason);
+
+    /**
+     * Every live session of this subject EXCEPT {@code keepTokenHash} (null keeps
+     * none) — the number changed, or "sign out everywhere else". Returns the
+     * revoked token hashes.
+     */
+    List<String> revokeOthers(String subject, String keepTokenHash, Instant at, String reason);
 
     boolean moveToTenant(String tokenHash, UUID tenantId);
 

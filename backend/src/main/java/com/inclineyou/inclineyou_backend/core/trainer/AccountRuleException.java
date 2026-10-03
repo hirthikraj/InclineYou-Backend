@@ -125,6 +125,37 @@ public class AccountRuleException extends RuntimeException {
                 "Confirm your current number again — that step timed out.");
     }
 
+    /* ── the step-up proof (api-contract v1.1, Settings A9) ───────────────── */
+
+    /**
+     * No ticket, or one that was issued for another purpose, another session or
+     * another trainer. 403 and one code for all of them on purpose: telling a
+     * caller WHICH half of a forged ticket was wrong would be a hint toward the
+     * right one. The recovery is the same either way — do the step-up.
+     */
+    public static AccountRuleException stepUpRequired() {
+        return new AccountRuleException(HttpStatus.FORBIDDEN, "STEP_UP_REQUIRED",
+                "Confirm it's you first — we'll send a code to your current number.");
+    }
+
+    /**
+     * The ticket was real and is no longer good: past its ten minutes, or already
+     * spent (the number it proved is not the one the account is on any more).
+     * Kept apart from {@link #stepUpRequired()} because the screen says something
+     * kinder here — "that timed out" — and because it is the one a retry after a
+     * half-finished change legitimately produces.
+     */
+    public static AccountRuleException ticketExpired() {
+        return new AccountRuleException(HttpStatus.UNAUTHORIZED, "TICKET_EXPIRED",
+                "That confirmation has timed out or was already used. Start again to get a new code.");
+    }
+
+    /** The new number does not have the sign-in shape. Named, so the screen can say it under the field. */
+    public static AccountRuleException phoneInvalid() {
+        return new AccountRuleException(HttpStatus.BAD_REQUEST, "PHONE_INVALID",
+                "That is not a valid Indian mobile number — it looks like +919876543210.");
+    }
+
     /* ── closing the account ───────────────────────────────────────────────── */
 
     /**

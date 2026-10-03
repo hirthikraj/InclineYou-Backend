@@ -1,12 +1,8 @@
 package com.inclineyou.inclineyou_backend.core.trainer.dto;
 
-import jakarta.validation.constraints.NotBlank;
-
 /**
- * {@code DELETE /v1/trainers/me}.
- *
- * @param confirmPhone the trainer's own number, typed back. Compared on the last
- *                     ten digits, so whichever way the screen formatted it back
- *                     to them is an answer this accepts.
+ * DEPRECATED (3 Oct 2026) — the typed-number confirmation, replaced by the step-up
+ * ticket in {@code X-Step-Up-Ticket}; remove after the web migration. Optional on the
+ * wire now: absent, the ticket is required.
  */
-public record DeleteAccountRequest(@NotBlank String confirmPhone) {}
+public record DeleteAccountRequest(String confirmPhone) {}

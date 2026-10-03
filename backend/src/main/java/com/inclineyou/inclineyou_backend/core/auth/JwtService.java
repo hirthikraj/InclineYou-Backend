@@ -42,31 +42,52 @@ public class JwtService {
     public static final String ROLE_INVITED = "invited";
 
     /**
-     * Proof that a trainer just verified the number they are signed in WITH.
+     * Proof that the person at this keyboard just received a code on the number
+     * the account is signed in with — the STEP-UP ticket (api-contract v1.1,
+     * Settings A9).
      *
-     * <p>Changing a phone number is two proofs: possession of the number being
-     * left, and possession of the number being taken. They arrive on two
-     * separate requests minutes apart, so something has to remember the first
-     * one — and this is that memory, in the only form that cannot go stale in a
-     * table nobody sweeps.
+     * <p>One ticket shape for the two things that need it, changing the number
+     * and closing the account, told apart by a {@code purpose} claim. It carries
+     * four facts and every one of them is checked when it is spent:
      *
-     * <p><b>It is never an Authorization header.</b> It travels in the body of
-     * the two calls that follow, alongside the trainer's real bearer token,
-     * because it is a second factor rather than a credential: on its own it
-     * opens nothing. {@code SecurityConfig} is what makes that true rather than
-     * merely intended — {@code anyRequest().hasRole("TRAINER")} refuses a
-     * {@code phone_change} role outright, so a ticket presented as a bearer
-     * token authenticates nothing at all.
+     * <ul>
+     *   <li><b>who</b> — the trainer id, as the subject;</li>
+     *   <li><b>why</b> — {@code purpose}: a phone-change ticket cannot close the
+     *       account;</li>
+     *   <li><b>where</b> — {@code sess}, a SHA-256 of the bearer token the
+     *       caller proved it with, so a ticket lifted from one browser does
+     *       nothing in another;</li>
+     *   <li><b>against which number</b> — {@code phone}: a ticket minted before
+     *       the number changed is a proof of a SIM the account no longer uses.</li>
+     * </ul>
      *
-     * <p>Ten minutes, which is {@code app.otp.expiry-minutes}: the ticket must
-     * not outlive the codes it sits between, or a trainer who walked away could
-     * come back to a half-finished change that still believed in the SIM they
-     * were holding.
+     * <p><b>Single use without a table.</b> The ticket is stateless and the two
+     * actions it unlocks each change the very thing it is bound to: a confirmed
+     * phone change moves {@code phone}, and a closed account has no trainer to
+     * load. The first successful use therefore invalidates it, which is what
+     * "single use" needs, with no used-nonce row for a half-finished change to
+     * live in (the argument the 25 Sep rebuild made against a table here). What
+     * it does not do is invalidate on a FAILED attempt: a wrong code at the
+     * confirm step leaves the ticket spendable for the rest of its ten minutes,
+     * and that is the intended recovery, not a gap.
+     *
+     * <p><b>It is never an Authorization header.</b> It travels in a body field or
+     * the {@code X-Step-Up-Ticket} header, beside the real bearer token, because
+     * it is a second factor rather than a credential. {@code SecurityConfig} makes
+     * that true rather than merely intended: {@code anyRequest().hasRole("TRAINER")}
+     * refuses a {@code step_up} role, so a ticket presented as a bearer token
+     * authenticates nothing at all.
+     *
+     * <p>Ten minutes, which is {@code app.otp.expiry-minutes}: the ticket must not
+     * outlive the codes it sits between.
      */
-    public static final String ROLE_PHONE_CHANGE = "phone_change";
+    public static final String ROLE_STEP_UP = "step_up";
 
-    /** Matches app.otp.expiry-minutes. See {@link #ROLE_PHONE_CHANGE}. */
-    public static final int PHONE_CHANGE_MINUTES = 10;
+    /** Matches app.otp.expiry-minutes. See {@link #ROLE_STEP_UP}. */
+    public static final int STEP_UP_MINUTES = 10;
+
+    public static final String PURPOSE_CLAIM = "purpose";
+    public static final String SESSION_CLAIM = "sess";
 
     public String generate(UUID trainerId, String phone) {
         return build(trainerId.toString(), phone, ROLE_TRAINER);
@@ -80,9 +101,19 @@ public class JwtService {
      * that check a ticket minted before a first change would still be spendable
      * after it, which is a ticket for a SIM nobody holds any more.
      */
-    public String generatePhoneChangeTicket(UUID trainerId, String currentPhone) {
-        return build(trainerId.toString(), currentPhone, ROLE_PHONE_CHANGE,
-                PHONE_CHANGE_MINUTES * 60_000L);
+    /** See {@link #ROLE_STEP_UP}: who, why, where and against which number. */
+    public String generateStepUpTicket(UUID trainerId, String currentPhone, String purpose, String sessionBinding) {
+        long now = System.currentTimeMillis();
+        return Jwts.builder()
+                .subject(trainerId.toString())
+                .claim("phone", currentPhone)
+                .claim("role", ROLE_STEP_UP)
+                .claim(PURPOSE_CLAIM, purpose)
+                .claim(SESSION_CLAIM, sessionBinding)
+                .issuedAt(new Date(now))
+                .expiration(new Date(now + STEP_UP_MINUTES * 60_000L))
+                .signWith(signingKey())
+                .compact();
     }
 
     /**

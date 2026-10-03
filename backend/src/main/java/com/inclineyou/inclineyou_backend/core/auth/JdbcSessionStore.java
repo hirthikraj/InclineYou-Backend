@@ -95,20 +95,45 @@ public class JdbcSessionStore implements SessionStore {
     }
 
     @Override
-    public void revoke(String tokenHash, Instant at) {
+    public void revoke(String tokenHash, Instant at, String reason) {
         jdbc.update("""
-                UPDATE web_session SET revoked_at = :at
+                UPDATE web_session SET revoked_at = :at, revoked_reason = :reason
                 WHERE token_hash = :hash AND revoked_at IS NULL
-                """, Map.of("hash", tokenHash, "at", Timestamp.from(at)));
+                """, Map.of("hash", tokenHash, "at", Timestamp.from(at), "reason", reason));
     }
 
     @Override
-    public int revokeAllForSubject(String subject, Instant at) {
+    public int revokeAllForSubject(String subject, Instant at, String reason) {
         return jdbc.update("""
-                UPDATE web_session SET revoked_at = :at
+                UPDATE web_session SET revoked_at = :at, revoked_reason = :reason
                 WHERE app_user_id = (%s) AND revoked_at IS NULL
                 """.formatted(appUserIdSql()),
-                subjectParams(subject).addValue("at", Timestamp.from(at)));
+                subjectParams(subject).addValue("at", Timestamp.from(at)).addValue("reason", reason));
+    }
+
+    @Override
+    public Optional<String> revokeById(UUID sessionId, String subject, Instant at, String reason) {
+        return jdbc.queryForList("""
+                UPDATE web_session SET revoked_at = :at, revoked_reason = :reason
+                WHERE id = :id::uuid AND app_user_id = (%s) AND revoked_at IS NULL
+                RETURNING token_hash
+                """.formatted(appUserIdSql()),
+                subjectParams(subject).addValue("at", Timestamp.from(at)).addValue("reason", reason)
+                        .addValue("id", sessionId.toString()),
+                String.class).stream().findFirst();
+    }
+
+    @Override
+    public List<String> revokeOthers(String subject, String keepTokenHash, Instant at, String reason) {
+        return jdbc.queryForList("""
+                UPDATE web_session SET revoked_at = :at, revoked_reason = :reason
+                WHERE app_user_id = (%s) AND revoked_at IS NULL
+                  AND (CAST(:keep AS varchar) IS NULL OR token_hash <> :keep)
+                RETURNING token_hash
+                """.formatted(appUserIdSql()),
+                subjectParams(subject).addValue("at", Timestamp.from(at)).addValue("reason", reason)
+                        .addValue("keep", keepTokenHash),
+                String.class);
     }
 
     @Override

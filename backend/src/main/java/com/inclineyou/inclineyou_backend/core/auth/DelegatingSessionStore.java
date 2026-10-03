@@ -64,20 +64,35 @@ public class DelegatingSessionStore implements SessionStore {
     }
 
     @Override
-    public void revoke(String tokenHash, Instant at) {
-        jdbc.revoke(tokenHash, at);
+    public void revoke(String tokenHash, Instant at, String reason) {
+        jdbc.revoke(tokenHash, at, reason);
         var r = redis();
         if (r != null) r.evict(tokenHash);
     }
 
     @Override
-    public int revokeAllForSubject(String subject, Instant at) {
-        // Read the live set BEFORE revoking, or there is nothing left to evict.
+    public int revokeAllForSubject(String subject, Instant at, String reason) {
         List<Session> live = jdbc.listForSubject(subject);
-        int n = jdbc.revokeAllForSubject(subject, at);
+        int n = jdbc.revokeAllForSubject(subject, at, reason);
         var r = redis();
         if (r != null) live.forEach(s -> r.evict(s.tokenHash()));
         return n;
+    }
+
+    @Override
+    public Optional<String> revokeById(UUID sessionId, String subject, Instant at, String reason) {
+        var hash = jdbc.revokeById(sessionId, subject, at, reason);
+        var r = redis();
+        if (r != null) hash.ifPresent(r::evict);
+        return hash;
+    }
+
+    @Override
+    public List<String> revokeOthers(String subject, String keepTokenHash, Instant at, String reason) {
+        var hashes = jdbc.revokeOthers(subject, keepTokenHash, at, reason);
+        var r = redis();
+        if (r != null) hashes.forEach(r::evict);
+        return hashes;
     }
 
     @Override

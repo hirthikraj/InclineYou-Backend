@@ -1,12 +1,15 @@
 package com.inclineyou.inclineyou_backend.core.trainer;
 
+import com.inclineyou.inclineyou_backend.core.auth.AuthTokenFilter;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.ConfirmNewPhoneRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.NewPhoneRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.PhoneChangedResponse;
-import com.inclineyou.inclineyou_backend.core.trainer.dto.TicketResponse;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.StepUpTicketResponse;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.VerifyCurrentPhoneRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.validation.annotation.Validated;
@@ -15,23 +18,18 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 /**
- * THE ACCOUNT ROUTES — the login itself, and the way out.
+ * CHANGING THE SIGN-IN NUMBER — the two requests after a step-up
+ * (api-contract v1.1, Settings A9/A10).
  *
- * <p>Separate from {@link TrainerController}, which is one GET and one PATCH
- * over a profile. Everything here rewrites or retires an identity and each call
- * carries a proof that a profile PATCH has no concept of, so folding them into
- * {@code /v1/trainers/me} would have put four side-effecting verbs behind an
- * endpoint whose whole contract is <i>null means leave it alone</i>.
- *
- * <p>They sit under {@code /v1/trainers/me/} regardless, because that is the
- * resource: {@code SecurityConfig}'s {@code anyRequest().hasRole("TRAINER")}
- * covers the prefix, so a client token, an invited token and a phone-change
+ * <p>Separate from {@link TrainerController}, which is one GET and one PATCH over a
+ * profile: everything here rewrites an identity and carries a proof a profile PATCH
+ * has no concept of. They sit under {@code /v1/trainers/me/} regardless, because
+ * that is the resource — {@code SecurityConfig}'s {@code anyRequest().hasRole
+ * ("TRAINER")} covers the prefix, so a client token, an invited token and a step-up
  * ticket presented as a bearer are all refused before any of this runs.
  *
- * <p>{@link AccountService} carries the argument for the four-step shape and for
- * why deletion is a soft delete. The one thing worth repeating at the door: the
- * codes are {@link com.inclineyou.inclineyou_backend.core.auth.OtpService}'s, so every wait,
- * lock and daily ceiling that governs sign-in governs this too, per number.
+ * <p>AUTH rate tier ({@code RateLimitFilter}): a code to a new number plus a swap of
+ * the sign-in credential is an authentication act.
  */
 @RestController
 @RequestMapping("/v1/trainers/me/phone")
@@ -40,34 +38,46 @@ import java.util.UUID;
 public class AccountController {
 
     private final AccountService service;
+    private final StepUpService stepUp;
 
-    /** 1 · a code to the number they are signed in with. No body: it is the token's. */
+    /** 1 · the new number, checked before a message is spent on it. 204. */
+    @PostMapping("/request")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void request(@Valid @RequestBody NewPhoneRequest body, HttpServletRequest request) {
+        service.requestNewPhone(trainerId(), body, rawToken(request));
+    }
+
+    /** 2 · the code from the new number, and the swap. {@code {phone}}; the caller's session survives. */
+    @PostMapping("/confirm")
+    public PhoneChangedResponse confirm(@Valid @RequestBody ConfirmNewPhoneRequest body, HttpServletRequest request) {
+        return service.confirmNewPhone(trainerId(), body, rawToken(request));
+    }
+
+    /**
+     * DEPRECATED (3 Oct 2026) — replaced by {@code POST /v1/auth/step-up} with purpose
+     * {@code phone_change}; remove after the web migration. Kept so the web's current
+     * Change-number flow works unchanged.
+     */
     @PostMapping("/challenge")
     public ResponseEntity<Void> challenge() {
-        service.challengeCurrentPhone(trainerId());
+        stepUp.send(trainerId(), StepUpService.PHONE_CHANGE);
         return ResponseEntity.ok().build();
     }
 
-    /** 2 · that code back. The ticket is the memory that this step happened. */
+    /**
+     * DEPRECATED (3 Oct 2026) — replaced by {@code POST /v1/auth/step-up/verify}; remove
+     * after the web migration. Answers the same ticket the new route does.
+     */
     @PostMapping("/verify")
-    public TicketResponse verify(@Valid @RequestBody VerifyCurrentPhoneRequest body) {
-        return new TicketResponse(service.verifyCurrentPhone(trainerId(), body));
-    }
-
-    /** 3 · the new number, checked for availability before an SMS is spent on it. */
-    @PostMapping("/request")
-    public ResponseEntity<Void> request(@Valid @RequestBody NewPhoneRequest body) {
-        service.requestNewPhone(trainerId(), body);
-        return ResponseEntity.ok().build();
-    }
-
-    /** 4 · the code from the new number, and the swap. Answers a fresh token. */
-    @PostMapping("/confirm")
-    public PhoneChangedResponse confirm(@Valid @RequestBody ConfirmNewPhoneRequest body) {
-        return service.confirmNewPhone(trainerId(), body);
+    public StepUpTicketResponse verify(@Valid @RequestBody VerifyCurrentPhoneRequest body, HttpServletRequest request) {
+        return stepUp.verify(trainerId(), StepUpService.PHONE_CHANGE, body.otp(), rawToken(request));
     }
 
     private UUID trainerId() {
         return UUID.fromString(SecurityContextHolder.getContext().getAuthentication().getName());
+    }
+
+    private static String rawToken(HttpServletRequest request) {
+        return (String) request.getAttribute(AuthTokenFilter.TOKEN_ATTRIBUTE);
     }
 }

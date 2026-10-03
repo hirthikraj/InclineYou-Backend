@@ -1,6 +1,8 @@
 package com.inclineyou.inclineyou_backend.core.trainer;
 
+import com.inclineyou.inclineyou_backend.core.auth.AuthTokenFilter;
 import com.inclineyou.inclineyou_backend.core.auth.OtpSender;
+import com.inclineyou.inclineyou_backend.core.auth.SessionTokenIssuer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -219,7 +221,7 @@ class TrainerAccountTest {
         mvc.perform(post("/v1/trainers/me/phone/request")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(Map.of("ticket", ticket, "phone", FREE))))
-                .andExpect(status().isOk());
+                .andExpect(status().isNoContent());
 
         mvc.perform(post("/v1/trainers/me/phone/confirm")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -227,9 +229,9 @@ class TrainerAccountTest {
                                              "otp", sender.codeFor(FREE)))))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.phone").value(FREE))
-                // A fresh token, because the old one carries the old number in
-                // its `phone` claim.
-                .andExpect(jsonPath("$.token").isNotEmpty());
+                // v1.1: no token comes back. The caller's session survives the change
+                // (the OTHER sessions are the ones ended), so there is nothing to swap.
+                .andExpect(jsonPath("$.token").doesNotExist());
 
         // BOTH tables. `app_user` is what sign-in resolves and `trainer` is what
         // every authorised request loads; a change on one and not the other is
@@ -241,6 +243,48 @@ class TrainerAccountTest {
     }
 
     @Test
+    @DisplayName("confirming ends every OTHER browser (phone_changed) and keeps the one that made the change")
+    void phoneChangeEndsTheOtherSessions() throws Exception {
+        UUID appUser = UUID.fromString(jdbc.queryForObject(
+                "SELECT app_user_id::text FROM trainer WHERE id = :id", Map.of("id", me), String.class));
+        String here = session(appUser, "xs_here-" + UUID.randomUUID());
+        String elsewhere = session(appUser, "xs_elsewhere-" + UUID.randomUUID());
+
+        String ticket = stepUpTicket(MINE, "phone_change", here);
+        mvc.perform(post("/v1/trainers/me/phone/request")
+                        .requestAttr(AuthTokenFilter.TOKEN_ATTRIBUTE, here)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(Map.of("ticket", ticket, "phone", FREE))))
+                .andExpect(status().isNoContent());
+        mvc.perform(post("/v1/trainers/me/phone/confirm")
+                        .requestAttr(AuthTokenFilter.TOKEN_ATTRIBUTE, here)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(Map.of("ticket", ticket, "phone", FREE, "otp", sender.codeFor(FREE)))))
+                .andExpect(status().isOk());
+
+        assertThat(revokedReason(elsewhere)).isEqualTo("phone_changed");
+        assertThat(revokedReason(here)).isNull();
+    }
+
+    @Test
+    @DisplayName("a ticket is bound to the browser that earned it: another session's token is refused")
+    void ticketIsBoundToTheSession() throws Exception {
+        UUID appUser = UUID.fromString(jdbc.queryForObject(
+                "SELECT app_user_id::text FROM trainer WHERE id = :id", Map.of("id", me), String.class));
+        String here = session(appUser, "xs_here-" + UUID.randomUUID());
+        String elsewhere = session(appUser, "xs_elsewhere-" + UUID.randomUUID());
+
+        String ticket = stepUpTicket(MINE, "phone_change", here);
+        // A stolen ticket on a different browser is worth nothing.
+        mvc.perform(post("/v1/trainers/me/phone/request")
+                        .requestAttr(AuthTokenFilter.TOKEN_ATTRIBUTE, elsewhere)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(Map.of("ticket", ticket, "phone", FREE))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("STEP_UP_REQUIRED"));
+    }
+
+    @Test
     @DisplayName("without the first proof, nothing else in the flow works")
     void ticketIsRequired() throws Exception {
         // This is the property the brief asks for, stated as a test: a bearer
@@ -248,8 +292,8 @@ class TrainerAccountTest {
         mvc.perform(post("/v1/trainers/me/phone/request")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(Map.of("ticket", "not-a-ticket", "phone", FREE))))
-                .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("PHONE_CHANGE_UNPROVEN"));
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("STEP_UP_REQUIRED"));
 
         assertThat(phoneOfTrainer(me)).isEqualTo(MINE);
     }
@@ -262,12 +306,13 @@ class TrainerAccountTest {
         confirm(ticket, FREE).andExpect(status().isOk());
 
         // The same ticket now proves a SIM this account no longer uses. One code
-        // must not buy two changes.
+        // must not buy two changes — and the answer is TICKET_EXPIRED (401), the
+        // "go prove it again" signal, not STEP_UP_REQUIRED.
         mvc.perform(post("/v1/trainers/me/phone/request")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(Map.of("ticket", ticket, "phone", THEIRS))))
                 .andExpect(status().isUnauthorized())
-                .andExpect(jsonPath("$.code").value("PHONE_CHANGE_UNPROVEN"));
+                .andExpect(jsonPath("$.code").value("TICKET_EXPIRED"));
     }
 
     @Test
@@ -303,6 +348,18 @@ class TrainerAccountTest {
     }
 
     @Test
+    @DisplayName("a number sign-in would not accept is PHONE_INVALID, before any code is spent")
+    void invalidPhone() throws Exception {
+        String ticket = proveCurrent();
+        mvc.perform(post("/v1/trainers/me/phone/request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(Map.of("ticket", ticket, "phone", "12345"))))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("PHONE_INVALID"));
+        assertThat(sender.sent).doesNotContainKey("12345");
+    }
+
+    @Test
     @DisplayName("a wrong code on the new number leaves the account exactly where it was")
     void wrongCodeChangesNothing() throws Exception {
         String ticket = proveCurrent();
@@ -320,8 +377,28 @@ class TrainerAccountTest {
     /* ──────────────────────────────────────────────────────── deleting it ── */
 
     @Test
-    @DisplayName("the number typed back is the confirmation, in any format the app prints it")
-    void deleteNeedsTheNumber() throws Exception {
+    @DisplayName("deletion needs a step-up ticket; with nothing it is STEP_UP_REQUIRED")
+    void deleteNeedsATicket() throws Exception {
+        mvc.perform(delete("/v1/trainers/me"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("STEP_UP_REQUIRED"));
+        assertThat(deletedAtOfTrainer(me)).isNull();
+
+        // A ticket for the OTHER purpose must not close an account: a phone-change
+        // proof is not a deletion proof.
+        String wrong = stepUpTicket(MINE, "phone_change");
+        mvc.perform(delete("/v1/trainers/me").header("X-Step-Up-Ticket", wrong))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("STEP_UP_REQUIRED"));
+        assertThat(deletedAtOfTrainer(me)).isNull();
+
+        // (The success path is the next three tests. One step-up per test: a second
+        // code to the same number inside a test is the resend ladder's 429.)
+    }
+
+    @Test
+    @DisplayName("DEPRECATED: the number typed back still confirms, in any format the app prints it")
+    void legacyDeleteByTypedNumber() throws Exception {
         mvc.perform(delete("/v1/trainers/me")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(Map.of("confirmPhone", "9999999999"))))
@@ -330,9 +407,6 @@ class TrainerAccountTest {
 
         assertThat(deletedAtOfTrainer(me)).isNull();
 
-        // `+91 98410 22119` is the shape `formatPhone` prints one card above the
-        // field. A confirmation that refuses the product's own formatting
-        // teaches the trainer the product is broken.
         String bare = MINE.substring(3); // strip the "+91" MINE already carries
         String asShown = "+91 " + bare.substring(0, 5) + " " + bare.substring(5);
         mvc.perform(delete("/v1/trainers/me")
@@ -346,9 +420,8 @@ class TrainerAccountTest {
     @Test
     @DisplayName("both rows are stamped, and the number is NOT released")
     void deleteStampsBothAndKeepsTheNumber() throws Exception {
-        mvc.perform(delete("/v1/trainers/me")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(Map.of("confirmPhone", MINE))))
+        String ticket = stepUpTicket(MINE, "account_deletion");
+        mvc.perform(delete("/v1/trainers/me").header("X-Step-Up-Ticket", ticket))
                 .andExpect(status().isNoContent());
 
         assertThat(deletedAtOfTrainer(me)).isNotNull();
@@ -360,10 +433,10 @@ class TrainerAccountTest {
         // else's money. Another trainer moving onto it is refused.
         UUID other = trainer(THEIRS);
         signedInAs(other);
-        String ticket = proveCurrentFor(THEIRS);
+        String phoneTicket = proveCurrentFor(THEIRS);
         mvc.perform(post("/v1/trainers/me/phone/request")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(Map.of("ticket", ticket, "phone", MINE))))
+                        .content(body(Map.of("ticket", phoneTicket, "phone", MINE))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PHONE_TAKEN"));
     }
@@ -371,16 +444,48 @@ class TrainerAccountTest {
     @Test
     @DisplayName("everything else 404s once the account is gone, including a second delete")
     void deletedAccountIsUnreachable() throws Exception {
-        mvc.perform(delete("/v1/trainers/me")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(Map.of("confirmPhone", MINE))))
+        String ticket = stepUpTicket(MINE, "account_deletion");
+        mvc.perform(delete("/v1/trainers/me").header("X-Step-Up-Ticket", ticket))
                 .andExpect(status().isNoContent());
 
         mvc.perform(get("/v1/trainers/me")).andExpect(status().isNotFound());
-        mvc.perform(delete("/v1/trainers/me")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(Map.of("confirmPhone", MINE))))
+        mvc.perform(delete("/v1/trainers/me").header("X-Step-Up-Ticket", ticket))
                 .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("step-up: an unknown purpose is a 400, a wrong code is OTP_WRONG, a ticket for someone else is refused")
+    void stepUpEdges() throws Exception {
+        mvc.perform(post("/v1/auth/step-up")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(Map.of("purpose", "launch_missiles"))))
+                .andExpect(status().isBadRequest());
+
+        mvc.perform(post("/v1/auth/step-up")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(Map.of("purpose", "phone_change"))))
+                .andExpect(status().isNoContent());
+        mvc.perform(post("/v1/auth/step-up/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(Map.of("purpose", "phone_change", "otp", "000000"))))
+                .andExpect(status().is4xxClientError())
+                .andExpect(jsonPath("$.code").value("OTP_WRONG"));
+
+        // A ticket is bound to its trainer: another trainer presenting it is refused.
+        // (Same send: the wrong guess above spent one of three attempts, not the code.)
+        String json = mvc.perform(post("/v1/auth/step-up/verify")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(Map.of("purpose", "phone_change", "otp", sender.codeFor(MINE)))))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        String ticket = json.replaceAll(".*\"ticket\"\\s*:\\s*\"([^\"]+)\".*", "$1");
+        UUID other = trainer(THEIRS);
+        signedInAs(other);
+        mvc.perform(post("/v1/trainers/me/phone/request")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(Map.of("ticket", ticket, "phone", FREE))))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("STEP_UP_REQUIRED"));
     }
 
     /* ------------------------------------------------------------ fixtures */
@@ -391,11 +496,27 @@ class TrainerAccountTest {
     }
 
     private String proveCurrentFor(String phone) throws Exception {
-        mvc.perform(post("/v1/trainers/me/phone/challenge")).andExpect(status().isOk());
-        String json = mvc.perform(post("/v1/trainers/me/phone/verify")
+        return stepUpTicket(phone, "phone_change");
+    }
+
+    /** A step-up for a purpose: the code to the current number, traded for the ticket. */
+    private String stepUpTicket(String phone, String purpose) throws Exception {
+        return stepUpTicket(phone, purpose, null);
+    }
+
+    /** As above from a given browser: the ticket is bound to that session's token. */
+    private String stepUpTicket(String phone, String purpose, String rawToken) throws Exception {
+        mvc.perform(post("/v1/auth/step-up")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(Map.of("otp", sender.codeFor(phone)))))
+                        .content(body(Map.of("purpose", purpose))))
+                .andExpect(status().isNoContent());
+        var verify = post("/v1/auth/step-up/verify");
+        if (rawToken != null) verify.requestAttr(AuthTokenFilter.TOKEN_ATTRIBUTE, rawToken);
+        String json = mvc.perform(verify
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(Map.of("purpose", purpose, "otp", sender.codeFor(phone)))))
                 .andExpect(status().isOk())
+                .andExpect(jsonPath("$.expiresAt").isNumber())
                 .andReturn().getResponse().getContentAsString();
         return json.replaceAll(".*\"ticket\"\\s*:\\s*\"([^\"]+)\".*", "$1");
     }
@@ -404,13 +525,28 @@ class TrainerAccountTest {
         mvc.perform(post("/v1/trainers/me/phone/request")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body(Map.of("ticket", ticket, "phone", phone))))
-                .andExpect(status().isOk());
+                .andExpect(status().isNoContent());
     }
 
     private ResultActions confirm(String ticket, String phone) throws Exception {
         return mvc.perform(post("/v1/trainers/me/phone/confirm")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body(Map.of("ticket", ticket, "phone", phone, "otp", sender.codeFor(phone)))));
+    }
+
+    /** A live web session for the account, by raw token; returns the raw token. */
+    private String session(UUID appUserId, String raw) {
+        jdbc.update("""
+                INSERT INTO web_session (token_hash, app_user_id, role, issued_at, last_seen_at, expires_at)
+                VALUES (:h, :u::uuid, 'trainer', now() - interval '1 hour', now(), now() + interval '1 day')
+                """, Map.of("h", SessionTokenIssuer.hash(raw), "u", appUserId.toString()));
+        return raw;
+    }
+
+    private String revokedReason(String raw) {
+        em.flush();
+        return jdbc.queryForObject("SELECT revoked_reason FROM web_session WHERE token_hash = :h",
+                Map.of("h", SessionTokenIssuer.hash(raw)), String.class);
     }
 
     private ResultActions patchMe(String body) throws Exception {

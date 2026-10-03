@@ -1,16 +1,15 @@
 package com.inclineyou.inclineyou_backend.core.trainer;
 
-import com.inclineyou.inclineyou_backend.core.auth.JwtService;
-import com.inclineyou.inclineyou_backend.core.auth.OtpService;
 import com.inclineyou.inclineyou_backend.core.auth.AppUser;
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
+import com.inclineyou.inclineyou_backend.core.auth.OtpService;
+import com.inclineyou.inclineyou_backend.core.auth.SessionStore;
+import com.inclineyou.inclineyou_backend.core.auth.SessionTokenIssuer;
+import com.inclineyou.inclineyou_backend.core.auth.dto.SendOtpRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.ConfirmNewPhoneRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.DeleteAccountRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.NewPhoneRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.PhoneChangedResponse;
-import com.inclineyou.inclineyou_backend.core.trainer.dto.VerifyCurrentPhoneRequest;
-import io.jsonwebtoken.Claims;
-import io.jsonwebtoken.JwtException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -23,57 +22,59 @@ import java.util.UUID;
 
 /**
  * THE ACCOUNT — changing the number the trainer signs in with, and closing the
- * account down.
+ * account down. Both need a STEP-UP TICKET ({@link StepUpService}): a fresh code to
+ * the number the account is signed in with, traded for a ten-minute ticket bound to
+ * this session and this purpose.
  *
- * <p>Both are separate from {@link TrainerService} on purpose. That class edits
- * a profile: every field on it is nullable, every write means <i>leave the rest
- * alone</i>, and the worst outcome of getting one wrong is a stale bio. These
- * two rewrite an IDENTITY — the row sign-in resolves, in two tables — and each
- * needs a proof the profile endpoint has no concept of.
+ * <p>Both are separate from {@link TrainerService} on purpose. That class edits a
+ * profile: every field on it is nullable, every write means <i>leave the rest
+ * alone</i>, and the worst outcome of getting one wrong is a stale bio. These two
+ * rewrite an IDENTITY — the row sign-in resolves, in two tables — and each needs a
+ * proof the profile endpoint has no concept of.
  *
- * <h2>Changing a number is three requests, and the middle one is the point</h2>
+ * <h2>Changing a number is a step-up and two requests</h2>
  *
  * <pre>
- *   1. POST /v1/trainers/me/phone/challenge   → a code to the CURRENT number
- *   2. POST /v1/trainers/me/phone/verify      → that code back; returns a ticket
- *   3. POST /v1/trainers/me/phone/request     → ticket + new number; a code to IT
- *   4. POST /v1/trainers/me/phone/confirm     → ticket + new number + its code
+ *   0. POST /v1/auth/step-up {phone_change}          → a code to the CURRENT number
+ *      POST /v1/auth/step-up/verify                   → that code back; a ticket
+ *   1. POST /v1/trainers/me/phone/request             → ticket + new number; a code to IT
+ *   2. POST /v1/trainers/me/phone/confirm             → ticket + new number + its code
  * </pre>
  *
- * <p><b>Two numbers are proved, not one.</b> The brief asks for authentication
- * on the old number, and that half is what stops a stolen session from walking
- * an account away: a bearer token is seven days long and lives in a cookie, so
- * anybody holding one could otherwise re-point the account at a number they
- * control and lock the trainer out of their own book permanently. The new number
- * has to be proved too, for the mirror reason — a typo in the last digit of a
- * number nobody checks is an account that has moved to a stranger's phone and
- * can never be signed into again.
+ * <p><b>Two numbers are proved, not one.</b> The old number stops a stolen session
+ * from walking an account away: a bearer token is seven days long and lives in a
+ * cookie, so anybody holding one could otherwise re-point the account at a number
+ * they control and lock the trainer out of their own book. The new number has to
+ * be proved too, for the mirror reason — a typo in the last digit of a number
+ * nobody checks is an account that has moved to a stranger's phone and can never
+ * be signed into again.
  *
- * <p>The OTP machinery does all of the sending, the throttling, the three-wrong
- * lock and the daily ceiling, keyed per number, and none of it needed touching:
- * a code to the old number and a code to the new one are two independent keys in
- * the same store. The only thing this class adds is the memory that step 2
- * happened, which is {@link JwtService#generatePhoneChangeTicket} — a signed
- * ten-minute ticket rather than a row, because a table would be a second place
- * for a half-finished change to live and a row nobody sweeps outlives the SIM
- * it is about.
+ * <p><b>The confirm ends every OTHER session.</b> The number is the credential, so
+ * every browser that was signed in on the old one is signed out
+ * ({@code revoked_reason = 'phone_changed'}); the one that made the change
+ * survives, so nothing on this screen signs out. That is why no new token comes
+ * back (v1.1): the caller keeps the one it has.
  *
  * <h2>And closing an account is a soft delete, honestly described</h2>
  *
  * <p>There is no hard delete and there cannot be a cheap one: {@code
- * client.trainer_id} is NOT NULL and twenty tables hang off {@code client} in
- * turn, so removing the row would take a year of somebody's sessions, packages
- * and payments with it — including the ones a gym or a CA may still need. What
- * {@code DELETE /v1/trainers/me} does is stamp {@code deleted_at} on {@code
- * trainer} and on {@code app_user}, which is exactly what sign-in reads: the
+ * client.trainer_id} is NOT NULL and twenty tables hang off {@code client} in turn,
+ * so removing the row would take a year of somebody's sessions, packages and
+ * payments with it — including the ones a gym or a CA may still need. What {@code
+ * DELETE /v1/trainers/me} does is stamp {@code deleted_at} on {@code trainer} and on
+ * {@code app_user}, which is exactly what sign-in reads, and end every session. The
  * number stops resolving, every route stops loading, and the data stops being
  * reachable through the product.
  *
  * <p><b>The number is not released, and the screen says so before the button
  * works.</b> Both phone columns are plain UNIQUE indexes rather than partial on
- * {@code deleted_at}, so the deleted row keeps the number and a fresh sign-up on
- * it is refused. That is deliberate — see V36 — and it is the one consequence of
+ * {@code deleted_at}, so the deleted row keeps the number and a fresh sign-up on it
+ * is refused. That is deliberate — see V36 — and it is the one consequence of
  * deletion a trainer cannot discover by trying it once.
+ *
+ * <p><b>The confirmation is the ticket now</b> (v1.1). It used to be the number
+ * typed back, which anybody at an unlocked desktop could do; a fresh code to the
+ * phone cannot be.
  */
 @Service
 @RequiredArgsConstructor
@@ -83,128 +84,83 @@ public class AccountService {
     private final TrainerRepository trainerRepo;
     private final AppUserRepository appUserRepo;
     private final OtpService otpService;
-    private final JwtService jwtService;
+    private final StepUpService stepUp;
+    private final SessionStore sessions;
 
     /* ─────────────────────────────────────────────────── changing a number ── */
 
-    /** Step 1 — a code to the number they are signed in with. */
-    public void challengeCurrentPhone(UUID trainerId) {
-        // Straight through to the OTP service, which owns the wait, the daily
-        // ceiling and the lock. Nothing here re-implements any of them: this
-        // path and sign-in must throttle a number identically, or the cheaper of
-        // the two becomes the way to brute-force it.
-        otpService.send(phoneOf(load(trainerId)));
-    }
-
     /**
-     * Step 2 — that code back, and a ticket for it.
-     *
-     * <p>Not {@code @Transactional}: nothing is written. A verified code is
-     * consumed inside the OTP store's own transaction, and the ticket is a
-     * signature over facts that are already true.
-     */
-    public String verifyCurrentPhone(UUID trainerId, VerifyCurrentPhoneRequest req) {
-        String phone = phoneOf(load(trainerId));
-        // Throws OtpLocked / OtpExpired / InvalidOtp, each of which already has
-        // its own handler and its own recovery on the screen. Deliberately NOT
-        // caught and re-thrown as an account rule: "wrong code, 2 tries left" is
-        // a better sentence than anything this class could write, and the web
-        // already reads all three from the sign-in flow.
-        otpService.verify(phone, req.otp());
-        return jwtService.generatePhoneChangeTicket(trainerId, phone);
-    }
-
-    /**
-     * Step 3 — the new number, and a code to it.
+     * The new number, and a code to it.
      *
      * <p>The availability check runs HERE rather than only at the confirm, so a
-     * number that can never work is refused before an SMS is spent on it and
-     * before the trainer waits for a code that would have been rejected anyway.
-     * It runs again at the confirm, because two minutes is long enough for
-     * somebody else to sign up in between.
+     * number that can never work is refused before a message is spent on it and
+     * before the trainer waits for a code that would have been rejected anyway. It
+     * runs again at the confirm, because two minutes is long enough for somebody
+     * else to sign up in between.
      */
-    public void requestNewPhone(UUID trainerId, NewPhoneRequest req) {
-        String ticket = req.ticket();
-        String newPhone = req.phone();
-        String phone = phoneOf(load(trainerId));
-        requireTicket(ticket, trainerId, phone);
-        requireAvailable(phone, newPhone);
+    public void requestNewPhone(UUID trainerId, NewPhoneRequest req, String rawToken) {
+        stepUp.require(req.ticket(), StepUpService.PHONE_CHANGE, trainerId, rawToken);
+        String newPhone = requireValidPhone(req.phone());
+        requireAvailable(phoneOf(load(trainerId)), newPhone);
         otpService.send(newPhone);
     }
 
     /**
-     * Step 4 — the code from the new number, and the swap.
+     * The code from the new number, and the swap.
      *
-     * <p>One transaction over both tables. {@code app_user} is what sign-in
-     * resolves and {@code trainer} is what every authorised request loads, so a
-     * change that landed on one and not the other is an account that either
-     * cannot be signed into or cannot be found once you are in — and the second
-     * is the worse half, because the trainer would appear to have lost
-     * everything.
-     *
-     * <p>A fresh token comes back because the old one carries the old number in
-     * its {@code phone} claim. Nothing on a trainer's path reads that claim
-     * today — {@code TrainerController} reads the subject, which is the id and
-     * does not move — but a seven-day token that disagrees with the row about
-     * who it belongs to is a thing to hand back rather than to leave in a
-     * cookie and reason about later.
+     * <p>One transaction over the number and the sessions. {@code app_user} is what
+     * sign-in resolves and {@code trainer} is what every authorised request loads
+     * (reached through the fixed FK, so there is no second copy of the number to
+     * keep in step), and the other sessions are ended in the same commit: a change
+     * that landed without them is an old browser still signed in as the old number.
      */
     @Transactional
-    public PhoneChangedResponse confirmNewPhone(UUID trainerId, ConfirmNewPhoneRequest req) {
-        String ticket = req.ticket();
-        String newPhone = req.phone();
+    public PhoneChangedResponse confirmNewPhone(UUID trainerId, ConfirmNewPhoneRequest req, String rawToken) {
+        stepUp.require(req.ticket(), StepUpService.PHONE_CHANGE, trainerId, rawToken);
+        String newPhone = requireValidPhone(req.phone());
         Trainer t = load(trainerId);
         AppUser user = appUserRepo.findById(t.getAppUserId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
         String previous = user.getPhone();
 
-        requireTicket(ticket, trainerId, previous);
         requireAvailable(previous, newPhone);
-
         otpService.verify(newPhone, req.otp());
 
-        // The one row sign-in resolves. `trainer.app_user_id` is a fixed FK —
-        // unlike the old phone-on-trainer shape, there is no second copy of the
-        // number to keep in step, and so no split for this transaction to
-        // guard against.
         user.setPhone(newPhone);
         appUserRepo.save(user);
+        sessions.revokeOthers(trainerId.toString(), currentSessionHash(rawToken), Instant.now(), SessionStore.PHONE_CHANGED);
 
         log.info("trainer {} changed phone {} → {}", trainerId, masked(previous), masked(newPhone));
-        return new PhoneChangedResponse(newPhone, jwtService.generate(trainerId, newPhone));
+        return new PhoneChangedResponse(newPhone);
     }
 
     /* ───────────────────────────────────────────────────── closing it down ── */
 
     /**
-     * Soft delete, on both tables, with the number typed back as the proof.
+     * Soft delete on both tables and every session ended, behind a step-up ticket
+     * (header {@code X-Step-Up-Ticket}, purpose {@code account_deletion}).
      *
-     * <p><b>No OTP here, and that is a considered asymmetry with the change
-     * flow.</b> Changing a number is an attacker's goal — it takes the account
-     * over and locks the owner out — so it is worth an SMS. Deleting is nobody's
-     * goal but the owner's: it destroys the thing an attacker would want and
-     * hands them nothing. What it needs is protection from a MIS-TAP, and typing
-     * ten digits is what supplies that.
+     * <p><b>DEPRECATED transitional path:</b> with no ticket but the old body
+     * ({@code confirmPhone}) the number-typed-back confirmation still works, so the
+     * web's current Delete keeps working until it moves. Remove after the web
+     * migration; with neither, the answer is {@code 403 STEP_UP_REQUIRED}.
      *
      * <p>Idempotent by way of {@link #load}: a second call finds no live trainer
      * and 404s, which is the honest answer to deleting something already gone.
      */
     @Transactional
-    public void deleteAccount(UUID trainerId, DeleteAccountRequest req) {
-        String confirmPhone = req.confirmPhone();
+    public void deleteAccount(UUID trainerId, String ticket, DeleteAccountRequest legacy, String rawToken) {
         Trainer t = load(trainerId);
         AppUser user = appUserRepo.findById(t.getAppUserId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
         String phone = user.getPhone();
 
-        String typed = confirmPhone == null ? "" : confirmPhone.replaceAll("\\D", "");
-        // Compared on the last ten digits, so `+91 98410 22119`, `9198410 22119`
-        // and `9841022119` are all the same answer. A confirmation step that
-        // refuses the number as the trainer's own phone displays it back to them
-        // is a step that teaches them the product is broken, not that they typed
-        // it wrong.
-        if (typed.length() < 10 || !typed.endsWith(last10(phone))) {
-            throw AccountRuleException.confirmationMismatch();
+        if (ticket != null && !ticket.isBlank()) {
+            stepUp.require(ticket, StepUpService.ACCOUNT_DELETION, trainerId, rawToken);
+        } else if (legacy != null && legacy.confirmPhone() != null) {
+            requireTypedPhone(legacy.confirmPhone(), phone);
+        } else {
+            throw AccountRuleException.stepUpRequired();
         }
 
         Instant now = Instant.now();
@@ -213,6 +169,9 @@ public class AccountService {
 
         user.setDeletedAt(now);
         appUserRepo.save(user);
+        // Every credential this account holds, this one included: there is nothing
+        // left for it to open. `erased` is kept for the later erasure step.
+        sessions.revokeAllForSubject(trainerId.toString(), now, SessionStore.SIGN_OUT_ALL);
 
         log.info("trainer {} deleted their account ({})", trainerId, masked(phone));
     }
@@ -232,49 +191,41 @@ public class AccountService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
     }
 
-    /**
-     * Is this ticket this trainer's, unexpired, and about the number they are
-     * still on?
-     *
-     * <p>The last clause is the one worth having. Without it a ticket minted
-     * before a change would still be spendable after it, which is a proof of a
-     * SIM the account no longer uses — so two changes in one sitting would need
-     * only the first one's code.
-     */
-    private void requireTicket(String ticket, UUID trainerId, String currentPhone) {
-        if (ticket == null || ticket.isBlank()) throw AccountRuleException.proveCurrentFirst();
-        Claims claims;
-        try {
-            claims = jwtService.parse(ticket);
-        } catch (JwtException e) {
-            // Expiry and a forged signature land here together, and they get the
-            // same sentence deliberately: distinguishing them would tell anybody
-            // holding a made-up ticket which half they got wrong.
-            throw AccountRuleException.proveCurrentFirst();
+    /** The number must be one sign-in accepts, and a refusal is named so the screen can say it under the field. */
+    private static String requireValidPhone(String phone) {
+        if (phone == null || !phone.strip().matches(SendOtpRequest.PHONE_PATTERN)) {
+            throw AccountRuleException.phoneInvalid();
         }
-        boolean ok = JwtService.ROLE_PHONE_CHANGE.equals(jwtService.extractRole(claims))
-                && trainerId.toString().equals(claims.getSubject())
-                && currentPhone.equals(claims.get("phone", String.class));
-        if (!ok) throw AccountRuleException.proveCurrentFirst();
+        return phone.strip();
     }
 
     /**
      * Is the number free, and is it actually a move?
      *
-     * <p>"Free" means no {@code app_user} row on it at all, live or not —
-     * checking only that table is enough now that {@code trainer.app_user_id}
-     * is a fixed, unique FK (since the 25 Sep 2026 schema rebuild): every
-     * trainer has exactly one {@code app_user} row, so there is no second place
-     * for the number to be taken.
-     *
-     * <p>Soft-deleted rows still hold their number, which is what makes a
-     * deleted account's phone unavailable. That is the same rule stated from the
-     * other side in {@link #deleteAccount}, and it is why the query does not
-     * filter on {@code deleted_at}.
+     * <p>"Free" means no {@code app_user} row on it at all, live or not. Soft-deleted
+     * rows still hold their number, which is what makes a deleted account's phone
+     * unavailable — the same rule stated from the other side in {@link
+     * #deleteAccount}, and why the query does not filter on {@code deleted_at}.
+     * The refusal does not say who has it: this endpoint must not become <i>is this
+     * number on InclineYou</i> for any number in India, one request at a time.
      */
     private void requireAvailable(String currentPhone, String newPhone) {
         if (newPhone.equals(currentPhone)) throw AccountRuleException.samePhone();
         if (appUserRepo.findByPhone(newPhone).isPresent()) throw AccountRuleException.phoneTaken();
+    }
+
+    /** The legacy typed confirmation, compared on the last ten digits so formatting does not matter. */
+    private static void requireTypedPhone(String confirmPhone, String phone) {
+        String typed = confirmPhone.replaceAll("\\D", "");
+        if (typed.length() < 10 || !typed.endsWith(last10(phone))) {
+            throw AccountRuleException.confirmationMismatch();
+        }
+    }
+
+    /** The hash of the session this request came in on — the one to keep. Null for a JWT caller. */
+    private static String currentSessionHash(String rawToken) {
+        return rawToken != null && rawToken.startsWith(SessionTokenIssuer.PREFIX)
+                ? SessionTokenIssuer.hash(rawToken) : null;
     }
 
     private static String last10(String phone) {

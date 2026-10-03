@@ -15,6 +15,12 @@ import java.util.List;
  * What a web sign-in can do that a phone sign-in cannot: see its own sessions
  * and end them.
  *
+ * <p><b>DEPRECATED (3 Oct 2026) — replaced by {@link SessionsController}
+ * ({@code GET /v1/auth/sessions}, {@code DELETE /v1/auth/sessions/{id}},
+ * {@code DELETE /v1/auth/sessions?scope=others}); remove after the web migration.</b>
+ * Kept so the web's current Settings keeps working; now writes the schema's
+ * revoke reasons instead of failing the CHECK.
+ *
  * <p>These endpoints work for a JWT caller too, and answer honestly rather than
  * pretending: the list is empty and revoking is a no-op, because a JWT is not
  * stored anywhere and cannot be recalled. Saying so is better than a button that
