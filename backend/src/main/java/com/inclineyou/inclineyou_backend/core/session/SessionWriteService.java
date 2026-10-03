@@ -166,7 +166,8 @@ public class SessionWriteService {
         // waits and then reads `done`. The service a pack must match is the
         // session's own mode, else its slot's, else the client's default.
         var rows = jdbc.queryForList("""
-                SELECT s.status, s.client_id::text AS client_id, s.scheduled_at > now() AS not_started,
+                SELECT s.status, s.client_id::text AS client_id,
+                       (s.scheduled_at > now() AND s.started_at IS NULL) AS not_started,
                        coalesce(s.delivery_mode, sl.delivery_mode, cs.delivery_mode, 'floor') AS service
                 FROM scheduled_session s
                 LEFT JOIN client_schedule_slot sl ON sl.id = s.slot_id
@@ -200,8 +201,10 @@ public class SessionWriteService {
             case "cancelled" -> { return new MarkResult(sessionId.toString(), "skipped", null, null, "SESSION_CANCELLED"); }
             default -> { /* scheduled or no_show: mark it below */ }
         }
-        // A future session can't have been delivered. Checked after `done`, so a
-        // session somebody marked early still answers already_done.
+        // A future session can't have been delivered — UNLESS its log was opened: a trainer who
+        // starts early has begun delivering it, and must be able to finish it (not_started above is
+        // false once started_at is set). Checked after `done`, so a session somebody marked early
+        // still answers already_done.
         if (Boolean.TRUE.equals(row.get("not_started"))) {
             return new MarkResult(sessionId.toString(), "skipped", null, null, "SESSION_NOT_STARTED");
         }

@@ -40,6 +40,7 @@ class SessionStateTest {
 
     @Autowired NamedParameterJdbcTemplate jdbc;
     @Autowired SessionStateService states;
+    @Autowired SessionWriteService writes;
 
     private UUID trainer;
     private UUID client;
@@ -133,6 +134,40 @@ class SessionStateTest {
         var s = session(Duration.ofHours(-3));
         assertEquals("SESSION_NOT_STARTED", code(() -> states.markDone(trainer, s, null)));
         assertEquals("SESSION_NOT_STARTED", code(() -> states.noShow(trainer, s, Map.of("charge", true))));
+    }
+
+    @Test
+    @DisplayName("a log opened before the start time can be marked done and charges the pack; an unopened future session still cannot")
+    void anEarlyStartCanBeFinished() {
+        var pack = pack(12, 12, null);
+        var early = session(Duration.ofHours(-3));            // three hours from now …
+        jdbc.update("UPDATE scheduled_session SET started_at = now() WHERE id = :s::uuid", Map.of("s", early.toString()));
+        var future = session(Duration.ofHours(-4));           // … and one nobody has opened
+        assertEquals("SESSION_NOT_STARTED", code(() -> states.markDone(trainer, future, null)), "a planned session is not markable by accident");
+
+        var done = states.markDone(trainer, early, null);
+        assertEquals("done", done.outcome());
+        assertEquals(11, remaining(pack), "the pack is charged exactly as for any delivered session");
+        assertEquals("done", jdbc.queryForObject("SELECT status FROM scheduled_session WHERE id = :s::uuid", Map.of("s", early.toString()), String.class));
+        assertTrue(jdbc.queryForObject("SELECT ended_at IS NOT NULL FROM scheduled_session WHERE id = :s::uuid", Map.of("s", early.toString()), Boolean.class),
+                "marking it done closes the open log");
+        assertEquals("already_done", states.markDone(trainer, early, null).outcome(), "and a repeat changes nothing");
+        assertEquals(11, remaining(pack));
+    }
+
+    @Test
+    @DisplayName("the batch route shares the rule: an opened log is marked, an unopened future session is skipped with SESSION_NOT_STARTED")
+    void theBatchSharesTheEarlyStartRule() {
+        var pack = pack(12, 12, null);
+        var early = session(Duration.ofHours(-2));
+        jdbc.update("UPDATE scheduled_session SET started_at = now() WHERE id = :s::uuid", Map.of("s", early.toString()));
+        var future = session(Duration.ofHours(-5));
+
+        var r = writes.markDone(trainer, new SessionWriteService.SessionIdsRequest(List.of(early.toString(), future.toString()))).results();
+        assertEquals("done", r.get(0).outcome());
+        assertEquals("skipped", r.get(1).outcome());
+        assertEquals("SESSION_NOT_STARTED", r.get(1).reason());
+        assertEquals(11, remaining(pack), "only the opened one was charged");
     }
 
     @Test
