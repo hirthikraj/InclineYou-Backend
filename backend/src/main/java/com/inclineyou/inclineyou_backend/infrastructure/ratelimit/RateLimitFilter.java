@@ -129,6 +129,14 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // is a way to get a healthy deployment killed.
         if ("/health".equals(path)) return null;
 
+        // Managing signed-in browsers is an authenticated action on the caller's own account, keyed by
+        // their token, not a sign-in attempt: the AUTH tier counts per IP and exists to slow guessing
+        // and OTP spend, so a trainer with a few tabs open should not share it. (The prefix would
+        // otherwise put these under /v1/auth/ below.)
+        if (path.equals("/v1/auth/sessions") || path.startsWith("/v1/auth/sessions/")
+                || path.equals("/v1/auth/session") || path.startsWith("/v1/auth/session/")) {
+            return Tier.STANDARD;
+        }
         if (path.startsWith("/v1/auth/")) return Tier.AUTH;
         // Changing the number sends a code to the NEW number and ends in a swap of the
         // sign-in credential: it is an authentication act, so it is counted as one
