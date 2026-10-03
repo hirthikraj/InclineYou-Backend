@@ -46,9 +46,20 @@ public class SetHistoryService {
                          String loadKind, String effortKind, Double loadValue, Double effortValue,
                          Double rpe, long doneAt,
                          /** The keyset position, never on the wire. */
-                         @JsonIgnore String cursorKey, @JsonIgnore String setId) {}
+                         @JsonIgnore String cursorKey, @JsonIgnore String setId,
+                         /** Read in the same query (scheduled_session.workout_id → workout.name); lifted into {@code sessions}. */
+                         @JsonIgnore String workoutName) {}
 
-    public record History(Map<String, Exercise> exercises, List<SetRow> items, String nextCursor) {}
+    /** What is worth saying about a session once per page rather than on every set: the workout it ran, if it had one. */
+    public record SessionInfo(String workoutName) {}
+
+    /**
+     * {@code sessions} is keyed by session id and holds only the sessions that appear on THIS page — the same idiom as
+     * {@code exercises}, so a client's 5,000-set page doesn't repeat a workout name 5,000 times. Appended last: every
+     * existing field keeps its place.
+     */
+    public record History(Map<String, Exercise> exercises, List<SetRow> items, String nextCursor,
+                          Map<String, SessionInfo> sessions) {}
 
     public History list(UUID tid, UUID clientId, String from, String exerciseId, Integer limit, String cursor) {
         var p = new HashMap<String, Object>();
@@ -99,10 +110,11 @@ public class SetHistoryService {
                 SELECT s.id::text AS session_id, (s.scheduled_at AT TIME ZONE :tz)::date::text AS day,
                        s.scheduled_at, se.exercise_id::text AS exercise_id, se.position AS ex_pos,
                        sl.id::text AS set_id, sl.position, sl.load_kind, sl.effort_kind,
-                       sl.load_value, sl.effort_value, sl.rpe, sl.done_at
+                       sl.load_value, sl.effort_value, sl.rpe, sl.done_at, w.name AS workout_name
                 FROM set_log sl
                 JOIN session_exercise se ON se.id = sl.session_exercise_id
                 JOIN scheduled_session s ON s.id = se.session_id
+                LEFT JOIN workout w ON w.id = s.workout_id
                 WHERE %s
                 ORDER BY s.scheduled_at, s.id, se.position, sl.position, sl.id
                 LIMIT :limit
@@ -113,7 +125,7 @@ public class SetHistoryService {
                 number(rs.getBigDecimal("rpe")), rs.getTimestamp("done_at").getTime(),
                 Cursor.key(rs.getTimestamp("scheduled_at")) + "~" + rs.getString("session_id") + "~"
                         + rs.getInt("ex_pos") + "~" + rs.getInt("position"),
-                rs.getString("set_id")));
+                rs.getString("set_id"), rs.getString("workout_name")));
         var page = Page.of(rows, n, r -> Cursor.encode(r.cursorKey(), r.setId()));
 
         var exercises = new LinkedHashMap<String, Exercise>();
@@ -127,7 +139,9 @@ public class SetHistoryService {
                         new Exercise(rs.getString("name"), rs.getString("equipment"), rs.getBoolean("custom")));
             });
         }
-        return new History(exercises, page.items(), page.nextCursor());
+        var sessions = new LinkedHashMap<String, SessionInfo>();
+        for (var r : page.items()) sessions.putIfAbsent(r.sessionId(), new SessionInfo(r.workoutName()));
+        return new History(exercises, page.items(), page.nextCursor(), sessions);
     }
 
     /** A JSON number — 80, not "80.00" and not 8E+1. */
