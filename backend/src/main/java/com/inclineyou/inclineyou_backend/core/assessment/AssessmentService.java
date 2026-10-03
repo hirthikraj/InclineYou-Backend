@@ -1,5 +1,7 @@
 package com.inclineyou.inclineyou_backend.core.assessment;
 
+import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentDeleted;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentCreated;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentDetail;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentItem;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.Catalog;
@@ -37,11 +39,6 @@ public class AssessmentService {
     private final AssessmentTemplateJdbcRepository templates;
     private final AssessmentBooker booker;
     private final WorkspaceClock clock;
-
-    public record Created(AssessmentItem item, boolean created) {}
-
-    /** {@code next}: what the cycle booked in the deleted one's place, null for a one-off. */
-    public record Deleted(AssessmentItem next) {}
 
     /** Served from code, not a table; it changes only on a deploy. */
     public Catalog catalog() {
@@ -125,13 +122,13 @@ public class AssessmentService {
 
     /** Assign for a date, or — with {@code dueOn} today — take it now. */
     @Transactional
-    public Created create(UUID trainerId, CreateAssessmentRequest req) {
+    public AssessmentCreated create(UUID trainerId, CreateAssessmentRequest req) {
         if (req.id() != null) {
             var mine = assessments.isMine(req.id(), trainerId, req.clientId());
             if (mine.isPresent()) {
                 if (!mine.get()) throw ApiException.idConflict();
                 var row = assessments.find(trainerId, req.id()).orElseThrow(ApiException::idConflict);
-                return new Created(AssessmentForms.item(row, today()), false);
+                return new AssessmentCreated(AssessmentForms.item(row, today()), false);
             }
         }
         var status = assessments.clientStatus(trainerId, req.clientId())
@@ -143,7 +140,7 @@ public class AssessmentService {
                 .orElseThrow(() -> ApiException.notFound("That assessment template is not in your library."));
         LocalDate today = today();
         UUID id = booker.book(trainerId, req.clientId(), tpl, null, req.dueOn() == null ? today : req.dueOn(), req.id());
-        return new Created(AssessmentForms.item(assessments.find(trainerId, id).orElseThrow(), today), true);
+        return new AssessmentCreated(AssessmentForms.item(assessments.find(trainerId, id).orElseThrow(), today), true);
     }
 
     /** Move the date. A cycle's open assessment also moves the cycle's own next date. */
@@ -168,19 +165,19 @@ public class AssessmentService {
      * without a date — ending the cycle is how to stop it.
      */
     @Transactional
-    public Deleted delete(UUID trainerId, UUID id) {
+    public AssessmentDeleted delete(UUID trainerId, UUID id) {
         var row = assessments.lock(trainerId, id).orElseThrow(AssessmentService::notFound);
-        if (row.deleted()) return new Deleted(null);
+        if (row.deleted()) return new AssessmentDeleted(null);
         assessments.softDelete(id);
-        if (row.done() || row.scheduleId() == null) return new Deleted(null);
+        if (row.done() || row.scheduleId() == null) return new AssessmentDeleted(null);
 
         var cycle = schedules.lock(trainerId, row.scheduleId()).filter(AssessmentScheduleJdbcRepository.Locked::live).orElse(null);
         var tpl = cycle == null ? null : templates.find(trainerId, cycle.templateId()).filter(t -> !t.deleted()).orElse(null);
-        if (tpl == null) return new Deleted(null);
+        if (tpl == null) return new AssessmentDeleted(null);
         LocalDate next = row.dueOn().plusDays(cycle.intervalDays());
         schedules.update(cycle.id(), next, null);
         UUID booked = booker.book(trainerId, row.clientId(), tpl, cycle.id(), next, null);
-        return new Deleted(AssessmentForms.item(assessments.find(trainerId, booked).orElseThrow(), today()));
+        return new AssessmentDeleted(AssessmentForms.item(assessments.find(trainerId, booked).orElseThrow(), today()));
     }
 
     private LocalDate today() {

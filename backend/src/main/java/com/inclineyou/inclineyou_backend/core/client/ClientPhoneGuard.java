@@ -2,10 +2,9 @@ package com.inclineyou.inclineyou_backend.core.client;
 
 import com.inclineyou.inclineyou_backend.core.tenant.CurrentScope;
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.util.Map;
+import java.util.UUID;
 
 /**
  * Who a trainer is allowed to put on their roster.
@@ -61,7 +60,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ClientPhoneGuard {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final ClientPhoneJdbcRepository phones;
 
     /** The number is the caller's own. Recovery: a different number. */
     public static final String CODE_TRAINER = "PHONE_IS_TRAINER";
@@ -150,51 +149,16 @@ public class ClientPhoneGuard {
             return Verdict.no(CODE_INVALID, "That isn't a phone number we can use — +91 and ten digits.");
         }
 
-        var row = jdbc.queryForMap("""
-                SELECT
-                    EXISTS(
-                        SELECT 1 FROM trainer t JOIN app_user au ON au.id = t.app_user_id
-                        WHERE au.phone = :phone AND t.id = :tid::uuid AND t.deleted_at IS NULL
-                    ) AS is_self,
-                    EXISTS(
-                        SELECT 1 FROM client
-                        WHERE phone = :phone
-                          AND trainer_id <> :tid::uuid
-                          -- Scoped to ONE workspace, which is the change tenancy
-                          -- made. The old query had no tenant predicate and
-                          -- therefore refused a number that was on any roster in
-                          -- the product; that made "a client can train under two
-                          -- arrangements" impossible to express.
-                          AND (:tenantId::uuid IS NULL OR tenant_id = :tenantId::uuid)
-                          AND deleted_at IS NULL
-                          AND status <> 'archived'
-                          AND membership_status NOT IN ('removed', 'declined')
-                    ) AS on_other_roster,
-                    own.id::text AS own_client_id, own.name AS own_client_name, own.status AS own_client_status
-                FROM (SELECT 1) one
-                LEFT JOIN LATERAL (
-                        SELECT id, name, status FROM client
-                        WHERE phone = :phone
-                          AND trainer_id = :tid::uuid
-                          AND (:tenantId::uuid IS NULL OR tenant_id = :tenantId::uuid)
-                          AND deleted_at IS NULL
-                          AND (:archived OR (status <> 'archived'
-                               AND membership_status NOT IN ('removed', 'declined')))
-                        -- A live client before an archived one with the same number.
-                        ORDER BY (status = 'archived'), created_at
-                        LIMIT 1
-                ) own ON true
-                """, params(phone, trainerId, activeTenantId(), includeArchived));
+        var standing = phones.standing(phone, UUID.fromString(trainerId), activeTenantId(), includeArchived);
 
-        if (Boolean.TRUE.equals(row.get("is_self"))) {
+        if (standing.isSelf()) {
             return Verdict.no(CODE_TRAINER, MSG_TRAINER);
         }
-        Object ownClient = row.get("own_client_name");
-        if (row.get("own_client_id") != null) {
-            return new Verdict(false, CODE_OWN_ROSTER, MSG_OWN_ROSTER.formatted(ownClient),
-                    (String) row.get("own_client_id"), (String) ownClient, (String) row.get("own_client_status"));
+        if (standing.ownClientId() != null) {
+            return new Verdict(false, CODE_OWN_ROSTER, MSG_OWN_ROSTER.formatted(standing.ownClientName()),
+                    standing.ownClientId(), standing.ownClientName(), standing.ownClientStatus());
         }
-        if (Boolean.TRUE.equals(row.get("on_other_roster"))) {
+        if (standing.onOtherRoster()) {
             return Verdict.no(CODE_OTHER_ROSTER, MSG_OTHER_ROSTER);
         }
         return Verdict.ok();
@@ -213,20 +177,9 @@ public class ClientPhoneGuard {
      * EXACTLY the behaviour this guard had before tenancy. Failing back to the
      * old rule is the only safe direction: the old rule was stricter.
      */
-    private static String activeTenantId() {
+    private static UUID activeTenantId() {
         var scope = CurrentScope.get();
-        return scope == null || scope.activeTenantId() == null
-                ? null : scope.activeTenantId().toString();
-    }
-
-    /** {@code Map.of} refuses nulls, and a null tenant is a meaningful value here. */
-    private static Map<String, Object> params(String phone, String trainerId, String tenantId, boolean archived) {
-        var p = new java.util.HashMap<String, Object>();
-        p.put("archived", archived);
-        p.put("phone", phone);
-        p.put("tid", trainerId);
-        p.put("tenantId", tenantId);
-        return p;
+        return scope == null ? null : scope.activeTenantId();
     }
 
     /** The same check, for callers that answer a request rather than a push. */

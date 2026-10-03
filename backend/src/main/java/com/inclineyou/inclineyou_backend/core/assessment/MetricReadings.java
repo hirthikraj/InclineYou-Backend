@@ -1,14 +1,10 @@
 package com.inclineyou.inclineyou_backend.core.assessment;
 
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
-import java.sql.Timestamp;
 import java.time.Instant;
-import java.time.OffsetDateTime;
-import java.util.HashMap;
 import java.util.List;
 import java.util.UUID;
 
@@ -34,7 +30,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class MetricReadings {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final MetricReadingsJdbcRepository rows;
 
     public record MetricReading(UUID assessmentId, UUID clientId, String metricType,
                                 BigDecimal value, String unit, Instant recordedAt) {}
@@ -55,41 +51,11 @@ public class MetricReadings {
     }
 
     private List<MetricReading> query(UUID clientId, String metricType, String order, Integer limit) {
-        var p = new HashMap<String, Object>();
-        p.put("cid", clientId.toString());
-        p.put("keys", metricType == null ? MetricCatalogue.ids() : List.of(metricType));
-        // `order` is one of two literals chosen above, never caller text.
-        String sql = """
-                SELECT a.id::text AS assessment_id, r.key AS metric_type,
-                       (r.value)::text::numeric AS value, a.completed_at
-                FROM assessment a
-                -- v1: readings is an object keyed by measurement id (assessment_readings_valid).
-                CROSS JOIN LATERAL jsonb_each(a.readings) r
-                WHERE a.client_id = :cid::uuid
-                  AND a.deleted_at IS NULL
-                  AND a.completed_at IS NOT NULL
-                  AND r.key IN (:keys)
-                  AND jsonb_typeof(r.value) = 'number'
-                ORDER BY a.completed_at %1$s, a.id %1$s, r.key
-                """.formatted(order) + (limit == null ? "" : " LIMIT :limit");
-        if (limit != null) p.put("limit", limit);
-        return jdbc.queryForList(sql, p).stream().map(r -> {
-            String type = (String) r.get("metric_type");
-            var metric = MetricCatalogue.get(type);
-            return new MetricReading(
-                    UUID.fromString((String) r.get("assessment_id")),
-                    clientId,
-                    type,
-                    (BigDecimal) r.get("value"),
-                    metric == null ? null : metric.unit(),
-                    instant(r.get("completed_at")));
+        List<String> keys = metricType == null ? MetricCatalogue.ids() : List.of(metricType);
+        return rows.read(clientId, keys, "DESC".equals(order), limit).stream().map(r -> {
+            var metric = MetricCatalogue.get(r.key());
+            return new MetricReading(r.assessmentId(), clientId, r.key(), r.value(),
+                    metric == null ? null : metric.unit(), r.completedAt());
         }).toList();
-    }
-
-    private static Instant instant(Object o) {
-        if (o instanceof Timestamp t) return t.toInstant();
-        if (o instanceof OffsetDateTime odt) return odt.toInstant();
-        if (o instanceof Instant i) return i;
-        throw new IllegalStateException("completed_at: unexpected " + o);
     }
 }

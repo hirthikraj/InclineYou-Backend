@@ -148,6 +148,16 @@ different packs), with the records in `session/dto/`. The legacy `ScheduledSessi
 validates it into a typed `SessionEdit` at the service's entry. `SessionDiaryTest` pins the read, the booking and the PATCH;
 `SessionStateTest` the verbs.
 
+**Every slice is now on this shape (3 Oct 2026): no class in `core/` outside a `*JdbcRepository` holds SQL.** The last ones:
+`attention/` (`AttentionDismissalJdbcRepository`, records in `attention/dto/`), `push/` (`DeviceService` — the controller no
+longer touches `TrainerRepository`), `assessment/` (`AssessmentListJdbcRepository` for the list, `MetricReadingsJdbcRepository`
+under `MetricReadings`, which keeps only the catalogue's units) and `client/` (`ClientPhoneJdbcRepository` under
+`ClientPhoneGuard`, which keeps the codes and the sentences). The "created or found" wrappers and the wire records that were
+nested in services (`Made`, `Created`, `Applied`, `TemplateResponse` …) moved to each slice's `dto/` under distinct names. What
+stays by design: the `SessionStore` implementations in `auth/` (an interface with a Redis and a JDBC side, so `JdbcSessionStore`
+is that slice's repository under another name), the JPA entities and their Spring Data repositories, `ClientPhoneGuard.Verdict`
+(a verdict with its own factories), and the startup seeder and health checks under `infrastructure/`.
+
 ### Persistence is deliberately split
 
 Only five things are JPA entities — `AppUser`, `Trainer`, `Client`, `BodyMetric`,

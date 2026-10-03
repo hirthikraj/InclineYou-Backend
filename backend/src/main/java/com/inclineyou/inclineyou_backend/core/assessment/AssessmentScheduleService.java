@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.assessment;
 
+import com.inclineyou.inclineyou_backend.core.assessment.dto.ScheduleCreated;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.CreateScheduleRequest;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.ScheduleItem;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.UpdateScheduleRequest;
@@ -36,8 +37,6 @@ public class AssessmentScheduleService {
     private final AssessmentBooker booker;
     private final WorkspaceClock clock;
 
-    public record Created(ScheduleItem schedule, boolean created) {}
-
     /** Live first, then ended. A client is the caller's or a 404. */
     public List<ScheduleItem> forClient(UUID trainerId, UUID clientId) {
         if (clientId == null) throw ApiException.validation("clientId: required");
@@ -47,12 +46,12 @@ public class AssessmentScheduleService {
     }
 
     @Transactional
-    public Created create(UUID trainerId, CreateScheduleRequest req) {
+    public ScheduleCreated create(UUID trainerId, CreateScheduleRequest req) {
         if (req.id() != null) {
             var mine = schedules.isMine(req.id(), trainerId);
             if (mine.isPresent()) {
                 if (!mine.get()) throw ApiException.idConflict();
-                return new Created(one(trainerId, req.id()), false);
+                return new ScheduleCreated(one(trainerId, req.id()), false);
             }
         }
         var status = assessments.clientStatus(trainerId, req.clientId())
@@ -75,7 +74,7 @@ public class AssessmentScheduleService {
             throw msg.contains("uq_assessment_schedule_live") ? live() : ApiException.idConflict();
         }
         booker.book(trainerId, req.clientId(), tpl, id, first, null);
-        return new Created(one(trainerId, id), true);
+        return new ScheduleCreated(one(trainerId, id), true);
     }
 
     /** Send only what changed. {@code nextDueOn} also moves the open assessment's date. */

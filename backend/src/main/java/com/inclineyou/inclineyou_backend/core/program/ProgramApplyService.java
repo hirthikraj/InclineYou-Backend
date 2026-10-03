@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.program;
 
+import com.inclineyou.inclineyou_backend.core.program.dto.ProgramApplied;
 import com.inclineyou.inclineyou_backend.core.client.ClientScheduleService;
 import com.inclineyou.inclineyou_backend.core.program.dto.ApplyRequest;
 import com.inclineyou.inclineyou_backend.core.program.dto.ProgramItem;
@@ -36,11 +37,8 @@ public class ProgramApplyService {
     private final ClientScheduleService schedules;
     private final WorkspaceClock clock;
 
-    /** The new plan with {@code linkedSessions}; {@code created} is 201, a replayed id is 200. */
-    public record Applied(ProgramItem plan, boolean created) {}
-
     @Transactional
-    public Applied apply(UUID trainerId, UUID templateId, ApplyRequest req) {
+    public ProgramApplied apply(UUID trainerId, UUID templateId, ApplyRequest req) {
         var source = repo.copySource(trainerId, templateId).orElseThrow(() -> ApiException.notFound("That program is not yours."));
         if (source.clientId() != null) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "PROGRAM_NOT_TEMPLATE",
@@ -52,7 +50,7 @@ public class ProgramApplyService {
         var existing = repo.planOwnership(trainerId, id, req.clientId());
         if (existing.isPresent()) {
             if (!existing.get()) throw ApiException.idConflict();
-            return new Applied(read.get(trainerId, id).withLinked(0), false);
+            return new ProgramApplied(read.get(trainerId, id).withLinked(0), false);
         }
         if ("archived".equals(clientStatus)) {
             throw ApiException.conflict("CLIENT_ARCHIVED", "This client is archived. Unarchive them first.");
@@ -66,6 +64,6 @@ public class ProgramApplyService {
         trees.copy(templateId, id, trainerId);
         int linked = schedules.linkWorkouts(req.clientId(), schedules.futureOpen(req.clientId()), zone);
         log.info("program applied trainer={} client={} template={} plan={} linked={}", trainerId, req.clientId(), templateId, id, linked);
-        return new Applied(read.get(trainerId, id).withLinked(linked), true);
+        return new ProgramApplied(read.get(trainerId, id).withLinked(linked), true);
     }
 }

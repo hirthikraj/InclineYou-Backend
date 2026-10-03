@@ -21,7 +21,7 @@ import java.util.UUID;
 
 /**
  * The SQL on {@code assessment}. The list has its own service
- * ({@code AssessmentListService}) because its query is built from filters.
+ * (AssessmentListJdbcRepository) because its query is built from filters.
  *
  * <p>Every read filters {@code trainer_id} and {@code deleted_at IS NULL}: ownership
  * is a query filter, so somebody else's id is a 404. {@code tenant_id} is RLS's.

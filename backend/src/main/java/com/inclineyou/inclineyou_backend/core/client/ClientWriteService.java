@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.client;
 
+import com.inclineyou.inclineyou_backend.core.client.dto.ClientCreated;
 import com.inclineyou.inclineyou_backend.core.client.dto.ClientSummary;
 import com.inclineyou.inclineyou_backend.core.client.dto.CreateClientRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.PhoneCheckRequest;
@@ -36,20 +37,17 @@ public class ClientWriteService {
     private final ClientSummaryService summaries;
     private final WorkspaceClock clock;
 
-    /** The row and whether this call made it (201) or a replay found it (200). */
-    public record Created(ClientSummary client, boolean created) {}
-
     public ClientPhoneGuard.Verdict phoneCheck(UUID trainerId, PhoneCheckRequest req) {
         return phoneGuard.check(trainerId.toString(), req.phone(), true);
     }
 
     @Transactional
-    public Created create(UUID trainerId, CreateClientRequest req) {
+    public ClientCreated create(UUID trainerId, CreateClientRequest req) {
         requireAdult(req.dateOfBirth());
         UUID id = req.id() == null ? UUID.randomUUID() : req.id();
         if (req.id() != null) {
             var replay = replay(trainerId, id);
-            if (replay != null) return new Created(replay, false);
+            if (replay != null) return new ClientCreated(replay, false);
         }
         requirePhone(trainerId, req.phone());
         try {
@@ -59,7 +57,7 @@ public class ClientWriteService {
         }
         if (req.schedule() != null) schedules.setDefaults(id, req.schedule());
         log.info("client created trainer={} client={} type={}", trainerId, id, req.clientType());
-        return new Created(summaries.one(trainerId, id).orElseThrow(), true);
+        return new ClientCreated(summaries.one(trainerId, id).orElseThrow(), true);
     }
 
     @Transactional

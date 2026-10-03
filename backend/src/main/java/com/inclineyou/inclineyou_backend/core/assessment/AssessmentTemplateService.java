@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.assessment;
 
+import com.inclineyou.inclineyou_backend.core.assessment.dto.TemplateCreated;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.TemplateItem;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.TemplateRequest;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
@@ -51,8 +52,6 @@ public class AssessmentTemplateService {
     private final AssessmentScheduleJdbcRepository schedules;
     private final AssessmentJdbcRepository assessments;
 
-    public record Created(TemplateItem template, boolean created) {}
-
     /** The whole shelf, one grouped query for the live-cycle counts. */
     public List<TemplateItem> list(UUID trainerId) {
         var cycles = templates.liveCycles(trainerId);
@@ -60,12 +59,12 @@ public class AssessmentTemplateService {
     }
 
     @Transactional
-    public Created create(UUID trainerId, TemplateRequest req) {
+    public TemplateCreated create(UUID trainerId, TemplateRequest req) {
         if (req.id() != null) {
             var mine = templates.isMine(req.id(), trainerId);
             if (mine.isPresent()) {
                 if (!mine.get()) throw ApiException.idConflict();
-                return new Created(one(trainerId, req.id()), false);
+                return new TemplateCreated(one(trainerId, req.id()), false);
             }
         }
         var form = normalise(req);
@@ -79,7 +78,7 @@ public class AssessmentTemplateService {
         } catch (DuplicateKeyException e) {
             throw duplicate(e);
         }
-        return new Created(one(trainerId, id), true);
+        return new TemplateCreated(one(trainerId, id), true);
     }
 
     /** Whole-form replace. Every open assessment nobody has started picks the new form up. */

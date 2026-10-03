@@ -1,5 +1,8 @@
 package com.inclineyou.inclineyou_backend.core.assessment;
 
+import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentPage;
+import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentDeleted;
+
 import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentDetail;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentItem;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.Catalog;
@@ -48,7 +51,7 @@ public class AssessmentController {
 
     /** The list — Today L10, the Assessments screen and a client's tab. See {@link AssessmentListService}. */
     @GetMapping("/assessments")
-    public AssessmentListService.Page list(
+    public AssessmentPage list(
             @RequestParam(required = false) String state,
             @RequestParam(required = false) String clientId,
             @RequestParam(required = false) String q,
@@ -93,7 +96,7 @@ public class AssessmentController {
     }
 
     @DeleteMapping("/assessments/{id}")
-    public AssessmentService.Deleted delete(@PathVariable UUID id) {
+    public AssessmentDeleted delete(@PathVariable UUID id) {
         return assessments.delete(trainerId(), id);
     }
 

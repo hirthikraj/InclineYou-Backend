@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.exercise;
 
+import com.inclineyou.inclineyou_backend.core.exercise.dto.ExerciseMade;
 import com.inclineyou.inclineyou_backend.core.exercise.ExerciseJdbcRepository.After;
 import com.inclineyou.inclineyou_backend.core.exercise.ExerciseJdbcRepository.Filter;
 import com.inclineyou.inclineyou_backend.core.exercise.ExerciseJdbcRepository.Hit;
@@ -46,9 +47,6 @@ public class ExerciseService {
 
     private final ExerciseJdbcRepository repo;
 
-    /** What a create answers with: the exercise, and whether this call made it (201) or found it (200). */
-    public record Made(ExerciseItem exercise, boolean created) {}
-
     @Transactional(readOnly = true)
     public ExercisePage search(UUID trainerId, String q, String bodyPart, String equipment, String level,
                                Boolean custom, Integer limit, String cursor, boolean includeTotal) {
@@ -82,12 +80,12 @@ public class ExerciseService {
     }
 
     @Transactional
-    public Made create(UUID trainerId, ExerciseRequest body) {
+    public ExerciseMade create(UUID trainerId, ExerciseRequest body) {
         UUID id = body.id() == null ? UUID.randomUUID() : body.id();
         var existing = repo.ownership(trainerId, id);
         if (existing.isPresent()) {
             if (!existing.get()) throw ApiException.idConflict();
-            return new Made(get(trainerId, id), false);
+            return new ExerciseMade(get(trainerId, id), false);
         }
         requireFreeName(trainerId, body.name(), null);
         try {
@@ -96,7 +94,7 @@ public class ExerciseService {
             throw taken(e);
         }
         log.info("custom exercise created trainer={} exercise={}", trainerId, id);
-        return new Made(get(trainerId, id), true);
+        return new ExerciseMade(get(trainerId, id), true);
     }
 
     /** If-Match is honoured when sent (412), not required: a PATCH sends only what changed. */

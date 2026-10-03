@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.client;
 
+import com.inclineyou.inclineyou_backend.core.client.dto.NoteCreated;
 import com.inclineyou.inclineyou_backend.core.client.dto.CreateNoteRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.Note;
 import com.inclineyou.inclineyou_backend.core.client.dto.UpdateNoteRequest;
@@ -32,26 +33,24 @@ public class ClientNoteService {
     private final ClientNoteJdbcRepository repo;
     private final ClientFileService files;
 
-    public record Created(Note note, boolean created) {}
-
     public List<Note> list(UUID tid, UUID cid) {
         files.requireOwned(tid, cid);
         return repo.list(tid, cid);
     }
 
     @Transactional
-    public Created create(UUID tid, UUID cid, CreateNoteRequest req) {
+    public NoteCreated create(UUID tid, UUID cid, CreateNoteRequest req) {
         files.requireOwned(tid, cid);
         if (req.id() != null) {
             var mine = repo.isMine(req.id(), tid, cid);
             if (mine.isPresent()) {
                 if (!mine.get()) throw ApiException.idConflict();
-                return new Created(repo.one(req.id()), false);
+                return new NoteCreated(repo.one(req.id()), false);
             }
         }
         UUID id = req.id() == null ? UUID.randomUUID() : req.id();
         if (!repo.insert(id, tid, cid, req.body(), req.pinned())) throw ApiException.idConflict();
-        return new Created(repo.one(id), true);
+        return new NoteCreated(repo.one(id), true);
     }
 
     /** Send only what changed — {@code body}, {@code pinned}, or both. If-Match honoured when sent. */

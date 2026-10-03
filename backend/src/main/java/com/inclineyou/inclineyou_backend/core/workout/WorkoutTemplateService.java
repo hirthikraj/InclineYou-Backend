@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.workout;
 
+import com.inclineyou.inclineyou_backend.core.workout.dto.WorkoutTemplateMade;
 import com.inclineyou.inclineyou_backend.core.program.PlanRules;
 import com.inclineyou.inclineyou_backend.core.program.PlanRules.E;
 import com.inclineyou.inclineyou_backend.core.program.PlanTreeJdbcRepository;
@@ -45,9 +46,6 @@ public class WorkoutTemplateService {
     private final ProgramJdbcRepository programs;
     private final PlanTreeJdbcRepository trees;
 
-    /** What a create answers with: the workout, and whether this call made it (201) or found it (200). */
-    public record Made(WorkoutTemplateItem workout, boolean created) {}
-
     @Transactional(readOnly = true)
     public List<WorkoutTemplateItem> list(UUID trainerId) {
         List<Row> rows = repo.shelf(trainerId);
@@ -62,14 +60,14 @@ public class WorkoutTemplateService {
     }
 
     @Transactional
-    public Made create(UUID trainerId, WorkoutTemplateRequest body) {
+    public WorkoutTemplateMade create(UUID trainerId, WorkoutTemplateRequest body) {
         UUID id = body.id() == null ? UUID.randomUUID() : body.id();
         List<E> planned = PlanRules.exercises(body.exercises());
         Map<Integer, String> sections = sections(body, planned.size());
         var existing = repo.ownership(trainerId, id);
         if (existing.isPresent()) {
             if (!existing.get()) throw ApiException.idConflict();
-            return new Made(get(trainerId, id), false);
+            return new WorkoutTemplateMade(get(trainerId, id), false);
         }
         requireExercises(trainerId, planned);
         try {
@@ -79,7 +77,7 @@ public class WorkoutTemplateService {
             throw ApiException.idConflict();
         }
         log.info("workout template created trainer={} workout={} exercises={}", trainerId, id, planned.size());
-        return new Made(get(trainerId, id), true);
+        return new WorkoutTemplateMade(get(trainerId, id), true);
     }
 
     /** Conditional on the version the builder loaded: 428 without If-Match, 412 when stale. */

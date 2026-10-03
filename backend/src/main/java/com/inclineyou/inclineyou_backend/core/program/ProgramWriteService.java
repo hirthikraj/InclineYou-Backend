@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.program;
 
+import com.inclineyou.inclineyou_backend.core.program.dto.ProgramMade;
 import com.inclineyou.inclineyou_backend.core.client.ClientScheduleService;
 import com.inclineyou.inclineyou_backend.core.program.ProgramJdbcRepository.Locked;
 import com.inclineyou.inclineyou_backend.core.program.PlanRules.W;
@@ -44,12 +45,9 @@ public class ProgramWriteService {
     private final ClientScheduleService schedules;
     private final WorkspaceClock clock;
 
-    /** What a create answers with: the program, and whether this call made it (201) or found it (200). */
-    public record Made(ProgramItem program, boolean created) {}
-
     /** {@code POST /v1/programs} — a template from scratch, or a copy of any program when the body has {@code copyFrom}. */
     @Transactional
-    public Made create(UUID trainerId, ProgramRequest body) {
+    public ProgramMade create(UUID trainerId, ProgramRequest body) {
         try {
             return body.copyFrom() != null ? copy(trainerId, body) : scratch(trainerId, body);
         } catch (DuplicateKeyException e) {
@@ -57,22 +55,22 @@ public class ProgramWriteService {
         }
     }
 
-    private Made scratch(UUID trainerId, ProgramRequest body) {
+    private ProgramMade scratch(UUID trainerId, ProgramRequest body) {
         UUID id = body.id() == null ? UUID.randomUUID() : body.id();
         requireName(body);
         int weeks = body.weeks() == null ? 1 : body.weeks();
         int days = body.days() == null ? 1 : body.days();
         List<W> planned = PlanRules.tree(body.workouts(), weeks, days);
-        Made replay = replay(trainerId, id);
+        ProgramMade replay = replay(trainerId, id);
         if (replay != null) return replay;
         requireExercises(trainerId, planned);
         repo.insertTemplate(id, trainerId, body.name(), body.goal(), body.description(), weeks, days);
         trees.save(id, trainerId, planned);
         log.info("program created trainer={} program={} workouts={}", trainerId, id, planned.size());
-        return new Made(read.get(trainerId, id), true);
+        return new ProgramMade(read.get(trainerId, id), true);
     }
 
-    private Made copy(UUID trainerId, ProgramRequest body) {
+    private ProgramMade copy(UUID trainerId, ProgramRequest body) {
         if (body.workouts() != null || body.weeks() != null || body.days() != null || body.goal() != null
                 || body.description() != null) {
             throw ApiException.validation("copyFrom: send it with an id and a name only, not with program content");
@@ -80,7 +78,7 @@ public class ProgramWriteService {
         UUID src = body.copyFrom();
         UUID id = body.id() == null ? UUID.randomUUID() : body.id();
         var source = repo.copySource(trainerId, src).orElseThrow(() -> ApiException.notFound("That program is not yours."));
-        Made replay = replay(trainerId, id);
+        ProgramMade replay = replay(trainerId, id);
         if (replay != null) return replay;
         String name = body.name() != null && !body.name().isBlank() ? body.name()
                 : (source.name().length() > 143 ? source.name().substring(0, 143) : source.name()) + " (copy)";
@@ -90,15 +88,15 @@ public class ProgramWriteService {
         trees.copy(src, id, trainerId);
         if ("inclineyou".equals(source.origin())) repo.countUse(src);
         log.info("program copied trainer={} from={} to={}", trainerId, src, id);
-        return new Made(read.get(trainerId, id), true);
+        return new ProgramMade(read.get(trainerId, id), true);
     }
 
     /** A retried create: what the first try made. Somebody else's id is a conflict, not a read. */
-    private Made replay(UUID trainerId, UUID id) {
+    private ProgramMade replay(UUID trainerId, UUID id) {
         var mine = repo.templateOwnership(trainerId, id);
         if (mine.isEmpty()) return null;
         if (!mine.get()) throw ApiException.idConflict();
-        return new Made(read.get(trainerId, id), false);
+        return new ProgramMade(read.get(trainerId, id), false);
     }
 
     /** {@code PUT /v1/programs/{id}} — the whole tree, conditional on the version the builder loaded. */

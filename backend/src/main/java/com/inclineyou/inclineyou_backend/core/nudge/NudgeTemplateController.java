@@ -1,5 +1,9 @@
 package com.inclineyou.inclineyou_backend.core.nudge;
 
+import com.inclineyou.inclineyou_backend.core.nudge.dto.SaveTemplateRequest;
+
+import com.inclineyou.inclineyou_backend.core.nudge.dto.TemplateResponse;
+
 import com.inclineyou.inclineyou_backend.shared.wire.Items;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -29,7 +33,7 @@ public class NudgeTemplateController {
      * have not. The web holds no copy of any of it. Cacheable: {@code ETag} / {@code If-None-Match}.
      */
     @GetMapping
-    public ResponseEntity<Items<NudgeTemplateService.TemplateResponse>> list(
+    public ResponseEntity<Items<TemplateResponse>> list(
             @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
         var rows = service.list(trainerId());
         String etag = "\"" + NudgeTemplateService.listVersion(rows) + "\"";
@@ -41,16 +45,16 @@ public class NudgeTemplateController {
 
     /** Save the trainer's own wording for one template. {@code If-Match} required; {@code *} creates the first. */
     @PutMapping("/{name}")
-    public NudgeTemplateService.TemplateResponse save(
+    public TemplateResponse save(
             @PathVariable String name,
             @RequestHeader(value = "If-Match", required = false) String ifMatch,
-            @RequestBody NudgeTemplateService.SaveTemplateRequest req) {
+            @RequestBody SaveTemplateRequest req) {
         return service.save(trainerId(), name, req.body(), ifMatch);
     }
 
     /** Back to the built-in wording; answers the default so the screen can paint it without a second request. */
     @DeleteMapping("/{name}")
-    public NudgeTemplateService.TemplateResponse reset(@PathVariable String name) {
+    public TemplateResponse reset(@PathVariable String name) {
         return service.reset(trainerId(), name);
     }
 

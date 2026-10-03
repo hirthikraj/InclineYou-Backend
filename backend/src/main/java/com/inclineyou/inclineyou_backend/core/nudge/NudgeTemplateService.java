@@ -1,5 +1,8 @@
 package com.inclineyou.inclineyou_backend.core.nudge;
 
+import com.inclineyou.inclineyou_backend.core.nudge.dto.SaveTemplateRequest;
+import com.inclineyou.inclineyou_backend.core.nudge.dto.VariableResponse;
+import com.inclineyou.inclineyou_backend.core.nudge.dto.TemplateResponse;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import com.inclineyou.inclineyou_backend.shared.wire.IfMatch;
 import lombok.RequiredArgsConstructor;
@@ -48,25 +51,6 @@ public class NudgeTemplateService {
             "re_engagement", "session_reminder", "session_summary", "well_done", "check_in");
 
     private static final Pattern TOKEN = Pattern.compile("\\{[^{}\\s]*}");
-
-    /**
-     * @param isDefault false once the trainer has saved their own — the editor draws Reset only then.
-     * @param version   the override's version, null while built-in.
-     */
-    public record TemplateResponse(
-            String name,
-            String label,
-            String purpose,
-            String body,
-            boolean isDefault,
-            List<VariableResponse> variables,
-            String version
-    ) {}
-
-    /** {@code label} is the contract's word; {@code meaning} is what 1.0 called it and stays for old callers. */
-    public record VariableResponse(String token, String label, String meaning) {}
-
-    public record SaveTemplateRequest(String body) {}
 
     /* ── read ─────────────────────────────────────────────────────────────── */
 
