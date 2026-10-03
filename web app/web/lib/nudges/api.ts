@@ -25,8 +25,8 @@ import { TEMPLATE_ORDER } from './types';
  * the trainer messaged yesterday, which is the difference between a list they
  * clear and a list they stop reading.
  *
- * `listClientNudges` is the client file's, one client, a year. `listTemplates`
- * is the settings screen's and is read on no other screen — a button does not
+ * The client file reads one client's year itself (`clientNudges` in `lib/clients/client-api.ts`).
+ * `listTemplates` is the settings screen's and is read on no other screen — a button does not
  * need the template to send it, because the server renders it.
  */
 
@@ -187,26 +187,6 @@ interface RecentNudgeWire {
   template: string;
   reason: string;
   sentAt: number;
-}
-
-/**
- * One client's follow-up history, newest first. A year, because the client file
- * is where a trainer goes to ask "when did I last chase this" and the answer is
- * often months old.
- *
- * Same non-throwing contract as above and for the same reason: the file's six
- * tabs must render without it.
- */
-export async function listClientNudges(clientId: string, days = 365): Promise<NudgeLogEntry[]> {
-  try {
-    return (
-      (await request<NudgeLogEntry[]>(
-        `/v1/clients/${encodeURIComponent(clientId)}/nudges?days=${days}`,
-      )) ?? []
-    );
-  } catch {
-    return [];
-  }
 }
 
 /* ───────────────────────────────────────────────────────────── the send ──── */
