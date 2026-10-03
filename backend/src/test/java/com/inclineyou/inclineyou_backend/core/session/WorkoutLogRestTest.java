@@ -6,7 +6,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.AuthorityUtils;
@@ -25,29 +24,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * The three workout-log routes the online half could not do without.
- *
- * <p>All three were gaps the web app had already written a workaround for, and
- * each workaround was wrong in a way a test can state:
- *
- * <ul>
- *   <li><b>Closing a log.</b> {@code PUT /v1/workouts/{id}} wrote {@code notes}
- *       and nothing else, so nothing on the wire could stamp {@code ended_at} and
- *       every log read as permanently open — a session logged on Tuesday still
- *       said <i>In session</i> on Sunday. The web closed logs by posting whole
- *       rows back through the sync envelope instead.</li>
- *   <li><b>Reading a client's sets.</b> One request per session meant ~150 for a
- *       year of training, so the web read a 40-session window and patched the
- *       hole with {@code /progress}, which is capped at 30 exercises and ignores
- *       reps-only work.</li>
- *   <li><b>Today's card list.</b> {@code workout_exercise} had no route, so the
- *       grid was reconstructed from the plan plus whatever had a set logged
- *       against it — which cannot represent an added exercise nobody has typed
- *       into yet, and turns a swap into a skip.</li>
- * </ul>
- *
- * <p>Security filters are out of this chain, per {@code PhoneAvailabilityTest}:
- * the controller reads the trainer off the {@code SecurityContextHolder}.
+ * The READ side of the old {@code /v1/workouts} log API — exerciseCount on the list and the
+ * single read, and a client's whole set history. The writes (create, update, sets, exercises)
+ * were removed on 3 Oct 2026 with the move to the session as the log; their tests went with
+ * them, and {@link OldWorkoutWritesGoneTest} pins that they stay gone. These reads still use the
+ * pre-v1 {@code workout_session} table, which is why this class fails on a v1 database until the
+ * Progress pass moves them.
  */
 @SpringBootTest
 @Transactional
@@ -115,99 +97,12 @@ class WorkoutLogRestTest {
                 .andExpect(jsonPath("$.exerciseCount").value(2));
     }
 
-    @Test
-    @DisplayName("a log created a moment ago holds nothing and says 0")
-    void freshLogIsZero() throws Exception {
-        mvc.perform(post("/v1/workouts")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"clientId\":\"" + client + "\",\"sessionDate\":\"2026-08-21\"}"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.exerciseCount").value(0));
-    }
 
     private void card(UUID workoutId, UUID exerciseId, boolean removed) {
         jdbc.update("""
                 INSERT INTO workout_exercise (workout_session_id, exercise_id, removed_at)
                 VALUES (:w::uuid, :e::uuid, CASE WHEN :removed THEN now() END)
                 """, Map.of("w", workoutId.toString(), "e", exerciseId.toString(), "removed", removed));
-    }
-
-    /* ────────────────────────────────────────── closing a log (gap 4) ── */
-
-    @Test
-    @DisplayName("a log can be closed, and comes back with the instant it closed at")
-    void endedAtIsWritable() throws Exception {
-        var log = workout(client, "2026-08-20", null);
-        long at = 1_756_000_000_000L;
-
-        mvc.perform(put("/v1/workouts/" + log)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"endedAt\":" + at + "}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.endedAt").value(at));
-    }
-
-    @Test
-    @DisplayName("an open log reads as null, never 0 — 0 is a log closed at the epoch")
-    void openLogIsNull() throws Exception {
-        var log = workout(client, "2026-08-20", null);
-
-        mvc.perform(get("/v1/workouts/" + log))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.endedAt").doesNotExist());
-    }
-
-    /**
-     * The regression that had to be prevented in the same commit that added the
-     * field: every caller written before it sends `{notes}` alone, and if an
-     * absent `endedAt` meant "clear" each of them would silently reopen a closed
-     * log — putting the trainer back *In session* on a Tuesday session.
-     */
-    @Test
-    @DisplayName("editing the notes of a closed log does not reopen it")
-    void notesEditDoesNotReopen() throws Exception {
-        var log = workout(client, "2026-08-20", null);
-        long at = 1_756_000_000_000L;
-
-        mvc.perform(put("/v1/workouts/" + log)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"endedAt\":" + at + "}"));
-
-        mvc.perform(put("/v1/workouts/" + log)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"notes\":\"good session\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.notes").value("good session"))
-                .andExpect(jsonPath("$.endedAt").value(at));
-    }
-
-    /** The mirror image: closing a log must not erase what was written in it. */
-    @Test
-    @DisplayName("closing a log does not erase its notes")
-    void closingDoesNotEraseNotes() throws Exception {
-        var log = workout(client, "2026-08-20", "shoulder felt fine today");
-
-        mvc.perform(put("/v1/workouts/" + log)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"endedAt\":1756000000000}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.notes").value("shoulder felt fine today"));
-    }
-
-    @Test
-    @DisplayName("endedAt 0 reopens a log — mis-tapping Finish is not permanent")
-    void zeroReopens() throws Exception {
-        var log = workout(client, "2026-08-20", null);
-
-        mvc.perform(put("/v1/workouts/" + log)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"endedAt\":1756000000000}"));
-
-        mvc.perform(put("/v1/workouts/" + log)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"endedAt\":0}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.endedAt").doesNotExist());
     }
 
     /* ──────────────────────────────── a client's whole history (gap 3) ── */
@@ -289,155 +184,6 @@ class WorkoutLogRestTest {
                 .andExpect(status().isOk());
     }
 
-    /* ─────────────────────────────────── today's card list (gap 7) ── */
-
-    @Test
-    @DisplayName("an exercise can be added to today before any set exists")
-    void addExerciseToTheGrid() throws Exception {
-        var log = workout(client, "2026-08-20", null);
-
-        mvc.perform(post("/v1/workouts/" + log + "/exercises")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"exerciseId\":\"" + chinUp + "\",\"source\":\"unplanned\","
-                                + "\"orderIndex\":3,\"restSeconds\":90}"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.exerciseId").value(chinUp.toString()))
-                .andExpect(jsonPath("$.source").value("unplanned"))
-                .andExpect(jsonPath("$.restSeconds").value(90))
-                .andExpect(jsonPath("$.removedAt").doesNotExist());
-
-        mvc.perform(get("/v1/workouts/" + log + "/exercises"))
-                .andExpect(jsonPath("$.length()").value(1));
-    }
-
-    /**
-     * A swap is the thing reconstruction could not represent. The rack was busy,
-     * so the bench press was not skipped — it was replaced, and adherence reads
-     * `swapped_from_exercise_id` rather than the absence of the original.
-     */
-    @Test
-    @DisplayName("a swap records what it replaced")
-    void swapRecordsTheOriginal() throws Exception {
-        var log = workout(client, "2026-08-20", null);
-
-        mvc.perform(post("/v1/workouts/" + log + "/exercises")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"exerciseId\":\"" + chinUp + "\",\"swappedFromExerciseId\":\""
-                                + bench + "\"}"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.swappedFromExerciseId").value(bench.toString()));
-    }
-
-    /**
-     * The table's unique index is partial — `(workout_session_id, exercise_id)
-     * WHERE deleted_at IS NULL` — so a second POST of the same pair would be a
-     * 500 without the upsert. Adding one that is already there is what "add it
-     * back" means to a trainer, so it clears `removed_at` too.
-     */
-    @Test
-    @DisplayName("adding the same exercise twice updates the row and un-removes it")
-    void addIsIdempotentOnThePair() throws Exception {
-        var log = workout(client, "2026-08-20", null);
-
-        var first = mvc.perform(post("/v1/workouts/" + log + "/exercises")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"exerciseId\":\"" + bench + "\",\"targetSets\":3}"))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getContentAsString();
-        String rowId = idOf(first);
-
-        mvc.perform(put("/v1/workouts/" + log + "/exercises/" + rowId)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"removedAt\":1756000000000}"))
-                .andExpect(jsonPath("$.removedAt").value(1756000000000L));
-
-        mvc.perform(post("/v1/workouts/" + log + "/exercises")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"exerciseId\":\"" + bench + "\",\"targetSets\":4}"))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.id").value(rowId))
-                .andExpect(jsonPath("$.targetSets").value(4))
-                .andExpect(jsonPath("$.removedAt").doesNotExist());
-
-        mvc.perform(get("/v1/workouts/" + log + "/exercises"))
-                .andExpect(jsonPath("$.length()").value(1));
-    }
-
-    /**
-     * Removed is not deleted. The row stays as the record that the trainer
-     * decided against it, and the toast's Undo needs something to put back.
-     */
-    @Test
-    @DisplayName("removedAt 0 puts a removed card back — that is Undo")
-    void removeAndRestore() throws Exception {
-        var log = workout(client, "2026-08-20", null);
-        String rowId = idOf(mvc.perform(post("/v1/workouts/" + log + "/exercises")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"exerciseId\":\"" + bench + "\"}"))
-                .andReturn().getResponse().getContentAsString());
-
-        mvc.perform(put("/v1/workouts/" + log + "/exercises/" + rowId)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"removedAt\":1756000000000}"))
-                .andExpect(jsonPath("$.removedAt").value(1756000000000L));
-
-        // Still in the list — the card is drawn struck through, not gone.
-        mvc.perform(get("/v1/workouts/" + log + "/exercises"))
-                .andExpect(jsonPath("$.length()").value(1));
-
-        mvc.perform(put("/v1/workouts/" + log + "/exercises/" + rowId)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"removedAt\":0}"))
-                .andExpect(jsonPath("$.removedAt").doesNotExist());
-    }
-
-    @Test
-    @DisplayName("a deleted card is tombstoned and leaves the list")
-    void deleteTombstones() throws Exception {
-        var log = workout(client, "2026-08-20", null);
-        String rowId = idOf(mvc.perform(post("/v1/workouts/" + log + "/exercises")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"exerciseId\":\"" + bench + "\"}"))
-                .andReturn().getResponse().getContentAsString());
-
-        mvc.perform(delete("/v1/workouts/" + log + "/exercises/" + rowId))
-                .andExpect(status().isNoContent());
-
-        mvc.perform(get("/v1/workouts/" + log + "/exercises"))
-                .andExpect(jsonPath("$.length()").value(0));
-    }
-
-    /**
-     * Left to the foreign key this would be a 500, and it would not notice
-     * another trainer's private exercise at all.
-     */
-    @Test
-    @DisplayName("an exercise this trainer cannot see is a 404, not a 500")
-    void invisibleExerciseIs404() throws Exception {
-        var log = workout(client, "2026-08-20", null);
-        var theirs = exercise(other, "Their private lift");
-
-        mvc.perform(post("/v1/workouts/" + log + "/exercises")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"exerciseId\":\"" + theirs + "\"}"))
-                .andExpect(status().isNotFound());
-    }
-
-    @Test
-    @DisplayName("another trainer's log is a 404 at the session, before the card")
-    void somebodyElsesLogIs404() throws Exception {
-        var theirLog = workout(other, client(other, "Rajesh"), "2026-08-20", null);
-
-        mvc.perform(get("/v1/workouts/" + theirLog + "/exercises"))
-                .andExpect(status().isNotFound());
-    }
-
-    /* ------------------------------------------------------------- fixtures */
-
-    private static String idOf(String json) {
-        int at = json.indexOf("\"id\":\"") + 6;
-        return json.substring(at, json.indexOf('"', at));
-    }
 
     private UUID workout(UUID clientId, String date, String notes) {
         return workout(owner, clientId, date, notes);

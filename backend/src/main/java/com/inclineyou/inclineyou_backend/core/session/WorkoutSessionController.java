@@ -1,14 +1,17 @@
 package com.inclineyou.inclineyou_backend.core.session;
 
-import jakarta.validation.Valid;
-import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import lombok.RequiredArgsConstructor;
 
 import java.util.List;
 import java.util.UUID;
 
+/**
+ * The OLD workout-as-log READS. The writes (create, update, sets, exercises) were removed on
+ * 3 Oct 2026: the log is the session now — see core/sessionlog and "Log session v1.1" in API.md.
+ * These five reads stay only until the Progress / exercise-history pass moves off them.
+ */
 @RestController
 @RequestMapping("/v1/workouts")
 @RequiredArgsConstructor
@@ -26,15 +29,6 @@ public class WorkoutSessionController {
             @RequestParam(required = false) String clientId
     ) {
         return service.list(trainerId(auth), clientId);
-    }
-
-    @PostMapping
-    @ResponseStatus(HttpStatus.CREATED)
-    public WorkoutSessionService.WorkoutSessionResponse create(
-            Authentication auth,
-            @RequestBody WorkoutSessionService.CreateSessionRequest req
-    ) {
-        return service.create(trainerId(auth), req);
     }
 
     /**
@@ -62,15 +56,6 @@ public class WorkoutSessionController {
         return service.get(id, trainerId(auth));
     }
 
-    @PutMapping("/{id}")
-    public WorkoutSessionService.WorkoutSessionResponse update(
-            Authentication auth,
-            @PathVariable UUID id,
-            @RequestBody WorkoutSessionService.UpdateSessionRequest req
-    ) {
-        return service.update(id, trainerId(auth), req);
-    }
-
     @GetMapping("/{id}/sets")
     public List<WorkoutSessionService.SetLogResponse> listSets(
             Authentication auth,
@@ -79,73 +64,11 @@ public class WorkoutSessionController {
         return service.listSets(id, trainerId(auth));
     }
 
-    @PostMapping("/{id}/sets")
-    @ResponseStatus(HttpStatus.CREATED)
-    public WorkoutSessionService.SetLogResponse addSet(
-            Authentication auth,
-            @PathVariable UUID id,
-            @RequestBody WorkoutSessionService.CreateSetRequest req
-    ) {
-        return service.addSet(id, trainerId(auth), req);
-    }
-
-    @PutMapping("/{id}/sets/{setId}")
-    public WorkoutSessionService.SetLogResponse updateSet(
-            Authentication auth,
-            @PathVariable UUID id,
-            @PathVariable UUID setId,
-            @RequestBody WorkoutSessionService.UpdateSetRequest req
-    ) {
-        return service.updateSet(id, setId, trainerId(auth), req);
-    }
-
-    @DeleteMapping("/{id}/sets/{setId}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteSet(
-            Authentication auth,
-            @PathVariable UUID id,
-            @PathVariable UUID setId
-    ) {
-        service.deleteSet(id, setId, trainerId(auth));
-    }
-
-    // ── Today's card list — V13's workout_exercise ────────────────────────────
-
     @GetMapping("/{id}/exercises")
     public List<WorkoutSessionService.WorkoutExerciseResponse> listExercises(
             Authentication auth,
             @PathVariable UUID id
     ) {
         return service.listExercises(id, trainerId(auth));
-    }
-
-    @PostMapping("/{id}/exercises")
-    @ResponseStatus(HttpStatus.CREATED)
-    public WorkoutSessionService.WorkoutExerciseResponse addExercise(
-            Authentication auth,
-            @PathVariable UUID id,
-            @Valid @RequestBody WorkoutSessionService.CreateWorkoutExerciseRequest req
-    ) {
-        return service.addExercise(id, trainerId(auth), req);
-    }
-
-    @PutMapping("/{id}/exercises/{rowId}")
-    public WorkoutSessionService.WorkoutExerciseResponse updateExercise(
-            Authentication auth,
-            @PathVariable UUID id,
-            @PathVariable UUID rowId,
-            @RequestBody WorkoutSessionService.UpdateWorkoutExerciseRequest req
-    ) {
-        return service.updateExercise(id, rowId, trainerId(auth), req);
-    }
-
-    @DeleteMapping("/{id}/exercises/{rowId}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void deleteExercise(
-            Authentication auth,
-            @PathVariable UUID id,
-            @PathVariable UUID rowId
-    ) {
-        service.deleteExercise(id, rowId, trainerId(auth));
     }
 }

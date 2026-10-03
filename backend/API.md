@@ -38,7 +38,7 @@ and indexes — see [`SCHEMA.md`](SCHEMA.md).
 | [Programs](#programs) | `/v1/programs` | 11 |
 | [Workout templates](#workout-templates) | `/v1/workout-templates` | 5 | V13
 | [Scheduled sessions (diary)](#scheduled-sessions-diary) | `/v1/sessions` | 6 |
-| [Workout sessions & set logs](#workout-sessions--set-logs) | `/v1/workouts` | 13 |
+| [Workout sessions & set logs](#workout-sessions--set-logs) | `/v1/workouts` (reads only) | 5 |
 | [Packs (the price list)](#packs-the-price-list) | `/v1/packs` | 3 |
 | [Packages & payments (money book)](#packages--payments-money-book) | `/v1/clients/{id}/packages`, `/v1/packages`, `/v1/payments` | 14 |
 | [Nudges](#nudges) | `/v1/clients/{clientId}/nudge`, `/v1/nudges`, `/v1/nudge-templates` | 6 |
@@ -2114,8 +2114,9 @@ today).
 
 ## Workout sessions & set logs
 
-`session/WorkoutSessionController.java` — what *actually happened*. Kept separate
-from scheduled sessions because a plan and a log are different records.
+`session/WorkoutSessionController.java` — what *actually happened*, the **old workout-as-log reads**.
+
+**POST / PUT / DELETE under `/v1/workouts` were removed on 3 Oct 2026; the log is the session — see [Log session v1.1](#log-session-v11-3-oct-2026).** Eight routes went: `POST /v1/workouts`, `PUT /v1/workouts/{id}`, `POST /v1/workouts/{id}/sets`, `PUT` and `DELETE /v1/workouts/{id}/sets/{setId}`, and `POST`, `PUT` and `DELETE` on `/v1/workouts/{id}/exercises`. They answer `404`/`405` now. The five reads below stay until the Progress and exercise-history pages move off them (they still read the pre-v1 `workout_session` table).
 
 ### `GET /v1/workouts?clientId=…`
 **Purpose:** the workout history, optionally per client.
@@ -2130,151 +2131,35 @@ and no cards; counting only cards would print *0 exercises* against it. A log
 whose cards were all removed genuinely holds nothing and answers `0`. No
 migration.
 
-### `POST /v1/workouts` → `201`
-**Purpose:** log a session that happened.
-
-Body: `clientId` (required), `sessionDate` (required, ISO `yyyy-MM-dd`),
-`programId`, `scheduledSessionId`, `notes`.
-
-### `GET /v1/workouts/{id}` · `PUT /v1/workouts/{id}`
-**Purpose:** read one logged session; `PUT` edits its `notes` and **closes or
-reopens the log**.
-
-Body: `notes`, `endedAt` (epoch ms). Both are optional and **both are
-conditional** — an absent field is left as it is.
+### `GET /v1/workouts/{id}`
+**Purpose:** read one logged session.
 
 Every workout response carries **`endedAt`** — V13's column, stamped when the
 trainer *closed* the log. **Null means the log is still open**, which is the only
-thing that makes a scheduled session *in session*.
-
-The column and the sync envelope have carried it since V13; this DTO did not, and
-the omission was load-bearing rather than cosmetic. `buildRunning` — on both
-halves — looks for a session whose log has not ended, so with the field absent
-every log read as permanently open: a session logged on Tuesday still said *In
-session* on Sunday, and the *started, nothing logged* state could never fire at
-all. Those are the two states a trainer's home screen is most often in.
-
-It is also what makes *Later* honest: finishing the log and closing the money are
-different facts, and a trainer who did the first and left the second should not
-still be told they are mid-session.
-
-Appended last, like every other additive field.
-
-**`endedAt` on the request has three states**, and the third is why it is a
-number rather than a boolean:
-
-| sent | meaning |
-| --- | --- |
-| absent / null | leave `ended_at` exactly as it is — **the default** |
-| `> 0` | close the log at that instant |
-| `0` | reopen it |
-
-Absent has to mean *leave it*: every caller written before this field sends
-`{notes}` alone, and if absent meant "clear", each of them would silently reopen
-a closed log and put the trainer back *In session*. And `0` has to mean
-something, because with null already taken, an additive-only API that never adds
-a way back has made mis-tapping *Finish the log* permanent. It is the same
-"empty clears" rule `deliveryMode` uses on the scheduled-session update, spelled
-for a number.
-
-**`notes` became conditional in the same change**, which is a behaviour change
-worth stating: it used to be written unconditionally, so a request carrying only
-`endedAt` would have set it to `NULL` — closing a log would have *erased the
-session's notes*. Nothing clears notes by sending null; a cleared note is an
-empty string, which is non-null and still clears.
-
-Before this, `SyncService.pushWorkoutSessions` was the only writer of the column
-anywhere, so the online half closed logs by posting whole rows back through the
-sync envelope to change one field.
+thing that makes a scheduled session *in session*. (It is written through
+`POST /v1/sessions/{id}/end` now.)
 
 ### `GET /v1/workouts/sets?clientId=…&exerciseId=…` · **`STANDARD` tier**
 **Purpose:** **every set one client has ever logged**, in one request, optionally
 narrowed to one exercise. `clientId` is required; `exerciseId` is not.
 
-`STANDARD` rather than a tier of its own, and that is the point of it: this
-endpoint exists to turn ~150 requests into one, so the budget it spends is a
-hundred-and-fiftieth of what the shape it replaces spent.
-
-The workout console needs every set this client has done on the movements in
-today's grid — *Previous* is per set number against the last session, and the
-record test compares today's top set against the heaviest load in the whole
-history. Per-session reads make that ~150 requests for a client at three
-sessions a week for a year, against a 120/min tier, so the online half read a
-40-session **window** and patched the hole with the all-time maximum from
-`/progress` — which is `LIMIT 30` exercises and counts only sets that carry a
-load. A client with more than thirty movements, or a reps-only exercise logged
-more than forty times, could still have an old best outside both.
-
-Deliberately **unbounded**: a window is what produced the wrong answer. The
-phone answers the same question with a local `SELECT` over SQLite, and this is
-the online half's equivalent of that read.
-
-Rows come back **oldest first**, so a caller folding them into a running best or
-a per-set-number *previous* does it in one pass. Ownership is the join, not a
+Deliberately **unbounded**: a window is what produced the wrong answer. Rows come
+back **oldest first**, so a caller folding them into a running best or a
+per-set-number *previous* does it in one pass. Ownership is the join, not a
 second check — another trainer's client matches no session and so no set, and
 comes back empty.
 
 ### `GET /v1/workouts/{id}/sets`
 **Purpose:** every set logged in this session.
 
-Every set — on both routes — carries **`sessionDate`**, the owning log's date as
-ISO `yyyy-MM-dd`. A set's date is the *session's*, never its `created_at`: a
+Every set — on both set routes — carries **`sessionDate`**, the owning log's date
+as ISO `yyyy-MM-dd`. A set's date is the *session's*, never its `created_at`: a
 Tuesday session typed up on Thursday is a Tuesday session, and both *Previous*
-and the record test order by when the training happened. Redundant on the
-per-session read; on the bulk read it is the whole point, because a caller
-holding two thousand sets would otherwise need the workout list as well just to
-sort them. Appended last.
+and the record test order by when the training happened. Appended last.
 
-### `POST /v1/workouts/{id}/sets` → `201`
-**Purpose:** log one set — the highest-frequency write in the product.
-
-Body: `exerciseId` (required), `setNumber`, `loadKg`, `reps`, `rpe`, `notes`.
-These rows are what `/progress` computes PRs and volume from.
-
-### `PUT /v1/workouts/{id}/sets/{setId}`
-**Purpose:** correct a set — load, reps, RPE or notes.
-
-### `DELETE /v1/workouts/{id}/sets/{setId}` → `204`
-**Purpose:** delete a mis-entered set.
-
-### `GET /v1/workouts/{id}/exercises` · `POST` → `201` · `PUT .../{rowId}` · `DELETE .../{rowId}` → `204`
-**Purpose:** today's card list — V13's `workout_exercise`. What is in the grid,
+### `GET /v1/workouts/{id}/exercises`
+**Purpose:** today's card list — V13's `workout_exercise`: what is in the grid,
 in what order, what was asked for, and what was swapped or taken out.
-
-The table has been in the sync envelope since V13 and had no route, so the online
-half could only *reconstruct* the grid from the program's rows plus every
-exercise that happened to have a set logged against it. Three things that
-reconstruction cannot represent, all of them things a trainer did on purpose: an
-exercise **added** to today that nobody has typed a set into yet; a **swap**,
-where the rack was busy so the bench press was not skipped but replaced — and
-`swappedFromExerciseId` is what adherence reads, so reconstructed the original
-just vanishes and reads as a skip; and **rest** for an off-plan exercise, which
-had nowhere to persist.
-
-`POST` body: `exerciseId` (required), `orderIndex`, `source` (`planned` |
-`unplanned`; null means `planned`), `swappedFromExerciseId`, `targetSets`,
-`targetReps`, `restSeconds`.
-
-`POST` is **idempotent on the pair**. The table's unique index is partial —
-`(workout_session_id, exercise_id) WHERE deleted_at IS NULL` — so a second POST
-would otherwise be a `500`. Adding an exercise that is already there, including
-one just removed, updates the row and **clears `removedAt`**, which is what "add
-it back" means to the trainer who clicked it.
-
-`PUT` body: `orderIndex`, `targetSets`, `targetReps`, `restSeconds`, `removedAt`
-— the same three-state Long as `endedAt`: absent leaves it, `> 0` takes the card
-out of today, `0` puts it back, which is what the toast's Undo needs.
-
-**`removedAt` and `DELETE` are different verbs.** A removed row stays in the list
-and is drawn struck through — it is still the record that the trainer decided not
-to do this. `DELETE` tombstones with `deleted_at`, which is for a row that should
-never have existed, and is soft like every delete here so sync carries it.
-
-An exercise this trainer cannot see — a mistyped id, or another trainer's private
-custom — is a `404`, checked before the foreign key, which would answer with a
-`500` and would not notice the second case at all.
-
----
 
 ## Packs (the price list)
 
