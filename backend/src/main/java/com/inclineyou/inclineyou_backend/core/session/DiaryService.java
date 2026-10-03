@@ -63,8 +63,8 @@ public class DiaryService {
 
     /**
      * The trainer's day. Every other date-bounded read in this codebase pins
-     * {@code Asia/Kolkata} rather than the JVM's zone — {@code AuthService},
-     * {@code WeeklyReportWriter} and {@code ReportController} all do — and a
+     * {@code Asia/Kolkata} rather than the JVM's zone — {@code AuthService}
+     * and {@code ReportService} both do — and a
      * diary laid out in the server's zone would put a 6am session at 11:30pm the
      * night before for a container running UTC.
      */

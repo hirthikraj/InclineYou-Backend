@@ -1,6 +1,5 @@
 package com.inclineyou.inclineyou_backend.core.report;
 
-import com.inclineyou.inclineyou_backend.core.report.dto.ActiveClient;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -19,12 +18,10 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * What the report slice's repositories answer today, pinned so the layering refactor cannot move it.
- *
- * <p>Deliberately NOT here: the personal-records, next-session and weekly-report statements. They still
- * read pre-v1 tables and columns ({@code workout_session}, {@code scheduled_session.day_label},
- * {@code weekly_report}), so they fail on the v1 schema — a standing break the refactor preserved on
- * purpose, and one that should be fixed rather than pinned.
+ * What the report slice's repositories and service answer on the v1 schema: ownership, the adherence window,
+ * the personal records (done weight x reps sets only) and the next session. The weekly report — its job, its
+ * writer and the {@code weekly_report} table — went with this fix: v1 has no such table, and the client portal
+ * that read it is out of v1.
  */
 @SpringBootTest
 @Transactional
@@ -90,12 +87,78 @@ class ReportRefactorTest {
         assertEquals(0, none.scheduled(), "scoped by trainer_id");
     }
 
-    @Test @DisplayName("the week arithmetic and the job's log shape do not move")
-    void pureHelpers() {
-        // a Monday morning and a Sunday night both report on the week that just finished
-        assertEquals(LocalDate.of(2026, 9, 21), WeeklyReportWriter.lastWeekStart(LocalDate.of(2026, 9, 28)));
-        assertEquals(LocalDate.of(2026, 9, 21), WeeklyReportWriter.lastWeekStart(LocalDate.of(2026, 10, 4)));
-        var a = new ActiveClient(UUID.fromString("00000000-0000-4000-8000-000000000001"), UUID.fromString("00000000-0000-4000-8000-000000000002"));
-        assertEquals("{trainer_id=00000000-0000-4000-8000-000000000001, client_id=00000000-0000-4000-8000-000000000002}", a.toString());
+    private UUID exercise(String name) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO exercise (id, name, origin, log_type, source_id) VALUES (:id::uuid, :n, 'inclineyou', 'weight_reps', :src)",
+                Map.of("id", id.toString(), "n", name, "src", "test-" + id));
+        return id;
+    }
+
+    /** One logged exercise on a fresh done session: a set per (kind, load, effort) triple, all done. */
+    private int loggedDays = 10;
+
+    private void logged(UUID exercise, String loadKind, String effortKind, double[]... loadEffort) {
+        UUID s = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO scheduled_session (id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at, status, started_at)
+                VALUES (:id::uuid, :t::uuid, :c::uuid, now() - make_interval(days => :d), 60, now() - make_interval(days => :d), 'done', now() - make_interval(days => :d))
+                """, Map.of("id", s.toString(), "t", trainer.toString(), "c", client.toString(), "d", loggedDays++));
+        UUID sx = UUID.randomUUID();
+        jdbc.update("INSERT INTO session_exercise (id, session_id, client_id, exercise_id, position) VALUES (:id::uuid, :s::uuid, :c::uuid, :e::uuid, 0)",
+                Map.of("id", sx.toString(), "s", s.toString(), "c", client.toString(), "e", exercise.toString()));
+        int pos = 1;
+        for (double[] le : loadEffort) {
+            jdbc.update("""
+                    INSERT INTO set_log (session_exercise_id, position, planned, load_kind, effort_kind, load_value, effort_value, done_at)
+                    VALUES (:sx::uuid, :p, false, :lk, :ek, :l, :e, now())
+                    """, Map.of("sx", sx.toString(), "p", pos++, "lk", loadKind, "ek", effortKind, "l", le[0], "e", le[1]));
+        }
+    }
+
+    @Test @DisplayName("personalRecords: the heaviest weight x reps set per exercise, heaviest first, this trainer's client only")
+    void personalRecords() {
+        UUID bench = exercise("Bench press"), squat = exercise("Back squat"), plank = exercise("Plank");
+        logged(bench, "weight", "reps", new double[]{60, 8}, new double[]{70, 5}, new double[]{70, 6});   // best: 70 x 6
+        logged(squat, "weight", "reps", new double[]{100, 5});
+        logged(plank, "bodyweight", "time", new double[]{0, 60});                                      // no kilogram figure: no record
+        var prs = reports.personalRecords(trainer, client);
+        assertEquals(2, prs.size());
+        assertEquals("Back squat", prs.get(0).exercise());
+        assertEquals(0, new java.math.BigDecimal("100").compareTo((java.math.BigDecimal) prs.get(0).maxLoadKg()));
+        assertEquals("Bench press", prs.get(1).exercise());
+        assertEquals(0, new java.math.BigDecimal("6").compareTo((java.math.BigDecimal) prs.get(1).maxReps()), "ties on load break on reps");
+        assertTrue(reports.personalRecords(other, client).isEmpty(), "another trainer must not read this client's sets");
+    }
+
+    @Test @DisplayName("personalRecords: a set on a removed exercise card is not a record")
+    void removedCardIsNotARecord() {
+        UUID bench = exercise("Bench press");
+        logged(bench, "weight", "reps", new double[]{50, 10});
+        jdbc.update("UPDATE session_exercise SET removed_at = now() WHERE client_id = :c::uuid", Map.of("c", client.toString()));
+        assertTrue(reports.personalRecords(trainer, client).isEmpty());
+    }
+
+    @Test @DisplayName("nextSession: the soonest scheduled one ahead, with its workout's name when it runs one")
+    void nextSession() {
+        assertTrue(reports.nextSession(trainer, client).isEmpty());
+        jdbc.update("""
+                INSERT INTO scheduled_session (id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at, status)
+                VALUES (gen_random_uuid(), :t::uuid, :c::uuid, now() + interval '3 days', 60, now() + interval '3 days', 'scheduled')
+                """, Map.of("t", trainer.toString(), "c", client.toString()));
+        var next = reports.nextSession(trainer, client).orElseThrow();
+        assertNull(next.workoutName(), "a walk-in slot carries no workout name");
+        assertTrue(next.scheduledAt().isAfter(Instant.now()));
+        assertTrue(reports.nextSession(other, client).isEmpty());
+    }
+
+    @Test @DisplayName("generateReport: the text names the client, counts the four weeks and lists the records")
+    void report() {
+        session("done", 3);
+        session("scheduled", 1);
+        logged(exercise("Bench press"), "weight", "reps", new double[]{70, 6});
+        String text = service.generateReport(trainer, client);
+        assertTrue(text.contains("Client: Asha"), text);
+        assertTrue(text.contains("Sessions (last 4 weeks): 2 done"), text);   // the logged() session is done too
+        assertTrue(text.contains("Bench press: 70"), text);
     }
 }

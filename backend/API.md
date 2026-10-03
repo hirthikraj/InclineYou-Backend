@@ -45,7 +45,7 @@ and indexes — see [`SCHEMA.md`](SCHEMA.md).
 | [Packages & payments (money book)](#packages--payments-money-book) | `/v1/clients/{id}/packages`, `/v1/packages`, `/v1/payments` | 14 |
 | [Nudges](#nudges) | `/v1/clients/{clientId}/nudge`, `/v1/nudges`, `/v1/nudge-templates` | 6 |
 | [Attention dismissals](#attention-dismissals) | `/v1/attention/dismissals` | 3 |
-| [Reports](#reports) | `/v1/clients/{clientId}/report` | 2 |
+| [Reports](#reports) | `/v1/clients/{clientId}/report` | 1 |
 | [Push devices](#push-devices) | `/v1/devices` | 2 |
 | [Trainer sync](#trainer-sync) | `/v1/sync` | 2 |
 | [Client sync](#client-sync) | `/v1/client/sync` | 2 |
@@ -2904,23 +2904,26 @@ Additive: a `400 VALIDATION` body gains `"errors": [{ "field", "code", "message"
 
 ## Reports
 
-`report/ReportController.java` — both **`MESSAGING` tier** where noted.
+`report/ReportController.java` — one read, `STANDARD` tier.
 
 ### `GET /v1/clients/{clientId}/report`
 **Purpose:** an on-demand text report for one client, generated live from their
-sessions, sets and metrics. Returns `{ "report": "…" }` — plain text, ready to
-paste into WhatsApp.
+sessions, sets and assessments. Returns `{ "report": "…" }` — plain text, ready to
+paste into WhatsApp. Nothing is stored and nothing is sent.
 
-### `POST /v1/clients/{clientId}/report/weekly` · **`MESSAGING` tier — 10/min**
-**Purpose:** share on demand — write the *stored* weekly report for one week now,
-rather than waiting for Monday's scheduled job.
+What it says (all on the v1 schema, 3 Oct 2026): the client and the date; **sessions in the last four weeks**
+— `done` against everything not cancelled, with the adherence percentage; the **latest body weight** from the
+last assessment that took one; up to **five personal records**, one per exercise, the heaviest done
+`weight × reps` set the client has logged (a bodyweight or timed set has no kilogram figure and so no record;
+the history is the client's, not whoever ran the session), printed as `57.5 kg × 7 reps`; and the **next
+session** with its workout's name. A client that is not this trainer's, or is deleted, reads as the sentence
+`Report unavailable — client not found.` with a `200`, not a 404 — the text is the whole contract.
 
-Query param `weekStart` (ISO date); defaults to last week's start in
-`Asia/Kolkata`. Returns `{ "weekStart", "stored" }`.
-
-Idempotent, deliberately: a week that already has a report keeps the one it has,
-and `stored: false` means it was already there. That is the answer to "can I
-re-send last week's" — yes, and it will be the same numbers.
+**Removed 3 Oct 2026: `POST /v1/clients/{clientId}/report/weekly` and the Monday 08:00 job.** They wrote and
+read `weekly_report`, a table the v1 schema does not have, and queued a server-side WhatsApp nudge, which the
+product's *nothing sends* rule rules out. The stored weekly report belonged to the client portal, which is out
+of v1; both come back, with a migration, when it ships. The `MESSAGING`-tier rule for `…/report/weekly` went
+with them.
 
 ---
 

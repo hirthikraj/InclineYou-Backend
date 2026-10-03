@@ -50,7 +50,7 @@ public class ReportService {
         var next = reports.nextSession(trainerId, clientId);
         if (next.isPresent()) {
             nextSession = next.get().scheduledAt().atZone(IST).format(SESS_FMT);
-            if (next.get().dayLabel() != null) nextSession += " · " + next.get().dayLabel();
+            if (next.get().workoutName() != null) nextSession += " · " + next.get().workoutName();
         }
 
         var sb = new StringBuilder();
@@ -70,8 +70,8 @@ public class ReportService {
             sb.append('\n').append("Personal Records:\n");
             for (var pr : prs) {
                 sb.append("  • ").append(pr.exercise());
-                if (pr.maxLoadKg() != null) sb.append(": ").append(pr.maxLoadKg()).append(" kg");
-                if (pr.maxReps() != null) sb.append(" × ").append(pr.maxReps()).append(" reps");
+                if (pr.maxLoadKg() != null) sb.append(": ").append(num(pr.maxLoadKg())).append(" kg");
+                if (pr.maxReps() != null) sb.append(" × ").append(num(pr.maxReps())).append(" reps");
                 sb.append('\n');
             }
         }
@@ -82,6 +82,11 @@ public class ReportService {
 
         sb.append('\n').append("Keep it up! — ").append(trainerName).append(" via InclineYou");
         return sb.toString();
+    }
+
+    /** numeric(7,2) comes back as 57.50 and 7.00; a person reads 57.5 and 7. */
+    private static String num(Object o) {
+        return o instanceof java.math.BigDecimal d ? d.stripTrailingZeros().toPlainString() : String.valueOf(o);
     }
 
     private String str(Object o) { return o != null ? o.toString() : "—"; }

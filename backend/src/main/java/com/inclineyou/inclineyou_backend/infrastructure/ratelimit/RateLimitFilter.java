@@ -47,7 +47,7 @@ import java.nio.charset.StandardCharsets;
  * ── The tiers ─────────────────────────────────────────────────────────────────
  *
  * Which endpoints cost money is a fact about the endpoints, so the mapping is
- * here rather than in YAML: a nudge and a weekly report each spend a WhatsApp
+ * here rather than in YAML: a nudge spends a WhatsApp
  * message, and everything else shares one ceiling.
  */
 @Component
@@ -147,8 +147,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 && (path.endsWith("/nudge")
                     // 1.1's route (POST /v1/clients/{id}/nudges). A GET of the
                     // same path is the history and stays STANDARD.
-                    || path.endsWith("/nudges")
-                    || path.endsWith("/report/weekly"))) {
+                    || path.endsWith("/nudges"))) {
             return Tier.MESSAGING;
         }
         return Tier.STANDARD;

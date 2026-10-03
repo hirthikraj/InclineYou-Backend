@@ -58,23 +58,32 @@ public class ReportJdbcRepository {
         return new SessionStats(toLong(sessionStats.get("done_count")), toLong(sessionStats.get("scheduled_count")));
     }
 
-    /** The five heaviest sets, one per exercise, heaviest first. */
+    /**
+     * The five heaviest sets, one per exercise, heaviest first: the top done weight × reps set the client has
+     * logged on each movement. The history is the CLIENT's (not who ran each session), and the client has to be
+     * this trainer's. Only {@code weight} × {@code reps} sets have a load and a rep count to print; a bodyweight or
+     * timed set has no kilogram figure and so no record here.
+     */
     public List<PersonalRecord> personalRecords(UUID trainerId, UUID clientId) {
         List<Map<String, Object>> prs = jdbc.queryForList("""
                 SELECT ex.name AS ex_name, sub.max_load_kg, sub.max_reps
                 FROM (
-                    SELECT DISTINCT ON (sl.exercise_id)
-                        sl.exercise_id,
-                        sl.load_kg AS max_load_kg,
-                        sl.reps    AS max_reps
+                    SELECT DISTINCT ON (se.exercise_id)
+                        se.exercise_id,
+                        sl.load_value   AS max_load_kg,
+                        sl.effort_value AS max_reps
                     FROM set_log sl
-                    JOIN workout_session ws ON ws.id = sl.workout_session_id
-                    WHERE ws.trainer_id = :tid::uuid AND ws.client_id = :cid::uuid
-                      AND sl.deleted_at IS NULL
-                    ORDER BY sl.exercise_id, sl.load_kg DESC NULLS LAST
+                    JOIN session_exercise se ON se.id = sl.session_exercise_id
+                    JOIN scheduled_session s ON s.id = se.session_id
+                    JOIN client c ON c.id = se.client_id
+                    WHERE c.id = :cid::uuid AND c.trainer_id = :tid::uuid AND c.deleted_at IS NULL
+                      AND se.removed_at IS NULL AND s.deleted_at IS NULL
+                      AND sl.done_at IS NOT NULL
+                      AND sl.load_kind = 'weight' AND sl.effort_kind = 'reps' AND sl.load_value > 0
+                    ORDER BY se.exercise_id, sl.load_value DESC, sl.effort_value DESC NULLS LAST
                 ) sub
                 JOIN exercise ex ON ex.id = sub.exercise_id
-                ORDER BY sub.max_load_kg DESC NULLS LAST
+                ORDER BY sub.max_load_kg DESC
                 LIMIT 5
                 """, Map.of("cid", clientId.toString(), "tid", trainerId.toString()));
         return prs.stream()
@@ -82,17 +91,18 @@ public class ReportJdbcRepository {
                 .toList();
     }
 
-    /** The next session still to come, if there is one. */
+    /** The next session still to come, if there is one, with the name of the workout it runs (null for a walk-in). */
     public Optional<NextSession> nextSession(UUID trainerId, UUID clientId) {
         try {
             var ns = jdbc.queryForMap("""
-                    SELECT scheduled_at, day_label FROM scheduled_session
-                    WHERE client_id = :cid::uuid AND trainer_id = :tid::uuid
-                      AND status = 'scheduled' AND deleted_at IS NULL AND scheduled_at > NOW()
-                    ORDER BY scheduled_at ASC LIMIT 1
+                    SELECT s.scheduled_at, w.name AS workout_name
+                    FROM scheduled_session s LEFT JOIN workout w ON w.id = s.workout_id
+                    WHERE s.client_id = :cid::uuid AND s.trainer_id = :tid::uuid
+                      AND s.status = 'scheduled' AND s.deleted_at IS NULL AND s.scheduled_at > NOW()
+                    ORDER BY s.scheduled_at ASC LIMIT 1
                     """, Map.of("cid", clientId.toString(), "tid", trainerId.toString()));
             var ts = (java.sql.Timestamp) ns.get("scheduled_at");
-            return Optional.of(new NextSession(ts.toInstant(), ns.get("day_label")));
+            return Optional.of(new NextSession(ts.toInstant(), ns.get("workout_name")));
         } catch (EmptyResultDataAccessException ignored) {
             return Optional.empty();
         }

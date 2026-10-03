@@ -124,14 +124,13 @@ for "owed today" rather than copying it; and money formatting and the workspace 
 PATCH routes keep a raw `Map` body on purpose — presence of a key is the contract (absent = leave,
 null = clear), which a record cannot say — and validate it into typed values at the service's entry.
 
-`report/` is on the same shape (3 Oct 2026): `ReportJdbcRepository` (the report's reads) and
-`WeeklyReportJdbcRepository` (the Monday job and the stored weekly report), records in `report/dto/`.
-**It is layered but not on the v1 schema.** Its SQL was moved verbatim, so it still reads pre-v1
-tables and columns — `workout_session`, `set_log.load_kg`/`reps`/`workout_session_id`,
-`scheduled_session.day_label`, `weekly_report`, `nudge_log.template_name`/`status` — and
-`GET /v1/clients/{id}/report` is a 500 for every real client, `POST …/report/weekly` a 500, and the
-Monday job skips every pair. Fixing that is a schema decision (is there a `weekly_report` table in v1
-at all?), not a refactor; `ReportRefactorTest` pins only what works today.
+`report/` is on the same shape and on the v1 schema (3 Oct 2026): `ReportJdbcRepository` (the four
+reads behind `GET /v1/clients/{id}/report`), `ReportService` (what the figures mean and the wording),
+records in `report/dto/`. The **weekly report went with the fix**: `weekly_report` is not in the approved v1
+schema, its reader (the client portal) is out of v1, and its Monday job queued a server-side WhatsApp, which
+*nothing sends* rules out — so `POST …/report/weekly`, `WeeklyReportJob`/`Writer` and their repository are
+deleted (git has them), to return with a migration when the portal does. `progress/` is on the shape too
+(`SetHistoryJdbcRepository`, `SetHistoryService`, records in `progress/dto/`).
 
 ### Persistence is deliberately split
 
