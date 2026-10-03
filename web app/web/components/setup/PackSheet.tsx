@@ -14,6 +14,8 @@ export interface PackFields {
   sessions: number | null;
   amount: number;
   validityDays: number | null;
+  /** A gym's package only: what the trainer gets, as a percentage of the price (v1 `pack_trainer_share`). */
+  trainerSharePercent?: number | null;
 }
 
 /**
@@ -62,11 +64,16 @@ export function PackSheet({
   const [amount, setAmount] = useState(seed?.amount ? String(seed.amount) : '');
   const [validity, setValidity] = useState(seed?.validityDays != null ? String(seed.validityDays) : '');
   const [name, setName] = useState(seed?.name ?? '');
+  const [share, setShare] = useState(seed?.trainerSharePercent != null ? String(seed.trainerSharePercent) : '');
 
   const count = type === 'single' ? 1 : Number(sessions.replace(/\D/g, '')) || 0;
   const price = Number(amount.replace(/\D/g, '')) || 0;
   const per = perSession({ type, sessions: count, amount: price });
-  const valid = price > 0 && (type === 'monthly' || count > 0);
+  const sharePct = Number(share.replace(/\D/g, '')) || 0;
+  const theirsOwner = owner === 'gym';
+  /* A gym package carries the trainer's share by the schema's own check, so a gym
+     price with no share is not a price the server will take. */
+  const valid = price > 0 && (type === 'monthly' || count > 0) && (!theirsOwner || (sharePct > 0 && sharePct <= 100));
   const label = autoName(type, count);
 
   const theirs = owner === 'gym';
@@ -174,6 +181,30 @@ export function PackSheet({
         />
       </div>
 
+      {theirs && (
+        <div className="fldrow" style={{ marginTop: 12 }}>
+          <div className="fld fld--w2">
+            <label className="fld__l" htmlFor="pk-share">You get, of that price</label>
+            <div className="affix">
+              <span className="affix__p">%</span>
+              <input
+                className="ctl ctl--num"
+                id="pk-share"
+                inputMode="numeric"
+                value={share}
+                placeholder="60"
+                onChange={(e) => setShare(e.target.value.replace(/\D/g, '').slice(0, 3))}
+              />
+            </div>
+            {price > 0 && sharePct > 0 && sharePct <= 100 ? (
+              <span className="fld__h" style={{ color: 'var(--tx-accent-text)', fontWeight: 600 }}>
+                You get {rupees(Math.round((price * sharePct) / 100))} · {whose} keeps {rupees(price - Math.round((price * sharePct) / 100))}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      )}
+
       <p className="small" style={{ marginTop: 14, maxWidth: '64ch' }}>
         {theirs ? (
           <>
@@ -199,6 +230,7 @@ export function PackSheet({
               sessions: type === 'monthly' ? null : count,
               amount: price,
               validityDays: Number(validity.replace(/\D/g, '')) || null,
+              ...(theirsOwner ? { trainerSharePercent: sharePct } : {}),
             })
           }
         >

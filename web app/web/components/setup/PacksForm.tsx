@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 
+import { GymPicker } from '@/components/profile/GymPicker';
+import type { PlaceHit } from '@/lib/places/types';
 import { MessageSlot } from '@/components/auth/MessageSlot';
 import { IconPlus } from '@/components/auth/Icons';
 import { addPack, leavePacks, removePack, saveWorkMode, skipStep } from '@/lib/setup/actions';
@@ -46,6 +48,8 @@ export function PacksForm({ state, packs }: { state: SetupState; packs: Pack[] }
     state.workMode ?? (state.gymName ? 'both' : null),
   );
   const [gymName, setGymName] = useState(state.gymName ?? '');
+  /** `undefined` until the trainer touches the gym field, so a save that never did leaves a stored link alone. */
+  const [gymPlace, setGymPlace] = useState<PlaceHit | null | undefined>(undefined);
   const [adding, setAdding] = useState<'trainer' | 'gym' | null>(null);
   const [pressed, setPressed] = useState(false);
 
@@ -85,7 +89,7 @@ export function PacksForm({ state, packs }: { state: SetupState; packs: Pack[] }
         // attribute: the Money screen would have nothing to head the group
         // with. So the name goes up the moment the first one is added, not a
         // screen later.
-        if (result.ok && owner === 'gym' && mode) await saveWorkMode(mode, trimmedGym);
+        if (result.ok && owner === 'gym' && mode) await saveWorkMode(mode, trimmedGym, gymPlace);
         return result;
       }),
     );
@@ -115,7 +119,7 @@ export function PacksForm({ state, packs }: { state: SetupState; packs: Pack[] }
     // Written before leaving, in case an answer was edited after the packages
     // were added — the profile has to end up saying what the screen said.
     run(async () => {
-      const saved = await saveWorkMode(mode, sellsGym ? trimmedGym : '');
+      const saved = await saveWorkMode(mode, sellsGym ? trimmedGym : '', gymPlace);
       return saved.ok ? leavePacks() : saved;
     });
   }
@@ -204,22 +208,19 @@ export function PacksForm({ state, packs }: { state: SetupState; packs: Pack[] }
       {sellsGym ? (
         <>
           <GroupLabel>THE GYM YOU WORK AT</GroupLabel>
-          <div
-            className={`fld${pressed && trimmedGym.length === 0 ? ' fld--err' : ''}`}
-            style={{ maxWidth: 420 }}
-          >
-            <label className="fld__l" htmlFor="gym">
-              Which gym
-            </label>
-            <input
-              className="ctl"
+          <div style={{ maxWidth: 420 }}>
+            <GymPicker
               id="gym"
-              value={gymName}
-              maxLength={120}
-              placeholder="Anytime Fitness, Adyar"
-              onChange={(e) => setGymName(e.target.value)}
+              label="Which gym"
+              name={gymName}
+              place={gymPlace ?? null}
+              invalid={pressed && trimmedGym.length === 0}
+              onChange={(next) => {
+                setGymName(next.name);
+                setGymPlace(next.place as PlaceHit | null);
+              }}
             />
-            <span className="fld__h">
+            <span className="fld__h" style={{ marginTop: 6, display: 'block' }}>
               {pressed && trimmedGym.length === 0
                 ? 'The gym needs a name before its packages can be attributed to it'
                 : 'Their share of a session is set per client, when you add them.'}

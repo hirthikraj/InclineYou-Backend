@@ -1,18 +1,19 @@
 'use client';
 
+import { GymPicker } from '@/components/profile/GymPicker';
+import type { PlaceHit } from '@/lib/places/types';
 import { useEffect, useRef, useState, useTransition } from 'react';
 
-import { Chip, ChipRow } from '@/components/setup/Chips';
-import { PackSheet, type PackFields } from '@/components/setup/PackSheet';
-import { addPack, savePack, saveWorkMode, setPackStatus } from '@/lib/packs/actions';
-import { buildPacks, modeOf, type PackRow, type PacksData } from '@/lib/packs/compute';
-import { WORK_MODES, type WorkMode } from '@/lib/setup/options';
+import { PackForm } from './PackForm';
+import { addPack, deletePack, saveGym, savePack, setPackStatus, swapPackOrder } from '@/lib/packs/actions';
+import { buildPacks, type PackRow, type PacksData } from '@/lib/packs/compute';
+import type { PackWrite } from '@/lib/packs/api';
+import { serviceLabel } from '@/lib/packs/vocab';
 import { rupees } from '@/lib/today/time';
 import { NudgeButton } from '@/components/nudge/NudgeButton';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
 import { Tag } from '@/web-components/ui/Tag';
-import { TextField } from '@/web-components/ui/Field';
 import { Avatar } from '@/web-components/ui/Avatar';
 import { Table, Row } from '@/web-components/ui/Table';
 
@@ -76,8 +77,8 @@ export function Packages({ data }: { data: PacksData }) {
   // for as long as it takes to fill in a gym name — `saveWorkMode` refuses a
   // nameless one, and a select that snapped back on every keystroke would make
   // that impossible to satisfy.
-  const [mode, setMode] = useState<WorkMode>(modeOf(data.trainer));
   const [gymDraft, setGymDraft] = useState(data.trainer.gymName ?? '');
+  const [gymPlaceDraft, setGymPlaceDraft] = useState<PlaceHit | null | undefined>(undefined);
 
   /** The open form: which list it writes to, and the row it is editing, if any. */
   const [editing, setEditing] = useState<{ owner: 'trainer' | 'gym'; pack: PackRow | null } | null>(null);
@@ -87,7 +88,6 @@ export function Packages({ data }: { data: PacksData }) {
     packs: data.packs,
     live: data.live,
     clientNames: data.clientNames,
-    mode,
     gymName: data.trainer.gymName,
   });
 
@@ -95,51 +95,59 @@ export function Packages({ data }: { data: PacksData }) {
   const gym = data.trainer.gymName;
   const gymNeedsName = view.showsGym && gym === null;
 
-  function run(work: () => Promise<{ ok: boolean; message?: string }>, done: string) {
+  /* A refusal that names a next move keeps its code, so the row can offer it —
+     `PACK_SOLD` on a delete turns into *Retire it instead*. */
+  const [refusedCode, setRefusedCode] = useState<string | null>(null);
+  /* Packs the server said were sold after all (`PACK_SOLD`): the count on the row
+     was stale, so Delete is withdrawn for them and Retire is the offer. */
+  const [soldIds, setSoldIds] = useState<Set<string>>(new Set());
+
+  function run(work: () => Promise<{ ok: boolean; message?: string; code?: string }>, done: string) {
     setNotice(null);
     setError(null);
+    setRefusedCode(null);
     startTransition(async () => {
       const result = await work();
       if (result.ok) setNotice(done);
-      else setError(result.message ?? 'That did not go through. Nothing changed.');
+      else {
+        setError(result.message ?? 'That did not go through. Nothing changed.');
+        setRefusedCode(result.code ?? null);
+      }
     });
   }
 
-  function submit(fields: PackFields) {
+  /* Minted when the form OPENS and not when it is submitted: a double click or a
+     retried request then replays the same create (the server answers 200 with
+     the pack it already made) instead of adding a second. */
+  const newId = useRef<string>('');
+  /* A refusal is drawn inside the form while it is open — beside the field it is
+     about — and the form stays open, so a taken name is fixed rather than retyped. */
+  const [formError, setFormError] = useState<string | null>(null);
+
+  function submit(fields: PackWrite) {
     const target = editing;
     if (!target) return;
-    setEditing(null);
-    if (target.pack) {
-      run(() => savePack(target.pack!.id, fields), 'Saved. Packs already sold are untouched.');
-    } else {
-      run(
-        () => addPack({ ...fields, owner: target.owner, orderIndex: data.packs.length }),
-        target.owner === 'gym'
-          ? `${fields.name} added to ${gym ?? 'the gym'}'s list.`
-          : `${fields.name} added to your price list.`,
+    setFormError(null);
+    startTransition(async () => {
+      const result = target.pack
+        ? await savePack(target.pack.id, fields)
+        : await addPack({ ...fields, id: newId.current, owner: target.owner, orderIndex: data.packs.length });
+      if (!result.ok) {
+        setFormError(result.message ?? 'That did not go through. Nothing changed.');
+        setRefusedCode(result.code ?? null);
+        return;
+      }
+      setEditing(null);
+      setNotice(
+        target.pack
+          ? 'Saved. Packs already sold are untouched.'
+          : target.owner === 'gym'
+            ? `${fields.name} added to ${gym ?? 'the gym'}'s list.`
+            : `${fields.name} added to your price list.`,
       );
-    }
+    });
   }
 
-  /**
-   * THE FORM OPENS WHERE THE THUMB IS, AND ON A PHONE THAT IS NOT WHERE IT WAS.
-   *
-   * Reported as *"the add-a-pack input opens at the bottom but it is not scrolled
-   * down to it"*, and measured at 390px: pressing *Add a pack* grew the page by
-   * 597px, left `.body`'s scroll at 0, and put the form's first field **380px
-   * below the fold**. So the loudest control on the tab did nothing a trainer
-   * could see. app.css docks it to the bottom of the screen below 900px — the
-   * fifth opt-in of that shape after `.sch__panel`, `.crd-fpanel` and
-   * `.rp-panel`, and the same answer *Record payment* already gives one tab over.
-   *
-   * `PackSheet`'s own docstring argues for a panel over a sheet because "adding
-   * two or three packs is the common case, and a modal that has to be opened and
-   * dismissed three times is three dismissals a desk does not need to spend."
-   * **That is an argument about a desk, and on this screen it no longer holds
-   * even there:** `submit` closes the form on every add, so the three openings
-   * are already being paid for. What the dock buys is that the second and third
-   * ones are visible.
-   */
   const sheet = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLElement | null>(null);
 
@@ -150,6 +158,8 @@ export function Packages({ data }: { data: PacksData }) {
     setNotice(null);
     setError(null);
     setConfirming(null);
+    setFormError(null);
+    if (!pack) newId.current = crypto.randomUUID();
     setEditing({ owner, pack });
   }
 
@@ -199,26 +209,14 @@ export function Packages({ data }: { data: PacksData }) {
         onClick={close}
       />
     <div className="pk__sheet" ref={sheet} tabIndex={-1}>
-    <PackSheet
-      // Read at mount only, so the id is the key — without it, opening a second
-      // row would re-show the first row's numbers.
+    <PackForm
       key={editing.pack?.id ?? `new-${editing.owner}`}
       owner={editing.owner}
       gymName={gym}
       pending={pending}
-      seed={
-        editing.pack
-          ? {
-              name: editing.pack.name,
-              type: editing.pack.type,
-              sessions: editing.pack.sessions,
-              amount: editing.pack.amount,
-              validityDays: editing.pack.validityDays,
-            }
-          : null
-      }
-      submitLabel={editing.pack ? 'Save' : undefined}
-      onAdd={submit}
+      seed={editing.pack ? editing.pack.source : null}
+      error={formError}
+      onSubmit={submit}
       onCancel={close}
     />
     </div>
@@ -226,48 +224,70 @@ export function Packages({ data }: { data: PacksData }) {
   ) : null;
 
   /** One price list, as a table. Both lists are the same table with different copy. */
+  /**
+   * One list of prices. A row says what it is (*In person · 12 sessions*), what it
+   * costs and — on the gym's list — how the price splits: **You get ₹5,400 · gym
+   * keeps ₹3,600**, which the server derived and this only prints. *On it now* and
+   * *sold* are the two counts that make retiring or deleting a decision.
+   *
+   * Three ways to take a pack off the list, and they are not the same: **Retire**
+   * stops it being offered and changes nothing anybody bought; **Delete** removes
+   * a pack that was never sold; and a Delete the server refuses (`PACK_SOLD`)
+   * turns into an offer of Retire right there, because the refusal is a fork in
+   * the road and not a dead end.
+   */
   function list(rows: PackRow[], owner: 'trainer' | 'gym') {
     const priceLabel = owner === 'gym' ? 'Their price' : 'Price';
     return (
       <div className="tblwrap">
         {/* `data-l` on every cell is not decoration: under 620px app.css hides
-            the header and re-prints these as the row's own labels. Four columns
-            of bare rupee figures cannot be read without them, which is why this
-            table does NOT reuse `.tbl--stack` — that rule drops the header,
-            which the queue can afford and a price list cannot. */}
-        <table className="tbl pk__tbl">
+            the header and re-prints these as the row's own labels. */}
+        <table className={`tbl pk__tbl${owner === 'gym' ? ' pk__tbl--gym' : ''}`}>
           <thead>
             <tr>
               <th>{owner === 'gym' ? 'Package' : 'Pack'}</th>
               <th className="num">{priceLabel}</th>
+              {owner === 'gym' && <th className="num">Your part · gym keeps</th>}
               <th className="num">Per session</th>
-              <th className="num">On it now</th>
+              <th className="num">On it · sold</th>
               <th />
             </tr>
           </thead>
           <tbody>
-            {rows.map((row) => (
+            {rows.map((row, i) => {
+              const peers = rows.map((r) => r.source);
+              const above = i > 0 ? peers[i - 1] : null;
+              const below = i < peers.length - 1 ? peers[i + 1] : null;
+              return (
               <tr key={row.id}>
                 <td data-l="">
                   <b>{row.name}</b>
-                  {row.validityDays != null && (
-                    <span className="small" style={{ color: 'var(--tx-ink-3)', marginLeft: 8 }}>
-                      valid {row.validityDays} days
-                    </span>
-                  )}
+                  <span className="small" style={{ display: 'block', color: 'var(--tx-ink-3)' }}>
+                    {row.basis === 'period' ? 'Period' : `${row.sessions} sessions`}
+                    {' · '}{serviceLabel(row.service)}
+                    {row.validityDays != null && ` · valid ${row.validityDays} days`}
+                  </span>
                 </td>
                 <td className="num" data-l={priceLabel}>{rupees(row.amount)}</td>
+                {owner === 'gym' && (
+                  <td className="num" data-l="Your part · gym keeps">
+                    {row.split
+                      ? <>{rupees(row.split.trainer)} <span className="small" style={{ color: 'var(--tx-ink-3)' }}>({row.split.trainerLabel})</span>
+                          <span className="small" style={{ display: 'block', color: 'var(--tx-ink-3)' }}>gym keeps {rupees(row.split.gym)}</span></>
+                      : '—'}
+                  </td>
+                )}
                 <td className="num" data-l="Per session">
                   {row.perSession != null ? rupees(row.perSession) : '—'}
                 </td>
-                <td className="num" data-l="On it now">{row.clients}</td>
+                <td className="num" data-l="On it · sold">{row.clients} · {row.sold}</td>
                 <td className="pk__acts" style={{ textAlign: 'right' }}>
                   {confirming === row.id ? (
-                    <span className="row" style={{ gap: 8, justifyContent: 'flex-end' }}>
+                    <span className="row" style={{ gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                       <span className="small" style={{ color: 'var(--tx-ink-3)' }}>
-                        {row.clients > 0
-                          ? `${row.clients} keep${row.clients === 1 ? 's' : ''} what they bought.`
-                          : 'It stops being offered.'}
+                        {row.sold > 0 || soldIds.has(row.id)
+                          ? `Sold ${row.sold} time${row.sold === 1 ? '' : 's'}; ${row.clients} on it keep${row.clients === 1 ? 's' : ''} what they bought.`
+                          : 'Never sold, so it can be removed for good.'}
                       </span>
                       <Button
                         variant="ghost"
@@ -280,11 +300,34 @@ export function Packages({ data }: { data: PacksData }) {
                       >
                         Retire it
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setConfirming(null)}
-                      >
+                      {row.sold === 0 && !soldIds.has(row.id) && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={pending}
+                          onClick={() => {
+                            setError(null);
+                            setNotice(null);
+                            startTransition(async () => {
+                              const result = await deletePack(row.id);
+                              if (result.ok) {
+                                setConfirming(null);
+                                setNotice(`${row.name} deleted.`);
+                              } else if (result.code === 'PACK_SOLD') {
+                                setSoldIds((ids) => new Set(ids).add(row.id));
+                                setError(result.message ?? null);
+                                setRefusedCode('PACK_SOLD');
+                              } else {
+                                setConfirming(null);
+                                setError(result.message ?? 'That did not go through. Nothing changed.');
+                              }
+                            });
+                          }}
+                        >
+                          Delete it
+                        </Button>
+                      )}
+                      <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>
                         Keep selling it
                       </Button>
                     </span>
@@ -293,8 +336,34 @@ export function Packages({ data }: { data: PacksData }) {
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => open(owner, row)}
+                        aria-label={`Move ${row.name} up`}
+                        disabled={pending || above === null}
+                        onClick={() => above && run(
+                          () => swapPackOrder(
+                            { id: row.id, orderIndex: row.orderIndex },
+                            { id: above.id, orderIndex: above.orderIndex },
+                          ),
+                          `${row.name} moved up.`,
+                        )}
                       >
+                        ↑
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        aria-label={`Move ${row.name} down`}
+                        disabled={pending || below === null}
+                        onClick={() => below && run(
+                          () => swapPackOrder(
+                            { id: row.id, orderIndex: row.orderIndex },
+                            { id: below.id, orderIndex: below.orderIndex },
+                          ),
+                          `${row.name} moved down.`,
+                        )}
+                      >
+                        ↓
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => open(owner, row)}>
                         Edit
                       </Button>
                       <Button
@@ -305,13 +374,14 @@ export function Packages({ data }: { data: PacksData }) {
                           setConfirming(row.id);
                         }}
                       >
-                        Retire
+                        Remove
                       </Button>
                     </span>
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -355,7 +425,12 @@ export function Packages({ data }: { data: PacksData }) {
 
       {(notice || error) && (
         <p className={error ? 'msg msg--err' : 'msg msg--ok'} style={{ marginBottom: 14 }} role="status">
-          <span>{error ?? notice}</span>
+          <span>
+            {error ?? notice}
+            {error && refusedCode === 'GYM_PACK_NEEDS_GYM' && (
+              <> Add it under <b>Your gym</b> on this page, or on the <a href="/settings/profile/work">Work &amp; hours</a> tab.</>
+            )}
+          </span>
         </p>
       )}
 
@@ -412,11 +487,6 @@ export function Packages({ data }: { data: PacksData }) {
               <div className="card__hd">
                 <h2 className="card__t">{gym ? `${gym} sells` : 'The gym’s packages'}</h2>
                 <Tag>{view.gymSelling.length}</Tag>
-                {data.trainer.gymSharePercent != null && (
-                  <p className="small" style={{ color: 'var(--tx-ink-3)', marginLeft: 'auto' }}>
-                    {data.trainer.gymSharePercent}% of a floor session goes to them
-                  </p>
-                )}
                 {/* The twin of the own list's, and the control this card never
                     had. Its add used to be *Add another* — a ghost at the FOOT
                     of the card, which is neither where the other list keeps its
@@ -440,7 +510,7 @@ export function Packages({ data }: { data: PacksData }) {
               {gymNeedsName ? (
                 <div className="card__b">
                   <p className="empty__b">
-                    Name the gym in <b>How you work</b> and its price list opens here. An
+                    Add your gym under <b>Your gym</b> and its price list opens here. An
                     unnamed list belongs to nobody — there would be nothing to head it with,
                     and a package on it could never be attributed.
                   </p>
@@ -525,55 +595,36 @@ export function Packages({ data }: { data: PacksData }) {
 
         {/* ── how you work, the callout, and who is running out ──────── */}
         <div>
-          <Card title="How you work">
+          <Card title="Your gym">
             <p className="small" style={{ color: 'var(--tx-ink-3)', marginBottom: 10 }}>
-              It decides which price lists exist. A hint, never a gate — who collects is
-              still decided per client.
+              If you work at a gym, name it and its price list opens here — what the gym
+              charges, and the part of each sale that is yours. Who collects is still decided
+              per client.
             </p>
 
-            {/* The flow's `Chip`, not a raw `.chip` button — this is the
-                same question step 7 asks, and two definitions of one
-                control drift on the next change. It also settles the
-                a11y: `aria-pressed` on a toggle button, never
-                `role="radio"`, which does not support it. */}
-            <ChipRow top={0}>
-              {WORK_MODES.map((m) => (
-                <Chip
-                  key={m.id}
-                  label={m.label}
-                  pressed={mode === m.id}
-                  disabled={pending}
-                  onClick={() => setMode(m.id)}
-                />
-              ))}
-            </ChipRow>
-            <p className="small" style={{ color: 'var(--tx-ink-3)', marginTop: 8 }}>
-              {WORK_MODES.find((m) => m.id === mode)?.note}
-            </p>
+            <GymPicker
+              id="pk-gym"
+              label="Which gym"
+              name={gymDraft}
+              place={gymPlaceDraft ?? null}
+              maxLength={80}
+              onChange={(next) => {
+                setGymDraft(next.name);
+                setGymPlaceDraft(next.place as PlaceHit | null);
+              }}
+            />
 
-            {(mode === 'gym' || mode === 'both') && (
-              <TextField
-                label="Which gym"
-                id="pk-gym"
-                className="mt3"
-                value={gymDraft}
-                maxLength={80}
-                placeholder="Iron Cage, Anna Nagar"
-                onChange={(e) => setGymDraft(e.target.value)}
-              />
-            )}
-
-            {(mode !== modeOf(data.trainer) || gymDraft.trim() !== (data.trainer.gymName ?? '')) && (
+            {gymDraft.trim() !== (data.trainer.gymName ?? '') && (
               <div className="row" style={{ gap: 8, marginTop: 14 }}>
                 <Button
                   variant="primary"
                   disabled={pending}
                   onClick={() =>
                     run(
-                      () => saveWorkMode(mode, gymDraft),
-                      mode === 'independent'
-                        ? 'Saved. One price list — your own.'
-                        : 'Saved. Both lists are on this screen.',
+                      () => saveGym(gymDraft, gymPlaceDraft, data.trainer.trainingModes),
+                      gymDraft.trim() === ''
+                        ? 'Saved. Your own price list only.'
+                        : `Saved. ${gymDraft.trim()}'s price list is on this screen.`,
                     )
                   }
                 >
@@ -582,8 +633,8 @@ export function Packages({ data }: { data: PacksData }) {
                 <Button
                   variant="ghost"
                   onClick={() => {
-                    setMode(modeOf(data.trainer));
                     setGymDraft(data.trainer.gymName ?? '');
+                    setGymPlaceDraft(undefined);
                   }}
                 >
                   Cancel

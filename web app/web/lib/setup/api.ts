@@ -9,6 +9,7 @@ import { SetupApiError } from './errors';
 import { type HourWindow } from './hours';
 import { asGender, asWorkMode } from './options';
 import type { Pack, PackType } from './money';
+import { termsFromType, typeFromTerms } from '@/lib/packs/vocab';
 import type { SetupState, SetupStep } from './steps';
 import { readSkipped } from './skipped';
 
@@ -114,6 +115,8 @@ export interface TrainerUpdate {
   workMode?: string;
   /** An empty string means "left the gym" — it clears the percentage too. */
   gymName?: string;
+  /** A picked place, or `null` to unlink. Omitted leaves the link alone. */
+  gymPlace?: import('@/lib/places/types').PlaceHit | null;
   /**
    * V33 identity. Same null/empty rule as the rest — omitting leaves the field
    * alone, `''` clears it — with one difference from the lists above: the server
@@ -208,15 +211,12 @@ export interface StoredHour extends HourWindow {
 }
 
 function num(v: unknown, fallback = 0): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+  const n = typeof v === 'string' ? Number(v) : v;
+  return typeof n === 'number' && Number.isFinite(n) ? n : fallback;
 }
 
 function text(v: unknown, fallback = ''): string {
   return typeof v === 'string' ? v : fallback;
-}
-
-function asPackType(value: string): PackType {
-  return value === 'monthly' || value === 'single' ? value : 'session_pack';
 }
 
 /**
@@ -227,7 +227,7 @@ function asPackType(value: string): PackType {
  * because nothing on this half holds rows between requests.
  */
 const fetchSyncTables = cache(
-  async (): Promise<{ hours: StoredHour[]; packs: Pack[] }> => {
+  async (): Promise<{ hours: StoredHour[] }> => {
     const res = await call<PullResponse>('/v1/sync/pull', { method: 'GET' });
 
     const rows = (table: string): Record<string, unknown>[] => {
@@ -244,28 +244,7 @@ const fetchSyncTables = cache(
       }))
       .filter((h) => h.id !== '' && h.weekday >= 0 && h.endMinute > h.startMinute);
 
-    const packs: Pack[] = rows('packs')
-      // `status` retires a price without deleting it — a pack a package points
-      // at can never be deleted, so `inactive` is how the app removes one.
-      .filter((r) => text(r.status, 'active') === 'active')
-      .map((r) => ({
-        id: text(r.id),
-        name: text(r.name, 'Pack'),
-        // Unrecognised degrades to the commonest kind rather than failing the
-        // read: a newer build's pack type should cost one label, not the list.
-        type: asPackType(text(r.type, 'session_pack')),
-        sessions: typeof r.sessions === 'number' ? r.sessions : null,
-        amount: num(r.amount),
-        validityDays: typeof r.validity_days === 'number' ? r.validity_days : null,
-        // Absent reads as the trainer's own — the same default the server
-        // applies, and the pre-V19 rows that predate the gym list.
-        owner: text(r.owner, 'trainer') === 'gym' ? ('gym' as const) : ('trainer' as const),
-        orderIndex: num(r.order_index),
-      }))
-      .filter((p) => p.id !== '')
-      .sort((a, b) => a.orderIndex - b.orderIndex);
-
-    return { hours, packs };
+    return { hours };
   },
 );
 
@@ -273,8 +252,35 @@ export async function getHours(): Promise<StoredHour[]> {
   return (await fetchSyncTables()).hours;
 }
 
+/**
+ * The price list, from `GET /v1/packs` — the v1.1 route, replacing the sync
+ * envelope the backend no longer carries `packs` in. Active only: a retired pack
+ * is not on the list a trainer is setting up. Translated to the setup flow's own
+ * three-way `type` at the edge (R24); `lib/packs/vocab.ts` holds both directions.
+ */
 export async function getPacks(): Promise<Pack[]> {
-  return (await fetchSyncTables()).packs;
+  const res = await call<{ items?: PackWire[] }>('/v1/packs?status=active', { method: 'GET' });
+  return (res?.items ?? []).map((p) => ({
+    id: p.id,
+    name: p.name || 'Pack',
+    type: typeFromTerms({ basis: p.basis, sessions: p.sessions }),
+    sessions: typeof p.sessions === 'number' ? p.sessions : null,
+    amount: num(p.amount),
+    validityDays: typeof p.validityDays === 'number' ? p.validityDays : null,
+    owner: p.owner === 'gym' ? ('gym' as const) : ('trainer' as const),
+    orderIndex: num(p.orderIndex),
+  }));
+}
+
+interface PackWire {
+  id: string;
+  name: string;
+  basis: 'sessions' | 'period';
+  sessions: number | null;
+  validityDays: number | null;
+  amount: string | number;
+  owner: string;
+  orderIndex: number;
 }
 
 /**
@@ -332,59 +338,47 @@ export interface PackInput {
   validityDays: number | null;
   owner: 'trainer' | 'gym';
   orderIndex: number;
+  /** A gym's package only — the trainer's part as a percentage of the price. */
+  trainerSharePercent?: number | null;
 }
 
+/**
+ * `POST /v1/packs`, in the v1 vocabulary. The id is minted here, and `type` is
+ * translated to `service` + `basis` at this edge only (R24): the route refuses the
+ * old `type` outright. Setup has no *where it is delivered* question, so a pack
+ * is in-person; the Packages page asks it.
+ */
 export async function createPack(input: PackInput): Promise<void> {
-  const now = Date.now();
-  await push({
-    packs: {
-      created: [
-        {
-          id: crypto.randomUUID(),
-          name: input.name,
-          type: input.type,
-          sessions: input.sessions,
-          amount: input.amount,
-          currency: 'INR',
-          validity_days: input.validityDays,
-          status: 'active',
-          owner: input.owner,
-          order_index: input.orderIndex,
-          created_at: now,
-          updated_at: now,
-        },
-      ],
-    },
+  const terms = termsFromType(input.type, input.sessions, input.validityDays);
+  await call('/v1/packs', {
+    method: 'POST',
+    body: JSON.stringify({
+      id: crypto.randomUUID(),
+      name: input.name,
+      ...terms,
+      amount: input.amount,
+      owner: input.owner,
+      orderIndex: input.orderIndex,
+      ...(input.owner === 'gym' ? { trainerSharePercent: input.trainerSharePercent ?? null } : {}),
+    }),
   });
 }
 
 /**
- * Takes a price off the list.
- *
- * `status: 'inactive'`, never a delete — retiring a price must not rewrite what
- * was sold, and the FK from `package.pack_id` would refuse anyway. Sent as an
- * `updated` row because the push is an upsert on the id.
+ * Takes a price off the list while setting up. Nothing has been sold yet, so the
+ * contract's DELETE (a pack never sold) is the honest verb; a 409 means a package
+ * points at it after all, and it is retired by status instead.
  */
 export async function retirePack(pack: Pack): Promise<void> {
-  await push({
-    packs: {
-      updated: [
-        {
-          id: pack.id,
-          name: pack.name,
-          type: pack.type,
-          sessions: pack.sessions,
-          amount: pack.amount,
-          currency: 'INR',
-          validity_days: pack.validityDays,
-          status: 'inactive',
-          owner: pack.owner,
-          order_index: pack.orderIndex,
-          updated_at: Date.now(),
-        },
-      ],
-    },
-  });
+  try {
+    await call(`/v1/packs/${pack.id}`, { method: 'DELETE' });
+  } catch (error) {
+    if (error instanceof SetupApiError && error.status === 409) {
+      await call(`/v1/packs/${pack.id}`, { method: 'PATCH', body: JSON.stringify({ status: 'inactive' }) });
+      return;
+    }
+    throw error;
+  }
 }
 
 /* ────────────────────────────────────────────────── the assembled state ── */
@@ -399,9 +393,10 @@ export async function retirePack(pack: Pack): Promise<void> {
  * both directions; this is the web's half of it.
  */
 export async function getSetupState(): Promise<SetupState> {
-  const [profile, tables, skipped] = await Promise.all([
+  const [profile, tables, packs, skipped] = await Promise.all([
     fetchProfile(),
     fetchSyncTables(),
+    getPacks(),
     readSkipped(),
   ]);
 
@@ -418,7 +413,7 @@ export async function getSetupState(): Promise<SetupState> {
     workMode: asWorkMode(profile.workMode),
     gymName: profile.gymName ?? null,
     hoursCount: tables.hours.length,
-    packCount: tables.packs.length,
+    packCount: packs.length,
     skipped,
     setupComplete: profile.setupComplete,
   };

@@ -1,5 +1,6 @@
 'use server';
 
+import type { PlaceHit } from '@/lib/places/types';
 import {
   createPack,
   getHours,
@@ -206,7 +207,12 @@ export async function saveHours(days: number[], windows: HourWindow[]): Promise<
  * nobody can attribute — the Money screen would have nothing to head the group
  * with.
  */
-export async function saveWorkMode(mode: string, gymName: string): Promise<StepResult> {
+export async function saveWorkMode(
+  mode: string,
+  gymName: string,
+  /** `undefined` leaves the stored link alone; `null` unlinks (a typed gym); a place links it. */
+  gymPlace?: PlaceHit | null,
+): Promise<StepResult> {
   const parsed = asWorkMode(mode);
   if (!parsed) {
     return { ok: false, error: { status: 400, detail: 'Pick one — it decides which price lists to set up.' } };
@@ -223,7 +229,11 @@ export async function saveWorkMode(mode: string, gymName: string): Promise<StepR
     // "On my own" with a gym on file is the trainer leaving it. An empty string
     // clears the name AND its share percentage together, server-side — which is
     // right: a share of nothing is not zero, it is absent.
-    await patchProfile({ workMode: parsed, gymName: sellsGym ? trimmed : '' });
+    await patchProfile({
+      workMode: parsed,
+      gymName: sellsGym ? trimmed : '',
+      ...(!sellsGym ? { gymPlace: null } : gymPlace !== undefined ? { gymPlace } : {}),
+    });
     return { ok: true, next: '' };
   } catch (error) {
     return failure(error);

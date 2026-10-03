@@ -2,240 +2,230 @@ import 'server-only';
 
 import { cache } from 'react';
 
-import { getToken } from '@/lib/auth/session';
-import type { PackType } from '@/lib/setup/money';
-import { asWorkMode, type WorkMode } from '@/lib/setup/options';
+import { api, ApiError, listAll, type ListEnvelope } from '@/lib/http/client';
+import type { PlaceHit } from '@/lib/places/types';
 /* The shapes live in `compute.ts`, which is client-safe. This module is
    `server-only`, and a client component that imported a VALUE from it — not a
-   type, which is erased — would fail the build. `modeOf` is a value. */
+   type, which is erased — would fail the build. */
 import type { LivePackage, PacksData, PacksTrainer, PriceListPack } from './compute';
-import { type ListEnvelope } from '@/lib/http/client';
+import type { PackBasis, PackService } from './vocab';
 
 /**
  * THE PRICE LIST'S DATA LAYER — `pack`, not `package`.
  *
  * One letter, two different things, and the whole screen turns on it. A **pack**
  * is what the trainer offers (a 12-session block at ₹9,000); a **package** is
- * what one client bought. `lib/money/api.ts` reads the second and the Money
- * book's Packages tab derives fake price points by grouping sold rows — this
- * reads the actual list.
+ * what one client bought. This reads the actual list.
  *
- * ───────────────────────────────────────────────────────────────────────────
- * FOUR REQUESTS, AND NOT A `sync/pull`
+ * ── ON THE v1.1 WIRE ─────────────────────────────────────────────────────────
  *
- * `lib/setup/api.ts` says packs have "no REST endpoint at all" and reaches them
- * through the sync envelope. **That is no longer true** — `GET /v1/packs`,
- * `POST /v1/packs` and `PATCH /v1/packs/{id}` were added for this screen, for
- * the reason that file's own comment gives: the pull is affordable during setup
- * "precisely here and nowhere else", because the account is new and the envelope
- * close to empty. A price list a trainer opens with a year of set logs behind it
- * is the built screen that comment forbids.
+ * `GET /v1/packs?status=all&include=usage` returns every pack with how many
+ * clients are on it and how many it has sold, and — on a gym pack — the
+ * trainer's share and the gym's derived part. The writes are the three routes the
+ * contract names (`POST` · `PATCH` · `DELETE /v1/packs`), each answering a pack
+ * row. Four reads in all, in parallel: the profile for the gym, the list, the
+ * live packages for *Ending soon*, and the client names to head those rows.
  *
- * So: `/v1/trainers/me` for whose lists exist, `/v1/packs` for the lists,
- * `/v1/packages?status=active` and `/v1/clients` for *Ending soon* — the one
- * group on this screen that is about sales rather than prices, and the reason
- * renewing lives here at all: it is a money decision, and this is where the
- * prices are.
+ * `workMode` and `gymSharePercent` are gone from the wire. The first was a
+ * defaults hint nothing branched on and the second is per pack now (R3): the
+ * trainer's cut varies with the price of the pack, so no trainer-wide percentage
+ * can be right.
  *
- * `activeClients` is NOT computed here. It comes down on each pack because
- * `PackService` counts it in SQL, which is what keeps every sold package off a
- * screen that has no other use for them.
- *
- * The shapes this returns are declared in `compute.ts` rather than here, so the
- * client component can import them without pulling `server-only` into the
- * browser bundle.
- * ───────────────────────────────────────────────────────────────────────────
+ * Money arrives as decimal strings and is parsed once, here.
  */
 
-const BASE = process.env.INCLINEYOU_API_URL ?? 'http://localhost:8080';
-const TIMEOUT_MS = 8_000;
-
+/** A refusal carrying the server's `code` and its sentence, so the action can choose the words. */
 export class PacksApiError extends Error {
-  constructor(readonly status: number | null, readonly detail: string | null = null) {
+  constructor(
+    readonly status: number | null,
+    readonly detail: string | null = null,
+    readonly code: string | null = null,
+  ) {
     super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'PacksApiError';
   }
 }
 
-async function call<T>(path: string, init: RequestInit): Promise<T> {
-  const token = await getToken();
-  if (!token) throw new PacksApiError(401);
-
-  let res: Response;
+async function call<T>(path: string, options: Parameters<typeof api>[1] = {}): Promise<T> {
   try {
-    res = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${token}`,
-        ...init.headers,
-      },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch {
-    throw new PacksApiError(null);
-  }
-
-  if (!res.ok) {
-    // The 400s this endpoint raises are sentences a trainer can act on — "A pack
-    // needs a price." — so the body is read rather than flattened into a status.
-    let detail: string | null = null;
-    try {
-      const body: unknown = await res.json();
-      if (body && typeof body === 'object') {
-        const d = (body as Record<string, unknown>).detail ?? (body as Record<string, unknown>).message;
-        if (typeof d === 'string') detail = d;
-      }
-    } catch {
-      /* a body that is not JSON tells us nothing the status has not */
+    return await api<T>(path, options);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw new PacksApiError(error.status, error.problem.detail ?? null, error.problem.code ?? null);
     }
-    throw new PacksApiError(res.status, detail);
+    throw error;
   }
-
-  const text = await res.text();
-  return (text ? JSON.parse(text) : null) as T;
 }
 
 /* ---------------------------------------------------------------- wire shapes */
 
 interface TrainerWire {
-  id: string;
-  name: string;
-  workMode?: string | null;
-  gymName?: string | null;
-  gymSharePercent?: number | null;
+  name: string | null;
+  gymName: string | null;
+  trainingModes: string[] | null;
   setupComplete: boolean;
 }
 
-interface PackWire {
+export interface PackWire {
   id: string;
   name: string;
-  type: string;
+  service: PackService;
+  basis: PackBasis;
   sessions: number | null;
-  amount: number | string | null;
-  currency: string | null;
   validityDays: number | null;
+  amount: string;
+  owner: 'trainer' | 'gym';
+  trainerSharePercent: number | null;
+  trainerShareAmount: string | null;
+  gymSharePercent: number | null;
+  gymShareAmount: string | null;
   status: string;
-  owner: string;
   orderIndex: number;
-  activeClients: number;
-  createdAt: number;
-  updatedAt: number;
+  version: string;
+  activeClients?: number;
+  soldCount?: number;
 }
 
 interface PackageWire {
   id: string;
   clientId: string;
-  type: string;
   sessionsTotal: number | null;
   sessionsRemaining: number | null;
-  amount: number | string | null;
-  status: string;
 }
 
 interface ClientWire {
   id: string;
-  name: string;
-  status: string;
+  name: string | null;
 }
 
 /* ----------------------------------------------------------------- coercion */
 
-function num(v: number | string | null | undefined): number {
+function num(v: string | number | null | undefined): number {
   if (v === null || v === undefined) return 0;
   const n = typeof v === 'number' ? v : Number(v);
   return Number.isFinite(n) ? n : 0;
 }
 
-/** Unrecognised degrades to the commonest kind rather than failing the read —
- *  a newer build's pack type should cost one label, not the list. The identical
- *  rule in `lib/setup/api.ts`. */
-function asPackType(value: string): PackType {
-  return value === 'monthly' || value === 'single' ? value : 'session_pack';
+function maybeNum(v: string | number | null | undefined): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** One pack row, parsed. Exported for the writes, which answer the same row. */
+export function parsePack(p: PackWire): PriceListPack {
+  return {
+    id: p.id,
+    name: p.name || 'Pack',
+    service: p.service,
+    basis: p.basis,
+    sessions: typeof p.sessions === 'number' ? p.sessions : null,
+    amount: num(p.amount),
+    validityDays: typeof p.validityDays === 'number' ? p.validityDays : null,
+    status: p.status === 'inactive' ? 'inactive' : 'active',
+    owner: p.owner === 'gym' ? 'gym' : 'trainer',
+    orderIndex: p.orderIndex ?? 0,
+    activeClients: p.activeClients ?? 0,
+    soldCount: p.soldCount ?? 0,
+    trainerSharePercent: maybeNum(p.trainerSharePercent),
+    trainerShareAmount: maybeNum(p.trainerShareAmount),
+    gymSharePercent: maybeNum(p.gymSharePercent),
+    gymShareAmount: maybeNum(p.gymShareAmount),
+    version: p.version,
+  };
 }
 
 export const getPacksData = cache(async (): Promise<PacksData> => {
   const now = Date.now();
 
   const [trainer, packs, live, clients] = await Promise.all([
-    call<TrainerWire>('/v1/trainers/me', { method: 'GET' }),
-    call<PackWire[]>('/v1/packs', { method: 'GET' }),
-    // 1.1: `{items}`, and `scope=current` is the live packs plus what is owed.
-    call<ListEnvelope<PackageWire>>('/v1/packages?scope=current', { method: 'GET' }).then((r) => r?.items ?? []),
-    call<ClientWire[]>('/v1/clients?view=legacy', { method: 'GET' }),
+    call<TrainerWire>('/v1/trainers/me'),
+    listAll<PackWire>('/v1/packs?status=all&include=usage', (p) => call<ListEnvelope<PackWire>>(p)),
+    listAll<PackageWire>('/v1/packages?scope=current', (p) => call<ListEnvelope<PackageWire>>(p)),
+    listAll<ClientWire>('/v1/clients?view=summary&status=all', (p) => call<ListEnvelope<ClientWire>>(p)),
   ]);
 
+  const me: PacksTrainer = {
+    name: trainer?.name ?? '',
+    gymName: trainer?.gymName?.trim() ? trainer.gymName.trim() : null,
+    trainingModes: trainer?.trainingModes ?? [],
+    setupComplete: trainer?.setupComplete !== false,
+  };
+
   return {
-    trainer: {
-      name: trainer?.name ?? '',
-      workMode: asWorkMode(trainer?.workMode),
-      gymName: trainer?.gymName?.trim() ? trainer.gymName.trim() : null,
-      gymSharePercent:
-        typeof trainer?.gymSharePercent === 'number' ? trainer.gymSharePercent : null,
-      setupComplete: trainer?.setupComplete !== false,
-    },
-    packs: (packs ?? []).map((p) => ({
-      id: p.id,
-      name: p.name || 'Pack',
-      type: asPackType(p.type),
-      sessions: typeof p.sessions === 'number' ? p.sessions : null,
-      amount: num(p.amount),
-      validityDays: typeof p.validityDays === 'number' ? p.validityDays : null,
-      status: p.status === 'inactive' ? ('inactive' as const) : ('active' as const),
-      // Absent reads as the trainer's own — the server's default and the meaning
-      // of every row written before V19.
-      owner: p.owner === 'gym' ? ('gym' as const) : ('trainer' as const),
-      orderIndex: p.orderIndex ?? 0,
-      activeClients: p.activeClients ?? 0,
-    })),
-    live: (live ?? []).map((p) => ({
+    trainer: me,
+    packs: packs.map(parsePack),
+    live: live.map((p): LivePackage => ({
       id: p.id,
       clientId: p.clientId,
       sessionsRemaining: p.sessionsRemaining ?? null,
       sessionsTotal: p.sessionsTotal ?? null,
     })),
-    clientNames: new Map((clients ?? []).map((c) => [c.id, c.name])),
+    clientNames: new Map(clients.map((c) => [c.id, c.name ?? 'Unnamed'])),
     now,
   };
 });
 
-/* Types only. `modeOf` is NOT re-exported: a value re-exported from a
-   `server-only` module still drags this file into the browser bundle, which is
-   the build error that put the shapes in `compute.ts` in the first place. */
+/* Types only: a value re-exported from a `server-only` module drags this file
+   into the browser bundle. */
 export type { LivePackage, PacksData, PacksTrainer, PriceListPack };
 
 /* ----------------------------------------------------------------- the writes */
 
+/** The terms of one pack, in the v1 vocabulary. */
 export interface PackWrite {
   name: string;
-  type: PackType;
+  service: PackService;
+  basis: PackBasis;
   sessions: number | null;
-  amount: number;
   validityDays: number | null;
-}
-
-export async function postPack(
-  input: PackWrite & { owner: 'trainer' | 'gym'; orderIndex: number },
-): Promise<void> {
-  await call('/v1/packs', { method: 'POST', body: JSON.stringify(input) });
+  amount: number;
+  /** A gym pack's share: exactly one of the two is a number, the other null. */
+  trainerSharePercent?: number | null;
+  trainerShareAmount?: number | null;
 }
 
 /**
- * PATCH is partial **by key presence**, so `JSON.stringify` doing the obvious
- * thing is load-bearing: `{validityDays: null}` serialises the key and therefore
- * CLEARS the expiry, while a field left off the object is untouched. That is why
- * `savePack` sends the whole form and `setPackStatus` sends one field.
- *
- * `owner` is deliberately never sent: moving a pack between the two lists would
- * re-attribute every package already sold from it, and the gym's prices are not
- * the trainer's to re-badge. The server answers 400 rather than ignoring it.
+ * `POST /v1/packs`. The id is minted by the caller when the form OPENS, so a
+ * double click or a retried request replays the same create (200) rather than
+ * adding a second pack.
  */
-export async function patchPack(packId: string, patch: Partial<PackWrite> & { status?: string }): Promise<void> {
-  await call(`/v1/packs/${packId}`, { method: 'PATCH', body: JSON.stringify(patch) });
+export async function postPack(
+  input: PackWrite & { id: string; owner: 'trainer' | 'gym'; orderIndex?: number },
+): Promise<PriceListPack> {
+  return parsePack(await call<PackWire>('/v1/packs', { method: 'POST', body: input }));
 }
 
-/** Whose lists exist, and the gym's name to head one with. */
-export async function patchTrainerGym(patch: { workMode: WorkMode; gymName: string }): Promise<void> {
-  await call('/v1/trainers/me', { method: 'PATCH', body: JSON.stringify(patch) });
+/**
+ * PATCH is partial **by key presence**, so serialising the object as it is is
+ * load-bearing: `{validityDays: null}` CLEARS the expiry, while a field left off
+ * is untouched. `owner` is never sent — the server answers 400
+ * `PACK_OWNER_IMMUTABLE`, because moving a pack between the two lists would
+ * re-attribute every package already sold from it.
+ */
+export async function patchPack(
+  packId: string,
+  patch: Partial<PackWrite> & { status?: 'active' | 'inactive'; orderIndex?: number },
+): Promise<PriceListPack> {
+  return parsePack(await call<PackWire>(`/v1/packs/${packId}`, { method: 'PATCH', body: patch }));
+}
+
+/** Soft delete, and only for a pack nothing was ever sold from (409 `PACK_SOLD` otherwise). */
+export async function deletePackRow(packId: string): Promise<void> {
+  await call<null>(`/v1/packs/${packId}`, { method: 'DELETE' });
+}
+
+/**
+ * The gym on the profile. A gym needs `gym_floor` among the training modes
+ * (`trainer_business_gym_needs_floor`), so choosing one adds the mode in the same
+ * save rather than refusing a trainer who never ticked it. `gymPlace: null`
+ * clears the link AND the name together; `gymName` alone is a typed gym with no
+ * place behind it.
+ */
+export async function patchTrainerGym(patch: {
+  gymName?: string;
+  gymPlace?: PlaceHit | null;
+  trainingModes?: string[];
+}): Promise<void> {
+  await call<unknown>('/v1/trainers/me', { method: 'PATCH', body: patch });
 }

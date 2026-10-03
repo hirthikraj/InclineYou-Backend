@@ -1,43 +1,50 @@
-import { perSession, type PackType } from '@/lib/setup/money';
 import { rupees } from '@/lib/today/time';
-import type { WorkMode } from '@/lib/setup/options';
+import type { PackBasis, PackService } from './vocab';
 
 /**
- * `buildPacks` from `app/src/money/money.ts`, on this half.
+ * The price list's model — what the screen shows, derived from the server's rows.
  *
- * Ported rather than re-derived, because the two halves must not disagree about
- * what a price list *says*. The one real difference is where the second list
- * comes from: the phone shows it whenever a gym has a name, and this reads
- * `workMode` as well — which is the same answer asked out loud instead of
- * inferred, and the whole of what "independent shows one list, both shows two"
- * means on this screen.
+ * `buildPacks` on the phone is the ancestor, and the two halves must not
+ * disagree about what a price list *says*. What changed on this half is the
+ * source: v1 packs carry `service` + `basis`, a gym pack carries the trainer's
+ * share, and the gym's own part is derived by the server (`gymSharePercent` /
+ * `gymShareAmount`) and only displayed here — never typed, never recomputed.
  */
 
 /* ------------------------------------------------------------ public shapes */
 /* Declared here rather than in `api.ts` so the client component can import
-   them: `api.ts` is `server-only`, and `modeOf` is a value, not a type. */
+   them: `api.ts` is `server-only`. */
 
 /**
  * One entry on a price list, as the screen needs it.
  *
- * Wider than `lib/setup/money.ts`'s `Pack` by two fields setup has no use for:
- * `status`, because setup only ever adds and this screen retires and restores,
- * and `activeClients`, because "3 clients are on it" is what makes retiring a
- * decision rather than a click.
+ * `status` because setup only ever adds and this screen retires and restores;
+ * `activeClients` and `soldCount` because "3 on it · sold 14" is what makes
+ * retiring or deleting a decision rather than a click — `include=usage` brings
+ * both down in one grouped pass, so no sold package ever reaches this screen.
  */
 export interface PriceListPack {
   id: string;
   name: string;
-  type: PackType;
-  /** Null on a monthly fee — there is no session count to divide by. */
+  service: PackService;
+  basis: PackBasis;
+  /** Null on a period pack — there is no session count to divide by. */
   sessions: number | null;
   amount: number;
   validityDays: number | null;
   status: 'active' | 'inactive';
-  /** Whose list this is on. The gym's counter sets its own; see V19. */
+  /** Whose list this is on. The gym's counter sets its own prices. */
   owner: 'trainer' | 'gym';
   orderIndex: number;
   activeClients: number;
+  soldCount: number;
+  /** A gym pack carries EXACTLY ONE of these two: the trainer's part of the price. */
+  trainerSharePercent: number | null;
+  trainerShareAmount: number | null;
+  /** What the gym keeps — the server's, derived, never typed. Null on a pack with no share. */
+  gymSharePercent: number | null;
+  gymShareAmount: number | null;
+  version: string;
 }
 
 /** A package somebody is actually running — only what *Ending soon* needs. */
@@ -50,14 +57,10 @@ export interface LivePackage {
 
 export interface PacksTrainer {
   name: string;
-  /**
-   * Which lists exist. Null on a profile that predates the question — see
-   * `modeOf` below, which is where the fallback lives rather than here, so the
-   * raw answer and the derived one never get confused for each other.
-   */
-  workMode: WorkMode | null;
+  /** The gym on the profile, typed or picked. Null when there is none. */
   gymName: string | null;
-  gymSharePercent: number | null;
+  /** Kept so saving the gym can add `gym_floor` without dropping the other modes. */
+  trainingModes: string[];
   setupComplete: boolean;
 }
 
@@ -69,15 +72,6 @@ export interface PacksData {
   now: number;
 }
 
-/**
- * A trainer with a gym on file from before `workMode` existed was shown both
- * price lists, so `both` is the faithful reading of pre-workMode data — the same
- * fallback `PacksForm` applies at setup. Everything else is on their own.
- */
-export function modeOf(trainer: PacksTrainer): WorkMode {
-  return trainer.workMode ?? (trainer.gymName ? 'both' : 'independent');
-}
-
 /** Three sessions left is when renewing stops being early and starts being late.
  *  The phone's constant, same value, same file position. */
 export const PACK_ENDING_AT = 3;
@@ -85,17 +79,23 @@ export const PACK_ENDING_AT = 3;
 export interface PackRow {
   id: string;
   name: string;
-  type: PriceListPack['type'];
+  service: PackService;
+  basis: PackBasis;
   sessions: number | null;
   amount: number;
+  /** The whole price over the count — and on a gym pack, the TRAINER's part of it. */
   perSession: number | null;
   validityDays: number | null;
   active: boolean;
   owner: 'trainer' | 'gym';
-  /** How many people are on it right now. Counted by the server, not here. */
+  orderIndex: number;
+  /** How many people are on it right now, and how many it has ever sold. Counted by the server. */
   clients: number;
-  /** "₹750 each · 3 clients on this" — the subtitle under the name. */
-  detail: string;
+  sold: number;
+  /** Gym packs only: what the trainer gets and what the gym keeps, per sale at this price. */
+  split: { trainer: number; gym: number; trainerLabel: string } | null;
+  /** The source row, for the edit form. */
+  source: PriceListPack;
 }
 
 export interface EndingRow {
@@ -108,7 +108,7 @@ export interface EndingRow {
 }
 
 export interface PacksView {
-  /** Which lists this screen draws. Nothing else branches on `workMode`. */
+  /** Which lists this screen draws. */
   showsOwn: boolean;
   showsGym: boolean;
   selling: PackRow[];
@@ -120,26 +120,48 @@ export interface PacksView {
   subtitle: string;
 }
 
+/** The trainer's part of a gym pack's price, from whichever of the two forms it was entered in. */
+function trainerPart(p: PriceListPack): number | null {
+  if (p.trainerShareAmount !== null) return p.trainerShareAmount;
+  if (p.trainerSharePercent !== null) return Math.round((p.amount * p.trainerSharePercent) / 100);
+  return null;
+}
+
 function toRow(pack: PriceListPack): PackRow {
-  const per = perSession(pack);
-  const on = pack.activeClients;
+  const trainer = pack.owner === 'gym' ? trainerPart(pack) : null;
+  /* The gym's part is the server's own figure whenever it sent one; the
+     subtraction is only the fallback for a pack whose derived field is absent,
+     so a stale API cannot make the two halves of one price disagree. */
+  const gym = trainer === null
+    ? null
+    : pack.gymShareAmount !== null ? pack.gymShareAmount : Math.max(pack.amount - trainer, 0);
+  const basis = trainer ?? pack.amount;
   return {
     id: pack.id,
     name: pack.name,
-    type: pack.type,
+    service: pack.service,
+    basis: pack.basis,
     sessions: pack.sessions,
     amount: pack.amount,
-    perSession: per,
+    perSession: pack.basis === 'sessions' && (pack.sessions ?? 0) > 0
+      ? Math.round(basis / (pack.sessions as number))
+      : null,
     validityDays: pack.validityDays,
     active: pack.status === 'active',
     owner: pack.owner,
-    clients: on,
-    detail: [
-      per != null ? `${rupees(per)} each` : pack.type === 'monthly' ? 'per month' : null,
-      `${on} client${on === 1 ? '' : 's'} on this`,
-    ]
-      .filter(Boolean)
-      .join(' · '),
+    orderIndex: pack.orderIndex,
+    clients: pack.activeClients,
+    sold: pack.soldCount,
+    split: trainer === null || gym === null
+      ? null
+      : {
+          trainer,
+          gym,
+          trainerLabel: pack.trainerSharePercent !== null
+            ? `${pack.trainerSharePercent}%`
+            : rupees(trainer),
+        },
+    source: pack,
   };
 }
 
@@ -147,7 +169,6 @@ export function buildPacks(input: {
   packs: PriceListPack[];
   live: LivePackage[];
   clientNames: Map<string, string>;
-  mode: WorkMode;
   gymName: string | null;
 }): PacksView {
   const rows = [...input.packs]
@@ -158,18 +179,14 @@ export function buildPacks(input: {
   const gymSelling = rows.filter((r) => r.active && r.owner === 'gym');
 
   /**
-   * WHOSE LISTS EXIST — the rule this screen was built for.
-   *
-   * *On my own* draws one list. *Both* draws two. *At a gym* draws the gym's,
-   * and still draws the trainer's whenever they have prices of their own on
-   * file, because hiding a list a trainer has already filled in is losing their
-   * data behind a radio button they can change back.
-   *
-   * A defaults hint, never a gate — the same words `lib/setup/options.ts` uses.
-   * Who actually collects is decided per client at add-client time.
+   * WHOSE LISTS EXIST. The trainer's own always does. The gym's draws whenever
+   * there is a gym on the profile, and also whenever gym packs are on file —
+   * hiding a list a trainer has already filled in is losing their data behind a
+   * setting they can change back. (`workMode` is gone from the wire: the gym
+   * name, with `gym_floor` among the training modes, is what v1 keeps.)
    */
-  const showsOwn = input.mode !== 'gym' || selling.length > 0;
-  const showsGym = input.mode === 'gym' || input.mode === 'both';
+  const showsOwn = true;
+  const showsGym = input.gymName !== null || rows.some((r) => r.owner === 'gym');
 
   const ending: EndingRow[] = input.live
     .filter((p) => (p.sessionsRemaining ?? 0) > 0 && (p.sessionsRemaining ?? 0) <= PACK_ENDING_AT)
@@ -194,8 +211,7 @@ export function buildPacks(input: {
     selling,
     gymSelling,
     // Retired keeps both owners together. A price nobody sells any more is a
-    // receipt whichever list it came off, and two dim groups of one row each is
-    // ceremony for something already below the fold.
+    // receipt whichever list it came off.
     retired: rows.filter((r) => !r.active),
     ending,
     activePackages: input.live.length,
@@ -207,13 +223,10 @@ export function buildPacks(input: {
 }
 
 /**
- * "5 you sell · 6 active", or "1 you sell · 1 Revoke Gym sells · 6 active".
+ * "5 you sell · 6 active", or "1 you sell · 1 Iron Yard sells · 6 active".
  *
- * The two halves echo the two group HEADINGS on the screen word for word, which
- * is the whole reason it is not the phone's phrasing. `buildPacks` on the phone
- * writes "1 yours · 1 the gym's" — read at 1440 against real data, that renders
- * as **"1 yours"**, which is not English, and "1 the gym's" only escapes it by
- * being wrong in a way the eye skims. A count and a verb agree at every number.
+ * The two halves echo the two group HEADINGS on the screen word for word. A
+ * count and a verb agree at every number.
  */
 function subtitleFor(
   showsGym: boolean,
@@ -232,13 +245,10 @@ function subtitleFor(
  * Checks the one thing that is easy to get wrong and expensive to leave wrong:
  * a shorter pack should cost MORE per session than a longer one. Pricing them
  * the other way round means the discount is being given for nothing.
- *
- * The arithmetic nobody does on paper, which is the entire argument for a screen
- * that lists prices side by side.
  */
 export function pricingNote(rows: PackRow[]): string | null {
   const priced = rows
-    .filter((r) => r.sessions != null && r.perSession != null && r.sessions > 1)
+    .filter((r) => r.basis === 'sessions' && r.sessions != null && r.perSession != null && r.sessions > 1)
     .sort((a, b) => (a.sessions as number) - (b.sessions as number));
   if (priced.length < 2) return null;
 
