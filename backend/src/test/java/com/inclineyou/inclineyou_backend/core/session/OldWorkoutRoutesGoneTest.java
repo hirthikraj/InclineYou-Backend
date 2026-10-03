@@ -19,13 +19,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 
 /**
- * The old workout-as-log WRITE routes are gone (3 Oct 2026): the log is the session, written
- * through {@code /v1/sessions/{id}/…} (see core/sessionlog). Each of the eight removed
- * method + path pairs must answer a 4xx "no such route / method" and never a 5xx or a 2xx, and
- * the five reads that remain must still be mapped.
+ * The old workout-as-log API is gone: the eight writes on 3 Oct 2026 and the five reads after the
+ * Progress pass, because the log is the session, written and read through {@code /v1/sessions/{id}/…}
+ * (core/sessionlog) and {@code /v1/clients/{id}/set-history}. Each removed method + path pair must
+ * answer 404 or 405 — no handler — and never a 2xx or a 5xx.
  */
 @SpringBootTest
-class OldWorkoutWritesGoneTest {
+class OldWorkoutRoutesGoneTest {
 
     @Autowired WebApplicationContext context;
 
@@ -67,18 +67,12 @@ class OldWorkoutWritesGoneTest {
     }
 
     @Test
-    @DisplayName("the five reads that stay are still mapped (any answer but 404/405)")
-    void readsStillExist() throws Exception {
-        // These still run pre-v1 SQL, so a 200 or a database error are both fine here: only "no such route" is not.
-        for (String path : new String[]{"/v1/workouts", "/v1/workouts/sets?clientId=" + ID, "/v1/workouts/" + ID,
-                "/v1/workouts/" + ID + "/sets", "/v1/workouts/" + ID + "/exercises"}) {
-            int status;
-            try {
-                status = answer(get(path));
-            } catch (Exception e) {
-                continue; // a thrown database error means the handler ran, which is what we are proving
-            }
-            assertTrue(status != 404 && status != 405, "GET " + path + " must still be mapped but answered " + status);
-        }
+    @DisplayName("the five old /v1/workouts reads answer 404 or 405 too")
+    void readsAreGone() throws Exception {
+        gone("GET /v1/workouts", get("/v1/workouts"));
+        gone("GET /v1/workouts/sets", get("/v1/workouts/sets?clientId=" + ID));
+        gone("GET /v1/workouts/{id}", get("/v1/workouts/" + ID));
+        gone("GET /v1/workouts/{id}/sets", get("/v1/workouts/" + ID + "/sets"));
+        gone("GET /v1/workouts/{id}/exercises", get("/v1/workouts/" + ID + "/exercises"));
     }
 }

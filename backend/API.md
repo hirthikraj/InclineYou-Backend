@@ -40,7 +40,7 @@ and indexes — see [`SCHEMA.md`](SCHEMA.md).
 | [Programs](#programs) | `/v1/programs` | 11 |
 | [Workout templates](#workout-templates) | `/v1/workout-templates` | 5 | V13
 | [Scheduled sessions (diary)](#scheduled-sessions-diary) | `/v1/sessions` | 6 |
-| [Workout sessions & set logs](#workout-sessions--set-logs) | `/v1/workouts` (reads only) | 5 |
+| [Workout sessions & set logs](#workout-sessions--set-logs) | `/v1/workouts` — **removed** | 0 |
 | [Packs (the price list)](#packs-the-price-list) | `/v1/packs` | 3 |
 | [Packages & payments (money book)](#packages--payments-money-book) | `/v1/clients/{id}/packages`, `/v1/packages`, `/v1/payments` | 14 |
 | [Nudges](#nudges) | `/v1/clients/{clientId}/nudge`, `/v1/nudges`, `/v1/nudge-templates` | 6 |
@@ -2100,52 +2100,7 @@ today).
 
 ## Workout sessions & set logs
 
-`session/WorkoutSessionController.java` — what *actually happened*, the **old workout-as-log reads**.
-
-**POST / PUT / DELETE under `/v1/workouts` were removed on 3 Oct 2026; the log is the session — see [Log session v1.1](#log-session-v11-3-oct-2026).** Eight routes went: `POST /v1/workouts`, `PUT /v1/workouts/{id}`, `POST /v1/workouts/{id}/sets`, `PUT` and `DELETE /v1/workouts/{id}/sets/{setId}`, and `POST`, `PUT` and `DELETE` on `/v1/workouts/{id}/exercises`. They answer `404`/`405` now. The five reads below stay until the Progress and exercise-history pages move off them (they still read the pre-v1 `workout_session` table).
-
-### `GET /v1/workouts?clientId=…`
-**Purpose:** the workout history, optionally per client.
-
-Every workout response carries **`exerciseCount`** (appended last, 23 Sep 2026):
-how many movements are in the log, **counted on read, never stored**, for the
-client file's Sessions table. It is the live `workout_exercise` cards (not
-removed, not deleted). **A log with no cards at all falls back to the distinct
-movements in its `set_log`**, because `workout_exercise` arrived with V13 and a
-log written before it — or by a phone build that predates it — has a full sheet
-and no cards; counting only cards would print *0 exercises* against it. A log
-whose cards were all removed genuinely holds nothing and answers `0`. No
-migration.
-
-### `GET /v1/workouts/{id}`
-**Purpose:** read one logged session.
-
-Every workout response carries **`endedAt`** — V13's column, stamped when the
-trainer *closed* the log. **Null means the log is still open**, which is the only
-thing that makes a scheduled session *in session*. (It is written through
-`POST /v1/sessions/{id}/end` now.)
-
-### `GET /v1/workouts/sets?clientId=…&exerciseId=…` · **`STANDARD` tier**
-**Purpose:** **every set one client has ever logged**, in one request, optionally
-narrowed to one exercise. `clientId` is required; `exerciseId` is not.
-
-Deliberately **unbounded**: a window is what produced the wrong answer. Rows come
-back **oldest first**, so a caller folding them into a running best or a
-per-set-number *previous* does it in one pass. Ownership is the join, not a
-second check — another trainer's client matches no session and so no set, and
-comes back empty.
-
-### `GET /v1/workouts/{id}/sets`
-**Purpose:** every set logged in this session.
-
-Every set — on both set routes — carries **`sessionDate`**, the owning log's date
-as ISO `yyyy-MM-dd`. A set's date is the *session's*, never its `created_at`: a
-Tuesday session typed up on Thursday is a Tuesday session, and both *Previous*
-and the record test order by when the training happened. Appended last.
-
-### `GET /v1/workouts/{id}/exercises`
-**Purpose:** today's card list — V13's `workout_exercise`: what is in the grid,
-in what order, what was asked for, and what was swapped or taken out.
+**Removed.** `/v1/workouts` no longer exists. The eight writes went on 3 Oct 2026 and the five reads (`GET /v1/workouts`, `/sets`, `/{id}`, `/{id}/sets`, `/{id}/exercises`) went with the Progress pass the same day. The log is the session: read it through [Log session v1.1](#log-session-v11-3-oct-2026) (`GET /v1/sessions/{id}/log`), list sessions with `GET /v1/sessions` (each row carries `startedAt`, `endedAt` and `log` totals), and read a client's sets through `GET /v1/clients/{id}/set-history`.
 
 ## Packs (the price list)
 
