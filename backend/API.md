@@ -23,11 +23,13 @@ and indexes — see [`SCHEMA.md`](SCHEMA.md).
 | --- | --- | --- | --- |
 | [Health](#health) | `/health` | 1 | Reviewed
 | [Auth & membership](#auth--membership) | `/v1/auth` | 8 | Reviewed
-| [Sessions (web sign-in)](#sessions-web-sign-in) | `/v1/auth/session` | 3 | V41
+| [Sessions (web sign-in)](#sessions-web-sign-in) | `/v1/auth/session` | 3 | V41 · **deprecated** by [Settings v1.1](#settings-v11--account--sign-in-3-oct-2026)
+| [Settings v1.1 — account & sign-in](#settings-v11--account--sign-in-3-oct-2026) | `/v1/auth/step-up` · `/v1/auth/sessions` · `/v1/trainers/me/phone` · `DELETE /v1/trainers/me` | 9 | v1.1
 | [Workspaces](#workspaces) | `/v1/tenants` | 8 | V37–V42
 | [Trainer profile](#trainer-profile) | `/v1/trainers` | 2 | Reviewed
 | [The account](#the-account) | `/v1/trainers/me/phone`, `/v1/trainers/me` | 5 | V36
-| [Working hours](#working-hours) | `/v1/working-hours` | 1 |
+| [Settings v1.1 — profile, working week & messages](#settings-v11--profile-working-week--messages) | `/v1/trainers/me/consent` · `/setup/complete` · `PATCH /v1/working-hours` · `/v1/nudge-templates` | 6 | v1.1
+| [Working hours](#working-hours) | `/v1/working-hours` | 2 |
 | [Team coaching](#team-coaching) | `/v1/team` | 29 |
 | [Clients](#clients) | `/v1/clients` | 10 |
 | [Progress](#progress) | `/v1/clients/{clientId}/progress` | 1 |
@@ -164,11 +166,17 @@ branches on (`exception/GlobalExceptionHandler.java`):
 | `PACK_NEEDS_NAME` · `PACK_NEEDS_PRICE` · `PACK_NEEDS_SESSIONS` · `PACK_FIELD_INVALID` · `PACK_FIELD_UNKNOWN` | 400 | A price-list entry that cannot be written as sent. |
 | `PACK_OWNER_IMMUTABLE` | 400 | A pack's `owner` cannot change — it would re-attribute every package sold from it. |
 | `PACK_NOT_FOUND` | 404 | Not on the caller's price list. |
-| `NUDGE_TEMPLATE_UNKNOWN` · `NUDGE_TEMPLATE_EMPTY` · `NUDGE_TEMPLATE_TOO_LONG` | 400 | A wording override for a template that does not exist, with no words, or over the cap. |
+| `UNKNOWN_VARIABLE` | 400 | v1.1 — a `{token}` in a nudge-template body that the template does not fill; the sentence names the ones it does. |
+| `CONSENT_REQUIRED` | 400 | v1.1 — `POST /v1/trainers/me/consent` with a `policyVersion` that is missing or is not the notice in force (`app.privacy.policy-version`). |
+| `PROFILE_TOO_LONG` | 400 | v1.1 — `headline` over 80 or `bio` over 1200 on `PATCH /v1/trainers/me`; refused, never truncated. |
+| ~~`NUDGE_TEMPLATE_UNKNOWN` · `NUDGE_TEMPLATE_EMPTY` · `NUDGE_TEMPLATE_TOO_LONG`~~ | — | Retired in v1.1 by the nudge-templates rewrite: an unknown name is a plain 404, a blank or over-long body is `VALIDATION`. |
 | `NUDGE_CLIENT_NOT_FOUND` | 404 | The client is no longer on the caller's roster. |
 | `NUDGE_NO_PHONE` | 422 | The client has no phone number, so there is nowhere to send the link. |
 | `EMAIL_INVALID` · `EMAIL_TOO_LONG` | 400 | V36's contact address is not shaped like one, or is over 254 characters. |
-| `DELETE_NOT_CONFIRMED` | 400 | Closing the account: the typed confirmation is not this account's number. |
+| `DELETE_NOT_CONFIRMED` | 400 | Closing the account (deprecated typed path): the typed confirmation is not this account's number. |
+| `STEP_UP_REQUIRED` | 403 | A dangerous act (change number, close account) without a valid step-up ticket for it. See *Settings v1.1*. |
+| `TICKET_EXPIRED` | 401 | The step-up ticket was right but has aged out or been spent — start the step-up again. |
+| `PHONE_INVALID` | 400 | The new number is not an E.164 Indian mobile. |
 | `ASSESSMENT_NOT_FOUND` | 404 | **V14.** Not one of the caller's sent assessments, or deleted. (V5 used this code for a body reading; that is now `READING_NOT_FOUND`. V5 never shipped, so no build reads the old meaning.) |
 | `ASSESSMENT_TEMPLATE_NOT_FOUND` | 404 | **V14.** Not one of the caller's assessment templates, or deleted. |
 | `READING_NOT_FOUND` | 404 | **Retired by V22** with the routes that raised it (`PUT` / `DELETE /v1/clients/{id}/body-metrics/{metricId}`). Nothing returns it; the code is kept out of reuse. |
@@ -310,6 +318,8 @@ live membership anywhere for this number.
 ---
 
 ## Sessions (web sign-in)
+
+> **Deprecated 3 Oct 2026** — `GET/DELETE /v1/auth/session` and `/all` are replaced by `/v1/auth/sessions` ([Settings v1.1](#settings-v11--account--sign-in-3-oct-2026)); kept until the web has moved. They now stamp `revoked_reason` (`sign_out` / `sign_out_all`), which the table's CHECK requires.
 
 **Two kinds of credential, one interface.** `AuthTokenService` picks; nothing
 below it can tell which answered.
@@ -634,6 +644,8 @@ the same three errors with the same `code`s and the same `retryAfterSeconds`.
 
 ### Changing the number you sign in with
 
+> **Superseded 3 Oct 2026 by [Settings v1.1](#settings-v11--account--sign-in-3-oct-2026)** — the proof of the *current* number is now one shared **step-up** (`/v1/auth/step-up`), `confirm` no longer returns a token, and deletion is confirmed by a ticket, not the typed number. `/phone/challenge`, `/phone/verify` and the typed-number DELETE body below still answer, as **deprecated**, until the web migrates.
+
 Four calls, and **two numbers are proved, not one**.
 
 ```
@@ -723,13 +735,7 @@ already gone.
 
 ## Working hours
 
-`trainer/WorkingHoursController.java` — the trainer's own week. **Read only.**
-
-Still read only after the web gained a working-week editor on 29 Aug 2026:
-`/settings/profile/work` reads this route and **writes through `/v1/sync/push`**,
-the one path that has ever written this table. A second write path on a table the
-phone also writes offline is how the two halves drift, which is the reason this
-controller has no PUT — see the note at the top of `WorkingHoursService`.
+`trainer/WorkingHoursController.java` — the trainer's own week. **Read, and (v1.1, 3 Oct 2026) `PATCH`** — replaces only the weekdays listed; see [Settings v1.1](#settings-v11--profile-working-week--messages). The phone still writes this table offline through `/v1/sync/push`.
 
 ### `GET /v1/working-hours`
 **Purpose:** the working windows the diary and the day ribbon are drawn on.
@@ -2746,62 +2752,26 @@ gave `client_note`, and for the same reason: a team widens reads over a
 teammate's roster and must not widen this.
 
 ### `GET /v1/nudge-templates`
-`nudge/NudgeTemplateController.java` · **`STANDARD` tier.** V32.
+`nudge/NudgeTemplateController.java` · **`STANDARD` tier.** V32; **rewritten to v1.1 (3 Oct 2026)** — see [Settings v1.1](#settings-v11--profile-working-week--messages).
 
 **Purpose:** the trainer's message library — all eight, merged.
 
-Returns `[{ "name", "label", "purpose", "body", "isDefault", "variables":
-[{ "token", "meaning" }] }]`. `body` is the trainer's wording where they have
-saved one and the catalogue's default where they have not; `isDefault` says
-which, and gates the *Reset* button.
+Returns `{ "items": [{ "name", "label", "purpose", "body", "isDefault", "variables": [{ "token", "label", "meaning" }], "version" }] }`, **always the eight names in the `nudge_template_name` check's order** — `payment_reminder · renewal · missed_session · re_engagement · session_reminder · session_summary · well_done · check_in`. `body` is the trainer's wording where they have saved one and the catalogue's default where they have not; `isDefault` says which and gates *Reset*; `version` is the override row's `updated_at` as epoch ms in a string, **`null` while it is the built-in wording**. `variables[].label` is the contract's word; `meaning` carries the same text for 1.0 callers. **Cacheable:** `ETag` (a hash of every template's version) and `If-None-Match` → `304`.
 
-**`nudge_template` is an OVERRIDE table, not a seeded one.** A trainer who has
-never opened the library has no rows at all. Seeding eight on signup was the
-obvious alternative and it is wrong: it freezes today's copy into every account
-that ever existed, so improving a default sentence — and these are sentences a
-trainer sends to somebody they see three times a week — would reach nobody.
+**`nudge_template` is an OVERRIDE table, not a seeded one.** A trainer who has never opened the library has no rows. Seeding eight on signup would freeze today's copy into every account, so improving a default sentence would reach nobody. The v1 table has no `deleted_at` and no `id`: a row is `(trainer_id, template, body, created_at, updated_at)`, and a reset is a real `DELETE`.
 
-**The label, the purpose and the variables are on the wire because the web holds
-no copy of any of them.** The root `CLAUDE.md` opens with what happens when a
-policy number lives in three files; eight message bodies is a worse version of
-the same trap, because a drifted sentence is one a client actually receives.
+**The label, the purpose and the variables are on the wire because the web holds no copy of any of them** — eight message bodies in two places is how a drifted sentence reaches a client.
 
-**Why this is not `nudge_rule.message`.** V12's `nudge_rule` already carries a
-message column with `{name}`/`{days}`/`{amount}` substitution, and it is the
-wrong table: it is one row per trainer per KIND — `quiet` | `pack_low` |
-`overdue` | `well_done` | `birthday` — which the phone's `NudgeRulesScreen`
-iterates and renders, and it answers *when should a nudge be raised, and should
-it go automatically*. Writing template names into its `kind` would put rows that
-editor cannot label into a table it walks. The honest cost is stated in V32: a
-trainer who edits a rule's draft on the phone and the same template's body on the
-web has two strings. They do not fight — the phone's automation reads its rule,
-these routes read this table — and closing the overlap means the phone adopting
-`nudge_template`, in a commit that moves both halves.
+**Not `nudge_rule.message`.** The phone's `nudge_rule` is one row per trainer per *kind* and answers *when should a nudge be raised*; this answers *what does it say*. A trainer who edits both has two strings until the phone adopts `nudge_template`.
 
 ### `PUT /v1/nudge-templates/{name}` · `DELETE /v1/nudge-templates/{name}`
 **Purpose:** save the trainer's own wording; reset to the built-in.
 
-`PUT` body `{ "body": "…" }`, upsert on `(trainer_id, name)` — saving twice is one
-row. `DELETE` is a soft delete that answers **the default** rather than `204`, so
-the screen can repaint without a second request, and it is idempotent: resetting a
-template nobody overrode writes nothing and returns the default.
+`PUT` body `{ "body": "…" }` (≤ 1000), **`If-Match` required** (`428 PRECONDITION_REQUIRED` without it): the `version` read, or **`*` to create the first override** (`412` if one already exists). A stale version, or a version for a template with no override, is `412 PRECONDITION_FAILED`. Answers the template row with its new `version`. Refusals: unknown name `404` (plain, no `code`); blank body or over 1000 `400 VALIDATION`; a `{token}` the template does not fill `400 UNKNOWN_VARIABLE` — *which replaces 1.0's leave-it-verbatim rule: a typo caught on save never reaches a client.*
 
-**The body is not validated for which variables it contains.** A trainer who
-deletes `{amount}` from the payment reminder has written a payment reminder that
-does not name the figure, which is a legitimate thing to want. An unknown token
-is left in the message **verbatim** rather than blanked, so a typo shows up as
-itself in the WhatsApp composer where the trainer can see it — rendering silently
-is how a client receives "Hi , you owe .".
+`DELETE` removes the override and answers **the default** (`version: null`) so the screen repaints without a second request. **Idempotent** — resetting a template nobody overrode is `200`; an unknown name is `404`.
 
-Three refusals, each a sentence: `400 NUDGE_TEMPLATE_UNKNOWN` for a name outside
-the catalogue, `400 NUDGE_TEMPLATE_EMPTY` (an empty override is a DELETE, not a
-save — a stored empty body sends an empty WhatsApp), and
-`400 NUDGE_TEMPLATE_TOO_LONG` past 600 characters, because a reminder nobody
-reads to the end is a reminder that did not work.
-
-**`nudge_template` is not in sync**, per V26's, V28's, V29's and V30's precedent.
-No phone build notices, and the phone keeps its own built-in wording until it
-adopts these routes.
+**`nudge_template` is not in sync**, per V26's, V28's, V29's and V30's precedent. `NudgeService` and `NudgeDraftService` read the override through `NudgeTemplateJdbcRepository`.
 
 ---
 
@@ -2928,6 +2898,74 @@ New error codes: `PACK_NAME_TAKEN` · `PACK_SOLD` · `GYM_PACK_NEEDS_GYM` · `PA
 - **`GET /v1/clients/{clientId}/set-history`** (core/progress — documented here because the console's history column and its "Repeat 3 Oct · Push A" offer read it) gains **`sessions`**: a map keyed by session id holding `{workoutName}` (`null` for a session with no workout), for the sessions that appear on *this page* only — the same idiom as `exercises`, so a 5,000-set page does not repeat a name 5,000 times. Appended last: `{exercises, items, nextCursor, sessions}`; every existing field and the item shape are unchanged. The name is joined in the same query (`scheduled_session.workout_id → workout.name`).
 - **`GET /v1/clients/{clientId}/set-history`** rows also carry **`setId`** (the `set_log.id`, additive, 3 Oct) — a row used to have no id the web could write to, so the exercise-history page's *Correct a set* sent a synthesised key and got 400. A past set is corrected with `PATCH /v1/sessions/{sessionId}/sets/{setId}` using the row's `sessionId` and `setId`.
 - **Marking a session done is allowed once its log has been opened, whatever the clock says.** `POST /v1/sessions/{id}/done` and the batch `POST /v1/sessions/done` (one shared rule, `SessionWriteService.markOne`) used to refuse any session whose scheduled start had not come (`409 SESSION_NOT_STARTED`, *"This session's start time hasn't come yet."*). A session with `started_at` set is now treated as started: a trainer who starts early can finish. The same 409 (batch: `skipped` / `SESSION_NOT_STARTED`) still answers a session that has **not** been started and whose time has not come, so a planned future session cannot be marked done by accident. Marking it done also closes the open log (`ended_at`) and charges the pack exactly as before. The no-show rules are unchanged (a session whose log was opened can't be a no-show).
+
+## Settings v1.1 — account & sign-in (3 Oct 2026)
+
+Contract: `release/api-contract-v1.1.html`, Settings (A9–A10). `core/trainer/StepUp*`, `AccountController`, `AccountDeleteController`; `core/auth/Sessions*`. **TRAINER-only** except the sessions routes (any signed-in role). AUTH tier for `/v1/auth/**` and `/v1/trainers/me/phone/*` (each spends or settles an OTP); `DELETE /v1/trainers/me` is STANDARD.
+
+### Step-up — one proof for the two dangerous acts
+
+| Route | What it does |
+| --- | --- |
+| `POST /v1/auth/step-up` `{purpose}` → `204` | A code to the **current** number. `purpose` is `phone_change` or `account_deletion`; anything else is 400 `VALIDATION`. The OTP service's waits, ceiling and lock apply unchanged (`OTP_THROTTLED` · `OTP_LOCKED` as at sign-in). |
+| `POST /v1/auth/step-up/verify` `{purpose, otp}` → `{ticket, expiresAt}` | The code back. `expiresAt` is epoch ms, ten minutes out. A wrong code is `422 OTP_WRONG` (with `attemptsLeft`) / `OTP_EXPIRED` / `OTP_LOCKED`. |
+
+**The ticket** is a signed JWT (`role: step_up`) carrying the trainer id, the `purpose`, the number that was proved, and a binding to **the session it was earned on** (SHA-256 of the token; `-` for a JWT caller). It travels in the body of `phone/request` · `phone/confirm` or in the **`X-Step-Up-Ticket`** header of `DELETE /v1/trainers/me` — never as `Authorization`, and a `step_up` role is not `ROLE_TRAINER`, so presenting it as a bearer authenticates nothing. **Single use is by state change, not by a table:** the number it proved stops being the account's number (phone change) or the account stops existing (deletion), and `require` re-reads the live number, so the ticket dies with the thing it was about. Stateless, so there is nothing to sweep or to leak.
+
+| Code | Status | Means |
+| --- | --- | --- |
+| `STEP_UP_REQUIRED` | 403 | no ticket, malformed or forged, wrong purpose, wrong trainer, or earned on a different browser session. The client starts the step-up. |
+| `TICKET_EXPIRED` | 401 | it was right and has aged out (10 min) or been spent (the number it proved is no longer the account's). The client restarts the step-up with a fresh code. |
+
+### Changing the number — two requests after the step-up
+
+| Route | What it does |
+| --- | --- |
+| `POST /v1/trainers/me/phone/request` `{ticket, phone}` → `204` | Ticket purpose `phone_change`. `400 PHONE_INVALID` (not an E.164 Indian mobile), `400 PHONE_UNCHANGED`, `409 PHONE_TAKEN` (never says whose; soft-deleted rows count as occupied) — all **before** a code is spent. Then a code to the new number. |
+| `POST /v1/trainers/me/phone/confirm` `{ticket, phone, otp}` → `{phone}` | The new number's code. `trainer`/`app_user` swap and **every other web session is ended** (`revoked_reason = 'phone_changed'`) in one transaction; the caller's own session survives, so **no token comes back** — keep the one you have. A trainer's session subject is the trainer id, so a JWT stays valid too (the phone is not signed out by this). |
+
+### Signed-in browsers
+
+| Route | What it does |
+| --- | --- |
+| `GET /v1/auth/sessions` → `{items: [{id, userAgent, issuedAt, lastSeenAt, current}]}` | Live sessions of the caller, newest activity first; times are epoch ms; exactly one row has `current: true`. Empty for a JWT caller (a JWT is stored nowhere). |
+| `DELETE /v1/auth/sessions/{id}` → `204` | End one (`sign_out`). **Idempotent**: an id that is not yours, already ended or never existed is a quiet `204` — nothing to leak, nothing to retry. A non-UUID is 400 `VALIDATION`. |
+| `DELETE /v1/auth/sessions/current` → `204` | Sign out this browser (what `DELETE /v1/auth/session` did). |
+| `DELETE /v1/auth/sessions?scope=others` → `204` | End every session but this one (`sign_out_all`). Any other `scope`, or none, is 400 `VALIDATION`. |
+
+### Closing the account
+
+`DELETE /v1/trainers/me` → `204`, header **`X-Step-Up-Ticket: <ticket>`** (purpose `account_deletion`), **no body**. Soft delete on `trainer` and `app_user`, **every** session ended (`sign_out_all`), the number **not** released (see *The account* above — unchanged). No ticket → `403 STEP_UP_REQUIRED`. A second call is `404`. **Deprecated transitional path:** with no ticket header and the old body `{confirmPhone}` the typed-number confirmation still works (`400 DELETE_NOT_CONFIRMED` on a mismatch); remove once the web sends the ticket.
+
+### Deprecated, still answering (remove after the web migration)
+
+`POST /v1/trainers/me/phone/challenge` → `200` and `POST /v1/trainers/me/phone/verify` `{otp}` → `{ticket, expiresAt}` now delegate to the `phone_change` step-up (same ticket as the new routes, so the web's current flow keeps working); `GET/DELETE /v1/auth/session` and `/all`; the typed-number body on `DELETE /v1/trainers/me`. **Breaking, no shim:** `phone/confirm` answers `{phone}` only — the old `token` field is gone.
+
+## Settings v1.1 — profile, working week & messages
+3 Oct 2026 · `core/trainer` + `core/nudge` · the contract's Settings group (api-contract-v1.1). The account half — step-up, phone change, signed-in browsers, delete — is documented under [The account](#the-account).
+
+### What changed on `/v1/trainers/me`
+- **`GET`** carries `ETag: "<version>"` and honours `If-None-Match` (`304`). `version` is the later of `trainer.updated_at` and `trainer_business.updated_at`, as epoch ms in a string.
+- **`PATCH`** honours `If-Match` when sent (`412 PRECONDITION_FAILED`; absent means "go ahead", because a PATCH sends only what changed) and answers the profile with the new `ETag`.
+- **Instants are epoch ms**, not ISO strings: `setupCompletedAt` is now a number. Appended fields: `privacyPolicyVersion`, `privacyAcceptedAt` (both on `app_user`, null until accepted) and `version`.
+- **`acceptPrivacyPolicy` and `completeSetup` are no longer PATCH keys.** Sending either is `400 VALIDATION` with an `errors[]` entry `{field, code: "unknown_field"}` — an old caller fails loudly instead of silently not consenting.
+- **`headline` > 80 / `bio` > 1200** is `400 PROFILE_TOO_LONG` (was a bean-validation `VALIDATION`).
+- **A gym needs the floor.** Naming a `gymName` (or `gymPlace`) with `trainingModes` lacking `gym_floor` is `400 GYM_NEEDS_FLOOR`; a PATCH that only drops `gym_floor` **clears the gym** instead of failing, because the trainer's intent is unambiguous.
+
+### `POST /v1/trainers/me/consent` → `200` profile
+Body `{ "policyVersion": "2026-09" }`. Must equal the notice in force (`app.privacy.policy-version`, env `PRIVACY_POLICY_VERSION`), else `400 CONSENT_REQUIRED` — a missing version answers the same. **Idempotent: accepting the version already on file keeps the original `privacyAcceptedAt`**; a *new* version moves both columns together (the `app_user_privacy_pair` check).
+
+### `POST /v1/trainers/me/setup/complete` → `200` profile
+No body. Stamps `setupCompletedAt` **once and never un-stamps it**; a second call returns the first instant.
+
+### `PATCH /v1/working-hours` → `200 {items: the whole week}`
+Was `PUT`, and before that a push through the sync envelope. Body `{ "days": [{ "weekday": 1–7, "windows": [{ "start": "HH:mm", "end": "HH:mm" }] }] }`. **Replaces only the weekdays listed**, in one transaction: each listed day's rows are soft-deleted and its windows inserted; `windows: []` is a rest day; unlisted days are untouched; the same body twice gives the same week. `400 VALIDATION` (and nothing written) for a weekday outside 1–7, a weekday listed twice, a time that is not `HH:mm`, `start ≥ end`, or two windows on one day that **overlap** (touching — 06:00–11:00 and 11:00–12:00 — is a split shift, not an overlap). The sync push still writes this table for the phone.
+
+### Nudge templates
+`GET` / `PUT` / `DELETE /v1/nudge-templates` — see [Nudges](#nudges) above for the v1.1 shape.
+
+### `errors[]` on every `VALIDATION`
+Additive: a `400 VALIDATION` body gains `"errors": [{ "field", "code", "message" }]` beside `detail` — one entry per bean-validation failure, per `"field: sentence"` service refusal, and per unreadable body (`code` is `unknown_field` or `invalid`). `detail` is unchanged, so nothing that reads it notices.
 
 ## Reports
 
