@@ -1156,6 +1156,8 @@ Two deliberate design choices:
 **Purpose:** edit a client. Adds `status` and `weeklySchedule` on top of the
 create fields.
 
+> **Superseded (3 Oct 2026).** In v1 the week is `PUT /v1/clients/{id}/schedule` (`If-Match`, whole week), which books a rolling 28 days and answers `{schedule, slots, booked, cancelled, clashes}`; selling a pack books nothing. `DiaryService` and `SessionPlanner`, which implemented the rule below, were deleted; the paragraph is kept as history.
+
 **Sending `weeklySchedule` BOOKS THE DIARY**, in the same transaction — V3, and
 `DiaryService` carries the three-pass rule that keeps a hand-booked session and a
 typed note through the change. Two fields on `ClientResponse` say what that did,
@@ -1167,7 +1169,7 @@ typed note through the change. Two fields on `ClientResponse` say what that did,
 | `firstSessionAt` | epoch ms of the first one it booked |
 
 Both **null** when the request did not touch the rhythm — a name change books
-nothing and must not claim a zero — and both are `DiaryService.Result`'s own
+nothing and must not claim a zero — and both are `the pre-v1 DiaryService.Result`'s own
 count rather than a count of the diary afterwards, which would answer a different
 question: adding a fourth training day spreads the same eight sessions, and a
 count of the board would report eight where nothing new was booked. Zero is a
