@@ -5,7 +5,6 @@ import { cookies } from 'next/headers';
 
 import { signOut } from '@/lib/auth/actions';
 import { PHONE_PATTERN } from '@/lib/auth/policy';
-import { setToken } from '@/lib/auth/session';
 import {
   AccountApiError,
   challengeCurrentPhone,
@@ -169,10 +168,10 @@ export async function requestNewNumber(phone: string): Promise<StepResult> {
 /**
  * 4 · the code from the new number, and the swap.
  *
- * The fresh token is written to the cookie here rather than handed back, the
- * same division of labour `verifyCode` uses at sign-in — and it has to happen in
- * this action, because the old token carries the old number in its `phone` claim
- * and there is no later moment the browser could ask for a replacement.
+ * Nothing is written to the session cookie: the confirm answers `{ phone }` and no token (v1.1), and the
+ * browser that made the change keeps the session it has. The server ends every OTHER browser's session
+ * with the reason `phone_changed`. (Before v1.1 this wrote a fresh JWT here, because a JWT carries the
+ * number in a claim; passing the new answer to `setToken` would store `undefined`.)
  */
 export async function confirmPhoneChange(
   phone: string,
@@ -184,7 +183,6 @@ export async function confirmPhoneChange(
 
   try {
     const changed = await confirmNewPhone(ticket, digits, otp);
-    await setToken(changed.token);
     (await cookies()).delete(TICKET_COOKIE);
     // The shell prints the number in the account menu's header, so a trainer
     // with two accounts can see which one they are signed in to.

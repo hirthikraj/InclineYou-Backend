@@ -31,7 +31,7 @@ import { getToken } from '@/lib/auth/session';
  *
  * ── AND THE OTP REFUSALS ARE THE SIGN-IN ONES ───────────────────────────────
  *
- * `POST /v1/trainers/me/phone/challenge` and `/confirm` go through
+ * `POST /v1/auth/step-up` and `/phone/request` + `/phone/confirm` go through
  * `OtpService`, the same one `/v1/auth/otp/*` uses, so they raise the same three
  * exceptions with the same `code` values and the same `retryAfterSeconds`. The
  * classifier below is deliberately the shape of `lib/auth/api.ts`'s two: a
@@ -69,7 +69,7 @@ export type AccountFailure =
   | { kind: 'expired' }
   /** Wrong. `attemptsLeft` is null when the server did not say. */
   | { kind: 'wrong'; attemptsLeft: number | null }
-  /** The proof that they hold the old number timed out — step 2 again. */
+  /** The proof that they hold the old number is gone (never given, lapsed, spent, or from another browser) — step 2 again. */
   | { kind: 'unproven' }
   /** Somebody already holds the new number. */
   | { kind: 'taken' }
@@ -106,8 +106,11 @@ function classify(status: number, body: ProblemDetail, header: number | null): A
     return { kind: 'wrong', attemptsLeft: left };
   }
 
-  // The account three.
-  if (code === 'PHONE_CHANGE_UNPROVEN') return { kind: 'unproven' };
+  // The account three. `STEP_UP_REQUIRED` (403) is no ticket, or one minted for another purpose or
+  // browser; `TICKET_EXPIRED` (401) is a right ticket that has lapsed or been spent. The two need the
+  // SAME recovery from this screen — prove the current number again — so both are `unproven`; they are
+  // read before the status fallback below, which would otherwise print "session expired" for a 401/403.
+  if (code === 'STEP_UP_REQUIRED' || code === 'TICKET_EXPIRED') return { kind: 'unproven' };
   if (code === 'PHONE_TAKEN') return { kind: 'taken' };
 
   // Anything else that wrote a sentence. Spring prefixes the field name onto
@@ -230,16 +233,30 @@ function withCountryCode(phone: string): string {
   return `+91${phone}`;
 }
 
-/** 1 · a code to the number they are signed in with. */
+/**
+ * 1 · a code to the number they are signed in with.
+ *
+ * `POST /v1/auth/step-up` (v1.1) — one door for every action that must prove the person is still holding
+ * the phone, told apart by `purpose`. It replaced `/v1/trainers/me/phone/challenge`, which could only
+ * ever mean this one thing.
+ */
 export async function challengeCurrentPhone(): Promise<void> {
-  await request<void>('/v1/trainers/me/phone/challenge', { method: 'POST' });
+  await request<void>('/v1/auth/step-up', {
+    method: 'POST',
+    body: JSON.stringify({ purpose: 'phone_change' }),
+  });
 }
 
-/** 2 · that code back. The ticket is the proof step 1 happened. */
+/**
+ * 2 · that code back. The ticket is the proof step 1 happened.
+ *
+ * Valid ten minutes, single use, and bound to THIS browser's session and to the `phone_change` purpose:
+ * one lifted from another browser, or minted for closing the account, is refused by steps 3 and 4.
+ */
 export async function verifyCurrentPhone(otp: string): Promise<string> {
-  const res = await request<{ ticket: string }>('/v1/trainers/me/phone/verify', {
+  const res = await request<{ ticket: string; expiresAt: number }>('/v1/auth/step-up/verify', {
     method: 'POST',
-    body: JSON.stringify({ otp }),
+    body: JSON.stringify({ purpose: 'phone_change', otp }),
   });
   return res.ticket;
 }
@@ -255,17 +272,17 @@ export async function requestNewPhone(ticket: string, phone: string): Promise<vo
 /**
  * 4 · the code from the new number, and the swap.
  *
- * Answers a fresh token, which the caller must write to the cookie: the old one
- * carries the old number in its `phone` claim, and a seven-day token that
- * disagrees with the row about who it belongs to is a thing to replace rather
- * than to reason about later.
+ * Answers `{ phone }` and NO token (v1.1). The browser that made the change keeps its own session — the
+ * server ends every OTHER browser's, with the reason `phone_changed` — so there is nothing to write to
+ * the cookie. The earlier version answered a fresh JWT because a seven-day token carried the old number
+ * in its `phone` claim; a web session is an opaque id with no claim to go stale.
  */
 export async function confirmNewPhone(
   ticket: string,
   phone: string,
   otp: string,
-): Promise<{ phone: string; token: string }> {
-  return request<{ phone: string; token: string }>('/v1/trainers/me/phone/confirm', {
+): Promise<{ phone: string }> {
+  return request<{ phone: string }>('/v1/trainers/me/phone/confirm', {
     method: 'POST',
     body: JSON.stringify({ ticket, phone: withCountryCode(phone), otp }),
   });
@@ -282,6 +299,10 @@ export async function confirmNewPhone(
  * server.
  */
 export async function deleteAccount(confirmPhone: string): Promise<void> {
+  // Settings v1.1 prefers a step-up ticket (`X-Step-Up-Ticket`, purpose `account_deletion`, no body).
+  // The screen has only the typed-number confirmation and no code step, so adding the ticket would add
+  // a visible step; the backend still accepts this body when no ticket header is sent. Open decision for
+  // the user — see the migration report.
   await request<void>('/v1/trainers/me', {
     method: 'DELETE',
     body: JSON.stringify({ confirmPhone }),
