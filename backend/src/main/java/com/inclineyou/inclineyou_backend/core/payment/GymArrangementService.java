@@ -1,19 +1,17 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
+import com.inclineyou.inclineyou_backend.core.payment.dto.Arrangement;
+import com.inclineyou.inclineyou_backend.core.payment.dto.ArrangementCreated;
+import com.inclineyou.inclineyou_backend.core.payment.dto.CurrentGym;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import com.inclineyou.inclineyou_backend.shared.wire.IfMatch;
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.sql.Date;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.YearMonth;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -37,37 +35,26 @@ import static com.inclineyou.inclineyou_backend.core.payment.GymInput.*;
 @RequiredArgsConstructor
 public class GymArrangementService {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final GymArrangementJdbcRepository arrangements;
     private final WorkspaceClock clock;
-    private final PackageReadService reads;
-
-    public record Arrangement(String id, String gymName, String gymPlaceId, String baseKind, String baseAmount, String currency,
-                              String startsMonth, String endsMonth, String note,
-                              long createdAt, long updatedAt, String version) {}
-
-    private static final String COLUMNS = """
-            id::text AS id, gym_name, gym_place_id::text AS gym_place_id, base_kind, base_amount, currency, starts_month, ends_month, note,
-            created_at, updated_at""";
 
     /** Every live row, the running one first, then by startsMonth newest first. */
     public List<Arrangement> list(UUID tid) {
-        return jdbc.query("SELECT " + COLUMNS + """
-                 FROM gym_arrangement WHERE trainer_id = :tid::uuid AND deleted_at IS NULL
-                ORDER BY (ends_month IS NULL) DESC, starts_month DESC, id
-                """, Map.of("tid", tid.toString()), GymArrangementService::row);
+        return arrangements.list(tid);
     }
 
     /** The running arrangement, if any. */
     Optional<Arrangement> running(UUID tid) {
-        return jdbc.query("SELECT " + COLUMNS + """
-                 FROM gym_arrangement WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND ends_month IS NULL
-                """, Map.of("tid", tid.toString()), GymArrangementService::row).stream().findFirst();
+        return arrangements.running(tid);
     }
 
-    public record Created(Arrangement arrangement, boolean created) {}
+    /** The gym the trainer is with now, as their profile holds it. */
+    Optional<CurrentGym> currentGym(UUID tid) {
+        return arrangements.currentGym(tid);
+    }
 
     @Transactional
-    public Created create(UUID tid, Map<String, Object> raw) {
+    public ArrangementCreated create(UUID tid, Map<String, Object> raw) {
         var b = body(raw, "id", "baseKind", "baseAmount", "startsMonth", "note");
         UUID id = uuid(b.get("id"), "id");
         YearMonth starts = month(b.get("startsMonth"), "startsMonth");
@@ -78,67 +65,37 @@ public class GymArrangementService {
         String note = text(b.get("note"), 500, "note");
 
         if (id != null) {
-            var existing = find(tid, id);
-            if (existing.isPresent()) return new Created(existing.get(), false);
+            var existing = arrangements.find(tid, id);
+            if (existing.isPresent()) return new ArrangementCreated(existing.get(), false);
         }
         // The gym the trainer is with now: its name as a snapshot, and the directory place when it was picked from the search.
-        var current = jdbc.query("SELECT gym_name, gym_place_id::text FROM trainer_business WHERE trainer_id = :tid::uuid",
-                Map.of("tid", tid.toString()), (rs, i) -> new String[]{rs.getString(1), rs.getString(2)})
-                .stream().filter(r -> r[0] != null).findFirst().orElse(null);
-        String gym = current == null ? null : current[0];
-        String gymPlaceId = current == null ? null : current[1];
-        if (gym == null || gym.isBlank()) {
+        var current = arrangements.currentGym(tid).orElse(null);
+        if (current == null || current.name().isBlank()) {
             throw ApiException.conflict("ARRANGEMENT_NEEDS_GYM", "Set your gym's name in Settings first.");
         }
 
         // The running row is locked so two taps cannot both close it.
-        var run = jdbc.query("""
-                SELECT id::text AS id, starts_month FROM gym_arrangement
-                WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND ends_month IS NULL FOR UPDATE
-                """, Map.of("tid", tid.toString()),
-                (rs, i) -> Map.entry(rs.getString("id"), YearMonth.from(rs.getDate("starts_month").toLocalDate())))
-                .stream().findFirst();
-        if (run.isPresent() && !starts.isAfter(run.get().getValue())) {
+        var run = arrangements.lockRunning(tid);
+        if (run.isPresent() && !starts.isAfter(run.get().startsMonth())) {
             throw ApiException.conflict("ARRANGEMENT_OVERLAP",
-                    "New terms must start after the running terms began (" + run.get().getValue() + ").");
+                    "New terms must start after the running terms began (" + run.get().startsMonth() + ").");
         }
         // A closed row that already covers the start month would overlap too.
-        Integer clash = jdbc.queryForObject("""
-                SELECT count(*) FROM gym_arrangement
-                WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND ends_month IS NOT NULL AND ends_month >= :s
-                """, Map.of("tid", tid.toString(), "s", Date.valueOf(starts.atDay(1))), Integer.class);
-        if (clash != null && clash > 0) {
+        if (arrangements.closedCovering(tid, starts) > 0) {
             throw ApiException.conflict("ARRANGEMENT_OVERLAP", "Those months are already covered by earlier terms.");
         }
-        if (run.isPresent()) {
-            jdbc.update("UPDATE gym_arrangement SET ends_month = :e WHERE id = :id::uuid",
-                    Map.of("e", Date.valueOf(starts.minusMonths(1).atDay(1)), "id", run.get().getKey()));
-        }
+        if (run.isPresent()) arrangements.close(run.get().id(), starts.minusMonths(1));
 
         UUID newId = id == null ? UUID.randomUUID() : id;
-        var p = new HashMap<String, Object>();
-        p.put("id", newId.toString());
-        p.put("tid", tid.toString());
-        p.put("gym", gym);
-        p.put("gp", gymPlaceId);
-        p.put("kind", kind);
-        p.put("base", base);
-        p.put("cur", reads.workspaceCurrency());
-        p.put("s", Date.valueOf(starts.atDay(1)));
-        p.put("note", note);
-        int n = jdbc.update("""
-                INSERT INTO gym_arrangement (id, trainer_id, gym_name, gym_place_id, base_kind, base_amount, currency, starts_month, note)
-                VALUES (:id::uuid, :tid::uuid, :gym, :gp::uuid, :kind, :base, :cur, :s, :note)
-                ON CONFLICT (id) DO NOTHING
-                """, p);
+        int n = arrangements.insert(newId, tid, current, kind, base, clock.currency(), starts, note);
         if (n == 0) throw ApiException.idConflict();
-        return new Created(find(tid, newId).orElseThrow(), true);
+        return new ArrangementCreated(arrangements.find(tid, newId).orElseThrow(), true);
     }
 
     @Transactional
     public Arrangement patch(UUID tid, UUID id, String ifMatch, Map<String, Object> raw) {
         var b = body(raw, "baseKind", "baseAmount", "note");
-        var cur = find(tid, id).orElseThrow(() -> ApiException.notFound("Those terms do not exist."));
+        var cur = arrangements.find(tid, id).orElseThrow(() -> ApiException.notFound("Those terms do not exist."));
         IfMatch.check(ifMatch, cur.version(), "These terms changed since you opened them.");
         if (b.isEmpty()) return cur;
 
@@ -156,32 +113,19 @@ public class GymArrangementService {
                         "These terms have started — make new terms instead of changing the base.");
             }
         }
-        var p = new HashMap<String, Object>();
-        p.put("id", id.toString());
-        p.put("tid", tid.toString());
-        p.put("kind", kind);
-        p.put("base", base);
-        p.put("note", b.containsKey("note") ? text(b.get("note"), 500, "note") : cur.note());
-        jdbc.update("""
-                UPDATE gym_arrangement SET base_kind = :kind, base_amount = :base, note = :note
-                WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
-                """, p);
-        return find(tid, id).orElseThrow();
+        String note = b.containsKey("note") ? text(b.get("note"), 500, "note") : cur.note();
+        arrangements.update(id, tid, kind, base, note);
+        return arrangements.find(tid, id).orElseThrow();
     }
 
     /** Soft, for terms entered by mistake; idempotent. The months it covered fall back to shares only. */
     @Transactional
     public void delete(UUID tid, UUID id) {
-        jdbc.update("""
-                UPDATE gym_arrangement SET deleted_at = now()
-                WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
-                """, Map.of("id", id.toString(), "tid", tid.toString()));
+        arrangements.softDelete(tid, id);
     }
 
     Optional<Arrangement> find(UUID tid, UUID id) {
-        return jdbc.query("SELECT " + COLUMNS + """
-                 FROM gym_arrangement WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
-                """, Map.of("id", id.toString(), "tid", tid.toString()), GymArrangementService::row).stream().findFirst();
+        return arrangements.find(tid, id);
     }
 
     private static String kind(Object raw) {
@@ -197,15 +141,5 @@ public class GymArrangementService {
         if ((kind == null) != (base.signum() == 0)) {
             throw ApiException.validation("baseKind and baseAmount: a base needs a kind, and a kind needs an amount above zero");
         }
-    }
-
-    private static Arrangement row(ResultSet rs, int i) throws SQLException {
-        long updated = rs.getTimestamp("updated_at").getTime();
-        var ends = rs.getDate("ends_month");
-        return new Arrangement(rs.getString("id"), rs.getString("gym_name"), rs.getString("gym_place_id"), rs.getString("base_kind"),
-                PackageReadService.money(rs.getBigDecimal("base_amount")), rs.getString("currency"),
-                YearMonth.from(rs.getDate("starts_month").toLocalDate()).toString(),
-                ends == null ? null : YearMonth.from(ends.toLocalDate()).toString(),
-                rs.getString("note"), rs.getTimestamp("created_at").getTime(), updated, String.valueOf(updated));
     }
 }

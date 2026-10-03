@@ -1,11 +1,19 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
+import com.inclineyou.inclineyou_backend.core.payment.dto.Adjustment;
+import com.inclineyou.inclineyou_backend.core.payment.dto.CurrentPackage;
+import com.inclineyou.inclineyou_backend.core.payment.dto.Ledgered;
+import com.inclineyou.inclineyou_backend.core.payment.dto.LockedPackage;
+import com.inclineyou.inclineyou_backend.core.payment.dto.LockedPayment;
+import com.inclineyou.inclineyou_backend.core.payment.dto.NewPayment;
+import com.inclineyou.inclineyou_backend.core.payment.dto.PaymentPatch;
+import com.inclineyou.inclineyou_backend.core.payment.dto.PaymentSums;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
+import com.inclineyou.inclineyou_backend.shared.util.Money;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,7 +21,6 @@ import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -45,73 +52,61 @@ import java.util.function.Supplier;
 @Slf4j
 public class PackageLedgerService {
 
-    private final NamedParameterJdbcTemplate jdbc;
-    private final PackageReadService reads;
+    private final PackageJdbcRepository packages;
+    private final PaymentJdbcRepository payments;
 
     private static final Set<String> METHODS = Set.of("upi", "cash", "bank_transfer");
     private static final Set<String> KINDS = Set.of("pause", "resume", "extend", "sessions", "session", "due_date");
 
-    /** What a money write answers with: the row, and the package with its new sums. */
-    public record Ledgered(PackageReadService.PaymentRow payment, PackageReadService.CurrentPackage pkg,
-                           boolean created) {
-        public Map<String, Object> body() {
-            return Map.of("payment", payment, "package", pkg);
-        }
-    }
-
-    public record Adjustment(String id, String kind, int days, int sessions, String sessionId, String reason,
-                             long effectiveAt, String dueDate, String previousDueDate, Long reversedAt,
-                             long createdAt) {}
-
     /* ── the pack's life ───────────────────────────────────────────────────── */
 
     @Transactional
-    public PackageReadService.CurrentPackage pause(UUID tid, UUID pid, Map<String, Object> body) {
+    public CurrentPackage pause(UUID tid, UUID pid, Map<String, Object> body) {
         var b = body(body, "reason", "effectiveAt");
         String reason = text(b.get("reason"), 200, "reason");
         Instant at = pastInstant(b.get("effectiveAt"), "effectiveAt");
         var k = lock(tid, pid);
         running(k);
         // Idempotent by target state: a paused pack stays paused, no second row.
-        if (k.get("paused_at") == null) {
+        if (k.pausedAt() == null) {
             adjust(tid, k, "pause", 0, reason, at);
             log.info("package paused trainer={} package={}", tid, pid);
         }
-        return reads.one(tid, pid).orElseThrow();
+        return packages.one(tid, pid).orElseThrow();
     }
 
     @Transactional
-    public PackageReadService.CurrentPackage resume(UUID tid, UUID pid, Map<String, Object> body) {
+    public CurrentPackage resume(UUID tid, UUID pid, Map<String, Object> body) {
         var b = body(body, "effectiveAt");
         Instant at = pastInstant(b.get("effectiveAt"), "effectiveAt");
         var k = lock(tid, pid);
         running(k);
-        if (k.get("paused_at") instanceof Timestamp paused) {
-            if (at != null && at.isBefore(paused.toInstant())) {
+        if (k.pausedAt() != null) {
+            if (at != null && at.isBefore(k.pausedAt().toInstant())) {
                 throw ApiException.validation("effectiveAt: before the pause started");
             }
             // The trigger measures the days paused in the trainer's calendar and pushes end_date out.
             adjust(tid, k, "resume", 0, null, at);
             log.info("package resumed trainer={} package={}", tid, pid);
         }
-        return reads.one(tid, pid).orElseThrow();
+        return packages.one(tid, pid).orElseThrow();
     }
 
     /** Not a state, so every call adds days; the confirm sheet guards the double tap. */
     @Transactional
-    public PackageReadService.CurrentPackage extend(UUID tid, UUID pid, Map<String, Object> body) {
+    public CurrentPackage extend(UUID tid, UUID pid, Map<String, Object> body) {
         var b = body(body, "days", "reason");
         Integer days = whole(b.get("days"), 1, 3650, "days");
         if (days == null) throw ApiException.validation("days: required, 1 to 3650");
         String reason = text(b.get("reason"), 200, "reason");
         var k = lock(tid, pid);
         running(k);
-        if (k.get("end_date") == null) {
+        if (k.endDate() == null) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "PACKAGE_NO_END_DATE",
                     "This pack never expires, so there is nothing to extend.");
         }
         adjust(tid, k, "extend", days, reason, null);
-        return reads.one(tid, pid).orElseThrow();
+        return packages.one(tid, pid).orElseThrow();
     }
 
     /**
@@ -124,56 +119,37 @@ public class PackageLedgerService {
      * is worse than one refused.
      */
     @Transactional
-    public PackageReadService.CurrentPackage cancel(UUID tid, UUID pid, Map<String, Object> body) {
+    public CurrentPackage cancel(UUID tid, UUID pid, Map<String, Object> body) {
         var b = body(body, "note");
         if (b.get("note") != null) throw ApiException.validation("note: not stored in v1 — send null or leave it out");
         var k = lock(tid, pid);
-        String status = (String) k.get("status");
-        if ("cancelled".equals(status)) return reads.one(tid, pid).orElseThrow();
+        String status = k.status();
+        if ("cancelled".equals(status)) return packages.one(tid, pid).orElseThrow();
         if (!"active".equals(status)) {
             throw ApiException.conflict("PACKAGE_CLOSED", "This pack is already " + status + ".");
         }
-        var sums = sums(pid);
+        var sums = payments.sums(pid);
         if (due(k, sums).signum() > 0 || sums.pending().signum() > 0) {
             throw ApiException.conflict("PACKAGE_HAS_DUES",
                     "Money is still owed on this pack. Collect it or write it off first.");
         }
-        jdbc.update("UPDATE package SET status = 'cancelled', closed_at = now() WHERE id = :pid::uuid",
-                Map.of("pid", pid.toString()));
+        packages.cancel(pid);
         log.info("package cancelled trainer={} package={}", tid, pid);
-        return reads.one(tid, pid).orElseThrow();
+        return packages.one(tid, pid).orElseThrow();
     }
 
     /** Oldest first on idx_package_adjustment_package. Bounded: one pack's history. */
     public List<Adjustment> adjustments(UUID tid, UUID pid, String kind) {
-        var p = new HashMap<String, Object>();
-        p.put("tid", tid.toString());
-        p.put("pid", pid.toString());
-        Boolean mine = jdbc.queryForObject("""
-                SELECT EXISTS (SELECT 1 FROM package WHERE id = :pid::uuid AND trainer_id = :tid::uuid
-                               AND deleted_at IS NULL)""", p, Boolean.class);
-        if (!Boolean.TRUE.equals(mine)) throw ApiException.notFound("That package is not on your books.");
-        String byKind = "";
+        if (!packages.isMine(tid, pid)) throw ApiException.notFound("That package is not on your books.");
+        List<String> kinds = null;
         if (kind != null && !kind.isBlank()) {
-            var kinds = new ArrayList<String>();
+            kinds = new ArrayList<>();
             for (String s : kind.split(",")) {
                 if (!KINDS.contains(s.strip())) throw ApiException.validation("kind: unknown value " + s.strip());
                 kinds.add(s.strip());
             }
-            p.put("kinds", kinds);
-            byKind = " AND kind IN (:kinds)";
         }
-        return jdbc.query("""
-                SELECT id::text AS id, kind, days, sessions, session_id::text AS session_id, reason, effective_at,
-                       due_date::text AS due_date, previous_due_date::text AS previous_due_date, reversed_at, created_at
-                FROM package_adjustment WHERE package_id = :pid::uuid%s
-                ORDER BY effective_at, id
-                """.formatted(byKind), p, (rs, i) -> new Adjustment(
-                rs.getString("id"), rs.getString("kind"), rs.getInt("days"), rs.getInt("sessions"),
-                rs.getString("session_id"), rs.getString("reason"), rs.getTimestamp("effective_at").getTime(),
-                rs.getString("due_date"), rs.getString("previous_due_date"),
-                rs.getTimestamp("reversed_at") == null ? null : rs.getTimestamp("reversed_at").getTime(),
-                rs.getTimestamp("created_at").getTime()));
+        return packages.adjustments(pid, kinds);
     }
 
     /* ── money ─────────────────────────────────────────────────────────────── */
@@ -199,34 +175,19 @@ public class PackageLedgerService {
         }
         takesMoney(k);
         collector(k, method, reference);
-        var sums = sums(pid);
+        var sums = payments.sums(pid);
         BigDecimal room = due(k, sums);
         if ("pending".equals(status)) room = room.subtract(sums.pending());
         if (amount.compareTo(room) > 0) throw overDue(room.max(BigDecimal.ZERO));
 
-        var p = new HashMap<String, Object>();
-        p.put("id", (id == null ? UUID.randomUUID() : id).toString());
-        p.put("tid", tid.toString());
-        p.put("pid", pid.toString());
-        p.put("cid", k.get("client_id").toString());
-        p.put("amount", amount);
-        p.put("currency", k.get("currency"));
-        p.put("method", method);
-        p.put("status", status);
-        p.put("reference", reference);
-        p.put("paidAt", "paid".equals(status) ? Timestamp.from(paidAt == null ? Instant.now() : paidAt) : null);
-        p.put("note", note);
+        UUID made = id == null ? UUID.randomUUID() : id;
+        Timestamp paid = "paid".equals(status) ? Timestamp.from(paidAt == null ? Instant.now() : paidAt) : null;
         // collected_by is stamped by stamp_payment_collector from the client's type; the value here is overwritten.
-        int inserted = ledger(() -> jdbc.update("""
-                INSERT INTO payment (id, trainer_id, client_id, package_id, amount, currency, collected_by,
-                                     method, status, reference, paid_at, note)
-                VALUES (:id::uuid, :tid::uuid, :cid::uuid, :pid::uuid, :amount, :currency, 'trainer',
-                        :method, :status, :reference, :paidAt, :note)
-                ON CONFLICT (id) DO NOTHING
-                """, p));
+        int inserted = ledger(() -> payments.insertRecorded(new NewPayment(made, tid, pid, k.clientId(), amount,
+                k.currency(), method, status, reference, paid, null, null, note)));
         if (inserted == 0) throw ApiException.idConflict();
         log.info("payment recorded trainer={} package={} status={}", tid, pid, status);
-        return answer(tid, UUID.fromString((String) p.get("id")), pid, true);
+        return answer(tid, made, pid, true);
     }
 
     /** A3 — a pending payment landed. A retried tap on a paid row answers it as it is. */
@@ -237,31 +198,25 @@ public class PackageLedgerService {
         String reference = text(b.get("reference"), 64, "reference");
         Instant paidAt = pastInstant(b.get("paidAt"), "paidAt");
         var y = lockPayment(tid, yid);
-        UUID pid = (UUID) y.get("package_id");
+        UUID pid = y.packageId();
         var k = lock(tid, pid);
-        String status = (String) y.get("status");
+        String status = y.status();
         if ("paid".equals(status)) {
-            boolean same = (method == null || method.equals(y.get("method")))
-                    && (reference == null || reference.equals(y.get("reference")));
+            boolean same = (method == null || method.equals(y.method()))
+                    && (reference == null || reference.equals(y.reference()));
             if (same) return answer(tid, yid, pid, false);
             throw notPending("This payment is already paid differently. Edit it instead.");
         }
         if (!"pending".equals(status)) throw notPending("This payment was " + label(status) + ".");
         takesMoney(k);
-        String m = method != null ? method : (String) y.get("method");
-        String r = reference != null ? reference : (String) y.get("reference");
+        String m = method != null ? method : y.method();
+        String r = reference != null ? reference : y.reference();
         collector(k, m, r);
-        BigDecimal room = due(k, sums(pid));
-        if (((BigDecimal) y.get("amount")).compareTo(room) > 0) throw overDue(room);
-        var p = new HashMap<String, Object>();
-        p.put("yid", yid.toString());
-        p.put("method", m);
-        p.put("reference", r);
-        p.put("paidAt", Timestamp.from(paidAt == null ? Instant.now() : paidAt));
-        ledger(() -> jdbc.update("""
-                UPDATE payment SET status = 'paid', paid_at = :paidAt, method = :method, reference = :reference
-                WHERE id = :yid::uuid""", p));
-        touch(pid);
+        BigDecimal room = due(k, payments.sums(pid));
+        if (y.amount().compareTo(room) > 0) throw overDue(room);
+        Timestamp at = Timestamp.from(paidAt == null ? Instant.now() : paidAt);
+        ledger(() -> payments.markPaid(yid, at, m, r));
+        packages.touch(pid);
         return answer(tid, yid, pid, false);
     }
 
@@ -271,19 +226,15 @@ public class PackageLedgerService {
         var b = body(body, "note");
         String reason = text(b.get("note"), 500, "note");
         var y = lockPayment(tid, yid);
-        UUID pid = (UUID) y.get("package_id");
+        UUID pid = y.packageId();
         var k = lock(tid, pid);
-        String status = (String) y.get("status");
+        String status = y.status();
         if ("write_off".equals(status)) return answer(tid, yid, pid, false);
         if (!"pending".equals(status)) throw notPending("This payment was " + label(status) + ".");
-        if ("refunded".equals(k.get("status"))) throw closed(k);
-        var p = new HashMap<String, Object>();
-        p.put("yid", yid.toString());
-        p.put("note", appended((String) y.get("note"), reason));
-        ledger(() -> jdbc.update("""
-                UPDATE payment SET status = 'write_off', written_off_at = now(), note = :note
-                WHERE id = :yid::uuid""", p));
-        touch(pid);
+        if ("refunded".equals(k.status())) throw closed(k);
+        String note = appended(y.note(), reason);
+        ledger(() -> payments.writeOff(yid, note));
+        packages.touch(pid);
         return answer(tid, yid, pid, false);
     }
 
@@ -309,31 +260,15 @@ public class PackageLedgerService {
             if (replay != null) return replay;
         }
         takesMoney(k);
-        var sums = sums(pid);
+        var sums = payments.sums(pid);
         BigDecimal due = due(k, sums);
         if (due.signum() <= 0) throw ApiException.conflict("PACKAGE_NOTHING_DUE", "Nothing is owed on this pack.");
 
-        var p = new HashMap<String, Object>();
-        p.put("tid", tid.toString());
-        p.put("pid", pid.toString());
-        p.put("cid", k.get("client_id").toString());
-        p.put("currency", k.get("currency"));
-        p.put("note", note);
         BigDecimal rest;
         UUID answered = null;
         if (part == null) {
-            var pending = jdbc.queryForList("""
-                    SELECT id FROM payment WHERE package_id = :pid::uuid AND status = 'pending' AND deleted_at IS NULL
-                    ORDER BY created_at, id""", p, UUID.class);
-            for (UUID pendingId : pending) {
-                var q = new HashMap<String, Object>(p);
-                q.put("yid", pendingId.toString());
-                ledger(() -> jdbc.update("""
-                        UPDATE payment SET status = 'write_off', written_off_at = now(),
-                               note = CASE WHEN CAST(:note AS text) IS NULL THEN note
-                                           WHEN note IS NULL THEN :note
-                                           ELSE left(note || ' · ' || :note, 500) END
-                        WHERE id = :yid::uuid""", q));
+            for (UUID pendingId : payments.pendingIds(pid)) {
+                ledger(() -> payments.writeOffAppending(pendingId, note));
                 answered = pendingId;
             }
             rest = due.subtract(sums.pending());
@@ -344,18 +279,13 @@ public class PackageLedgerService {
         }
         if (rest.signum() > 0) {
             UUID made = id == null ? UUID.randomUUID() : id;
-            p.put("id", made.toString());
-            p.put("amount", rest);
-            int inserted = ledger(() -> jdbc.update("""
-                    INSERT INTO payment (id, trainer_id, client_id, package_id, amount, currency, collected_by,
-                                         status, written_off_at, note)
-                    VALUES (:id::uuid, :tid::uuid, :cid::uuid, :pid::uuid, :amount, :currency, 'trainer',
-                            'write_off', now(), :note)
-                    ON CONFLICT (id) DO NOTHING""", p));
+            BigDecimal restAmount = rest;
+            int inserted = ledger(() -> payments.insertWriteOff(new NewPayment(made, tid, pid, k.clientId(), restAmount,
+                    k.currency(), null, "write_off", null, null, null, null, note)));
             if (inserted == 0) throw ApiException.idConflict();
             answered = made;
         }
-        touch(pid);
+        packages.touch(pid);
         log.info("package written off trainer={} package={} all={}", tid, pid, part == null);
         return answer(tid, answered, pid, true);
     }
@@ -375,39 +305,25 @@ public class PackageLedgerService {
             var replay = replay(tid, id, pid);
             if (replay != null) return replay;
         }
-        if ("refunded".equals(k.get("status"))) {
+        if ("refunded".equals(k.status())) {
             throw ApiException.conflict("PACKAGE_ALREADY_REFUNDED", "This pack was already refunded.");
         }
         collector(k, method, reference);
-        var sums = sums(pid);
-        if (sums.paid().compareTo((BigDecimal) k.get("amount")) < 0 || sums.writtenOff().signum() > 0) {
+        var sums = payments.sums(pid);
+        if (sums.paid().compareTo(k.amount()) < 0 || sums.writtenOff().signum() > 0) {
             throw ApiException.conflict("PACKAGE_NOT_FULLY_PAID",
                     "Only a fully paid pack with nothing written off can be refunded.");
         }
         if (amount.compareTo(sums.paid()) > 0) {
             throw ApiException.conflict("REFUND_OVER_PAID", "That is more than was paid on this pack.");
         }
-        var p = new HashMap<String, Object>();
         UUID made = id == null ? UUID.randomUUID() : id;
-        p.put("id", made.toString());
-        p.put("tid", tid.toString());
-        p.put("pid", pid.toString());
-        p.put("cid", k.get("client_id").toString());
-        p.put("amount", amount);
-        p.put("currency", k.get("currency"));
-        p.put("method", method);
-        p.put("reference", reference);
-        p.put("at", Timestamp.from(at == null ? Instant.now() : at));
-        p.put("note", note);
-        int inserted = ledger(() -> jdbc.update("""
-                INSERT INTO payment (id, trainer_id, client_id, package_id, amount, currency, collected_by,
-                                     method, status, reference, refunded_at, note)
-                VALUES (:id::uuid, :tid::uuid, :cid::uuid, :pid::uuid, :amount, :currency, 'trainer',
-                        :method, 'refund', :reference, :at, :note)
-                ON CONFLICT (id) DO NOTHING""", p));
+        Timestamp when = Timestamp.from(at == null ? Instant.now() : at);
+        int inserted = ledger(() -> payments.insertRefund(new NewPayment(made, tid, pid, k.clientId(), amount,
+                k.currency(), method, "refund", reference, null, null, when, note)));
         if (inserted == 0) throw ApiException.idConflict();
         // The schema wants the refund row and the refunded status in one transaction.
-        jdbc.update("UPDATE package SET status = 'refunded', closed_at = coalesce(closed_at, now()) WHERE id = :pid::uuid", p);
+        packages.markRefunded(pid);
         log.info("package refunded trainer={} package={}", tid, pid);
         return answer(tid, made, pid, true);
     }
@@ -425,12 +341,12 @@ public class PackageLedgerService {
             }
         }
         var y = lockPayment(tid, yid);
-        UUID pid = (UUID) y.get("package_id");
+        UUID pid = y.packageId();
         var k = lock(tid, pid);
-        String status = (String) y.get("status");
+        String status = y.status();
         if ("refund".equals(status)) throw frozen();
-        if ("refunded".equals(k.get("status"))) throw closed(k);
-        checkVersion(ifMatch, String.valueOf(((Timestamp) y.get("updated_at")).getTime()));
+        if ("refunded".equals(k.status())) throw closed(k);
+        checkVersion(ifMatch, String.valueOf(y.updatedAt().getTime()));
         Set<String> allowed = switch (status) {
             case "paid" -> Set.of("amount", "method", "reference", "paidAt", "note");
             case "pending" -> Set.of("amount", "method", "reference", "note");
@@ -439,114 +355,84 @@ public class PackageLedgerService {
         for (String key : body.keySet()) {
             if (!allowed.contains(key)) throw ApiException.validation(key + ": not editable on a " + label(status) + " payment");
         }
-        var p = new HashMap<String, Object>();
-        p.put("yid", yid.toString());
-        var sets = new ArrayList<String>();
-        BigDecimal amount = (BigDecimal) y.get("amount");
+        BigDecimal amount = null;
         if (body.containsKey("amount")) {
             amount = positive(body.get("amount"), "amount");
-            var sums = sums(pid);
-            BigDecimal total = (BigDecimal) k.get("amount");
-            BigDecimal old = (BigDecimal) y.get("amount");
+            var sums = payments.sums(pid);
+            BigDecimal total = k.amount();
+            BigDecimal old = y.amount();
             BigDecimal others = sums.paid().add(sums.writtenOff());
             if (!"pending".equals(status)) others = others.subtract(old);
             else others = others.add(sums.pending()).subtract(old);
             BigDecimal room = total.subtract(others);
             if (amount.compareTo(room) > 0) throw overDue(room.max(BigDecimal.ZERO));
-            p.put("amount", amount);
-            sets.add("amount = :amount");
         }
-        String method = (String) y.get("method");
-        String reference = (String) y.get("reference");
-        if (body.containsKey("method")) { method = method(body.get("method")); sets.add("method = :method"); }
-        if (body.containsKey("reference")) { reference = text(body.get("reference"), 64, "reference"); sets.add("reference = :reference"); }
+        String method = y.method();
+        String reference = y.reference();
+        if (body.containsKey("method")) method = method(body.get("method"));
+        if (body.containsKey("reference")) reference = text(body.get("reference"), 64, "reference");
         if (!"write_off".equals(status)) collector(k, method, reference);
-        p.put("method", method);
-        p.put("reference", reference);
+        Timestamp paidAt = null;
         if (body.containsKey("paidAt")) {
             Instant at = pastInstant(body.get("paidAt"), "paidAt");
             if (at == null) throw ApiException.validation("paidAt: a paid payment keeps its date");
-            p.put("paidAt", Timestamp.from(at));
-            sets.add("paid_at = :paidAt");
+            paidAt = Timestamp.from(at);
         }
-        if (body.containsKey("note")) { p.put("note", text(body.get("note"), 500, "note")); sets.add("note = :note"); }
-        ledger(() -> jdbc.update("UPDATE payment SET " + String.join(", ", sets) + " WHERE id = :yid::uuid", p));
-        touch(pid);
+        String note = null;
+        if (body.containsKey("note")) note = text(body.get("note"), 500, "note");
+        var change = new PaymentPatch(body.containsKey("amount"), amount, body.containsKey("method"), method,
+                body.containsKey("reference"), reference, body.containsKey("paidAt"), paidAt,
+                body.containsKey("note"), note);
+        ledger(() -> payments.patch(yid, change));
+        packages.touch(pid);
         return answer(tid, yid, pid, false);
     }
 
     /** A8 — recorded by mistake. Soft, and idempotent: a deleted payment answers 204 again. */
     @Transactional
     public void delete(UUID tid, UUID yid) {
-        var rows = jdbc.queryForList("""
-                SELECT package_id, status, deleted_at FROM payment WHERE id = :yid::uuid AND trainer_id = :tid::uuid
-                """, Map.of("yid", yid.toString(), "tid", tid.toString()));
-        if (rows.isEmpty()) throw ApiException.notFound("That payment is not on your books.");
-        if (rows.getFirst().get("deleted_at") != null) return;
-        UUID pid = (UUID) rows.getFirst().get("package_id");
+        var ref = payments.ref(tid, yid).orElseThrow(() -> ApiException.notFound("That payment is not on your books."));
+        if (ref.deletedAt() != null) return;
+        UUID pid = ref.packageId();
         var k = lock(tid, pid);
-        if ("refund".equals(rows.getFirst().get("status"))) throw frozen();
-        if ("refunded".equals(k.get("status"))) throw closed(k);
-        ledger(() -> jdbc.update("UPDATE payment SET deleted_at = now() WHERE id = :yid::uuid AND deleted_at IS NULL",
-                Map.of("yid", yid.toString())));
-        touch(pid);
+        if ("refund".equals(ref.status())) throw frozen();
+        if ("refunded".equals(k.status())) throw closed(k);
+        ledger(() -> payments.softDelete(yid));
+        packages.touch(pid);
         log.info("payment deleted trainer={} payment={}", tid, yid);
     }
 
     /* ── helpers ───────────────────────────────────────────────────────────── */
 
-    private record Sums(BigDecimal paid, BigDecimal writtenOff, BigDecimal pending) {}
-
-    private Map<String, Object> lock(UUID tid, UUID pid) {
-        var rows = jdbc.queryForList("""
-                SELECT k.id, k.client_id, k.status, k.amount, k.currency, k.paused_at, k.end_date, c.client_type
-                FROM package k JOIN client c ON c.id = k.client_id
-                WHERE k.id = :pid::uuid AND k.trainer_id = :tid::uuid AND k.deleted_at IS NULL
-                FOR UPDATE OF k""", Map.of("pid", pid.toString(), "tid", tid.toString()));
-        if (rows.isEmpty()) throw ApiException.notFound("That package is not on your books.");
-        return rows.getFirst();
+    private LockedPackage lock(UUID tid, UUID pid) {
+        return packages.lock(tid, pid).orElseThrow(() -> ApiException.notFound("That package is not on your books."));
     }
 
-    private Map<String, Object> lockPayment(UUID tid, UUID yid) {
-        var rows = jdbc.queryForList("""
-                SELECT package_id, status, amount, method, reference, note, updated_at FROM payment
-                WHERE id = :yid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL""",
-                Map.of("yid", yid.toString(), "tid", tid.toString()));
-        if (rows.isEmpty()) throw ApiException.notFound("That payment is not on your books.");
-        return rows.getFirst();
-    }
-
-    private Sums sums(UUID pid) {
-        return jdbc.queryForObject("""
-                SELECT coalesce(sum(amount) FILTER (WHERE status = 'paid'), 0) AS paid,
-                       coalesce(sum(amount) FILTER (WHERE status = 'write_off'), 0) AS written_off,
-                       coalesce(sum(amount) FILTER (WHERE status = 'pending'), 0) AS pending
-                FROM payment WHERE package_id = :pid::uuid AND deleted_at IS NULL""",
-                Map.of("pid", pid.toString()), (rs, i) -> new Sums(
-                        rs.getBigDecimal("paid"), rs.getBigDecimal("written_off"), rs.getBigDecimal("pending")));
+    private LockedPayment lockPayment(UUID tid, UUID yid) {
+        return payments.findLive(tid, yid).orElseThrow(() -> ApiException.notFound("That payment is not on your books."));
     }
 
     /** L5's rule: amount − paid − written off, never below zero. */
-    private static BigDecimal due(Map<String, Object> k, Sums s) {
-        return ((BigDecimal) k.get("amount")).subtract(s.paid()).subtract(s.writtenOff()).max(BigDecimal.ZERO);
+    private static BigDecimal due(LockedPackage k, PaymentSums s) {
+        return k.amount().subtract(s.paid()).subtract(s.writtenOff()).max(BigDecimal.ZERO);
     }
 
-    private static void running(Map<String, Object> k) {
-        if (!"active".equals(k.get("status"))) throw closed(k);
+    private static void running(LockedPackage k) {
+        if (!"active".equals(k.status())) throw closed(k);
     }
 
     /** A cancelled or refunded pack takes no new money; a finished one can still be owed for. */
-    private static void takesMoney(Map<String, Object> k) {
-        if (Set.of("cancelled", "refunded").contains(k.get("status"))) throw closed(k);
+    private static void takesMoney(LockedPackage k) {
+        if (Set.of("cancelled", "refunded").contains(k.status())) throw closed(k);
     }
 
-    private static ApiException closed(Map<String, Object> k) {
-        return ApiException.conflict("PACKAGE_CLOSED", "This pack is " + k.get("status") + ".");
+    private static ApiException closed(LockedPackage k) {
+        return ApiException.conflict("PACKAGE_CLOSED", "This pack is " + k.status() + ".");
     }
 
     /** payment_collector: the gym's desk takes no method; the trainer's needs one, and a reference only on UPI or bank. */
-    private static void collector(Map<String, Object> k, String method, String reference) {
-        if ("gym".equals(k.get("client_type"))) {
+    private static void collector(LockedPackage k, String method, String reference) {
+        if ("gym".equals(k.clientType())) {
             if (method != null || reference != null) {
                 throw ApiException.validation("method: the gym collects for a gym client — send null");
             }
@@ -556,39 +442,21 @@ public class PackageLedgerService {
         if (reference != null && "cash".equals(method)) throw ApiException.validation("reference: only on upi or bank_transfer");
     }
 
-    private void adjust(UUID tid, Map<String, Object> k, String kind, int days, String reason, Instant at) {
-        var p = new HashMap<String, Object>();
-        p.put("tid", tid.toString());
-        p.put("pid", k.get("id").toString());
-        p.put("cid", k.get("client_id").toString());
-        p.put("kind", kind);
-        p.put("days", days);
-        p.put("reason", reason);
-        p.put("at", Timestamp.from(at == null ? Instant.now() : at));
-        // apply_package_adjustment applies it to the package, under the same row lock.
-        jdbc.update("""
-                INSERT INTO package_adjustment (trainer_id, package_id, client_id, kind, days, reason, effective_at)
-                VALUES (:tid::uuid, :pid::uuid, :cid::uuid, :kind, :days, :reason, :at)""", p);
-    }
-
-    /** A child-row write moves its parent's version (Conventions · Concurrency). */
-    private void touch(UUID pid) {
-        jdbc.update("UPDATE package SET updated_at = now() WHERE id = :pid::uuid", Map.of("pid", pid.toString()));
+    private void adjust(UUID tid, LockedPackage k, String kind, int days, String reason, Instant at) {
+        packages.insertAdjustment(tid, k, kind, days, reason, Timestamp.from(at == null ? Instant.now() : at));
     }
 
     /** A replayed id: this trainer's row on this package answers 200; anywhere else is a clash. */
     private Ledgered replay(UUID tid, UUID id, UUID pid) {
-        var rows = jdbc.queryForList("""
-                SELECT (trainer_id = :tid::uuid AND package_id = :pid::uuid) AS mine FROM payment WHERE id = :id::uuid
-                """, Map.of("tid", tid.toString(), "pid", pid.toString(), "id", id.toString()));
-        if (rows.isEmpty()) return null;
-        if (!Boolean.TRUE.equals(rows.getFirst().get("mine"))) throw ApiException.idConflict();
+        var mine = payments.belongsTo(tid, id, pid);
+        if (mine.isEmpty()) return null;
+        if (!mine.get()) throw ApiException.idConflict();
         return answer(tid, id, pid, false);
     }
 
     private Ledgered answer(UUID tid, UUID yid, UUID pid, boolean created) {
-        return new Ledgered(reads.payment(tid, yid).orElseThrow(ApiException::idConflict),
-                reads.one(tid, pid).orElseThrow(), created);
+        return new Ledgered(payments.find(tid, yid).orElseThrow(ApiException::idConflict),
+                packages.one(tid, pid).orElseThrow(), created);
     }
 
     /**
@@ -623,7 +491,7 @@ public class PackageLedgerService {
     private static ApiException overDue(BigDecimal room) {
         return ApiException.conflict("PAYMENT_OVER_DUE", room == null
                 ? "That is more than is owed on this pack."
-                : "₹" + PackageReadService.money(room) + " is all that's owed on this pack.");
+                : "₹" + Money.format(room) + " is all that's owed on this pack.");
     }
 
     private static ApiException notPending(String message) {

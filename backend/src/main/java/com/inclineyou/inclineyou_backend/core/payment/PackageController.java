@@ -1,5 +1,11 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
+import com.inclineyou.inclineyou_backend.core.payment.dto.Adjustment;
+import com.inclineyou.inclineyou_backend.core.payment.dto.CurrentPackage;
+import com.inclineyou.inclineyou_backend.core.payment.dto.Ledger;
+import com.inclineyou.inclineyou_backend.core.payment.dto.LedgerQuery;
+import com.inclineyou.inclineyou_backend.core.payment.dto.Ledgered;
+import com.inclineyou.inclineyou_backend.core.payment.dto.RenewRequest;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import com.inclineyou.inclineyou_backend.shared.wire.Items;
 import lombok.RequiredArgsConstructor;
@@ -31,7 +37,7 @@ public class PackageController {
      * read would be every package ever sold.
      */
     @GetMapping("/v1/packages")
-    public Items<PackageReadService.CurrentPackage> listPackages(
+    public Items<CurrentPackage> listPackages(
             @RequestParam(required = false) String scope,
             @RequestParam(required = false) String clientId
     ) {
@@ -54,7 +60,7 @@ public class PackageController {
 
     /** api-contract 1.1 Clients A7 — 201 the first time, 200 on a replayed id. */
     @PostMapping("/v1/clients/{clientId}/packages")
-    public ResponseEntity<PackageReadService.CurrentPackage> createPackage(
+    public ResponseEntity<CurrentPackage> createPackage(
             @PathVariable UUID clientId,
             @RequestBody(required = false) Map<String, Object> body
     ) {
@@ -76,9 +82,9 @@ public class PackageController {
      * would have to guess which.
      */
     @PostMapping("/v1/packages/{packageId}/renew")
-    public ResponseEntity<PackageReadService.CurrentPackage> renewPackage(
+    public ResponseEntity<CurrentPackage> renewPackage(
             @PathVariable UUID packageId,
-            @RequestBody(required = false) PackageRenewService.RenewRequest req
+            @RequestBody(required = false) RenewRequest req
     ) {
         // 201 the first time; a replayed id answers 200 with the same package.
         var renewed = renewals.renew(trainerId(), packageId, req);
@@ -94,33 +100,33 @@ public class PackageController {
      * trigger applies. There is deliberately no route that sets a session count.
      */
     @PostMapping("/v1/packages/{packageId}/pause")
-    public PackageReadService.CurrentPackage pausePackage(@PathVariable UUID packageId,
+    public CurrentPackage pausePackage(@PathVariable UUID packageId,
                                                           @RequestBody(required = false) Map<String, Object> body) {
         return ledger.pause(trainerId(), packageId, body);
     }
 
     @PostMapping("/v1/packages/{packageId}/resume")
-    public PackageReadService.CurrentPackage resumePackage(@PathVariable UUID packageId,
+    public CurrentPackage resumePackage(@PathVariable UUID packageId,
                                                            @RequestBody(required = false) Map<String, Object> body) {
         return ledger.resume(trainerId(), packageId, body);
     }
 
     @PostMapping("/v1/packages/{packageId}/extend")
-    public PackageReadService.CurrentPackage extendPackage(@PathVariable UUID packageId,
+    public CurrentPackage extendPackage(@PathVariable UUID packageId,
                                                            @RequestBody(required = false) Map<String, Object> body) {
         return ledger.extend(trainerId(), packageId, body);
     }
 
     /** R74 — end one deal early, once nothing is owed. */
     @PostMapping("/v1/packages/{packageId}/cancel")
-    public PackageReadService.CurrentPackage cancelPackage(@PathVariable UUID packageId,
+    public CurrentPackage cancelPackage(@PathVariable UUID packageId,
                                                            @RequestBody(required = false) Map<String, Object> body) {
         return ledger.cancel(trainerId(), packageId, body);
     }
 
     /** Everything that has happened to this pack, oldest first. Append-only. */
     @GetMapping("/v1/packages/{packageId}/adjustments")
-    public Items<PackageLedgerService.Adjustment> listAdjustments(@PathVariable UUID packageId,
+    public Items<Adjustment> listAdjustments(@PathVariable UUID packageId,
                                                                   @RequestParam(required = false) String kind) {
         return Items.of(ledger.adjustments(trainerId(), packageId, kind));
     }
@@ -132,7 +138,7 @@ public class PackageController {
      * Dates in the workspace timezone, {@code to} exclusive.
      */
     @GetMapping("/v1/payments")
-    public PackageReadService.Ledger listPayments(
+    public Ledger listPayments(
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
@@ -145,7 +151,7 @@ public class PackageController {
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "false") boolean includeTotal
     ) {
-        return reads.payments(trainerId(), new PackageReadService.LedgerQuery(
+        return reads.payments(trainerId(), new LedgerQuery(
                 status, from, to, method, clientId, packageId, collectedBy, clientType, limit, cursor, includeTotal));
     }
 
@@ -193,7 +199,7 @@ public class PackageController {
         ledger.delete(trainerId(), paymentId);
     }
 
-    private static ResponseEntity<Map<String, Object>> created(PackageLedgerService.Ledgered l) {
+    private static ResponseEntity<Map<String, Object>> created(Ledgered l) {
         return ResponseEntity.status(l.created() ? HttpStatus.CREATED : HttpStatus.OK).body(l.body());
     }
 

@@ -1,21 +1,22 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
-import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
+import com.inclineyou.inclineyou_backend.core.payment.MoneyReportJdbcRepository.PaymentKind;
+import com.inclineyou.inclineyou_backend.core.payment.dto.MoneySummary;
+import com.inclineyou.inclineyou_backend.core.payment.dto.SummaryMonth;
+import com.inclineyou.inclineyou_backend.core.payment.dto.SummaryNow;
+import com.inclineyou.inclineyou_backend.core.payment.dto.SummaryTotal;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
+import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
+import com.inclineyou.inclineyou_backend.shared.util.Money;
 import lombok.RequiredArgsConstructor;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
-import java.sql.Date;
-import java.sql.Timestamp;
 import java.time.YearMonth;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -43,46 +44,13 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class MoneySummaryService {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final MoneyReportJdbcRepository reports;
+    private final PackageJdbcRepository packages;
     private final WorkspaceClock clock;
-    private final PackageReadService packages;
 
     private static final int MAX_MONTHS = 24;
     /** "Overdue" is owed past its due date by more than this. */
     private static final int OVERDUE_GRACE_DAYS = 7;
-
-    public record Month(
-            String month,
-            String billed,
-            String collected,
-            String gymCut,
-            String yours,
-            String writtenOff,
-            String refunded,
-            int packagesSold,
-            int paymentsCount,
-            /** collected less the gym's part of what was collected — cash-basis, where {@code yours} is billed-basis. */
-            String takeHome
-    ) {}
-
-    /** The month fields summed over the span, plus the trend on billed. */
-    public record Total(
-            String billed,
-            String collected,
-            String gymCut,
-            String yours,
-            String writtenOff,
-            String refunded,
-            int packagesSold,
-            int paymentsCount,
-            String takeHome,
-            /** Billed against the same-length span before it; null when that span billed 0. */
-            Double trendPercent
-    ) {}
-
-    public record Now(String pending, String overdue, int clientsOwing, int clientsOverdue) {}
-
-    public record Summary(String currency, List<Month> months, Total total, Now now) {}
 
     /** Mutable accumulator for one month while the grouped rows are folded in. */
     private static final class Acc {
@@ -96,7 +64,7 @@ public class MoneySummaryService {
      * @param from   {@code yyyy-MM}, inclusive, with
      * @param to     {@code yyyy-MM}, inclusive
      */
-    public Summary summary(UUID trainerId, Integer months, String from, String to) {
+    public MoneySummary summary(UUID trainerId, Integer months, String from, String to) {
         var zone = clock.zone();
         YearMonth thisMonth = YearMonth.now(zone);
         YearMonth first, last;
@@ -118,59 +86,31 @@ public class MoneySummaryService {
 
         // The span before, for the trend, is read in the same queries.
         YearMonth readFrom = first.minusMonths(span);
-        var p = new HashMap<String, Object>();
-        p.put("tid", trainerId.toString());
-        p.put("tz", zone.getId());
-        p.put("firstDay", Date.valueOf(readFrom.atDay(1)));
-        p.put("endDay", Date.valueOf(last.plusMonths(1).atDay(1)));
-        p.put("fromAt", Timestamp.from(WorkspaceClock.startOf(readFrom, zone)));
-        p.put("toAt", Timestamp.from(WorkspaceClock.startOf(last.plusMonths(1), zone)));
+        var fromAt = WorkspaceClock.startOf(readFrom, zone);
+        var toAt = WorkspaceClock.startOf(last.plusMonths(1), zone);
+        var uid = trainerId;
 
         var acc = new HashMap<String, Acc>();
-        /*
-         * The trainer's share is either a percentage or a flat amount out of the
-         * package price; the gym keeps the rest. No share means the whole package
-         * is the trainer's.
-         */
-        jdbc.query("""
-                SELECT to_char(start_date, 'YYYY-MM') AS m, count(*) AS sold,
-                       coalesce(sum(amount), 0) AS billed,
-                       coalesce(sum(gym_cut(amount, trainer_share_percent, trainer_share_amount)), 0) AS gym_cut
-                FROM package
-                WHERE trainer_id = :tid::uuid AND deleted_at IS NULL
-                  AND start_date >= :firstDay AND start_date < :endDay
-                GROUP BY 1
-                """, p, rs -> {
-            var a = acc.computeIfAbsent(rs.getString("m"), k -> new Acc());
-            a.sold = rs.getInt("sold");
-            a.billed = rs.getBigDecimal("billed");
-            a.gymCut = rs.getBigDecimal("gym_cut");
-        });
+        for (var m : reports.packagesByMonth(uid, readFrom, last)) {
+            var a = acc.computeIfAbsent(m.month(), k -> new Acc());
+            a.sold = m.sold();
+            a.billed = m.billed();
+            a.gymCut = m.gymCut();
+        }
         // One pass per status column, each on its own partial index.
-        for (String[] kind : new String[][]{{"paid", "paid_at"}, {"refund", "refunded_at"}, {"write_off", "written_off_at"}}) {
-            // take_home: what was collected less the gym's part of it. The share view only has rows for
-            // gym-desk payments, so a payment without one is entirely the trainer's.
-            jdbc.query("""
-                    SELECT to_char(y.%1$s AT TIME ZONE :tz, 'YYYY-MM') AS m, count(*) AS n, sum(y.amount) AS total,
-                           sum(coalesce(sh.share, y.amount)) AS take_home
-                    FROM payment y
-                    LEFT JOIN payment_trainer_share sh ON sh.payment_id = y.id AND y.status = 'paid'
-                    WHERE y.trainer_id = :tid::uuid AND y.deleted_at IS NULL AND y.status = '%2$s'
-                      AND y.%1$s >= :fromAt AND y.%1$s < :toAt
-                    GROUP BY 1
-                    """.formatted(kind[1], kind[0]), p, rs -> {
-                var a = acc.computeIfAbsent(rs.getString("m"), k -> new Acc());
-                switch (kind[0]) {
-                    case "paid" -> { a.collected = rs.getBigDecimal("total"); a.payments = rs.getInt("n");
-                                     a.takeHome = rs.getBigDecimal("take_home"); }
-                    case "refund" -> a.refunded = rs.getBigDecimal("total");
-                    default -> a.writtenOff = rs.getBigDecimal("total");
+        for (var kind : PaymentKind.values()) {
+            for (var m : reports.paymentsByMonth(uid, zone, kind, fromAt, toAt)) {
+                var a = acc.computeIfAbsent(m.month(), k -> new Acc());
+                switch (kind) {
+                    case PAID -> { a.collected = m.total(); a.payments = m.count(); a.takeHome = m.takeHome(); }
+                    case REFUND -> a.refunded = m.total();
+                    default -> a.writtenOff = m.total();
                 }
-            });
+            }
         }
 
         // Oldest first, one row per month, zero rows included.
-        var out = new ArrayList<Month>(span);
+        var out = new ArrayList<SummaryMonth>(span);
         var sum = new Acc();
         BigDecimal billedBefore = BigDecimal.ZERO;
         for (YearMonth m = readFrom; !m.isAfter(last); m = m.plusMonths(1)) {
@@ -179,7 +119,7 @@ public class MoneySummaryService {
                 billedBefore = billedBefore.add(a.billed);
                 continue;
             }
-            out.add(new Month(m.toString(), money(a.billed), money(a.collected), money(a.gymCut),
+            out.add(new SummaryMonth(m.toString(), money(a.billed), money(a.collected), money(a.gymCut),
                     money(a.billed.subtract(a.gymCut)), money(a.writtenOff), money(a.refunded),
                     a.sold, a.payments, money(a.takeHome)));
             sum.billed = sum.billed.add(a.billed);
@@ -194,26 +134,16 @@ public class MoneySummaryService {
         Double trend = billedBefore.signum() == 0 ? null
                 : sum.billed.subtract(billedBefore).multiply(BigDecimal.valueOf(100))
                         .divide(billedBefore, 1, RoundingMode.HALF_UP).doubleValue();
-        var total = new Total(money(sum.billed), money(sum.collected), money(sum.gymCut),
+        var total = new SummaryTotal(money(sum.billed), money(sum.collected), money(sum.gymCut),
                 money(sum.billed.subtract(sum.gymCut)), money(sum.writtenOff), money(sum.refunded),
                 sum.sold, sum.payments, money(sum.takeHome), trend);
 
         // Now — on the same ledger L5 uses, so "owed" on a pack and "pending"
         // here cannot disagree.
-        p.put("overdueBefore", Date.valueOf(WorkspaceClock.today(zone).minusDays(OVERDUE_GRACE_DAYS)));
-        Map<String, Object> now = jdbc.queryForMap("WITH " + PackageReadService.LEDGER_CTE + """
-                SELECT coalesce(sum(amount_due), 0) AS pending,
-                       coalesce(sum(amount_due) FILTER (WHERE due_date < :overdueBefore), 0) AS overdue,
-                       count(DISTINCT client_id) FILTER (WHERE amount_due > 0) AS owing,
-                       count(DISTINCT client_id) FILTER (WHERE amount_due > 0 AND due_date < :overdueBefore) AS overdue_clients
-                FROM ledger
-                """, p);
+        var now = packages.dues(trainerId, WorkspaceClock.today(zone).minusDays(OVERDUE_GRACE_DAYS));
 
-        return new Summary(packages.workspaceCurrency(), out, total, new Now(
-                money((BigDecimal) now.get("pending")),
-                money((BigDecimal) now.get("overdue")),
-                ((Number) now.get("owing")).intValue(),
-                ((Number) now.get("overdue_clients")).intValue()));
+        return new MoneySummary(clock.currency(), out, total, new SummaryNow(
+                money(now.pending()), money(now.overdue()), now.clientsOwing(), now.clientsOverdue()));
     }
 
     private static YearMonth month(String raw, String param) {
@@ -226,6 +156,6 @@ public class MoneySummaryService {
     }
 
     private static String money(BigDecimal v) {
-        return PackageReadService.money(v == null ? BigDecimal.ZERO : v);
+        return Money.formatOrZero(v);
     }
 }

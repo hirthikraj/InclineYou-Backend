@@ -115,6 +115,15 @@ Validation, checked by `@Valid`) → `*Service` (logic only, takes the typed
 record, never a `Map`) → `*JdbcRepository` (all SQL, nothing else) — with the
 records in a `dto/` subpackage once a slice has more than a handful.
 
+`payment/` is on this shape (3 Oct 2026): twelve `*Service`s with no SQL, eight `*JdbcRepository`s
+(`Pack`, `Package`, `Payment`, `MoneyReport`, `PracticeReport`, `GymArrangement`, `TrainerPayout`,
+`GymMoney`), records in `payment/dto/`. Two rules came out of it: the package ledger CTE (what a
+package still owes) has ONE definition, in `PackageJdbcRepository`, and the money summary asks it
+for "owed today" rather than copying it; and money formatting and the workspace currency are
+`shared/util/Money` and `WorkspaceClock.currency()`, not per-service helpers. The pack and payment
+PATCH routes keep a raw `Map` body on purpose — presence of a key is the contract (absent = leave,
+null = clear), which a record cannot say — and validate it into typed values at the service's entry.
+
 ### Persistence is deliberately split
 
 Only five things are JPA entities — `AppUser`, `Trainer`, `Client`, `BodyMetric`,

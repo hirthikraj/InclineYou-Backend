@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
+import com.inclineyou.inclineyou_backend.core.payment.dto.PracticeReport;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,7 +17,7 @@ public class PracticeReportController {
     private final PracticeReportService service;
 
     @GetMapping("/v1/reports/practice")
-    public PracticeReportService.Report practice(@RequestParam(required = false) Integer months) {
+    public PracticeReport practice(@RequestParam(required = false) Integer months) {
         return service.practice(UUID.fromString(SecurityContextHolder.getContext().getAuthentication().getName()), months);
     }
 }

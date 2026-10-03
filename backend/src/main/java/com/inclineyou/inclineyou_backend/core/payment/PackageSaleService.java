@@ -1,18 +1,17 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
-import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
+import com.inclineyou.inclineyou_backend.core.payment.dto.NewPackage;
+import com.inclineyou.inclineyou_backend.core.payment.dto.PackageWrite;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
+import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.sql.Date;
 import java.time.LocalDate;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -33,18 +32,15 @@ import java.util.UUID;
 @Slf4j
 public class PackageSaleService {
 
-    private final NamedParameterJdbcTemplate jdbc;
+    private final PackageJdbcRepository packages;
     private final WorkspaceClock clock;
-    private final PackageReadService reads;
 
     private static final Set<String> KEYS = Set.of("id", "packId", "name", "service", "basis", "sessionsTotal",
             "amount", "validityDays", "trainerSharePercent", "trainerShareAmount", "startDate", "dueDate", "discountAmount");
     private static final Set<String> SERVICES = Set.of("floor", "home_visit", "remote", "programming");
 
-    public record Sold(PackageReadService.CurrentPackage pkg, boolean created) {}
-
     @Transactional
-    public Sold sell(UUID trainerId, UUID clientId, Map<String, Object> body) {
+    public PackageWrite sell(UUID trainerId, UUID clientId, Map<String, Object> body) {
         if (body == null) throw ApiException.validation("body: required");
         for (String key : body.keySet()) {
             if (!KEYS.contains(key)) throw ApiException.validation(key + ": not a field this route takes");
@@ -57,57 +53,41 @@ public class PackageSaleService {
         BigDecimal sharePercent = number(body.get("trainerSharePercent"), "trainerSharePercent");
         BigDecimal shareAmount = money(body.get("trainerShareAmount"), "trainerShareAmount");
 
-        var p = new HashMap<String, Object>();
-        p.put("tid", trainerId.toString());
-        p.put("cid", clientId.toString());
-        var clients = jdbc.queryForList("""
-                SELECT status, client_type FROM client
-                WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL FOR UPDATE
-                """, p);
-        if (clients.isEmpty()) throw ApiException.notFound("That client is not on your roster.");
+        var client = packages.lockClient(trainerId, clientId)
+                .orElseThrow(() -> ApiException.notFound("That client is not on your roster."));
         if (id != null) {
-            p.put("id", id.toString());
-            var owner = jdbc.queryForList("""
-                    SELECT (trainer_id = :tid::uuid AND client_id = :cid::uuid) AS mine FROM package WHERE id = :id::uuid
-                    """, p);
-            if (!owner.isEmpty()) {
-                if (!Boolean.TRUE.equals(owner.getFirst().get("mine"))) throw ApiException.idConflict();
-                return new Sold(reads.one(trainerId, id).orElseThrow(ApiException::idConflict), false);
+            var mine = packages.belongsTo(trainerId, clientId, id);
+            if (mine.isPresent()) {
+                if (!mine.get()) throw ApiException.idConflict();
+                return new PackageWrite(packages.one(trainerId, id).orElseThrow(ApiException::idConflict), false);
             }
         }
-        var client = clients.getFirst();
-        if ("archived".equals(client.get("status"))) {
+        if ("archived".equals(client.status())) {
             throw ApiException.conflict("CLIENT_ARCHIVED", "This client is archived. Unarchive them first.");
         }
-        boolean gymClient = "gym".equals(client.get("client_type"));
+        boolean gymClient = "gym".equals(client.clientType());
 
         String name, service, basis, currency, owner;
         Integer sessions, validity;
         BigDecimal listPrice;
         if (packId != null) {
             // The pack's terms win over anything sent, except the trainer's share (R3).
-            p.put("pk", packId.toString());
-            var packs = jdbc.queryForList("""
-                    SELECT name, service, basis, sessions, validity_days, amount, currency, owner, status,
-                           trainer_share_percent, trainer_share_amount
-                    FROM pack WHERE id = :pk::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
-                    """, p);
-            if (packs.isEmpty()) throw ApiException.notFound("That pack is not on your price list.");
-            var pack = packs.getFirst();
-            if (!"active".equals(pack.get("status"))) {
+            var pack = packages.pack(trainerId, packId)
+                    .orElseThrow(() -> ApiException.notFound("That pack is not on your price list."));
+            if (!"active".equals(pack.status())) {
                 throw ApiException.conflict("PACK_INACTIVE", "That pack was archived since the sheet opened.");
             }
-            name = (String) pack.get("name");
-            service = (String) pack.get("service");
-            basis = (String) pack.get("basis");
-            sessions = (Integer) pack.get("sessions");
-            validity = (Integer) pack.get("validity_days");
-            listPrice = (BigDecimal) pack.get("amount");
-            currency = (String) pack.get("currency");
-            owner = (String) pack.get("owner");
+            name = pack.name();
+            service = pack.service();
+            basis = pack.basis();
+            sessions = pack.sessions();
+            validity = pack.validityDays();
+            listPrice = pack.amount();
+            currency = pack.currency();
+            owner = pack.owner();
             if (sharePercent == null && shareAmount == null) {
-                sharePercent = (BigDecimal) pack.get("trainer_share_percent");
-                shareAmount = (BigDecimal) pack.get("trainer_share_amount");
+                sharePercent = pack.trainerSharePercent();
+                shareAmount = pack.trainerShareAmount();
             }
         } else {
             if (!(body.get("name") instanceof String n) || n.isBlank() || n.strip().length() > 80) {
@@ -132,7 +112,7 @@ public class PackageSaleService {
             validity = whole(body.get("validityDays"), 1, 730, "validityDays");
             listPrice = money(body.get("amount"), "amount");
             if (listPrice == null) throw ApiException.validation("amount: required");
-            currency = reads.workspaceCurrency();
+            currency = clock.currency();
             // A custom sale has no pack, so the owner follows the client (check_package_client_type).
             owner = gymClient ? "gym" : "trainer";
         }
@@ -160,41 +140,20 @@ public class PackageSaleService {
         }
 
         LocalDate from = start != null ? start : WorkspaceClock.today(clock.zone());
-        p.put("id", (id == null ? UUID.randomUUID() : id).toString());
-        p.put("packId", packId == null ? null : packId.toString());
-        p.put("name", name);
-        p.put("service", service);
-        p.put("basis", basis);
-        p.put("sessions", sessions);
-        p.put("amount", amount);
-        p.put("discount", discount);
-        p.put("currency", currency);
-        p.put("start", Date.valueOf(from));
-        p.put("end", validity == null ? null : Date.valueOf(from.plusDays(validity)));
-        p.put("due", Date.valueOf(due != null ? due : from));
-        p.put("sharePercent", sharePercent);
-        p.put("shareAmount", shareAmount);
-        int inserted = jdbc.update("""
-                INSERT INTO package (id, trainer_id, client_id, pack_id, name, service, basis, sessions_total,
-                                     sessions_remaining, amount, discount_amount, currency, start_date, end_date, due_date,
-                                     trainer_share_percent, trainer_share_amount)
-                VALUES (:id::uuid, :tid::uuid, :cid::uuid, :packId::uuid, :name, :service, :basis, :sessions,
-                        :sessions, :amount, :discount, :currency, :start, :end, :due, :sharePercent, :shareAmount)
-                ON CONFLICT (id) DO NOTHING
-                """, p);
+        UUID made = id == null ? UUID.randomUUID() : id;
+        int inserted = packages.insert(new NewPackage(made, trainerId, clientId, packId, name, service, basis, sessions,
+                amount, discount, currency, from, validity == null ? null : from.plusDays(validity),
+                due != null ? due : from, sharePercent, shareAmount));
         // Nothing inserted: the id belongs to a row this trainer cannot see.
         if (inserted == 0) throw ApiException.idConflict();
-        UUID made = UUID.fromString((String) p.get("id"));
 
         // A prospect who is sold a pack has, by that act, become an active
         // client — the same rule ClientScheduleService applies when they are
         // given a real weekly plan instead.
-        if ("prospect".equals(client.get("status"))) {
-            jdbc.update("UPDATE client SET status = 'active' WHERE id = :cid::uuid AND status = 'prospect'", p);
-        }
+        if ("prospect".equals(client.status())) packages.activateProspect(clientId);
 
         log.info("package sold trainer={} client={} package={} fromPack={}", trainerId, clientId, made, packId != null);
-        return new Sold(reads.one(trainerId, made).orElseThrow(), true);
+        return new PackageWrite(packages.one(trainerId, made).orElseThrow(), true);
     }
 
     private static UUID uuid(Object raw, String field) {

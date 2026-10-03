@@ -32,6 +32,12 @@ public class TenantJdbcRepository {
                 Map.of("id", tenantId.toString()), String.class);
     }
 
+    /** {@code tenant.currency} — every money response states it. */
+    public String currency(UUID tenantId) {
+        return jdbc.queryForObject("SELECT currency FROM tenant WHERE id = :id::uuid",
+                Map.of("id", tenantId.toString()), String.class);
+    }
+
     /** The workspace banner {@code /v1/me} draws. */
     public Optional<Workspace> workspace(UUID tenantId) {
         return jdbc.query("""

@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
+import com.inclineyou.inclineyou_backend.core.payment.dto.PackRow;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -35,7 +36,7 @@ public class PackController {
      * `?status=active` drops what is no longer offered.
      */
     @GetMapping("/v1/packs")
-    public com.inclineyou.inclineyou_backend.shared.wire.Items<PackService.PackRow> listPacks(
+    public com.inclineyou.inclineyou_backend.shared.wire.Items<PackRow> listPacks(
             @RequestParam(required = false) String owner,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) String include
@@ -45,7 +46,7 @@ public class PackController {
 
     /** 201 the first time, 200 on a replayed id; the version rides as the ETag. */
     @PostMapping("/v1/packs")
-    public ResponseEntity<PackService.PackRow> createPack(@RequestBody(required = false) Map<String, Object> body) {
+    public ResponseEntity<PackRow> createPack(@RequestBody(required = false) Map<String, Object> body) {
         var made = service.create(trainerId(), body);
         return ResponseEntity.status(made.created() ? HttpStatus.CREATED : HttpStatus.OK)
                 .eTag("\"" + made.row().version() + "\"").body(made.row());
@@ -56,7 +57,7 @@ public class PackController {
      * omitted is untouched. Archive is {@code {"status":"inactive"}}.
      */
     @PatchMapping("/v1/packs/{packId}")
-    public ResponseEntity<PackService.PackRow> updatePack(
+    public ResponseEntity<PackRow> updatePack(
             @PathVariable UUID packId,
             @RequestHeader(value = "If-Match", required = false) String ifMatch,
             @RequestBody(required = false) Map<String, Object> body

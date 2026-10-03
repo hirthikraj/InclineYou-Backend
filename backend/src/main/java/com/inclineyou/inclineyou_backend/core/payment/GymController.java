@@ -1,6 +1,10 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
 import com.inclineyou.inclineyou_backend.shared.wire.Items;
+import com.inclineyou.inclineyou_backend.core.payment.dto.Arrangement;
+import com.inclineyou.inclineyou_backend.core.payment.dto.GymMoney;
+import com.inclineyou.inclineyou_backend.core.payment.dto.Payout;
+import com.inclineyou.inclineyou_backend.core.payment.dto.PayoutPage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,7 +30,7 @@ public class GymController {
     private final TrainerPayoutService payouts;
 
     @GetMapping("/v1/money/gym")
-    public GymMoneyService.GymMoney gym(@RequestParam(required = false) String from,
+    public GymMoney gym(@RequestParam(required = false) String from,
                                         @RequestParam(required = false) String to) {
         return money.get(trainerId(), from, to);
     }
@@ -34,19 +38,19 @@ public class GymController {
     // ── gym arrangements ──────────────────────────────────────────────────────
 
     @GetMapping("/v1/gym-arrangements")
-    public Items<GymArrangementService.Arrangement> listArrangements() {
+    public Items<Arrangement> listArrangements() {
         return Items.of(arrangements.list(trainerId()));
     }
 
     @PostMapping("/v1/gym-arrangements")
-    public ResponseEntity<GymArrangementService.Arrangement> createArrangement(
+    public ResponseEntity<Arrangement> createArrangement(
             @RequestBody(required = false) Map<String, Object> body) {
         var c = arrangements.create(trainerId(), body);
         return ResponseEntity.status(c.created() ? HttpStatus.CREATED : HttpStatus.OK).body(c.arrangement());
     }
 
     @PatchMapping("/v1/gym-arrangements/{id}")
-    public ResponseEntity<GymArrangementService.Arrangement> patchArrangement(
+    public ResponseEntity<Arrangement> patchArrangement(
             @PathVariable UUID id,
             @RequestHeader(value = "If-Match", required = false) String ifMatch,
             @RequestBody(required = false) Map<String, Object> body) {
@@ -63,7 +67,7 @@ public class GymController {
     // ── trainer payouts ───────────────────────────────────────────────────────
 
     @GetMapping("/v1/trainer-payouts")
-    public TrainerPayoutService.PayoutPage listPayouts(
+    public PayoutPage listPayouts(
             @RequestParam(required = false) String gymName,
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
@@ -73,13 +77,13 @@ public class GymController {
     }
 
     @PostMapping("/v1/trainer-payouts")
-    public ResponseEntity<TrainerPayoutService.Payout> createPayout(@RequestBody(required = false) Map<String, Object> body) {
+    public ResponseEntity<Payout> createPayout(@RequestBody(required = false) Map<String, Object> body) {
         var c = payouts.create(trainerId(), body);
         return ResponseEntity.status(c.created() ? HttpStatus.CREATED : HttpStatus.OK).body(c.payout());
     }
 
     @PatchMapping("/v1/trainer-payouts/{id}")
-    public ResponseEntity<TrainerPayoutService.Payout> patchPayout(
+    public ResponseEntity<Payout> patchPayout(
             @PathVariable UUID id,
             @RequestHeader(value = "If-Match", required = false) String ifMatch,
             @RequestBody(required = false) Map<String, Object> body) {

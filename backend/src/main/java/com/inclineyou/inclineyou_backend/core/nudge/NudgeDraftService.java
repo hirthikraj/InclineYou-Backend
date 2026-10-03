@@ -2,6 +2,7 @@ package com.inclineyou.inclineyou_backend.core.nudge;
 
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import com.inclineyou.inclineyou_backend.core.payment.PackageReadService;
+import com.inclineyou.inclineyou_backend.core.payment.dto.CurrentPackage;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -245,7 +246,7 @@ public class NudgeDraftService {
         return vars;
     }
 
-    private PackageReadService.CurrentPackage pack(Map<String, Object> p, UUID packageId, boolean owingOnly) {
+    private CurrentPackage pack(Map<String, Object> p, UUID packageId, boolean owingOnly) {
         var trainer = UUID.fromString((String) p.get("tid"));
         if (packageId != null) return packages.one(trainer, packageId).orElse(null);
         return packages.list(trainer, true, UUID.fromString((String) p.get("cid"))).stream()
@@ -257,14 +258,14 @@ public class NudgeDraftService {
 
     private Owed owing(Map<String, Object> p, UUID packageId) {
         var trainer = UUID.fromString((String) p.get("tid"));
-        List<PackageReadService.CurrentPackage> owing = packageId != null
+        List<CurrentPackage> owing = packageId != null
                 ? packages.one(trainer, packageId).stream().toList()
                 : packages.list(trainer, true, UUID.fromString((String) p.get("cid"))).stream()
                         .filter(k -> new BigDecimal(k.amountDue()).signum() > 0).toList();
         BigDecimal total = owing.stream().map(k -> new BigDecimal(k.amountDue())).reduce(BigDecimal.ZERO, BigDecimal::add);
         String name = owing.size() == 1 ? owing.getFirst().name() : "pack";
         // How long it has been outstanding: from the earliest due date still owed.
-        int days = owing.stream().map(PackageReadService.CurrentPackage::dueDate)
+        int days = owing.stream().map(CurrentPackage::dueDate)
                 .filter(d -> d != null)
                 .map(d -> (int) Math.max(0, java.time.temporal.ChronoUnit.DAYS.between(
                         java.time.LocalDate.parse(d), ((java.sql.Date) p.get("today")).toLocalDate())))

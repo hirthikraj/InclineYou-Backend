@@ -1,20 +1,17 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
+import com.inclineyou.inclineyou_backend.core.payment.dto.PackCreated;
+import com.inclineyou.inclineyou_backend.core.payment.dto.PackRow;
+import com.inclineyou.inclineyou_backend.core.payment.dto.PackShape;
+import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import com.inclineyou.inclineyou_backend.shared.wire.IfMatch;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -51,8 +48,8 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PackService {
 
-    private final NamedParameterJdbcTemplate jdbc;
-    private final PackageReadService reads;
+    private final PackJdbcRepository packs;
+    private final WorkspaceClock clock;
 
     private static final Set<String> OWNERS = Set.of("trainer", "gym");
     private static final Set<String> STATUSES = Set.of("active", "inactive");
@@ -66,27 +63,6 @@ public class PackService {
     private static final Set<String> CREATABLE = Set.of("id", "name", "service", "basis", "sessions", "validityDays",
             "amount", "owner", "trainerSharePercent", "trainerShareAmount", "orderIndex");
 
-    /**
-     * One price-list row on the 1.1 wire. {@code gymSharePercent} /
-     * {@code gymShareAmount} are what the gym keeps of a gym pack, derived (null
-     * on a trainer's own pack). {@code activeClients} and {@code soldCount} only
-     * with {@code include=usage}.
-     */
-    public record PackRow(String id, String name, String service, String basis, Integer sessions,
-                          Integer validityDays, String amount, String currency, String owner,
-                          BigDecimal trainerSharePercent, String trainerShareAmount,
-                          BigDecimal gymSharePercent, String gymShareAmount,
-                          String status, int orderIndex, String version,
-                          @JsonInclude(JsonInclude.Include.NON_NULL) Integer activeClients,
-                          @JsonInclude(JsonInclude.Include.NON_NULL) Integer soldCount) {}
-
-    /** A create's answer: {@code created} is false for a replayed id (200). */
-    public record Created(PackRow row, boolean created) {}
-
-    private static final String ROW_COLUMNS = """
-            p.id::text AS id, p.name, p.service, p.basis, p.sessions, p.validity_days, p.amount, p.currency,
-            p.owner, p.trainer_share_percent, p.trainer_share_amount, p.status, p.order_index, p.updated_at""";
-
     // ── Reads ─────────────────────────────────────────────────────
 
     /**
@@ -95,68 +71,21 @@ public class PackService {
      * pass over idx_package_pack, and only when asked for.
      */
     public List<PackRow> list(UUID trainerId, String status, String owner, String include) {
-        var p = new HashMap<String, Object>();
-        p.put("tid", trainerId.toString());
-        var where = new ArrayList<String>(List.of("p.trainer_id = :tid::uuid", "p.deleted_at IS NULL"));
         String st = status == null || status.isBlank() ? "active" : status.strip();
-        if (!"all".equals(st)) {
-            if (!"active".equals(st)) throw ApiException.validation("status: active or all");
-            where.add("p.status = 'active'");
-        }
+        if (!"all".equals(st) && !"active".equals(st)) throw ApiException.validation("status: active or all");
+        String ownerFilter = null;
         if (owner != null && !owner.isBlank()) {
             if (!OWNERS.contains(owner.strip())) throw ApiException.validation("owner: trainer or gym");
-            p.put("owner", owner.strip());
-            where.add("p.owner = :owner");
+            ownerFilter = owner.strip();
         }
         if (include != null && !include.isBlank() && !"usage".equals(include.strip())) {
             throw ApiException.validation("include: usage");
         }
         boolean usage = include != null && "usage".equals(include.strip());
-        p.put("usage", usage);
-        return jdbc.query("""
-                SELECT %s, u.active_clients, u.sold
-                FROM pack p
-                LEFT JOIN (
-                    SELECT pack_id, count(DISTINCT client_id) FILTER (WHERE status = 'active') AS active_clients,
-                           count(*) AS sold
-                    FROM package WHERE trainer_id = :tid::uuid AND pack_id IS NOT NULL AND deleted_at IS NULL AND :usage
-                    GROUP BY pack_id
-                ) u ON u.pack_id = p.id
-                WHERE %s
-                ORDER BY p.order_index, p.id
-                """.formatted(ROW_COLUMNS, String.join(" AND ", where)), p, (rs, i) -> row(rs, usage));
-    }
-
-    private static PackRow row(ResultSet rs, boolean usage) throws SQLException {
-        BigDecimal amount = rs.getBigDecimal("amount");
-        BigDecimal pct = rs.getBigDecimal("trainer_share_percent");   // a percentage is a JSON number, not money
-        BigDecimal share = rs.getBigDecimal("trainer_share_amount");
-        // What the gym keeps — derived on read, never stored (R3).
-        BigDecimal gymPct = pct == null ? null : BigDecimal.valueOf(100).subtract(pct);
-        String gymAmt = null;
-        if (pct != null) {
-            gymAmt = PackageReadService.money(amount.multiply(gymPct).divide(BigDecimal.valueOf(100), 2,
-                    java.math.RoundingMode.HALF_UP));
-        } else if (share != null) {
-            gymAmt = PackageReadService.money(amount.subtract(share));
-            gymPct = amount.signum() == 0 ? null
-                    : amount.subtract(share).multiply(BigDecimal.valueOf(100)).divide(amount, 2, java.math.RoundingMode.HALF_UP);
-        }
-        return new PackRow(
-                rs.getString("id"), rs.getString("name"), rs.getString("service"), rs.getString("basis"),
-                (Integer) rs.getObject("sessions"), (Integer) rs.getObject("validity_days"),
-                PackageReadService.money(amount), rs.getString("currency"), rs.getString("owner"),
-                pct, PackageReadService.money(share), gymPct, gymAmt,
-                rs.getString("status"), rs.getInt("order_index"),
-                String.valueOf(rs.getTimestamp("updated_at").getTime()),
-                usage ? rs.getInt("active_clients") : null, usage ? rs.getInt("sold") : null);
+        return packs.list(trainerId, !"all".equals(st), ownerFilter, usage);
     }
 
     // ── Writes ─────────────────────────────────────────────────────
-
-    /** The pack as one validated value — what a create is built from and a PATCH merges into. */
-    private record Shape(String name, String service, String basis, Integer sessions, Integer validityDays,
-                         BigDecimal amount, String owner, BigDecimal pct, BigDecimal shareAmount) {}
 
     /**
      * {@code POST /v1/packs} — 201, or 200 for a replayed id. The id is optional;
@@ -164,23 +93,22 @@ public class PackService {
      * ID_CONFLICT with no detail, so a create is never a probe.
      */
     @Transactional
-    public Created create(UUID trainerId, Map<String, Object> body) {
+    public PackCreated create(UUID trainerId, Map<String, Object> body) {
         if (body == null) throw ApiException.validation("A pack needs a name, a price and what it covers.");
         for (String key : body.keySet()) {
             if (!CREATABLE.contains(key)) throw ApiException.validation(key + ": not a pack field");
         }
         UUID id = body.get("id") == null ? UUID.randomUUID() : uuid(body.get("id"), "id");
 
-        var existing = jdbc.queryForList("SELECT trainer_id::text AS tid, deleted_at FROM pack WHERE id = :id::uuid",
-                Map.of("id", id.toString()));
-        if (!existing.isEmpty()) {
-            var e = existing.get(0);
-            if (!trainerId.toString().equals(e.get("tid")) || e.get("deleted_at") != null) throw ApiException.idConflict();
-            return new Created(one(trainerId, id).orElseThrow(), false);
+        var existing = packs.ownership(id);
+        if (existing.isPresent()) {
+            var e = existing.get();
+            if (!trainerId.toString().equals(e.trainerId()) || e.deleted()) throw ApiException.idConflict();
+            return new PackCreated(packs.find(trainerId, id).orElseThrow(), false);
         }
 
         String owner = body.get("owner") == null ? "trainer" : text(body.get("owner"), "owner");
-        var shape = validate(new Shape(
+        var shape = validate(new PackShape(
                 text(body.get("name"), "name"),
                 text(body.get("service"), "service"),
                 body.get("basis") == null ? "sessions" : text(body.get("basis"), "basis"),
@@ -194,24 +122,14 @@ public class PackService {
         if ("gym".equals(shape.owner())) requireGymName(trainerId);
         requireNameFree(trainerId, shape.name(), null);
 
-        int order = body.get("orderIndex") == null ? nextOrder(trainerId) : intRequired(body.get("orderIndex"), "orderIndex");
-        var p = params(shape);
-        p.put("id", id.toString());
-        p.put("tid", trainerId.toString());
-        p.put("currency", reads.workspaceCurrency());
-        p.put("orderIndex", order);
+        int order = body.get("orderIndex") == null ? packs.nextOrder(trainerId) : intRequired(body.get("orderIndex"), "orderIndex");
         try {
-            jdbc.update("""
-                    INSERT INTO pack (id, trainer_id, name, service, basis, sessions, validity_days, amount, currency,
-                                      owner, trainer_share_percent, trainer_share_amount, status, order_index)
-                    VALUES (:id::uuid, :tid::uuid, :name, :service, :basis, :sessions, :validityDays, :amount, :currency,
-                            :owner, :pct, :shareAmount, 'active', :orderIndex)
-                    """, p);
+            packs.insert(id, trainerId, shape, clock.currency(), order);
         } catch (DuplicateKeyException e) {
             // The name, if the race got past requireNameFree; otherwise a row in another workspace that RLS hid.
             throw String.valueOf(e.getMessage()).contains("uq_pack_live_name") ? PackRuleException.nameTaken() : ApiException.idConflict();
         }
-        return new Created(one(trainerId, id).orElseThrow(), true);
+        return new PackCreated(packs.find(trainerId, id).orElseThrow(), true);
     }
 
     /**
@@ -227,14 +145,10 @@ public class PackService {
         for (String key : body.keySet()) {
             if (!PATCHABLE.contains(key)) throw ApiException.validation(key + ": not an editable pack field");
         }
-        var cur = jdbc.query("SELECT " + ROW_COLUMNS + """
-                , p.deleted_at FROM pack p
-                WHERE p.id = :id::uuid AND p.trainer_id = :tid::uuid AND p.deleted_at IS NULL FOR UPDATE
-                """, Map.of("id", packId.toString(), "tid", trainerId.toString()), (rs, i) -> row(rs, false))
-                .stream().findFirst().orElseThrow(PackRuleException::notFound);
+        var cur = packs.lockLive(trainerId, packId).orElseThrow(PackRuleException::notFound);
         IfMatch.check(ifMatch, cur.version(), "That pack changed since you opened it.");
 
-        var merged = validate(new Shape(
+        var merged = validate(new PackShape(
                 body.containsKey("name") ? text(body.get("name"), "name") : cur.name(),
                 body.containsKey("service") ? text(body.get("service"), "service") : cur.service(),
                 body.containsKey("basis") ? text(body.get("basis"), "basis") : cur.basis(),
@@ -253,25 +167,15 @@ public class PackService {
         }
         int order = body.containsKey("orderIndex") ? intRequired(body.get("orderIndex"), "orderIndex") : cur.orderIndex();
 
-        var now = new Shape(cur.name(), cur.service(), cur.basis(), cur.sessions(), cur.validityDays(),
+        var now = new PackShape(cur.name(), cur.service(), cur.basis(), cur.sessions(), cur.validityDays(),
                 new BigDecimal(cur.amount()), cur.owner(), cur.trainerSharePercent(),
                 cur.trainerShareAmount() == null ? null : new BigDecimal(cur.trainerShareAmount()));
-        if (sameShape(now, merged) && status.equals(cur.status()) && order == cur.orderIndex()) return cur;
+        if (samePackShape(now, merged) && status.equals(cur.status()) && order == cur.orderIndex()) return cur;
 
         if (!merged.name().equalsIgnoreCase(cur.name())) requireNameFree(trainerId, merged.name(), packId);
 
-        var p = params(merged);
-        p.put("id", packId.toString());
-        p.put("tid", trainerId.toString());
-        p.put("status", status);
-        p.put("orderIndex", order);
-        jdbc.update("""
-                UPDATE pack SET name = :name, service = :service, basis = :basis, sessions = :sessions,
-                       validity_days = :validityDays, amount = :amount, trainer_share_percent = :pct,
-                       trainer_share_amount = :shareAmount, status = :status, order_index = :orderIndex
-                WHERE id = :id::uuid AND trainer_id = :tid::uuid
-                """, p);
-        return one(trainerId, packId).orElseThrow();
+        packs.update(packId, trainerId, merged, status, order);
+        return packs.find(trainerId, packId).orElseThrow();
     }
 
     /**
@@ -281,29 +185,21 @@ public class PackService {
      */
     @Transactional
     public void delete(UUID trainerId, UUID packId) {
-        var rows = jdbc.queryForList("SELECT deleted_at FROM pack WHERE id = :id::uuid AND trainer_id = :tid::uuid FOR UPDATE",
-                Map.of("id", packId.toString(), "tid", trainerId.toString()));
-        if (rows.isEmpty()) throw PackRuleException.notFound();
-        if (rows.get(0).get("deleted_at") != null) return;
-        Integer sold = jdbc.queryForObject("SELECT count(*) FROM package WHERE pack_id = :id::uuid",
-                Map.of("id", packId.toString()), Integer.class);
-        if (sold != null && sold > 0) throw PackRuleException.sold();
-        jdbc.update("UPDATE pack SET deleted_at = now() WHERE id = :id::uuid AND trainer_id = :tid::uuid",
-                Map.of("id", packId.toString(), "tid", trainerId.toString()));
+        var deleted = packs.lockForDelete(trainerId, packId).orElseThrow(PackRuleException::notFound);
+        if (deleted) return;
+        if (packs.soldCount(packId) > 0) throw PackRuleException.sold();
+        packs.softDelete(trainerId, packId);
     }
 
     /** One live pack in the list shape; empty if it is not this trainer's. */
     public java.util.Optional<PackRow> one(UUID trainerId, UUID packId) {
-        return jdbc.query("SELECT " + ROW_COLUMNS + """
-                 FROM pack p WHERE p.id = :id::uuid AND p.trainer_id = :tid::uuid AND p.deleted_at IS NULL
-                """, Map.of("id", packId.toString(), "tid", trainerId.toString()), (rs, i) -> row(rs, false))
-                .stream().findFirst();
+        return packs.find(trainerId, packId);
     }
 
     // ── Rules ─────────────────────────────────────────────────────
 
     /** The pack check constraints, as 400s naming the field. */
-    private Shape validate(Shape s) {
+    private PackShape validate(PackShape s) {
         String name = s.name() == null ? "" : s.name().strip();
         if (name.isEmpty()) throw ApiException.validation("name: a pack needs a name");
         if (name.length() > 80) throw ApiException.validation("name: at most 80 characters");
@@ -348,11 +244,11 @@ public class PackService {
                 || s.shareAmount().scale() > 2)) {
             throw ApiException.validation("trainerShareAmount: between 0 and the pack price");
         }
-        return new Shape(name, s.service(), s.basis(), s.sessions(), s.validityDays(), s.amount(), s.owner(),
+        return new PackShape(name, s.service(), s.basis(), s.sessions(), s.validityDays(), s.amount(), s.owner(),
                 s.pct(), s.shareAmount());
     }
 
-    private static boolean sameShape(Shape a, Shape b) {
+    private static boolean samePackShape(PackShape a, PackShape b) {
         return a.name().equals(b.name()) && a.service().equals(b.service()) && a.basis().equals(b.basis())
                 && java.util.Objects.equals(a.sessions(), b.sessions())
                 && java.util.Objects.equals(a.validityDays(), b.validityDays())
@@ -364,47 +260,14 @@ public class PackService {
         return a == null ? b == null : b != null && a.compareTo(b) == 0;
     }
 
-    private static Map<String, Object> params(Shape s) {
-        var p = new LinkedHashMap<String, Object>();
-        p.put("name", s.name());
-        p.put("service", s.service());
-        p.put("basis", s.basis());
-        p.put("sessions", s.sessions());
-        p.put("validityDays", s.validityDays());
-        p.put("amount", s.amount());
-        p.put("owner", s.owner());
-        p.put("pct", s.pct());
-        p.put("shareAmount", s.shareAmount());
-        return p;
-    }
-
     /** A gym pack needs a gym to belong to (409: the trainer can fix it in Settings). */
     private void requireGymName(UUID trainerId) {
-        Boolean has = jdbc.queryForObject("""
-                SELECT EXISTS (SELECT 1 FROM trainer_business
-                               WHERE trainer_id = :tid::uuid AND btrim(coalesce(gym_name, '')) <> '')
-                """, Map.of("tid", trainerId.toString()), Boolean.class);
-        if (!Boolean.TRUE.equals(has)) throw PackRuleException.gymNeeded();
+        if (!packs.hasGymName(trainerId)) throw PackRuleException.gymNeeded();
     }
 
     /** Live names are unique per trainer, case-insensitively — the price list is read by name. */
     private void requireNameFree(UUID trainerId, String name, UUID except) {
-        var p = new HashMap<String, Object>();
-        p.put("tid", trainerId.toString());
-        p.put("name", name.strip());
-        p.put("except", except == null ? null : except.toString());
-        Boolean taken = jdbc.queryForObject("""
-                SELECT EXISTS (SELECT 1 FROM pack WHERE trainer_id = :tid::uuid AND deleted_at IS NULL
-                               AND lower(name) = lower(:name)
-                               AND (CAST(:except AS uuid) IS NULL OR id <> CAST(:except AS uuid)))
-                """, p, Boolean.class);
-        if (Boolean.TRUE.equals(taken)) throw PackRuleException.nameTaken();
-    }
-
-    private int nextOrder(UUID trainerId) {
-        Integer max = jdbc.queryForObject("SELECT max(order_index) FROM pack WHERE trainer_id = :tid::uuid AND deleted_at IS NULL",
-                Map.of("tid", trainerId.toString()), Integer.class);
-        return max == null ? 0 : max + 1;
+        if (packs.nameTaken(trainerId, name, except)) throw PackRuleException.nameTaken();
     }
 
     // ── Body parsing: JSON types are checked, never coerced ───────────

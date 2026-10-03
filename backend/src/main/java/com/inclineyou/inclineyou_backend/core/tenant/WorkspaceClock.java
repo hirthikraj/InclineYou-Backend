@@ -41,6 +41,11 @@ public class WorkspaceClock {
         }
     }
 
+    /** The active workspace's currency — an aggregate states it, a row carries its own. */
+    public String currency() {
+        return repo.currency(CurrentScope.require().activeTenantId());
+    }
+
     public static LocalDate today(ZoneId zone) {
         return LocalDate.now(zone);
     }

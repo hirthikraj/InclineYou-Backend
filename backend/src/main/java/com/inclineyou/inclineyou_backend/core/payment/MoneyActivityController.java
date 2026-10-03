@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
+import com.inclineyou.inclineyou_backend.core.payment.dto.ActivityFeed;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,7 +17,7 @@ public class MoneyActivityController {
     private final MoneyActivityService service;
 
     @GetMapping("/v1/money/activity")
-    public MoneyActivityService.Feed activity(
+    public ActivityFeed activity(
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
             @RequestParam(required = false) Integer limit,

@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
+import com.inclineyou.inclineyou_backend.core.payment.dto.MoneySummary;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -20,7 +21,7 @@ public class MoneyController {
     private final MoneySummaryService service;
 
     @GetMapping("/v1/money/summary")
-    public MoneySummaryService.Summary summary(
+    public MoneySummary summary(
             @RequestParam(required = false) Integer months,
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to) {
