@@ -12,6 +12,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
@@ -20,19 +21,25 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.hamcrest.Matchers.hasItem;
-import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 /**
- * V9 · the redesigned library: drafts, `?source=`, a wider `q`, one row by id,
- * and the *By categories* counts.
+ * The exercise library on the v1 wire (api-contract 1.1, Programs L6 and A9–A10): the global, text-only catalogue plus
+ * the trainer's own custom exercises. What is pinned is who can see and write what (a custom is the owner's alone, a
+ * global is never writable), the safe-retry create, the name rule, the sparse PATCH, the soft delete that frees the
+ * name, the typeahead page and the facets, and {@code logType} on the wire.
  *
- * <p>Written against whatever catalogue the test database holds — the category
- * checks are DELTAS around rows this test adds, so the suite does not depend on
- * whether the seeder ran.
+ * <p>Written against whatever catalogue the test database holds: every name carries a {@code Zqx} marker so the search
+ * checks cannot be fooled by seeded rows, and the facet checks are DELTAS around rows this test adds.
+ *
+ * <p>Gone since the pre-v1 library, deliberately: {@code ?ids=} (a plan, a session and a set history now carry the names
+ * they need), {@code ?source=}, {@code /categories} (the facets are {@code /meta}), and a draft shelf — a draft is a
+ * custom whose {@code status} says so, and it is found like any other of the owner's.
  */
 @SpringBootTest
 @Transactional
@@ -59,106 +66,185 @@ class ExerciseLibraryTest {
     }
 
     @Test
-    @DisplayName("a draft is hidden from the default library and from `mine`, and found under `draft` and by id")
-    void draftsAreTheirOwnShelf() throws Exception {
-        String id = create("{\"name\":\"Zqx landmine press\",\"status\":\"draft\"}", "draft");
-
-        mvc.perform(get("/v1/exercises").param("q", "Zqx landmine"))
-                .andExpect(jsonPath("$.total").value(0));
-        mvc.perform(get("/v1/exercises").param("q", "Zqx landmine").param("source", "mine"))
-                .andExpect(jsonPath("$.total").value(0));
-        mvc.perform(get("/v1/exercises").param("q", "Zqx landmine").param("source", "draft"))
-                .andExpect(jsonPath("$.total").value(1))
-                .andExpect(jsonPath("$.exercises[0].status").value("draft"));
-        // A draft already named in a plan must still resolve.
-        mvc.perform(get("/v1/exercises").param("ids", id))
-                .andExpect(jsonPath("$.exercises[0].id").value(id));
-    }
-
-    @Test
-    @DisplayName("anything but the literal 'draft' is published; `incline` never shows custom rows")
-    void publishedByDefault() throws Exception {
-        create("{\"name\":\"Zqx cable fly\",\"status\":\"Draft \"}", "published");
-        mvc.perform(get("/v1/exercises").param("q", "Zqx cable").param("source", "mine"))
-                .andExpect(jsonPath("$.total").value(1));
-        mvc.perform(get("/v1/exercises").param("q", "Zqx cable").param("source", "incline"))
-                .andExpect(jsonPath("$.total").value(0));
-    }
-
-    @Test
-    @DisplayName("q matches target, movement pattern and body part, not only the name")
-    void qSearchesTheTaxonomy() throws Exception {
-        create("{\"name\":\"Ananya's rehab\",\"target\":\"zqxquads\",\"movementPattern\":\"zqxhinge\"}", "published");
-        mvc.perform(get("/v1/exercises").param("q", "zqxquads"))
-                .andExpect(jsonPath("$.exercises[0].name").value("Ananya's rehab"));
-        mvc.perform(get("/v1/exercises").param("q", "ZQXHINGE"))
-                .andExpect(jsonPath("$.total").value(1));
-    }
-
-    @Test
-    @DisplayName("GET /{id} returns the whole row — target kept, cue lists present and empty")
-    void oneRow() throws Exception {
-        String id = create("{\"name\":\"Zqx goblet squat\",\"target\":\"quads\",\"muscleGroup\":\"Legs\"}", "published");
-        mvc.perform(get("/v1/exercises/" + id))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.target").value("quads"))
+    @DisplayName("create: 201 with the whole row, a retried id is 200, another trainer's id is a 409, a taken name is a 409")
+    void createRules() throws Exception {
+        UUID id = UUID.randomUUID();
+        String body = "{\"id\":\"" + id + "\",\"name\":\"  Zqx landmine press  \",\"bodyPart\":\"shoulders\",\"target\":\"delts\","
+                + "\"description\":\"Press it.\",\"formCues\":[\"Brace\",\"Drive\"]}";
+        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(header().exists("ETag"))
+                .andExpect(jsonPath("$.id").value(id.toString()))
+                .andExpect(jsonPath("$.name").value("Zqx landmine press"))
+                .andExpect(jsonPath("$.isCustom").value(true))
                 .andExpect(jsonPath("$.status").value("published"))
-                .andExpect(jsonPath("$.secondaryTargets").isArray())
-                .andExpect(jsonPath("$.secondaryTargets.length()").value(0))
-                .andExpect(jsonPath("$.formCues.length()").value(0));
+                .andExpect(jsonPath("$.logType").value("weight_reps"))          // unstated is weight_reps, like the sync push
+                .andExpect(jsonPath("$.formCues.length()").value(2))
+                .andExpect(jsonPath("$.secondaryTargets").isArray());
+        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
+        // A different id, same name: the name is the trainer's own and is taken.
+        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"zqx LANDMINE press\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXERCISE_NAME_TAKEN"));
+        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"  \"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Zqx x\",\"logType\":\"time\"}"))
+                .andExpect(status().isBadRequest());
+
+        // Another trainer may use the same NAME (names are per trainer) but not the same id.
+        signedInAs(other);
+        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content(body.replace(id.toString(), UUID.randomUUID().toString())))
+                .andExpect(status().isCreated());
+        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ID_CONFLICT"));
+    }
+
+    @Test
+    @DisplayName("a custom can be reps-only, and a seeded row with no logType comes back null, not guessed at")
+    void logType() throws Exception {
+        String chin = create("{\"name\":\"Zqx chin-up\",\"logType\":\"reps\"}");
+        mvc.perform(get("/v1/exercises/" + chin)).andExpect(jsonPath("$.logType").value("reps"));
+        mvc.perform(get("/v1/exercises").param("q", "Zqx chin")).andExpect(jsonPath("$.items[0].logType").value("reps"));
+
+        UUID seeded = UUID.randomUUID();
+        jdbc.update("INSERT INTO exercise (id, name, origin, source_id) VALUES (:id::uuid, 'Zqx seeded lift', 'inclineyou', :src)",
+                Map.of("id", seeded.toString(), "src", "test-" + seeded));
+        mvc.perform(get("/v1/exercises/" + seeded)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.isCustom").value(false))
+                .andExpect(jsonPath("$.logType").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("search: customs are the owner's alone, `custom` narrows, `includeTotal` counts, a list row carries no description")
+    void search() throws Exception {
+        create("{\"name\":\"Zqxfly cable\",\"description\":\"Squeeze.\"}");
+        signedInAs(other);
+        create("{\"name\":\"Zqxfly crossover\"}");
+        signedInAs(owner);
+
+        mvc.perform(get("/v1/exercises").param("q", "Zqxfly").param("includeTotal", "true"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].name").value("Zqxfly cable"))
+                .andExpect(jsonPath("$.items[0].description").doesNotExist())
+                .andExpect(jsonPath("$.nextCursor").doesNotExist());
+        mvc.perform(get("/v1/exercises").param("q", "Zqxfly").param("custom", "false")).andExpect(jsonPath("$.items.length()").value(0));
+        mvc.perform(get("/v1/exercises").param("q", "Zqxfly").param("custom", "true")).andExpect(jsonPath("$.items.length()").value(1));
+        // Without includeTotal there is no total at all.
+        mvc.perform(get("/v1/exercises").param("q", "Zqxfly")).andExpect(jsonPath("$.total").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("search pages by keyset: a limit of one walks the matches once each, and a foreign cursor is a 400")
+    void paging() throws Exception {
+        create("{\"name\":\"Zqxpage a\"}");
+        create("{\"name\":\"Zqxpage b\"}");
+        create("{\"name\":\"Zqxpage c\"}");
+        var names = new java.util.ArrayList<String>();
+        String cursor = null;
+        for (int i = 0; i < 5; i++) {
+            var req = get("/v1/exercises").param("q", "Zqxpage").param("limit", "1");
+            if (cursor != null) req = req.param("cursor", cursor);
+            String json = mvc.perform(req).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+            names.add(com.jayway.jsonpath.JsonPath.read(json, "$.items[0].name"));
+            cursor = com.jayway.jsonpath.JsonPath.read(json, "$.nextCursor");
+            if (cursor == null) break;
+        }
+        assertEquals(3, names.size());
+        assertEquals(3, new java.util.HashSet<>(names).size());
+        mvc.perform(get("/v1/exercises").param("q", "Zqxpage").param("cursor", "bm9wZQ")).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("a draft is the owner's own custom with status draft; anything but published|draft is a 400")
+    void drafts() throws Exception {
+        String id = create("{\"name\":\"Zqx draft press\",\"status\":\"draft\"}");
+        mvc.perform(get("/v1/exercises/" + id)).andExpect(jsonPath("$.status").value("draft"));
+        mvc.perform(get("/v1/exercises").param("q", "Zqx draft")).andExpect(jsonPath("$.items[0].status").value("draft"));
+        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Zqx d2\",\"status\":\"Draft \"}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
     @DisplayName("another trainer's private movement is a 404, and so is an unknown id")
     void notVisibleIs404() throws Exception {
         signedInAs(other);
-        String theirs = create("{\"name\":\"Their secret lift\"}", "published");
+        String theirs = create("{\"name\":\"Zqx their secret lift\"}");
         signedInAs(owner);
         mvc.perform(get("/v1/exercises/" + theirs)).andExpect(status().isNotFound());
         mvc.perform(get("/v1/exercises/" + UUID.randomUUID())).andExpect(status().isNotFound());
+        mvc.perform(patch("/v1/exercises/" + theirs).contentType(MediaType.APPLICATION_JSON).content("{\"target\":\"x\"}")).andExpect(status().isNotFound());
+        mvc.perform(delete("/v1/exercises/" + theirs)).andExpect(status().isNotFound());
     }
 
     @Test
-    @DisplayName("categories count the caller's library: own rows in, drafts and other trainers' rows out")
-    void categoriesCountTheCallersLibrary() throws Exception {
-        var before = categories();
+    @DisplayName("PATCH changes only what is sent; an empty body, a taken name and a wrong version are refused; a global is not writable")
+    void patchRules() throws Exception {
+        String a = create("{\"name\":\"Zqx patch a\",\"target\":\"quads\",\"bodyPart\":\"legs\"}");
+        create("{\"name\":\"Zqx patch b\"}");
+        mvc.perform(patch("/v1/exercises/" + a).contentType(MediaType.APPLICATION_JSON).content("{\"target\":\"glutes\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.target").value("glutes"))
+                .andExpect(jsonPath("$.bodyPart").value("legs"))
+                .andExpect(jsonPath("$.name").value("Zqx patch a"));
+        // null clears, absent leaves.
+        mvc.perform(patch("/v1/exercises/" + a).contentType(MediaType.APPLICATION_JSON).content("{\"target\":null}"))
+                .andExpect(jsonPath("$.target").doesNotExist()).andExpect(jsonPath("$.bodyPart").value("legs"));
+        mvc.perform(patch("/v1/exercises/" + a).contentType(MediaType.APPLICATION_JSON).content("{}")).andExpect(status().isBadRequest());
+        mvc.perform(patch("/v1/exercises/" + a).contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Zqx patch b\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXERCISE_NAME_TAKEN"));
+        mvc.perform(patch("/v1/exercises/" + a).header("If-Match", "\"1\"").contentType(MediaType.APPLICATION_JSON).content("{\"target\":\"x\"}"))
+                .andExpect(status().isPreconditionFailed());
 
-        create("{\"name\":\"Zqx one\",\"muscleGroup\":\"Zqxgroup\"}", "published");
-        create("{\"name\":\"Zqx two\"}", "published");                                   // no group
-        create("{\"name\":\"Zqx draft\",\"muscleGroup\":\"Zqxgroup\",\"status\":\"draft\"}", "draft");
+        UUID global = UUID.randomUUID();
+        jdbc.update("INSERT INTO exercise (id, name, origin, source_id) VALUES (:id::uuid, 'Zqx global', 'inclineyou', :src)",
+                Map.of("id", global.toString(), "src", "test-" + global));
+        mvc.perform(patch("/v1/exercises/" + global).contentType(MediaType.APPLICATION_JSON).content("{\"target\":\"x\"}")).andExpect(status().isNotFound());
+        mvc.perform(delete("/v1/exercises/" + global)).andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("delete is soft: it leaves search and frees the name, and again is 204 again")
+    void deleteFreesTheName() throws Exception {
+        String id = create("{\"name\":\"Zqx retire me\"}");
+        mvc.perform(delete("/v1/exercises/" + id)).andExpect(status().isNoContent());
+        mvc.perform(delete("/v1/exercises/" + id)).andExpect(status().isNoContent());
+        mvc.perform(get("/v1/exercises").param("q", "Zqx retire")).andExpect(jsonPath("$.items.length()").value(0));
+        mvc.perform(get("/v1/exercises/" + id)).andExpect(status().isNotFound());
+        assertNotNull(jdbc.queryForObject("SELECT deleted_at FROM exercise WHERE id = :id::uuid", Map.of("id", id), Object.class));
+        create("{\"name\":\"Zqx retire me\"}");                                   // the name is free again
+    }
+
+    @Test
+    @DisplayName("meta counts the caller's library: own rows in, other trainers' rows out, and a repeat is a 304")
+    void metaCountsTheCallersLibrary() throws Exception {
+        int before = metaTotal();
+        create("{\"name\":\"Zqx meta one\",\"bodyPart\":\"zqxparts\",\"equipment\":\"zqxbar\"}");
+        create("{\"name\":\"Zqx meta two\",\"bodyPart\":\"zqxparts\"}");
         signedInAs(other);
-        create("{\"name\":\"Zqx theirs\",\"muscleGroup\":\"Zqxgroup\"}", "published");
+        create("{\"name\":\"Zqx meta theirs\",\"bodyPart\":\"zqxparts\"}");
         signedInAs(owner);
 
-        var after = categories();
-        assertEquals(before.total() + 2, after.total(), "one grouped and one ungrouped row of mine");
-        assertEquals(before.uncategorised() + 1, after.uncategorised());
-
-        mvc.perform(get("/v1/exercises/categories"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.categories[?(@.muscleGroup == 'Zqxgroup')].count").value(hasItem(1)))
-                // A group only a custom row uses goes after the catalogue's, so it is last.
-                .andExpect(jsonPath("$.categories[-1].muscleGroup").value("Zqxgroup"))
-                .andExpect(jsonPath("$.categories[*].muscleGroup").value(not(hasItem((String) null))));
+        assertEquals(before + 2, metaTotal());
+        MvcResult r = mvc.perform(get("/v1/exercises/meta")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.bodyParts[?(@.id == 'zqxparts')].count").value(hasItem(2)))
+                .andExpect(jsonPath("$.equipment[?(@.id == 'zqxbar')].count").value(hasItem(1)))
+                .andExpect(jsonPath("$.levels").isArray())
+                .andReturn();
+        mvc.perform(get("/v1/exercises/meta").header("If-None-Match", r.getResponse().getHeader("ETag")))
+                .andExpect(status().isNotModified());
     }
 
     /* ── helpers ────────────────────────────────────────────────────────── */
 
-    private record Counts(int total, int uncategorised) {}
-
-    private Counts categories() throws Exception {
-        String body = mvc.perform(get("/v1/exercises/categories"))
-                .andReturn().getResponse().getContentAsString();
-        return new Counts(com.jayway.jsonpath.JsonPath.read(body, "$.total"),
-                          com.jayway.jsonpath.JsonPath.read(body, "$.uncategorised"));
+    private int metaTotal() throws Exception {
+        String body = mvc.perform(get("/v1/exercises/meta")).andReturn().getResponse().getContentAsString();
+        return com.jayway.jsonpath.JsonPath.read(body, "$.total");
     }
 
-    private String create(String body, String expectedStatus) throws Exception {
-        String json = mvc.perform(post("/v1/exercises")
-                        .contentType(MediaType.APPLICATION_JSON).content(body))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.status").value(expectedStatus))
-                .andReturn().getResponse().getContentAsString();
+    private String create(String body) throws Exception {
+        String json = mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
         return com.jayway.jsonpath.JsonPath.read(json, "$.id");
     }
 

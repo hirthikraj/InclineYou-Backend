@@ -12,6 +12,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
@@ -20,15 +21,18 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 
 /**
- * V13 · saved workouts. The CRUD is ordinary; what is pinned is the
- * normalisation the builder relies on, the library check, and that PUT
- * replaces whole fields and only the ones it was sent.
+ * Standalone workouts (api-contract 1.1, Programs L4 and A7). The CRUD is ordinary; what is pinned is the v1 contract:
+ * a list is {@code {items}}, a save is the WHOLE workout (name and an exercise list are required, an empty list clears
+ * it), the id is the caller's and a retry is safe, a PUT is conditional (428 without If-Match, 412 when stale), the tree
+ * is normalised (ids minted, order from position, dividers stored as the section of the exercise they sit in front of),
+ * and a movement outside the caller's library is a 400 that says where.
  */
 @SpringBootTest
 @Transactional
@@ -61,104 +65,135 @@ class WorkoutTemplateTest {
     }
 
     @Test
-    @DisplayName("an empty account is [], and a bare POST is a workout called 'New workout'")
-    void emptyAndDefaults() throws Exception {
+    @DisplayName("an empty account is {items: []}; name and an exercise list are required; a retried id answers 200, not a second row")
+    void emptyAndRequired() throws Exception {
         mvc.perform(get("/v1/workout-templates")).andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(0));
+                .andExpect(jsonPath("$.items.length()").value(0));
         mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION"));
+        mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"x\"}"))
+                .andExpect(status().isBadRequest());
+
+        UUID id = UUID.randomUUID();
+        String body = "{\"id\":\"" + id + "\",\"name\":\"  Legs  \",\"exercises\":[]}";
+        mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.name").value("New workout"))
+                .andExpect(header().exists("ETag"))
+                .andExpect(jsonPath("$.id").value(id.toString()))
+                .andExpect(jsonPath("$.name").value("Legs"))
                 .andExpect(jsonPath("$.exerciseCount").value(0))
                 .andExpect(jsonPath("$.setCount").value(0));
+        mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+        mvc.perform(get("/v1/workout-templates")).andExpect(jsonPath("$.items.length()").value(1));
+
+        // The same id under another trainer is somebody else's row, and is told so.
+        signedInAs(other);
+        mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ID_CONFLICT"));
     }
 
     @Test
-    @DisplayName("normalised on write: order from position, ids kept or minted, unknown kinds defaulted, junk nulled")
+    @DisplayName("normalised on write: order from position, ids minted, blanks nulled, alternatives kept, dividers clamped onto a row")
     void normalisation() throws Exception {
         mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content("""
                 {"name":"  Upper A  ","notes":"  ",
                  "exercises":[
-                   {"id":"keep-me","exerciseId":"%s","orderIndex":9,"groupId":"g1",
+                   {"id":"%s","exerciseId":"%s","position":9,"groupId":null,
                     "sets":[{"loadKind":"percent_1rm","loadValue":70,"effortKind":"reps","effortValue":8,
-                             "restSeconds":90.4,"tempo":"","notes":" top set "},
-                            {"loadKind":"kettlebell","loadValue":"heavy","effortKind":"forever","effortValue":8}],
-                    "alternatives":[{"exerciseId":"%s","sets":[{"effortKind":"reps","effortValue":10}]},
-                                    {"exerciseId":"","sets":[{"effortValue":5}]},
-                                    {"exerciseId":"%s","sets":[]}]},
-                   {"exerciseId":"%s","orderIndex":0,"sets":[{"effortValue":12}]}],
-                 "dividers":[{"label":"Main","beforeIndex":0.6},{"label":"","beforeIndex":1},
-                             {"label":"Finisher","beforeIndex":40},{"label":"Warm-up","beforeIndex":-3}]}
-                """.formatted(bench, row, row, row)))
+                             "restSeconds":90,"tempo":"","notes":" top set "},
+                            {"effortValue":6}],
+                    "alternatives":[{"exerciseId":"%s","sets":[{"effortValue":10}]}]},
+                   {"exerciseId":"%s","position":0,"sets":[{"effortValue":12}]}],
+                 "dividers":[{"position":0,"label":"Main"},{"position":40,"label":"Finisher"},{"position":0,"label":"Warm-up"}]}
+                """.formatted(UUID.randomUUID(), bench, row, row)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.name").value("Upper A"))
                 .andExpect(jsonPath("$.notes").doesNotExist())
-                .andExpect(jsonPath("$.exercises[0].id").value("keep-me"))
-                .andExpect(jsonPath("$.exercises[0].orderIndex").value(0))
-                .andExpect(jsonPath("$.exercises[1].orderIndex").value(1))
+                // position orders the list; the stored positions are then 0, 1.
+                .andExpect(jsonPath("$.exercises[0].exerciseId").value(row.toString()))
+                .andExpect(jsonPath("$.exercises[0].position").value(0))
+                .andExpect(jsonPath("$.exercises[1].exerciseId").value(bench.toString()))
+                .andExpect(jsonPath("$.exercises[1].position").value(1))
                 .andExpect(jsonPath("$.exercises[1].id").isString())
-                .andExpect(jsonPath("$.exercises[0].sets[0].restSeconds").value(90))
-                .andExpect(jsonPath("$.exercises[0].sets[0].tempo").doesNotExist())
-                .andExpect(jsonPath("$.exercises[0].sets[0].notes").value("top set"))
-                .andExpect(jsonPath("$.exercises[0].sets[1].loadKind").value("weight"))
-                .andExpect(jsonPath("$.exercises[0].sets[1].loadValue").doesNotExist())
-                .andExpect(jsonPath("$.exercises[0].sets[1].effortKind").value("reps"))
-                // Two of the three alternatives had nothing to do instead, and are gone.
-                .andExpect(jsonPath("$.exercises[0].alternatives.length()").value(1))
-                // Rounded, clamped to [0, 1] — a divider needs a row to sit in front
-                // of, so with 2 exercises the ceiling is the LAST one (index 1), not
-                // past it — blank dropped, sorted.
-                .andExpect(jsonPath("$.dividers[*].label", contains("Warm-up", "Main", "Finisher")))
-                .andExpect(jsonPath("$.dividers[*].beforeIndex", contains(0, 1, 1)))
+                .andExpect(jsonPath("$.exercises[1].sets[0].loadKind").value("percent_1rm"))
+                .andExpect(jsonPath("$.exercises[1].sets[0].restSeconds").value(90))
+                .andExpect(jsonPath("$.exercises[1].sets[0].tempo").doesNotExist())
+                .andExpect(jsonPath("$.exercises[1].sets[0].notes").value("top set"))
+                // A set with nothing said is a weight x reps set.
+                .andExpect(jsonPath("$.exercises[1].sets[1].loadKind").value("weight"))
+                .andExpect(jsonPath("$.exercises[1].sets[1].effortKind").value("reps"))
+                .andExpect(jsonPath("$.exercises[1].alternatives.length()").value(1))
+                // A divider needs a row to sit in front of: past the last clamps to the last; two in front of one share it.
+                .andExpect(jsonPath("$.dividers.length()").value(3))
+                .andExpect(jsonPath("$.dividers[?(@.label=='Finisher')].position").value(1))
+                .andExpect(jsonPath("$.dividers[?(@.label=='Main')].position").value(0))
                 .andExpect(jsonPath("$.exerciseCount").value(2))
                 .andExpect(jsonPath("$.setCount").value(3));
     }
 
     @Test
-    @DisplayName("a movement outside the caller's library is a 400 naming where it was, and nothing is stored")
-    void libraryIsChecked() throws Exception {
+    @DisplayName("an unknown kind or a malformed set is a 400 and nothing is stored")
+    void badSets() throws Exception {
         mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content("""
-                {"name":"x","exercises":[{"exerciseId":"%s","sets":[]},
-                  {"exerciseId":"%s","alternatives":[{"exerciseId":"%s","sets":[{"effortValue":5}]}]}]}
-                """.formatted(bench, row, theirs)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.code").value("VALIDATION"))
-                .andExpect(jsonPath("$.detail").value(containsString("exercises[1].alternatives[0].exerciseId")));
-        mvc.perform(get("/v1/workout-templates")).andExpect(jsonPath("$.length()").value(0));
+                {"name":"x","exercises":[{"exerciseId":"%s","sets":[{"loadKind":"kettlebell","effortValue":8}]}]}
+                """.formatted(bench))).andExpect(status().isBadRequest());
+        mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content("""
+                {"name":"x","exercises":[{"exerciseId":"%s","sets":[{"loadKind":"bodyweight","loadValue":20,"effortValue":8}]}]}
+                """.formatted(bench))).andExpect(status().isBadRequest());
+        mvc.perform(get("/v1/workout-templates")).andExpect(jsonPath("$.items.length()").value(0));
     }
 
     @Test
-    @DisplayName("PUT replaces the fields it is sent, whole, and leaves the rest; headings clamp to what is stored")
-    void putReplacesPresentFields() throws Exception {
-        String id = create("""
+    @DisplayName("a movement outside the caller's library is a 400 naming it, and nothing is stored")
+    void libraryIsChecked() throws Exception {
+        mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content("""
+                {"name":"x","exercises":[{"exerciseId":"%s","sets":[]},{"exerciseId":"%s","sets":[]}]}
+                """.formatted(bench, theirs)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION"))
+                .andExpect(jsonPath("$.detail").value(containsString(theirs.toString())));
+        mvc.perform(get("/v1/workout-templates")).andExpect(jsonPath("$.items.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("PUT is the whole workout and conditional: 428 without If-Match, 412 when stale, and a wrong version never matches")
+    void putIsWholeAndConditional() throws Exception {
+        MvcResult made = mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content("""
                 {"name":"Upper A","notes":"Keep it snappy",
                  "exercises":[{"exerciseId":"%s","sets":[{"effortValue":8}]},{"exerciseId":"%s","sets":[]}]}
-                """.formatted(bench, row));
+                """.formatted(bench, row))).andExpect(status().isCreated()).andReturn();
+        String id = com.jayway.jsonpath.JsonPath.read(made.getResponse().getContentAsString(), "$.id");
+        String etag = made.getResponse().getHeader("ETag");
+        String whole = "{\"name\":\"Upper B\",\"exercises\":[{\"exerciseId\":\"" + row + "\",\"sets\":[{},{}]}],"
+                + "\"dividers\":[{\"position\":0,\"label\":\"Accessories\"}]}";
 
-        mvc.perform(put("/v1/workout-templates/" + id).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"dividers\":[{\"label\":\"Accessories\",\"beforeIndex\":9}]}"))
+        mvc.perform(put("/v1/workout-templates/" + id).contentType(MediaType.APPLICATION_JSON).content(whole))
+                .andExpect(status().isPreconditionRequired());
+        mvc.perform(put("/v1/workout-templates/" + id).header("If-Match", "\"1\"").contentType(MediaType.APPLICATION_JSON).content(whole))
+                .andExpect(status().isPreconditionFailed());
+        mvc.perform(put("/v1/workout-templates/" + id).header("If-Match", etag).contentType(MediaType.APPLICATION_JSON).content(whole))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.name").value("Upper A"))
-                .andExpect(jsonPath("$.notes").value("Keep it snappy"))
-                .andExpect(jsonPath("$.exerciseCount").value(2))
-                .andExpect(jsonPath("$.dividers[0].beforeIndex").value(1));
-
-        mvc.perform(put("/v1/workout-templates/" + id).contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"exercises\":[{\"exerciseId\":\"" + row + "\",\"sets\":[{},{}]}]}"))
+                .andExpect(header().exists("ETag"))
+                .andExpect(jsonPath("$.name").value("Upper B"))
+                .andExpect(jsonPath("$.notes").doesNotExist())                       // whole: what was not sent is cleared
                 .andExpect(jsonPath("$.exercises.length()").value(1))
                 .andExpect(jsonPath("$.setCount").value(2))
                 .andExpect(jsonPath("$.dividers[0].label").value("Accessories"));
+        // (Whether a save moves the version is not asserted here: the version is updated_at, a trigger sets it to now(),
+        // and inside this test's single transaction now() does not move.)
     }
 
     @Test
-    @DisplayName("delete is soft and final for the reader; another trainer's workout is a 404")
+    @DisplayName("delete is soft and final for the reader, and again is 204 again; another trainer's workout is a 404")
     void deleteAndOwnership() throws Exception {
-        String id = create("{\"name\":\"Legs\"}");
+        String id = create("{\"name\":\"Legs\",\"exercises\":[]}");
         signedInAs(other);
-        mvc.perform(get("/v1/workout-templates/" + id)).andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("WORKOUT_NOT_FOUND"));
+        mvc.perform(get("/v1/workout-templates/" + id)).andExpect(status().isNotFound());
         mvc.perform(delete("/v1/workout-templates/" + id)).andExpect(status().isNotFound());
         signedInAs(me);
 
+        mvc.perform(delete("/v1/workout-templates/" + id)).andExpect(status().isNoContent());
         mvc.perform(delete("/v1/workout-templates/" + id)).andExpect(status().isNoContent());
         mvc.perform(get("/v1/workout-templates/" + id)).andExpect(status().isNotFound());
         org.junit.jupiter.api.Assertions.assertNotNull(jdbc.queryForObject(

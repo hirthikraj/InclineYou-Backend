@@ -49,6 +49,17 @@ class GymPlaceWallTest {
     void sweep() {
         jdbc.update("UPDATE trainer_business SET gym_place_id = NULL WHERE trainer_id IN (:a, :b)", Map.of("a", a, "b", b));
         jdbc.update("DELETE FROM gym_place WHERE place_id LIKE 'ChIJ-wall-%'", Map.of());
+        // The two trainers, and the solo workspace and trial the trainer insert minted for each, are committed too: leave
+        // the shared dev database as it was found. Children before parents; as the owner, which bypasses the policies.
+        var p = Map.of("a", a, "b", b);
+        var tenants = jdbc.queryForList("SELECT home_tenant_id FROM trainer WHERE id IN (:a, :b) AND home_tenant_id IS NOT NULL", p, UUID.class);
+        var users = jdbc.queryForList("SELECT app_user_id FROM trainer WHERE id IN (:a, :b)", p, UUID.class);
+        jdbc.update("DELETE FROM trainer_business WHERE trainer_id IN (:a, :b)", p);
+        jdbc.update("DELETE FROM subscription WHERE trainer_id IN (:a, :b)", p);
+        if (!users.isEmpty()) jdbc.update("DELETE FROM tenant_member WHERE app_user_id IN (:u)", Map.of("u", users));
+        jdbc.update("DELETE FROM trainer WHERE id IN (:a, :b)", p);
+        if (!tenants.isEmpty()) jdbc.update("DELETE FROM tenant WHERE id IN (:t)", Map.of("t", tenants));
+        if (!users.isEmpty()) jdbc.update("DELETE FROM app_user WHERE id IN (:u)", Map.of("u", users));
     }
 
     @Test

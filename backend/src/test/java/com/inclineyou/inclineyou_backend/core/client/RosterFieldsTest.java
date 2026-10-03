@@ -23,19 +23,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * `membershipStatus` on the roster response.
+ * `membershipStatus` on the roster response: the state of the INVITATION, a second field rather than more values on
+ * {@code status}, which is the trainer's view of the arrangement — a single column would have to answer to two people
+ * who can disagree.
  *
- * <p>V18's column has always travelled in the sync envelope and never on this
- * response, and the omission cost the roster a whole attention band. The band
- * fires on {@code 'unavailable'} — a number the trainer typed that already signs
- * in as a trainer account, so the invitation can never be delivered. The row
- * needs a <i>Fix number</i> action rather than a silent wait, and the online half
- * had no way to know it was in that state at all.
- *
- * <p>It is the state of the INVITATION, which is why it is a second field rather
- * than more values on {@code status}: that one is the trainer's view of the
- * arrangement, and a single column would have to answer to two people who can
- * disagree.
+ * <p>v1 (25 Sep 2026): the states are {@code not_invited} (the default — a client the trainer added and has not invited),
+ * {@code invited}, {@code accepted}, {@code declined}, {@code paused} and {@code removed}. The old {@code unavailable}
+ * state is gone: a number that already signs in as a trainer is refused when it is typed (PHONE_IS_TRAINER), so there is
+ * no row left to flag. {@code client_membership_dates} makes each state carry its own timestamp.
  */
 @SpringBootTest
 @Transactional
@@ -60,16 +55,16 @@ class RosterFieldsTest {
     }
 
     @Test
-    @DisplayName("an unreachable number reaches the roster as `unavailable`")
+    @DisplayName("a declined invitation reaches the roster as `declined`")
     void membershipStatusIsOnTheList() throws Exception {
-        client("Meera", "unavailable");
+        client("Meera", "declined");
 
         mvc.perform(get("/v1/clients"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.length()").value(1))
-                .andExpect(jsonPath("$[0].membershipStatus").value("unavailable"))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].membershipStatus").value("declined"))
                 // Distinct from `status`, which says nothing about the invite.
-                .andExpect(jsonPath("$[0].status").value("active"));
+                .andExpect(jsonPath("$.items[0].status").value("active"));
     }
 
     @Test
@@ -82,18 +77,14 @@ class RosterFieldsTest {
                 .andExpect(jsonPath("$.membershipStatus").value("invited"));
     }
 
-    /**
-     * V18 defaults it to accepted, because every row that predates consent is a
-     * live arrangement — putting a wall in front of somebody who has trained for
-     * months is the one outcome that must not happen.
-     */
+    /** v1 defaults it to not_invited: a client the trainer typed in has not been asked to anything yet. */
     @Test
-    @DisplayName("a client added before consent existed reads as accepted")
-    void defaultsToAccepted() throws Exception {
+    @DisplayName("a client nobody has invited reads as not_invited")
+    void defaultsToNotInvited() throws Exception {
         var id = client("Ananya", null);
 
         mvc.perform(get("/v1/clients/" + id))
-                .andExpect(jsonPath("$.membershipStatus").value("accepted"));
+                .andExpect(jsonPath("$.membershipStatus").value("not_invited"));
     }
 
     /* ------------------------------------------------------------- fixtures */
@@ -104,8 +95,13 @@ class RosterFieldsTest {
                 INSERT INTO client (id, trainer_id, name, client_type) VALUES (:id::uuid, :tid::uuid, :name, 'independent')
                 """, Map.of("id", id.toString(), "tid", owner.toString(), "name", name));
         if (membershipStatus != null) {
-            jdbc.update("UPDATE client SET membership_status = :ms WHERE id = :id::uuid",
-                    Map.of("ms", membershipStatus, "id", id.toString()));
+            // client_membership_dates: every state past not_invited carries the timestamp that got it there.
+            jdbc.update("""
+                    UPDATE client SET membership_status = :ms,
+                           invited_at = now(),
+                           accepted_at = CASE WHEN :ms = 'accepted' THEN now() END,
+                           declined_at = CASE WHEN :ms = 'declined' THEN now() END
+                    WHERE id = :id::uuid""", Map.of("ms", membershipStatus, "id", id.toString()));
         }
         return id;
     }

@@ -168,7 +168,7 @@ public class ClientPhoneGuard {
                           AND (:tenantId::uuid IS NULL OR tenant_id = :tenantId::uuid)
                           AND deleted_at IS NULL
                           AND status <> 'archived'
-                          AND membership_status NOT IN ('removed', 'declined', 'unavailable')
+                          AND membership_status NOT IN ('removed', 'declined')
                     ) AS on_other_roster,
                     own.id::text AS own_client_id, own.name AS own_client_name, own.status AS own_client_status
                 FROM (SELECT 1) one
@@ -179,7 +179,7 @@ public class ClientPhoneGuard {
                           AND (:tenantId::uuid IS NULL OR tenant_id = :tenantId::uuid)
                           AND deleted_at IS NULL
                           AND (:archived OR (status <> 'archived'
-                               AND membership_status NOT IN ('removed', 'declined', 'unavailable')))
+                               AND membership_status NOT IN ('removed', 'declined')))
                         -- A live client before an archived one with the same number.
                         ORDER BY (status = 'archived'), created_at
                         LIMIT 1
