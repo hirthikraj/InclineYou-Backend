@@ -23,6 +23,8 @@ export interface SetHistoryItem {
   effortValue: number | null;
   rpe: number | null;
   doneAt: number;
+  /** `set_log.id` — what a correction PATCHes. Absent only on an older backend. */
+  setId?: string;
 }
 
 export interface SetHistory {
@@ -86,7 +88,8 @@ export function toLogInput(clientId: string, history: SetHistory): {
     const loadKg = KG_KINDS.has(s.loadKind) ? s.loadValue : null;
     if (loadKg != null) weighted.add(s.exerciseId);
     return {
-      id: `${s.sessionId}:${s.exerciseId}:${s.position}:${s.doneAt}`,
+      // The real set id when the backend sends it (a correction PATCHes it); the composite is only a stable key for an older one.
+      id: s.setId ?? `${s.sessionId}:${s.exerciseId}:${s.position}:${s.doneAt}`,
       workoutSessionId: s.sessionId,
       exerciseId: s.exerciseId,
       setNumber: s.position,

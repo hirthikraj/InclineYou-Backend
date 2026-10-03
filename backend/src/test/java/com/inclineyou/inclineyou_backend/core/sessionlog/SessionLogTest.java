@@ -315,6 +315,7 @@ class SessionLogTest {
                 .andExpect(jsonPath("$.items.length()").value(2))
                 .andExpect(jsonPath("$.items[0].sessionId").value(freestyle.toString()))     // the existing shape, oldest first
                 .andExpect(jsonPath("$.items[0].workoutName").doesNotExist())                // per session, not repeated on every set
+                .andExpect(jsonPath("$.items[0].setId").isNotEmpty())                        // the set_log id, so a past set can be corrected
                 .andExpect(jsonPath("$.exercises").isMap())
                 .andExpect(jsonPath("$.sessions['" + session + "'].workoutName").value("Full Body A"))
                 .andExpect(jsonPath("$.sessions['" + freestyle + "'].workoutName").doesNotExist())
