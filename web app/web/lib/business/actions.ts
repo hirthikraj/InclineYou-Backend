@@ -79,12 +79,17 @@ export async function loadLedgerView(input: {
   });
 }
 
-/** Next and Previous: a page by cursor, never re-counted. */
+/**
+ * Next and Previous: a page by cursor, never re-counted — and the one caller that
+ * DOES re-count is a reload after a write, because a write is what changes the count
+ * (`includeTotal` is one indexed COUNT, so it is asked for only then).
+ */
 export async function loadLedgerPage(input: {
   period: Period;
   now: number;
   filter: LedgerFilter;
   cursor: string | null;
+  includeTotal?: boolean;
 }): Promise<Loaded<LedgerPage>> {
   return load(() => getLedgerPage(input));
 }

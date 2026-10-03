@@ -131,17 +131,19 @@ export function Transactions({
     if (view.index > 0) void go(view.index - 1, view.cursors);
   };
 
-  /* After a write: the page the trainer is on, and the tiles, re-read. A row that
-     just stopped matching its chip (a pending one marked paid under *Pending*)
-     falls out of the page, which is the right answer and not a glitch. */
+  /* After a write: the page the trainer is on, the tiles AND THE COUNT, re-read. A row
+     that just stopped matching its chip (a pending one marked paid under *Pending*)
+     falls out of the page, which is the right answer and not a glitch. The count is
+     re-asked for here and nowhere else: carried over from before the write it read
+     "1–1 of 0" for the first payment of a month, and a deleted row left it too high. */
   const reload = useCallback(async () => {
     const asked = latest.current;
     const [page, summary] = await Promise.all([
-      loadLedgerPage({ period, now, filter, cursor: view.cursors[view.index] }),
+      loadLedgerPage({ period, now, filter, cursor: view.cursors[view.index], includeTotal: true }),
       loadSummary(period),
     ]);
     if (latest.current !== asked || !page.ok || !summary.ok) return;
-    setView((v) => ({ ...v, summary: summary.data, page: { ...page.data, total: v.page.total } }));
+    setView((v) => ({ ...v, summary: summary.data, page: page.data }));
   }, [period, now, filter, view.cursors, view.index]);
 
   const [recordPanelOpen, setRecordPanelOpen] = useState(recordFor !== null);
