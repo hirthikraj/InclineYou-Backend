@@ -1,6 +1,7 @@
 package com.inclineyou.inclineyou_backend.core.trainer.dto;
 
 import com.inclineyou.inclineyou_backend.shared.util.Text;
+import com.inclineyou.inclineyou_backend.shared.wire.Patch;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
@@ -47,7 +48,13 @@ public record UpdateTrainerRequest(
          */
         String email,
         /* ---- V6. Null leaves alone; "" clears; otherwise one of GENDERS. ---- */
-        String gender
+        String gender,
+        /* ---- V8. Absent leaves alone; null clears (gym name too); a value links the gym. ---- */
+        /**
+         * The gym picked from the place search. {@code gymName} alone stays free text and
+         * unlinks; sending both is refused, because they disagree about who wins.
+         */
+        Patch<GymPlaceInput> gymPlace
 ) {
     /**
      * The five capped fields are REFUSED over their cap (V33–V35), measured

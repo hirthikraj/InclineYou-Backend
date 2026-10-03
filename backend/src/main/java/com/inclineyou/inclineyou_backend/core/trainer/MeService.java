@@ -32,6 +32,7 @@ public class MeService {
     private final AppUserRepository appUserRepo;
     private final TrainerBusinessRepository businessRepo;
     private final TenantJdbcRepository tenants;
+    private final GymPlaceJdbcRepository gymPlaces;
 
 
     public MeResponse get(UUID trainerId) {
@@ -40,7 +41,9 @@ public class MeService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
         AppUser user = appUserRepo.findById(t.getAppUserId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
-        String gymName = businessRepo.findById(trainerId).map(TrainerBusiness::getGymName).orElse(null);
+        var business = businessRepo.findById(trainerId);
+        String gymName = business.map(TrainerBusiness::getGymName).orElse(null);
+        var gymPlace = business.map(TrainerBusiness::getGymPlaceId).flatMap(gymPlaces::find).orElse(null);
 
         // The ACTIVE workspace, not the home one — a trainer who switched
         // stays switched on every later /v1/me until they switch back. Set by
@@ -57,6 +60,7 @@ public class MeService {
                 t.getSetupCompletedAt() == null ? null : t.getSetupCompletedAt().toEpochMilli(),
                 gymName,
                 tenants.workspace(tenantId)
-                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Workspace not found")));
+                        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Workspace not found")),
+                gymPlace);
     }
 }

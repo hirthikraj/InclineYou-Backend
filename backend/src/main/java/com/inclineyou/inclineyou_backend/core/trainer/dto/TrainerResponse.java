@@ -58,5 +58,7 @@ public record TrainerResponse(
          */
         String email,
         /* ---- V6. Null means never asked; "undisclosed" is an answer. ---- */
-        String gender
+        String gender,
+        /* ---- V8. The directory place gymName was picked from; null for free text or no gym. ---- */
+        GymPlaceView gymPlace
 ) {}

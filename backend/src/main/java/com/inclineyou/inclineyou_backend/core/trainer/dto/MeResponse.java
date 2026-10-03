@@ -13,5 +13,7 @@ public record MeResponse(
          */
         Long setupCompletedAt,
         String gymName,
-        Workspace workspace
+        Workspace workspace,
+        /** V8 — the directory place behind {@code gymName}; null for free text or no gym. */
+        GymPlaceView gymPlace
 ) {}

@@ -2,6 +2,7 @@ package com.inclineyou.inclineyou_backend.core.trainer;
 
 import com.inclineyou.inclineyou_backend.core.auth.AppUser;
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.GymPlaceInput;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.TrainerResponse;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.UpdateTrainerRequest;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
@@ -63,6 +64,7 @@ public class TrainerService {
     private final TrainerRepository repo;
     private final TrainerBusinessRepository businessRepo;
     private final AppUserRepository appUserRepo;
+    private final GymPlaceJdbcRepository gymPlaces;
 
 
 
@@ -95,15 +97,34 @@ public class TrainerService {
         if (req.languages() != null) b.setLanguages(clean(req.languages(), "languages"));
         if (req.trainingModes() != null) b.setTrainingModes(clean(req.trainingModes(), "trainingModes"));
         if (req.serviceAreas() != null) b.setServiceAreas(clean(req.serviceAreas(), "serviceAreas"));
+        if (req.gymName() != null && req.gymPlace() != null) {
+            throw ApiException.validation("gymName and gymPlace: send one — a picked gym names itself");
+        }
         if (req.gymName() != null) {
+            // Free text is an unlinked gym: the name no longer says which place it was.
             b.setGymName(req.gymName().isBlank() ? null : trim(req.gymName(), 120));
+            b.setGymPlaceId(null);
+        }
+        if (req.gymPlace() != null) {
+            GymPlaceInput place = req.gymPlace().value();
+            if (place == null) {
+                b.setGymPlaceId(null);
+                b.setGymName(null);
+            } else {
+                place = cleanPlace(place);
+                String before = b.getGymName();
+                UUID id = gymPlaces.upsert(place);
+                b.setGymPlaceId(id);
+                b.setGymName(place.name());
+                gymPlaces.adoptUnlinked(trainerId, id, before, place.name());
+            }
         }
         // `trainer_business_gym_needs_floor` refuses a gym name whose training
         // modes don't include `gym_floor` — checked here so the trainer gets a
         // sentence rather than a raw constraint violation from the UPDATE below.
         if (b.getGymName() != null
                 && (b.getTrainingModes() == null || !b.getTrainingModes().contains("gym_floor"))) {
-            throw ApiException.validation("gymName: trainingModes must include gym_floor");
+            throw new ApiException(HttpStatus.BAD_REQUEST, "GYM_NEEDS_FLOOR", "gymName: trainingModes must include gym_floor");
         }
         if (req.headline() != null) {
             b.setHeadline(req.headline().isBlank() ? null : req.headline());
@@ -126,8 +147,37 @@ public class TrainerService {
         if (req.preferences() != null) mergePrefs(t, req.preferences());
 
         Trainer saved = repo.save(t);
-        TrainerBusiness savedBusiness = businessRepo.save(b);
+        // Flushed, not merely saved: the place read-back below is policied by the row this writes.
+        TrainerBusiness savedBusiness = businessRepo.saveAndFlush(b);
         return toResponse(saved, savedBusiness);
+    }
+
+    /** Trims, and refuses what the directory could not hold — checked here so the trainer meets a sentence. */
+    private GymPlaceInput cleanPlace(GymPlaceInput in) {
+        String placeId = in.placeId() == null ? "" : in.placeId().trim();
+        String name = in.name() == null ? "" : in.name().trim();
+        // A Google place id is URL-safe base64-ish ("ChIJ…"); the web supplies it, so refuse what could not be one.
+        if (!placeId.matches("[A-Za-z0-9_-]{10,300}")) throw ApiException.validation("gymPlace.placeId: not a place id");
+        if (name.isEmpty() || name.length() > 120) throw ApiException.validation("gymPlace.name: required, at most 120 characters");
+        String address = blankToNull(in.address(), 400, "gymPlace.address");
+        String city = blankToNull(in.city(), 80, "gymPlace.city");
+        String link = blankToNull(in.mapLink(), 500, "gymPlace.mapLink");
+        if (link != null && !link.matches("(?i)https?://.*")) throw ApiException.validation("gymPlace.mapLink: must be a link starting http:// or https://");
+        if ((in.lat() == null) != (in.lng() == null)) throw ApiException.validation("gymPlace.lat and lng: send both or neither");
+        if (in.lat() != null && (in.lat().abs().compareTo(java.math.BigDecimal.valueOf(90)) > 0
+                || in.lng().abs().compareTo(java.math.BigDecimal.valueOf(180)) > 0)) {
+            throw ApiException.validation("gymPlace.lat and lng: latitude within ±90 and longitude within ±180");
+        }
+        var lat = in.lat() == null ? null : in.lat().setScale(6, java.math.RoundingMode.HALF_UP);
+        var lng = in.lng() == null ? null : in.lng().setScale(6, java.math.RoundingMode.HALF_UP);
+        return new GymPlaceInput(placeId, name, address, city, lat, lng, link);
+    }
+
+    private static String blankToNull(String v, int max, String field) {
+        if (v == null || v.isBlank()) return null;
+        String t = v.trim();
+        if (t.length() > max) throw ApiException.validation(field + ": at most " + max + " characters");
+        return t;
     }
 
     private Trainer load(UUID trainerId) {
@@ -256,7 +306,8 @@ public class TrainerService {
                 SocialLink.handleOf(b.getInstagramUrl()),
                 SocialLink.handleOf(b.getYoutubeUrl()),
                 t.getEmail(),
-                t.getGender()
+                t.getGender(),
+                gymPlaces.find(b.getGymPlaceId()).orElse(null)
         );
     }
 

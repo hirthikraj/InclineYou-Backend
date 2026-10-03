@@ -53,6 +53,10 @@ public class TrainerBusiness {
     @Column(name = "gym_name", length = 120)
     private String gymName;
 
+    /** The directory row {@code gym_name} was picked from (V8). Null: free text, or no gym. Never an authority. */
+    @Column(name = "gym_place_id")
+    private java.util.UUID gymPlaceId;
+
     @Column(name = "upi_vpa", length = 100)
     private String upiVpa;
 
