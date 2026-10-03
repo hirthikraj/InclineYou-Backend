@@ -5,7 +5,9 @@ import { useState } from 'react';
 import { AddChip, Chip, ChipRow } from '@/components/setup/Chips';
 import { AddOwn } from '@/components/setup/AddOwn';
 import { GroupLabel } from '@/components/setup/SetupShell';
+import { GymPicker } from '@/components/profile/GymPicker';
 import type { Identity } from '@/lib/profile/api';
+import type { PlaceHit, StoredGymPlace } from '@/lib/places/types';
 import {
   AREA_CAP,
   MAX_GYM_NAME,
@@ -64,6 +66,8 @@ export interface PlaceDraft {
   /** `'independent' | 'gym' | 'both'`, or `''` for never answered. */
   mode: string;
   gymName: string;
+  /** The picked place; `null` for a typed gym. */
+  gymPlace: PlaceHit | StoredGymPlace | null;
   mapLink: string;
   modes: string[];
   areas: string[];
@@ -157,24 +161,28 @@ export function WorkPlaceFields({
         <>
           <GroupLabel>THE GYM OR STUDIO</GroupLabel>
           <div className="fldrow">
-            <div className="fld" style={{ flex: '1 1 260px' }}>
-              <label className="fld__l" htmlFor="pf-gym-name">
-                Gym or studio name
-              </label>
-              <input
-                className="ctl"
+            <div style={{ flex: '1 1 260px' }}>
+              {/* Search first, text second: see `GymPicker`. Most gyms in India are
+                  on the map and a picked one is countable; the ones that are not
+                  are one tap on *Not listed?* away, so the majority answer never
+                  feels like a failure. */}
+              <GymPicker
                 id="pf-gym-name"
-                value={gymName}
-                maxLength={MAX_GYM_NAME}
+                name={gymName}
+                place={value.gymPlace}
                 disabled={disabled}
-                autoComplete="organization"
-                placeholder="Iron House, Indiranagar"
-                onChange={(e) => onChange({ ...value, gymName: e.target.value })}
+                maxLength={MAX_GYM_NAME}
+                onChange={(next) =>
+                  onChange({
+                    ...value,
+                    gymName: next.name,
+                    gymPlace: next.place,
+                    // A picked place brings its map link; one the trainer already
+                    // pasted is theirs and is never overwritten.
+                    mapLink: !mapLink.trim() && next.place?.mapLink ? next.place.mapLink : mapLink,
+                  })
+                }
               />
-              {/* Free text, and free text on purpose: most gyms in India are not
-                  on InclineYou, and a picker of the ones that are would make the
-                  majority answer feel like a failure. */}
-              <span className="fld__h">Whatever it is called on the board outside.</span>
             </div>
 
             <div className="fld" style={{ flex: '1 1 300px' }}>

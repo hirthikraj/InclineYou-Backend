@@ -3,6 +3,7 @@ import 'server-only';
 import { cache } from 'react';
 
 import { getToken } from '@/lib/auth/session';
+import type { PlaceHit, StoredGymPlace } from '@/lib/places/types';
 
 /**
  * THE IDENTITY DATA LAYER — `/settings/profile`, and nothing else.
@@ -110,6 +111,12 @@ export interface Identity {
   workMode: string;
   /** Free text, and free text on purpose: most gyms in India are not on InclineYou. */
   gymName: string;
+  /**
+   * The gym as a place on the map, when the trainer picked one from the search —
+   * `null` for a typed, unlinked gym. `gymName` stays the display text either
+   * way; this is what lets the platform tell two spellings of one gym apart.
+   */
+  gymPlace: StoredGymPlace | null;
   /** Verbatim, as pasted. The server does not canonicalise it — see V34. */
   mapLink: string;
   /**
@@ -158,6 +165,11 @@ export interface IdentityPatch {
   workMode?: string;
   /** `''` clears it — and the server clears `gymSharePercent` with it. */
   gymName?: string;
+  /**
+   * A picked place, or `null` to unlink. Omitted leaves the link alone;
+   * `gymName` without it is an unlinked, typed gym.
+   */
+  gymPlace?: PlaceHit | null;
   mapLink?: string;
   trainingModes?: string[];
   serviceAreas?: string[];
@@ -180,6 +192,7 @@ interface TrainerWire {
   languages?: string[] | null;
   workMode?: string | null;
   gymName?: string | null;
+  gymPlace?: StoredGymPlace | null;
   mapLink?: string | null;
   trainingModes?: string[] | null;
   serviceAreas?: string[] | null;
@@ -272,6 +285,7 @@ function toIdentity(t: TrainerWire): Identity {
     languages: t.languages ?? [],
     workMode: t.workMode ?? '',
     gymName: t.gymName ?? '',
+    gymPlace: t.gymPlace ?? null,
     mapLink: t.mapLink ?? '',
     trainingModes: t.trainingModes ?? [],
     serviceAreas: t.serviceAreas ?? [],

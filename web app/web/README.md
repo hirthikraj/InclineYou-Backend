@@ -20,6 +20,13 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Environment
+
+| Variable | Needed for |
+| --- | --- |
+| `INCLINEYOU_API_URL` | The Spring backend (default `http://localhost:8080`). |
+| `GOOGLE_PLACES_API_KEY` | Optional. The gym picker's search (`/api/places/search`). Enable **Places API (New)** on the Google Cloud project and restrict the key to that API and to your server's IP. Server-side only — never prefix it `NEXT_PUBLIC_`. Unset, the picker silently becomes a plain text field and nothing else changes. |
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

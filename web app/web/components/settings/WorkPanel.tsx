@@ -11,6 +11,7 @@ import { WorkingWeekFields, weekFrom } from '@/components/settings/WorkingWeekFi
 import type { Message } from '@/lib/auth/copy';
 import { saveWorkPlace, saveWorkingWeek } from '@/lib/profile/actions';
 import type { Identity, StoredHour } from '@/lib/profile/api';
+import type { PlaceHit } from '@/lib/places/types';
 import { modeLabel } from '@/lib/profile/work';
 import { formatWindow, mergeWindows, sameWindows } from '@/lib/setup/hours';
 
@@ -106,7 +107,9 @@ export function WorkPanel({
   const placeDirty =
     place.mode !== savedPlace.workMode ||
     (atGym(place) &&
-      (place.gymName !== savedPlace.gymName || place.mapLink !== savedPlace.mapLink)) ||
+      (place.gymName !== savedPlace.gymName ||
+        (place.gymPlace?.placeId ?? null) !== (savedPlace.gymPlace?.placeId ?? null) ||
+        place.mapLink !== savedPlace.mapLink)) ||
     losesGym ||
     // Compared as sets, like every other list tab: the catalogue's order is the
     // meaningful one, so a toggle that put a card back where it started is not
@@ -148,6 +151,7 @@ export function WorkPanel({
         const result = await saveWorkPlace({
           workMode: place.mode,
           gymName: place.gymName,
+          gymPlace: asHit(place.gymPlace),
           mapLink: place.mapLink,
           trainingModes: place.modes,
           serviceAreas: place.areas,
@@ -249,9 +253,25 @@ function draftOf(identity: Identity): PlaceDraft {
   return {
     mode: identity.workMode,
     gymName: identity.gymName,
+    gymPlace: identity.gymPlace,
     mapLink: identity.mapLink,
     modes: identity.trainingModes,
     areas: identity.serviceAreas,
+  };
+}
+
+/** A stored directory row, or a fresh pick, as what `saveWorkPlace` sends. Coordinates the store has and we do not are left null — the server keeps its own. */
+function asHit(p: PlaceDraft['gymPlace']): PlaceHit | null {
+  if (!p) return null;
+  if ('lat' in p) return p;
+  return {
+    placeId: p.placeId,
+    name: p.name,
+    address: p.address ?? '',
+    city: p.city ?? '',
+    lat: null,
+    lng: null,
+    mapLink: p.mapLink ?? '',
   };
 }
 

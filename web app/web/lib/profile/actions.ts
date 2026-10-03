@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 
+import type { PlaceHit } from '@/lib/places/types';
 import { saveWorkingHours } from '@/lib/setup/api';
 import { SetupApiError } from '@/lib/setup/errors';
 import { mergeWindows, sameWindows, type HourWindow } from '@/lib/setup/hours';
@@ -195,6 +196,8 @@ export interface WorkPlaceInput {
   /** `'independent' | 'gym' | 'both'`, or `''` to un-answer it. */
   workMode: string;
   gymName: string;
+  /** The picked place, or `null` for a typed gym. Always sent, so a typed edit unlinks. */
+  gymPlace: PlaceHit | null;
   mapLink: string;
   trainingModes: string[];
   serviceAreas: string[];
@@ -256,6 +259,10 @@ export async function saveWorkPlace(input: WorkPlaceInput): Promise<SaveResult> 
        */
       workMode: mode,
       gymName,
+      // Sent whole like its neighbours: `null` UNLINKS, which is what typing
+      // over a picked gym or choosing *on my own* must do. A name with no place
+      // is a gym the platform cannot count, not a broken one.
+      gymPlace: independent || gymName === '' ? null : input.gymPlace,
       mapLink,
       trainingModes: cleanList(input.trainingModes),
       // Free text rather than ids, so each one is normalised before the server
