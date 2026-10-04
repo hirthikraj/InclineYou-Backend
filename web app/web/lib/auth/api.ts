@@ -47,6 +47,20 @@ class ApiUnreachable extends Error {
   }
 }
 
+/**
+ * A 2xx whose body is not the shape this client was written against — most
+ * often a backend that predates the v1.1 sign-in (its `otp/request` answers 200
+ * with no body at all). Not a refusal and not "unreachable": the server
+ * answered, and what it said cannot be used. Readers classify it as `unknown`,
+ * so the screen says it could not send the code instead of the action throwing.
+ */
+class ApiBadResponse extends Error {
+  constructor(what: string) {
+    super(`inclineyou api sent an unusable ${what}`);
+    this.name = 'ApiBadResponse';
+  }
+}
+
 async function fetchJson<T>(path: string, init: RequestInit): Promise<T> {
   let res: Response;
   try {
@@ -150,12 +164,18 @@ function withCountryCode(phone: string): string {
  * older one, so only the latest id can be verified.
  */
 export async function requestOtp(phone: string): Promise<OtpRequested> {
-  return post<OtpRequested>('/v1/auth/otp/request', { phone: withCountryCode(phone) });
+  const res = await post<OtpRequested | null>('/v1/auth/otp/request', { phone: withCountryCode(phone) });
+  if (!res || typeof res.requestId !== 'string' || !res.requestId) {
+    throw new ApiBadResponse('otp/request answer');
+  }
+  return res;
 }
 
 /** Check a code against the request it was sent for. No phone number rides here. */
 export async function verifyOtp(requestId: string, otp: string): Promise<AuthResponse> {
-  return post<AuthResponse>('/v1/auth/otp/verify', { requestId, otp });
+  const res = await post<AuthResponse | null>('/v1/auth/otp/verify', { requestId, otp });
+  if (!res || typeof res.token !== 'string') throw new ApiBadResponse('otp/verify answer');
+  return res;
 }
 
 /**
@@ -194,7 +214,9 @@ export async function getDelivery(requestId: string): Promise<{ deliveryStatus: 
  *                      accepting is what pressing the button means
  */
 export async function claimTrainerAccount(policyVersion: string): Promise<AuthResponse> {
-  return authed<AuthResponse>('POST', '/v1/trainers', { privacyPolicyVersion: policyVersion });
+  const res = await authed<AuthResponse | null>('POST', '/v1/trainers', { privacyPolicyVersion: policyVersion });
+  if (!res || typeof res.token !== 'string') throw new ApiBadResponse('POST /v1/trainers answer');
+  return res;
 }
 
 /** `POST /v1/trainers/me/consent` — accept the notice now in force. Idempotent. */

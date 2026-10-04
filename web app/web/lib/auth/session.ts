@@ -154,6 +154,36 @@ export async function getRequestId(): Promise<string | null> {
 
 export async function clearRequestId(): Promise<void> {
   (await cookies()).delete(REQUEST_COOKIE);
+  (await cookies()).delete(RESEND_COOKIE);
+}
+
+/**
+ * When the next code may be asked for — epoch ms, from `resendAfterSeconds`.
+ *
+ * The ladder's rung depends on how many codes this number has had in the last
+ * hour (30s, then 60s, then 120s), so the verify screen cannot assume the first
+ * one: somebody signing in AGAIN soon after is on the second rung, and a
+ * countdown that said 0:30 would let them press "Resend" into a refusal. The
+ * server computes the wait; this carries it across the redirect, and across a
+ * reload of the verify screen, which must not restart the clock.
+ */
+const RESEND_COOKIE = 'inclineyou_resend_at';
+
+export async function setResendAt(epochMs: number): Promise<void> {
+  (await cookies()).set(RESEND_COOKIE, String(epochMs), {
+    httpOnly: true,
+    secure: SECURE,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: PENDING_MAX_AGE,
+  });
+}
+
+/** Seconds left until a resend is allowed, or null when no wait was recorded. */
+export async function getResendWait(): Promise<number | null> {
+  const raw = Number((await cookies()).get(RESEND_COOKIE)?.value);
+  if (!Number.isFinite(raw) || raw <= 0) return null;
+  return Math.max(0, Math.ceil((raw - Date.now()) / 1000));
 }
 
 /**

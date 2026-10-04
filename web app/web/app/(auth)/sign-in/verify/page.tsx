@@ -2,7 +2,8 @@ import { redirect } from 'next/navigation';
 
 import { AuthShell } from '@/components/auth/AuthShell';
 import { VerifyForm } from '@/components/auth/VerifyForm';
-import { getPendingPhone, getToken } from '@/lib/auth/session';
+import { resendDelay } from '@/lib/auth/policy';
+import { getPendingPhone, getResendWait, getToken } from '@/lib/auth/session';
 
 export const metadata = { title: 'Enter the code · InclineYou' };
 
@@ -25,12 +26,16 @@ export default async function VerifyPage() {
   const phone = await getPendingPhone();
   if (!phone) redirect('/sign-in');
 
+  // The server's own wait for this request, not the first rung assumed: signing in
+  // again soon after a code is on a later one. No record means the first rung.
+  const cooldown = (await getResendWait()) ?? resendDelay(0);
+
   return (
     <AuthShell
       lead="Six digits. That is it."
       quote="No password to remember and nothing to reset — the code lands in about ten seconds."
     >
-      <VerifyForm phone={phone} />
+      <VerifyForm phone={phone} initialCooldown={cooldown} />
     </AuthShell>
   );
 }

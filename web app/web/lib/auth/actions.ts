@@ -32,6 +32,7 @@ import {
   setActiveClient,
   setPolicyVersion,
   setRequestId,
+  setResendAt,
   setToken,
 } from './session';
 import type {
@@ -75,6 +76,7 @@ export async function sendCode(phoneInput: string): Promise<RequestResult> {
   // that is actually on its way. The request id replaces any earlier one — a
   // newer request retires the older, so only the latest can be verified.
   await setRequestId(issued.requestId);
+  await setResendAt(Date.now() + issued.resendAfterSeconds * 1000);
   await setPendingPhone(phone);
   return { ok: true, resendAfterSeconds: issued.resendAfterSeconds };
 }

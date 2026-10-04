@@ -29,7 +29,14 @@ import { Tag } from '@/web-components/ui/Tag';
  * — and for the slot being always present, keeping its height whether or not it
  * holds anything, so nothing below it moves when a code is refused.
  */
-export function VerifyForm({ phone }: { phone: string }) {
+export function VerifyForm({
+  phone,
+  initialCooldown,
+}: {
+  phone: string;
+  /** Seconds until resend is allowed on arrival — the server's wait for this request. */
+  initialCooldown: number;
+}) {
   const router = useRouter();
 
   const [code, setCode] = useState('');
@@ -42,7 +49,7 @@ export function VerifyForm({ phone }: { phone: string }) {
   /** How many resends have been spent. Paces the ladder, and opens the foot. */
   const [resends, setResends] = useState(0);
   /** Seconds until resend is allowed again. The first wait starts on arrival. */
-  const [cooldown, setCooldown] = useState(() => resendDelay(0));
+  const [cooldown, setCooldown] = useState(initialCooldown);
   /**
    * Seconds left on a lock, or 0. Held apart from `message` because it counts
    * down on screen: the sentence has to quote the wait as it is now.
