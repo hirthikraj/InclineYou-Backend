@@ -93,10 +93,11 @@ export function PeriodPicker({ period, minYear = 2020, nowMs, onChange }: Period
   const span = periodSpanLabel(period, nowMs);
 
   return (
-    <div ref={wrapRef} style={{ position: 'relative' }}>
+    <div ref={wrapRef} className="pp">
       {/* Trigger */}
       <Button
         variant="secondary"
+        className="pp__tr"
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={toggle}
@@ -106,108 +107,35 @@ export function PeriodPicker({ period, minYear = 2020, nowMs, onChange }: Period
           <rect x="3" y="4.5" width="18" height="16" rx="2" /><path d="M3 9.5h18M8 2.5v4M16 2.5v4" />
         </svg>
         <span style={{ fontVariantNumeric: 'tabular-nums' }}>{periodChip(period)}</span>
-        <svg
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-          style={{ transition: 'transform .15s', transform: open ? 'rotate(180deg)' : 'none' }}
-        >
+        <svg className="pp__chev" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M6 9l6 6 6-6" />
         </svg>
       </Button>
 
       {/* Dropdown */}
       {open && (
-        <div
-          role="dialog"
-          aria-label="Pick a period"
-          style={{
-            position: 'absolute',
-            top: 'calc(100% + 6px)',
-            right: 0,
-            zIndex: 60,
-            width: 240,
-            /* --w-surface does not exist. An undefined custom property resolves
-               to nothing, so this popup had NO background and the payments table behind
-               it read straight through the month grid. The `--w-*` family is
-               layout and state (hover, selected, rail, row); a surface is `--tx-`. */
-            background: 'var(--tx-surface)',
-            border: '1px solid var(--tx-line)',
-            borderRadius: 'var(--tx-r3)',
-            boxShadow: '0 8px 24px rgba(0,0,0,.18)',
-            overflow: 'hidden',
-          }}
-        >
+        <div className="pp__pop" role="dialog" aria-label="Pick a period">
           {/* The spans — first, because they are the coarser question. */}
-          <div style={{ padding: 6, borderBottom: '1px solid var(--tx-line)' }}>
+          <div className="pp__spans">
             {([3, 6] as const).map((months) => {
               const p: Period = { kind: 'recent', months };
-              const isSelected = samePeriod(period, p);
               return (
                 <button
                   key={months}
                   type="button"
-                  aria-pressed={isSelected}
+                  className="pp__o pp__o--span"
+                  aria-pressed={samePeriod(period, p)}
                   onClick={() => pick(p)}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'baseline',
-                    justifyContent: 'space-between',
-                    gap: 8,
-                    width: '100%',
-                    padding: '8px 8px',
-                    borderRadius: 'var(--tx-r2)',
-                    border: '1px solid transparent',
-                    fontSize: 13,
-                    textAlign: 'left',
-                    cursor: 'pointer',
-                    fontWeight: isSelected ? 700 : 400,
-                    background: isSelected ? 'var(--tx-accent)' : 'transparent',
-                    color: isSelected ? '#000' : 'var(--tx-ink)',
-                    transition: 'background .1s, color .1s',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isSelected)
-                      (e.currentTarget as HTMLButtonElement).style.background = 'var(--w-hover)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isSelected)
-                      (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-                  }}
                 >
                   <span>Last {months} months</span>
-                  <span
-                    className="mono"
-                    style={{
-                      fontSize: 11,
-                      opacity: isSelected ? 0.7 : 1,
-                      color: isSelected ? '#000' : 'var(--tx-ink-3)',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {periodSpanLabel({ kind: 'recent', months }, nowMs)}
-                  </span>
+                  <small>{periodSpanLabel(p, nowMs)}</small>
                 </button>
               );
             })}
           </div>
 
           {/* Year navigation */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '8px 12px',
-              borderBottom: '1px solid var(--tx-line)',
-            }}
-          >
+          <div className="pp__yr">
             <button
               className="btn btn--icon btn--ghost"
               type="button"
@@ -219,9 +147,7 @@ export function PeriodPicker({ period, minYear = 2020, nowMs, onChange }: Period
                 <path d="M15 18l-6-6 6-6" />
               </svg>
             </button>
-            <span style={{ fontFamily: 'var(--tx-brand)', fontWeight: 800, fontSize: 15 }}>
-              {pickerYear}
-            </span>
+            <b>{pickerYear}</b>
             <button
               className="btn btn--icon btn--ghost"
               type="button"
@@ -236,47 +162,19 @@ export function PeriodPicker({ period, minYear = 2020, nowMs, onChange }: Period
           </div>
 
           {/* Month grid — 4 rows × 3 cols */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: 4,
-              padding: 10,
-            }}
-          >
+          <div className="pp__grid">
             {MONTHS.map((label, i) => {
               const m = i + 1;
-              const isSelected =
-                period.kind === 'month' && pickerYear === period.year && m === period.month;
-              const disabled = isFuture(pickerYear, m);
               return (
                 <button
                   key={label}
                   type="button"
-                  disabled={disabled}
-                  aria-pressed={isSelected}
+                  className="pp__o pp__o--month"
+                  disabled={isFuture(pickerYear, m)}
+                  aria-pressed={
+                    period.kind === 'month' && pickerYear === period.year && m === period.month
+                  }
                   onClick={() => pick({ kind: 'month', year: pickerYear, month: m })}
-                  style={{
-                    padding: '7px 4px',
-                    borderRadius: 'var(--tx-r2)',
-                    border: '1px solid transparent',
-                    fontSize: 13,
-                    fontFamily: 'var(--tx-mono)',
-                    fontWeight: isSelected ? 700 : 400,
-                    cursor: disabled ? 'default' : 'pointer',
-                    opacity: disabled ? 0.32 : 1,
-                    background: isSelected ? 'var(--tx-accent)' : 'transparent',
-                    color: isSelected ? '#000' : disabled ? 'var(--tx-ink-3)' : 'var(--tx-ink)',
-                    transition: 'background .1s, color .1s',
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!disabled && !isSelected)
-                      (e.currentTarget as HTMLButtonElement).style.background = 'var(--w-hover)';
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!disabled && !isSelected)
-                      (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
-                  }}
                 >
                   {label}
                 </button>
@@ -286,18 +184,7 @@ export function PeriodPicker({ period, minYear = 2020, nowMs, onChange }: Period
 
           {/* What a span actually resolved to, spelled out once at the bottom so
               the trainer never has to count months to know what they are reading. */}
-          {span && (
-            <div
-              style={{
-                padding: '8px 12px',
-                borderTop: '1px solid var(--tx-line)',
-                fontSize: 11,
-                color: 'var(--tx-ink-3)',
-              }}
-            >
-              Showing {span}
-            </div>
-          )}
+          {span && <div className="pp__foot">Showing {span}</div>}
         </div>
       )}
     </div>

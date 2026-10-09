@@ -115,6 +115,14 @@ export function Today({ data }: { data: TodayData }) {
   const [booking, setBooking] = useState<{ dayAt: number; minute: number } | null>(null);
 
   /** The next whole hour today — the schedule's own rule, on today's midnight. */
+  /* ONE LIME FILL ABOVE THE FOLD. The hero's *Start session* is the screen's
+     primary verb; while a session is running or starts within the hour, a second
+     lime in the header is two answers to *what do I do now*. *New session* steps
+     down to secondary for exactly that window and is primary the rest of the day.
+     Derived from the ticking `now`, never `Date.now()`. */
+  const sessionImminent =
+    deck.running !== null || (deck.next !== null && deck.next.at - now <= 60 * 60_000);
+
   const openBooking = useCallback(
     () => setBooking(defaultSlot(startOfDay(now), 'day', now)),
     [now],
@@ -232,7 +240,7 @@ export function Today({ data }: { data: TodayData }) {
                 {/* A button, not a link — see the note in the body. The panel
                     opens over this screen instead of over a week grid two
                     navigations away. */}
-                <Button variant="primary" onClick={openBooking}>
+                <Button variant={sessionImminent ? 'secondary' : 'primary'} onClick={openBooking}>
                   <Plus size={15} />
                   New session
                 </Button>

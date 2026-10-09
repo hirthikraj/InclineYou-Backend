@@ -127,6 +127,12 @@ function dayPhrase(days: number): string {
 
 /* ─────────────────────────────────────────────────────────────── the tab ── */
 
+/** `weight_loss` → *Weight loss*. The goal is stored as the slug it was typed or seeded as. */
+function goalLabel(goal: string): string {
+  const t = goal.replace(/[_-]+/g, ' ').trim();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
 export function ProgramTab({
   programs,
   sessions,
@@ -142,6 +148,9 @@ export function ProgramTab({
   const clientId = client.id;
   const sorted = programs;
   const active = sorted.find((p) => p.status === 'active') ?? null;
+  /* *Assign* never ends the block already running, so a client can hold two rows with that status. The
+     card is about one of them; saying so is the least the tab can do. */
+  const liveCount = sorted.filter((p) => p.status === 'active').length;
 
   const weekStart = startOfWeek(now);
   const thisWeek = active
@@ -234,15 +243,25 @@ export function ProgramTab({
                 }
               />
             )}
-            <p
-              className={
-                block.state === 'overrun' || block.state === 'ending'
-                  ? 'cfpl__say cfpl__say--warn'
-                  : 'cfpl__say'
-              }
-            >
-              <BlockSentence state={block.state} daysLeft={block.daysLeft} endMs={block.endMs} />
-            </p>
+            {/* A running block says nothing here: its end is already in the range line above (it was
+                stated a third time as *Running to 4 Nov*, beside *Days to run*). */}
+            {block.state !== 'running' && (
+              <p
+                className={
+                  block.state === 'overrun' || block.state === 'ending'
+                    ? 'cfpl__say cfpl__say--warn'
+                    : 'cfpl__say'
+                }
+              >
+                <BlockSentence state={block.state} daysLeft={block.daysLeft} endMs={block.endMs} />
+              </p>
+            )}
+            {liveCount > 1 && (
+              <p className="cfpl__say cfpl__say--warn">
+                {liveCount} plans are marked active; this is the newest. Assigning does not end the
+                one that was running, so open the older one to close it off.
+              </p>
+            )}
           </Card.Body>
           <Card.Body divided flush className="cfpl__figs">
             <Figures>
@@ -251,7 +270,10 @@ export function ProgramTab({
                 value={spent > 0 ? kept : '—'}
                 of={spent > 0 ? spent : undefined}
               />
-              <Figure label="Left this week" value={leftThisWeek > 0 ? leftThisWeek : '—'} />
+              <Figure
+                label="Left this week"
+                value={leftThisWeek > 0 ? leftThisWeek : block.state === 'scheduled' ? '—' : 0}
+              />
               <Figure
                 label={block.state === 'overrun' ? 'Days over' : 'Days to run'}
                 value={block.daysLeft === null ? 'Open' : Math.abs(block.daysLeft)}
@@ -268,7 +290,7 @@ export function ProgramTab({
                tables already follow: cap the COLUMN, never the row. Two tracks
                puts each pair in ~350px. */
             <Card.Body divided className="cfpl__facts">
-              {active.goal && <KeyValueRow k="Goal">{active.goal}</KeyValueRow>}
+              {active.goal && <KeyValueRow k="Goal">{goalLabel(active.goal)}</KeyValueRow>}
               {dayLabels && <KeyValueRow k="This week">{dayLabels}</KeyValueRow>}
             </Card.Body>
           )}
@@ -294,7 +316,7 @@ export function ProgramTab({
           <Card.Band>
             {block.state === 'overrun' || block.state === 'ending' ? (
               <>
-                <Button href="/programs/templates" variant="primary" icon={<Plus size={15} />}>
+                <Button href={`/programs/templates?client=${clientId}`} variant="primary" icon={<Plus size={15} />}>
                   Assign the next plan
                 </Button>
                 <Button
@@ -314,7 +336,7 @@ export function ProgramTab({
                 >
                   Open the plan
                 </Button>
-                <Button href="/programs/templates" variant="secondary">
+                <Button href={`/programs/templates?client=${clientId}`} variant="secondary">
                   Assign another
                 </Button>
               </>
@@ -340,7 +362,7 @@ export function ProgramTab({
               </>
             }
             action={
-              <Button href="/programs/templates" variant="primary" icon={<Plus size={15} />}>
+              <Button href={`/programs/templates?client=${clientId}`} variant="primary" icon={<Plus size={15} />}>
                 Assign a plan
               </Button>
             }
@@ -348,10 +370,11 @@ export function ProgramTab({
         </Card>
       )}
 
+      {/* A client with no plan already has a card that says so; a second saying *nothing assigned yet*
+          was the same fact twice. */}
+      {(sorted.length > 0 || showGap) && (
       <Card title="Every plan, newest first">
-        {sorted.length === 0 && !showGap ? (
-          <p className="small ink3">Nothing assigned yet</p>
-        ) : (
+        {(
           <Timeline label="Every plan this client has been on, newest first">
             {sorted.map((p, i) => {
               const b = blockOf(p, now);
@@ -371,7 +394,7 @@ export function ProgramTab({
                      database". The whole row is the door now and not the name
                      inside it — see `.tl__i--link`. */
                   href={`/clients/${clientId}/program/${p.id}`}
-                  mark={sorted.length - i}
+                  mark={sorted.length > 1 ? sorted.length - i : undefined}
                   title={p.name}
                   aside={
                     isLive ? (
@@ -406,7 +429,7 @@ export function ProgramTab({
                           ? b.week !== null &&
                             ` · week ${b.week}${b.weeks ? ` of ${b.weeks}` : ''}`
                           : b.weeks && ` · ${b.weeks} weeks`}
-                        {p.goal ? ` · ${p.goal}` : null}
+                        {p.goal ? ` · ${goalLabel(p.goal)}` : null}
                       </>
                     )
                   }
@@ -432,6 +455,7 @@ export function ProgramTab({
           </Timeline>
         )}
       </Card>
+      )}
     </div>
   );
 }

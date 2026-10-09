@@ -14,6 +14,38 @@ import { Why } from '@/web-components/ui/Why';
 import { DockPanel } from '@/web-components/ui/DockPanel';
 
 /**
+ * The grid a client's standing week seeds, or null when they have none. The template's ordinal days take
+ * their weekdays in order (Day 1 = their first morning), and a day left over keeps a free weekday so the
+ * seed never produces the double-booked morning a click cannot.
+ */
+function seedForClient(
+  days: number[],
+  next: ClientWire,
+): Record<number, { weekday: number; time: string }> | null {
+  const week = [...(next.weeklySchedule ?? [])]
+    .filter(slot => slot.weekday >= 1 && slot.weekday <= 7)
+    .sort((a, b) => a.weekday - b.weekday);
+  if (week.length === 0) return null;
+  const seeded = seedSchedule(days);
+  const used = new Set<number>();
+  days.forEach((day, i) => {
+    const slot = week[i];
+    if (!slot || used.has(slot.weekday)) return;
+    used.add(slot.weekday);
+    seeded[day] = { weekday: slot.weekday, time: slot.time };
+  });
+  const free = [1, 2, 3, 4, 5, 6, 7].filter(wd => !used.has(wd));
+  days.forEach(day => {
+    if (used.has(seeded[day].weekday)) {
+      const spare = free.shift();
+      if (spare !== undefined) seeded[day] = { ...seeded[day], weekday: spare };
+    }
+    used.add(seeded[day].weekday);
+  });
+  return seeded;
+}
+
+/**
  * ASSIGN — where an ordinal slot becomes a real Tuesday.
  *
  * The design set files this as *still open · 02*: "the step where Day 1 becomes
@@ -48,6 +80,7 @@ export function AssignPanel({
   days,
   dayLabels,
   clients,
+  initialClientId,
   onClose,
   onAssign,
   busy,
@@ -58,6 +91,8 @@ export function AssignPanel({
   days: number[];
   dayLabels: Record<string, string>;
   clients: ClientWire[];
+  /** The client the trainer arrived for (`?client=`): chosen, and their week seeded, before first paint. */
+  initialClientId?: string | null;
   onClose: () => void;
   onAssign: (input: {
     clientId: string;
@@ -68,14 +103,15 @@ export function AssignPanel({
   error: string | null;
 }) {
   const [query, setQuery] = useState('');
-  const [clientId, setClientId] = useState<string | null>(null);
+  const initial = clients.find(c => c.id === initialClientId) ?? null;
+  const [clientId, setClientId] = useState<string | null>(initial?.id ?? null);
   const [start, setStart] = useState(() => new Date().toISOString().slice(0, 10));
 
   /* Seeded at 06:00 on the pattern a trainer would have typed — see PATTERNS
      at the foot of this file. A seed they change, rather than a blank grid they
      have to fill three times. */
-  const [slots, setSlots] = useState<Record<number, { weekday: number; time: string }>>(() =>
-    seedSchedule(days),
+  const [slots, setSlots] = useState<Record<number, { weekday: number; time: string }>>(
+    () => (initial ? seedForClient(days, initial) : null) ?? seedSchedule(days),
   );
 
   const active = useMemo(
@@ -115,32 +151,8 @@ export function AssignPanel({
    */
   function chooseClient(next: ClientWire): void {
     setClientId(next.id);
-    const week = [...(next.weeklySchedule ?? [])]
-      .filter(slot => slot.weekday >= 1 && slot.weekday <= 7)
-      .sort((a, b) => a.weekday - b.weekday);
-    if (week.length === 0) return;
-    setSlots(() => {
-      const seeded = seedSchedule(days);
-      const used = new Set<number>();
-      days.forEach((day, i) => {
-        const slot = week[i];
-        if (!slot || used.has(slot.weekday)) return;
-        used.add(slot.weekday);
-        seeded[day] = { weekday: slot.weekday, time: slot.time };
-      });
-      /* A day that kept its seeded weekday must not collide with one that took
-         the client's — two sessions on one morning is what the picker refuses,
-         and a seed is not allowed to produce the state a click cannot. */
-      const free = [1, 2, 3, 4, 5, 6, 7].filter(wd => !used.has(wd));
-      days.forEach(day => {
-        if (used.has(seeded[day].weekday)) {
-          const spare = free.shift();
-          if (spare !== undefined) seeded[day] = { ...seeded[day], weekday: spare };
-        }
-        used.add(seeded[day].weekday);
-      });
-      return seeded;
-    });
+    const seeded = seedForClient(days, next);
+    if (seeded) setSlots(seeded);
   }
 
   /**

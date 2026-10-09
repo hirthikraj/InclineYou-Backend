@@ -52,27 +52,40 @@ export function NudgeTemplates({ initial }: { initial: NudgeTemplate[] }) {
   return (
     <div className="ndgt">
       <Card title="How the messages are sent" className="ndgt__intro">
+        {/* One sentence, then the rest on demand. Two paragraphs here put a 270px card between a phone's header and its first
+            template, so the list started below the fold; the fixed limits are a thing to know, not a thing to read every visit. */}
         <p className="small" style={{ lineHeight: 1.7 }}>
-          Nothing here sends on its own. Pressing a nudge button anywhere in InclineYou opens
-          <b> your own WhatsApp</b> with the message already typed — you read it, change
-          anything you like, and press send. It goes from your number, which is the one
-          your clients have saved.
+          Nothing here sends on its own. A nudge button opens <b>your own WhatsApp</b> with the message already typed, and
+          you press send, from the number your clients have saved.
         </p>
-        {/* No `marginTop` — the two paragraphs are grid items now and the gap
-            does it. An inline style would have outranked the grid and ranged
-            this one 10px below its neighbour (trap 2). */}
-        <p className="small" style={{ lineHeight: 1.7 }}>
-          Two limits are fixed and are not settings: messages are meant for{' '}
-          <b>9am–8pm</b>, and InclineYou will stop asking you to chase somebody it knows you
-          messaged in the last <b>7 days</b>. A limit with a text field beside it is not a
-          limit.
-        </p>
+        <details className="rpt-why ndgt__limits">
+          <summary>The two fixed limits</summary>
+          <p>
+            Messages are meant for <b>9am–8pm</b>, and InclineYou stops asking you to chase somebody it knows you
+            messaged in the last <b>7 days</b>. A limit with a text field beside it is not a limit, so neither is a setting.
+          </p>
+        </details>
       </Card>
 
       {initial.map((template) => (
         <NudgeCard key={template.name} initial={template} />
       ))}
     </div>
+  );
+}
+
+/** The wording, with each {token} drawn as the placeholder it is, so a collapsed row does not read as code. */
+function TokenLine({ text }: { text: string }) {
+  return (
+    <>
+      {text.split(/(\{[a-z_]+\})/).map((part, i) =>
+        /^\{[a-z_]+\}$/.test(part) ? (
+          <code key={i} className="ndgt__tk">{part}</code>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
   );
 }
 
@@ -173,7 +186,7 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
         purpose is the one thing the body no longer has to spend a line on.
         Both are a single line, so the head does not change height on a press.
       */
-      sub={open ? template.purpose : body}
+      sub={open ? template.purpose : <TokenLine text={body} />}
       open={open}
       onOpenChange={setOpen}
       control={
@@ -190,7 +203,7 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
             sign that reopening was worth it.
           */}
           {dirty && <Tag tone="warn">Unsaved</Tag>}
-          {!template.isDefault && <Tag tone="info">Yours</Tag>}
+          {!template.isDefault && <Tag>Yours</Tag>}
         </>
       }
     >

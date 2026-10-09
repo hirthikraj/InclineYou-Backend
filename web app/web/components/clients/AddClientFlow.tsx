@@ -13,6 +13,8 @@ import {
   applyTemplate,
   type WeeklySlot,
 } from '@/lib/clients/new-actions';
+import { adultCutoff, checkBirthDate } from '@/lib/clients/adult';
+import { DateField } from '@/web-components/ui/DateField';
 import { bookSession } from '@/lib/schedule/actions';
 import { Glyph } from '@/components/shell/Icons';
 import { avatarToken, initials, rupees, isoWeekday, startOfDay, dayStamp, DAY_MS } from '@/lib/today/time';
@@ -210,8 +212,17 @@ function demoSlotTaken(at: number, durationMinutes: number, sessions: UpcomingSe
 /* ─────────────────────────────────────────────────── phone helpers ── */
 
 function cleanPhone(raw: string): string {
-  const digits = raw.replace(/\D/g, '');
-  return digits.startsWith('0') ? digits.slice(1) : digits;
+  let digits = raw.replace(/\D/g, '');
+  if (digits.startsWith('0')) digits = digits.slice(1);
+  /* A number pasted from WhatsApp or a contact card arrives as `+91 98410 22119`,
+     which is `919841022119` once the plus and the spaces go. Read as a national
+     number it displayed "91984 10221" and the band said *free to add* about a
+     stranger. Twelve or more digits that open with 91 are the country code; ten
+     digits that open with 91 are a real mobile prefix and are left alone. */
+  if (digits.length >= 12 && digits.startsWith('91')) digits = digits.slice(2);
+  /* And never more than ten: an eleventh digit used to be held and never shown,
+     so the field and the request disagreed about the number. */
+  return digits.slice(0, 10);
 }
 
 function displayPhone(raw: string): string {
@@ -231,7 +242,7 @@ function displayPhone(raw: string): string {
 const CLIENT_TYPE_INFO: Record<'independent' | 'gym', { label: string; sub: string; tag: string; tagClass: string }> = {
   independent: {
     label: 'Independent',
-    sub: 'They collect. Their own packs, price editable on the sale.',
+    sub: 'They collect. Your own price list.',
     tag: 'no split',
     tagClass: 'tag tag--ok',
   },
@@ -285,6 +296,7 @@ export const PACKS_DETOUR = 'new-client';
 interface Draft {
   name: string;
   phone: string;
+  dob: string;
   /** Only the active path ever detours to Business, so a restored draft is
    *  always active — kept anyway so a stale draft written before this shape
    *  changed still parses (see `parseDraft`). */
@@ -376,6 +388,8 @@ function parseDraft(raw: string): Draft | null {
     return {
       name: d.name,
       phone: d.phone,
+      /* A draft written before the date of birth was asked has none. */
+      dob: typeof d.dob === 'string' ? d.dob : '',
       /* Always active in practice (only that path detours to Business), but a
          draft written before this field existed has none — read as active
          rather than refused, since that is the only path it could have been. */
@@ -550,6 +564,18 @@ export function AddClientFlow({
   const [step, setStep] = useState<Step>(1);
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
+  /* `YYYY-MM-DD`, from a native date input. Asked WITH the phone so the 18+ rule
+     (MUST-22) is checked before a client row exists, and the age is shown back so
+     "verified" is something the trainer can see. `dobError` is the sentence under
+     the field and `dobAge` the quiet confirmation; both are set in handlers, never
+     in render, because checking an age reads the clock. */
+  const [dob, setDob] = useState('');
+  const [dobError, setDobError] = useState<string | null>(null);
+  const [dobAge, setDobAge] = useState<number | null>(null);
+  const dobRef = useRef<HTMLInputElement>(null);
+  /* Where the calendar opens while the field is empty: the day somebody turns 18, so
+     the first view is the youngest valid month and not today. */
+  const [adultAt] = useState(() => adultCutoff(Date.now()));
   const [phoneCheck, setPhoneCheck] = useState<'idle' | 'checking' | 'ok' | 'on-roster' | 'blocked'>('idle');
   const [rosterMatch, setRosterMatch] = useState<{ id: string; name: string } | null>(null);
   const [dismissedRosterWarn, setDismissedRosterWarn] = useState(false);
@@ -600,6 +626,7 @@ export function AddClientFlow({
   const [committed, setCommitted] = useState<{
     name: string;
     phone: string;
+    dob: string;
     deliveryMode: 'floor' | 'remote';
     clientType: 'independent' | 'gym';
     packId: string | null;
@@ -619,6 +646,13 @@ export function AddClientFlow({
 
   const phoneCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nameRef = useRef<HTMLInputElement>(null);
+
+  /* WHO OPENED THIS, read during render — before the effect below moves focus to
+     the name field. A drawer that closes should hand focus back to *Add client*;
+     it left it on <body>, so a keyboard user re-walked the roster. */
+  const [opener] = useState<Element | null>(() =>
+    typeof document === 'undefined' ? null : document.activeElement,
+  );
 
   /* focus name on open */
   useEffect(() => {
@@ -640,6 +674,7 @@ export function AddClientFlow({
     if (draft) {
       setName(draft.name);
       setPhone(draft.phone);
+      setDob(draft.dob);
       /* Only the active path ever detours to Business (Money is the one step
          with a "set up your packs" empty state), so this is always active in
          practice — `parseDraft` already reads a missing/legacy value that way. */
@@ -671,11 +706,39 @@ export function AddClientFlow({
   useEffect(() => {
     if (shell !== 'drawer') return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); cancel(); }
+      /* An open calendar owns Escape and Tab: it closes ITSELF, not this drawer, and its
+         portal lives outside `.adrawer` on purpose (`data-popup`). */
+      if (document.querySelector('[data-popup]')) return;
+      if (e.key === 'Escape') { e.preventDefault(); cancel(); return; }
+      /* THE TRAP. The drawer says `aria-modal`, and nothing made it so: Tab left
+         Cancel for the page behind it (nine Tabs to the rail, confirmed live). It
+         wraps inside the dialog instead, and pulls focus back in if it ever sits
+         outside. */
+      if (e.key !== 'Tab') return;
+      const root = document.querySelector<HTMLElement>('.adrawer');
+      if (!root) return;
+      const items = [
+        ...root.querySelectorAll<HTMLElement>(
+          'button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),a[href],[tabindex]:not([tabindex="-1"])',
+        ),
+      ].filter((el) => el.offsetParent !== null);
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!root.contains(active)) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && active === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [shell, cancel]);
+
+  /* Hand focus back to whatever opened the drawer when it goes. */
+  useEffect(() => {
+    if (shell !== 'drawer') return;
+    return () => { (opener as HTMLElement | null)?.focus?.(); };
+  }, [shell, opener]);
 
   /* phone validation — debounced; state is reset in onChange, not in the effect */
   const doPhoneCheck = useCallback(async (rawPhone: string) => {
@@ -775,16 +838,20 @@ export function AddClientFlow({
    * away and named.
    */
   const goDefinePacks = useCallback(() => {
-    writeDraft({ name, phone, status, deliveryMode, trainerSplit, clientType, packId });
+    writeDraft({ name, phone, dob, status, deliveryMode, trainerSplit, clientType, packId });
     /* The drawer has to close before the route under it changes, or the dialog
        is left open over the screen it navigated to. */
     onClose?.();
     router.push(`/business/packages?from=${PACKS_DETOUR}`);
-  }, [name, phone, status, deliveryMode, trainerSplit, clientType, packId, onClose, router]);
+  }, [name, phone, dob, status, deliveryMode, trainerSplit, clientType, packId, onClose, router]);
 
+  /* Plans are filtered by the days that were SAVED — a day with an hour — never by
+     the days that were merely ticked: a plan's day count has to equal the booked
+     rhythm or the apply is refused. */
+  const bookedDays = Object.keys(selectedSlots).length;
   const eligibleTemplates =
-    weekdays.size > 0
-      ? data.templates.filter(t => (t.dayLabels?.length ?? 0) === weekdays.size)
+    bookedDays > 0
+      ? data.templates.filter(t => (t.dayLabels?.length ?? 0) === bookedDays)
       : data.templates;
 
   /* The demo picker's 14 real dates, snapshotted once at mount — not
@@ -883,6 +950,24 @@ export function AddClientFlow({
     setStep(prev => (prev > cap ? cap : prev));
   }, []);
 
+  /** Check the date of birth and put the answer on screen. Returns whether it passed. */
+  const validateDob = (value: string): boolean => {
+    if (!value) {
+      setDobAge(null);
+      setDobError('Enter their date of birth.');
+      return false;
+    }
+    const result = checkBirthDate(value, Date.now());
+    if (!result.ok) {
+      setDobAge(null);
+      setDobError(result.message);
+      return false;
+    }
+    setDobError(null);
+    setDobAge(result.age);
+    return true;
+  };
+
   /* step 1 — and on a return visit it SAVES rather than merely advancing. */
   const handleStep1Continue = async () => {
     if (!name.trim()) { setError('Enter their name.'); return; }
@@ -892,6 +977,7 @@ export function AddClientFlow({
       if (phoneCheck === 'blocked') { setError('That number cannot be added.'); return; }
     }
     setError(null);
+    if (!validateDob(dob)) { dobRef.current?.focus(); return; }
 
     /* Nothing committed yet: the row is created at the end of step 2, so step 1
        is still only a form and Continue is still only a navigation. */
@@ -900,13 +986,13 @@ export function AddClientFlow({
     /* A no-op save is a no-op — `/settings/profile/work` states the rule and it
        matters more here, because Back-then-Continue is how a trainer CHECKS
        what they typed, and checking should not cost a write. */
-    if (trimmed === committed.name && digits === committed.phone) { goTo(2); return; }
+    if (trimmed === committed.name && digits === committed.phone && dob === committed.dob) { goTo(2); return; }
 
     if (submitting) return;
     setSubmitting(true);
     try {
-      await updateClientDetails(createdClientId, { name: trimmed, phone: digits });
-      setCommitted({ ...committed, name: trimmed, phone: digits });
+      await updateClientDetails(createdClientId, { name: trimmed, phone: digits, dateOfBirth: dob });
+      setCommitted({ ...committed, name: trimmed, phone: digits, dob });
       goTo(2);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That did not save. Nothing changed.');
@@ -937,13 +1023,14 @@ export function AddClientFlow({
           id: ids.client,
           name: name.trim(),
           phone: digits,
+          dateOfBirth: dob,
           clientType,
           status,
           deliveryMode,
         });
         setCreatedClientId(created.id);
         setScheduleVersion(created.scheduleVersion);
-        setCommitted({ name: trimmed, phone: digits, deliveryMode, clientType, packId: null });
+        setCommitted({ name: trimmed, phone: digits, dob, deliveryMode, clientType, packId: null });
         goTo(3);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Something went wrong.');
@@ -1030,6 +1117,21 @@ export function AddClientFlow({
   /* step 4, active path only (Week) */
   const handleWeekContinue = async () => {
     if (!createdClientId || !scheduleVersion || submitting) return;
+    /* A DAY WITH NO HOUR IS REFUSED, NOT DROPPED. `weekdays` is the days the trainer
+       ticked and `selectedSlots` the hours they gave, and this only read the second —
+       so a ticked Friday with no time saved a two-day week in silence, and step 5
+       then offered a three-day plan whose apply would 400 with a sentence that never
+       reaches the browser. Say which day, and what to do about it. */
+    const unset = Array.from(weekdays)
+      .filter((wd) => selectedSlots[wd] === undefined)
+      .sort((a, b) => a - b)
+      .map((wd) => WEEKDAYS.find((w) => w.n === wd)?.label ?? '');
+    if (unset.length > 0) {
+      setError(
+        `${unset.join(' and ')} ${unset.length === 1 ? 'has' : 'have'} no time yet. Pick one, or untick the day.`,
+      );
+      return;
+    }
     /* Program days in week order (R45): the first slot books Day 1. */
     const slots = Object.entries(selectedSlots)
       .sort(([a], [b]) => Number(a) - Number(b))
@@ -1105,7 +1207,7 @@ export function AddClientFlow({
                   does not, because `aria-label` on `role="dialog"` names it.
                   The band IS the header on both, so there is no second copy. */}
               <Title className="ascent__name">{trimmed || 'Add a client'}</Title>
-              <span className="ascent__sub" data-tone={band.tone}>
+              <span className="ascent__sub" data-tone={band.tone} aria-live="polite">
                 <span key={band.key}>{band.text}</span>
               </span>
             </span>
@@ -1215,7 +1317,7 @@ export function AddClientFlow({
         {/* Error banner */}
         {error && (
           <div style={{ padding: '12px 20px 0' }}>
-            <div className="why why--warn" style={{ padding: '8px 12px' }}>
+            <div className="why why--warn" role="alert" style={{ padding: '8px 12px' }}>
               <p style={{ margin: 0 }}>{error}</p>
             </div>
           </div>
@@ -1281,7 +1383,7 @@ export function AddClientFlow({
                         onKeyDown={e => { if (e.key === 'Enter') void handleStep1Continue(); }}
                       />
                     </div>
-                    <p className="fld__h">Reminders and the invite both go to this number.</p>
+                    <p className="fld__h">Their number is how you find them.</p>
                   </div>
                 </div>
 
@@ -1329,21 +1431,53 @@ export function AddClientFlow({
                   </div>
                 )}
 
+                {/* ── DATE OF BIRTH — and the 18+ rule (MUST-22), checked HERE.
+                    Asked beside the phone because a client row is created at the end
+                    of step 2 and an under-18 person must never reach that press. A
+                    native date input: a phone gets its own picker, a desk gets
+                    typing. It is REQUIRED on this flow (the server allows none, but a
+                    rule that cannot be checked is not a rule), validated as soon as a
+                    plausible year is typed, and the age is shown back so "verified"
+                    is something a trainer can see. The refusal says WHEN they turn 18.
+                    The server refuses `CLIENT_UNDER_18` too — this only moves the
+                    sentence ahead of the round trip. */}
                 <div style={{ ['--i' as string]: 3 }}>
-                  <Sec k="Any time later" n="not now" />
-                  <Card>
-                    <KeyValueRow
-                      k={<>Plan
-                        <span className="small" style={{ marginLeft: 8 }}>After their first session</span></>}
-                      valueClassName="ink3"
-                    >—</KeyValueRow>
-                    <KeyValueRow
-                      k={<>Pack
-                        <span className="small" style={{ marginLeft: 8 }}>Sell it on the day they pay</span></>}
-                      valueClassName="ink3"
-                    >—</KeyValueRow>
-                  </Card>
+                  <Sec k="Date of birth" n={dobAge !== null ? `${dobAge} years old` : undefined} />
+                  <div className="fld">
+                    <DateField
+                      id="nc-dob"
+                      inputRef={dobRef}
+                      label="Date of birth"
+                      block
+                      value={dob}
+                      min="1900-01-01"
+                      max={adultAt}
+                      openAt={adultAt}
+                      invalid={Boolean(dobError)}
+                      describedBy="nc-dob-h"
+                      onChange={v => {
+                        setDob(v);
+                        /* The field says '' until the year is four digits and the day is
+                           a real one, so a year typed on the way to 1990 is never judged
+                           as 0019; once it is a date, say what we make of it. */
+                        if (v) validateDob(v);
+                        else { setDobAge(null); setDobError(null); }
+                      }}
+                      onBlur={(v, state) => {
+                        if (state === 'ok') validateDob(v);
+                        else if (state === 'invalid') { setDobAge(null); setDobError('That is not a date.'); }
+                        else if (state === 'incomplete') { setDobAge(null); setDobError('Enter the day, month and year.'); }
+                      }}
+                      onEnter={() => void handleStep1Continue()}
+                    />
+                    {dobError ? (
+                      <p id="nc-dob-h" className="fld__e" role="alert">{dobError}</p>
+                    ) : (
+                      <p id="nc-dob-h" className="fld__h">Clients must be 18 or over.</p>
+                    )}
+                  </div>
                 </div>
+
               </>
             )}
 
@@ -1961,6 +2095,7 @@ export function AddClientFlow({
           className="scrim scrim--soft"
           type="button"
           aria-label="Close drawer"
+          tabIndex={-1}
           onClick={cancel}
         />
         <div className="adrawer acflow" role="dialog" aria-modal="true" aria-label="Add a client">

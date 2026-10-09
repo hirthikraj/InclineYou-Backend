@@ -183,9 +183,9 @@ export type StatusFilter = 'all' | 'done' | 'missed' | 'incoming';
 /** The order the facet draws them: everything, then the two that need doing. */
 export const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All' },
-  { value: 'done', label: 'Done' },
-  { value: 'missed', label: 'Missed' },
-  { value: 'incoming', label: 'Incoming' },
+  { value: 'done', label: 'Taken' },
+  { value: 'missed', label: 'Not taken' },
+  { value: 'incoming', label: 'To take' },
 ];
 
 /**

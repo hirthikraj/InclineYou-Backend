@@ -56,6 +56,27 @@ export interface ExerciseWire {
   logType?: string | null;
   /** What a PATCH echoes as If-Match. */
   version?: string;
+  /** On the single-exercise read only, like `description` and `formCues`. */
+  aliases?: string[];
+  commonMistakes?: string[];
+  safety?: string[];
+  equipmentNeeded?: string[];
+  /** Yoga, a static stretch, a mobility drill, foam rolling — null on a strength movement. */
+  category?: string | null;
+  /** The whole metadata object, on the single-exercise read: what the panel shows beyond the named fields above. */
+  metadata?: Record<string, unknown> | null;
+}
+
+/** Everything the library's three views are drawn from: one read, cached by the server's ETag. */
+export interface LibraryMeta {
+  total: number;
+  bodyParts: { id: string; count: number }[];
+  muscles: { bodyPart: string; target: string; count: number }[];
+  equipmentGroups: { category: string; items: { key: string; name: string; count: number; value?: string }[] }[];
+  patterns: { id: string; count: number }[];
+  levels: { id: string; count: number }[];
+  logTypes: { id: string; count: number }[];
+  categories: { id: string; count: number }[];
 }
 
 export interface ExercisesMeta {
@@ -106,6 +127,16 @@ export interface ExerciseSearchParams {
   q?: string;
   muscleGroup?: string;
   equipment?: string;
+  /** The library's own filters. Each is a list: several values of one filter are OR-ed, different filters are AND-ed. */
+  bodyPart?: string[];
+  target?: string[];
+  secondary?: string[];
+  equipmentKey?: string[];
+  equipmentCategory?: string[];
+  pattern?: string[];
+  level?: string[];
+  logType?: string[];
+  category?: string[];
   /** Whose movements, and whether finished. Server-side, deliberately — see the
    *  route's note in `mock/router.ts` on why the client-side version was a bug. */
   source?: ExerciseSource;
@@ -145,6 +176,12 @@ interface ItemV11 {
   version: string;
   description?: string | null;
   formCues?: string[];
+  aliases?: string[];
+  commonMistakes?: string[];
+  safety?: string[];
+  equipmentNeeded?: string[];
+  category?: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 interface PageV11 {
@@ -153,7 +190,7 @@ interface PageV11 {
   total?: number;
 }
 
-interface MetaV11 {
+interface MetaV11 extends Partial<Omit<LibraryMeta, 'bodyParts' | 'levels' | 'total'>> {
   bodyParts: { id: string; count: number }[];
   equipment: { id: string; count: number }[];
   levels: { id: string; count: number }[];
@@ -177,6 +214,12 @@ const wireOf = (e: ItemV11): ExerciseWire => ({
   status: e.status,
   logType: e.logType,
   version: e.version,
+  aliases: e.aliases,
+  commonMistakes: e.commonMistakes,
+  safety: e.safety,
+  equipmentNeeded: e.equipmentNeeded,
+  category: e.category,
+  metadata: e.metadata,
 });
 
 async function call<T>(
@@ -227,6 +270,18 @@ export async function getExercises(params: ExerciseSearchParams = {}): Promise<E
   if (params.q) qs.set('q', params.q);
   if (params.muscleGroup) qs.set('bodyPart', params.muscleGroup);
   if (params.equipment) qs.set('equipment', params.equipment);
+  const list = (name: string, values?: string[]) => {
+    if (values && values.length > 0) qs.set(name, values.join(','));
+  };
+  list('bodyPart', params.bodyPart);
+  list('target', params.target);
+  list('secondary', params.secondary);
+  list('equipmentKey', params.equipmentKey);
+  list('equipmentCategory', params.equipmentCategory);
+  list('pattern', params.pattern);
+  list('level', params.level);
+  list('logType', params.logType);
+  list('category', params.category);
   if (source === 'incline') qs.set('custom', 'false');
   if (source === 'mine' || source === 'draft') qs.set('custom', 'true');
   qs.set('includeTotal', 'true');
@@ -273,7 +328,28 @@ export async function getExerciseCategories(): Promise<ExerciseCategories> {
 export async function getExercisesMeta(): Promise<ExercisesMeta> {
   const m = await metaOf();
   const bodyParts = m.bodyParts.map(b => b.id);
-  return { muscleGroups: bodyParts, bodyParts, targets: [], equipment: m.equipment.map(e => e.id), levels: m.levels.map(l => l.id) };
+  return {
+    muscleGroups: bodyParts,
+    bodyParts,
+    targets: (m.muscles ?? []).map(x => x.target),
+    equipment: m.equipment.map(e => e.id),
+    levels: m.levels.map(l => l.id),
+  };
+}
+
+/** The whole library's facets, for the three views. A server that predates a facet answers it empty. */
+export async function getLibraryMeta(): Promise<LibraryMeta> {
+  const m = await metaOf();
+  return {
+    total: m.total,
+    bodyParts: m.bodyParts,
+    muscles: m.muscles ?? [],
+    equipmentGroups: m.equipmentGroups ?? [],
+    patterns: m.patterns ?? [],
+    levels: m.levels,
+    logTypes: m.logTypes ?? [],
+    categories: m.categories ?? [],
+  };
 }
 
 /**
@@ -289,32 +365,36 @@ export async function getExercise(id: string): Promise<ExerciseWire> {
 }
 
 /** A custom exercise (A9). `muscleGroup` is the body part; the id is minted here so a retry replays. */
-export async function createExercise(body: {
+/** Everything the create form can send. Every list is optional, and an empty one is left off the request. */
+export interface NewExercise {
   name: string;
-  muscleGroup?: string;
+  bodyPart?: string;
   target?: string;
+  secondaryTargets?: string[];
   equipment?: string;
+  movementPattern?: string;
+  level?: string;
+  logType?: string;
   description?: string;
-  /** Omitted means published. */
+  formCues?: string[];
+  aliases?: string[];
+  commonMistakes?: string[];
+  safety?: string[];
+  equipmentNeeded?: string[];
   status?: 'published' | 'draft';
-}): Promise<ExerciseWire> {
-  return wireOf(
-    await call<ItemV11>('/v1/exercises', {
-      method: 'POST',
-      body: {
-        id: crypto.randomUUID(),
-        name: body.name,
-        ...(body.muscleGroup ? { bodyPart: body.muscleGroup } : {}),
-        ...(body.target ? { target: body.target } : {}),
-        ...(body.equipment ? { equipment: body.equipment } : {}),
-        ...(body.description ? { description: body.description } : {}),
-        ...(body.status ? { status: body.status } : {}),
-      },
-    }),
-  );
 }
 
-/** Fix a custom exercise (A10). Any subset; `version` (from the last read) makes it conditional. */
+export async function createExercise(body: NewExercise): Promise<ExerciseWire> {
+  const lists = ['secondaryTargets', 'formCues', 'aliases', 'commonMistakes', 'safety', 'equipmentNeeded'] as const;
+  const sent: Record<string, unknown> = { id: crypto.randomUUID(), name: body.name };
+  for (const [k, v] of Object.entries(body)) {
+    if (k === 'name' || v === undefined || v === '') continue;
+    if ((lists as readonly string[]).includes(k) && Array.isArray(v) && v.length === 0) continue;
+    sent[k] = v;
+  }
+  return wireOf(await call<ItemV11>('/v1/exercises', { method: 'POST', body: sent }));
+}
+
 export async function patchExercise(
   id: string,
   fields: {

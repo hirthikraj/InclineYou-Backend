@@ -189,6 +189,13 @@ export function AppShell({
               cannot see because a menu they left open is covering it is a
               confirm that did not happen. */}
           <ToastHost>
+          {/* FIRST, and not after the navigation. A skip link skips what comes
+              BEFORE its target and AFTER itself; this one used to sit between the
+              pane and `.main` on the argument that it should skip the whole
+              navigation — but a link placed after the navigation skips nothing,
+              because a keyboard user has already tabbed through the rail and the
+              pane to reach it. WCAG 2.4.1 wants it as the first stop on the page. */}
+          <a className="skip" href="#main-content">Skip to main content</a>
           <Rail
             current={current}
             trainerName={trainerName}
@@ -203,14 +210,12 @@ export function AppShell({
             onPreview={preview.enter}
             onPreviewLeave={preview.leave}
           />
-          {/* AFTER the rail and BEFORE the skip link, which is the reading order
+          {/* AFTER the rail, which is the reading order
               and not an accident of the grid. The two columns are one navigation
               read left to right — section, then page — and a tab from the last
               rail row should land on the first page of the section it just
-              named. The skip link stays the last thing before `.main` so that
-              *Skip to main content* still skips ALL of the navigation; putting
-              the pane after it would offer a trainer an escape from the rail
-              into a column they then have to escape again. */}
+              named. The skip link is the first stop on the page and so skips
+              both columns, rail and pane together. */}
           {/* THE TRACK. Its contents are the previewed section when there is
               one — that is the "when expand is on, moving to another row changes
               the column" half — and the route's section otherwise. `section` is
@@ -236,7 +241,6 @@ export function AppShell({
               hover={{ hold: preview.hold, leave: preview.leave }}
             />
           )}
-          <a className="skip" href="#main-content">Skip to main content</a>
           {children}
           <TabBar current={current} trainerName={trainerName} />
           </ToastHost>

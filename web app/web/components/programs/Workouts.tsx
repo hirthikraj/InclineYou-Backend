@@ -122,6 +122,11 @@ function WorkoutTable({
      cancelled from the schedule — are all one session at a time, all in front
      of the person and the time, and all with a pack balance behind them. */
 
+  /* ONLY WHAT DIFFERS. On *Completed* every row is Logged and the tab already says so; on a book of in-person
+     sessions every row is In person. A column that repeats one word down 25 rows is furniture. Decided per page. */
+  const showMode = rows.some(r => r.mode === 'remote') && rows.some(r => r.mode !== 'remote');
+  const showStatus = new Set(rows.map(r => statusOf(r, now))).size > 1;
+
   const groups = useMemo(() => groupByDay(rows, r => r.scheduledAt, now), [rows, now]);
 
   if (total === 0) {
@@ -168,7 +173,7 @@ function WorkoutTable({
   return (
     <>
       <div className="pgt__body pgt__body--ruled">
-        <WorkoutRowHead />
+        <WorkoutRowHead showMode={showMode} showStatus={showStatus} />
         <ul className="pgt__l" role="list">
           {groups.map(group => (
             /* THE RULE AND ITS ROWS ARE ONE ITEM WITH A NESTED LIST, not a rule
@@ -199,6 +204,8 @@ function WorkoutTable({
                         duration={formatSpan(row.minutes)}
                         mode={row.mode}
                         status={statusOf(row, now)}
+                        showMode={showMode}
+                        showStatus={showStatus}
                         menu={
                           <RowMenu
                             label={`${row.clientName}'s workout on ${group.label}`}
@@ -402,6 +409,8 @@ function TemplateShelf({
     );
   }
 
+  const showCreated = rows.some(r => dateStamp(r.createdAt) !== dateStamp(r.updatedAt));
+
   return (
     <div className="pgt">
       <div className="pgt__body">
@@ -440,6 +449,7 @@ function TemplateShelf({
           />
         ) : (
           <TemplateRowHead
+            showCreated={showCreated}
             allSelected={false}
             someSelected={false}
             onSelectAll={next => setSelected(next ? new Set(rows.map(r => r.id)) : new Set())}
@@ -470,6 +480,25 @@ function TemplateShelf({
                   onSelect={next => toggle(row.id, next)}
                   onOpen={() => onOpen(row.id)}
                   busy={busyId === row.id}
+                  showCreated={showCreated}
+                  menu={
+                    <RowMenu
+                      label={`Actions for ${row.name}`}
+                      items={[
+                        { key: 'open', label: 'Open', onSelect: () => onOpen(row.id) },
+                        { separator: true, key: 'sep' },
+                        {
+                          key: 'del',
+                          label: 'Delete…',
+                          danger: true,
+                          onSelect: () => {
+                            setSelected(new Set([row.id]));
+                            setConfirming(true);
+                          },
+                        },
+                      ]}
+                    />
+                  }
                 />
               </li>
             );
@@ -873,6 +902,15 @@ export function Workouts({
             />
           </div>
         )}
+
+        {/* THE PHONE'S PRIMARY, AT THE FOOT — the same pinned bar the template shelf draws, where a thumb already is.
+            The header's copy is `display:none` under 900px, so the verb is drawn once at each width. */}
+        <div className="pg__shelffoot pg__wkfoot">
+          <Button variant="secondary" size="lg" wide onClick={() => setBuilder({})}>
+            <PlusIcon />
+            New workout template
+          </Button>
+        </div>
       </main>
 
       {builder && (

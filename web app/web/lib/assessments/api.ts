@@ -1,26 +1,40 @@
 import 'server-only';
 
-import { api, ApiError, listAll } from '@/lib/http/client';
+import { api, ApiError, listAll, type ListEnvelope } from '@/lib/http/client';
 import { PAGE_SIZE, type Query } from './address';
 import type { AssessmentDetailWire } from './detail';
 import { STATUSES_FOR } from './vocab';
 import type { AssessmentWire, CatalogWire, ScheduleWire, TemplateWire } from './vocab';
 
 /**
- * A row of `GET /v1/clients?view=legacy` — the pre-v1 shape this screen still
- * reads until its own pass moves it to the summary (the roster no longer does).
+ * A row of `GET /v1/clients?view=summary` — the roster's own shape. This screen asked for `view=legacy`,
+ * which the backend refuses with a 400 (`ClientController`: only `summary` exists), and `lenient` turned
+ * the refusal into an empty list: every row read *A client*, the Client filter found nobody and the
+ * Schedule sheet's picker was empty, with nothing saying why.
  */
 export interface ClientWire {
   id: string;
   name: string;
   phone: string | null;
   status: string;
-  membershipStatus: string | null;
-  deliveryMode: string | null;
-  metadata: Record<string, unknown> | null;
-  weeklySchedule: Array<{ templateDay: number; weekday: number; time: string }> | null;
-  createdAt: number;
-  updatedAt: number;
+  membershipStatus?: string | null;
+  deliveryMode?: string | null;
+  metadata?: Record<string, unknown> | null;
+  weeklySchedule?: Array<{ templateDay: number; weekday: number; time: string }> | null;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+/** The whole roster, every page. `null` where the read FAILED, so the screen can say so. */
+async function clientsOrNull(): Promise<ClientWire[] | null> {
+  try {
+    const rows = await listAll<ClientWire & { name: string | null }>('/v1/clients?view=summary', (p) =>
+      request<ListEnvelope<ClientWire & { name: string | null }>>(p),
+    );
+    return rows.map((c) => ({ ...c, name: c.name ?? 'Unnamed' }));
+  } catch {
+    return null;
+  }
 }
 
 export class AssessmentsApiError extends Error {
@@ -90,6 +104,10 @@ export interface AssessmentsData {
   catalog: CatalogWire | null;
   /** Name and status per client, for the row, the avatar and the Client facet. */
   clients: ClientWire[];
+  /** The roster read FAILED: names and the picker are unavailable, and the page says so. */
+  clientsFailed: boolean;
+  /** The whole book by what the trainer filters on — the Status options' counts. */
+  counts: Record<'all' | 'done' | 'missed' | 'incoming', number>;
   now: number;
 }
 
@@ -135,12 +153,21 @@ async function pageOf(q: Query): Promise<Page> {
  * from the other end.
  */
 export async function getAssessments(q: Query): Promise<AssessmentsData> {
-  const [page, all, templates, catalog, clients] = await Promise.all([
+  const countOf = async (state: string) =>
+    (await lenient<Page>(`/v1/assessments?limit=1&includeTotal=true${state ? `&state=${state}` : ''}`, {
+      items: [],
+      nextCursor: null,
+      total: 0,
+    })).total ?? 0;
+  const [page, all, templates, catalog, clients, nDone, nMissed, nIncoming] = await Promise.all([
     pageOf(q),
     lenient<Page>('/v1/assessments?limit=1&includeTotal=true', { items: [], nextCursor: null, total: 0 }),
     lenient<Shelf>('/v1/assessment-templates', { items: [] }),
     lenient<CatalogWire | null>('/v1/assessment-catalog', null),
-    lenient<ClientWire[]>('/v1/clients?view=legacy', []),
+    clientsOrNull(),
+    countOf('done'),
+    countOf('missed'),
+    countOf('booked'),
   ]);
 
   return {
@@ -149,7 +176,9 @@ export async function getAssessments(q: Query): Promise<AssessmentsData> {
     grandTotal: all.total ?? 0,
     templates: templates.items,
     catalog,
-    clients,
+    clients: clients ?? [],
+    clientsFailed: clients === null,
+    counts: { all: all.total ?? 0, done: nDone, missed: nMissed, incoming: nIncoming },
     now: Date.now(),
   };
 }
@@ -160,17 +189,33 @@ export interface TemplatesData {
   /** For the strip's count on the tab the reader is NOT on. */
   assessmentTotal: number;
   clients: ClientWire[];
+  /** Per template: how many assessments were TAKEN with it, and when the last one was. `null` where the read failed. */
+  usage: Record<string, { taken: number; last: number | null }> | null;
   now: number;
 }
 
 export async function getAssessmentTemplates(): Promise<TemplatesData> {
-  const [templates, catalog, all, clients] = await Promise.all([
+  const [templates, catalog, all, clients, taken] = await Promise.all([
     request<Shelf>('/v1/assessment-templates'),
     lenient<CatalogWire | null>('/v1/assessment-catalog', null),
     lenient<Page>('/v1/assessments?limit=1&includeTotal=true', { items: [], nextCursor: null, total: 0 }),
-    lenient<ClientWire[]>('/v1/clients?view=legacy', []),
+    clientsOrNull(),
+    listAll<AssessmentWire>('/v1/assessments?state=done&limit=100', (p) =>
+      request<ListEnvelope<AssessmentWire>>(p),
+    ).catch(() => null),
   ]);
-  return { templates: templates.items, catalog, assessmentTotal: all.total ?? 0, clients, now: Date.now() };
+  /* WHAT EACH TEMPLATE HAS BEEN USED FOR: the assessments taken from it, off the list the server already
+     serves, grouped here (there is no per-template count on the wire). */
+  let usage: Record<string, { taken: number; last: number | null }> | null = null;
+  if (taken) {
+    usage = {};
+    for (const a of taken) {
+      const u = (usage[a.templateId] ??= { taken: 0, last: null });
+      u.taken += 1;
+      if (a.completedAt !== null && (u.last === null || a.completedAt > u.last)) u.last = a.completedAt;
+    }
+  }
+  return { templates: templates.items, catalog, assessmentTotal: all.total ?? 0, clients: clients ?? [], usage, now: Date.now() };
 }
 
 /**

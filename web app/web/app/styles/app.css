@@ -1688,7 +1688,7 @@ a.gapb--h{display:flex}
    nowrap cell in a 1.5fr column does not truncate — it pushes the table wider
    than the card and overflows it. Two lines is the correct answer to a long
    reason; `.tbl`'s `height` is a minimum on a cell, so the row grows. */
-.q__why{font-size:12.5px;color:var(--tx-ink-3);white-space:normal}
+.q__why{font-size:var(--tx-meta);color:var(--tx-ink-3);white-space:normal}
 .q__why--bad{color:var(--tx-danger)}
 .q__act{width:98px;text-align:right;white-space:nowrap}
 
@@ -1713,7 +1713,7 @@ a.gapb--h{display:flex}
    whose consequence is that the row goes away, and §17's focus treatment is what
    tells a keyboard user they are on it. `.rowpick` in the setup flow exists
    because a bare button had lost exactly this. */
-.q__x-b:focus-visible{outline:2px solid var(--tx-accent-line);outline-offset:1px}
+.q__x-b:focus-visible{outline:2px solid var(--tx-focus);outline-offset:1px}
 
 /* ── the confirm, in the row's own box ────────────────────────────────────
    Three buttons and a question where the reason was. Not a popover: a popover
@@ -1797,7 +1797,12 @@ a.gapb--h{display:flex}
     /* Three tracks now: the text, the verb, the ellipsis. The verb and the
        ellipsis are both `auto` and both span the two text rows, so the row is
        name-over-reason on the left with two controls centred against it. */
-    grid-template-columns:minmax(0,1fr) auto auto;
+    /* THE THIRD TRACK IS A FIXED WIDTH, `--q-xw`, and not `auto`. Each `<tr>` is its
+       own grid, so an `auto` track is as wide as THAT row's ⋯ button — and an
+       assessment row has none (`assess` cannot be snoozed), so its track collapsed
+       and its verb slid 44px right of every other verb in the list. The width is
+       the button (28px, 44 under a coarse pointer) plus the cell's 12px inset. */
+    grid-template-columns:minmax(0,1fr) auto var(--q-xw,auto);
     align-items:center;
     column-gap:10px;
     border-bottom:1px solid var(--tx-line);
@@ -8543,7 +8548,10 @@ a.lrow:hover{color:inherit}
    above carries its own gutter, so the rule can reach both sides of the card
    the way `.card__hd`'s does. */
 .cfhint{
-  flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;
+  /* DIRECTLY UNDER THE WALL. It took `flex:1` and centred its contents, so at one note a ~190px band
+     of nothing sat between the note and the prompts, and the prompts floated mid-card. The card's
+     floor now falls BELOW them, where a card's slack is expected. */
+  flex:0 0 auto;display:flex;flex-direction:column;
   border-top:1px solid var(--tx-line);
   padding:14px var(--w-cardpad);
 }
@@ -8651,7 +8659,8 @@ a.lrow:hover{color:inherit}
 .cfnw__add{
   display:flex;align-items:center;gap:9px;width:100%;
   min-height:var(--w-tap-touch);padding:11px 14px;
-  border:1px dashed var(--tx-line-strong);border-radius:var(--tx-r3);
+  /* ink-3, not line-strong: the dashed edge was 1.4:1 against its card. */
+  border:1px dashed var(--tx-ink-3);border-radius:var(--tx-r3);
   background:none;color:var(--tx-ink-3);font:inherit;font-size:14px;text-align:left;
   cursor:pointer;
   transition:border-color var(--tx-t-fast) var(--tx-ease),
@@ -8898,16 +8907,15 @@ a.lrow:hover{color:inherit}
   line-height:1;letter-spacing:var(--tx-track-fig);
   font-variant-numeric:tabular-nums;color:var(--tx-ink);
 }
-/* One reading and no direction yet. The same face as a `Change`, so the day a
-   second reading lands the card does not change size. */
-.cfov__solo{font-size:var(--tx-fig-sm);line-height:var(--tx-fig-sm-lh);color:var(--tx-ink)}
-
-/* The tape, two abreast. `auto-fit` with a 150px floor rather than
-   `repeat(2,1fr)`: the pair has to survive the 1240 stack, where this column
-   is 640px, and the 900 rung, where it is 351 — at which width two `Change`
-   pairs share 160px each and `.chg` wraps its own label onto a second line.
-   The floor folds them to one column before that happens. */
-.cfov__tape{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px 16px}
+/* Exercise records: a movement and what its top set did, one line each. The name column
+   takes the slack and truncates; the figure keeps its width, so a long name never pushes a
+   `Change` onto a second line. */
+.cfxr{list-style:none;margin:0;padding:0}
+.cfxr__r{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px var(--w-cardpad,16px);min-height:48px}
+.cfxr__r + .cfxr__r{border-top:1px solid var(--tx-line)}
+.cfxr__n{display:flex;flex-direction:column;gap:2px;min-width:0}
+.cfxr__n b{font-weight:600;color:var(--tx-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cfxr__r .chg{flex:0 0 auto;white-space:nowrap}
 
 /* ── THE SLACK A STRETCHED ROW HANDS THIS CARD IS LEFT ALONE, and one
    attempt at spending it is recorded here because it looked obviously right
@@ -9181,6 +9189,7 @@ a.lrow:hover{color:inherit}
   text-underline-offset:3px;border-radius:var(--tx-r1);
 }
 .facts__lk:hover{text-decoration:underline solid currentColor}
+.facts__lk{display:inline-flex;align-items:center;min-height:24px}
 .facts__lk:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
 /* Hit slop, the way `.switch` takes it: a `::before` costs zero layout and is
    the only way an inline link inside a nowrap value can reach a 24px target.
@@ -9464,7 +9473,9 @@ a.lrow:hover{color:inherit}
      the strip is present, and `.cfpin`'s own bottom margin holds the boundary
      there. Desk untouched: on a desk `.cfpin` is inside `.ph`, above the tabs. */
   .cfd--phone .ph__acts{margin-bottom:16px}
-  .cfpin{margin-bottom:16px}
+  /* `.cfd--phone .cfpin`, not `.cfpin`: the one-line strip's `margin:10px 0 0` is later in the sheet at
+     the same weight and zeroed this margin, so the strip sat flush against the next card (trap 1). */
+  .cfd--phone .cfpin{margin-bottom:16px}
 
   /* ── AND WHAT THE PINNED HEADER MAY NOT KEEP ─────────────────────────────
      MEASURED at 390×844, and this is the second half of the budget `.ph` began
@@ -10219,8 +10230,34 @@ a.lrow:hover{color:inherit}
 .cfses__go{text-align:right;color:var(--tx-ink-3);padding-right:14px}
 .cfses__go svg{margin-left:auto}
 .cfses__t tbody tr:hover .cfses__go{color:var(--tx-ink-2)}
-.cfses__t tbody tr:focus-visible{outline:2px solid var(--tx-accent-line);
-  outline-offset:-2px}
+.cfses__t tbody tr{position:relative}
+/* THE DOOR IS A REAL ANCHOR in the date cell, stretched over the row (see `cellFor`). The `<td>` is not
+   positioned, so the `::after` is sized by the `<tr>` and no cell's overflow clips it. */
+.cfses__lk{color:inherit;text-decoration:none}
+.cfses__lk::after{content:"";position:absolute;inset:0}
+.cfses__lk:focus-visible{outline:none}
+.cfses__lk:focus-visible::after{outline:2px solid var(--tx-focus);outline-offset:-2px}
+.cfses__t tbody tr{cursor:pointer}
+/* Done / No-show on an unmarked row, above the stretched link. */
+.cfses__mark{display:inline-flex;gap:6px;position:relative;z-index:1;white-space:nowrap}
+/* A one-line statement about a set of rows — here, what unmarked sessions are costing the pack. */
+.cfses__warn{margin:0;padding:10px 16px;font-size:12.5px;line-height:1.45;color:var(--tx-ink-2);
+  border-bottom:1px solid var(--tx-line)}
+.cfses__warn b{color:var(--tx-ink);font-weight:600}
+.cfses__none-up{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+/* A no-show is red in its tag; the row's spine stands down to neutral so it is not red three times
+   (tag, spine, band). */
+.cfses__t tbody tr.crit td:first-child,
+.cfses__t tbody tr.crit th:first-child{box-shadow:inset 2px 0 0 var(--tx-ink-3)}
+/* The month label opens on the same x as the date under it: the band's cell took the card gutter AND
+   the rule's own 12px (29px against 17), because `.card__b--flush .tbl tr > :first-child` outweighs the
+   group cell's reset. */
+@media (min-width:1151px){
+  .card__b--flush .cfses__t tbody td.tbl__grp-c{padding-left:0;padding-right:0}
+  .card__b--flush .cfses__t tbody td .dayr--sec{padding-left:16px;padding-right:16px}
+}
+/* Past ~1500 the rows are half empty: the card stops at a width its columns can fill. */
+@media (min-width:1500px){.cfses__wrap{max-width:1360px}}
 
 /* The window note, under both tables rather than under one of them. */
 .cfses__note{margin:0;font-size:var(--tx-meta);line-height:var(--tx-meta-lh);
@@ -10279,7 +10316,7 @@ a.lrow:hover{color:inherit}
    A wrapping flex puts as many facts on a line as the line holds: the session
    leads on its own, the figures run together under it, the note takes the last
    line when there is one. */
-@media (max-width:1080px){
+@media (max-width:1150px){
   .cfses__t,.cfses__t tbody{display:block;width:100%}
   .cfses__t thead{position:absolute;width:1px;height:1px;overflow:hidden;
     clip-path:inset(50%)}
@@ -10317,12 +10354,23 @@ a.lrow:hover{color:inherit}
   .cfses__t tbody td:has(> .cfses__none){display:none}
   /* The chevron loses its edge and would sit inline among the figures. The whole
      row is still the link and the `aria-label` still says so. */
-  .cfses__t tbody td.cfses__go{display:none}
+  .cfses__t tbody td.cfses__go:not(:has(.cfses__mark)){display:none}
+  .cfses__t tbody td.cfses__go:has(.cfses__mark){flex:0 0 100%;justify-content:flex-end;padding-top:4px}
+  .cfses__t tbody td.cfses__go:has(.cfses__mark)::before{content:none}
+  /* THE FIRST AND LAST CELLS ARE PADDED BY `.card__b--flush .tbl tr > :first-child` (0,3,1), which beat
+     the `padding:0` above: the date sat 13px right of every line under it and the month band opened at
+     28px. Restated one class heavier — the row's own 14px is the gutter. */
+  .card__b--flush .cfses__t tbody tr > :first-child{padding-left:0}
+  .card__b--flush .cfses__t tbody tr > :last-child{padding-right:0}
+  /* A long session name was a flex item with `white-space:nowrap`, so its `min-width:auto` was the text
+     and it ran 30px past the card at 390. It wraps instead. */
+  .cfses__t tbody td[data-l="Session"]{min-width:0}
+  .cfses__t tbody td[data-l="Session"] .cfses__nm{white-space:normal;overflow-wrap:anywhere}
   /* `tr.crit` / `tr.alert` draw their rule as a shadow on the first CELL, which
      has no column to sit on once the row has stopped being one. */
   .cfses__t tbody tr.crit td:first-child,
   .cfses__t tbody tr.alert td:first-child{box-shadow:none}
-  .cfses__t tbody tr.crit{box-shadow:inset 2px 0 0 var(--tx-danger)}
+  .cfses__t tbody tr.crit{box-shadow:inset 2px 0 0 var(--tx-ink-3)}
   .cfses__t tbody tr.alert{box-shadow:inset 2px 0 0 var(--tx-warn)}
   /* The month rule is a row of a table that is no longer one: it keeps its band
      and loses the row's padding, the flex and the `data-l` rung above. */
@@ -10341,6 +10389,28 @@ a.lrow:hover{color:inherit}
   .cfses__n{order:2}
 }
 
+/* ── A FINISHED SESSION ON A PHONE, AND THE FILTERS ABOVE IT ─────────────────
+   The card was three lines of label + value (DATE SUN 4 Oct 2026 · CLOCK 7:17-8:12 AM · DURATION 55 min ·
+   EXERCISES 4 · STATUS Done) — eight words of mono caps naming facts whose values already say what they
+   are. The labels that carry information stay (WHEN, EXERCISES, whose figure is a bare number); the
+   outcome rides on the name's line, where it is read first, and the rest runs together beneath. The two
+   pill groups were wrapping onto a third row with one orphaned pill (*Cancelled 0*): each is one
+   scrollable line now, which is how the tab strip above them already behaves. */
+@media (max-width:620px){
+  .cfses__tools{flex-direction:column;align-items:stretch;gap:8px}
+  .cfses__tools .seg{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;margin-inline:-2px;padding-inline:2px}
+  .cfses__tools .seg::-webkit-scrollbar{display:none}
+  .cfses__tools .seg__b{flex:0 0 auto}
+  .cfses__t tbody td[data-l="Date"]::before,
+  .cfses__t tbody td[data-l="Clock"]::before,
+  .cfses__t tbody td[data-l="Time"]::before,
+  .cfses__t tbody td[data-l="Duration"]::before,
+  .cfses__t tbody td[data-l="Status"]::before{content:none}
+  /* Name and outcome share the first line; a row with no status (Upcoming) keeps the name's own line. */
+  .cfses__t tbody tr:has(> td[data-l="Status"]) > td[data-l="Session"]{flex:1 0 calc(100% - 96px);order:-2}
+  .cfses__t tbody td[data-l="Status"]{order:-1;margin-left:auto}
+}
+
 /* ── the console's four figures, inside the file, on a phone ────────────────
    FOUND BY RENDERING at 390px. `ProgressBody` opens with `.stats--4`, which is
    `repeat(4, minmax(0,1fr))` with no breakpoint — four 82px tiles on a 390px
@@ -10354,7 +10424,7 @@ a.lrow:hover{color:inherit}
 @media (max-width:820px){
   .cfprog .stats--4{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
-@media (max-width:430px){
+@media (max-width:359px){
   .cfprog .stats--4{grid-template-columns:minmax(0,1fr)}
 }
 
@@ -11485,7 +11555,7 @@ a.lrow:hover{color:inherit}
      under it are countable by eye at this size. */
   .dayr{position:static;padding:14px 6px 5px}
   .pgt__l > li:first-child > .dayr{padding-top:8px}
-  .dayr__n{display:none}
+  .pgt__l .dayr__n{display:none}
 }
 
 /* ── the workout-template row ─────────────────────────────────────────────
@@ -14901,7 +14971,7 @@ a.setrow:hover{background:var(--tx-surface-2)}
 .wsbal__st{font-size:10.5px;font-weight:700;letter-spacing:.09em;
   text-transform:uppercase;color:var(--tx-ink-3);margin-bottom:8px}
 
-.wsbal__r{display:grid;grid-template-columns:66px 26px 1fr 13px;gap:7px;
+.wsbal__r{display:grid;grid-template-columns:120px 26px 1fr 13px;gap:7px;
   align-items:center;padding:3px 0}
 /* the pattern names are longer than the muscle names — "Horizontal push" needs
    96px in the 12px face where "Shoulders" needs 66 — so the section re-tracks
@@ -15062,7 +15132,7 @@ a.setrow:hover{background:var(--tx-surface-2)}
   /* THE CAP, and it is on the TRACK rather than on the panel — the hairlines
      and the header should still reach the card's edges, and only the bar has a
      length that means something. */
-  .wsbal__r{grid-template-columns:66px 26px minmax(0,240px) 13px;
+  .wsbal__r{grid-template-columns:120px 26px minmax(0,240px) 13px;
     justify-content:start}
   .wsbal__s--pat .wsbal__r{grid-template-columns:96px 22px minmax(0,240px) 13px}
 }
@@ -16535,6 +16605,9 @@ a.setrow:hover{background:var(--tx-surface-2)}
   .mny__tbl tbody td[data-cell="meta"] ~ td[data-cell="meta"]::before{
     content:'\00b7';margin-right:6px;color:var(--tx-ink-3);
   }
+  /* ...and a date is a label, not an item: the ledger's `21 Sep` + detail pair
+     drew a lone leading dot before the detail. The (0,4,2) beats the rule above. */
+  .mny__tbl tbody td.mono[data-cell="meta"] ~ td[data-cell="meta"]:not(.x)::before{content:none}
   /* The state sits under the money, which is the pair a trainer reads together. */
   .mny__tbl tbody td[data-cell="state"]{grid-row:2;grid-column:3;justify-self:end}
 
@@ -21690,54 +21763,46 @@ button.ev{transition:background-color var(--tx-t-instant) var(--tx-ease)}
    four times over and the surplus is better spent in front of the two counts
    than behind them. */
 .cfchk__t{font-variant-numeric:tabular-nums;table-layout:fixed}
-.cfchk__t .cfchk__c-date{width:186px}
+.cfchk__t .cfchk__c-date{width:216px}
 /* 300 and not the ~200 the two seeded templates draw: a template is named by
    the trainer, and `.cfses__c-ses` settled this number one tab along — about
    forty characters, which is enough to tell a reader which row to open. */
-.cfchk__t .cfchk__c-name{width:300px}
-.cfchk__t .cfchk__c-n{width:118px}
-.cfchk__t .cfchk__c-st{width:112px}
+.cfchk__t .cfchk__c-name{width:224px}
+.cfchk__t .cfchk__c-n{width:104px}
+.cfchk__t .cfchk__c-st{width:100px}
 /* ONE ELASTIC TRACK AND IT IS THE CHEVRON'S — see `COLUMNS` in `ChecksTab`
    for the 486px of interior void this replaced. */
+/* It now holds *Take it* and the chevron (~90px), so the tracks above were trimmed to leave it
+   that: at 1240 the fixed ones summed to 892 of a 912px table and the verb overflowed a 20px cell
+   with the chevron squeezed to 0px wide. The name is 224 (about 30 characters, then an ellipsis
+   with the full string on `title`). */
+.cfchk__t .cfchk__c-go{min-width:0}
 .cfchk__t .cfchk__c-go{width:auto}
 /* `fixed` requires that nothing overflow its track in silence. */
 .cfchk__t .cfchk__c-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cfchk__t tbody td{padding-top:6px;padding-bottom:6px}
-.cfchk__go{text-align:right;color:var(--tx-ink-3);padding-right:14px}
-.cfchk__go svg{margin-left:auto}
-.cfchk__t tbody tr{cursor:pointer}
+.cfchk__go{text-align:right;color:var(--tx-ink-3);padding-right:14px;white-space:nowrap}
+.cfchk__go svg{display:inline-block;vertical-align:middle}
+.cfchk__t tbody tr{cursor:pointer;position:relative}
 .cfchk__t tbody tr:hover .cfchk__go{color:var(--tx-ink-2)}
-.cfchk__t tbody tr:focus-visible{outline:2px solid var(--tx-accent-line);outline-offset:-2px}
+/* THE DOOR IS THE NAME'S REAL ANCHOR, stretched over the row. A `::after` on an inline link is
+   positioned against the nearest positioned ancestor — the `<tr>` — and the `<td>`'s
+   `overflow:hidden` does not clip it, because the td is not its containing block. */
+.cfchk__lk{color:inherit;text-decoration:none}
+.cfchk__lk::after{content:"";position:absolute;inset:0}
+.cfchk__lk:focus-visible{outline:none}
+.cfchk__lk:focus-visible::after{outline:2px solid var(--tx-focus);outline-offset:-2px}
+/* *Take it* is above the stretched layer, or it would be a link's backdrop. */
+.cfchk__take{position:relative;z-index:1;margin-right:10px;vertical-align:middle}
 
-/* The date names the row and carries the unread mark beside it. */
-.cfchk__d{display:flex;align-items:center;gap:8px;min-width:0;
-  color:var(--tx-ink);font-weight:600}
-/* *New* — a returned check-in the trainer has not opened. A word and not a
-   dot: this table has no gutter to put a dot in, and the list's own mark is a
-   dot precisely because it HAS one. */
-.cfchk__new{
-  flex:0 0 auto;font-style:normal;font-family:var(--tx-mono);font-size:10px;
-  font-weight:500;letter-spacing:.09em;text-transform:uppercase;
-  color:var(--tx-accent-text);
-}
+/* The date names the row; for a row still to take it is followed by how long ago / how far off,
+   in plain ink-3 and never a tone. */
+.cfchk__d{display:block;white-space:nowrap;color:var(--tx-ink);font-weight:600}
+.cfchk__rel{font-weight:400;color:var(--tx-ink-3)}
 
-/* The two counts, and the short one. `12 / 15` is a client who skipped two
-   tapes, which is the whole reason the column exists — so it is the one thing
-   in this table that takes a tone. */
+/* The two counts. `12 / 15` takes no tone — it was amber, on a screen a client may be looking at. */
 .cfchk__n{color:var(--tx-ink-2)}
-.cfchk__n--short{color:var(--tx-warn);font-weight:600}
-.cfchk__n--none{color:var(--tx-ink-off)}
-
-/* Said once, under both cards. */
-.cfchk__foot{
-  margin:0;font-size:12.5px;line-height:1.5;color:var(--tx-ink-3);text-wrap:pretty;
-}
-/* HIT SLOP, `.facts__lk`'s way and for the same reason: MEASURED at every
-   width from 360 up, this link's own box is **130×15** — a 12.5px line box in
-   a sentence, which cannot grow without moving the prose around it. A
-   `::before` costs zero layout and takes it to 27. */
-.cfchk__foot a{position:relative}
-.cfchk__foot a::before{content:'';position:absolute;inset:-6px -2px}
+.cfchk__n--none{color:var(--tx-ink-3)}
 
 @media (max-width:1080px){
   /* `.cftx`'s answer, and this table needs it for `.cftx`'s exact reason:
@@ -21758,6 +21823,10 @@ button.ev{transition:background-color var(--tx-t-instant) var(--tx-ease)}
   .cfchk__t tbody th{
     display:block;height:auto;padding:0 0 4px;border:0;width:auto;
   }
+  /* `.card__b--flush .tbl tr > :first-child` pads the first cell by the card's gutter at (0,3,1) and
+     beat the rule above at (0,1,2), so the date sat 13px right of every line under it (MEASURED at
+     390). Restated at the weight that wins; the row's own 14px is the gutter. */
+  .card__b--flush .cfchk__t tbody tr > th:first-child{padding:0 0 4px}
   .cfchk__t tbody td{
     display:flex;align-items:baseline;justify-content:space-between;gap:12px;
     height:auto;padding:3px 0;border-bottom:0;
@@ -21785,10 +21854,16 @@ button.ev{transition:background-color var(--tx-t-instant) var(--tx-ease)}
     display:block;overflow:visible;white-space:normal;color:var(--tx-ink-2);
   }
   .cfchk__t tbody td.cfchk__c-name::before{content:none}
-  /* The chevron goes with the columns. Below this width the whole row is
-     already one target and there is nothing for an edge control to sit at the
-     edge OF — `.cfses__t` drops its own for the same reason. */
-  .cfchk__t tbody td.cfchk__go{display:none}
+  /* The chevron goes with the columns — the whole row is one target — but *Take it* stays: it is the
+     verb the tab is for, and it is drawn at the foot of the row. */
+  .cfchk__t tbody td.cfchk__go{display:block;text-align:right;padding:8px 0 0}
+  .cfchk__t tbody td.cfchk__go::before{content:none}
+  /* The card's `tr > :last-child` gutter (0,3,1) outranked the 0 above, leaving the verb 16px inside the
+     status tag's right edge; restated heavier. */
+  .card__b--flush .cfchk__t tbody tr > td.cfchk__go{padding-right:0}
+  .cfchk__t tbody td.cfchk__go svg{display:none}
+  .cfchk__t tbody td.cfchk__go--done{display:none}
+  .cfchk__take{margin-right:0}
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -21900,7 +21975,7 @@ button.ev{transition:background-color var(--tx-t-instant) var(--tx-ease)}
    32px `.btn--icon` in it painted **3px past the card's right edge** on every
    row, clipped by `.main`'s `overflow:hidden` with `documentElement.scrollWidth
    - clientWidth` reading zero throughout. 32 + 24 is 56. */
-.asm-c-act{width:56px}
+.asm-c-act{width:150px}
 
 /* The date cell is two lines and the table's cells are `nowrap` by design, so
    the second line is a block rather than a wrap. Tabular, because a column of
@@ -21944,7 +22019,7 @@ button.ev{transition:background-color var(--tx-t-instant) var(--tx-ease)}
    `--tx-warn` is the tone this product spends on *somebody should look at
    this*, and the shortfall is the whole reason the three count columns exist. */
 .asm__n{font-variant-numeric:tabular-nums;color:var(--tx-ink-2)}
-.asm__n--short{color:var(--tx-warn);font-weight:600}
+.asm__n--short{color:var(--tx-ink-2)}
 .asm__n--none{color:var(--tx-ink-off)}
 
 /* THE UNREAD MARK IS A DOT IN THE SELECTION COLUMN'S GUTTER, not a bold row.
@@ -22107,9 +22182,9 @@ button.ev{transition:background-color var(--tx-t-instant) var(--tx-ease)}
 @media (max-width:1200px){
   .asm-c-n,.asm__t .tbl td.asm-c-n{display:none}
 }
-@media (max-width:820px){
-  .asm-c-name,.asm__t .tbl td.asm-c-name{display:none}
-}
+/* THE NAME STAYS ON A PHONE. This hid it at 820px, which removed the row's only link and the template's
+   name from the screen entirely — the way in was a 32px menu. */
+
 @media (max-width:900px){
   .asm__body,.asm__foot{padding-left:16px;padding-right:16px}
   .asm__tabs{margin-top:12px;min-height:0;flex-wrap:wrap;align-items:stretch}
@@ -22448,7 +22523,21 @@ button.ev{transition:background-color var(--tx-t-instant) var(--tx-ease)}
    a caption, and the 147px void the two-card stack left in the right-hand
    track of `.wk2--wide` closed with it. */
 .pfoc{margin-top:14px;padding-top:12px;border-top:1px solid var(--tx-line)}
-.pfoc > .micro{margin-bottom:8px}
+/* GETTING STRONGER — the answer the tab is opened for, above the counts. Up to three movements,
+   side by side on a desk and stacked on a phone; the name clips, the figure does not. */
+.pgs{list-style:none;margin:0;padding:0;display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:12px 24px}
+.pgs__r{display:flex;flex-direction:column;gap:3px;min-width:0}
+.pgs__n{font-weight:600;color:var(--tx-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:900px){.cfprog__rep{display:none}}
+/* The movements table's sort control, a row of its own above the head. */
+/* The card body already pads 16px, so this row adds none of its own: it carried 10px + a rule on top
+   of that and read as a 50px blank band between the head and the table. */
+.pmv__sort{display:flex;align-items:center;flex-wrap:wrap;gap:6px 10px;padding:0 0 12px}
+/* The two cards share a row, so they share a height — the shorter one no longer ends in a ragged
+   void under it. */
+.cfprog .wk2--wide{align-items:stretch}
+.pmv__sort .micro{white-space:nowrap}
 
 /* ── every movement ─────────────────────────────────────────────────────────
    `table-layout:fixed` with every text track CAPPED and the trailing action
@@ -22465,14 +22554,17 @@ button.ev{transition:background-color var(--tx-t-instant) var(--tx-ease)}
    library draws is `Dumbbell Romanian Deadlift` at 178px in §11's 13.5px face,
    and `Top set` at its widest is `102.5 → 117.5 kg` at 122px. */
 .pmv{table-layout:fixed}
-.pmv th:nth-child(1),.pmv td:nth-child(1){width:240px}
 .pmv th:nth-child(2),.pmv td:nth-child(2){width:92px}
 .pmv th:nth-child(3),.pmv td:nth-child(3){width:110px}
 .pmv th:nth-child(4),.pmv td:nth-child(4){width:170px}
 .pmv th:nth-child(5),.pmv td:nth-child(5){width:96px}
 .pmv th:nth-child(6),.pmv td:nth-child(6){width:96px}
 .pmv th:nth-child(7),.pmv td:nth-child(7){width:260px}
-/* No width — this is the elastic one. See above. */
+/* THE NAME IS THE ELASTIC COLUMN NOW, and the verb has a width. The surplus used to fall into the
+   trailing action column, which put `Every session` 400px right of the last figure on a wide
+   window (measured at 1853: a 628px final column). Every data column stays capped and they now
+   sit together at the right, with the name taking the slack. */
+.pmv th:nth-child(8),.pmv td:nth-child(8){width:132px}
 .pmv td.pmv__act{text-align:right;padding-right:0}
 /* A fixed track plus `.tbl`'s `nowrap` is an overflow waiting for a trainer
    who names a movement something long, and `.main` would clip it silently
@@ -22936,8 +23028,7 @@ button.pchk__r:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2
   .pgmv tbody tr{padding-left:var(--w-cardpad);padding-right:var(--w-cardpad)}
 }
 
-/* Assessments · the client file's tab: the Assign bar and the live cycles */
-.cfchk__bar{display:flex;justify-content:flex-end;margin-bottom:12px}
+/* Assessments · the client file's tab: the live cycles */
 .cfchk__cycles{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
 .cfchk__cycle{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .cfchk__cycle > span{flex:1 1 240px}
@@ -22965,3 +23056,1693 @@ button.pchk__r:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2
   .pk__tbl--gym td.pk__acts .row{flex-wrap:wrap;justify-content:flex-end}
   .pk__tbl--gym td.pk__acts .btn{white-space:nowrap}
 }
+
+/* ── THE PERIOD PICKER · `.pp` ───────────────────────────────────────────────
+   Moved out of `PeriodPicker.tsx`'s style attributes (the 14 Oct 2026 audit).
+   It carried 13 inline style objects and four `onMouseEnter` handlers, which
+   gave it three defects at once: hover that a keyboard never reached, a
+   literal `#000` on the lime fill where the system's ink is `--tx-accent-ink`,
+   and a one-off shadow and border where every other menu takes `--tx-e3` and
+   `--tx-line-strong`.
+
+   Selection is carried by `aria-pressed`, not by a class, so the state a screen
+   reader announces and the state the eye reads cannot disagree. A hover never
+   repaints the picked option — it is a fill, and a second fill over it would
+   read as the pointer un-choosing it (trap 1: the picked rule has to out-rank
+   hover, so hover names `:not([aria-pressed="true"])` instead of relying on
+   order). State rules touch `background-color`, never the shorthand. */
+.pp{position:relative}
+.pp__chev{transition:transform var(--tx-t-fast) var(--tx-ease)}
+.pp__tr[aria-expanded="true"] .pp__chev{transform:rotate(180deg)}
+.pp__pop{
+  position:absolute;top:calc(100% + 6px);right:0;z-index:60;
+  width:min(240px,calc(100vw - 24px));overflow:hidden;
+  background:var(--tx-surface);border:1px solid var(--tx-line-strong);
+  border-radius:var(--tx-r3);box-shadow:var(--tx-e3)}
+.pp__spans{padding:6px;border-bottom:1px solid var(--tx-line)}
+.pp__yr{display:flex;align-items:center;justify-content:space-between;
+  padding:8px 12px;border-bottom:1px solid var(--tx-line)}
+.pp__yr b{font-family:var(--tx-brand);font-weight:800;font-size:15px;
+  font-variant-numeric:tabular-nums}
+.pp__grid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:10px}
+.pp__foot{padding:8px 12px;border-top:1px solid var(--tx-line);
+  font-size:11px;color:var(--tx-ink-3)}
+.pp__o{
+  display:flex;align-items:center;justify-content:center;width:100%;
+  padding:7px 4px;border-radius:var(--tx-r2);border:1px solid transparent;
+  background-color:transparent;color:var(--tx-ink);
+  font:400 13px var(--tx-font);cursor:pointer;
+  transition:background-color var(--tx-t-instant) var(--tx-ease),
+             color var(--tx-t-instant) var(--tx-ease)}
+.pp__o--span{justify-content:space-between;align-items:baseline;gap:8px;
+  padding:8px;text-align:left}
+.pp__o--month{font-family:var(--tx-mono)}
+.pp__o small{font:inherit;font-size:11px;font-family:var(--tx-mono);
+  color:var(--tx-ink-3);white-space:nowrap}
+.pp__o:hover:not([aria-pressed="true"]):not(:disabled){background-color:var(--w-hover)}
+.pp__o:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2px}
+.pp__o[aria-pressed="true"]{background-color:var(--tx-accent);
+  color:var(--tx-accent-ink);font-weight:700}
+.pp__o[aria-pressed="true"] small{color:var(--tx-accent-ink);opacity:.7}
+.pp__o:active:not(:disabled){transform:scale(.97)}
+.pp__o:disabled{opacity:.32;cursor:default;color:var(--tx-ink-3)}
+@media (pointer:coarse){.pp__o{min-height:40px}}
+@media (prefers-reduced-motion:reduce){.pp__chev,.pp__o{transition:none}.pp__o:active:not(:disabled){transform:none}}
+
+
+/* ── SHELL POLISH · 4 Oct 2026 critique of the header, rail and foot ──────────
+   Three defects, each MEASURED against the running app at 1440 and 390.
+
+   THE RAIL'S CONTROL SLOT IS KEPT ON EVERY ROUTE. `.rail__ctl` is the row under
+   the mark that holds the pane switch, and it was drawn only where a section
+   pane exists — so the first destination sat at y=66 on /today and /schedule and
+   y=108 on /clients, /programs and /business, and the whole column of glyphs
+   jumped 42px on the navigation made most often. `Rail.tsx` now renders the row
+   always; where there is nothing to switch it is an empty, `aria-hidden` box of
+   the same height. 10px of padding plus `--w-tap` is `.rail__ctl`'s own height.
+
+   THE PHONE'S MORE SHEET HAS A THEME ROW. The switch lived only in the rail
+   foot's menu, which is hidden with the rail under 900px, so the light palette
+   was unreachable on a phone. `.sheet__row` is `.menu__row` at the sheet's own
+   density: 48px, the height of every other row in it, so a thumb has the same
+   target here as on the links above and below. */
+.rail__ctl--idle{height:calc(var(--w-tap) + 10px)}
+.sheet__row{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  min-height:48px;padding:6px 10px;font-size:14px;color:var(--tx-ink-2)}
+@media (pointer:coarse){.sheet__row .themesw .btn{min-height:40px}}
+
+
+/* ── SEARCH LABEL, TAB LABEL, AND THE DARK PANE · 4 Oct 2026 ────────────────
+   THE SEARCH PLACEHOLDER FITS. "Search clients, sessions, exercises…" needs
+   ~242px of text and the 320px field left it 198, so it clipped to "…ex…"; the
+   field is 360px now (webapp.css). From 901 to 1100 the field gives ground to
+   230px and the long label cannot fit at all — MEASURED, "Search cl…" — so
+   there it swaps for "Search clients…". The short span is `aria-hidden`: the
+   button's name is the long sentence at every width, announced once.
+
+   TAB LABELS ARE 11px, the `micro` step, up from 10 — a sweaty glance at a bar
+   held in one hand. MEASURED items are 73px wide at 360, and the longest label
+   ("Schedule") is ~50px at 11px/600, so nothing ellipsizes. */
+.omni__short{display:none}
+@media (max-width:1100px) and (min-width:901px){
+  .omni__long{display:none}
+  .omni__short{display:inline}
+}
+@media (max-width:900px){
+  .tabs__t{font-size:11px}
+}
+
+/* ── TODAY POLISH · 4 Oct 2026 critique ──────────────────────────────────────
+   THE QUEUE GROWS IN FLOW. `.q__scroll` capped at 348px and scrolled, so opening
+   the fold put a scroller inside a page that already scrolls — the wheel stopped
+   at the inner list with the glance block under it. The phone rung already
+   released it ("the page's own scroll is the queue's"); this makes it the rule.
+
+   THE TOUCH FLOOR, under a coarse pointer only. Verbs and chips measured 36 and
+   30px, the queue's name link 24, against the 40px the shell's own bar holds.
+   Width was never the question, so the media feature is `pointer:coarse` and the
+   desk keeps its 28/30px density. */
+.q__scroll{max-height:none;overflow:visible}
+@media (pointer:coarse){
+  .atn .btn--sm,.hro .btn--sm{min-height:40px}
+  .seg__b{min-height:40px}
+  .atn .who{min-height:40px}
+}
+
+/* FOCUS RINGS ARE `--tx-focus`, NOT `--tx-accent-line`. The accent line is the lime
+   WASH's edge (a hairline tint: 1.4:1 on white, about 1.3:1 on the dark page) and
+   is right for a selected row's border and wrong for the one thing a keyboard user
+   must find. MEASURED on Today with real key focus: the chips, "Full schedule" and
+   "Show N more rows" drew rgb(207,227,154) in light and lime at 34% in dark, while
+   the buttons beside them used `--tx-focus` (6.1:1 light, full lime dark). Same
+   defect, five more rules, repaired together: the queue's snooze button, and the
+   client file's session and check-in tables. */
+
+/* ── THE QUEUE ON A PHONE · 4 Oct 2026, from a screenshot ────────────────────
+   A SEPARATOR MUST NOT LEAD A LINE. "Pack expires Wednesday · 3 days · Send
+   progress report" wraps wherever the cell is full, and with the kind word in
+   front it wrapped BEFORE the second dot — a line opening with "· Send progress
+   report". Stacked, the link and the "messaged yesterday" note are lines of their
+   own and the dot between them is dropped (it is `aria-hidden`, so nothing is
+   lost to a reader).
+
+   THE SNOOZE QUESTION GETS A LINE. "Stop raising this?" plus three buttons is 355px
+   in a ~330px cell, so it wrapped as 1 + 2 + 1 with "Keep it" stranded and
+   right-aligned. The question takes the full row and the three buttons sit in one. */
+@media (max-width:620px){
+  .atn .q__dot{display:none}
+  .atn .q__rep,.atn .q__seen{display:block;margin-top:2px}
+  .atn .q__ask{justify-content:flex-start}
+  .atn .q__ask > span{flex-basis:100%;margin-right:0}
+}
+
+/* ── THE QUEUE'S VERB COLUMN ON A PHONE · 4 Oct 2026, from a screenshot ──────
+   `--q-xw` is the ⋯ track's width (see the grid above). And the verbs share a
+   minimum width: Take, Mark and Wish are 56–58px beside Check in at 81, right-
+   aligned, so their left edges wandered across 25px down the list. 76px lifts the
+   short ones to within five of the longest, with no verb truncated. */
+@media (max-width:620px){
+  .tbl--stack{--q-xw:40px}
+  .atn .q__act .btn{min-width:76px;justify-content:center}
+}
+@media (max-width:620px) and (pointer:coarse){
+  .tbl--stack{--q-xw:56px}
+}
+
+/* ── SCHEDULE POLISH · 4 Oct 2026 critique ───────────────────────────────────
+   THE HOVER MIX STAYS OPAQUE IN DARK. `button.ev:hover` mixes the hue into
+   `--ev-fill`, which is the translucent soft token in dark — so a hovered block
+   let the hour lines through again. Pointing `--ev-fill` at the same opaque mix
+   the resting block now uses (webapp.css) keeps all three states opaque.
+*/
+:root[data-theme="dark"] .ev{--ev-fill:color-mix(in srgb,var(--ev-hue) 12%,var(--tx-canvas))}
+
+/* THE PHONE WEEK SPEAKS THE DESK'S LANGUAGE. A pip is a <button> with no
+   `border:0`, so every one drew the UA's 2px outset box (white in dark, black in
+   light — MEASURED). Its stripe was lime for In Person, which is the one colour
+   this system spends on the NEXT action and is 1.2:1 on light; the desk encodes
+   delivery as floor blue and remote purple, so the phone now does too. Type is
+   11px (it was 8.5–9), the name is the FIRST name (a full one clipped to four or
+   five letters in a 37px cell), and a done session carries a tick. */
+.wkp__pip{
+  border:0;padding:5px 3px 5px 6px;
+  box-shadow:inset 3px 0 0 var(--tx-floor);
+  font-size:11px;font-weight:600;line-height:1.25;position:relative;
+}
+.wkp__pip b{font-size:11px;font-weight:800}
+.wkp__pip b i{font-style:normal;font-size:9px;font-weight:700;color:var(--tx-ink-3);margin-left:1px}
+.wkp__pip--remote{box-shadow:inset 3px 0 0 var(--tx-remote)}
+.wkp__pip--off{border:1px dashed var(--tx-line);box-shadow:none}
+/* The tick rides the TIME row: "7:15a" is ~30px of a 40px content box, so the right
+   10px of that line is free, and reserving it under the name instead clipped
+   "Meera" and "Sneha" to an ellipsis (MEASURED). */
+.wkp__ok{position:absolute;right:3px;top:5px;color:var(--tx-ok);display:inline-flex}
+
+/* DONE IS A WORD AND A TICK, NOT A DIMMER. `opacity:.55` on the card measured
+   3.95:1 for the client, 2.51 for the plan and 2.44 for the tag, and said "done"
+   by fading alone. The past day chips took the same .5. Both now use token
+   colours that hold their contrast, and the card says Done in words. */
+.dag__ses[data-status="done"]{opacity:1}
+.dag__ses[data-status="done"] .dag__main > b{color:var(--tx-ink-2)}
+.dag__d[data-past]{opacity:1}
+.dag__d[data-past]:not([aria-selected="true"]) b{color:var(--tx-ink-3)}
+/* The agenda's buttons are <button>s with their UA 2px outset border (the day
+   chips drew it bevelled — MEASURED). Their edge is an inset box-shadow, so the
+   border is simply zeroed. */
+.dag__d,.dag__ses,.dag__gap{border:0}
+.dag__st{
+  display:inline-flex;align-items:center;gap:3px;margin-left:8px;
+  font-size:11px;font-weight:700;font-style:normal;letter-spacing:.01em;color:var(--tx-ok);
+}
+.dag__st--noshow{color:var(--tx-danger)}
+
+
+/* ── NOW AND NEXT, AND THE SCHEDULE'S TOUCH FLOOR · 4 Oct 2026 ───────────────
+   `.cw__bnow` — the clock inside a collapsed quiet band. The dashed now-line is
+   drawn per SEGMENT, so at 12:48 PM with 11–5 folded the week had no now at all.
+   The band's own sentence says it instead, in the accent's TEXT form
+   (`--tx-accent-text`: dark lime on paper, the lime itself on slate), tabular so
+   the minute does not shift the row.
+
+   `.ev--next` — the session that is running or comes next today: a 3px top edge
+   in the same stroke form of the accent. Lime itself is a FILL and a 3px lime
+   edge on a pale blue block measures about 1.1:1 on light, so it would be a mark
+   nobody can see. The words "next up" are in the block's label too, so it is
+   never colour alone. It composes with the clash ring and the late ring, which
+   are `box-shadow`s of their own and must not be replaced. */
+.cw__bnow{
+  margin:0 10px 0 4px;font-weight:700;color:var(--tx-accent-text);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.ev--next{box-shadow:inset 0 3px 0 var(--tx-accent-text)}
+.ev--next.ev--conflict{box-shadow:inset 0 0 0 1px var(--tx-danger),inset 0 3px 0 var(--tx-accent-text)}
+.ev--next.ev--late{box-shadow:inset 0 0 0 1px var(--tx-warn),inset 0 3px 0 var(--tx-accent-text)}
+
+/* The phone toolbar's arrows and chips measured 32×34 and 28px beside segments
+   that are 44. Width was never the question; a finger is. */
+@media (pointer:coarse){
+  .sch__nav .btn--icon{min-width:44px;min-height:44px}
+  .sch__filters .chip{min-height:40px}
+}
+.ky__warn{color:var(--tx-warn);font:700 10px var(--tx-mono)}
+
+/* ── NO *SHOW GAPS* AND NO *WORKING HOURS* CHIP ON A PHONE · 4 Oct 2026 ─────
+   Asked for. *Show gaps* hatches free time on the desk's grid, and the phone has no
+   grid: `DayAgenda` lists every free interval as a BOOK row whatever the chip says
+   (`day.gaps` is read unconditionally), and the week's pips have no hatch to show.
+   So the chip toggled nothing on this surface. *Working hours* is one tap deeper
+   instead — Settings › Profile › Work & hours, from the More sheet — which the
+   header link already was once the desk's copy was hidden. With both gone the chip
+   strip is *In Person* and *Online*, which fit the row without scrolling. */
+@media (max-width:900px){
+  .sch__gaps,.sch__hours--mobile{display:none}
+}
+
+
+/* ── THE PHONE ROSTER CARD · 4 Oct 2026 ──────────────────────────────────────
+   Two siblings, because a button may not contain a button: `.crd-row__open` (avatar,
+   name, tag, reason) and `.crd-row__side` (the verb over the pack gauge). The tag
+   used to sit at x=237, 247 or 301 depending on whether a gauge existed; it rides
+   the name line now and cannot move. The reason takes two lines — it is the whole
+   explanation of why the row exists — and is clamped there, not cut at one. The
+   legacy `.crd-row__main span` rule (display:block on every span) is deliberately
+   not reused: new class names are how the tag stays a tag. */
+.crd-row__open{
+  flex:1 1 auto;min-width:0;display:flex;align-items:center;gap:12px;
+  background:none;border:0;padding:0;margin:0;text-align:left;
+  font:inherit;color:inherit;cursor:pointer;border-radius:var(--tx-r1);
+}
+.crd-row__open:focus-visible{outline:2px solid var(--tx-focus);outline-offset:4px}
+.crd-row__text{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.crd-row__top{display:flex;align-items:center;gap:8px;min-width:0}
+.crd-row__top b{
+  min-width:0;font-size:15px;font-weight:700;letter-spacing:-.015em;color:var(--tx-ink);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.crd-row__top .tag{flex:0 0 auto}
+.crd-row__line{
+  font-size:12.5px;line-height:1.35;color:var(--tx-ink-2);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+.crd-row__side{flex:0 0 auto;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.crd-row__side .btn{min-width:76px;justify-content:center}
+@media (pointer:coarse){.crd-row__side .btn--sm{min-height:40px}}
+
+
+/* ── THE ADD-CLIENT BAND, LEGIBLE · 4 Oct 2026 ───────────────────────────────
+   The plate is a fixed #0B0D11 in both themes, so these are measured against it.
+   The upcoming rung label was 3.3:1 at 10px, its "opt" tag 2.5:1 at 8px, and the
+   step readout 3.8:1 — the only words for the steps AHEAD, and for which of them
+   can be skipped. .58 alpha is ~6.5:1; the "opt" tag is 9.5px at .55. */
+.ascent__count{color:rgba(242,244,246,.58)}
+.rung{color:rgba(242,244,246,.58)}
+.rung__opt{font-size:9.5px;color:rgba(242,244,246,.55)}
+
+
+/* ── CLIENT FILE · OVERVIEW · 4 Oct 2026 critique ────────────────────────────
+   THE PINNED STRIP IS ONE LINE. It was a 64px amber block above all eight tabs, sticky,
+   which with the header and the tab strip was 28–38% of a desk window. Now an icon, the
+   first note clipped to a line, and `+N more` / `More` when there is more to read; open,
+   every note shows in full with its own Unpin. When nothing is pinned it draws nothing
+   (`PinnedStrip.tsx`). Unpin was 43×19 and invisible until hover — it is a quiet label
+   with a 24px floor and is always drawn. */
+.cfpin{display:flex;align-items:flex-start;gap:10px;margin:10px 0 0;padding:5px 8px 5px 12px}
+.cfpin__ic{flex:0 0 auto;margin-top:5px;display:inline-flex;color:var(--tx-warn)}
+.cfpin__l{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.cfpin__i{align-items:center;font-size:13px;line-height:1.45}
+.cfpin__i::before{display:none}
+.cfpin__b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cfpin:not([data-open]) .cfpin__i:nth-of-type(n+2){display:none}
+.cfpin[data-open] .cfpin__b{white-space:normal}
+.cfpin[data-open] .cfpin__i{align-items:flex-start}
+.cfpin__x{opacity:1;min-height:24px;padding:3px 8px;border-radius:var(--tx-r1)}
+.cfpin__x:hover{background-color:var(--w-hover);color:var(--tx-ink)}
+.cfpin__e{
+  flex:0 0 auto;min-height:24px;padding:3px 8px;border:0;border-radius:var(--tx-r1);
+  background-color:transparent;color:var(--tx-ink-2);cursor:pointer;
+  font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+}
+.cfpin__e:hover{background-color:var(--w-hover);color:var(--tx-ink)}
+.cfpin__e:focus-visible{outline:2px solid var(--tx-focus);outline-offset:1px}
+
+/* THE ROSTER'S REASON, under the name: *No workout logged in 12 days*. */
+.cfhd__why{margin:2px 0 0;font-size:12.5px;line-height:1.4;color:var(--tx-ink-2)}
+
+/* And the grid uses a wide window: 1240 was set when "past ~1530 there is nothing to spend
+   the width on", and at 1853 that left ~460px of nothing beside a header that runs to the
+   edge. 1500 gives each quadrant ~744px, which is a card with a gauge and two rows in it. */
+@media (min-width:1500px){.cfgrid--ov{max-width:1500px}}
+
+/* TARGETS. The tag link (*Strength base*, 92×20) takes vertical slop on the link itself, and
+   under a coarse pointer the card verbs are the 40px every other control on a phone is. */
+@media (pointer:fine){
+  .tag--link{position:relative}
+  .tag--link::before{content:'';position:absolute;inset:-2px 0}
+}
+@media (pointer:coarse){
+  .cfgrid--ov .btn--sm{min-height:40px}
+  .cfpin__x,.cfpin__e{min-height:40px}
+}
+
+
+/* ── THE SHELF, OPENED FROM A CLIENT'S PLAN ─ one line saying who it is for and the way back. */
+.pg__for{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  margin:0;padding:8px var(--w-gutter,16px);font-size:12.5px;color:var(--tx-ink-2);
+  background:var(--tx-surface-2);border-bottom:1px solid var(--tx-line)}
+
+/* The plan card's two verbs are 44px on a phone (they were 34). */
+@media (max-width:900px){.cfgrid--pl .card__band .btn{min-height:44px}}
+
+
+/* ── PAYMENTS · phone and touch ──────────────────────────────────────────────
+   The pack bar's verbs did not wrap: at 390 the row ran 13px past its card (Renew), and nothing in the
+   bar is allowed to be clipped, since one of them takes money. */
+.subbar__act{flex-wrap:wrap}
+/* The irreversible ones read as such: *End this pack* and *Refund* are ghost buttons in a danger ink,
+   and End sits at the far end of the pack's life row, away from the harmless *Give more time*. */
+.cfpay__end{color:var(--tx-danger)}
+.cfpay__end:hover{color:var(--tx-danger)}
+@media (pointer:coarse),(max-width:900px){
+  .subbar__act .btn,.cfpay__ledger .card__acts .btn,.cfpay__bars .btn--sm{min-height:44px}
+  .cs__await{min-height:44px}
+  .cs__await input{width:20px;height:20px}
+}
+.cs__await{min-height:24px}
+
+/* ── PAYMENTS LEDGER ON A PHONE ──────────────────────────────────────────────
+   · The row menu's dots sat 16px inside the right edge: the card's last-cell gutter (0,3,1) outranked the
+     reflow's zero. Restated heavier, and the first cell the same way.
+   · *Take a payment* was drawn three times (the pack bar, the ledger head, the owed row); the head's is
+     a desk shortcut and goes below 900px.
+   · A cell holding a date and how long ago, or a method and a reference, was spread to both ends by the
+     row's space-between; both are one right-aligned group. */
+@media (max-width:900px){
+  .cfpay__ledger .cftx tbody tr > :last-child{padding-right:0}
+  .cfpay__ledger .cftx tbody tr > :first-child{padding-left:0}
+  .cfpay__headtake{display:none}
+  .cfpay__when{text-align:right}
+  .cftx tbody td:has(> .cftx__how){justify-content:flex-end;gap:8px}
+}
+
+/* PAYMENTS LEDGER, PHONE — the row's actions leave its foot. The three-dot menu rides the top-right of the
+   row, level with the amount (it was a lone icon on a line of its own under the facts), and the owed row's
+   own *Take a payment* is dropped: the pack bar above carries the same verb, so the row only states the
+   debt. */
+@media (max-width:900px){
+  .cfpay__ledger .cftx tbody tr{position:relative}
+  .cfpay__ledger .cftx tbody td.cftx__act{position:absolute;top:4px;right:2px;padding:0;width:auto}
+  .cfpay__ledger .cftx tbody tr > td.num:first-child,
+  .cfpay__ledger .cftx tbody tr > :first-child{padding-right:34px}
+  .cfpay__owedtake{display:none}
+  .cfpay__ledger .cftx tbody tr:has(.cfpay__owedtake) td.cftx__act{display:none}
+}
+
+/* PAYMENTS HEAD, PHONE — the title and its one remaining verb share a line. *Draft a reminder* was a 44px
+   outlined box on a row of its own under *Payments*, taller than the heading it belongs to. */
+@media (max-width:900px){
+  .cfpay__ledger .card__hd{flex-wrap:nowrap;align-items:center;justify-content:space-between;gap:10px}
+  .cfpay__ledger .card__acts{margin-left:auto;flex:0 0 auto}
+  .cfpay__ledger .card__acts .btn{min-height:34px;padding-inline:12px;font-size:12.5px;white-space:nowrap}
+}
+
+/* PERSONAL INFORMATION */
+.cfrec__none{margin:0;padding:12px var(--w-cardpad,16px);font-size:13px;color:var(--tx-ink-3)}
+/* On a phone the notes come first: they are what a trainer opens this tab for, and they sat under nine
+   rows of record facts. The record cards follow; the danger cards keep their place at the foot. */
+@media (max-width:900px){
+  .cfgrid--pi > .cfnotes{order:-1}
+}
+
+/* ── ASSESSMENTS LIST · actions, relative date, client link ───────────────────
+   *Take it* sits beside the menu, so the one verb the trainer came for is not two taps deep. */
+.asm__acts{display:inline-flex;align-items:center;gap:6px;justify-content:flex-end;width:100%}
+.asm__rel{font-style:normal;font-weight:400;color:var(--tx-ink-3)}
+.asm__who--lk{color:inherit;text-decoration:none}
+.asm__who--lk:hover b{color:var(--tx-accent-text);text-decoration:underline}
+.asm__who--lk:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px;border-radius:var(--tx-r1)}
+@media (pointer:coarse),(max-width:900px){
+  .asm__acts .btn,.asm__acts .btn--icon{min-height:44px;min-width:44px}
+}
+@media (max-width:620px){
+  .asm-c-act{justify-self:stretch}
+  .asm__t .tbl tbody td.asm-c-name{order:0}
+}
+
+/* ── ASSESSMENT LIST ON A PHONE: a card, not a form ──────────────────────────
+   Each row stacked five labelled blocks (DATE / CLIENT / ASSESSMENT / STATUS) with the relative date on a
+   line of its own, indented, and a hover wash that tinted every cell as a separate slab. It is two lines
+   now: who and what happened to it, then what and when, then the verbs. The labels go — every value says
+   what it is — and the row, not each cell, takes the hover. */
+@media (max-width:620px){
+  .asm__t:has(.asm-c-who) .tbl tbody tr{
+    grid-template-columns:minmax(0,1fr) auto;
+    grid-template-areas:"who status" "name name" "date date" "act act";
+    gap:4px 10px;align-items:center;
+  }
+  .asm__t:has(.asm-c-who) .tbl tbody td::before{content:none}
+  .asm__t:has(.asm-c-who) .tbl tbody td.asm-c-who{grid-area:who}
+  .asm__t:has(.asm-c-who) .tbl tbody td.asm-c-status{grid-area:status;justify-self:end}
+  .asm__t:has(.asm-c-who) .tbl tbody td.asm-c-name{grid-area:name}
+  .asm__t:has(.asm-c-who) .tbl tbody td.asm-c-date{grid-area:date;color:var(--tx-ink-3)}
+  .asm__t:has(.asm-c-who) .tbl tbody td.asm-c-act{grid-area:act;justify-self:end;padding-top:6px}
+  .asm__t:has(.asm-c-who) .tbl tbody td.asm-c-n{display:none}
+  .asm__t:has(.asm-c-who) .tbl tbody td .asm__d b{display:inline;font-weight:500}
+  .asm__t:has(.asm-c-who) .tbl tbody td .asm__d em{display:inline;padding:0;margin:0}
+  .asm__t:has(.asm-c-who) .tbl tbody tr:hover td{background-color:transparent}
+  .asm__acts .btn{min-height:40px}
+}
+
+/* ── ASSESSMENT DETAIL ───────────────────────────────────────────────────────
+   A lead on the Summary: one sentence, and the signed change at the weight of a figure (it was 14px ink-2
+   beside a 14px figure, so nothing led). Still ink, never a tone. */
+.asmv__lead{margin:0;padding:12px var(--w-cardpad,16px) 4px;font-size:13px;color:var(--tx-ink-2);font-weight:500}
+.asmv__bars:not(.asmv__bars--rec) .asmv__step{font-size:15px;font-weight:700;color:var(--tx-ink)}
+/* *Delete* keeps its distance from *Correct readings* and reads as the irreversible one. */
+.asmv .ph__acts .asmv__del{margin-left:10px;color:var(--tx-danger)}
+.asmv__mcols{align-items:start}
+@media (pointer:coarse),(max-width:900px){
+  .asmv .ph__acts .btn{min-height:44px}
+  .asmv__pick .ctl{min-height:44px}
+}
+/* The active tab's underline is a STROKE: lime on a light ground measures ~1.2:1, so on light it takes the
+   accent-text step. (System-wide: every `.tab` strip.) */
+:root[data-theme="light"] .tab[aria-selected="true"],
+:root[data-theme="light"] .tab[aria-current="page"]{border-bottom-color:var(--tx-accent-text)}
+
+/* ASSESSMENT DETAIL — the verbs on a phone: one row spanning the width, the lead verb taking the room and
+   *Delete* beside it at the same height. They were a right-aligned 44px box and a lone red word floating
+   in an empty strip, with 10px of margin I had added for the desk. */
+@media (max-width:900px){
+  .asmv .ph__acts{width:100%;margin-left:0;display:flex;gap:8px;align-items:stretch}
+  .asmv .ph__acts .btn{min-height:40px}
+  .asmv .ph__acts .btn:first-child{flex:1 1 auto;justify-content:center}
+  .asmv .ph__acts .asmv__del{margin-left:0;flex:0 0 auto;border:1px solid var(--tx-line)}
+}
+
+/* ASSESSMENTS LIST, PHONE — the search field sat on the header's bottom rule with no air under it. */
+@media (max-width:900px){
+  .asm__tabs{padding-bottom:12px}
+}
+
+/* The same scope for the two rules that were bare `.asm__d`/`.asm__acts` selectors above. */
+/* ASSESSMENT TEMPLATES — column model (the name takes the slack) and phone targets. It was `table-layout:
+   fixed` with every track equal: a 90px date in a 345px cell at 1853. */
+.asm__t--tpl .tbl{table-layout:fixed}
+.asm__t--tpl .tpl-c-shape{width:260px}
+.asm__t--tpl .tpl-c-used{width:190px}
+.asm__t--tpl .tpl-c-made,.asm__t--tpl .tpl-c-edited{width:130px}
+@media (max-width:900px){
+  .asm__t--tpl .tpl-c-shape,.asm__t--tpl .tpl-c-used,.asm__t--tpl .tpl-c-made,.asm__t--tpl .tpl-c-edited{width:auto}
+  .asm__t--tpl .btn--icon{min-height:44px;min-width:44px}
+}
+/* The reorder grip is a 24px target (it was 19px). */
+.orow__g{min-width:24px;min-height:24px}
+
+/* ASSESSMENT TEMPLATES ON A PHONE — a compact card: the name with its menu on one line, what it asks for, and
+   the two dates side by side (they were four stacked label/value blocks and a lone menu dot on a line of its
+   own, 16px inside the edge). */
+@media (max-width:620px){
+  .asm__t--tpl .tbl tbody tr{
+    grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;
+    grid-template-areas:"name name act" "shape shape shape" "used used used" "made edited edited";
+    gap:6px 12px;align-items:center;position:relative;
+  }
+  .asm__t--tpl .tbl tbody tr > th{grid-area:name;padding:0}
+  .asm__t--tpl .tbl tbody td.tpl-c-shape{grid-area:shape}
+  .asm__t--tpl .tbl tbody td.tpl-c-used{grid-area:used}
+  .asm__t--tpl .tbl tbody td.tpl-c-made{grid-area:made}
+  .asm__t--tpl .tbl tbody td.tpl-c-edited{grid-area:edited}
+  .asm__t--tpl .tbl tbody td.asm-c-act{grid-area:act;justify-self:end;padding:0}
+  .asm__t--tpl .tbl tbody td::before{display:block;margin-bottom:1px}
+  .asm__t--tpl .tbl tbody td.tpl-c-shape::before{display:inline;margin-right:6px}
+}
+
+
+/* ── PROGRAMS (what clients are on) ──────────────────────────────────────────
+   The last column is PROGRESS, so it needs room for *Week 3 of 8* and reads left; the Goal track goes when no
+   row has a goal (it was 148px of nothing); and the list stops at a width its columns can fill, because the
+   name track alone was ~955px at 1853 with names ~100px wide. */
+.ptrow--cp{grid-template-columns:minmax(0,1fr) 100px 64px 64px 176px 148px 130px}
+.ptrow--cp.ptrow--nog{grid-template-columns:minmax(0,1fr) 100px 64px 64px 176px 130px}
+.ptrow--nog .ptrow__g,.ptrow--hd.ptrow--nog > span:nth-child(6){display:none}
+.ptrow--cp .ptrow__e,.ptrow--hd.ptrow--cp > span:nth-child(7){text-align:left}
+@media (max-width:1400px){
+  .ptrow--cp{grid-template-columns:minmax(0,1fr) 100px 56px 56px 144px 120px 116px}
+  .ptrow--cp.ptrow--nog{grid-template-columns:minmax(0,1fr) 100px 56px 56px 144px 116px}
+}
+/* Clients with nothing assigned: named, each with the verb. */
+.pgt__nop{margin:18px 8px 8px;border-top:1px solid var(--tx-line-strong);padding-top:14px}
+.pgt__nopt{margin:0 0 8px;font-size:13px;font-weight:700;color:var(--tx-ink)}
+.pgt__nopl{list-style:none;margin:0 0 6px;padding:0}
+.pgt__nopr{display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--tx-line)}
+.pgt__nopr:last-child{border-bottom:0}
+.pgt__nopn{flex:1;min-width:0;font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media (max-width:900px){
+  .ptrow__act .btn{min-width:44px;min-height:44px}
+  .ptrow__cl .ptrow__k{display:none}
+  .pgt__nopr .btn{min-height:40px}
+}
+
+/* PROGRAMS, WIDE — the clients with nothing assigned take the space beside the list instead of a second
+   screenful under it: the list was capped at 1280px with the right half of the window empty, and the names
+   sat below the fold of an inner scroller. From 1280px the two sit side by side, the panel staying in view. */
+@media (min-width:1280px){
+  .pgt__body:has(.pgt__nop){display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:0 24px;align-items:start}
+  .pgt__body:has(.pgt__nop) .pgt__nop{margin:0;border-top:0;border-left:1px solid var(--tx-line);
+    padding:12px 8px 0 20px;position:sticky;top:0}
+}
+
+/* PROGRAMS ON A PHONE — the desk column models above are declared later in the sheet than the phone rung and
+   the same weight, so they won: eight tracks squeezed into 330px and every cell stacked one word to a line.
+   The phone's two-track row is restated for the modified rows. */
+@media (max-width:900px){
+  .ptrow--cp,.ptrow--cp.ptrow--nog{grid-template-columns:minmax(0,1fr) auto;gap:2px 12px}
+  .ptrow--cp .ptrow__e{text-align:left}
+}
+
+/* PROGRAMS ON A PHONE — the row's chevron sat in the corner under the shape strip, off the strip's axis. It is
+   a column of its own at the row's right edge, centred on the row. */
+@media (max-width:900px){
+  .ptrow--cp.ptrow--act{padding-right:44px}
+  .ptrow__w--act:has(> .ptrow--cp) > .ptrow__act{right:0;top:0;bottom:0;height:auto;display:flex;align-items:center}
+}
+
+/* ── TEMPLATES SHELF AND PROGRAMS LIST · the 901–1180px rung ─────────────────
+   Between the phone rung (900) and the wide rung (1400) the desk grid kept its fixed tracks, gaps and padding
+   (~718px) inside a content box of window − 276px: at 901 the NAME track was 0, every name clipped and thirteen
+   elements spilled past the card. The picture (shape) and the goal are the two columns that give way — the
+   strip repeats the days column in a glyph — and the name gets a floor. Last in the sheet so it wins the ties. */
+@media (min-width:901px) and (max-width:1180px){
+  .ptrow .ptrow__sh,.ptrow .ptrow__g,
+  .ptrow--hd > span:nth-child(2),.ptrow--hd > span:nth-child(6){display:none}
+  .ptrow,.ptrow--cp,.ptrow--cp.ptrow--nog{grid-template-columns:minmax(150px,1fr) 52px 52px 132px 92px;gap:12px}
+  .ptrow--cp .ptrow__e{text-align:left}
+}
+
+/* ── THE SHELF ON A PHONE · use the page ─────────────────────────────────────
+   ~355px of chrome stood above the list and the list scrolled in a 150–190px box of its own. Below 900px the
+   page scrolls and the list is part of it; the two chip rows are one scrolling line each. */
+@media (max-width:900px){
+  .pgt{display:block;min-height:0;flex:none}
+  .pgt__body{overflow:visible;max-height:none}
+  .pgt__hd .tools,.pgt__sort .tools{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .pgt__hd .tools::-webkit-scrollbar,.pgt__sort .tools::-webkit-scrollbar{display:none}
+  .pgt__hd .chip{flex:0 0 auto;min-height:36px}
+}
+
+/* Touch: the row's select box is a 24px (44 on coarse) target — it was 18px wide. */
+.ptrow__sel{min-width:24px;justify-content:center}
+@media (pointer:coarse){
+  .ptrow__sel{min-width:44px;left:0}
+  .ptrow--pick{padding-left:48px}
+  .bulk .btn,.bulk .check{min-height:44px}
+}
+
+/* The strip on a light ground: lime fill is ~1.3:1, so a lit cell gets the accent-text step as an edge. */
+:root[data-theme="light"] .shape__c--1{box-shadow:inset 0 0 0 1px var(--tx-accent-text)}
+
+/* ── INCLINEYOU TEMPLATES ON A PHONE · use the page ─────────────────────────────────────────────────────
+   Below 900px the catalogue scrolled in a box of its own under ~400px of header and filters. The page scrolls and
+   the cards are part of it; thumb-sized controls on the card foot and the strip above it. */
+@media (max-width:900px){
+  /* `.main` is overflow:hidden and this page has no `.body`, so with the pane's own scroller released it is `.main` that scrolls. */
+  .main.pg:has(.cert__l){overflow-y:auto;-webkit-overflow-scrolling:touch}
+  /* A scrolling flex column squeezes its children; `.subtabs` is overflow-x:auto here so it was shrunk and clipped. */
+  .main.pg:has(.cert__l) > *{flex-shrink:0}
+  .pg .split:has(> .cert__l){display:block;flex:none;overflow:visible}
+  .pg .split:has(> .cert__l) > .split__l{max-height:none}
+  .pg .split:has(> .cert__l) > .split__r{overflow:visible}
+  .cert__grid .btn{min-height:36px}
+  .cert__l .btn,.cert__l .chip{min-height:36px}
+}
+@media (pointer:coarse){
+  .cert__grid .btn{min-height:44px}
+  .cert__l .btn,.cert__l .chip{min-height:44px}
+}
+
+/* TEMPLATES SHELF ON A PHONE — the ⋮ is a 44px target in the row's bottom-right corner, and the strip was centred
+   on the row, so the two shared ~14px. The strip rides the top of the row; the trigger keeps the corner. */
+@media (max-width:900px){
+  .ptrow:not(.ptrow--cp) .ptrow__sh{align-self:start;margin-top:5px}
+}
+
+/* ── NEW TEMPLATE DIALOG · the shape row's air, and a phone that can be typed into ─────────────────────────
+   The Goal chips sat 22px above the day count where every other group sits ~30 apart. On a phone the fields were 13.5px (iOS zooms
+   anything under 16px on focus), 34px high, with 28px chips. */
+.pg__newshape{padding-top:6px}
+@media (max-width:620px){
+  .pg__dialog .ctl,.pg__dialog .sel__t,.pg__dialog .ss__t{min-height:44px;font-size:16px}
+  .pg__newbody textarea.ctl{min-height:64px;font-size:16px}
+  .pg__newweeks .ctl{min-height:44px}
+  .pg__dialog .chip{min-height:40px}
+  .pg__newnum{min-width:40px}
+  .pg__dialog .btn{min-height:44px}
+  .pg__newhd .btn{min-width:44px;min-height:44px}
+}
+
+/* ── MY TEMPLATES ON A PHONE · one left edge, no orphan separator, thumb targets ────────────────────────────
+   MEASURED at 390: sub-tabs 24px, sort 16px, checkbox 14px, page tabs 12px — four edges. Rows whose pack count is
+   zero ended line one in a bare ` · ` (the dash is hidden, its separator was not). */
+@media (max-width:900px){
+  .pg .subtabs{padding-left:16px;padding-right:16px}
+  .pg .subtabs__t{height:36px}
+  .ptrow__sel{left:8px}
+  .ptrow__cl:has(> .ptrow__none){display:none}
+  .pg__for .btn{min-height:36px}
+  .pgt__hd .ctl{min-height:40px}
+  /* `.subtabs` is overflow-x:auto here, so as a flex child it can be shrunk to nothing and clips its own chips. */
+  .pg > .subtabs{flex-shrink:0}
+  .bulk .btn{min-height:36px}
+}
+
+/* the picker's own search field: 13px zoomed iOS on focus */
+@media (max-width:620px){
+  .pg__dialog .pick__s input{font-size:16px;min-height:40px}
+}
+
+/* ── NEW TEMPLATE DIALOG · THE ENTRANCE ─────────────────────────────────────────────────────────────────────
+   Desktop: `tx-pop-c` was a 4% scale and a fade, close to invisible on a 500px box. It is now a rise and a settle —
+   14px of travel and .97, a touch slower than the scrim so the box visibly arrives onto it. Phone: the sheet had
+   `animation:none` and simply appeared; it now slides up from the foot of the screen, which is where it docks.
+   A transition plus `@starting-style`, never a new keyframe (the motion vocabulary is closed), and transform and
+   opacity only. */
+.pg__dialog{
+  animation:none;
+  transition:opacity var(--tx-t-base) var(--tx-ease),transform var(--tx-t-slow) var(--tx-ease);
+}
+@starting-style{
+  .pg__dialog{opacity:0;transform:translate(-50%,calc(-50% + 14px)) scale(.97)}
+}
+@media (max-width:620px){
+  .pg__dialog{transition:opacity var(--tx-t-fast) var(--tx-ease),transform var(--tx-t-slow) var(--tx-ease)}
+  @starting-style{
+    .pg__dialog{opacity:1;transform:translateY(100%)}
+  }
+}
+/* A reader who turned motion down gets the resting values, not a 14px flash: restate them inside the starting-style
+   block as well as killing the transition. */
+@media (prefers-reduced-motion:reduce){
+  .pg__dialog{transition:none}
+  @starting-style{.pg__dialog{opacity:1;transform:translate(-50%,-50%)}}
+}
+@media (prefers-reduced-motion:reduce) and (max-width:620px){
+  @starting-style{.pg__dialog{opacity:1;transform:none}}
+}
+
+/* ── TEMPLATE BUILDER ON A PHONE · the week strip says there is more ───────────────────────────────────────
+   MEASURED at 390 with eight weeks: `1 2 3 4` and the left half of a `5` against the pinned `+`. Snap fixes where the
+   strip RESTS, not where it starts, and the scroll-timeline fade is inactive here, so the cue is a mask the component
+   sets (`data-more`) while chips are hidden and removes at the end. */
+.wsm__wkscroll[data-more]{
+  -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 26px),transparent);
+  mask-image:linear-gradient(to right,#000 calc(100% - 26px),transparent)}
+.wsm__balf--gap{color:var(--tx-ink-3);font-weight:500}
+
+/* ASSIGN PANEL ON A PHONE — the weekday chips measured 28px; they are the control the panel exists for. */
+@media (max-width:900px){
+  .pg__assign .chip,.dock .chip{min-height:40px}
+}
+
+/* NEW TEMPLATE DIALOG · THE EXIT — shorter than the entrance, same two properties. */
+.pg__dialog[data-leaving]{opacity:0;transform:translate(-50%,calc(-50% + 8px)) scale(.98);
+  transition-duration:var(--tx-t-fast);pointer-events:none}
+@media (max-width:620px){.pg__dialog[data-leaving]{opacity:1;transform:translateY(100%)}}
+
+/* the sub-tab chips on every shelf page, one height on a phone (the certified page kept the old 32) */
+@media (max-width:900px){ .subtabs__t{height:36px} }
+
+@media (max-width:900px){ .ph--cert .ph__acts .btn{min-height:40px} }
+
+/* ── WORKOUTS · columns that differ are drawn, the rest are not ─────────────────────────────────────────── */
+@media (min-width:901px){
+  .wkrow.wkrow--nomode{grid-template-columns:minmax(0,240px) minmax(0,300px) 92px 78px 96px minmax(36px,1fr)}
+  .wkrow.wkrow--nostatus{grid-template-columns:minmax(0,240px) minmax(0,300px) 92px 78px 100px minmax(36px,1fr)}
+  .wkrow.wkrow--nomode.wkrow--nostatus{grid-template-columns:minmax(0,240px) minmax(0,360px) 92px 78px minmax(36px,1fr)}
+}
+/* the dot between clauses: a margin, not a collapsing space */
+.wkrow__wp::before{content:'\00b7';margin-inline:.5em}
+@media (max-width:900px){
+  .wkrow__f + .wkrow__f::before,.wkrow__w + .wkrow__f::before{content:'\00b7';margin-inline:.5em}
+}
+
+/* ── WORKOUTS ON A PHONE ─────────────────────────────────────────────────────────────────────────────────
+   The header drew nothing at all under 900px, which took the only way to make a workout template with it (the tab
+   bar's + opens a session, not a blueprint). The action returns as one full-width button; the counts stay in the tab
+   badges. One left edge (16px) for tabs, search and rows; targets ≥36px. */
+@media (max-width:900px){
+  .pg .wkrow__nm{display:inline-flex;align-items:center;min-height:32px}
+  .wkrow .wkrow__act .btn{min-width:40px;min-height:40px}
+}
+@media (max-width:900px){
+  .wkrow__f{white-space:nowrap}
+}
+/* the name link is the row's door: a 20px line of text is a 20px target */
+.wkrow__nm,.wtrow__nm{display:inline-flex;align-items:center;min-height:28px}
+@media (max-width:900px){.wkrow__nm,.wtrow__nm{min-height:36px}}
+
+/* ── WORKOUT TEMPLATES · a menu, one date, a phone row that reads ───────────────────────────────────────── */
+.wtrow{grid-template-columns:26px minmax(0,1.1fr) minmax(0,1.4fr) 84px 100px 64px 116px 116px 36px}
+.wtrow.wtrow--onedate{grid-template-columns:26px minmax(0,1.1fr) minmax(0,1.4fr) 84px 100px 64px 116px 36px}
+.wtrow--hd > span:nth-child(9),.wtrow--onedate.wtrow--hd > span:nth-child(8){text-align:right}
+.wtrow__act{display:flex;justify-content:flex-end}
+@media (max-width:900px){
+  .wtrow,.wtrow.wtrow--onedate{grid-template-columns:34px minmax(0,1fr) 40px;gap:2px 8px}
+  .wtrow__sel{grid-column:1;grid-row:1;align-self:center;min-height:36px}
+  .wtrow__n{grid-column:2;grid-row:1}
+  .wtrow__meta{grid-column:2 / span 2;grid-row:2}
+  .wtrow__act{grid-column:3;grid-row:1;align-self:center}
+  .wtrow__note{display:block;margin-bottom:2px}
+  .wtrow__note + .wtrow__f::before{content:none}
+  .wtrow__f + .wtrow__f::before{content:'\00b7';margin-inline:.5em;color:var(--tx-ink-off)}
+  .wtrow__f{white-space:nowrap}
+  .wtrow .wtrow__act .btn{min-width:40px;min-height:40px}
+}
+
+/* the foot exists for the phone only */
+.pg__wkfoot{display:none}
+@media (max-width:900px){.pg__wkfoot{display:block;position:sticky;bottom:0;z-index:5}}
+@media (max-width:900px){
+  .wtrow__meta{display:flex;flex-wrap:wrap;gap:2px 14px;align-items:baseline}
+  .wtrow__note{flex:0 0 100%;margin-bottom:2px}
+  .wtrow__f + .wtrow__f::before,.wtrow__note + .wtrow__f::before{content:none}
+}
+
+/* WORKOUTS ON A PHONE — the list fills the screen and scrolls on its own; the foot is the last flex child, so it sits
+   at the bottom whether the list is 4 rows or 128 (the earlier `.pgt{flex:none}` let it ride up under a short list). */
+@media (max-width:900px){
+  .pg:has(> .pg__wkfoot) > .pgt{flex:1 1 0;min-height:0;overflow-y:auto}
+  .pg:has(> .pg__wkfoot) > .pg__wkfoot{position:static;flex:0 0 auto}
+}
+
+/* THE RAISED + STANDS ABOVE THE PAGE. It rises 13px over the content area, so anything pinned at the foot of a screen
+   was painted over its top edge. The bar is lifted above page content, and the pinned foot keeps clear of the lift. */
+@media (max-width:900px){
+  .tabs{position:relative;z-index:10}
+  .pg__wkfoot{padding-bottom:20px}
+}
+
+/* MY TEMPLATES ON A PHONE — same arrangement as Workouts: the list fills the screen and scrolls itself, the foot is the
+   last flex child. `.pgt{flex:none}` (page scroll) had left the foot below `.main`'s clip, off screen. The page
+   scroll rule above still governs the lists with no foot. */
+@media (max-width:900px){
+  .pg:has(> .pgt > .pg__shelffoot) > .pgt{flex:1 1 0;min-height:0;display:flex;flex-direction:column}
+  .pg:has(> .pgt > .pg__shelffoot) .pgt__body{flex:1 1 auto;min-height:0;overflow-y:auto}
+  .pgt > .pg__shelffoot{flex:0 0 auto;padding-bottom:20px}
+}
+
+/* LISTS WITH NO PINNED FOOT SCROLL THE PAGE ON A PHONE. The rule above released the list's own scroller and
+   `.main` is overflow:hidden, so /programs could not scroll at all (the certified shelf had the identical trap). */
+@media (max-width:900px){
+  .main.pg:not(:has(.pg__shelffoot,.pg__wkfoot)):has(.pgt){overflow-y:auto;-webkit-overflow-scrolling:touch}
+  .main.pg:not(:has(.pg__shelffoot,.pg__wkfoot)):has(.pgt) > *{flex-shrink:0}
+}
+
+/* SEARCH BELOW THE SHELF SWITCH ON A PHONE, matching the certified shelf. */
+.pg__qphone{display:none}
+@media (max-width:900px){
+  .pgtabs__q--desk{display:none}
+  .pg__qphone{display:block;padding:8px 16px 12px}
+  .pg__qphone .pgtabs__q{width:auto}
+}
+
+/* CERTIFIED: the search sits on the tab row, ranged right, like My templates. The rail keeps its own copy for a phone
+   (below the shelf switch); each width draws one. */
+@media (min-width:901px){.cert__l .pgsh__q .search{display:none}}
+@media (max-width:900px){.pgtabs__q--cert{display:none}}
+
+/* ── CERTIFIED FILTERS · FOLD AND UNFOLD ───────────────────────────────────────────────────────────────────
+   The track animates (`--w-list` 276 <-> 44px; both states are the same two-track list, so the browser interpolates it),
+   the filters fade and slip out while the spine fades in, and the inner column holds its 276px width so nothing reflows
+   mid-flight. Hidden contents are `visibility:hidden` (out of the tab order and the accessibility tree) after the fade.
+   Desk only: under 900px the column is the phone's bar. */
+@media (min-width:901px){
+  .pg .split:has(> .cert__l){transition:grid-template-columns var(--tx-t-slow) var(--tx-ease)}
+  .cert__l{position:relative;overflow:hidden}
+  .cert__l > .cert__inner{width:276px;height:100%;display:flex;flex-direction:column;min-height:0;
+    transition:opacity var(--tx-t-fast) var(--tx-ease),transform var(--tx-t-base) var(--tx-ease),visibility 0s linear 0s}
+  .cert__l.split__l--min > .cert__inner{opacity:0;transform:translateX(-12px);visibility:hidden;pointer-events:none;
+    transition:opacity var(--tx-t-instant) var(--tx-ease),transform var(--tx-t-base) var(--tx-ease),visibility 0s linear var(--tx-t-instant)}
+  .cert__l > .pgspine{position:absolute;inset:0 auto 0 0;width:44px;opacity:0;visibility:hidden;pointer-events:none;
+    transition:opacity var(--tx-t-fast) var(--tx-ease),visibility 0s linear var(--tx-t-fast)}
+  .cert__l.split__l--min > .pgspine{opacity:1;visibility:visible;pointer-events:auto;
+    transition:opacity var(--tx-t-base) var(--tx-ease) 120ms,visibility 0s}
+}
+@media (max-width:900px){.cert__l > .cert__inner{display:contents}}
+@media (prefers-reduced-motion:reduce){
+  .pg .split:has(> .cert__l),.cert__l > .cert__inner,.cert__l > .pgspine{transition:none}
+}
+
+/* ═══ WORKOUT BUILDER ON A PHONE · THE CANVAS ═══════════════════════════════════════════════════════════════
+   The desk is a library column beside a canvas. On a phone the canvas is the whole screen and the library is a sheet
+   opened from one pinned bar, so the workout is what you see while you build it. The desk rules above 900px are
+   untouched: the wrapper is `display:contents` there, so `.wkl` is still the grid's first child. The same component
+   serves the program template's single-day editor (`onLocalSave`), so both get this. */
+.wkb__sheet{display:contents}
+.wkb__sheethd,.wkb__addbar,.wkb__scrim{display:none}
+.wke__sum{display:none}
+
+@media (max-width:900px){
+  .wkb__b{display:flex;flex-direction:column;grid-template-rows:none}
+  .wkb__pane{flex:1;min-height:0}
+  .wkb__hint{display:none}
+  .wkb__canvas{padding:10px 12px 16px}
+
+  /* the head: one line of 40px controls, the name under it (the 620 rung already wraps it) */
+  .wkb__hd .btn,.wkb__ic,.wkb__gear{min-height:40px;min-width:40px}
+  .wkb__stat:nth-child(2){display:none}
+
+  /* a card says its sets in one line; a ⋮, the count and the chevron are thumb-sized */
+  .wke__hd{grid-template-columns:16px 20px auto minmax(0,1fr) auto 40px}
+  .wke__n{min-height:44px;display:flex;flex-direction:column;justify-content:center}
+  .wke__sum{display:block;margin-top:2px;font-family:var(--tx-mono);font-size:12px;font-weight:500;color:var(--tx-ink-2);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .wke__fold,.wke__hd .btn{min-width:40px;min-height:40px}
+
+  /* the pinned bar */
+  .wkb__addbar{display:block;flex:0 0 auto;padding:9px 12px calc(9px + env(safe-area-inset-bottom));
+    border-top:1px solid var(--tx-line);background:var(--tx-surface)}
+
+  /* the library, as a sheet */
+  .wkb__sheet{display:none}
+  .wkb--lib .wkb__sheet{display:flex;flex-direction:column;position:fixed;left:0;right:0;bottom:0;top:56px;z-index:8;
+    background:var(--tx-surface);border:1px solid var(--tx-line-strong);border-bottom:0;
+    border-radius:var(--tx-r3) var(--tx-r3) 0 0;box-shadow:0 -18px 48px rgba(0,0,0,.35);
+    transition:transform var(--tx-t-slow) var(--tx-ease),opacity var(--tx-t-base) var(--tx-ease)}
+  @starting-style{.wkb--lib .wkb__sheet{transform:translateY(100%);opacity:.6}}
+  .wkb--lib .wkb__scrim{display:block;position:fixed;inset:0;z-index:7;border:0;padding:0;background:var(--tx-scrim);cursor:default}
+  .wkb__sheethd{display:flex;align-items:center;gap:10px;flex:0 0 auto;padding:10px 12px 10px 16px;border-bottom:1px solid var(--tx-line)}
+  .wkb__sheethd b{flex:1;font-size:15px;font-weight:700;letter-spacing:-.01em}
+  .wkb__sheethd .btn{min-height:40px}
+  .wkb__undo{min-height:40px;padding:0 10px;border:0;background:transparent;color:var(--tx-accent-text);
+    font:inherit;font-size:13.5px;font-weight:600;border-radius:var(--tx-r1);cursor:pointer}
+  .wkb__undo:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2px}
+  .wkb__sheet .wkl{flex:1;min-height:0;border:0}
+  .wkb__sheet .wkl__b button{min-height:48px}
+}
+@media (max-width:900px) and (prefers-reduced-motion:reduce){
+  .wkb--lib .wkb__sheet{transition:none}
+  @starting-style{.wkb--lib .wkb__sheet{transform:none;opacity:1}}
+}
+
+/* which sentence an empty workout says: the desk points left, a phone points down */
+.wkb__onphone{display:none}
+@media (max-width:900px){
+  .wkb__ondesk{display:none}
+  .wkb__onphone{display:inline}
+  .wkb__onphone b{font-weight:700;color:var(--tx-ink)}
+  /* targets: the name field, the set count and the ⋮ were 32 / 26 / 24px */
+  .wkb__name{min-height:40px}
+  .wke__cin{min-height:40px;min-width:48px}
+  .wke__hd .wsd__more{min-width:40px;min-height:40px}
+}
+
+/* ═══ WORKOUT BUILDER ON A PHONE · THE EXERCISE SHEET (phase 2) ═════════════════════════════════════════════
+   A card opens a sheet instead of unfolding in place. z 66 sits above the dialog (61) and below the confirms and the
+   note/alternatives dialogs (70/71), which open FROM this sheet. */
+.exs,.exs__scrim{display:none}
+@media (max-width:900px){
+  .wke__fold{display:none}
+  .wke__sets{display:none}
+
+  .exs__scrim{display:block;position:fixed;inset:0;z-index:65;border:0;padding:0;background:var(--tx-scrim);cursor:default}
+  .exs{display:flex;flex-direction:column;position:fixed;left:0;right:0;bottom:0;top:72px;z-index:66;
+    background:var(--tx-surface);border:1px solid var(--tx-line-strong);border-bottom:0;
+    border-radius:var(--tx-r3) var(--tx-r3) 0 0;box-shadow:0 -18px 48px rgba(0,0,0,.35);
+    transition:transform var(--tx-t-slow) var(--tx-ease),opacity var(--tx-t-base) var(--tx-ease)}
+  @starting-style{.exs{transform:translateY(100%);opacity:.6}}
+  .exs__hd{display:flex;align-items:center;gap:10px;flex:0 0 auto;padding:12px 12px 12px 16px;border-bottom:1px solid var(--tx-line)}
+  .exs__t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+  .exs__t b{font-size:15px;font-weight:700;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .exs__t span{font-size:12px;color:var(--tx-ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .exs__hd .btn{min-height:40px}
+  .exs__b{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+  .exs__s{padding:6px 0;border-bottom:1px solid var(--tx-line)}
+  .exs__s:last-child{border-bottom:0}
+  .exs__f{padding:4px 12px 4px 16px}
+  .exs__note{margin:4px 16px 8px;font-size:12.5px;color:var(--tx-ink-3)}
+  .exs__rest{display:flex;flex-direction:column;gap:8px;padding:8px 16px 10px}
+  .exs__rl{font-size:13px;font-weight:600;color:var(--tx-ink)}
+  .exs__chips{display:flex;flex-wrap:wrap;gap:8px}
+  .exs__chip{min-height:40px;padding:0 14px;font:inherit;font-size:13px;font-weight:600;color:var(--tx-ink-2);
+    background-color:var(--tx-surface-2);border:1px solid var(--tx-line);border-radius:var(--tx-rfull);cursor:pointer}
+  .exs__chip[aria-pressed="true"]{background-color:var(--tx-ink);border-color:var(--tx-ink);color:var(--tx-surface)}
+  .exs__row{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-height:48px;padding:0 16px;
+    font:inherit;font-size:14px;font-weight:500;color:var(--tx-ink);text-align:left;background:transparent;border:0;cursor:pointer}
+  .exs__row > span:first-child{display:inline-flex;align-items:center;gap:8px}
+  .exs__row:hover:not(:disabled){background-color:var(--w-hover)}
+  .exs__row:disabled{color:var(--tx-ink-off);cursor:default}
+  .exs__row:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2px}
+  .exs__row--danger{color:var(--tx-danger)}
+  .exs__rn{font-family:var(--tx-mono);font-size:12px;color:var(--tx-ink-3)}
+  .exs__sets{padding:4px 12px 8px}
+  /* a set is a card of its own on a phone: the number and the two pickers, then the fields in a grid */
+  .exs__sets .wks{display:grid;grid-template-columns:24px minmax(0,1fr) minmax(0,1fr);gap:8px;padding:10px 4px;
+    border-bottom:1px solid var(--tx-line);align-items:center}
+  .exs__sets .wks__k{min-width:0}
+  .exs__sets .wks__f,.exs__sets .wks__f input{min-height:44px}
+  .exs__sets .wke__add{min-height:48px;width:100%}
+}
+@media (max-width:900px) and (prefers-reduced-motion:reduce){
+  .exs{transition:none}
+  @starting-style{.exs{transform:none;opacity:1}}
+}
+
+/* A SET, ON A PHONE: number | weight | reps | note over — | rest | tempo | remove. Two lines of two controls each, a 44px
+   thumb row, and nothing wrapping onto a line of its own (the desk row is one line of seven items). */
+@media (max-width:900px){
+  .exs__sets .wks{display:grid;grid-template-columns:24px minmax(0,1fr) minmax(0,1fr) 44px;grid-template-rows:auto auto;
+    gap:8px 8px;padding:12px 0;border-bottom:1px solid var(--tx-line);align-items:center}
+  .exs__sets .wks__n{grid-column:1;grid-row:1}
+  .exs__sets .wks__k{display:flex;align-items:center;gap:6px;min-width:0}
+  .exs__sets .wks__n + .wks__k{grid-column:2;grid-row:1}
+  .exs__sets .wks__n + .wks__k + .wks__k{grid-column:3;grid-row:1}
+  .exs__sets .wks__k--rest{grid-column:2;grid-row:2}
+  .exs__sets .wks__k--tempo{grid-column:3;grid-row:2}
+  .exs__sets .wks__i{grid-column:4;grid-row:1}
+  .exs__sets .wks__x{grid-column:4;grid-row:2}
+  .exs__sets .wks__i,.exs__sets .wks__x{width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center}
+  .exs__sets .wks__f{flex:1;min-width:0;min-height:44px}
+  .exs__sets .wks__f input{min-width:0;width:100%}
+  .exs__sets .wks__lb{flex:0 0 auto;font-size:12px;color:var(--tx-ink-3)}
+  .exs__sets .wks__tin{flex:1;min-width:0;min-height:44px}
+  .exs__sets .kpk__b{min-height:44px;padding:0 8px}
+}
+
+/* ═══ WORKOUT BUILDER ON A PHONE · HEADINGS (phase 3) ═══════════════════════════════════════════════════════
+   The grip on a heading cannot be dragged on a touch screen, so a heading carries its own ↑ ↓ under 900px, and its name
+   box and ✕ reach thumb size. Both are `display:none` above 900px. */
+.wkdv__mv{display:none}
+@media (max-width:900px){
+  .wkdv__g{display:none}
+  .wkdv__mv{display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto;width:40px;height:40px;
+    border:0;border-radius:var(--tx-r1);background:transparent;color:var(--tx-ink-2);font-size:16px;cursor:pointer}
+  .wkdv__mv:hover{background-color:var(--w-hover);color:var(--tx-ink)}
+  .wkdv__mv:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2px}
+  .wkdv__t{min-height:40px}
+  .wkdv__x{min-width:40px;min-height:40px;opacity:1;pointer-events:auto}
+}
+
+/* the library sheet's three controls were 32–33px */
+@media (max-width:900px){
+  .wkb__sheet .wkl__src,.wkb__sheet .wkl__src select,.wkb__sheet .wkl__q,.wkb__sheet .wkl__q input,.wkb__sheet .wkl__fn{min-height:40px}
+}
+
+/* the Alternatives dialog's close, search, source and filter controls: 30–32px */
+@media (max-width:900px){
+  .wkalt__x{min-width:40px;min-height:40px}
+  .wkalt .wkl__src,.wkalt .wkl__src select,.wkalt .wkl__q,.wkalt .wkl__q input,.wkalt .wkl__fn{min-height:40px}
+}
+@media (max-width:900px){ .wkalt .btn{min-height:40px} }
+
+/* ═══ ADD EXERCISE · THE SHEET SLIDES UP AND BACK DOWN (phone) ══════════════════════════════════════════════
+   It was `display:none` ↔ `flex`, so it could only animate in, and its scrim popped. Now both stay mounted: the sheet rests
+   below the screen and rises on one ease-out, the scrim fades with it, and closing runs the same movement in reverse
+   (visibility waits for the slide to finish, so a closed sheet is out of the tab order and the accessibility tree).
+   Transform and opacity only. */
+@media (max-width:900px){
+  .wkb__sheet{display:flex;flex-direction:column;position:fixed;left:0;right:0;bottom:0;top:56px;z-index:8;
+    background:var(--tx-surface);border:1px solid var(--tx-line-strong);border-bottom:0;
+    border-radius:var(--tx-r3) var(--tx-r3) 0 0;box-shadow:0 -18px 48px rgba(0,0,0,.35);
+    transform:translateY(105%);visibility:hidden;
+    transition:transform 420ms cubic-bezier(.4,0,.2,1),visibility 0s linear 420ms}
+  .wkb--lib .wkb__sheet{transform:none;visibility:visible;
+    transition:transform 560ms cubic-bezier(.32,.72,0,1),visibility 0s}
+  .wkb__scrim{display:block;position:fixed;inset:0;z-index:7;border:0;padding:0;background:var(--tx-scrim);cursor:default;
+    opacity:0;pointer-events:none;transition:opacity 420ms ease}
+  .wkb--lib .wkb__scrim{opacity:1;pointer-events:auto}
+  /* the bar's button answers the press before the sheet arrives */
+  .wkb__addbar .btn{transition:transform 120ms ease}
+  .wkb__addbar .btn:active{transform:scale(.97)}
+}
+@media (max-width:900px) and (prefers-reduced-motion:reduce){
+  .wkb__sheet,.wkb--lib .wkb__sheet,.wkb__scrim,.wkb__addbar .btn{transition:none}
+  .wkb__addbar .btn:active{transform:none}
+}
+
+/* THE SLOWER SLIDE, the same for the exercise sheet: ~560ms up on a softer curve (a long ease-out that does not spend itself in
+   the first third), ~420ms away. The first version was 340ms on a near-instant curve and read as a jump. */
+@media (max-width:900px){
+  .exs{transition:transform 560ms cubic-bezier(.32,.72,0,1),opacity 420ms ease}
+}
+@media (max-width:900px) and (prefers-reduced-motion:reduce){
+  .exs{transition:none}
+}
+
+/* the long half of *Save to this day* is for a desk: on a phone it wrapped the primary onto a row of its own */
+@media (max-width:900px){ .wkb__sv{display:none} }
+
+/* ═══ EXERCISE LIBRARY · phone and desk (6 Oct 2026) ════════════════════════════════════════════════════════
+   MEASURED at 390: the detail panel and the Create form were 420px wide at left −30 (titles and labels cut: "reate
+   exercise"); three stacked selects took ~280px above a two-row list; "MUSCLE GROUP" was clipped; the form's fields were
+   13.5px (iOS zooms) with ten controls under 36px. */
+.exl__sub,.exl__foot{display:none}
+/* the desk row: data columns packed beside the name instead of spread over 1,500px; the chevron keeps the far edge */
+@media (min-width:901px){
+  .tbl--exlib th:nth-child(1),.tbl--exlib td:nth-child(1){width:380px}
+  .tbl--exlib th:nth-child(2),.tbl--exlib td:nth-child(2){width:210px}
+  .tbl--exlib th:nth-child(3),.tbl--exlib td:nth-child(3){width:170px}
+  .tbl--exlib th:nth-child(4),.tbl--exlib td:nth-child(4){width:auto}
+}
+@media (max-width:900px){
+  .exl__desk{display:none}
+  .exl__foot{display:block}
+  .exl__bar{padding:10px 16px !important}
+  .exl__f{display:none;flex-direction:column;align-items:stretch;margin-top:10px}
+  .exl__f--open{display:flex}
+  .exl__f .fld,.exl__f select,.exl__f .ctl{width:100% !important;max-width:none}
+  .exl__f select,.exl__f .ctl{min-height:44px;font-size:16px}
+  /* rows: name over (equipment · group), the chevron at the edge; no column head to clip */
+  .tbl--exlib thead{display:none}
+  .tbl--exlib th:nth-child(1),.tbl--exlib td:nth-child(1){width:88%}
+  .tbl--exlib th:nth-child(2),.tbl--exlib td:nth-child(2),
+  .tbl--exlib th:nth-child(3),.tbl--exlib td:nth-child(3){display:none}
+  .tbl--exlib th:nth-child(4),.tbl--exlib td:nth-child(4){width:12%}
+  .tbl--exlib tbody th{padding-top:10px;padding-bottom:10px}
+  .exl__sub{display:block;margin-top:2px;font-size:12px;font-weight:400;color:var(--tx-ink-3)}
+  .tbl--exlib tbody tr{min-height:52px}
+}
+
+/* A panel header's title takes the room that is left, so the close control sits in the right corner. `.panel__hd` is a
+   flex row and nothing pushed the × off the title, so on the exercise detail it stood beside the name. Desk and phone. */
+.xl-panel .panel__hd .panel__t{flex:1 1 auto;min-width:0}
+
+/* THE PANEL AND THE FORM, AS A SHEET — opt-in class, the third such after `.crd-fpanel` and `.rp-panel`, because nine
+   components render `.panel` and each needs measuring on its own screen. Desk is untouched. */
+@media (max-width:900px){
+  .xl-panel{top:auto;left:0;right:0;bottom:0;width:auto;height:88dvh;max-height:100%;border-left:0;
+    border-top:1px solid var(--tx-line-strong);border-radius:var(--tx-r3) var(--tx-r3) 0 0;
+    padding-bottom:env(safe-area-inset-bottom);animation:none;
+    transition:transform 520ms cubic-bezier(.32,.72,0,1),opacity var(--tx-t-base) var(--tx-ease);transform:translateY(0)}
+  @starting-style{.xl-panel{transform:translateY(100%)}}
+  .xl-panel.panel--out{transform:translateY(100%)}
+  .xl-panel .panel__foot{flex-wrap:wrap;justify-content:space-between;row-gap:8px;padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+  .xl-panel .panel__foot .btn{flex:1 1 auto;justify-content:center;min-height:44px}
+  .xl-panel .panel__hd .btn{min-width:40px;min-height:40px}
+  .xl-panel .ctl,.xl-panel input,.xl-panel select,.xl-panel textarea{font-size:16px;min-height:44px}
+  .xl-panel .pick__t,.xl-panel .sel__t{min-height:44px}
+}
+@media (max-width:900px) and (prefers-reduced-motion:reduce){
+  .xl-panel{transition:none}
+  @starting-style{.xl-panel{transform:none}}
+}
+@media (max-width:900px){
+  .pgtabs__q,.pgtabs__q input{min-height:40px}
+  .xl-panel .panel__body button{min-height:44px}
+  .pgn .btn,.pager .btn,nav[aria-label$="pages"] .btn,nav[aria-label$="pages"] a{min-height:40px}
+}
+@media (max-width:900px){
+  /* with the head hidden the first BODY row sets the fixed layout: the name takes what the chevron leaves (it was 50/50) */
+  .tbl--exlib tbody th:nth-child(1){width:auto}
+  .tbl--exlib tbody td:nth-child(4){width:44px}
+}
+@media (max-width:900px){ .tbl--exlib{table-layout:auto} }
+@media (min-width:901px){
+  /* the chevron is an `svg` set to block, which ignores text-align: it sat beside the group chip with the row's slack
+     after it. It belongs on the row's right edge, where the affordance for *opens a panel* has always been. */
+  .tbl--exlib td:nth-child(4) svg{display:block;margin-left:auto;margin-right:20px}
+}
+
+/* ═══ BUSINESS OVERVIEW · phone and desk (6 Oct 2026) ═══════════════════════════════════════════════════════
+   MEASURED at 390: Remind / Open their file 28px, the section links 18px, the top-client names 24px, the period picker 34px.
+   The links are inline text, so their height is padding the box gets, not a taller font. */
+@media (max-width:900px){
+  .pp__tr{min-height:40px}
+  .slab__link{display:inline-flex;align-items:center;min-height:40px;padding-inline:4px}
+  .body .btn--sm{min-height:40px}
+  .body .who{display:inline-flex;align-items:center;min-height:40px}
+}
+/* the feed and Running out are a matched pair: columns start together, and the shorter one does not stretch its content */
+.grid2{align-items:start}
+
+/* The period picker is 40px on a phone now; the header's own bottom padding was sized for 34, so it touched the rule below. */
+@media (max-width:900px){
+  .ph--biz{padding-bottom:12px}
+}
+
+/* ═══ TRANSACTIONS · phone and desk (6 Oct 2026) ═════════════════════════════════════════════════════════════
+   MEASURED at 390: a settled payment card was 159px because its ⋮ sat alone on a third row (that row is *Remind* and *Mark paid*
+   on the Owed list); the five filter chips wrapped with *Gym share* orphaned; chips 28px, the export glyph 34px. */
+@media (min-width:901px){ .biz__export--phone{display:none} }
+@media (max-width:900px){
+  /* a lone row menu takes the card's corner, beside the money, instead of a row of its own */
+  .mny__tbl tbody tr:has(td.mny__acts > button[aria-label^="Actions for"]){grid-template-columns:auto minmax(0,1fr) auto 40px}
+  .mny__tbl tbody tr:has(td.mny__acts > button[aria-label^="Actions for"]) td.mny__acts{
+    grid-row:1;grid-column:4;padding:0;justify-self:end;margin-right:-6px}
+  .mny__tbl tbody tr:has(td.mny__acts > button[aria-label^="Actions for"]) td[data-cell="state"]{grid-column:3 / 5}
+  /* the filters are one line that scrolls, each chip a thumb wide */
+  .card__band[aria-label="Filter the ledger"]{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+  .card__band[aria-label="Filter the ledger"]::-webkit-scrollbar{display:none}
+  .card__band[aria-label="Filter the ledger"] .chip{flex:0 0 auto;min-height:36px}
+  .biz__export{min-width:40px;min-height:40px}
+}
+
+/* ═══ PACKAGES (`/business/packages`) — a price list of cards and a guided panel ═══
+   The page was two tables and a form on a row. A pack is read as a sentence, a price and
+   what it comes to a session, so it is a card; and the form asks one question at a time. */
+.pkx__tools{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+.pkx__tools .pk__hd__s{flex:1;min-width:0}
+.pkx{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;align-items:start}
+.pkx__main{min-width:0}
+.pkx__side{min-width:0}
+@media (max-width:1180px){.pkx{grid-template-columns:minmax(0,1fr)}}
+
+.pkx-g{margin-bottom:22px}
+.pkx-g__t{display:flex;align-items:center;gap:8px;margin:0;font-family:var(--tx-brand);font-weight:800;font-size:15px;letter-spacing:-.01em}
+.pkx-g__n{margin:2px 0 10px;font-size:12.5px;color:var(--tx-ink-3)}
+.pkx-g__e{display:flex;flex-direction:column;align-items:flex-start;gap:10px;margin:0;padding:14px;border:1px dashed var(--tx-line-strong);border-radius:var(--tx-r2);font-size:13px;color:var(--tx-ink-2)}
+.pkx-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(260px,100%),1fr));gap:12px}
+.pkx-grid > li{min-width:0;display:flex}
+
+.pkx-c{flex:1;display:flex;flex-direction:column;gap:6px;padding:14px;background:var(--tx-surface);border:1px solid var(--tx-line);border-radius:var(--tx-r3)}
+.pkx-c[data-theirs]{background:var(--tx-surface-2)}
+.pkx-c__hd{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.pkx-c__n{margin:0;font-size:15px;font-weight:700;line-height:1.3;min-width:0;overflow-wrap:anywhere}
+.pkx-c__t{margin:0;font-size:12.5px;color:var(--tx-ink-3)}
+.pkx-c__p{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px;margin:6px 0 0}
+.pkx-c__amt{font-family:var(--tx-mono);font-size:22px;font-weight:700;letter-spacing:-.02em}
+.pkx-c__per{font-size:12.5px;color:var(--tx-ink-2)}
+.pkx-c__s{margin:4px 0 0;display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:8px 10px;border-radius:var(--tx-r2);background:var(--tx-surface-3)}
+.pkx-c__s dt{font-size:11px;color:var(--tx-ink-3);white-space:nowrap}
+.pkx-c__s dd{margin:1px 0 0;font-family:var(--tx-mono);font-size:14px;font-weight:600}
+.pkx-c__s > div:first-child dd{color:var(--tx-ink)}
+.pkx-c__s > div:last-child dd{color:var(--tx-ink-2);font-weight:500}
+.pkx-c__ft{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto;padding-top:10px;border-top:1px solid var(--tx-line)}
+.pkx-c__use{font-size:12.5px;color:var(--tx-ink-3)}
+.pkx-c__use b{color:var(--tx-ink);font-weight:600}
+.pkx-c__acts{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
+.pkx-c__tray{display:flex;flex-wrap:wrap;gap:6px;padding-top:8px;border-top:1px solid var(--tx-line)}
+.pkx-c__ask{margin-top:auto;padding-top:10px;border-top:1px solid var(--tx-line)}
+.pkx-c__ask p{margin:0 0 8px;font-size:12.5px;color:var(--tx-ink-2)}
+
+.pkx-presets{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;width:100%;max-width:640px;margin-top:6px}
+.pkx-preset{display:flex;flex-direction:column;gap:2px;align-items:flex-start;text-align:left;padding:12px 14px;min-height:44px;
+  background:var(--tx-surface);border:1px solid var(--tx-line-strong);border-radius:var(--tx-r2);color:var(--tx-ink);cursor:pointer;font:inherit}
+.pkx-preset b{font-size:14px}
+.pkx-preset span{font-size:12px;color:var(--tx-ink-3)}
+.pkx-preset:hover{background-color:var(--tx-field-hover)}
+.pkx-preset:focus-visible,.pkx-o:focus-visible,.pkx-chip:focus-visible,.pkx-ret__t:focus-visible{outline:2px solid var(--tx-accent-text);outline-offset:2px}
+
+.pkx-ret__t{display:flex;align-items:center;gap:8px;width:100%;min-height:40px;padding:0;background:none;border:0;color:var(--tx-ink-2);font:inherit;font-weight:600;cursor:pointer;text-align:left}
+.pkx-ret__c{margin-left:auto;font-family:var(--tx-mono);font-size:16px;color:var(--tx-ink-3)}
+
+/* the panel */
+.pkx-panel{width:min(480px,100vw)}
+.pkx-panel:focus{outline:none}
+.pkx-step{margin-bottom:22px}
+.pkx-q{display:flex;align-items:center;gap:9px;margin:0 0 10px;font-size:14px;font-weight:700}
+.pkx-n{flex:0 0 auto;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:var(--tx-surface-3);color:var(--tx-ink-2);font-family:var(--tx-mono);font-size:11px;font-weight:600}
+.pkx-opts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.pkx-o{display:flex;flex-direction:column;gap:2px;align-items:flex-start;text-align:left;padding:10px 12px;min-height:56px;
+  background:var(--tx-surface);border:1px solid var(--tx-line-strong);border-radius:var(--tx-r2);color:var(--tx-ink);cursor:pointer;font:inherit}
+.pkx-o b{font-size:13.5px;font-weight:600}
+.pkx-o span{font-size:12px;color:var(--tx-ink-3);line-height:1.35}
+.pkx-o:hover{background-color:var(--tx-field-hover)}
+/* Picked is a stroke in the accent's TEXT form: the lime itself is 1.16:1 on a light ground. Paired with
+   its own :hover so pointing at the chosen card cannot draw it as unchosen (equal specificity, later wins). */
+.pkx-o[aria-checked="true"],.pkx-o[aria-checked="true"]:hover{border-color:var(--tx-accent-text);box-shadow:inset 0 0 0 1px var(--tx-accent-text);background-color:var(--tx-surface-2)}
+.pkx-o[aria-checked="true"] b::before{content:'✓ ';color:var(--tx-accent-text)}
+.pkx-fixed{margin:0;padding:10px 12px;border-radius:var(--tx-r2);background:var(--tx-surface-2);font-size:13px;color:var(--tx-ink-2)}
+.pkx-sub{margin-top:12px}
+.pkx-l{margin:12px 0 6px}
+.pkx-opt{font-weight:400;color:var(--tx-ink-3)}
+.pkx-chips{display:flex;flex-wrap:wrap;gap:6px}
+.pkx-chip{min-height:32px;padding:0 12px;border-radius:var(--tx-rfull);background:var(--tx-surface);border:1px solid var(--tx-line-strong);color:var(--tx-ink-2);font:inherit;font-size:13px;cursor:pointer}
+.pkx-chip:hover{background-color:var(--tx-field-hover)}
+.pkx-chip[aria-checked="true"],.pkx-chip[aria-checked="true"]:hover{background-color:var(--tx-ink);border-color:var(--tx-ink);color:var(--tx-surface)}
+.pkx-custom{margin-top:12px}
+.pkx-num{max-width:200px}
+.pkx-live{display:block;margin-top:6px;font-size:13px;font-weight:600;color:var(--tx-accent-text)}
+.pkx-hint{margin:8px 0 0;font-size:12.5px;line-height:1.5;color:var(--tx-ink-3);max-width:60ch}
+
+.pkx__bar{display:none}
+@media (max-width:900px){
+  .pkx__new{display:none}
+  .pkx__tools{margin-bottom:10px}
+  .pkx-presets{grid-template-columns:1fr}
+  .pkx-grid{grid-template-columns:minmax(0,1fr)}
+  .pkx-c__acts .btn{min-height:40px}
+  .pkx-c__tray .btn,.pkx-c__ask .btn{min-height:40px}
+  .pkx-chip{min-height:40px}
+  .pkx-o{min-height:60px}
+  .pkx-num{max-width:none}
+  .pkx-panel{width:auto}
+  .pkx__bar{display:block;position:sticky;bottom:0;z-index:5;margin:8px -14px -14px;padding:10px 14px;background:var(--tx-surface);border-top:1px solid var(--tx-line)}
+  .pkx__bar .btn{width:100%;min-height:44px;justify-content:center}
+}
+@media (max-width:420px){.pkx-opts{grid-template-columns:minmax(0,1fr)}}
+.pkx-panel .pkx-num{text-align:left}
+/* The pinned New pack bar sat 34px ABOVE the tab bar, with the list scrolling through the gap: sticky
+   `bottom:0` is the content edge and `.body` keeps 34px of padding under it for the tab bar's overhang.
+   Pin to the padding edge instead, and give the same 34px back as margin so the page can still end on it. */
+@media (max-width:900px){
+  .pkx__bar{bottom:-34px;margin:8px calc(-1 * var(--w-bodygut,12px)) -34px;padding-inline:var(--w-bodygut,12px)}
+}
+
+/* ── Packages' right column ─────────────────────────────────────────────────
+   Ending soon: 320px holds a name, two buttons AND a detail line only if the
+   buttons go on their own line. Side by side, the detail wrapped to four. */
+.pkx__side .pk__end{flex-wrap:wrap;row-gap:8px}
+.pkx__side .pk__end > .who{flex:1 1 100%;min-width:0}
+.pkx__side .pk__endacts{margin-left:0}
+/* A tinted card's header rule was the neutral grey, which vanishes on an olive ground and leaves the
+   header looking like a hole above the text. It takes the card's own border tint. */
+.pkx__side .card--acc .card__hd{border-bottom-color:var(--tx-accent-line)}
+
+/* ═══ GYM SHARE (`/business/gym`) — the balance leads ═══════════════════════════ */
+.gsx-hero{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);gap:20px 32px;align-items:start;margin-bottom:18px;
+  padding:var(--w-cardpad,18px);background:var(--tx-surface);border:1px solid var(--tx-line);border-radius:var(--tx-r3)}
+.gsx-hero--setup{grid-template-columns:minmax(0,1fr) auto;align-items:center}
+.gsx-hero__terms{padding-left:32px;border-left:1px solid var(--tx-line);min-width:0}
+.gsx-k{margin:0 0 4px;font-family:var(--tx-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--tx-ink-3)}
+.gsx-amt{margin:0;font-family:var(--tx-mono);font-size:38px;font-weight:700;letter-spacing:-.03em;line-height:1.1}
+.gsx-sub{margin:4px 0 0;font-size:13px;color:var(--tx-ink-3)}
+.gsx-hero__bal .btn{margin-top:14px}
+.gsx-terms{margin:0;font-size:15px;line-height:1.45;font-weight:600;max-width:42ch}
+.gsx-t1{margin:0 0 6px;font-family:var(--tx-brand);font-size:18px;font-weight:800;letter-spacing:-.01em}
+.gsx-p{margin:0 0 6px;font-size:13.5px;line-height:1.55;color:var(--tx-ink-2);max-width:60ch}
+.gsx-acts{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:12px}
+.gsx-acts--tray{margin-top:6px;padding-top:8px;border-top:1px solid var(--tx-line)}
+.gsx-ask{margin-top:12px;padding-top:10px;border-top:1px solid var(--tx-line)}
+.gsx-ask p{margin:0;font-size:13px;color:var(--tx-ink-2)}
+.gsx-h{margin:4px 0 10px;font-family:var(--tx-brand);font-size:15px;font-weight:800;letter-spacing:-.01em}
+.gsx-h span{font-family:var(--tx-sans,inherit);font-size:12.5px;font-weight:400;color:var(--tx-ink-3);margin-left:6px}
+.gsx-note{margin:0;font-size:12.5px;line-height:1.55;color:var(--tx-ink-3);max-width:80ch}
+.gsx-note a{color:var(--tx-accent-text)}
+
+/* tables: five or six figures need a measure, not 1400px */
+.gsx-tbl{width:100%}
+.gsx-tbl th.num,.gsx-tbl td.num{text-align:right}
+.gsx-tbl tbody tr[data-idle] td.num{color:var(--tx-ink-3)}
+
+/* payouts as rows */
+.gsx-po{list-style:none;margin:0;padding:0}
+.gsx-po__r{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr) auto;align-items:center;gap:4px 16px;padding:12px var(--w-cardpad,18px);border-top:1px solid var(--tx-line)}
+.gsx-po__r:first-child{border-top:0}
+.gsx-po__main{display:flex;align-items:baseline;gap:10px;white-space:nowrap}
+.gsx-po__amt{font-family:var(--tx-mono);font-size:16px;font-weight:700}
+.gsx-po__when{font-size:12.5px;color:var(--tx-ink-3)}
+.gsx-po__sub{font-size:13px;color:var(--tx-ink-2);min-width:0;overflow-wrap:anywhere}
+.gsx-po__acts{margin-top:0;justify-content:flex-end}
+.gsx-po__ask{font-size:12.5px;color:var(--tx-ink-3)}
+
+@media (max-width:900px){
+  .gsx-hero{grid-template-columns:minmax(0,1fr);gap:16px}
+  .gsx-hero__terms{padding-left:0;border-left:0;padding-top:16px;border-top:1px solid var(--tx-line)}
+  .gsx-hero--setup{grid-template-columns:minmax(0,1fr)}
+  .gsx-hero--setup .btn,.gsx-hero__bal .btn{width:100%;min-height:44px;justify-content:center}
+  .gsx-amt{font-size:34px}
+  .gsx-acts .btn{min-height:40px}
+  .gsx-po__r{grid-template-columns:minmax(0,1fr) auto}
+  .gsx-po__sub{grid-column:1/-1;order:3}
+  .gsx-po__acts{grid-column:1/-1;order:4;justify-content:flex-start}
+  .gsx-po__acts .btn{min-height:40px}
+  .gsx-opt{display:none}
+}
+/* phone tables: a name over two columns of label/value pairs. The old `.pk__tbl` reflow indented the
+   first cell and let the numbers drift 10px from row to row. */
+@media (max-width:620px){
+  .gsx-tbl thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .gsx-tbl,.gsx-tbl tbody{display:block;width:100%}
+  .tblwrap > .gsx-tbl{min-width:0}
+  .card__b--flush .gsx-tbl tbody tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px;padding:12px var(--w-cardpad,14px);border-bottom:1px solid var(--tx-line);height:auto}
+  .card__b--flush .gsx-tbl tbody tr:last-child{border-bottom:0}
+  .card__b--flush .gsx-tbl tbody td{display:flex;justify-content:space-between;align-items:baseline;gap:8px;height:auto;min-height:0;padding:0;border:0;white-space:normal}
+  .card__b--flush .gsx-tbl tbody td::before{content:attr(data-l);font-family:var(--tx-mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--tx-ink-3)}
+  .card__b--flush .gsx-tbl tbody td[data-l=""]{grid-column:1/-1;justify-content:flex-start;font-size:14.5px}
+  .card__b--flush .gsx-tbl tbody td[data-l=""]::before{content:none}
+}
+/* No width cap: a table narrower than its card leaves a dead strip on the right (Gym share and Reports). */
+/* The flush-table indent (`.card__b--flush .tbl tbody tr > :first-child` / `:last-child`, (0,3,3)) out-ranked the
+   phone reflow above at (0,2,2): the name sat 12px in and an odd last cell stopped 14px short of the right edge,
+   so the lone *Gym took* / *Balance* pair drifted off the column. Same selector, weighted past it. */
+@media (max-width:620px){
+  .card__b--flush .tblwrap .gsx-tbl tbody tr > td:nth-child(n){padding:0}
+}
+
+/* The tab bar's raised + overhangs 13px into whatever sits above it, and a bottom sheet (z 30) painted over it,
+   cutting the button's top off. While a sheet is open the bar stands above it. The sheet's foot keeps 14px of
+   bottom padding, so the overhang lands in padding and never on a button. The bar is above the scrim for that
+   time too, which is the price of the + staying whole. */
+@media (max-width:900px){
+  body:has(.xl-panel:not(.panel--out)) .tabs{z-index:35}
+}
+
+/* A bottom sheet (`.xl-panel`) ends ABOVE the tab bar. The bar stays over any open sheet (rule above, so the raised +
+   is not cut), and a sheet pinned to the bottom edge therefore had its last 55px under the bar: the foot with its
+   primary button, or, on a sheet with no foot (an exercise's detail), the end of the content itself. The bar already
+   pays for the home-gesture strip, so the sheet gives its own back. The raised + still overhangs 13px into the sheet's
+   foot padding, which is what that padding is for. */
+@media (max-width:900px){
+  .xl-panel{bottom:calc(var(--w-tabs) + env(safe-area-inset-bottom));height:calc(88dvh - var(--w-tabs));padding-bottom:0}
+  .xl-panel .panel__foot{padding-bottom:14px}
+}
+
+/* ═══ REPORTS — a page that says what it counts, not how ═══════════════════════ */
+.rpt-cap{margin:12px 0 0;font-size:12.5px;line-height:1.5;color:var(--tx-ink-3)}
+.rpt-from{margin:10px 0 0;font-size:12.5px;color:var(--tx-ink-3)}
+.rpt-why{margin-top:8px;font-size:12.5px;color:var(--tx-ink-3)}
+.rpt-why > summary{display:inline-flex;align-items:center;min-height:28px;cursor:pointer;color:var(--tx-ink-2);text-decoration:underline dotted;text-underline-offset:3px;list-style:none}
+.rpt-why > summary::-webkit-details-marker{display:none}
+.rpt-why > summary:focus-visible{outline:2px solid var(--tx-accent-text);outline-offset:2px;border-radius:2px}
+.rpt-why p{margin:6px 0 0;line-height:1.55;max-width:60ch}
+.rpt-g{margin:14px 0 2px;font-family:var(--tx-mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--tx-ink-3)}
+.rpt-g:first-child{margin-top:0}
+.rpt-jump{display:none}
+.rptflow{list-style:none;padding:0}
+.rptflow__m{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:44px;font-family:var(--tx-mono);font-size:12px;color:var(--tx-ink-2)}
+.rptflow__m--quiet{color:var(--tx-ink-3)}
+.rptflow__l{font-size:11px;color:var(--tx-ink-3)}
+.rptflow__in{color:var(--tx-accent-text);font-weight:600}
+.rptflow__out{color:var(--tx-danger);font-weight:600;margin-left:4px}
+.rptflow__m > span:last-child{display:inline-flex}
+
+@media (max-width:900px){
+  /* the section strip: one scrolling row, 40px targets, sticky under the header so a long page is never far from its parts */
+  .rpt-jump{display:flex;gap:6px;margin:0 calc(-1 * var(--w-bodygut,12px)) 12px;padding:0 var(--w-bodygut,12px);overflow-x:auto;scrollbar-width:none}
+  .rpt-jump::-webkit-scrollbar{display:none}
+  .rpt-jump a{flex:0 0 auto;display:inline-flex;align-items:center;min-height:40px;padding:0 14px;border:1px solid var(--tx-line-strong);border-radius:var(--tx-rfull);color:var(--tx-ink-2);font-size:13px;text-decoration:none;background:var(--tx-surface)}
+  .rpt-jump a:active{background-color:var(--tx-field-hover)}
+  #rpt-money,#rpt-work,#rpt-clients,#rpt-top{scroll-margin-top:8px}
+  /* compact charts: the plot stops at 120px instead of stretching the card */
+  .rptgrid > .card > .rptchart > .chart{min-height:120px;max-height:150px}
+  .rpt-why > summary{min-height:40px}
+  /* the clients strip becomes a grid, six to a row, so twelve months read as two lines not a wrapped ribbon */
+  .rptflow{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px 4px}
+  .rptflow__m{min-width:0}
+}
+@media (max-width:360px){.rptflow{grid-template-columns:repeat(4,minmax(0,1fr))}}
+/* Top clients on a phone: two lines a client, not five. The name and what they PAID share the first line (the
+   figure the list is ranked by); sessions and your share are the quiet second. Ten clients at ~120px each was
+   a third of the page. Weighted past the flush-table indent the same way `.gsx-tbl`'s reflow is. */
+@media (max-width:620px){
+  .card__b--flush .tblwrap .rpt-top tbody tr{grid-template-columns:minmax(0,1fr) auto;gap:2px 12px;padding:10px var(--w-cardpad,14px)}
+  .card__b--flush .tblwrap .rpt-top tbody td:nth-child(1){grid-column:1;grid-row:1;font-size:14.5px}
+  .card__b--flush .tblwrap .rpt-top tbody td:nth-child(3){grid-column:2;grid-row:1;font-family:var(--tx-mono);font-weight:600;font-size:14px}
+  .card__b--flush .tblwrap .rpt-top tbody td:nth-child(3)::before{content:none}
+  .card__b--flush .tblwrap .rpt-top tbody td:nth-child(2){grid-column:1;grid-row:2;justify-content:flex-start;gap:6px;font-size:12.5px;color:var(--tx-ink-3)}
+  .card__b--flush .tblwrap .rpt-top tbody td:nth-child(2)::after{content:'sessions'}
+  .card__b--flush .tblwrap .rpt-top tbody td:nth-child(2)::before{content:none}
+  .card__b--flush .tblwrap .rpt-top tbody td:nth-child(4){grid-column:2;grid-row:2;font-size:12.5px;color:var(--tx-ink-3)}
+}
+@media (max-width:620px){
+  .card__b--flush .tblwrap .rpt-top tbody tr{align-items:center;gap:0 12px;padding:4px var(--w-cardpad,14px) 8px}
+  .rpt-top .who{display:flex;align-items:center;min-height:36px}
+  .card__b--flush .tblwrap .rpt-top tbody td:nth-child(3){align-self:center}
+}
+
+/* ═══ EXERCISE LIBRARY TILES — the category and equipment pictures ═══ */
+.lt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(200px,100%),1fr));gap:12px;max-width:960px}
+.lt{display:flex;flex-direction:column;align-items:stretch;gap:2px;padding:0;text-align:left;cursor:pointer;font:inherit;color:var(--tx-ink);
+  background:var(--tx-surface);border:1px solid var(--tx-line);border-radius:var(--tx-r3);overflow:hidden}
+.lt:hover{background-color:var(--tx-field-hover)}
+.lt:focus-visible{outline:2px solid var(--tx-accent-text);outline-offset:2px}
+.lt__art{display:grid;place-items:center;height:132px;background:var(--tx-surface-2);border-bottom:1px solid var(--tx-line)}
+.lt__art .ta{height:116px;width:auto;max-width:90%}
+.lt__art .ta--fig{height:122px}
+.lt__t{padding:10px 14px 0;font-family:var(--tx-brand);font-size:15px;font-weight:800;letter-spacing:-.01em}
+.lt__n{padding:0 14px 12px;font-size:12.5px;color:var(--tx-ink-3)}
+.ta-row{display:flex;align-items:center;justify-content:center;gap:6px;height:100%}
+.ta-row .ta{height:120px;max-width:49%}
+.ta-row .ta:only-child{max-width:96%;height:124px}
+/* the body: an outline pass in the quiet ink, then a flat fill over it so limbs show no seams */
+.ta__out,.ta .ta__out *{fill:none;stroke:color-mix(in srgb,var(--tx-ink-3) 70%,transparent);stroke-width:3.4;stroke-linejoin:round}
+.ta__fill,.ta .ta__fill *{fill:var(--tx-surface-3);stroke:none}
+/* a muscle that is NOT the tile's subject: present, faint */
+.ta__m,.ta .ta__m{fill:none;stroke:color-mix(in srgb,var(--tx-ink-3) 55%,transparent);stroke-width:1.4;stroke-linejoin:round}
+.ta__b,.ta .ta__b{fill:var(--tx-surface-3);stroke:color-mix(in srgb,var(--tx-ink-3) 60%,transparent);stroke-width:1.5;stroke-linejoin:round}
+.ta__line,.ta .ta__line{fill:none;stroke:color-mix(in srgb,var(--tx-ink-3) 75%,transparent);stroke-width:8;stroke-linecap:round}
+.ta__line--thin,.ta .ta__line--thin{stroke:var(--tx-accent-text);stroke-width:3;stroke-linejoin:round}
+.ta__h,.ta .ta__h{fill:var(--tx-accent);stroke:var(--tx-accent-text);stroke-width:1.5;stroke-linejoin:round}
+.ta__s,.ta .ta__s{fill:none;stroke:var(--tx-accent-text);stroke-width:1.2;stroke-linecap:round;opacity:.7}
+.ta__s--abs,.ta .ta__s--abs{stroke:var(--tx-accent-ink,#12150a);opacity:.75;stroke-width:1.6}
+
+/* the muscle map: every region a quiet polygon, the tile's own regions lit. A thin ground-coloured seam keeps
+   neighbouring regions readable as separate muscles. */
+.ta__m,.ta polygon.ta__m{fill:var(--tx-surface-3);stroke:var(--tx-surface);stroke-width:.5;stroke-linejoin:round}
+.ta__h,.ta polygon.ta__h{fill:var(--tx-accent);stroke:var(--tx-accent-text);stroke-width:.5;stroke-linejoin:round}
+.ta-row .ta{height:124px}
+/* the unlit body needs enough weight to read as a person, with the lit muscle clearly brighter than it */
+.ta__m,.ta polygon.ta__m{fill:color-mix(in srgb,var(--tx-ink-3) 42%,var(--tx-surface-2));stroke:var(--tx-surface-2);stroke-width:.7}
+.ta__h,.ta polygon.ta__h{stroke-width:.7}
+
+/* one scale, a label, and a soft glow on the lit muscle */
+.ta-row{gap:10px}
+.ta-v{display:flex;flex-direction:column;align-items:center;gap:2px}
+.ta-row .ta-v .ta{height:112px;width:auto;max-width:none}
+.ta-v__l{font-family:var(--tx-mono);font-style:normal;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--tx-ink-3)}
+.ta__h,.ta polygon.ta__h{filter:drop-shadow(0 0 2.5px color-mix(in srgb,var(--tx-accent) 60%,transparent))}
+.lt__art{height:142px}
+/* a crop of a body should fade out, not end on a hard line */
+.ta--fig{-webkit-mask-image:linear-gradient(to bottom,transparent 0,#000 11%,#000 86%,transparent 100%);mask-image:linear-gradient(to bottom,transparent 0,#000 11%,#000 86%,transparent 100%)}
+
+/* equipment pictures: rings and thin strokes */
+.ta__ring,.ta circle.ta__ring{fill:none}
+.ta__line--thin,.ta .ta__line--thin{stroke-width:3}
+.ta path.ta__line--thin,.ta polygon.ta__line--thin{fill:none;stroke:color-mix(in srgb,var(--tx-ink-3) 75%,transparent);stroke-width:3.5;stroke-linejoin:round;stroke-linecap:round}
+.ta polygon.ta__line{fill:none;stroke:color-mix(in srgb,var(--tx-ink-3) 80%,transparent);stroke-width:6;stroke-linejoin:round}
+.lt[aria-current="true"]{border-color:var(--tx-accent-text);box-shadow:inset 0 0 0 1px var(--tx-accent-text)}
+.lt{text-decoration:none}
+.ta__pulse,.ta .ta__pulse{fill:none;stroke:var(--tx-accent-text);stroke-width:3;stroke-linejoin:round;stroke-linecap:round}
+.ta circle.ta__ring{fill:none;stroke:color-mix(in srgb,var(--tx-ink-3) 75%,transparent);stroke-width:3.5}
+.ta--whole{-webkit-mask-image:none !important;mask-image:none !important}
+.ta-row .ta-v .ta.ta--whole{height:118px}
+
+/* ═══ EXERCISE LIBRARY — three ways in ═══════════════════════════════════════════ */
+.lib-body{flex:1;min-height:0;overflow:auto;padding:18px 24px 24px}
+.lt-grid.lt-grid--lib{max-width:none;grid-template-columns:repeat(auto-fill,minmax(min(210px,100%),1fr))}
+.lt-grid.lt-grid--kit{max-width:none;margin:0 0 18px;grid-template-columns:repeat(auto-fill,minmax(min(168px,100%),1fr))}
+.lt-grid--kit .lt__art{height:104px}
+.lt-grid--kit .lt__art .ta{height:84px}
+.lt__art{overflow:hidden}
+.ta-row{max-width:100%}
+.ta-row .ta-v .ta{max-width:100%}
+
+.lib-hd{display:flex;align-items:center;flex-wrap:wrap;gap:6px 14px;margin:0 0 12px}
+.lib-hd__t{margin:0;font-family:var(--tx-brand);font-size:18px;font-weight:800;letter-spacing:-.01em}
+.lib-hd__n{font-size:12.5px;color:var(--tx-ink-3)}
+.lib-hd .lib-hd__row--aside{align-items:center}
+.lib-kind{margin:0 0 0 6px}
+.lib-narrow{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 16px}
+.lib-narrow__c{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;border-radius:var(--tx-rfull);
+  border:1px solid var(--tx-line-strong);background:var(--tx-surface);color:var(--tx-ink-2);font-size:13px;text-decoration:none}
+.lib-narrow__c i{font-style:normal;font-family:var(--tx-mono);font-size:11px;color:var(--tx-ink-3)}
+.lib-narrow__c:hover{background-color:var(--tx-field-hover)}
+.lib-narrow__c[aria-current="true"],.lib-narrow__c[aria-current="true"]:hover{background-color:var(--tx-ink);border-color:var(--tx-ink);color:var(--tx-surface)}
+.lib-narrow__c[aria-current="true"] i{color:inherit;opacity:.7}
+.lib-narrow__c:focus-visible{outline:2px solid var(--tx-accent-text);outline-offset:2px}
+.lib-empty{padding:24px 0}
+
+/* search: a filter rail beside the results */
+.lib-search{flex:1;min-height:0;display:grid;grid-template-columns:288px minmax(0,1fr)}
+.lib-search__rail{overflow-y:auto;padding:16px 16px 24px 24px;border-right:1px solid var(--tx-line)}
+.lib-search__main{min-width:0;overflow:auto;padding:16px 24px 24px}
+.lib-search__bar{display:flex;gap:10px;align-items:center;margin-bottom:12px}
+.lib-search__q{flex:1;min-width:0}
+.lib-search__bar .lib-search__fb{display:none}
+.lib-search__n{margin:0 0 8px;font-size:12.5px;color:var(--tx-ink-3)}
+.lib-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 10px}
+.lib-chip{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 10px;border-radius:var(--tx-rfull);
+  background:var(--tx-ink);border:0;color:var(--tx-surface);font:inherit;font-size:12.5px;cursor:pointer}
+.lib-chip:focus-visible,.lib-chips__clear:focus-visible,.lf-more:focus-visible{outline:2px solid var(--tx-accent-text);outline-offset:2px}
+.lib-chips__clear{min-height:28px;padding:0 6px;background:none;border:0;color:var(--tx-ink-2);font:inherit;font-size:12.5px;text-decoration:underline dotted;cursor:pointer}
+
+/* the filter groups */
+.lf{display:flex;flex-direction:column}
+.lf-g{border-bottom:1px solid var(--tx-line)}
+.lf-g > summary{display:flex;align-items:center;justify-content:space-between;min-height:40px;cursor:pointer;list-style:none;font-weight:600;font-size:13.5px}
+.lf-g > summary::-webkit-details-marker{display:none}
+.lf-g > summary::after{content:'+';font-family:var(--tx-mono);color:var(--tx-ink-3);margin-left:8px}
+.lf-g[open] > summary::after{content:'–'}
+.lf-g > summary > span{flex:1}
+.lf-g > summary:focus-visible{outline:2px solid var(--tx-accent-text);outline-offset:2px}
+.lf-n{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--tx-accent);color:var(--tx-accent-ink,#12150a);font-family:var(--tx-mono);font-size:11px}
+.lf-list{display:flex;flex-direction:column;padding:0 0 10px}
+.lf-o{display:flex;align-items:center;gap:10px;min-height:32px;cursor:pointer;font-size:13.5px}
+.lf-o input{width:16px;height:16px;margin:0;accent-color:var(--tx-accent-text)}
+.lf-o__l{flex:1;min-width:0}
+.lf-o__c{font-style:normal;font-family:var(--tx-mono);font-size:11px;color:var(--tx-ink-3)}
+.lf-more{align-self:flex-start;min-height:32px;padding:0;background:none;border:0;color:var(--tx-ink-2);font:inherit;font-size:12.5px;text-decoration:underline dotted;cursor:pointer}
+.lf-kit{padding:0 0 4px 8px}
+.lf-kit .lf-g{border-bottom:0}
+.lf-kit .lf-g > summary{min-height:34px;font-weight:500;color:var(--tx-ink-2)}
+.lf-show{padding:14px 0 0}
+
+/* the list rows: five columns at a desk, one with a second line on a phone */
+.tbl--exlib5 th:nth-child(5),.tbl--exlib5 td:nth-child(5){width:40px}
+
+@media (max-width:900px){
+  .lib-body{padding:14px 12px 24px}
+  .lt-grid.lt-grid--lib{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .lt-grid.lt-grid--kit{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  .lt__art{height:128px}
+  .ta-row{gap:4px}
+  .ta-row .ta-v .ta{height:100px}
+  .lt__t{padding:8px 10px 0;font-size:14px}
+  .lt__n{padding:0 10px 10px;font-size:12px}
+  .lib-narrow{flex-wrap:nowrap;overflow-x:auto;margin:0 -12px 14px;padding:0 12px;scrollbar-width:none}
+  .lib-narrow::-webkit-scrollbar{display:none}
+  .lib-narrow__c{flex:0 0 auto;min-height:40px}
+  .lib-search{display:block;overflow:auto}
+  .lib-search__rail{display:none}
+  .lib-search__main{overflow:visible;padding:12px}
+  .lib-search__bar .lib-search__fb{display:inline-flex;flex:0 0 auto;align-self:stretch;align-items:center;gap:6px;height:auto;min-height:34px}
+  .lib-chip,.lib-chips__clear{min-height:36px}
+  .lf-o{min-height:44px}
+  .lf-o input{width:20px;height:20px}
+  .lf-g > summary{min-height:48px}
+  .lf-more{min-height:44px}
+  .lf .lf-show .ctl,.lf .lf-show select{min-height:44px;font-size:16px}
+  /* five columns become a name over a quiet line; only the chevron stays beside it */
+  .tbl--exlib5 th:nth-child(2),.tbl--exlib5 td:nth-child(2),
+  .tbl--exlib5 th:nth-child(3),.tbl--exlib5 td:nth-child(3),
+  .tbl--exlib5 th:nth-child(4),.tbl--exlib5 td:nth-child(4){display:none}
+  .tbl--exlib5 th:nth-child(1),.tbl--exlib5 td:nth-child(1){width:88%}
+  .tbl--exlib5 th:nth-child(5),.tbl--exlib5 td:nth-child(5){width:12%}
+}
+
+/* the exercise panel's "About this entry": a key over its value, quiet */
+.exl__about{margin:0;display:flex;flex-direction:column;gap:10px}
+.exl__about dt{font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--tx-ink-3)}
+.exl__about dd{margin:2px 0 0;font-size:13px;line-height:1.55;color:var(--tx-ink-2);overflow-wrap:anywhere}
+
+/* a long set of kit as chips wraps over two or three rows at a desk; on a phone it scrolls (see .lib-narrow) */
+@media (min-width:901px){.lib-narrow{max-width:1100px}}
+
+/* twenty-odd kinds of kit as chips: tighter, so it is two rows at a desk (it scrolls on a phone, see .lib-narrow) */
+@media (min-width:901px){
+  .lib-narrow--dense{gap:5px;max-width:none}
+  .lib-narrow--dense .lib-narrow__c{min-height:28px;padding:0 9px;gap:5px;font-size:12.5px}
+  .lib-narrow--dense .lib-narrow__c i{font-size:10.5px}
+}
+
+/* the drill-down's trail, then its heading: the trail is the way UP, the chips the way ACROSS */
+.lib-hd{display:block;margin:0 0 12px}
+.lib-hd__row{display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 12px;margin-top:6px}
+.lib-crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:2px 8px;font-size:13px}
+.lib-crumbs a{display:inline-flex;align-items:center;min-height:32px;color:var(--tx-ink-2);text-decoration:none}
+.lib-crumbs a:hover{color:var(--tx-ink);text-decoration:underline}
+.lib-crumbs b{font-weight:600;color:var(--tx-ink)}
+.lib-crumbs i{font-style:normal;color:var(--tx-ink-3)}
+@media (max-width:900px){
+  .lib-crumbs a{min-height:40px}
+  .lib-crumbs{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap;scrollbar-width:none;margin:0 -12px;padding:0 12px}
+  .lib-crumbs::-webkit-scrollbar{display:none}
+}
+
+/* a tile for kit with no picture of its own: text only, so no drawing is ever repeated under another name */
+.lt--plain{padding:0}
+.lt--plain .lt__t{padding-top:14px}
+.lt--plain .lt__n{padding-bottom:14px}
+.lt-grid.lt-grid--plain{max-width:none;grid-template-columns:repeat(auto-fill,minmax(min(190px,100%),1fr))}
+@media (max-width:900px){.lt-grid.lt-grid--plain{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}}
+
+/* cardio: a heart, smaller than a figure, with a pulse that runs through it */
+.lt__art .ta.ta--heart{height:80px}
+.ta__pulse-out,.ta .ta__pulse-out{fill:none;stroke:color-mix(in srgb,var(--tx-ink-3) 75%,transparent);stroke-width:3;stroke-linecap:round}
+.ta__pulse-in,.ta .ta__pulse-in{fill:none;stroke:var(--tx-accent-ink,#12150a);stroke-width:3.2;stroke-linecap:round;stroke-linejoin:round}
+
+/* create exercise */
+.xc-l{margin:12px 0 6px}
+.xc-l:first-child{margin-top:0}
+.xc-lines__l{list-style:none;margin:0 0 6px;padding:0;display:flex;flex-direction:column;gap:6px}
+.xc-lines__l li{display:flex;align-items:center;gap:8px}
+.xc-lines__n{flex:0 0 22px;height:22px;border-radius:50%;display:grid;place-items:center;background:var(--tx-surface-2);border:1px solid var(--tx-line);font-family:var(--tx-mono);font-size:11px;font-weight:600;color:var(--tx-ink-2)}
+.xc-lines__l .ctl{flex:1;min-width:0}
+.xc-more{display:flex;align-items:center;justify-content:space-between;width:100%;min-height:44px;margin:4px 0 14px;padding:0 2px;background:none;border:0;border-top:1px solid var(--tx-line);border-bottom:1px solid var(--tx-line);color:var(--tx-ink-2);font:inherit;font-weight:600;font-size:13.5px;cursor:pointer}
+.xc-more span{font-family:var(--tx-mono);color:var(--tx-ink-3)}
+.xc-more:focus-visible{outline:2px solid var(--tx-accent-text);outline-offset:2px}
+.xc-panel select.ctl{width:100%}
+@media (max-width:900px){.xc-lines__l .btn{min-width:40px;min-height:40px}}
+
+/* a bullet list line is a dot beside the field, not a dot inside a ring; only numbered steps keep the ring */
+.xc-lines__n:where(:not([data-num])){flex:0 0 22px;border:0;background:none}
+.xc-lines__n[data-num]{}
+.xc-grp + .xc-grp{margin-top:2px}
+.xc-grp .xc-l{margin-top:10px}
+
+/* ═══ SETTINGS · ACCOUNT — two by two ═══════════════════════════════════════════ */
+.acxw{container:acx / inline-size;width:100%}
+.acx{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch;max-width:1120px}
+@container acx (max-width:820px){.acx{grid-template-columns:minmax(0,1fr);max-width:640px}}
+.acx-link{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding:12px 14px;min-height:56px;
+  border:1px solid var(--tx-line-strong);border-radius:var(--tx-r2);color:var(--tx-ink);text-decoration:none}
+.acx-link b{display:block;font-size:14px}
+.acx-link i{display:block;margin-top:2px;font-style:normal;font-size:12.5px;color:var(--tx-ink-3);line-height:1.4}
+.acx-link > span:last-child{font-family:var(--tx-mono);font-size:18px;color:var(--tx-ink-3)}
+.acx-link:hover{background-color:var(--tx-field-hover)}
+.acx-link:focus-visible{outline:2px solid var(--tx-accent-text);outline-offset:2px}
+@media (max-width:900px){
+  /* a thumb-sized form: 44px fields at 16px (under 16 and iOS zooms the page), 44px buttons */
+  .acx .ctl,.acx input,.acx select,.acx textarea{min-height:44px;font-size:16px}
+  .acx .btn{min-height:44px}
+}
+
+/* nudge messages */
+.ndgt__tk,.ndgt .fold__s .ndgt__tk{font-family:var(--tx-mono);font-size:.9em;padding:0 4px;border-radius:4px;background:var(--tx-surface-3);color:var(--tx-ink-2)}
+.ndgt .fold__s{max-width:100ch}
+.ndgt__limits{margin-top:6px}
+
+/* The facts list is inset 16px for a FLUSH card; inside a padded card that is a second left edge beside the link under it. */
+.acx .facts{padding:0}
+/* Cards in a row end on one line: the shorter one is stretched, and its content stays at the top. */
+.acx > .card{height:100%}
+
+/* ═══ SETTINGS · YOUR PROFILE ═══════════════════════════════════════════════════ */
+/* Stacked, the form comes FIRST and the preview after it: the sidecar's default puts the aside above, which on a phone
+   was ~480px of preview and empty-section list above the first field. */
+@container sidecar (max-width:927px){
+  .pfx .sdc__side{order:1}
+}
+/* The bio box fits its words (five rows at least) instead of holding three lines in an eight-row field */
+.pfx-bio{field-sizing:content;min-height:8.5em;max-height:24em;resize:vertical}
+.pfx-foot{margin-top:14px;padding-top:12px;border-top:1px solid var(--tx-line)}
+.pfx-foot__h{margin:12px 0 2px;font-weight:600;font-size:13.5px}
+.pfx-foot .small{margin:0}
+@media (max-width:900px){
+  .pfx .ctl,.pfx input,.pfx select,.pfx textarea{min-height:44px;font-size:16px}
+  .pfx .chip,.pfx a.chip{min-height:40px}
+  .pfx-hd .btn{min-height:40px}
+}
+@media (max-width:900px){.pfx textarea.pfx-bio{min-height:8.5em}}
+
+/* ═══ CERTIFICATIONS — one measure ═════════════════════════════════════════════════ */
+/* The chips, the notice, the search and its results used to stop at four different widths (480, 424, 355, 560). One
+   measure for all of them. */
+.cpk{max-width:600px}
+.cpk__trust{margin-top:14px}
+.cpk__find{display:flex;align-items:flex-end;gap:10px;margin-top:18px}
+.cpk__find .fld{flex:1;min-width:0}
+.cpk__add{flex:0 0 auto}
+@media (max-width:560px){
+  .cpk__find{flex-direction:column;align-items:stretch}
+  .cpk__add{width:100%;justify-content:center}
+}
+@media (max-width:900px){.cpk .btn{min-height:44px}}
+.cpk__find .fld{margin:0}
+
+/* the experience bands: one choice of five, as option cards */
+.xpk{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:18px;max-width:640px}
+.xpk__o{min-height:56px;justify-content:center}
+.xpk__o b{font-size:14.5px}
+@container sidecar (max-width:927px){.xpk{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:900px){.xpk{grid-template-columns:repeat(2,minmax(0,1fr))}}
+/* the tick sits in the corner so a picked band's label does not wrap to make room for it */
+.xpk__o{position:relative}
+.xpk__o b::before{content:none !important}
+.xpk__o[aria-checked="true"]::after{content:'✓';position:absolute;top:6px;right:8px;font-size:12px;line-height:1;color:var(--tx-accent-text)}
+
+/* specialities: the counter beside what it means, and a chip that knows its place */
+.spk__count{display:flex;align-items:center;gap:10px;margin-top:16px}
+.spk__count .small{margin:0;color:var(--tx-ink-3)}
+.chip__rank{display:inline-grid;place-items:center;min-width:16px;height:16px;margin-right:6px;padding:0 3px;border-radius:8px;
+  background:var(--tx-accent-ink,#12150a);color:var(--tx-accent);font-family:var(--tx-mono);font-size:10.5px;font-weight:700;line-height:1}
+
+/* ═══ SETTINGS · WORK & HOURS ═══════════════════════════════════════════════════ */
+/* the day ribbon scaled to its box: no sideways scroll, no instruction to scroll */
+.dr__scroll--fit{overflow:hidden}
+.dr--fit,.dr__ax--fit{width:100%;min-width:0}
+@media (max-width:560px){.dr__ax--fit .dr__t:nth-of-type(even){visibility:hidden}}
+
+/* a save bar that sticks to the foot of the scroller while there is anything to say */
+.pfx-pin{position:sticky;bottom:calc(12px - 32px);z-index:6;margin-top:18px;padding:10px 14px;background:var(--tx-surface);
+  border:1px solid var(--tx-line-strong);border-radius:var(--tx-r3);box-shadow:var(--tx-e2)}
+.pfx-pin .msg{margin:0 0 8px}
+.pfx-pin > div:last-child{margin-top:0 !important}
+.pfx-sec{scroll-margin-top:8px}
+.pfx-jump{display:none}
+@media (max-width:900px){
+  .pfx-pin{bottom:calc(12px - 34px)}
+  .pfx-jump{display:flex}
+  .pfx .fldrow .btn,.pfx .fldrow .btn--icon{min-height:44px;min-width:44px}
+}
+
+/* social links */
+.soc__l{display:flex;align-items:center;gap:6px}
+.soc__l svg{color:var(--tx-ink-3)}
+.soc__on{margin:6px 0 0;font-size:12.5px;color:var(--tx-ink-2)}
+.soc__on > span:first-child{color:var(--tx-accent-text);font-weight:700;margin-right:2px}
+.soc__on a{font-weight:600}
+@media (max-width:900px){.soc__on a{display:inline-flex;align-items:center;min-height:32px}}
+
+/* the library switch heads the filter list, with a rule under it like the groups */
+.lf-show{padding:0 0 12px;margin-bottom:2px;border-bottom:1px solid var(--tx-line)}

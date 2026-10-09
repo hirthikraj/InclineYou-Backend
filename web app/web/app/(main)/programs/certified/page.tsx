@@ -1,5 +1,6 @@
 import { CertifiedShelf } from '@/components/programs/CertifiedShelf';
 import { Unavailable } from '@/components/today/Unavailable';
+import { getClientName } from '@/lib/programs/api';
 import { requireCertifiedShelf } from '@/lib/programs/guard';
 
 /**
@@ -28,7 +29,13 @@ export const dynamic = 'force-dynamic';
 
 export const metadata = { title: 'InclineYou templates · Fitness · InclineYou' };
 
-export default async function Page() {
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const q = await searchParams;
+  const forClient = typeof q.client === 'string' ? q.client : null;
   const result = await requireCertifiedShelf();
 
   if (!result.ok) {
@@ -40,5 +47,8 @@ export default async function Page() {
     );
   }
 
-  return <CertifiedShelf data={result.data} />;
+  /* Who the trainer is choosing for, by first name; a failed read is an absence and the banner says *a client*. */
+  const forClientName = forClient ? ((await getClientName(forClient))?.split(' ')[0] ?? null) : null;
+
+  return <CertifiedShelf data={result.data} forClientName={forClientName} />;
 }

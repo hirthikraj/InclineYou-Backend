@@ -252,7 +252,7 @@ function Track({
         highOut ? ' wsbal__r--high' : ''
       }`}
     >
-      <span className="wsbal__l">{label}</span>
+      <span className="wsbal__l" title={label}>{label.replace(/ system$/, "")}</span>
       <span className="wsbal__v">{value}</span>
       <span className={`wsbal__t${banded ? '' : ' wsbal__t--plain'}`}>
         {/* THE BAND IS TWO TICKS NOW, not a wash. Measured, the wash was

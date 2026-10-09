@@ -1,9 +1,9 @@
 'use client';
 
+import Link from 'next/link';
+
 import { formatPhone } from '@/lib/auth/policy';
-import { Avatar } from '@/web-components/ui/Avatar';
 import { Card } from '@/web-components/ui/Card';
-import { Chip } from '@/web-components/ui/Chip';
 import { FactList } from '@/web-components/ui/FactList';
 
 /**
@@ -42,50 +42,25 @@ import { FactList } from '@/web-components/ui/FactList';
  * it goes somewhere the trainer can always come back from.
  */
 export function AccountAside({
-  /** The DRAFT, not the saved row — the same call `ProfileAside` makes, so the
-   *  plate is the name being typed rather than the one being replaced. */
-  name,
-  email,
   phone,
-  /** Null when the roster would not load. The row is dropped rather than
-   *  guessed at — see `countClients`, which swallows its own failure. */
+  email,
   clientCount,
 }: {
-  name: string;
-  email: string;
   phone: string;
+  email: string;
   clientCount: number | null;
 }) {
-  const trimmedName = name.trim();
-  const trimmedEmail = email.trim();
-
   return (
     <Card title="This account">
-      <div className="row" style={{ gap: 12, alignItems: 'center' }}>
-        {/* Tinted off the NUMBER, not the name, so the colour is stable while
-            the name beside it is being retyped. `avatarToken` is a hash, and a
-            plate that changes hue on every keystroke reads as a glitch. */}
-        <Avatar name={trimmedName || '?'} id={phone} size="lg" />
-        <div className="col" style={{ gap: 2, minWidth: 0 }}>
-          <p className="h5" style={{ margin: 0 }}>
-            {trimmedName || <span style={{ color: 'var(--tx-ink-3)' }}>No name yet</span>}
-          </p>
-          <p className="small" style={{ margin: 0, wordBreak: 'break-word' }}>
-            {trimmedEmail || <span style={{ color: 'var(--tx-ink-3)' }}>No email</span>}
-          </p>
-        </div>
-      </div>
-
-      <FactList className="mt3">
-        {/*
-          The one fact on this screen that appears nowhere else in the product,
-          and the reason the aside exists. Mono, because it is a number read
-          digit by digit against a phone that is being held up next to it.
-        */}
+      {/* What is NOT in the form beside it. It used to open with an avatar, the name and the email — the three things the
+          card to its left is editing — so a trainer read each twice. The number is the one fact that appears nowhere
+          else on this screen, which is why the aside exists; mono, because it is read digit by digit against a phone. */}
+      <FactList>
         <FactList.Row k="Signs in with">
           {phone ? <span className="mono">{formatPhone(phone)}</span> : <FactList.Blank />}
         </FactList.Row>
-
+        {/* The SAVED email, so the read-back still says something the form does not: what is on file, not what is being typed. */}
+        <FactList.Row k="Email">{email ? <span style={{ overflowWrap: 'anywhere' }}>{email}</span> : <FactList.Blank />}</FactList.Row>
         {clientCount !== null ? (
           <FactList.Row k="Clients">
             {clientCount} {clientCount === 1 ? 'client' : 'clients'}
@@ -93,24 +68,15 @@ export function AccountAside({
         ) : null}
       </FactList>
 
-      {/*
-        The profile back-links to Settings and Settings linked nowhere — the
-        asymmetry a trainer feels as *I came from there, how do I get back*. The
-        rail has the row, but the rail is a strip of icons, and this is the
-        screen where the distinction between the two names actually matters:
-        what is above is the account, what is behind this link is the pitch.
-
-        A CHIP, not an inline link, and `ProfileAside` made the same call for
-        the same reason one level down: `Chip` renders a `next/link` when it is
-        given an href, so this is a real 28px target. MEASURED as prose first —
-        15px tall, under the 24px floor, at every width from 390 to 1920.
-      */}
-      <div className="mt3">
-        <Chip href="/settings/profile">Your profile</Chip>
-        <p className="small mt2" style={{ marginBottom: 0 }}>
-          The longer version — what a client reads before they accept an invite.
-        </p>
-      </div>
+      {/* The profile back-links to Settings and Settings linked nowhere. A WHOLE-ROW link, not a 28px pill drawn like a
+          status tag: it says where it goes and why, and the row is the target. */}
+      <Link href="/settings/profile" className="acx-link">
+        <span>
+          <b>Your profile</b>
+          <i>What a client reads before they accept an invite.</i>
+        </span>
+        <span aria-hidden="true">›</span>
+      </Link>
     </Card>
   );
 }

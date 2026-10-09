@@ -122,7 +122,7 @@ export function WorkPlaceFields({
         coach. A trainer at a gym can still take home visits, so neither answers the other.
       </p>
 
-      <GroupLabel top={22}>THE ARRANGEMENT — THE MONEY BOOK READS THIS ONE</GroupLabel>
+      <GroupLabel top={22}>HOW YOU ARE PAID</GroupLabel>
       {/* `.card--pick` / `.card--pick-accent`, the same pair the packs step
           uses for the same three options. Not chips: each carries a second
           line, and the second line is what stops "Both" being guessed at. */}
@@ -223,7 +223,7 @@ export function WorkPlaceFields({
         </>
       ) : null}
 
-      <GroupLabel>HOW YOU COACH — WHAT A CLIENT IS CHOOSING BETWEEN</GroupLabel>
+      <GroupLabel>HOW YOU COACH</GroupLabel>
       <div className="row" style={{ gap: 10, alignItems: 'stretch', flexWrap: 'wrap' }}>
         {TRAINING_MODES.map((option) => {
           const on = modes.includes(option.id);

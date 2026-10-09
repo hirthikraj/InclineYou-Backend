@@ -42,10 +42,10 @@ export function SpecialitiesPanel({ initial }: { initial: Identity }) {
     publish({ specialities: chosen });
   }, [publish, chosen]);
 
-  // Compared as sets, like the certifications tab: the catalogue's order is the
-  // meaningful one, so a toggle that put a chip back where it started is not an
-  // edit and must not raise the unsaved marker.
-  const dirty = chosen.length !== saved.length || chosen.some((id) => !saved.includes(id));
+  // Compared IN ORDER. The first speciality leads the profile and the chips now
+  // show their place, so unpicking one and picking it again (it goes to the end)
+  // is a real change; the old set comparison would have called it none.
+  const dirty = chosen.length !== saved.length || chosen.some((id, i) => id !== saved[i]);
 
   function submit() {
     setMessage(null);
@@ -78,10 +78,10 @@ export function SpecialitiesPanel({ initial }: { initial: Identity }) {
         submit();
       }}
     >
-      <h2 className="card__t">What you coach best</h2>
+      <h2 className="card__t">Specialities</h2>
       <p className="small" style={{ marginTop: 3, maxWidth: 560 }}>
-        Up to {SPECIALITY_CAP}, and the cap is the point — a trainer who does everything tells a
-        client nothing. Add your own if the list has missed one.
+        Up to {SPECIALITY_CAP}, and the cap is the point — a trainer who does everything tells a client nothing. The first
+        leads your profile.
       </p>
 
       <SpecialityPicker
@@ -94,13 +94,9 @@ export function SpecialitiesPanel({ initial }: { initial: Identity }) {
         }}
       />
 
-      <MessageSlot message={message} />
+      {dirty || pending || message ? <MessageSlot message={message} /> : null}
 
-      <SaveRow
-        pending={pending}
-        dirty={dirty}
-        note="The first thing a client reads about you, after your name."
-      />
+      <SaveRow pending={pending} dirty={dirty} />
     </form>
   );
 }

@@ -18,6 +18,7 @@ import { DIVIDER_LABELS, metaOf } from '@/lib/workouts/draft';
 import { SearchIcon } from '../Icons';
 import { DIVIDER_MIME, EXERCISE_MIME, TEMPLATE_MIME } from './dnd';
 import { DividerIcon, FunnelIcon, Grip, StackIcon } from './Icons';
+import { useEscapeGuard } from '@/web-components/ui/Modal';
 
 /**
  * THE WHOLE CATALOGUE, not a window onto it — and that is a change the filters
@@ -187,16 +188,17 @@ export function LibraryPane({
     start(async () => setTemplates(await fetchWorkoutTemplates()));
   }, [source, templates]);
 
-  /* ESCAPE CLOSES THE POPOVER AND NOTHING ELSE, and it has to say so in
-     capture: `ModalHost` binds the builder's own Escape the same way and
+  /* ESCAPE CLOSES THE POPOVER AND NOTHING ELSE. It was said in
+     capture, which does not work (see the guard below): `ModalHost` binds the builder's own Escape the same way and
      answers first, so an un-consumed press here would shut the whole dialog
      over a trainer who meant *put the filters away*. The same arrangement
      `LibraryDock` uses for its inner info panel. */
+  /* The guard holds Escape away from the builder while the popover is up (trap 49); consuming it here in capture cannot. */
+  useEscapeGuard(filtersOpen);
   useEffect(() => {
     if (!filtersOpen) return;
     const key = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      e.stopImmediatePropagation();
       setFiltersOpen(false);
     };
     const down = (e: MouseEvent) => {

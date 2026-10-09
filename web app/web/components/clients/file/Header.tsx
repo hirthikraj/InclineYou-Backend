@@ -2,6 +2,9 @@
 import { Chevron } from '@/components/shell/Icons';
 import { avatarToken, initials, rupees } from '@/lib/today/time';
 import type { ClientDetailWire, ClientPackageWire } from '@/lib/clients/client-api';
+import { packBalance } from '@/lib/clients/packs';
+import { fileStatus } from '@/lib/clients/file-status';
+import { TAG_LABEL, TAG_TONE } from '@/lib/clients/roster';
 
 import { CalendarIcon, MessageIcon, PhoneIcon, dateStr, num } from './shared';
 import { Button } from '@/web-components/ui/Button';
@@ -88,18 +91,30 @@ const STATUS_TAG: Record<string, string> = {
 export function HeaderDetail({
   client,
   packages,
+  now,
 }: {
   client: ClientDetailWire;
   /** The client's current packs (L5 `scope=current`), amountDue computed on the server. */
   packages: ClientPackageWire[];
+  /** The server's instant, so *late* is read against the same clock the card uses. */
+  now: number;
 }) {
-  const activePkg = packages.find((p) => p.status === 'active') ?? null;
+  /* THE BALANCE ACROSS EVERY LIVE PACK, never the first one `find` hands back — see
+     `lib/clients/packs.ts`: the wire is newest first and the server spends oldest first,
+     so the first `active` row is the one NOT being spent. */
+  const balance = packBalance(packages);
   /* Everything owed on the client's current packs, not just the running one:
      a finished pack can still be owed for, and the server's `amountDue` is the
      only sum there is (never re-added from payments here). */
   const owed = packages.reduce((sum, p) => sum + num(p.amountDue), 0);
-  const left = activePkg?.sessionsRemaining ?? null;
-  const total = activePkg?.sessionsTotal ?? null;
+  const left = balance.left;
+  const total = balance.total;
+  /* Owed is amber until it is LATE and red only then — the card below already drew it
+     that way, and a header that is red for money that is not yet due is the one alarm on
+     the screen that is not about anything. */
+  const late = packages.some(
+    (p) => num(p.amountDue) > 0 && p.dueDate !== null && new Date(p.dueDate).getTime() < now,
+  );
   /*
    * ── A PACK WITH NO COUNT IS NOT THE ABSENCE OF A PACK ──────────────────────
    *
@@ -115,7 +130,7 @@ export function HeaderDetail({
    * the count alone — a pack with no count can never be low, which is the right
    * answer rather than a missing one.
    */
-  const hasPack = activePkg != null;
+  const hasPack = balance.count > 0;
   /* Two or fewer is the same threshold `StatusFlags.sessionPackLow` uses on the
      server and `deck.ts` uses on Today. One number, three screens. */
   const packLow = left !== null && left <= 2;
@@ -147,10 +162,18 @@ export function HeaderDetail({
           </i>
         </div>
         <div>
-          <b style={owed > 0 ? { color: 'var(--tx-danger)' } : undefined}>
-            {owed > 0 ? rupees(owed) : 'Nil'}
+          <b
+            style={
+              owed > 0
+                ? { color: late ? 'var(--tx-danger)' : 'var(--tx-warn)' }
+                : { color: 'var(--tx-ink-3)' }
+            }
+          >
+            {rupees(owed)}
           </b>
-          <i>{owed > 0 ? 'Pending' : 'Paid up'}</i>
+          {/* One label. It flipped between *Pending* and *Paid up*, and *Nil* over *Paid up*
+              read as "nothing has been paid". */}
+          <i>{late ? 'Overdue' : 'Pending'}</i>
         </div>
       </div>
 
@@ -178,7 +201,7 @@ export function HeaderDetail({
         >
           <PhoneIcon />
         </a>
-        <Button href="/schedule" variant="secondary">
+        <Button href={`/schedule?new=1&client=${client.id}`} variant="secondary">
           <CalendarIcon />
           Book
         </Button>
@@ -200,16 +223,22 @@ export function HeaderDetail({
 export function Header({
   client,
   packages,
+  now,
 }: {
   client: ClientDetailWire;
   packages: ClientPackageWire[];
+  now: number;
 }) {
   const sessionCount = client.stats.sessionsDone;
   const mode = client.schedule.deliveryMode;
   /* The money and the pack count moved to `HeaderDetail` with the figures that
      draw them — this half of the header is identity only. */
-  const statusLabel = STATUS_LABEL[client.status] ?? client.status;
-  const statusTag = STATUS_TAG[client.status] ?? '';
+  /* THE ROSTER'S VERDICT, not the membership status. The roster says *At risk* and why;
+     this used to say a green *Active* for the same person. `fileStatus` is the roster's
+     own derivation, and an archived client (which has none) keeps the plain status word. */
+  const derived = fileStatus(client, packages, now);
+  const statusLabel = derived ? TAG_LABEL[derived.tag] : (STATUS_LABEL[client.status] ?? client.status);
+  const statusTag = derived ? TAG_TONE[derived.tag] : (STATUS_TAG[client.status] ?? '');
   const modeLabel =
     mode === 'floor' ? 'In Person' : mode === 'remote' ? 'Online' : mode === 'home_visit' ? 'Home visit' : null;
   const modeTag = mode === 'floor' ? 'tag--floor' : 'tag--remote';
@@ -240,7 +269,7 @@ export function Header({
         </span>
 
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p className="ph__t">
+          <h1 className="ph__t">
             {client.name}
             <span className={`tag ${statusTag}`} style={{ marginLeft: 10, verticalAlign: 'middle' }}>
               {statusLabel}
@@ -250,7 +279,8 @@ export function Header({
                 {modeLabel}
               </span>
             )}
-          </p>
+          </h1>
+          {derived?.reason && <p className="cfhd__why">{derived.reason}</p>}
           <p className="ph__sub">
             {client.phone && `+91 ${prettyPhone(client.phone)} · `}
             {/* The tenure is the one fragment here that is never acted on, and on
@@ -272,6 +302,7 @@ export function Header({
           <HeaderDetail
             client={client}
             packages={packages}
+            now={now}
           />
         </div>
       </div>

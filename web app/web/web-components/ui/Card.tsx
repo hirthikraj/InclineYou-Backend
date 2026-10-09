@@ -200,6 +200,7 @@ const PARTS = new Set<unknown>([CardHead, CardBody, CardBand, CardFoot]);
 
 export function Card({
   as: As = 'div',
+  id,
   title,
   level = 2,
   aside,
@@ -218,6 +219,8 @@ export function Card({
    * general escape hatch: those two are the whole union.
    */
   as?: 'div' | 'section';
+  /** An anchor target, for a page that links to its own sections. */
+  id?: string;
   /** Omitted for a card that is a control rather than a region. */
   title?: ReactNode;
   level?: CardLevel;
@@ -252,14 +255,14 @@ export function Card({
 
   if (composed || bare) {
     return (
-      <As className={cls} style={style}>
+      <As id={id} className={cls} style={style}>
         {children}
       </As>
     );
   }
 
   return (
-    <As className={cls} style={style}>
+    <As id={id} className={cls} style={style}>
       {title || actions ? (
         <CardHead title={title} level={level} actions={actions}>
           {aside}

@@ -40,7 +40,9 @@ export function TemplateRowHead({
   allSelected,
   someSelected,
   onSelectAll,
+  showCreated = true,
 }: {
+  showCreated?: boolean;
   allSelected: boolean;
   someSelected: boolean;
   onSelectAll: (next: boolean) => void;
@@ -48,7 +50,7 @@ export function TemplateRowHead({
   return (
     /* Not `aria-hidden` — the select-all lives in it. The column names are,
        exactly as in `WorkoutRowHead`; every row carries its own. */
-    <div className="wtrow wtrow--hd">
+    <div className={`wtrow wtrow--hd${showCreated ? '' : ' wtrow--onedate'}`}>
       <span className="wtrow__sel">
         <CheckboxCell
           label="Select every workout template"
@@ -62,8 +64,9 @@ export function TemplateRowHead({
       <span aria-hidden="true">Duration</span>
       <span aria-hidden="true">Movements</span>
       <span aria-hidden="true">Sets</span>
-      <span aria-hidden="true">Created on</span>
-      <span aria-hidden="true">Updated on</span>
+      <span aria-hidden="true">{showCreated ? 'Created on' : 'Updated'}</span>
+      {showCreated && <span aria-hidden="true">Updated on</span>}
+      <span aria-hidden="true" />
     </div>
   );
 }
@@ -81,7 +84,13 @@ export function TemplateRow({
   onOpen,
   busy,
   className,
+  menu,
+  showCreated = true,
 }: {
+  /** A row's own verbs — a single template should not need a checkbox to be deleted. */
+  menu?: ReactNode;
+  /** Created is drawn only where it differs from Updated; on a fresh book it is the same day twice. */
+  showCreated?: boolean;
   name: string;
   /** The trainer's own line about the workout. Most have none. */
   notes?: ReactNode;
@@ -100,7 +109,7 @@ export function TemplateRow({
   className?: string;
 }) {
   return (
-    <div className={['wtrow', busy ? 'wtrow--busy' : '', className].filter(Boolean).join(' ')}>
+    <div className={['wtrow', busy ? 'wtrow--busy' : '', showCreated ? '' : 'wtrow--onedate', className].filter(Boolean).join(' ')}>
       <span className="wtrow__sel">
         <CheckboxCell
           label={`Select ${name}`}
@@ -138,16 +147,20 @@ export function TemplateRow({
           <span className="wtrow__k"> sets</span>
         </span>
 
-        <span className="wtrow__f">
-          <span className="wtrow__k">created </span>
-          <b>{created}</b>
-        </span>
+        {showCreated && (
+          <span className="wtrow__f">
+            <span className="wtrow__k">created </span>
+            <b>{created}</b>
+          </span>
+        )}
 
         <span className="wtrow__f">
           <span className="wtrow__k">updated </span>
           <b>{updated}</b>
         </span>
       </span>
+
+      <span className="wtrow__act">{menu}</span>
     </div>
   );
 }

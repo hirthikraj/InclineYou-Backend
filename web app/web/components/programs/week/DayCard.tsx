@@ -17,6 +17,7 @@ import {
 import { figures } from '@/lib/programs/weeksheet';
 import type { ExerciseNameWire } from '@/lib/programs/api';
 import { DotsIcon } from '../Icons';
+import { useEscapeGuard } from '@/web-components/ui/Modal';
 import {
   carriesExercise,
   carriesWorkout,
@@ -1045,6 +1046,7 @@ export function More({
 }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLSpanElement>(null);
+  useEscapeGuard(open);
 
   useEffect(() => {
     if (!open) return;
@@ -1052,12 +1054,10 @@ export function More({
       if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
     }
     function esc(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
-        /* CONSUMED IN CAPTURE, so the builder's own Escape ladder does not spend
-           a second rung closing the panel behind this menu. */
-        e.stopImmediatePropagation();
-        setOpen(false);
-      }
+      /* NOT CONSUMED HERE. `stopImmediatePropagation` in capture cannot keep Escape from the dialog around this menu
+         (the host's listener was bound first), so one press closed the menu AND opened *Close without saving?*. The
+         guard below holds the key away from the host instead (trap 49). */
+      if (e.key === 'Escape') setOpen(false);
     }
     document.addEventListener('mousedown', away);
     window.addEventListener('keydown', esc, true);

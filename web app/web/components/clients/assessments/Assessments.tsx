@@ -14,18 +14,18 @@ import {
 } from '@/lib/assessments/address';
 import {
   STATUS_FILTERS,
-  STATUS_LABEL,
-  STATUS_TONE,
   blockCount,
   type AssessmentStatus,
   type StatusFilter,
 } from '@/lib/assessments/vocab';
+import { DAY_MS, startOfDay } from '@/lib/today/time';
 import { TopBar } from '@/components/shell/TopBar';
 import { PageTabs } from '@/components/shell/PageTabs';
 import { Avatar } from '@/web-components/ui/Avatar';
 import { Button } from '@/web-components/ui/Button';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 import { Facet } from '@/web-components/ui/Facet';
+import { Message } from '@/web-components/ui/Message';
 import { PageHeader } from '@/web-components/ui/PageHeader';
 import { Pager } from '@/web-components/ui/Pager';
 import { RowMenu } from '@/web-components/ui/RowMenu';
@@ -85,7 +85,13 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
     go({ q: search });
   };
 
-  const rows = data.rows;
+  /* WHAT NEEDS DOING FIRST, within the page: not taken (oldest first), then to take (soonest first), then
+     what is done, newest first as the server sent it. The server pages by date, so across pages the order
+     is still the date's; the caption says which. */
+  const rows = useMemo(() => {
+    const need = data.rows.filter((r) => r.state !== 'done').sort((a, b) => a.dueOn.localeCompare(b.dueOn));
+    return [...need, ...data.rows.filter((r) => r.state === 'done')];
+  }, [data.rows]);
 
   return (
     <>
@@ -127,6 +133,7 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
             <SearchField
               className="asm__q"
               label="Search assessments"
+              placeholder="Search, then press Enter"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onBlur={commitSearch}
@@ -141,6 +148,16 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
         </PageHeader>
 
         <div className="asm__body">
+          {data.clientsFailed && (
+            <Message tone="warn" style={{ marginBottom: 12 }}>
+              The client list could not be loaded just now, so names and the client filter are unavailable.
+              Everything else here is current; try again in a moment.
+            </Message>
+          )}
+          {/* The filtered result, said to a reader who cannot see the table change. */}
+          <p className="vh" role="status">
+            {rows.length} of {data.total} {data.total === 1 ? 'assessment' : 'assessments'}
+          </p>
           <div className="asm__facets">
             <div className="facets">
               <Facet
@@ -176,7 +193,8 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                 single
                 selected={query.status === 'all' ? [] : [query.status]}
                 onChange={(next) => go({ status: (next[0] as StatusFilter) ?? 'all' })}
-                options={STATUS_FILTERS}
+                defaultValue="all"
+                options={STATUS_FILTERS.map((f) => ({ ...f, count: data.counts[f.value] }))}
               />
             </div>
           </div>
@@ -186,12 +204,11 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
           ) : (
             <div className="asm__t">
               <Table
-                caption={`${rows.length} of ${data.total} assessments, newest first`}
+                caption={`${rows.length} of ${data.total} assessments, the ones to take first`}
                 columns={COLUMNS}
-                sort={{ key: 'date', direction: 'descending' }}
               >
                 {rows.map((r) => {
-                  const client = names.get(r.clientId) ?? 'A client';
+                  const client = names.get(r.clientId) ?? 'Unknown client';
                   const when = new Date(`${r.dueOn}T00:00:00`);
                   return (
                     <Row
@@ -204,6 +221,9 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                           content: (
                             <span className="asm__d">
                               <b>{DATE.format(when)}</b>
+                              {r.state !== 'done' && (
+                                <em className="asm__rel"> · {relative(r.dueOn, data.now)}</em>
+                              )}
                             </span>
                           ),
                         },
@@ -212,10 +232,10 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                           className: 'asm-c-who',
                           label: 'Client',
                           content: (
-                            <span className="asm__who">
+                            <Link className="asm__who asm__who--lk" href={`/clients/${r.clientId}`}>
                               <Avatar name={client} id={r.clientId} size="sm" />
                               <b>{client}</b>
-                            </span>
+                            </Link>
                           ),
                         },
                         {
@@ -263,7 +283,7 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                           className: 'asm-c-status',
                           label: 'Status',
                           content: (
-                            <Tag tone={STATUS_TONE[r.state]}>{STATUS_LABEL[r.state]}</Tag>
+                            <Tag tone={r.state === 'done' ? 'ok' : 'neutral'}>{STATE_LABEL[r.state]}</Tag>
                           ),
                         },
                         {
@@ -271,28 +291,32 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                           className: 'asm-c-act',
                           label: '',
                           content: (
-                            <RowMenu
-                              label={`${client}'s ${r.name}`}
-                              items={[
-                                {
-                                  key: 'read-it',
-                                  label: 'Open the check-in',
-                                  href: `/clients/assessments/${r.id}`,
-                                },
-                                {
-                                  key: 'open',
-                                  label: 'Open the client file',
-                                  href: `/clients/${r.clientId}`,
-                                },
-                                ...(r.state === 'done'
-                                  ? []
-                                  : [{
-                                      key: 'take',
-                                      label: 'Take it now',
-                                      href: `/clients/assessments/${r.id}/take`,
-                                    }]),
-                              ]}
-                            />
+                            <span className="asm__acts">
+                              {r.state !== 'done' && (
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  href={`/clients/assessments/${r.id}/take`}
+                                >
+                                  Take it
+                                </Button>
+                              )}
+                              <RowMenu
+                                label={`${client}'s ${r.name}`}
+                                items={[
+                                  {
+                                    key: 'read-it',
+                                    label: 'Open the assessment',
+                                    href: `/clients/assessments/${r.id}`,
+                                  },
+                                  {
+                                    key: 'open',
+                                    label: 'Open the client file',
+                                    href: `/clients/${r.clientId}`,
+                                  },
+                                ]}
+                              />
+                            </span>
                           ),
                         },
                       ]}
@@ -334,6 +358,20 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
 
 /* ─────────────────────────────────────────────────────────────── the cells ── */
 
+/** The words of the client file's Assessments tab: this trainer takes the assessment, so a gone-by one is
+ *  *Not taken* in neutral ink, never an amber *Missed*. (`vocab.ts` still argues *Missed, not Overdue* for the
+ *  check-in's own screen; reconciling the two is open.) */
+const STATE_LABEL: Record<AssessmentStatus, string> = { booked: 'Booked', missed: 'Not taken', done: 'Done' };
+
+/** *Today*, *5 days ago* — against the server's instant, never `Date.now()` in a render. */
+function relative(dueOn: string, now: number): string {
+  const d = Math.round((Date.parse(`${dueOn}T00:00:00`) - startOfDay(now)) / DAY_MS);
+  if (d === 0) return 'Today';
+  if (d === 1) return 'Tomorrow';
+  if (d === -1) return 'Yesterday';
+  return d > 0 ? `in ${d} days` : `${-d} days ago`;
+}
+
 const DATE = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
 
 /**
@@ -365,7 +403,7 @@ const COLUMNS: Column[] = [
   { key: 'measurements', label: 'Measurements', numeric: true, className: 'asm-c-n' },
   { key: 'questions', label: 'Questions', numeric: true, className: 'asm-c-n' },
   { key: 'status', label: 'Status', className: 'asm-c-status' },
-  { key: 'act', bare: true, label: '', className: 'asm-c-act' },
+  { key: 'act', bare: true, label: <span className="vh">Actions</span>, className: 'asm-c-act' },
 ];
 
 /**
@@ -402,7 +440,7 @@ function Empty({ query, onClear }: { query: Query; onClear: () => void }) {
       <EmptyState
         kind="filtered"
         icon={<Checklist size={28} />}
-        title="No check-ins match"
+        title="No assessments match"
         body="Try a wider status, or clear the search."
         action={<Button variant="secondary" onClick={onClear}>Clear the filters</Button>}
       />
@@ -413,8 +451,8 @@ function Empty({ query, onClear }: { query: Query; onClear: () => void }) {
     <EmptyState
       kind="first-run"
       icon={<Checklist size={28} />}
-      title="No check-ins yet"
-      body="An assessment is a set of measurements and questions you send a client on a date. Write one on the Templates tab, then schedule it against somebody."
+      title="No assessments yet"
+      body="An assessment is a set of measurements and questions you take with a client in a session. Write one on the Templates tab, then schedule it against somebody."
       action={<Button variant="secondary" href="/clients/assessments/templates">Write an assessment</Button>}
     />
   );

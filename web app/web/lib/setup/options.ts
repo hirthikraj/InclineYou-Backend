@@ -242,6 +242,9 @@ export function labelFor(id: string, catalogue: Option[]): string {
 }
 
 /** Ids to a readable list: "Strength, weight loss, rehab". */
+/** How many languages the profile card NAMES; the rest become a count. The picker says so, so this is the one number. */
+export const LANGUAGES_ON_CARD = 4;
+
 export function labelList(ids: string[], catalogue: Option[], limit = 3): string {
   const labels = ids.slice(0, limit).map((id) => labelFor(id, catalogue));
   const rest = ids.length - labels.length;

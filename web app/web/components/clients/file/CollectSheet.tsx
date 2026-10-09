@@ -140,7 +140,7 @@ export function CollectSheet({
   return (
     <ModalHost onClose={onClose} cover="frame" initialFocus="#cs-amount">
       <Modal
-        title={settling ? `Settle ${rupees(owed)}` : `Record a payment from ${first}`}
+        title={settling ? `Settle ${rupees(owed)}` : `Take a payment from ${first}`}
         foot={
           <>
             <Button variant="ghost" onClick={onClose}>
@@ -158,6 +158,7 @@ export function CollectSheet({
           affix="₹"
           id="cs-amount"
           type="number"
+          inputMode="numeric"
           min="1"
           step="1"
           value={amount}
@@ -203,7 +204,7 @@ export function CollectSheet({
         )}
 
         {!settling && (
-          <label className="small mt3" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <label className="small mt3 cs__await" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <input type="checkbox" checked={awaiting} onChange={(e) => setAwaiting(e.target.checked)} />
             Not received yet — record it as expected
           </label>

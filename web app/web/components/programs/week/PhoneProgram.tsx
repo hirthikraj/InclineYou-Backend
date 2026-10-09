@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   workoutFigures,
@@ -11,7 +11,7 @@ import {
   type Entry,
   ordinalDayWord,
 } from '@/lib/programs/blueprint';
-import { balanceFlags, type Balance } from '@/lib/programs/balance';
+import { balanceFlags, MEV, type Balance } from '@/lib/programs/balance';
 import { dayShape, fieldOf, figures, kg, type NumField } from '@/lib/programs/weeksheet';
 import type { ExerciseNameWire } from '@/lib/programs/api';
 import { AcrossWeeks } from './AcrossWeeks';
@@ -56,6 +56,10 @@ import { Chip } from '@/web-components/ui/Chip';
  * most common mobile viewport.
  */
 export interface PhoneProgramProps extends DayActions {
+  /** TAPPING A DAY DESIGNS ITS WORKOUT in the workout builder — the one the desk opens from a container, so a day is designed with
+   *  one set of tools at every width. When it is given, the day list and the exercise screens below are never reached; a read-only
+   *  preview does not give it and keeps them. */
+  onDesignDay?: (day: number) => boolean;
   /** What a day is CALLED. See `WeekBoard`'s prop of the same name. */
   dayWord?: (day: number) => string;
   programName: string;
@@ -250,6 +254,23 @@ function Week(props: PhoneProgramProps & { onOpenDay: (day: number) => void }) {
   const dayWord = props.dayWord ?? ordinalDayWord;
   const { days, labels, week, weeks, authored, balance, entriesForDay, freeSlots } = props;
   const [balOpen, setBalOpen] = useState(false);
+  /* MORE WEEKS OFF THE RIGHT EDGE. A CSS scroll timeline is inactive on this Chrome (see `.wsm__wkscroll`), so the cue is
+     driven from the scroller itself: a right-edge mask while chips are hidden, gone at the end so week 8 is never veiled.
+     The observer's first callback sets the initial state — nothing is set synchronously in the effect. */
+  const wkRef = useRef<HTMLDivElement>(null);
+  const [moreWeeks, setMoreWeeks] = useState(false);
+  useEffect(() => {
+    const el = wkRef.current;
+    if (!el) return;
+    const read = () => setMoreWeeks(el.scrollWidth - el.scrollLeft - el.clientWidth > 2);
+    el.addEventListener('scroll', read, { passive: true });
+    const ro = new ResizeObserver(read);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener('scroll', read);
+      ro.disconnect();
+    };
+  }, [weeks]);
   const flags = balanceFlags(balance);
   const flagCount = flags.low.length + flags.high.length;
   const maxSets = Math.max(
@@ -274,7 +295,7 @@ function Week(props: PhoneProgramProps & { onOpenDay: (day: number) => void }) {
           thumb that was reaching for one. */}
       <div className="wsm__wk">
         <span className="wsm__k">Week</span>
-        <div className="wsm__wkscroll">
+        <div className="wsm__wkscroll" ref={wkRef} data-more={moreWeeks ? '' : undefined}>
           {Array.from({ length: weeks }, (_, i) => i + 1).map(w => (
             <button
               key={w}
@@ -335,8 +356,19 @@ function Week(props: PhoneProgramProps & { onOpenDay: (day: number) => void }) {
       <button className="wsm__balb" type="button" aria-expanded={balOpen} onClick={() => setBalOpen(v => !v)}>
         <span className="wsm__ball">Balance</span>
         {flagCount > 0 ? (
-          <span className="wsm__balf">
-            <WarnIcon size={12} /> {flagCount} flag{flagCount === 1 ? '' : 's'}
+          /* AMBER IS FOR ABOVE THE CEILING ONLY. Under the floor is a gap, not a hazard — the panel's own bars already
+             say so — and a 3-day circuit plan reading *7 flags* in warning colour called the trainer's own design a fault. */
+          <span className={`wsm__balf${flags.high.length === 0 ? ' wsm__balf--gap' : ''}`}>
+            {flags.high.length > 0 ? (
+              <>
+                <WarnIcon size={12} /> {flags.high.length} above the ceiling
+                {flags.low.length > 0 ? ` · ${flags.low.length} light` : ''}
+              </>
+            ) : (
+              <>
+                {flags.low.length} muscle group{flags.low.length === 1 ? '' : 's'} under {MEV} sets
+              </>
+            )}
           </span>
         ) : (
           <span className="wsm__balok">{balance.total} sets · in band</span>
@@ -371,7 +403,9 @@ function Week(props: PhoneProgramProps & { onOpenDay: (day: number) => void }) {
               maxSets={maxSets}
               actions={props}
               readOnly={props.readOnly}
-              onOpen={() => props.onOpenDay(d)}
+              onOpen={() => {
+                if (!props.onDesignDay?.(d)) props.onOpenDay(d);
+              }}
             />
           ))}
         </div>
@@ -467,7 +501,14 @@ function Tile({
             <Sheet
               label={`More actions for Day ${day}${label ? ` · ${label}` : ''}`}
               title={`Day ${day}${label ? ` · ${label}` : ''}`}
-              items={close => <DayMenuItems day={day} actions={actions} close={close} />}
+              items={close => (
+                <DayMenuItems
+                  day={day}
+                  actions={actions}
+                  close={close}
+                  workouts={workoutsOf(rows).filter(w => w.id).length > 1 ? workoutsOf(rows).filter(w => w.id) : []}
+                />
+              )}
             />
           </span>
         )}
@@ -717,7 +758,14 @@ function Day(
           <Sheet
             label={`More actions for Day ${day}${label ? ` · ${label}` : ''}`}
             title={`Day ${day}${label ? ` · ${label}` : ''}`}
-            items={close => <DayMenuItems day={day} actions={props} close={close} />}
+            items={close => (
+              <DayMenuItems
+                day={day}
+                actions={props}
+                close={close}
+                workouts={workoutsOf(props.entriesForDay(day)).filter(w => w.id)}
+              />
+            )}
           />
         )}
       </div>
@@ -961,7 +1009,7 @@ function ExerciseSheet({
           <span className="wsmx__hb">
             <span className="wsmx__t">{label}</span>
             <span className="wsmx__m">
-              {[name?.muscleGroup, name?.target, name?.equipment].filter(Boolean).join(' · ')}
+              {[...new Set([name?.muscleGroup, name?.target, name?.equipment].filter(Boolean))].join(' · ')}
             </span>
           </span>
           <button className="wsm__ic" type="button" aria-label="Close" onClick={onClose}>

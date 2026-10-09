@@ -118,13 +118,15 @@ export function ProgramSwitcher({
         className="pgsw"
         type="button"
         aria-haspopup="dialog"
+        aria-label={`${name || 'Untitled template'} — switch template, ${count} on your shelf`}
+        title={`Switch template · ${count} on your shelf`}
         aria-expanded={open}
         onClick={() => {
           setOpen(true);
           onOpenChange?.(true);
         }}
       >
-        <span className="pgsw__t">{name || 'Untitled program'}</span>
+        <span className="pgsw__t">{name || 'Untitled template'}</span>
         {/* THE COUNT AND THE CHEVRON ARE ONE BOX, and that is the whole reason
             for the wrapper: a bare `6` beside a program's name reads as a fact
             ABOUT that program — six weeks, six days. Inside the control it reads
@@ -142,7 +144,7 @@ export function ProgramSwitcher({
             className="pgsheet"
             role="dialog"
             aria-modal="true"
-            aria-label="Your programs"
+            aria-label="Your templates"
             onClick={e => {
               /* A row is a `<Link>`, so the navigation is already under way by
                  the time this fires. Closing here rather than in an effect keyed

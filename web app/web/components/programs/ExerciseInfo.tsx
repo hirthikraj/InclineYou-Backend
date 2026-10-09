@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useTransition } from 'react';
 
-import { fetchExercise, searchExercises } from '@/lib/exercises/actions';
+import { searchExercises } from '@/lib/exercises/actions';
+import { readExercise } from '@/lib/exercises/read';
 import type { ExerciseWire } from '@/lib/exercises/api';
 import { MEV, MAV } from '@/lib/programs/balance';
 import { ChevronLeft, ChevronRight, CloseIcon } from './Icons';
@@ -260,9 +261,11 @@ function Section({ label, children }: { label: string; children: React.ReactNode
  * library surface beside the docked one. What a trainer needs while choosing is
  * the day still visible.
  *
- * `exercise` is passed when the caller already has the whole row (the library
- * panel's own search results); `exerciseId` is passed when it does not (a row in
- * a column, which carries `ExerciseNameWire` and no prose at all).
+ * `exercise` is passed when the caller has a library row (the panel's own search
+ * results); `exerciseId` when it has only an id (a row in a column, which carries
+ * `ExerciseNameWire` and no prose at all). A search result is NOT the whole row
+ * either: the server drops the steps and cues from every list, so a row without
+ * `description` is completed from the single-exercise read.
  */
 export function ExerciseInfoView({
   exercise,
@@ -280,20 +283,22 @@ export function ExerciseInfoView({
   backLabel?: string;
 }) {
   const [fetched, setFetched] = useState<ExerciseWire | null>(exercise ?? null);
+  const wantedId = exercise?.id ?? exerciseId;
   const [failed, setFailed] = useState(false);
   const [pending, start] = useTransition();
   const [counted, setCounted] = useState<{ pattern: string; others: number } | null>(null);
 
   useEffect(() => {
-    if (exercise || !exerciseId) return;
+    if (!wantedId) return;
+    if (exercise && exercise.description != null) return;   // already whole
     start(async () => {
-      const row = await fetchExercise(exerciseId);
+      const row = await readExercise(wantedId);
       if (row) setFetched(row);
-      else setFailed(true);
+      else if (!exercise) setFailed(true);                  // a row we already have stays on screen
     });
-  }, [exercise, exerciseId]);
+  }, [exercise, wantedId]);
 
-  const row = exercise ?? fetched;
+  const row = fetched && fetched.id === wantedId ? fetched : (exercise ?? null);
   const pattern = row?.movementPattern ?? null;
 
   /* THE PANEL COUNTS ITS OWN ALTERNATIVES, so no caller has to know that the

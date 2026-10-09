@@ -180,7 +180,12 @@ export function Glance({ deck }: { deck: Deck }) {
           value={rupeesShort(deck.money.collected)}
           href="/business"
         />
-        <Figure label="Clients at risk" value={deck.clientsAtRisk} href="/clients" />
+        <Figure
+          label="Clients at risk"
+          value={deck.clientsAtRisk}
+          hint="Owing, pack ending or gone quiet"
+          href="/clients"
+        />
       </Figures>
     </Slab>
   );
@@ -462,7 +467,7 @@ function SessionRow({
          hides itself there rather than showing the client twice inside 400px.
          The class is still `.srow--h2` because the rule that reads it is the
          app's own and is keyed on nothing else. */
-      className={heroCard === 1 ? 'agn__r--dup' : undefined}
+      className={heroCard === 1 ? 'srow--h2' : undefined}
     />
   );
 }

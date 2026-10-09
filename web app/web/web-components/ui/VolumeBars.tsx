@@ -104,9 +104,22 @@ export function VolumeBars({
     { at: 100, v: 0 },
   ];
 
+  /* EVERY FIGURE IS WRITTEN ON ITS BAR when there are eight weeks or fewer — they are ~90px
+     apart on a desk, and a five-digit figure is 44px. Beyond that, or under 620px (the CSS
+     un-pins the middle ones), only the first and last are, and the rest is the hidden table
+     below: a figure that only appears under a pointer is unreachable by a keyboard, a screen
+     reader and a thumb. */
+  const showAll = weeks.length <= 8;
+  /* Label every Nth week so the axis never has more than ~12 labels: `w10` is 19px and a
+     26-week chart on a phone has 11px columns, which pushed the row 8-78px past its card. The
+     LATEST is always labelled. */
+  const step = Math.max(1, Math.ceil(weeks.length / 12));
+
   return (
     <div
-      className={['vb', size === 'sm' ? 'vb--sm' : null, className].filter(Boolean).join(' ')}
+      className={['vb', size === 'sm' ? 'vb--sm' : null, showAll ? 'vb--all' : null, className]
+        .filter(Boolean)
+        .join(' ')}
     >
       <div
         className="vb__row"
@@ -164,12 +177,35 @@ export function VolumeBars({
             })}
           </div>
           <div className="vb__x">
-            {weeks.map((w) => (
-              <span key={w.label}>{w.label}</span>
+            {weeks.map((w, i) => (
+              <span key={w.label}>{(weeks.length - 1 - i) % step === 0 ? w.label : ''}</span>
             ))}
           </div>
         </div>
       </div>
+      {/* The chart above is one image to a screen reader, so the weeks it is made of are a table
+          beside it. Visually hidden, never `display:none` (trap 5). */}
+      <table className="vh">
+        <caption>{label}, by week</caption>
+        <thead>
+          <tr>
+            <th scope="col">Week</th>
+            <th scope="col">{unit ? `Volume (${unit})` : 'Volume'}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {weeks.map((w) => (
+            <tr key={w.label}>
+              <th scope="row">
+                {w.label}
+                {w.when ? `, ${w.when}` : ''}
+                {w.current ? ', this week' : ''}
+              </th>
+              <td>{format(w.value)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
       {note ? <p className="vb__note">{note}</p> : null}
     </div>
   );

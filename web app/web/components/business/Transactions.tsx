@@ -193,6 +193,7 @@ export function Transactions({
                 </>
           }
           onExport={handleExport}
+          exportOnPhoneOnly
         />
 
         <div className="body">

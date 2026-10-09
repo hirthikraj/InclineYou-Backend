@@ -19,6 +19,7 @@ import {
 } from '@/lib/programs/blueprint';
 import { EQUIPMENT, LEVELS } from '@/lib/programs/certified';
 import { useToast } from '@/lib/toast/store';
+import { useForClient, withClient } from '@/lib/programs/for-client';
 import { TopBar } from '@/components/shell/TopBar';
 import { ExerciseInfoPanel } from './ExerciseInfo';
 import type { Detail } from './Builder';
@@ -82,6 +83,7 @@ import { Crumbs } from '@/web-components/ui/Crumbs';
  */
 export function CertifiedPreview({ data }: { data: CertifiedPreviewData }) {
   const router = useRouter();
+  const forClient = useForClient();
   const { template, names } = data;
   const [busy, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -169,7 +171,7 @@ export function CertifiedPreview({ data }: { data: CertifiedPreviewData }) {
           title: <>Copied into your programs</>,
           body: <>{result.value.name} &mdash; the certified original is untouched.</>,
         });
-        router.push(`/programs/${result.value.id}`);
+        router.push(withClient(`/programs/${result.value.id}`, forClient));
       } else setError(result.message);
     });
   }
@@ -238,7 +240,7 @@ export function CertifiedPreview({ data }: { data: CertifiedPreviewData }) {
               <Crumbs
                 className="pg__crumbs"
                 items={[
-                  { label: 'Templates', href: '/programs/certified' },
+                  { label: 'Templates', href: withClient('/programs/certified', forClient) },
                   { label: template.name },
                 ]}
               />
@@ -266,7 +268,7 @@ export function CertifiedPreview({ data }: { data: CertifiedPreviewData }) {
                   itself stands down at that width rather than being a second
                   control 100px under the first. */}
               {mine ? (
-                <Button href={`/programs/${mine.id}`} variant="primary" size="sm">
+                <Button href={withClient(`/programs/${mine.id}`, forClient)} variant="primary" size="sm">
                   Open your copy
                 </Button>
               ) : (

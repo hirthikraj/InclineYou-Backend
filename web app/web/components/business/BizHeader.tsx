@@ -44,6 +44,7 @@ export function BizHeader({
   showPeriod = true,
   onExport,
   exportLabel = 'Export for my CA',
+  exportOnPhoneOnly = false,
 }: {
   title: string;
   subtitle: React.ReactNode;
@@ -57,6 +58,8 @@ export function BizHeader({
   showPeriod?: boolean;
   onExport?: () => void;
   exportLabel?: string;
+  /** The page draws its own export beside the rows it exports; the header's is then the phone's, where that card has none. */
+  exportOnPhoneOnly?: boolean;
 }) {
   const { period, setPeriod, now } = usePeriodScope();
 
@@ -79,7 +82,7 @@ export function BizHeader({
             <PeriodPicker period={period} nowMs={now} onChange={setPeriod} />
           )}
           {onExport && (
-            <Button variant="secondary" className="biz__export" onClick={onExport}>
+            <Button variant="secondary" className={`biz__export${exportOnPhoneOnly ? ' biz__export--phone' : ''}`} onClick={onExport}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M12 4v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 19.5h15"/>
               </svg>

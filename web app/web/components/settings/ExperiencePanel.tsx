@@ -77,9 +77,11 @@ export function ExperiencePanel({ initial }: { initial: Identity }) {
         submit();
       }}
     >
-      <h2 className="card__t">How long you’ve been coaching</h2>
+      <h2 className="card__t">Experience</h2>
+      {/* What to COUNT, which is the question a trainer actually has (from the first client or the first workout?) — the
+          storage format it used to explain is the server's business, and "a band" says enough of it. */}
       <p className="small" style={{ marginTop: 3, maxWidth: 560 }}>
-        A band, not a number — so it stays true next year without you coming back here to edit it.
+        How long you have been coaching clients, counted from your first one. A band, so it stays true next year.
       </p>
 
       <ExperiencePicker
@@ -91,9 +93,9 @@ export function ExperiencePanel({ initial }: { initial: Identity }) {
         }}
       />
 
-      <MessageSlot message={message} />
+      {dirty || pending || message ? <MessageSlot message={message} /> : null}
 
-      <SaveRow pending={pending} dirty={dirty} note="Shown on your profile, under your name." />
+      <SaveRow pending={pending} dirty={dirty} />
     </form>
   );
 }

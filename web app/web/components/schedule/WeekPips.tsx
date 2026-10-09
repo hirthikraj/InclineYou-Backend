@@ -1,6 +1,7 @@
 'use client';
 
 import { formatMinute } from '@/lib/today/time';
+import { Check } from '@/components/shell/Icons';
 import type { ScheduleGrid } from '@/lib/schedule/grid';
 
 /** 0 = Monday … 6 = Sunday — matches `working_hours.weekday` convention. */
@@ -85,27 +86,45 @@ export function WeekPips({ grid, onOpenDay }: WeekPipsProps) {
                   className="wkp__pip wkp__pip--off"
                   onClick={() => onOpenDay(day.at)}
                   aria-label={`${DAY_SHORT[day.weekday]} ${day.dayOfMonth}, no sessions`}
-                >
-                  off
-                </button>
+                />
               ) : (
                 <>
-                  {visible.map((p) => (
-                    <button
-                      key={p.session.id}
-                      type="button"
-                      className={
-                        p.session.mode === 'remote'
-                          ? 'wkp__pip wkp__pip--remote'
-                          : 'wkp__pip'
-                      }
-                      onClick={() => onOpenDay(day.at)}
-                      aria-label={`${formatMinute(p.startMinute)}, ${p.session.clientName}`}
-                    >
-                      <b>{formatMinute(p.startMinute)}</b>
-                      <span>{p.session.clientName}</span>
-                    </button>
-                  ))}
+                  {visible.map((p) => {
+                    /* `7:15 AM` → `7:15` and a 9px `a`. A 37px cell holds "7:15" and
+                       one letter; "7:15 AM" wrapped to two lines. The letter is
+                       kept because 5:00 and 5:00 are both real on this trainer's
+                       week. The full time is in the label. */
+                    const [clock, meridiem] = formatMinute(p.startMinute).split(' ');
+                    const first = p.session.clientName.split(' ')[0];
+                    return (
+                      <button
+                        key={p.session.id}
+                        type="button"
+                        className={[
+                          'wkp__pip',
+                          p.session.mode === 'remote' ? 'wkp__pip--remote' : '',
+                          p.session.done ? 'wkp__pip--done' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                        onClick={() => onOpenDay(day.at)}
+                        aria-label={`${formatMinute(p.startMinute)}, ${p.session.clientName}, ${
+                          p.session.mode === 'remote' ? 'online' : 'in person'
+                        }${p.session.done ? ', done' : ''}`}
+                      >
+                        <b>
+                          {clock}
+                          <i>{meridiem?.[0]?.toLowerCase()}</i>
+                        </b>
+                        <span>{first}</span>
+                        {p.session.done && (
+                          <span className="wkp__ok" aria-hidden="true">
+                            <Check size={10} />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
                   {overflow > 0 && (
                     <button
                       type="button"
@@ -126,7 +145,7 @@ export function WeekPips({ grid, onOpenDay }: WeekPipsProps) {
       {/* Legend */}
       <div className="wkp__leg" aria-hidden="true">
         <span>
-          <s style={{ background: 'var(--tx-accent)' }} />
+          <s style={{ background: 'var(--tx-floor)' }} />
           In Person
         </span>
         <span>

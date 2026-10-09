@@ -27,6 +27,7 @@ export function CountBadge({
   return (
     <span
       className={['rail__n', tone === 'neutral' ? null : `rail__n--${tone}`, className].filter(Boolean).join(' ')}
+      role="img"
       aria-label={label}
     >
       {/* Capped, not truncated: past a point the exact number stops changing what

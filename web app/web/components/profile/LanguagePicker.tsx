@@ -4,7 +4,8 @@ import { useMemo, useState } from 'react';
 
 import { AddChip, Chip, ChipRow } from '@/components/setup/Chips';
 import { AddOwn } from '@/components/setup/AddOwn';
-import { LANGUAGES, customId, labelFor } from '@/lib/setup/options';
+import { LANGUAGES, LANGUAGES_ON_CARD, customId, labelFor } from '@/lib/setup/options';
+import { Tag } from '@/web-components/ui/Tag';
 
 /**
  * THE LANGUAGE PICKER — ten chips, no cap, and the free differentiator.
@@ -57,20 +58,34 @@ export function LanguagePicker({
 
   return (
     <>
-      <ChipRow top={20}>
-        {chips.map((id) => (
-          <Chip
-            key={id}
-            label={labelFor(id, LANGUAGES)}
-            pressed={value.includes(id)}
-            disabled={disabled}
-            onClick={() => toggle(id)}
-          />
-        ))}
-        {adding ? null : (
-          <AddChip label="Another language" disabled={disabled} onClick={() => setAdding(true)} />
-        )}
-      </ChipRow>
+      {/* The profile card names the first FOUR and counts the rest, so which four is a decision the trainer is making whether or
+          not they know it. The chips carry their place, and this line says what the place is for. */}
+      <div className="spk__count">
+        {value.length > 0 ? <Tag>{value.length}</Tag> : null}
+        <span className="small">
+          {value.length > LANGUAGES_ON_CARD
+            ? `Your profile names the first ${LANGUAGES_ON_CARD}. Unpick and re-pick to change which.`
+            : `The first ${LANGUAGES_ON_CARD} are named on your profile, in the order you pick them.`}
+        </span>
+      </div>
+
+      <div role="group" aria-label="Languages">
+        <ChipRow>
+          {chips.map((id) => (
+            <Chip
+              key={id}
+              label={labelFor(id, LANGUAGES)}
+              pressed={value.includes(id)}
+              rank={value.includes(id) ? value.indexOf(id) + 1 : undefined}
+              disabled={disabled}
+              onClick={() => toggle(id)}
+            />
+          ))}
+          {adding ? null : (
+            <AddChip label="Another language" disabled={disabled} onClick={() => setAdding(true)} />
+          )}
+        </ChipRow>
+      </div>
 
       {adding ? (
         <AddOwn

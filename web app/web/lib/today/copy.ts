@@ -47,3 +47,47 @@ export function clientsNeedYou(n: number): string {
 export function sessionsToday(n: number): string {
   return `${sessions(n)} today`;
 }
+
+/**
+ * THE WORD A QUEUE ROW LEADS WITH, and the summary of the rows folded under it.
+ *
+ * Eleven rows that all open with a name and a grey sentence carry one cue — the
+ * 2px red edge — and that is colour alone. A lead word is the kind of thing the
+ * row is about, said first and in the same place on every row, so the eye can run
+ * down the column and a screen reader meets it before the sentence.
+ *
+ * Categories, not restatements: `PACK Pack ends in 2 sessions` would say the same
+ * word twice, so the pack row leads *Renewal* and the money row *Money*. Two kinds
+ * share *Diary* — an unmarked session and an open log are the same housekeeping
+ * to a trainer, and a ninth word for a ninth kind is a legend to learn.
+ */
+import type { AttentionKind } from './deck';
+
+export const KIND_LEAD: Record<AttentionKind, string> = {
+  overdue: 'Money',
+  pack: 'Renewal',
+  quiet: 'Quiet',
+  missed: 'Attendance',
+  'no-program': 'Plan',
+  assess: 'Measure',
+  unmarked: 'Diary',
+  log: 'Diary',
+  milestone: 'Milestone',
+};
+
+/**
+ * `2 money · 1 renewal · 2 quiet` — what is behind *Show 5 more rows*.
+ *
+ * A disclosure that states a count asks the trainer to click to find out whether
+ * the count was worth clicking; the KINDS are what tell them. Order is first
+ * appearance, which is the queue's own ranking, and it stops at four groups with
+ * a `+N` for the tail because five clauses is a sentence nobody reads.
+ */
+export function foldedSummary(kinds: AttentionKind[], maxGroups = 4): string {
+  const counts = new Map<string, number>();
+  for (const k of kinds) counts.set(KIND_LEAD[k], (counts.get(KIND_LEAD[k]) ?? 0) + 1);
+  const groups = [...counts.entries()];
+  const shown = groups.slice(0, maxGroups).map(([w, n]) => `${n} ${w.toLowerCase()}`);
+  const rest = groups.slice(maxGroups).reduce((sum, [, n]) => sum + n, 0);
+  return rest > 0 ? `${shown.join(' · ')} · +${rest}` : shown.join(' · ');
+}

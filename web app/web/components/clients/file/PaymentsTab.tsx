@@ -187,6 +187,13 @@ function owedOn(pkg: ClientPackageWire): number {
 }
 
 /** The pack the page read adjustments for — client-api's `livePackage` rule (the running one, else the newest). */
+/** The pack's name, plus its terms unless the name already says them (`12 sessions · floor` was printed twice). */
+function packLabel(pkg: ClientPackageWire): string {
+  const n = packName(pkg);
+  const t = packTerms(pkg);
+  return !t || n.includes(t) ? n : t.includes(n) ? t : `${n} · ${t}`;
+}
+
 function livePackageId(packages: ClientPackageWire[]): string | null {
   return (packages.find((p) => p.status === 'active') ?? packages[0])?.id ?? null;
 }
@@ -300,6 +307,12 @@ export function PaymentsTab({
       .filter((p) => p.dueDate && owedOn(p) > 0)
       .sort((a, b) => new Date(a.dueDate!).getTime() - new Date(b.dueDate!).getTime())[0] ?? null;
   const nextDue = nextDuePkg?.dueDate ? dueRead(nextDuePkg.dueDate, now) : null;
+  const unpaidPacks = packages.filter((p) => owedOn(p) > 0).length;
+  /* A pack that owes money and has no pending payment row has no line in the ledger at all: the debt
+     was a tile and a bar and nothing a trainer could act on from the table. */
+  const owedPacks = packages
+    .filter((p) => owedOn(p) > 0 && !payments.some((x) => x.packageId === p.id && x.status === 'pending'))
+    .sort((a, b) => (a.dueDate ?? '9').localeCompare(b.dueDate ?? '9'));
 
   /* The server's order already: bookAt, newest first. */
   const ledger = payments;
@@ -471,14 +484,14 @@ export function PaymentsTab({
       <SubscriptionBar
         key={pkg.id}
         label={isQueued ? 'A pack waiting behind the current one' : 'The pack in play'}
-        name={`${packName(pkg)} · ${packTerms(pkg)}`}
+        name={packLabel(pkg)}
         status={liveTag(pkg, isQueued)}
         facts={[
           { k: 'Amount', v: rupees(num(pkg.amount)) },
           {
             k: 'Balance',
             v: owed > 0 ? rupees(owed) : letGo ? 'Written off' : 'Paid in full',
-            tone: owed > 0 ? 'danger' : letGo ? 'warn' : 'acc',
+            tone: owed > 0 ? (due && due.tone !== 'neutral' ? due.tone : 'neutral') : letGo ? 'warn' : 'acc',
           },
           {
             k: 'Due',
@@ -527,7 +540,7 @@ export function PaymentsTab({
               </Button>
             )}
             {owed <= 0 && refundable(pkg, payments) && (
-              <Button variant="ghost" size="sm" onClick={() => setRefunding(pkg)}>
+              <Button variant="ghost" size="sm" className="cfpay__end" onClick={() => setRefunding(pkg)}>
                 Refund
               </Button>
             )}
@@ -563,12 +576,20 @@ export function PaymentsTab({
             pending.length > 0
               ? `${pending.length} invoice${pending.length === 1 ? '' : 's'} open`
               : outstanding > 0
-                ? 'never recorded as paid'
+                ? `on ${unpaidPacks} pack${unpaidPacks === 1 ? '' : 's'}, not paid yet`
                 : writtenOff > 0
                   ? `${rupees(writtenOff)} written off`
                   : `${first} is square with you`
           }
-          tone={outstanding > 0 ? 'danger' : 'acc'}
+          /* RED ONLY ONCE IT IS LATE. The whole tile was danger the moment anything was owed, so Sneha's
+              ₹8,000 — not due for four days — read as a debt in default. `dueRead` already has the ladder. */
+          tone={
+            outstanding > 0
+              ? nextDue && nextDue.tone !== 'neutral'
+                ? nextDue.tone
+                : undefined
+              : 'acc'
+          }
         />
         <Stat
           label="Next payment"
@@ -640,23 +661,30 @@ export function PaymentsTab({
           actions={
             <>
               {outstanding > 0 && (
-                <Button variant="secondary" size="sm" onClick={remind} disabled={busy}>
-                  Send a reminder
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={remind}
+                  disabled={busy}
+                  title="Drafts a WhatsApp message and logs it. Nothing is sent until you press send there."
+                >
+                  Draft a reminder
                 </Button>
               )}
               {current && (
                 <Button
                   variant="secondary"
                   size="sm"
+                  className="cfpay__headtake"
                   onClick={() => setCollecting({ pkg: current, settling: null })}
                 >
-                  Record a payment
+                  Take a payment
                 </Button>
               )}
             </>
           }
         />
-        {ledger.length === 0 ? (
+        {ledger.length === 0 && owedPacks.length === 0 ? (
           <Blank>Nothing collected yet</Blank>
         ) : (
           <Table
@@ -674,6 +702,51 @@ export function PaymentsTab({
               { key: 'act', label: '' },
             ]}
           >
+            {/* WHAT IS OWED IS A ROW, on top, with the verb on it — in a neutral tag: a debt inside its
+                terms is not an alarm, and *Pending* (amber) stays for an invoice somebody raised. */}
+            {owedPacks.map((pkg) => {
+              const dueIn = pkg.dueDate ? dueRead(pkg.dueDate, now) : null;
+              return (
+                <Row
+                  key={`owed-${pkg.id}`}
+                  cells={[
+                    { key: 'amount', numeric: true, label: 'Amount', content: rupees(owedOn(pkg)), className: 'strong' },
+                    { key: 'status', label: 'Status', content: <Tag>Owed</Tag> },
+                    { key: 'pack', label: 'Package', content: packName(pkg) },
+                    {
+                      key: 'when',
+                      label: 'Date',
+                      className: 'mono',
+                      content: pkg.dueDate ? (
+                        <span className="cfpay__when">
+                          {isoDateStr(pkg.dueDate)}
+                          {dueIn ? (
+                            <>
+                              <br />
+                              <span className="ink3">{dueIn.text}</span>
+                            </>
+                          ) : null}
+                        </span>
+                      ) : (
+                        <span className="ink3">No date set</span>
+                      ),
+                    },
+                    ...(billable ? [{ key: 'inv', label: 'Invoice', content: <span className="ink3">&mdash;</span> }] : []),
+                    { key: 'ref', label: 'How it was paid', content: <span className="ink3">&mdash;</span> },
+                    {
+                      key: 'act',
+                      label: '',
+                      className: 'cftx__act',
+                      content: (
+                        <Button variant="secondary" size="sm" className="cfpay__owedtake" onClick={() => setCollecting({ pkg, settling: null })}>
+                          Take a payment
+                        </Button>
+                      ),
+                    },
+                  ]}
+                />
+              );
+            })}
             {ledger.map((p) => {
               const against = p.packageId ? byPackage.get(p.packageId) : null;
               const eligible = canInvoice(p);

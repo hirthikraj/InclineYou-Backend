@@ -1,143 +1,151 @@
+import { hasOwnArt } from './kitArt';
 import type { PageTab } from '@/components/shell/PageTabs';
-import type { ExerciseSource } from './api';
+import type { ExerciseSource, LibraryMeta } from './api';
 
 /**
- * THE TWO VIEWS OF THE EXERCISE LIBRARY.
+ * THE LIBRARY'S THREE WAYS IN, AND THE ADDRESS THAT HOLDS EACH.
  *
- * `lib/sessions/tabs.ts` and `lib/programs/tabs.ts` own the other two strips in
- * this section and this is the third, written the same way for the reason those
- * two give: a strip drawn at its call-site is a strip the next screen draws
- * slightly differently.
+ * **Categories** is the default: pick a body part and then its muscles — the way a
+ * trainer who is building a session thinks. **Equipment** is the same drill by
+ * kit, because the question a home-visit trainer asks is what they can do with a
+ * barbell and two kettlebells. **Search** is every filter at once, for the
+ * trainer who knows what they want and wants it narrowed by several things.
  *
- * ── WHY THESE ARE TABS AND NOT TWO ROUTES ────────────────────────────────────
- *
- * `nav.tsx` draws the line: **a strip above a page is views of THIS page; a
- * column beside the rail is other pages.** *By categories* and *By exercises*
- * are the same question — *which movement* — asked at two grains. Neither is a
- * different screen, and a trainer who switches between them has not gone
- * anywhere; so the strip is right, and a `/categories` segment would have been
- * the mistake that pass was written to undo.
- *
- * ── AND WHY THE VIEW IS IN THE URL ───────────────────────────────────────────
- *
- * It costs nothing and it buys the three things a component-local `useState`
- * cannot: a reload lands where you were, the back button leaves the drill-down
- * you just entered, and a category link a trainer sends to themselves opens the
- * category. The filters ride along for the same reason — *Legs, barbell, page 2*
- * is a place, and a place should have an address.
- *
- * ── THE CATEGORY GRID IS A DOOR INTO THE LIST, NOT A THIRD VIEW ──────────────
- *
- * Clicking *Chest 9* lands on `?group=Chest` — the exercises view, filtered,
- * with the strip showing *By exercises* selected. That is honest about where the
- * click took you, and it means there is exactly one list of exercises in this
- * screen rather than one inside a category and another beside it.
+ * Every choice is a search parameter, so the first paint is already the right
+ * page, a link can be sent, and the back button leaves a drill-down rather than
+ * the screen. The drill-down parameters (`group`, `muscle`, `ecat`, `ekey`) and
+ * the search filters (`body`, `muscles`, …) have DIFFERENT names on purpose: the
+ * first narrow a tile the trainer opened, the second are a form they filled in,
+ * and one parameter doing both would make a tab switch carry over a filter the
+ * new tab does not draw.
  */
-export type ExercisesView = 'exercises' | 'categories';
+export type LibraryView = 'categories' | 'equipment' | 'search';
 
-export const EXERCISES_TABS: { key: ExercisesView; label: string }[] = [
-  { key: 'exercises', label: 'By exercises' },
-  { key: 'categories', label: 'By categories' },
+export const LIBRARY_TABS: { key: LibraryView; label: string }[] = [
+  { key: 'categories', label: 'Categories' },
+  { key: 'equipment', label: 'Equipment' },
+  { key: 'search', label: 'Search & filter' },
 ];
 
 export const EXERCISES_BASE = '/programs/exercises';
+export const EXERCISES_PAGE_SIZE = 24;
 
-/** What a page of exercises is, everywhere — the server's read and the pager
- *  both take this number, and a second copy is how the two disagree. */
-export const EXERCISES_PAGE_SIZE = 25;
-
-/** The filters, as the URL carries them. Every field optional; an absent field
- *  and an empty one mean the same thing, which is why `href` drops both. */
-export interface ExercisesQuery {
-  q?: string;
-  group?: string;
-  equipment?: string;
-  /** Whose movements, and whether finished. `all` is the default and is never
-   *  written to the URL. */
-  source?: ExerciseSource;
-  /** Zero-based, as the API counts. Never written to the URL for page one. */
-  page?: number;
+export interface LibraryQuery {
+  view: LibraryView;
+  /** Categories: the body part opened, and optionally one of its muscles. */
+  group: string;
+  muscle: string;
+  /** Equipment: the category opened, and optionally one kind of kit in it. */
+  ecat: string;
+  ekey: string;
+  /** Search: every filter. Lists are OR-ed within a filter and AND-ed between filters. */
+  q: string;
+  body: string[];
+  muscles: string[];
+  also: string[];
+  kit: string[];
+  pattern: string[];
+  level: string[];
+  counted: string[];
+  type: string[];
+  source: ExerciseSource;
+  page: number;
 }
 
-/**
- * The address of one view of the library.
- *
- * Empty strings and page zero are OMITTED rather than written as `&q=&page=0`.
- * Two URLs that draw the same screen are two entries in the trainer's history
- * and two different things to paste into a message, and the tab strip compares
- * `href`s to decide what is current.
- */
-export function exercisesHref(view: ExercisesView, query: ExercisesQuery = {}): string {
+export const emptyQuery = (view: LibraryView = 'categories'): LibraryQuery => ({
+  view, group: '', muscle: '', ecat: '', ekey: '', q: '',
+  body: [], muscles: [], also: [], kit: [], pattern: [], level: [], counted: [], type: [],
+  source: 'all', page: 0,
+});
+
+const LISTS = ['body', 'muscles', 'also', 'kit', 'pattern', 'level', 'counted', 'type'] as const;
+
+/** The address of a state. Defaults are left out, so the bare route is the categories grid. */
+export function libraryHref(next: Partial<LibraryQuery>): string {
+  const q = { ...emptyQuery(), ...next };
   const qs = new URLSearchParams();
-  if (view !== 'exercises') qs.set('view', view);
-  if (query.q) qs.set('q', query.q);
-  if (query.group) qs.set('group', query.group);
-  if (query.equipment) qs.set('equipment', query.equipment);
-  if (query.source && query.source !== 'all') qs.set('source', query.source);
-  if (query.page) qs.set('page', String(query.page));
+  if (q.view !== 'categories') qs.set('view', q.view);
+  if (q.view === 'categories') {
+    if (q.group) qs.set('group', q.group);
+    if (q.group && q.muscle) qs.set('muscle', q.muscle);
+  }
+  if (q.view === 'equipment') {
+    if (q.ecat) qs.set('ecat', q.ecat);
+    if (q.ecat && q.ekey) qs.set('ekey', q.ekey);
+  }
+  if (q.view === 'search') {
+    if (q.q) qs.set('q', q.q);
+    for (const key of LISTS) if (q[key].length > 0) qs.set(key, q[key].join(','));
+    if (q.source !== 'all') qs.set('source', q.source);
+  }
+  if (q.page) qs.set('page', String(q.page));
   const s = qs.toString();
   return s ? `${EXERCISES_BASE}?${s}` : EXERCISES_BASE;
 }
 
-/** Unknown values fall through to the list — a hand-typed parameter is a typo,
- *  not a broken page. `lib/sessions/tabs.ts` makes the same call. */
-export function parseView(raw: string | string[] | undefined): ExercisesView {
-  const one = Array.isArray(raw) ? raw[0] : raw;
-  return EXERCISES_TABS.some(v => v.key === one) ? (one as ExercisesView) : 'exercises';
-}
+type Raw = Record<string, string | string[] | undefined>;
+const one = (raw: string | string[] | undefined) => ((Array.isArray(raw) ? raw[0] : raw) ?? '').trim();
+const many = (raw: string | string[] | undefined) =>
+  one(raw).split(',').map(v => v.trim()).filter(Boolean).slice(0, 20);
 
-/** One search parameter, as a string, with the array case flattened. */
-export function parseOne(raw: string | string[] | undefined): string {
-  const one = Array.isArray(raw) ? raw[0] : raw;
-  return (one ?? '').trim();
-}
+const SOURCES: ExerciseSource[] = ['all', 'incline', 'mine', 'draft'];
 
-/** A page number that cannot be negative, fractional or `NaN` — all three are
- *  reachable by hand and all three would ask the API for a slice from nowhere. */
-export function parsePage(raw: string | string[] | undefined): number {
-  const n = Number.parseInt(parseOne(raw), 10);
-  return Number.isFinite(n) && n > 0 ? n : 0;
+export function parseQuery(sp: Raw): LibraryQuery {
+  const view = LIBRARY_TABS.some(t => t.key === one(sp.view)) ? (one(sp.view) as LibraryView) : 'categories';
+  const n = Number.parseInt(one(sp.page), 10);
+  const source = SOURCES.includes(one(sp.source) as ExerciseSource) ? (one(sp.source) as ExerciseSource) : 'all';
+  return {
+    view,
+    group: one(sp.group), muscle: one(sp.muscle), ecat: one(sp.ecat), ekey: one(sp.ekey),
+    q: one(sp.q).slice(0, 100),
+    body: many(sp.body), muscles: many(sp.muscles), also: many(sp.also), kit: many(sp.kit),
+    pattern: many(sp.pattern), level: many(sp.level), counted: many(sp.counted), type: many(sp.type),
+    source, page: Number.isFinite(n) && n > 0 ? n : 0,
+  };
 }
 
 /**
- * The strip, with a count on the tab you are NOT reading.
+ * Does this state ask for a list of exercises at all, or is it a grid of tiles?
  *
- * The rule is `lib/programs/tabs.ts`'s and it holds here: the exercises view
- * states its own total in the page header's subtitle, so a count on it would be
- * the same figure twice on one screen. On the categories tab the count is the
- * one thing the strip can say that the page cannot — how many groups are over
- * there.
+ * Both Categories and Equipment have three levels — the top tiles, the kinds or muscles
+ * inside one, then that one's exercises — so a tile opened with more than one thing in it
+ * is still a grid. One with a single thing (bodyweight, shoulders) has nothing to choose,
+ * and lists at once. So does a category of kit that is only partly drawn (the machines), which narrows by a filter.
  */
-export function exercisesTabs(
-  current: ExercisesView,
-  query: ExercisesQuery,
-  counts: Partial<Record<ExercisesView, number | null>> = {},
-): PageTab[] {
-  return EXERCISES_TABS.map(t => ({
+export function wantsList(q: LibraryQuery, meta: LibraryMeta): boolean {
+  if (q.view === 'categories') {
+    if (q.group === '') return false;
+    if (q.muscle !== '') return true;
+    /* a body part with one muscle (shoulders, neck) has nothing to choose between and lists at once */
+    return meta.muscles.filter(m => m.bodyPart === q.group).length <= 1;
+  }
+  if (q.view === 'equipment') {
+    if (q.ekey !== '') return true;
+    if (q.ecat === '') return false;
+    const items = meta.equipmentGroups.find(g => g.category === q.ecat)?.items ?? [];
+    if (items.length <= 1) return true;
+    /* a category whose kinds are not ALL drawn (the selectorised machines: twenty-odd kinds, one family picture) has
+       nothing to show as tiles, so it lists at once and narrows with a filter instead */
+    return !items.every(i => hasOwnArt(i.key));
+  }
+  return true;
+}
+
+export function libraryTabs(): PageTab[] {
+  return LIBRARY_TABS.map(t => ({
     key: t.key,
     label: t.label,
-    /* The filters ride to the exercises tab and are DROPPED on the way to the
-       categories tab — including `group`, which that view now understands.
-       Pressing *By categories* means *show me the categories*, whether you are
-       on the other tab or three rows into Chest; a strip that remembered the
-       drill-down would be a tab that cannot be used to leave it. The back
-       control inside the drill-down points at this same address. */
-    href: t.key === 'exercises' ? exercisesHref('exercises', query) : exercisesHref('categories'),
-    count: t.key === current ? null : counts[t.key] ?? null,
+    /* Pressing a tab means *show me that tab's front door*, from wherever you are:
+       a strip that remembered the drill-down would be a tab that cannot be used to
+       leave it. */
+    href: libraryHref({ view: t.key }),
+    count: null,
   }));
 }
 
-/** The four options, in the order they are drawn. The labels are what a trainer
- *  reads; the values are what the wire carries. */
 export const EXERCISE_SOURCES: { value: ExerciseSource; label: string }[] = [
   { value: 'all', label: 'All exercises' },
   { value: 'incline', label: 'InclineYou exercises' },
   { value: 'mine', label: 'My exercises' },
   { value: 'draft', label: 'Draft' },
 ];
-
-/** Unknown values fall through to `all`, the way `parseView` does. */
-export function parseSource(raw: string | string[] | undefined): ExerciseSource {
-  const one = Array.isArray(raw) ? raw[0] : raw;
-  return EXERCISE_SOURCES.some(s => s.value === one) ? (one as ExerciseSource) : 'all';
-}

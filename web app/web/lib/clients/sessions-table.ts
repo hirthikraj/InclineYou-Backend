@@ -123,9 +123,9 @@ export type SessionStatusFilter = 'all' | 'done' | 'booked' | 'missed' | 'cancel
 
 export const STATUS_OPTIONS: { value: SessionStatusFilter; label: string }[] = [
   { value: 'all', label: 'All' },
-  { value: 'done', label: 'Completed' },
+  { value: 'done', label: 'Done' },
   { value: 'booked', label: 'Booked' },
-  { value: 'missed', label: 'Missed' },
+  { value: 'missed', label: 'No-show' },
   { value: 'cancelled', label: 'Cancelled' },
   { value: 'unmarked', label: 'Unmarked' },
 ];
@@ -301,7 +301,9 @@ export function buildSessionRows(sessions: ClientSessionWire[], now: number): Se
         /* The session row names its workout, not the plan; the tab reads no
            program list (Client file · Sessions), so the plan column is empty. */
         program: null,
-        exercises: done ? (s.log?.exercises ?? null) : null,
+        /* `||` and not `??`: a log with nothing in it is `0`, and a column that says 0 on most rows
+         of a client who trained is a column nobody reads. The dash says *nothing logged*. */
+        exercises: done ? (s.log?.exercises || null) : null,
         note: s.notes ?? null,
         relative: relativeDay(startOfDay(s.scheduledAt), now),
         month: new Date(d.getFullYear(), d.getMonth(), 1).getTime(),

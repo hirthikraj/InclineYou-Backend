@@ -290,7 +290,7 @@ export function Rail({
           hold a 28px mark AND a 32px control — so the control takes the row
           under it, where it is a full `--w-tap` target and centred on the same
           axis as every glyph in the body below. */}
-      {pane && (
+      {pane ? (
         <div className="rail__ctl">
           <button
             className="rail__pc"
@@ -305,6 +305,14 @@ export function Rail({
             </span>
           </button>
         </div>
+      ) : (
+        /* THE SLOT IS KEPT WHEN THERE IS NOTHING TO PUT IN IT. MEASURED at 1440:
+           the first destination sat at y=66 on /today and /schedule — no section,
+           no switch, no row — and at y=108 on every route that has a pane, so the
+           whole column of glyphs jumped 42px on the navigation a trainer makes
+           most. A target aimed from memory is the one thing a rail must not move.
+           Empty and `aria-hidden`: it is a measurement, not a control. */
+        <div className="rail__ctl rail__ctl--idle" aria-hidden="true" />
       )}
 
       <div className="rail__body">

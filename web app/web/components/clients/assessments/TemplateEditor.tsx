@@ -102,12 +102,11 @@ export function TemplateEditor({
   /* WHICH BLOCK IS OPEN, AND ONLY ONE OF THEM IS.
      Both bodies open at once is a twenty-one-row measurement picker above a
      question builder — about 1,300px of dialog, with the Save button that ends
-     it somewhere past all of it. A new template opens on its questions, which
-     is what a trainer writing one starts with; an existing one opens on its
-     measurements, which is what they come back to change. */
-  const [open, setOpen] = useState<'measurements' | 'questions' | null>(
-    template ? 'measurements' : 'questions',
-  );
+     it somewhere past all of it. It opens on the MEASUREMENTS, new or existing: in v1 the trainer takes
+     the assessment with a tape in hand, so the tapes are the substance and the questions the addendum. It
+     opened a new template on a bank of eleven questions and *Add them all*, which is the wrong first
+     thing to be offered. */
+  const [open, setOpen] = useState<'measurements' | 'questions' | null>('measurements');
   const [dirty, setDirty] = useState(false);
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -167,7 +166,7 @@ export function TemplateEditor({
       covered={asking}
     >
       <Modal
-        title={template ? 'Edit an assessment' : 'New assessment'}
+        title={template ? 'Edit template' : 'New template'}
         width={640}
         className="asm-ed"
         foot={
@@ -179,13 +178,16 @@ export function TemplateEditor({
           </>
         }
       >
-        {error && <Message tone="err">{error}</Message>}
+        {/* `alert`, so a refusal is announced: it sits at the top of a body that scrolls while Create is pinned
+            at the foot, so a trainer pressing Create from the bottom neither saw nor heard the failure. */}
+        {error && <Message tone="err" alert>{error}</Message>}
 
         <TextField
           id="asm-name"
-          label="Assessment name"
+          label="Template name"
           value={name}
-          placeholder="e.g. Month 3 check-in"
+          maxLength={120}
+          placeholder="e.g. Month 3 review"
           onChange={(e) => { setName(e.target.value); touch(); }}
         />
 
@@ -201,7 +203,7 @@ export function TemplateEditor({
           hideLabel={false}
           value={description}
           onChange={(v) => { setDescription(v); touch(); }}
-          placeholder="What this check-in is for, and anything the client should know before they start."
+          placeholder="What this template is for, and anything to remember when you take it."
           className="mt3"
         />
 
@@ -242,7 +244,7 @@ export function TemplateEditor({
           icon={<Checklist />}
           title="Questions"
           count={questions.items.length}
-          sub="Questions to ask the client"
+          sub="Answers are notes only you read"
           open={open === 'questions'}
           onOpenChange={(next) => setOpen(next ? 'questions' : null)}
           off={!questions.on}
@@ -811,7 +813,7 @@ function QuestionCard({
               sentence and a switch (trap 10). */}
           <div className="asm-q__b asm-q__flags">
             <ListRow
-              title="The client can write their own answer"
+              title="They can write their own answer"
               sub="Adds an “Other” line under the options."
               right={
                 <Switch
@@ -823,7 +825,7 @@ function QuestionCard({
             />
             <ListRow
               title="Allow several answers"
-              sub="The client can tick more than one."
+              sub="More than one can be ticked."
               right={
                 <Switch
                   checked={q.allowMultiple}
@@ -839,8 +841,7 @@ function QuestionCard({
       {q.kind === 'yesno' && (
         <div className="asm-q__b">
           <p className="small" style={{ margin: 0 }}>
-            The client answers yes or no. Nothing here is a health question — see the note on the
-            write path.
+            Answered yes or no.
           </p>
         </div>
       )}
@@ -848,8 +849,8 @@ function QuestionCard({
       {q.kind === 'text' && (
         <div className="asm-q__b">
           <p className="small" style={{ margin: 0 }}>
-            The client writes an answer in their own words. It is the one kind that cannot be put
-            beside the same answer from eight weeks ago, so ask it where that is the point.
+            Written in their own words. It is the one kind that cannot be put beside the same answer
+            from eight weeks ago, so ask it where that is the point.
           </p>
         </div>
       )}

@@ -275,7 +275,7 @@ export function TrendChart({
         role="img"
         aria-label={`${label}: ${dir} from ${first.toFixed(1)} to ${last.toFixed(1)}${
           unit ? ` ${unit}` : ''
-        }`}
+        }${from && to ? `, ${from} to ${to}` : ''}`}
         preserveAspectRatio="none"
       >
         <g className="trend__g">

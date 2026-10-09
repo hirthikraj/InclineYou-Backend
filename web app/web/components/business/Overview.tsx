@@ -19,7 +19,7 @@ import {
   type RenewalItem,
 } from '@/lib/business/overview';
 import { summaryQuery, type MoneySummary, type OverviewData } from '@/lib/business/types';
-import { currentMonth, periodProse, periodTag } from '@/lib/money/period';
+import { currentMonth, periodProse, periodRange, periodTag } from '@/lib/money/period';
 import { relativePast, rupees } from '@/lib/today/time';
 import { TopBar } from '@/components/shell/TopBar';
 import { TrendChart } from '@/components/money/TrendChart';
@@ -143,7 +143,7 @@ export function Overview({ data }: { data: OverviewData }) {
       <TopBar crumb="Business" title="Business" />
       <main className="main" id="main-content">
         <BizHeader
-          title="Overview"
+          title="Business overview"
           subtitle={
             <>
               {actions.count > 0
@@ -193,6 +193,7 @@ export function Overview({ data }: { data: OverviewData }) {
                 stale={stale}
                 failed={failed}
                 concentration={concentration}
+                running={periodRange(period, data.now).to > data.now}
               />
               <OverTime trend={trend} peak={peak} />
             </>
@@ -339,7 +340,32 @@ function ActionRow({ item, now }: { item: ActionItem; now: number }) {
  * A `Timeline` and not a table, because the answer to *what happened* is an
  * order, not a set of columns.
  */
-function WhatHappened({ items, now }: { items: ActivityLine[]; now: number }) {
+/** A pack started and paid for on the same day by the same client is one event, not two. */
+function mergeEvents(items: ActivityLine[]): Array<ActivityLine & { paid?: number }> {
+  const out: Array<ActivityLine & { paid?: number }> = [];
+  const day = (at: number) => new Date(at).toDateString();
+  for (const it of items) {
+    const prev = out[out.length - 1];
+    const pair =
+      prev &&
+      prev.clientId === it.clientId &&
+      day(prev.at) === day(it.at) &&
+      ((prev.kind === 'sold' && it.kind === 'paid') || (prev.kind === 'paid' && it.kind === 'sold'));
+    if (pair) {
+      const sold = prev.kind === 'sold' ? prev : it;
+      const paid = prev.kind === 'paid' ? prev : it;
+      out[out.length - 1] = { ...sold, paid: paid.amount ?? 0 };
+    } else out.push({ ...it });
+  }
+  return out;
+}
+
+const FEED_SHOWN = 6;
+
+function WhatHappened({ items: all, now }: { items: ActivityLine[]; now: number }) {
+  /* SIX LINES, MERGED. Eight rows (four of them a start and its payment) beside two renewals left half a page of void under
+     the right-hand column; the full list is one link away. */
+  const items = mergeEvents(all).slice(0, FEED_SHOWN);
   return (
     <Slab
       title="What happened"
@@ -359,7 +385,7 @@ function WhatHappened({ items, now }: { items: ActivityLine[]; now: number }) {
               mark={relativePast(it.at, now)}
               at={new Date(it.at).toISOString()}
               href={`/clients/${it.clientId}`}
-              title={<>{it.clientName} {it.text}</>}
+              title={<>{it.clientName} {it.text}{it.paid !== undefined && <> · paid {rupees(it.paid)}</>}</>}
               /* Quiet ink for a write-off: it records an absence, which is
                  exactly what `dim` is for. */
               dim={it.kind === 'write_off'}
@@ -410,8 +436,8 @@ function RunningOut({
       action={{ label: 'The price list', href: '/business/packages' }}
     >
       <p className="small" style={{ marginBottom: items.length > 0 ? 10 : 0 }}>
-        {rupees(upcomingValue)} of coaching is sold and not yet delivered
-        {pausedValue > 0 && <>, {rupees(pausedValue)} of it on stopped clocks</>}.
+        {rupees(upcomingValue)} of coaching is sold but not yet delivered
+        {pausedValue > 0 && <>, {rupees(pausedValue)} of it on paused packs</>}.
         {items.length > 0 && <> {rupees(value)} is on the packs below.</>}
       </p>
 
@@ -484,7 +510,7 @@ function RunningOut({
  * and the second is `now.overdue`, as of today and not of the span.
  */
 function WhereFrom({
-  summary, tag, hasGym, stale, failed, concentration,
+  summary, tag, hasGym, stale, failed, concentration, running,
 }: {
   summary: MoneySummary;
   tag: string;
@@ -492,6 +518,8 @@ function WhereFrom({
   stale: boolean;
   failed: boolean;
   concentration: Concentration | null;
+  /** The picked period has not ended: it is compared with nothing, not with a finished month. */
+  running: boolean;
 }) {
   const t = summary.total;
   const rate = t.billed > 0 ? Math.min(100, Math.round((t.collected / t.billed) * 100)) : null;
@@ -547,17 +575,29 @@ function WhereFrom({
           href={summary.now.overdue > 0 ? '/business/transactions?filter=owed' : undefined}
         />
         <Stat
-          label="Billed against the period before"
-          /* A percentage only when there is something billed NOW to compare. Billing
-             nothing against a busy month is arithmetically −100%, which reads as a
-             collapse on a 3rd of the month when it is simply the 3rd. */
-          value={t.billed > 0 && trend !== null ? `${trend > 0 ? '+' : ''}${trend}%` : '—'}
-          tone={t.billed > 0 && trend !== null && trend < 0 ? 'warn' : 'neutral'}
-          detail={t.billed <= 0
-            ? 'Nothing billed this period'
-            : trend === null
-              ? 'No earlier period to compare to'
-              : `${t.packagesSold} pack${t.packagesSold === 1 ? '' : 's'} sold`}
+          /* A MONTH IN PROGRESS IS NOT COMPARED WITH A FINISHED ONE. This tile said −97.3% in warning amber on the 5th, because
+             ₹3,000 so far was set against all of September. The picker's range ends after today when the period is still
+             running: the tile then states what has been billed so far and says there is nothing to compare yet. */
+          label={running ? 'Billed so far' : 'Billed against the period before'}
+          /* Otherwise: a percentage only when there is something billed NOW to compare. Billing nothing against a busy month
+             is arithmetically −100%, which reads as a collapse when it is simply the 3rd. */
+          value={
+            running
+              ? rupees(t.billed)
+              : t.billed > 0 && trend !== null
+                ? `${trend > 0 ? '+' : ''}${trend}%`
+                : '—'
+          }
+          tone={!running && t.billed > 0 && trend !== null && trend < 0 ? 'warn' : 'neutral'}
+          detail={
+            running
+              ? `${t.packagesSold} pack${t.packagesSold === 1 ? '' : 's'} sold · month in progress, nothing to compare yet`
+              : t.billed <= 0
+                ? 'Nothing billed this period'
+                : trend === null
+                  ? 'No earlier period to compare to'
+                  : `${t.packagesSold} pack${t.packagesSold === 1 ? '' : 's'} sold`
+          }
         />
       </div>
 
@@ -580,11 +620,13 @@ function WhereFrom({
                 {/* The bar is the SHARE, there to make the ranking readable at a
                     glance. `describe={false}` and a label naming the person: the
                     default announcement would repeat what the row just said. */}
+                {/* SCALED TO THE LARGEST, not to the year's total: against the total every bar was 10–13% wide and the
+                    difference between the first client and the fifth could not be seen. The share is still in the label. */}
                 <Meter
                   label={`${c.name}’s share of the last twelve months — ${c.share}%`}
                   describe={false}
-                  segments={[{ tone: 'acc', value: Math.max(2, c.share) }]}
-                  total={100}
+                  segments={[{ tone: 'acc', value: Math.max(2, c.yours) }]}
+                  total={Math.max(1, ...concentration.top.map((x) => x.yours))}
                 />
               </div>
             ))}

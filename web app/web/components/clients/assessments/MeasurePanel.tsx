@@ -115,9 +115,11 @@ export function MeasurePanel({
           value={compareId}
           onChange={onCompare}
         />
-        <p className="asmv__pickn">
-          {stats.points.length} reading{stats.points.length === 1 ? '' : 's'} on record
-        </p>
+        {!only && (
+          <p className="asmv__pickn">
+            {stats.points.length} readings on record
+          </p>
+        )}
       </div>
 
       <div className="asmv__mcols">
@@ -140,7 +142,8 @@ export function MeasurePanel({
               /* The figure IS this card — see `Change`'s note on the size. */
               size="xl"
             />
-            <p className="small asmv__sub">
+            {/* ONE READING SAYS IT ONCE: the record card's message carries it. */}
+            <p className="small asmv__sub" hidden={!against}>
               {against
                 ? `Against ${DATE.format(new Date(against.at))}${
                     chosen ? ', the check-in you picked.' : ', the check-in before this one.'
@@ -231,7 +234,7 @@ export function MeasurePanel({
             )}
           </CardBody>
 
-          {stats.points.length > 0 && (
+          {stats.points.length > 0 && !only && (
             <CardBody flush divided>
               {/* THE RECORD IS A COLUMN OF BARS, NOT A TABLE, and it is the
                   Summary's row turned on its side.

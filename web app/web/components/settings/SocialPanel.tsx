@@ -2,8 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react';
 
-import { MessageSlot } from '@/components/auth/MessageSlot';
-import { SaveRow } from '@/components/settings/IdentityForm';
+import { SavePin } from '@/components/settings/IdentityForm';
 import { usePublishDraft } from '@/components/settings/ProfileDraft';
 import type { Message } from '@/lib/auth/copy';
 import { saveSocialLinks } from '@/lib/profile/actions';
@@ -132,17 +131,16 @@ export function SocialPanel({ initial }: { initial: Identity }) {
         submit();
       }}
     >
-      <h2 className="card__t">Where a client can look you up</h2>
+      <h2 className="card__t">Social links</h2>
       <p className="small" style={{ marginTop: 3, maxWidth: 560 }}>
-        Everything else on this profile is what you say about yourself. This is where a client goes
-        to check — and most of them will, invite or no invite. Both are optional, and both are
-        yours: we do not repost, count followers, or come between you and anyone who follows you.
+        Where a client goes to check you, invite or no invite. Both optional, and both yours — we do not repost or count
+        followers.
       </p>
 
       {/* ── instagram ────────────────────────────────────────────────────── */}
       <div className="fld" style={{ marginTop: 22, maxWidth: 560 }}>
-        <label className="fld__l" htmlFor="pf-instagram">
-          Instagram <Optional />
+        <label className="fld__l soc__l" htmlFor="pf-instagram">
+          <PlatformMark kind="instagram" /> Instagram <Optional />
         </label>
         <input
           className="ctl"
@@ -173,16 +171,16 @@ export function SocialPanel({ initial }: { initial: Identity }) {
           </p>
         ) : (
           <span className="fld__h" id="pf-instagram-h">
-            Your handle, or the link from your profile — either is fine, we tidy it up.{' '}
-            <SavedAs url={saved.instagramUrl} handle={saved.instagramHandle} current={instagram} />
+            Your handle, or your profile link — we tidy it up.
           </span>
         )}
+        <SavedAs url={saved.instagramUrl} handle={saved.instagramHandle} current={instagram} />
       </div>
 
       {/* ── youtube ──────────────────────────────────────────────────────── */}
       <div className="fld" style={{ marginTop: 18, maxWidth: 560 }}>
-        <label className="fld__l" htmlFor="pf-youtube">
-          YouTube <Optional />
+        <label className="fld__l soc__l" htmlFor="pf-youtube">
+          <PlatformMark kind="youtube" /> YouTube <Optional />
         </label>
         <input
           className="ctl"
@@ -210,19 +208,13 @@ export function SocialPanel({ initial }: { initial: Identity }) {
           </p>
         ) : (
           <span className="fld__h" id="pf-youtube-h">
-            Your channel, not a video — the Identity tab is where one intro video goes.{' '}
-            <SavedAs url={saved.youtubeUrl} handle={saved.youtubeHandle} current={youtube} />
+            Your channel, not a video — one intro video goes on the Identity tab.
           </span>
         )}
+        <SavedAs url={saved.youtubeUrl} handle={saved.youtubeHandle} current={youtube} />
       </div>
 
-      <MessageSlot message={message} />
-
-      <SaveRow
-        pending={pending}
-        dirty={dirty}
-        note="Clients check these before they reply to an invite."
-      />
+      <SavePin pending={pending} dirty={dirty} message={message} />
     </form>
   );
 }
@@ -236,28 +228,42 @@ export function SocialPanel({ initial }: { initial: Identity }) {
  * the trainer thinks of the account; a `/channel/UC…` URL has no handle and
  * says so by showing the link instead.
  */
-function SavedAs({
-  url,
-  handle,
-  current,
-}: {
-  url: string;
-  handle: string | null;
-  current: string;
-}) {
+/** THE ONE FACT THAT SAYS THE LINK WORKS gets a line of its own. After a save it used to be a sentence tacked onto the end of the
+ *  hint ("…we tidy it up. Saved as @ravi.trains."), the least visible thing on the screen. Drawn only while the field still holds
+ *  what was saved. */
+function SavedAs({ url, handle, current }: { url: string; handle: string | null; current: string }) {
   if (!url || url !== current) return null;
   return (
-    <>
-      Saved as{' '}
+    <p className="soc__on">
+      <span aria-hidden="true">✓</span> On your profile:{' '}
       <a href={url} target="_blank" rel="noreferrer noopener">
         {handle ?? url.replace(/^https:\/\/(www\.)?/, '')}
+        <span className="vh"> (opens in a new tab)</span>
       </a>
-      .
-    </>
+    </p>
   );
 }
 
-/** The same inline marker every other tab uses. */
+/** A small mark beside a platform's name, so the two fields read as two places and not two words. Line glyphs, not logos. */
+function PlatformMark({ kind }: { kind: 'instagram' | 'youtube' }) {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {kind === 'instagram' ? (
+        <>
+          <rect x="3" y="3" width="18" height="18" rx="5" />
+          <circle cx="12" cy="12" r="4" />
+          <circle cx="17.2" cy="6.8" r=".6" fill="currentColor" />
+        </>
+      ) : (
+        <>
+          <rect x="2.5" y="5.5" width="19" height="13" rx="4" />
+          <path d="M10 9.5v5l4.5-2.5z" fill="currentColor" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 function Optional() {
   return <span style={{ fontWeight: 400, color: 'var(--tx-ink-3)' }}>optional</span>;
 }

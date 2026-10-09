@@ -5,7 +5,7 @@ import { Unavailable } from '@/components/today/Unavailable';
 import { parseAssessmentTab, parseCompare } from '@/lib/assessments/address';
 import { requireAssessment } from '@/lib/assessments/guard';
 
-export const metadata = { title: 'Check-in · Clients · InclineYou' };
+export const metadata = { title: 'Assessment · Clients · InclineYou' };
 
 /**
  * `force-dynamic`, for the reason both of this screen's addresses carry: the
@@ -67,6 +67,9 @@ export default async function Page(props: {
       <Unavailable
         kind={result.kind}
         status={result.kind === 'refused' ? result.status : undefined}
+        kicker="CHECK-IN"
+        what="this check-in"
+        back={{ href: `/clients/${clientId}/assessments`, label: 'Back to the check-ins' }}
       />
     );
   }

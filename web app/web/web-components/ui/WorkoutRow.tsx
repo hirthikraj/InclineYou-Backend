@@ -68,20 +68,20 @@ const STATUS: Record<WorkoutStatus, { label: string; tone: 'ok' | 'info' | 'warn
   unmarked: { label: 'Unmarked', tone: 'warn' },
 };
 
-export function WorkoutRowHead() {
+export function WorkoutRowHead({ showMode = true, showStatus = true }: { showMode?: boolean; showStatus?: boolean }) {
   return (
     /* `aria-hidden` on the whole row, which is `ProgramRowHead`'s call and is
        legal again now the select-all has gone: there is no control left in
        here, and every figure below carries its own noun as text. It took
        props and a per-span `aria-hidden` only because a checkbox inside a
        hidden subtree is a checkbox nothing can reach. */
-    <div className="wkrow wkrow--hd" aria-hidden="true">
+    <div className={`wkrow wkrow--hd${showMode ? '' : ' wkrow--nomode'}${showStatus ? '' : ' wkrow--nostatus'}`} aria-hidden="true">
       <span>Client</span>
       <span>Workout</span>
       <span>Time</span>
       <span>Duration</span>
-      <span>Mode</span>
-      <span>Status</span>
+      {showMode && <span>Mode</span>}
+      {showStatus && <span>Status</span>}
       <span />
     </div>
   );
@@ -100,6 +100,8 @@ export function WorkoutRow({
   status,
   menu,
   className,
+  showMode = true,
+  showStatus = true,
 }: {
   name: string;
   /** Keys the avatar's colour, exactly as the card this replaces did. */
@@ -120,6 +122,9 @@ export function WorkoutRow({
   /** The row's overflow control. A node, so the catalogue holds no router. */
   menu?: ReactNode;
   className?: string;
+  /** A column that says the same thing on every row of the page says nothing — the caller turns it off. */
+  showMode?: boolean;
+  showStatus?: boolean;
 }) {
   const state = STATUS[status];
   /* A program whose name IS the day label is not a second line, it is the same
@@ -128,7 +133,7 @@ export function WorkoutRow({
   const sub = program && program !== workout ? program : null;
 
   return (
-    <div className={['wkrow', className].filter(Boolean).join(' ')}>
+    <div className={['wkrow', showMode ? '' : 'wkrow--nomode', showStatus ? '' : 'wkrow--nostatus', className].filter(Boolean).join(' ')}>
       <span className="wkrow__n">
         <Avatar name={name} id={clientId} size="sm" />
         <Link className="wkrow__nm" href={href}>{name}</Link>
@@ -159,15 +164,19 @@ export function WorkoutRow({
           </span>
         </span>
 
-        <span className="wkrow__md">
-          <Tag tone={mode === 'remote' ? 'remote' : 'floor'}>
-            {mode === 'remote' ? 'Online' : 'In person'}
-          </Tag>
-        </span>
+        {showMode && (
+          <span className="wkrow__md">
+            <Tag tone={mode === 'remote' ? 'remote' : 'floor'}>
+              {mode === 'remote' ? 'Online' : 'In person'}
+            </Tag>
+          </span>
+        )}
 
-        <span className="wkrow__st">
-          <Tag tone={state.tone}>{state.label}</Tag>
-        </span>
+        {showStatus && (
+          <span className="wkrow__st">
+            <Tag tone={state.tone}>{state.label}</Tag>
+          </span>
+        )}
       </span>
 
       <span className="wkrow__act">{menu}</span>

@@ -184,11 +184,13 @@ export function LedgerTab({
             : 'Nothing forgiven or given back'}
         />
         <Stat
-          label="Owed now"
+          /* NOT *Owed now* beside the overview's *Overdue now*: this is everything owed, due yet or not; that is only what is past
+             its date. Two figures for two questions, now worded as two. */
+          label="Owed in all"
           value={summary.now.pending > 0 ? rupees(summary.now.pending) : '—'}
           tone={summary.now.pending > 0 ? 'warn' : 'neutral'}
           detail={summary.now.pending > 0
-            ? `${summary.now.clientsOwing} client${summary.now.clientsOwing === 1 ? '' : 's'} · as of today, whatever the period`
+            ? `${summary.now.clientsOwing} client${summary.now.clientsOwing === 1 ? '' : 's'} · due or not, whatever the period`
             : 'Everything billed is in'}
         />
       </div>
@@ -197,7 +199,7 @@ export function LedgerTab({
         <div className="card">
           <div className="card__hd mny__hd">
             <span className="card__t">Payments</span>
-            <Tag>Append-only</Tag>
+            <span title="A payment is never edited. A mistake is fixed with a new row, so the trail stays whole."><Tag>Never edited</Tag></span>
             {/* `.mny__dup` — both buttons have a second home below 900px (the page
                 header's export glyph and the tab bar's + sheet). */}
             <span className="card__acts mny__dup">
@@ -205,7 +207,7 @@ export function LedgerTab({
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M12 4v11"/><path d="M7.5 10.5 12 15l4.5-4.5"/><path d="M4.5 19.5h15"/>
                 </svg>
-                CSV
+                Export CSV
               </Button>
               <Button variant="primary" size="sm" onClick={onRecord}>
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -313,12 +315,17 @@ export function LedgerTab({
                   {rows.length === 0 ? '0' : `${first}–${last}`}
                   {paging.total !== null && <> of {paging.total}</>}
                 </span>
-                <Button variant="secondary" size="sm" onClick={paging.onPrev} disabled={paging.index === 0 || paging.busy}>
-                  Previous
-                </Button>
-                <Button variant="secondary" size="sm" onClick={paging.onNext} disabled={!paging.hasNext || paging.busy}>
-                  Next
-                </Button>
+                {/* NO PAGER FOR ONE PAGE: two disabled buttons beside *1–1 of 1* were furniture. */}
+                {(paging.index > 0 || paging.hasNext) && (
+                  <>
+                    <Button variant="secondary" size="sm" onClick={paging.onPrev} disabled={paging.index === 0 || paging.busy}>
+                      Previous
+                    </Button>
+                    <Button variant="secondary" size="sm" onClick={paging.onNext} disabled={!paging.hasNext || paging.busy}>
+                      Next
+                    </Button>
+                  </>
+                )}
               </nav>
             )}
           </div>

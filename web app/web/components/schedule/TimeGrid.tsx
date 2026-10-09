@@ -102,6 +102,17 @@ export function TimeGrid({
   const { scale, foot, ref: scrollRef } = useCwScale(grid);
   const { ref: gridRef, activeId, onKeyDown, onFocusCapture } = useGridKeys();
   const nowMinute = minuteOfDay(now);
+  /* THE NEXT SESSION, for the one column that is today. The first one that has not
+     finished and is not already done or a no-show — running counts, because the
+     answer to *what is next* while somebody is mid-set is the one they are in. */
+  const todayCol = grid.days.find((d) => d.isToday);
+  const nextPlaced = todayCol?.placed.find(
+    (p) => !p.hidden && !p.session.done && !p.session.noShow && p.endMinute > nowMinute,
+  );
+  const nextId = nextPlaced?.session.id ?? null;
+  const nextLabel = nextPlaced
+    ? `${nextPlaced.session.clientName} ${formatMinute(nextPlaced.startMinute)}`
+    : null;
 
   /*
    * ── THE CONTEXT LANE IS DROPPED WHEN IT CANNOT BE DRAWN HONESTLY ───────────
@@ -209,6 +220,7 @@ export function TimeGrid({
               row={row}
               open={row.open}
               onToggle={() => onToggleBand(row.from)}
+              now={todayCol ? { minute: nowMinute, next: nextLabel } : null}
             />
           ) : (
             <SegmentRow
@@ -219,6 +231,7 @@ export function TimeGrid({
               rates={rates}
               gymSharePercent={gymSharePercent}
               nowMinute={nowMinute}
+              nextId={nextId}
               showGaps={showGaps}
               lane={laneFits}
               hoursSet={hoursSet}
@@ -328,11 +341,14 @@ function DayHead({ day, hoursSet }: { day: ScheduleDay; hoursSet: boolean }) {
 /* ------------------------------------------------------------------ band ── */
 
 function BandRow({
-  row, open, onToggle,
+  row, open, onToggle, now,
 }: {
   row: Extract<GridRow, { kind: 'band' }>;
   open: boolean;
   onToggle: () => void;
+  /** Present when today is a column on screen. The minute is `now`'s, and `next` is
+   *  the session to name beside it. */
+  now: { minute: number; next: string | null } | null;
 }) {
   /*
    * A band with something booked in it is HELD OPEN and says why, rather than
@@ -381,6 +397,17 @@ function BandRow({
           </b>{' '}
           · {hoursWord(row.to - row.from)} outside your hours
         </span>{' '}
+        {/* NOW LIVES HERE WHEN IT FALLS INSIDE THE FOLD. The dashed line is drawn per
+            segment, so a clock inside a collapsed band had no row to cross — at 12:48
+            the week simply had no *now* (MEASURED), and nothing said what came next.
+            This says the minute and names the next session in the sentence that is
+            already covering the hour. */}
+        {now && now.minute >= row.from && now.minute < row.to && (
+          <b className="cw__bnow">
+            Now {formatMinute(now.minute)}
+            {now.next && <> · next {now.next}</>}
+          </b>
+        )}
         <em>{open ? 'hide' : 'show'}</em>
       </span>
     </button>
@@ -397,6 +424,8 @@ interface SegmentRowProps {
   rates: RateSource;
   gymSharePercent: number | null;
   nowMinute: number;
+  /** The id of today's next session, so its block can say so. */
+  nextId?: string | null;
   showGaps: boolean;
   lane: boolean;
   hoursSet: boolean;
@@ -521,7 +550,7 @@ function SegmentRow(props: SegmentRowProps) {
 
 function DayColumn({
   day, seg, rates, gymSharePercent, nowMinute, showGaps, hoursSet,
-  activeId, onOpenSession, onOpenDay, onBook, justMovedId, scale,
+  activeId, onOpenSession, onOpenDay, onBook, justMovedId, scale, nextId,
 }: SegmentRowProps & { day: ScheduleDay }) {
   const height = (seg.to - seg.from) * scale;
   const money = dayMoney(
@@ -678,6 +707,7 @@ function DayColumn({
             dayAt={day.at}
             tabbable={placed.session.id === activeId}
             just={placed.session.id === justMovedId}
+            next={day.isToday && placed.session.id === nextId}
             onOpen={onOpenSession}
           />
         ))}

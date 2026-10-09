@@ -181,7 +181,9 @@ export function SessionCalendar({
         <ul className="scal__key">
           {legend.map((l) => (
             <li className={`scal__k scal__k--${l.state}`} key={l.state}>
-              <i aria-hidden="true" />
+              <i aria-hidden="true">
+                <StateGlyph state={l.state} />
+              </i>
               {CALENDAR_STATE_LABEL[l.state]}
               <b>{l.count}</b>
             </li>
@@ -217,17 +219,30 @@ export function SessionCalendar({
             if (day.isToday) classes.push('scal__c--today');
 
             return (
-              <div className={classes.join(' ')} key={day.at}>
+              <div
+                className={classes.join(' ')}
+                key={day.at}
+                aria-current={day.isToday ? 'date' : undefined}
+              >
                 {/* The date number is `aria-hidden` and every pill below it
                     names its own full date. A reader walking a month otherwise
-                    hears "14" and then a time with no day attached to it. */}
-                <span className="scal__d" aria-hidden="true">
-                  {day.dayOfMonth}
-                </span>
+                    hears "14" and then a time with no day attached to it.
+                    Today is the exception, because an empty today has no pill
+                    to say so: it is read, with its word. */}
+                {day.isToday ? (
+                  <span className="scal__d">
+                    <span className="vh">Today, </span>
+                    {day.dayOfMonth}
+                  </span>
+                ) : (
+                  <span className="scal__d" aria-hidden="true">
+                    {day.dayOfMonth}
+                  </span>
+                )}
                 {day.sessions.length > 0 && (
                   <div className="scal__ss">
                     {day.sessions.map((s) => (
-                      <SessionPill key={s.id} session={s} />
+                      <SessionPill key={s.id} session={s} only={day.sessions.length === 1} />
                     ))}
                   </div>
                 )}
@@ -252,15 +267,17 @@ export function SessionCalendar({
  * happened*. `aria-label` carries the sentence either way, which is why losing
  * the clock time to a media query costs a reader nothing.
  */
-function SessionPill({ session }: { session: CalendarSession }) {
+function SessionPill({ session, only }: { session: CalendarSession; only: boolean }) {
   const inner = (
     <>
-      <i aria-hidden="true" />
+      <i aria-hidden="true">
+        <StateGlyph state={session.state} />
+      </i>
       <b>{session.time}</b>
       {session.label ? <span>{session.label}</span> : null}
     </>
   );
-  const className = `scal__s scal__s--${session.state}`;
+  const className = `scal__s scal__s--${session.state}${only ? ' scal__s--only' : ''}`;
 
   if (!session.href) {
     return (
@@ -275,4 +292,56 @@ function SessionPill({ session }: { session: CalendarSession }) {
       {inner}
     </Link>
   );
+}
+
+/**
+ * A SHAPE PER STATE, so the outcome is never carried by hue alone. The four
+ * tones have near-identical luminance, which makes them one colour to a reader
+ * who cannot separate red from green; check, ring, cross, half-moon and dash can
+ * be told apart in grayscale. Drawn in `currentColor`, so the pill, the legend
+ * and the phone's dot take the tone from their own rule and cannot drift.
+ */
+export function StateGlyph({ state }: { state: CalendarState }) {
+  const common = {
+    viewBox: '0 0 12 12',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    focusable: false,
+  };
+  switch (state) {
+    case 'done':
+      return (
+        <svg {...common}>
+          <path d="M2.2 6.4 4.9 9 9.8 3.2" />
+        </svg>
+      );
+    case 'booked':
+      return (
+        <svg {...common}>
+          <circle cx="6" cy="6" r="3.8" />
+        </svg>
+      );
+    case 'missed':
+      return (
+        <svg {...common}>
+          <path d="M3 3 9 9M9 3 3 9" />
+        </svg>
+      );
+    case 'unmarked':
+      return (
+        <svg {...common}>
+          <circle cx="6" cy="6" r="3.8" />
+          <path d="M6 2.2a3.8 3.8 0 0 0 0 7.6Z" fill="currentColor" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...common}>
+          <path d="M2.8 6h6.4" />
+        </svg>
+      );
+  }
 }

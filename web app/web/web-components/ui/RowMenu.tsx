@@ -155,6 +155,8 @@ export type RowMenuItem =
        * pressed. Absent is the ordinary verb.
        */
       checked?: boolean;
+      /** With `checked`: one of a set, so it announces as a `menuitemradio` (a single-select facet). */
+      radio?: boolean;
     }
   | { separator: true; key?: string };
 
@@ -173,7 +175,8 @@ function isChecked(item: RowMenuItem): boolean {
  * verbs and states at once — the facet's *Clear* under four tickable statuses
  * is exactly that, and a selector naming one role skips the other in silence.
  */
-const ROVE = '[role="menuitem"]:not([disabled]),[role="menuitemcheckbox"]:not([disabled])';
+const ROVE =
+  '[role="menuitem"]:not([disabled]),[role="menuitemcheckbox"]:not([disabled]),[role="menuitemradio"]:not([disabled])';
 
 /** `.menu__list`'s cap in §22, and the arithmetic below has to agree with it —
  *  a panel measured at the height of a hundred and forty rows flips upward to
@@ -401,7 +404,7 @@ export function RowMenu({
           isChecked(item) ? 'menu__i--check' : null,
         ].filter(Boolean).join(' ')}
         type="button"
-        role={isChecked(item) ? 'menuitemcheckbox' : 'menuitem'}
+        role={isChecked(item) ? ('radio' in item && item.radio ? 'menuitemradio' : 'menuitemcheckbox') : 'menuitem'}
         aria-checked={isChecked(item) ? 'checked' in item && item.checked : undefined}
         disabled={item.disabled}
         id={`${id}-${i}`}

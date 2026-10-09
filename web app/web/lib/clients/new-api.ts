@@ -67,7 +67,13 @@ interface TemplateV1 {
   goal: string | null;
   description: string | null;
   days: number;
-  workouts: string[];
+  /** The tree, and ONLY on a detail read: `ProgramItem.workouts` is
+   *  `@JsonInclude(NON_NULL)`, so a LIST row (`/v1/programs?kind=template`) has no
+   *  such key at all — and where it is present it is `PlanWorkout` OBJECTS, not the
+   *  strings this interface used to claim. That claim was the crash: the day label
+   *  read `t.workouts[i]` on `undefined` and every press of *Add client* answered
+   *  with a server error. A type is a claim the JSON never has to satisfy. */
+  workouts?: { week: number; day: number; name: string }[];
 }
 
 /** `SessionReadService.SessionRow`, trimmed to what the demo picker's clash
@@ -208,7 +214,11 @@ export const getNewClientData = cache(async (): Promise<NewClientData> => {
       name: t.name,
       goal: t.goal,
       description: t.description,
-      dayLabels: Array.from({ length: t.days }, (_, i) => t.workouts[i] ?? `Day ${i + 1}`),
+      dayLabels: Array.from(
+        { length: t.days },
+        (_, i) =>
+          t.workouts?.find((w) => w.week === 1 && w.day === i + 1)?.name?.trim() || `Day ${i + 1}`,
+      ),
     })),
     sessions: (sessions?.items ?? [])
       .filter((s) => s.status !== 'cancelled')

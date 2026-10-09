@@ -385,7 +385,7 @@ function SignOutConfirm({
         will meet it, so the sentence is worth its two lines.
       */}
       <p className="menu__note">
-        Getting back in needs a fresh code by SMS. Nothing on your account changes.
+        Getting back in needs a fresh code on WhatsApp. Nothing on your account changes.
       </p>
       <ConfirmRows onCancel={onCancel} />
     </form>

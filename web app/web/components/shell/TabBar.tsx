@@ -18,6 +18,7 @@ import { Check, Dots6, Out, Plus } from './Icons';
 import { AddSheet } from './AddSheet';
 import { useNavFlags, visiblePages } from './NavFlags';
 import { Avatar } from '@/web-components/ui/Avatar';
+import { ThemeSwitch } from '@/web-components/ui/ThemeSwitch';
 
 /**
  * THE RAIL, AT 390px — three destinations, a raised +, and a door to the other two.
@@ -535,7 +536,14 @@ function MoreSheet({
    */
   const flags = useNavFlags();
   const reachable = new Set(BAR.map((b) => b.href));
-  const sections = PRIMARY.filter((d) => (d.pages?.length ?? 0) > 1);
+  /* BUSINESS FIRST. The sheet used to follow the rail's column — Clients,
+     Fitness, Business — which put the money book, the retention hook, under two
+     other headings on the one surface where it is already a tap further away
+     than at a desk. A stable sort on one key, so the other sections keep the
+     rail's relative order and nothing else here is stated twice. */
+  const sections = PRIMARY.filter((d) => (d.pages?.length ?? 0) > 1).sort(
+    (a, b) => Number(b.key === 'biz') - Number(a.key === 'biz'),
+  );
 
   /**
    * A SECTION, DRAWN AS A HEADING AND ITS PAGES — and the row for it goes away.
@@ -661,11 +669,9 @@ function MoreSheet({
               lists rather than one pass that branches, so the sheet's ORDER is
               stated here instead of falling out of `PRIMARY`'s.
 
-              WITHIN the first pass the order IS `PRIMARY`'s, which is the rail's
-              column top to bottom: Clients, then Fitness, then the money book.
-              That is deliberate rather than incidental — the sheet and the rail
-              are the same navigation at two widths, and a trainer who learns the
-              column at a desk should not have to relearn it with a thumb. */}
+              WITHIN the first pass the order is `PRIMARY`'s — the rail's column
+              top to bottom, so the two widths agree — except that Business is
+              lifted to the front (see `sections` above). */}
           {sections.map(section)}
           {dropped.filter((d) => !d.pages || d.pages.length <= 1).length > 0 && (
             <div className="sheet__g sheet__g--first">
@@ -753,6 +759,17 @@ function MoreSheet({
               against cannot happen, and the cost is still named in the line
               underneath rather than in a step.
             */}
+            {/* THE THEME SWITCH, and it was reachable from the desk only: it lived
+                in `AccountMenu`'s panel, which is the rail's foot and is hidden
+                with the rail under 900px. A phone trainer under gym strip-lights
+                or in a bright car park had no way to the light palette, and the
+                phone is where the ambient light changes most. Same control, same
+                group name, same save-on-press; a row of its own so it is not
+                read as one of the account's links. */}
+            <div className="sheet__row">
+              <span>Theme</span>
+              <ThemeSwitch />
+            </div>
             <form action={signOut}>
               <button className="sheet__i sheet__i--danger" type="submit">
                 <Out size={17} />
@@ -760,7 +777,7 @@ function MoreSheet({
               </button>
             </form>
             <p className="sheet__note">
-              Getting back in needs a fresh code by SMS. Nothing on your account changes.
+              Getting back in needs a fresh code on WhatsApp. Nothing on your account changes.
             </p>
           </div>
         </div>

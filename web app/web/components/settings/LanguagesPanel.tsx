@@ -38,7 +38,8 @@ export function LanguagesPanel({ initial }: { initial: Identity }) {
     publish({ languages: chosen });
   }, [publish, chosen]);
 
-  const dirty = chosen.length !== saved.length || chosen.some((id) => !saved.includes(id));
+  // In order: the profile card names the first four, so a re-pick that moves a language is a real change.
+  const dirty = chosen.length !== saved.length || chosen.some((id, i) => id !== saved[i]);
 
   function submit() {
     setMessage(null);
@@ -69,10 +70,9 @@ export function LanguagesPanel({ initial }: { initial: Identity }) {
         submit();
       }}
     >
-      <h2 className="card__t">Languages you coach in</h2>
+      <h2 className="card__t">Languages</h2>
       <p className="small" style={{ marginTop: 3, maxWidth: 560 }}>
-        The ones you actually use on the floor, not the ones you can read. Clients filter on this,
-        and no other app in this market asks for it.
+        The ones you actually use on the floor, not the ones you can read. Clients can filter on this.
       </p>
 
       <LanguagePicker
@@ -85,9 +85,9 @@ export function LanguagesPanel({ initial }: { initial: Identity }) {
         }}
       />
 
-      <MessageSlot message={message} />
+      {dirty || pending || message ? <MessageSlot message={message} /> : null}
 
-      <SaveRow pending={pending} dirty={dirty} note="Clients searching in these will find you." />
+      <SaveRow pending={pending} dirty={dirty} />
     </form>
   );
 }

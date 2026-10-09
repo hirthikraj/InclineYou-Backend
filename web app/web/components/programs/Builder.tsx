@@ -51,10 +51,12 @@ import {
   unlinkGroup,
   updateEntry,
   workoutAt,
+  workoutsOf,
   type Entry,
   type ProgressionStep,
 } from '@/lib/programs/blueprint';
 import { AssignPanel } from './AssignPanel';
+import { useForClient } from '@/lib/programs/for-client';
 import { AssignedList } from './AssignedList';
 import { CloseIcon, CopyIcon, DotsIcon, PlusIcon, UsersIcon } from './Icons';
 import { LibraryPanel, type Prescription } from './LibraryPanel';
@@ -235,7 +237,11 @@ export function Builder({
      The dock hands over the whole row, so it is merged in here and the next
      genuine reload supersedes it. */
   const [added, setAdded] = useState<Record<string, ExerciseNameWire>>({});
-  const [panel, setPanel] = useState<Panel>(null);
+  /* Arrived from a client's file (`?client=`): the assign panel is already open, pointing at them. */
+  const forClient = useForClient();
+  const [panel, setPanel] = useState<Panel>(() =>
+    forClient && clients.some((c) => c.id === forClient) ? { kind: 'assign' } : null,
+  );
   const [assignBusy, setAssignBusy] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
@@ -1273,7 +1279,7 @@ export function Builder({
             <Button variant="secondary" className="pg__act--desk" onClick={() => openPanel({ kind: 'assigned' })}>
               <UsersIcon />
               {template.assignedCount === 0
-                ? 'Nobody on this'
+                ? 'Clients'
                 : `${template.activeAssignedCount} on this`}
             </Button>
             {/* DUPLICATE IS THE MOST-USED ACTION ON THIS SCREEN, so it is a
@@ -1333,7 +1339,7 @@ export function Builder({
                     }}
                   >
                     {template.assignedCount === 0
-                      ? 'Nobody on this'
+                      ? 'Clients'
                       : `${template.activeAssignedCount} on this`}
                   </button>
                   <button
@@ -1600,6 +1606,20 @@ export function Builder({
                    search field, a chip row and a reachable footer, and there is
                    no version of that which leaves the day usefully visible. */
                 onAdd={d => openPanel({ kind: 'library', week, day: d })}
+                onEditWorkout={editWorkout}
+                onDesignDay={d => {
+                  const here = workoutsOf(entriesFor(shown.rows, sourceWeek, d)).filter(w => w.id);
+                  /* ALWAYS THE BUILDER. A day with several workouts opens the first; the day's menu lists the others by name. The
+                     old day list and exercise screens are not reachable from an editable program any more. */
+                  if (here.length > 0) {
+                    editWorkout(here[0].id);
+                    return true;
+                  }
+                  setPanel(null);
+                  setLibrary(null);
+                  setWorkoutDay(d);
+                  return true;
+                }}
                 onField={setField}
                 onAddDay={addDay}
                 freeSlots={freeSlots}
@@ -1833,6 +1853,7 @@ export function Builder({
             days={days}
             dayLabels={labels}
             clients={clients}
+            initialClientId={forClient}
             busy={assignBusy}
             error={assignError}
             onClose={() => setPanel(null)}

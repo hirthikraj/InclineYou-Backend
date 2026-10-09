@@ -57,6 +57,9 @@ export interface CreateClientInput {
    *  status. */
   status?: 'active' | 'prospect';
   deliveryMode: 'floor' | 'remote';
+  /** `YYYY-MM-DD`. The flow asks for it so the 18+ rule is checked before a client
+   *  exists (`lib/clients/adult.ts`); the server refuses `CLIENT_UNDER_18` as well. */
+  dateOfBirth: string;
 }
 
 export interface CreatedClient {
@@ -74,6 +77,7 @@ export async function createClient(input: CreateClientInput): Promise<CreatedCli
         id: input.id,
         name: input.name,
         phone: e164(input.phone),
+        dateOfBirth: input.dateOfBirth,
         clientType: input.clientType,
         status: input.status,
         schedule: { deliveryMode: input.deliveryMode },
@@ -90,6 +94,7 @@ export async function createClient(input: CreateClientInput): Promise<CreatedCli
 export interface ClientDetailsPatch {
   name?: string;
   phone?: string;
+  dateOfBirth?: string;
   clientType?: 'independent' | 'gym';
 }
 

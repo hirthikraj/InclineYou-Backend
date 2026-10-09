@@ -75,13 +75,13 @@ export function Templates({ data }: { data: TemplatesData }) {
           title="Assessment templates"
           sub={
             data.templates.length === 1
-              ? '1 blueprint'
-              : `${data.templates.length} blueprints`
+              ? '1 template'
+              : `${data.templates.length} templates`
           }
           actions={
             <Button variant="primary" onClick={() => setEditing({ row: null })}>
               <Plus size={15} />
-              New assessment
+              New template
             </Button>
           }
         >
@@ -108,7 +108,7 @@ export function Templates({ data }: { data: TemplatesData }) {
             q ? (
               <EmptyState
                 kind="filtered"
-                title="No assessment matches"
+                title="No template matches"
                 body="Try a shorter search."
                 action={<Button variant="secondary" onClick={() => setSearch('')}>Clear the search</Button>}
               />
@@ -116,8 +116,8 @@ export function Templates({ data }: { data: TemplatesData }) {
               <EmptyState
                 kind="first-run"
                 icon={<Checklist size={28} />}
-                title="No assessments written yet"
-                body="An assessment is what you ask for: a list of measurements, and questions about the block that just finished. Write one and you can send it to anybody on the roster."
+                title="No templates yet"
+                body="A template is the list of measurements and questions you work through with a client in a session. Write one, then schedule it against somebody."
                 action={
                   <Button variant="primary" onClick={() => setEditing({ row: null })}>
                     Write the first one
@@ -126,9 +126,9 @@ export function Templates({ data }: { data: TemplatesData }) {
               />
             )
           ) : (
-            <div className="asm__t" style={{ marginTop: 16 }}>
+            <div className="asm__t asm__t--tpl" style={{ marginTop: 16 }}>
               <Table
-                caption={`${rows.length} assessment templates`}
+                caption={`${rows.length} assessment ${rows.length === 1 ? 'template' : 'templates'}`}
                 columns={COLUMNS}
               >
                 {rows.map((t) => (
@@ -138,16 +138,47 @@ export function Templates({ data }: { data: TemplatesData }) {
                       <button
                         type="button"
                         className="asm-open asm-open--name"
+                        title={t.name}
                         onClick={() => setEditing({ row: t })}
                       >
                         {t.name}
                       </button>
                     }
                     cells={[
-                      { key: 'shape', label: 'Asks for', content: <span className="small">{templateShape(t)}</span> },
-                      { key: 'made', label: 'Created on', content: <span className="asm__d">{DATE.format(new Date(t.createdAt))}</span> },
+                      {
+                        key: 'shape',
+                        label: 'Asks for',
+                        className: 'tpl-c-shape',
+                        content: (
+                          <span className="small">
+                            {templateShape(t) === 'Nothing asked yet'
+                              ? 'Nothing asked yet · open it to finish'
+                              : templateShape(t)}
+                          </span>
+                        ),
+                      },
+                      {
+                        key: 'used',
+                        label: 'Taken',
+                        className: 'tpl-c-used',
+                        /* HOW MANY TIMES IT HAS BEEN USED, and when last: what tells a trainer whether a template is
+                           one they rely on or one they wrote and forgot. */
+                        content: (() => {
+                          const u = data.usage?.[t.id];
+                          if (!data.usage) return <span className="ink3">—</span>;
+                          if (!u || u.taken === 0) return <span className="ink3 small">Not taken yet</span>;
+                          return (
+                            <span className="small">
+                              {u.taken} {u.taken === 1 ? 'time' : 'times'}
+                              {u.last !== null && <span className="ink3"> · last {DATE.format(new Date(u.last))}</span>}
+                            </span>
+                          );
+                        })(),
+                      },
+                      { key: 'made', label: 'Created on', className: 'tpl-c-made', content: <span className="asm__d">{DATE.format(new Date(t.createdAt))}</span> },
                       {
                         key: 'edited',
+                        className: 'tpl-c-edited',
                         label: 'Edited on',
                         /* A template edited on the day it was written says a
                            dash rather than the same date twice. The client
@@ -226,8 +257,9 @@ const DATE = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', 
 
 const COLUMNS: Column[] = [
   { key: 'name', label: 'Name' },
-  { key: 'shape', label: 'Asks for' },
-  { key: 'made', label: 'Created on' },
-  { key: 'edited', label: 'Edited on' },
-  { key: 'act', bare: true, label: '', className: 'asm-c-act' },
+  { key: 'shape', label: 'Asks for', className: 'tpl-c-shape' },
+  { key: 'used', label: 'Taken', className: 'tpl-c-used' },
+  { key: 'made', label: 'Created on', className: 'tpl-c-made' },
+  { key: 'edited', label: 'Edited on', className: 'tpl-c-edited' },
+  { key: 'act', bare: true, label: <span className="vh">Actions</span>, className: 'asm-c-act' },
 ];

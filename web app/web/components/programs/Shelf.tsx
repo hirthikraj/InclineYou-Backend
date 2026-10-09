@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 
 import type { TemplateWire } from '@/lib/programs/api';
 import { duplicateTemplate, removeTemplates } from '@/lib/programs/actions';
+import { useForClient, withClient } from '@/lib/programs/for-client';
 import { useToast } from '@/lib/toast/store';
 import {
   GOALS,
@@ -105,6 +106,7 @@ export function Shelf({
   now,
   variant = 'pane',
   search,
+  forClientName,
 }: {
   templates: TemplateWire[];
   selectedId: string | null;
@@ -151,6 +153,8 @@ export function Shelf({
    * optional object rather than as two optional props.
    */
   search?: { query: string; onQuery: (q: string) => void };
+  /** The client the trainer arrived for (`?client=`): their first name, so a row can say *Use for Meera*. */
+  forClientName?: string | null;
 }) {
   /* The fallback owner. Held unconditionally — a hook cannot be called behind a
      condition — and simply ignored when the caller brought its own. */
@@ -202,7 +206,9 @@ export function Shelf({
      a filter set doing the job the row already does by being readable. Nothing
      is lost: `filtered` searches `goal` as well as `name`, so a unique goal is
      still one word away in the field above. */
-  const useful = useMemo(() => [...counts.values()].some(n => n > 1), [counts]);
+  /* Goal chips need a shelf big enough to filter: six templates over five goals is a row of chips with
+     nothing to separate. They come at eight. */
+  const useful = useMemo(() => templates.length >= 8 && [...counts.values()].some(n => n > 1), [counts, templates.length]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -509,7 +515,8 @@ export function Shelf({
           <div className="pgt__sort">
             <span className="pgt__sortk">Sort</span>
             <div className="tools" role="group" aria-label="Sort the list">
-              {SORTS.map(o => (
+              {/* *Most clients* sorts nothing while every count is zero. */}
+              {SORTS.filter(o => o.key !== 'clients' || templates.some(t => t.assignedCount > 0)).map(o => (
                 <Chip
                   pressed={sort === o.key}
                   key={o.key}
@@ -612,6 +619,7 @@ export function Shelf({
                     onDuplicate={() => duplicate(row.template.id, row.template.name)}
                     onDelete={() => deleteOne(row.template.id)}
                     busy={deleting}
+                    forClientName={forClientName ?? null}
                   />
                 </li>
               ))}
@@ -732,6 +740,7 @@ function TableRow({
   onDuplicate,
   onDelete,
   busy,
+  forClientName,
 }: {
   template: TemplateWire;
   days: number[];
@@ -742,12 +751,14 @@ function TableRow({
   onDuplicate: () => void;
   onDelete: () => void;
   busy: boolean;
+  forClientName?: string | null;
 }) {
+  const forClient = useForClient();
   /* `certified` is PROVENANCE and it is permanent — the shelf row's own note. */
   return (
     <ProgramRow
       name={template.name}
-      href={`/programs/${template.id}`}
+      href={withClient(`/programs/${template.id}`, forClient)}
       /* THE DAY NAMES, ON THE NAME'S SECOND LINE. `ProgramRow`'s own `sub`
          bullet argues the space; what it says here is the one thing a trainer
          comparing two four-day blocks actually needs and no column carried —
@@ -791,6 +802,14 @@ function TableRow({
         <RowMenu
           label={template.name}
           items={[
+            /* FROM A CLIENT: the verb is on the row. It opens the template with their assign panel already open
+               and their week seeded — nothing is assigned until the trainer confirms there. */
+            ...(forClient && forClientName
+              ? [
+                  { label: `Use for ${forClientName}`, href: withClient(`/programs/${template.id}`, forClient) },
+                  { separator: true as const },
+                ]
+              : []),
             { label: 'Duplicate', onSelect: onDuplicate, disabled: busy },
             { separator: true },
             { label: 'Delete…', onSelect: onDelete, danger: true, disabled: busy },
@@ -831,13 +850,14 @@ function ShelfRow({
   weeks: number;
   selected: boolean;
 }) {
+  const forClient = useForClient();
   const active = new Set(days);
   const clients = template.activeAssignedCount;
 
   return (
     <Link
       className="lrow"
-      href={`/programs/${template.id}`}
+      href={withClient(`/programs/${template.id}`, forClient)}
       aria-current={selected ? 'page' : undefined}
     >
       <span className="lrow__m">

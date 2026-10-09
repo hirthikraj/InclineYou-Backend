@@ -19,8 +19,10 @@ import { FilterRail } from './FilterRail';
 import { PageTabs } from '@/components/shell/PageTabs';
 import { SubTabs } from '@/web-components/ui/SubTabs';
 import { programsTabs, templateTabs } from '@/lib/programs/tabs';
+import { useForClient, withClient } from '@/lib/programs/for-client';
 import { SearchIcon } from './Icons';
 import { Button } from '@/web-components/ui/Button';
+import { SearchField } from '@/web-components/ui/SearchField';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 import { PageHeader } from '@/web-components/ui/PageHeader';
 
@@ -65,7 +67,14 @@ import { PageHeader } from '@/web-components/ui/PageHeader';
  * *most used of the four things still on screen* is a claim nobody asked for.
  * If the filter hides that row, nothing is badged.
  */
-export function CertifiedShelf({ data }: { data: CertifiedShelfData }) {
+export function CertifiedShelf({
+  data,
+  forClientName = null,
+}: {
+  data: CertifiedShelfData;
+  forClientName?: string | null;
+}) {
+  const forClient = useForClient();
   const [filter, setFilter] = useState<CertifiedFilter>(emptyFilter);
 
   const rows = useMemo(() => readRows(data.certified), [data.certified]);
@@ -81,13 +90,25 @@ export function CertifiedShelf({ data }: { data: CertifiedShelfData }) {
       <TopBar crumb="Fitness · Templates · InclineYou" />
 
       <main className="main body--flush pg" id="main-content">
+        {/* COMING FROM A CLIENT'S PLAN: the same band My templates draws, so the shelf pair says it once. */}
+        {forClient && (
+          <p className="pg__for" role="status">
+            <span>
+              Choosing a plan for {forClientName ?? 'a client'}. Copy one and it is ready to assign
+              {forClientName ? ` to ${forClientName}` : ''}.
+            </span>
+            <Button href={`/clients/${forClient}/program`} variant="ghost" size="sm">
+              Back to their plan
+            </Button>
+          </p>
+        )}
         {/* `ph--pglist` — the headline stands down on a phone. The crumb
             reads *Programs · Certified* and the active tab reads *Certified*;
             a third copy at 22px cost 29px of a 844px screen. The subtitle
             stays, because it is the sentence that decides whether a trainer
             trusts a blueprint somebody else wrote. */}
         <PageHeader
-          title="InclineYou templates"
+          title="Templates"
           sub="Written and reviewed by certified trainers. Copy one and it is yours to edit — nothing you change reaches anybody else&rsquo;s copy."
           className="ph--pglist"
         >
@@ -107,11 +128,21 @@ export function CertifiedShelf({ data }: { data: CertifiedShelfData }) {
               The count rides on *Programs* and not on this tab — the page below
               already states its own total in `.cert__count`, and a strip that
               repeats the figure under it has spent a badge saying nothing. */}
-          <PageTabs
-            label="Fitness"
-            current="templates"
-            tabs={programsTabs('templates')}
-          />
+          <div className="pgtabs">
+            <PageTabs
+              label="Fitness"
+              current="templates"
+              tabs={programsTabs('templates').map((t) => ({ ...t, href: withClient(t.href, forClient) }))}
+            />
+            {/* THE SEARCH ON THE STRIP'S ROW, RANGED RIGHT — My templates' arrangement. Same query as the rail's field,
+                which is hidden from 901px up so a desk draws one. */}
+            <SearchField
+              className="pgtabs__q pgtabs__q--cert"
+              label="Search templates"
+              value={filter.query}
+              onChange={(e) => setFilter({ ...filter, query: e.target.value })}
+            />
+          </div>
         </PageHeader>
 
         {/* THE SECOND LEVEL, and this is the tab that reaches the trainer's own
@@ -124,7 +155,10 @@ export function CertifiedShelf({ data }: { data: CertifiedShelfData }) {
         <SubTabs
           label="Template shelves"
           current="certified"
-          tabs={templateTabs('certified', { mine: data.ownCount })}
+          tabs={templateTabs('certified', { mine: data.ownCount }).map((t) => ({
+            ...t,
+            href: withClient(t.href, forClient),
+          }))}
         />
 
         <div className="split">

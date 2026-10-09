@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 
 import { IconCheck, IconSearch, IconShield } from '@/components/auth/Icons';
-import { AddChip, Chip, ChipRow } from '@/components/setup/Chips';
+import { Chip, ChipRow } from '@/components/setup/Chips';
 import { AddOwn } from '@/components/setup/AddOwn';
 import { MAX_CERTIFICATIONS, toggleCertification } from '@/lib/profile/certifications';
 import {
@@ -12,6 +12,7 @@ import {
   customId,
   labelFor,
 } from '@/lib/setup/options';
+import { Button } from '@/web-components/ui/Button';
 import { Table, Row } from '@/web-components/ui/Table';
 
 /**
@@ -101,7 +102,7 @@ export function CertificationPicker({
   const full = value.length >= MAX_CERTIFICATIONS;
 
   return (
-    <>
+    <div className="cpk">
       <ChipRow top={20}>
         {chips.map((id) => (
           <Chip
@@ -119,9 +120,6 @@ export function CertificationPicker({
             }}
           />
         ))}
-        {adding ? null : (
-          <AddChip label="Add your own" disabled={disabled || full} onClick={() => setAdding(true)} />
-        )}
       </ChipRow>
 
       {full ? (
@@ -129,6 +127,42 @@ export function CertificationPicker({
           That is {MAX_CERTIFICATIONS} — the most we store. Remove one to add another.
         </p>
       ) : null}
+
+      {/* The sentence that keeps the feature honest, and it comes BEFORE the ways to add more: it is about everything below it,
+          and on a phone it used to sit under the search, out of sight, explaining a field the trainer had already used. */}
+      <div className="trust cpk__trust">
+        <IconShield size={15} />
+        <span>
+          <b>We don’t check these.</b> Whatever you add here is shown to clients as something you
+          told us, not something we confirmed — and we say so on your profile too.
+        </span>
+      </div>
+
+      {/* TWO WAYS TO ADD, SIDE BY SIDE, AND SAYING WHICH IS WHICH. The field searches our catalogue of certificates; the
+          button is the answer to not finding yours there. They were a chip a row above and a field labelled *Not on the
+          list?* — which was, confusingly, the one that searches the list. */}
+      <div className="cpk__find">
+        <div className="fld">
+          <label className="fld__l" htmlFor={`${idPrefix}-q`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <IconSearch size={13} />
+            Search all certifications
+          </label>
+          <input
+            className="ctl"
+            id={`${idPrefix}-q`}
+            value={query}
+            placeholder="e.g. NASM, ISSA, yoga"
+            autoComplete="off"
+            disabled={disabled}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
+        {adding ? null : (
+          <Button variant="secondary" className="cpk__add" disabled={disabled || full} onClick={() => setAdding(true)}>
+            Add your own
+          </Button>
+        )}
+      </div>
 
       {adding ? (
         <AddOwn
@@ -144,34 +178,11 @@ export function CertificationPicker({
         />
       ) : null}
 
-      {/* A plain field, not an `.affix` group: `app.css`'s affix delta pins the
-          prefix to the 44px sign-in field, and this is a 34px one. The glyph
-          goes beside the label, where it costs nothing. */}
-      <div className="fld" style={{ marginTop: 22, maxWidth: 420 }}>
-        <label
-          className="fld__l"
-          htmlFor={`${idPrefix}-q`}
-          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-        >
-          <IconSearch size={13} />
-          Not on the list?
-        </label>
-        <input
-          className="ctl"
-          id={`${idPrefix}-q`}
-          value={query}
-          placeholder="Search certifications"
-          autoComplete="off"
-          disabled={disabled}
-          onChange={(e) => setQuery(e.target.value)}
-        />
-      </div>
-
       {q ? (
-        <div style={{ marginTop: 14, maxWidth: 560 }}>
+        <div style={{ marginTop: 14 }}>
           {matches.length === 0 ? (
             <p className="small">
-              Nothing matches “{query.trim()}”. Add it with the chip above — we’d rather have your
+              Nothing matches “{query.trim()}”. Use Add your own — we’d rather have your
               real certificate than the nearest one on our list.
             </p>
           ) : (
@@ -218,14 +229,6 @@ export function CertificationPicker({
 
       {children}
 
-      {/* Deliberately plain. This is the sentence that keeps the feature honest. */}
-      <div className="trust" style={{ marginTop: 8, maxWidth: '66ch' }}>
-        <IconShield size={15} />
-        <span>
-          <b>We don’t check these.</b> Whatever you add here is shown to clients as something you
-          told us, not something we confirmed — and we say so on your profile too.
-        </span>
-      </div>
-    </>
+    </div>
   );
 }

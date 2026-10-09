@@ -23,7 +23,10 @@ export default async function Page({
     <ClientFilePage
       clientId={clientId}
       tab="progress"
-      extra={requireProgress(clientId, range, focus).then((p) => ({ progress: p.ok ? p.data : null }))}
+      extra={requireProgress(clientId, range, focus).then((p) => ({
+        progress: p.ok ? p.data : null,
+        progressFailed: !p.ok,
+      }))}
     />
   );
 }

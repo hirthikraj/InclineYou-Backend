@@ -272,7 +272,10 @@ export function TopBar({
       {search && (
         <button className="omni" type="button" onClick={search} aria-keyshortcuts="Meta+K Control+K">
           <Search size={15} />
-          <span>Search clients, sessions, exercises…</span>
+          <span>
+            <span className="omni__long">Search clients, sessions, exercises…</span>
+            <span className="omni__short" aria-hidden="true">Search clients…</span>
+          </span>
           {/* The chord this platform actually listens for — see ShortcutKeys.
               It said ⌘K to everyone, and the app has always bound Ctrl+K too. */}
           <ShortcutKeys letter="K" />

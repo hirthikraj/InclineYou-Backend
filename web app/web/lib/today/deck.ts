@@ -419,6 +419,9 @@ export function moneyMagnitude(rupeesOwed: number): number {
  * package and gave a trainer no way to know it. */
 
 export function moneyLine(total: number, days: number, late: boolean): string {
+  /* "due · 0 days" read as *due today* or *no days late* — it is the invoice's AGE,
+     and an age of zero is the invoice raised today. Say that. */
+  if (days <= 0 && !late) return `${rupees(total)} due · raised today`;
   return `${rupees(total)} ${late ? 'overdue' : 'due'} · ${days} day${days === 1 ? '' : 's'}`;
 }
 

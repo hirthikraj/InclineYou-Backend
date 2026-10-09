@@ -291,7 +291,7 @@ export function Assessment({
                   </Button>
                 </>
               ) : (
-                <Button variant="ghost" disabled={busy} onClick={() => setConfirmDelete(true)}>
+                <Button variant="ghost" className="asmv__del" disabled={busy} onClick={() => setConfirmDelete(true)}>
                   Delete
                 </Button>
               )}
@@ -552,16 +552,36 @@ function Tapes({
   }, [data.history, data.id]);
 
   const first = data.client?.name.split(' ')[0];
+  /* WHAT THE ROWS CAN SAY. A bar needs a record with a range; with only a first reading per tape there is
+     no bar, so the footnote about bars described something that was not on the screen and every row said
+     *The first reading on record* underneath its own figure. Said once instead, and the footnote only
+     where a bar exists. */
+  const anyBar = rows.some((r) => {
+    const t = track.get(r.key);
+    return !!t && t.high > t.low;
+  });
+  const allFirst = rows.every((r) => (track.get(r.key)?.n ?? 0) < 2);
+  const compared = rows.map((r) => ({ r, from: compare?.values.get(r.key) ?? track.get(r.key)?.previous ?? null }));
+  const withPrev = compared.filter((c) => c.from !== null);
+  const moved = withPrev.filter((c) => Math.round((c.r.value - (c.from as number)) * 10) / 10 !== 0).length;
 
   return (
     <div className="asmv__bars">
+      {/* THE LEAD: what a trainer opens this for. It was fifteen figures at equal weight with nothing to
+          skim; now one sentence says how many moved, and the signed change is the heavy mark on each row. */}
+      {withPrev.length > 0 && (
+        <p className="asmv__lead">
+          {moved} of {withPrev.length} {withPrev.length === 1 ? 'measurement' : 'measurements'} moved since{' '}
+          {compare ? SHORT.format(new Date(compare.at)) : 'the last assessment'}
+        </p>
+      )}
       {byGroup(rows).map((g) => (
         <section key={g.group} className="asmv__grp" aria-label={g.group}>
           {/* The catalogue's own heading. The four groups are how the picker
               files a measurement and how a trainer takes one — top to bottom,
               round a body — so a run of fifteen tapes with no divisions is a
               list nobody can find the girths in. */}
-          <h4 className="asmv__grpt">{g.group}</h4>
+          <h3 className="asmv__grpt">{g.group}</h3>
           <ul className="asmv__grpl">
             {g.rows.map((r) => {
               const t = track.get(r.key) ?? null;
@@ -592,6 +612,7 @@ function Tapes({
                           : null
                   }
                   track={t}
+                  quiet={allFirst}
                   /* ENDS ON, because every row here is a different measurement
                      with a range of its own — see `ReadingBar`. */
                   ends
@@ -604,11 +625,18 @@ function Tapes({
       {/* Said once, at the foot, rather than under every bar. Fifteen copies of
           one sentence is fifteen lines of chrome on a card somebody opened to
           read fifteen numbers. */}
-      <p className="asmv__barsn">
-        Each bar runs from the lowest to the highest
-        {first ? ` ${first} has` : ''} ever recorded for that measurement. The
-        lit stretch is the move that produced this reading.
-      </p>
+      {anyBar ? (
+        <p className="asmv__barsn">
+          Each bar runs from the lowest to the highest
+          {first ? ` ${first} has` : ''} ever recorded for that measurement. The
+          lit stretch is the move that produced this reading.
+        </p>
+      ) : allFirst ? (
+        <p className="asmv__barsn">
+          {first ? `${first}'s first assessment` : 'The first assessment'}: there is nothing before it to compare
+          against. The next one shows how each measurement moved.
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -130,6 +130,16 @@ export function ScheduleKey({
         <WarnTriangle size={month ? 11 : 9} />
       </Key>
 
+      {/* THE MONTH'S AMBER. A day's count and its percentage turn warn when the day is
+          full or over the trainer's own hours, and nothing said so — the same
+          amber read as decoration on a heat map. One term, drawn as the figure it
+          colours, so a trainer meets the colour and its meaning in one place. */}
+      {month && (
+        <Key swatch="bare" label="Full or over your hours">
+          <b className="ky__warn">%</b>
+        </Key>
+      )}
+
       {/* No lifecycle state on the month at all — a `.mo__c` says how many
           sessions a day holds and how full it is, never whether they happened. */}
       {!month && (

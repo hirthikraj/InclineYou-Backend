@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   EFFORT_KINDS,
@@ -12,6 +13,7 @@ import {
   type DraftExercise,
   type DraftSet,
   type KindOption,
+  setsSummary,
 } from '@/lib/workouts/draft';
 import { parseRest, restLabel } from '@/lib/workouts/estimate';
 import { plainText } from '@/lib/text/markup';
@@ -21,6 +23,20 @@ import { AltIcon, CheckIcon, ChevronDown, CloseIcon, LinkIcon, TrashIcon } from 
 import { More } from '../week/DayCard';
 import { Grip, NoteIcon } from './Icons';
 import { CARD_MIME } from './dnd';
+import { ExerciseSheet, type SheetPosition } from './ExerciseSheet';
+
+/** Under 900px — the builder's own phone line. Read through the store so the server render and the first client render agree. */
+function usePhone(): boolean {
+  return useSyncExternalStore(
+    cb => {
+      const m = window.matchMedia('(max-width: 900px)');
+      m.addEventListener('change', cb);
+      return () => m.removeEventListener('change', cb);
+    },
+    () => window.matchMedia('(max-width: 900px)').matches,
+    () => false,
+  );
+}
 
 /**
  * ONE MOVEMENT ON THE CANVAS, with its sets written out.
@@ -65,6 +81,12 @@ export interface CardActions {
   onAlternates: (uid: string) => void;
   onRemove: (uid: string) => void;
   onUnchain: (uid: string) => void;
+  /** One place up or down. The phone's alternative to dragging. */
+  onMove: (uid: string, direction: -1 | 1) => void;
+  /** Make this movement and the one after it a circuit. */
+  onChainNext: (uid: string) => void;
+  /** Put a heading above this movement. The phone's way to place one without dragging. */
+  onHeading: (uid: string) => void;
 }
 
 export function ExerciseCard({
@@ -75,7 +97,10 @@ export function ExerciseCard({
   onCarry,
   carrying,
   chainTarget,
+  position,
 }: {
+  /** Where this card sits in the whole workout, for the phone sheet's Move up / Move down. */
+  position: SheetPosition;
   entry: DraftExercise;
   ordinal: string;
   /** Drawn inside a circuit — the head loses its ✕ to the chain's own menu and
@@ -92,6 +117,10 @@ export function ExerciseCard({
      trainer has to scroll past to see what the day even contains. The list of
      names is the overview; the sets are what you come for after picking one. */
   const [open, setOpen] = useState(false);
+  /* ON A PHONE A TAP OPENS THE EXERCISE SHEET and the card never unfolds in place. */
+  const phone = usePhone();
+  const [sheet, setSheet] = useState(false);
+  const nameBtn = useRef<HTMLButtonElement>(null);
   const [armed, setArmed] = useState(false);
 
   /* The same disarm `LibraryRow` needs, and for the same reason: a grip
@@ -156,11 +185,14 @@ export function ExerciseCard({
         <button
           className="wke__n"
           type="button"
-          aria-expanded={open}
-          onClick={() => setOpen(v => !v)}
+          ref={nameBtn}
+          aria-expanded={phone ? sheet : open}
+          onClick={() => (phone ? setSheet(true) : setOpen(v => !v))}
         >
           {entry.name}
           {entry.meta && <span className="wke__mt">{entry.meta}</span>}
+          {/* THE PHONE'S READING of the sets: one line, where the desk shows a count chip and a panel. */}
+          <span className="wke__sum">{setsSummary(entry.sets)}</span>
           {/* THE SAME LINE `DayColumn` DRAWS, word for word — *or* is what a
               trainer says, and a workout template and a program row that carry
               the same fact must not read as two different ones.
@@ -287,6 +319,20 @@ export function ExerciseCard({
           keeps a shut card's inputs out of the tab order and the accessibility
           tree — `max-height:0` alone would leave a trainer tabbing off the
           chevron into a panel that is not on the screen. */}
+      {sheet && (
+        <ExerciseSheet
+          entry={entry}
+          position={position}
+          chained={chained}
+          actions={actions}
+          onClose={() => {
+            setSheet(false);
+            /* back to the movement that was opened, not wherever focus was before the tap */
+            queueMicrotask(() => nameBtn.current?.focus({ preventScroll: true }));
+          }}
+        />
+      )}
+
       <div className="wke__sets" data-open={open ? 'true' : 'false'}>
         {/* ONE child, and it is load-bearing: `grid-template-rows:0fr` sizes the
             FIRST row, so a panel with six children collapses one of them and
@@ -588,7 +634,12 @@ function KindPicker<K extends string>({
 }) {
   const [open, setOpen] = useState(false);
   const [more, setMore] = useState(false);
+  /* FIXED, FROM THE BUTTON'S RECT. The sets panel is `overflow:hidden` (it collapses), so an absolutely positioned menu
+     was clipped at the card's foot — three of seven rows visible. A fixed box escapes that clip, and flips upward when
+     there is no room below. */
+  const [at, setAt] = useState<{ top?: number; bottom?: number; left: number; listMax: number } | null>(null);
   const box = useRef<HTMLSpanElement>(null);
+  const menuEl = useRef<HTMLSpanElement>(null);
   const list = useRef<HTMLSpanElement>(null);
   const current = options.find(o => o.kind === value) ?? options[0];
 
@@ -602,16 +653,28 @@ function KindPicker<K extends string>({
   useEffect(() => {
     if (!open) return;
     function away(e: MouseEvent) {
-      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (box.current && !box.current.contains(t) && !menuEl.current?.contains(t)) setOpen(false);
     }
     function esc(e: KeyboardEvent) {
       if (e.key === 'Escape') setOpen(false);
     }
+    /* A fixed menu does not follow its button, so any scroll of the canvas puts it away. */
+    const shut = (e: Event) => {
+      const t = e.target;
+      /* A resize's target is the window, which is not a Node; it always closes. A scroll inside the list itself does not. */
+      if (t instanceof Node && (box.current?.contains(t) || menuEl.current?.contains(t))) return;
+      setOpen(false);
+    };
     document.addEventListener('mousedown', away);
     window.addEventListener('keydown', esc);
+    window.addEventListener('scroll', shut, true);
+    window.addEventListener('resize', shut);
     return () => {
       document.removeEventListener('mousedown', away);
       window.removeEventListener('keydown', esc);
+      window.removeEventListener('scroll', shut, true);
+      window.removeEventListener('resize', shut);
     };
   }, [open]);
 
@@ -632,16 +695,40 @@ function KindPicker<K extends string>({
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-label={`${label} — ${current.label}`}
-        onClick={() => setOpen(v => !v)}
+        onClick={() => {
+          if (!open) {
+            const r = box.current?.getBoundingClientRect();
+            if (r) {
+              const CHROME = 6 + 30; // the menu's padding and the more-row
+              const below = window.innerHeight - r.bottom - 16;
+              const above = r.top - 16;
+              const left = Math.max(12, Math.min(r.left, window.innerWidth - 12 - 260));
+              /* THE SIDE WITH MORE ROOM, and the list shortened to fit it: a low set row in a tall sheet has neither 262px
+                 above nor below, and a menu that cannot scroll into view is one a thumb cannot reach. */
+              const useBelow = below >= 232 + CHROME || below >= above;
+              const room = (useBelow ? below : above) - CHROME;
+              const listMax = Math.max(96, Math.min(232, room));
+              setAt(useBelow ? { top: r.bottom + 4, left, listMax } : { bottom: window.innerHeight - r.top + 4, left, listMax });
+            }
+          }
+          setOpen(v => !v);
+        }}
       >
         <span className="kpk__v">{current.short}</span>
         <ChevronDown size={11} />
       </button>
 
-      {open && (
-        <span className="kpk__m">
+      {/* ON THE PAGE BODY, NOT INSIDE THE DIALOG. A fixed box inside `.wkb` was placed relative to the dialog (it landed
+          ~160px right and ~20px down of its button) because an ancestor is a containing block for fixed descendants. */}
+      {open && at && createPortal(
+        <span
+          className="kpk__m"
+          ref={menuEl}
+          style={{ position: 'fixed', zIndex: 90, top: at.top ?? 'auto', bottom: at.bottom ?? 'auto', left: at.left }}
+        >
           <span
             className="kpk__sc"
+            style={at ? { maxHeight: at.listMax } : undefined}
             role="listbox"
             aria-label={label}
             ref={el => {
@@ -680,7 +767,8 @@ function KindPicker<K extends string>({
               ↓
             </span>
           )}
-        </span>
+        </span>,
+        document.body,
       )}
     </span>
   );

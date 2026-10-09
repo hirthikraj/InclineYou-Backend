@@ -78,7 +78,7 @@ export function WorkingWeekFields({
           : 'Clients’ sessions are booked out of these windows. One set of hours, applied to every day you pick; day-by-day differences live in the diary.'}
       </p>
 
-      <WeekPicker value={value} disabled={disabled} onChange={onChange} />
+      <WeekPicker value={value} disabled={disabled} onChange={onChange} fitRibbon />
 
       {varies ? (
         <p className="fld__e" style={{ marginTop: 12, maxWidth: 620 }}>

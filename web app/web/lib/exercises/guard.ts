@@ -6,78 +6,62 @@ import { getToken } from '@/lib/auth/session';
 import {
   ExercisesApiError,
   getExercises,
-  getExerciseCategories,
   getExercisesMeta,
-  type ExercisesPage,
+  getLibraryMeta,
   type ExercisesMeta,
-  type ExerciseCategories,
+  type ExercisesPage,
+  type LibraryMeta,
 } from './api';
-import { EXERCISES_PAGE_SIZE, type ExercisesQuery } from './tabs';
+import { EXERCISES_PAGE_SIZE, wantsList, type LibraryQuery } from './tabs';
 
-export interface ExercisesData {
-  initial: ExercisesPage;
-  meta: ExercisesMeta;
-  /**
-   * Read on BOTH views, not only on the one that draws the grid.
-   *
-   * It is one small read and it is what lets the tab strip say *By categories
-   * 8* while the list is open — a strip whose count appears only once you are
-   * already looking at the thing it counts is a strip that never told you
-   * anything. The drill-down banner over a filtered list uses the same figure.
-   */
-  categories: ExerciseCategories;
-  /** Echoed back so the screen draws the filters the server actually applied,
-   *  rather than re-deriving them from the URL and risking a different answer. */
-  query: Required<Pick<ExercisesQuery, 'q' | 'group' | 'equipment' | 'source' | 'page'>>;
+export interface LibraryData {
+  /** Null on a grid of tiles: nothing is listed until a tile is opened or the search is used. */
+  initial: ExercisesPage | null;
+  meta: LibraryMeta;
+  /** For the create form's pickers. */
+  createMeta: ExercisesMeta;
+  query: LibraryQuery;
   size: number;
 }
 
 export type ExercisesResult =
-  | { ok: true; data: ExercisesData }
+  | { ok: true; data: LibraryData }
   | { ok: false; kind: 'unreachable' }
   | { ok: false; kind: 'refused'; status: number };
 
-/**
- * The library, at the slice the URL asked for.
- *
- * This used to take nothing and always read the first forty rows, because the
- * screen filtered and paged entirely on the client. Numbered pages moved that
- * decision into the address bar, and a page number in the URL that the server
- * ignores is a link that opens on page one — so the read is parameterised and
- * the first paint is already the right page.
- */
-export async function requireExercises(query: ExercisesQuery = {}): Promise<ExercisesResult> {
+/** What the server is asked, from a state of the page. The three views name the same filters differently. */
+function searchOf(q: LibraryQuery) {
+  const base = { size: EXERCISES_PAGE_SIZE, page: q.page };
+  if (q.view === 'categories') {
+    return { ...base, bodyPart: q.group ? [q.group] : [], target: q.muscle ? [q.muscle] : [] };
+  }
+  if (q.view === 'equipment') {
+    return { ...base, equipmentCategory: q.ecat ? [q.ecat] : [], equipmentKey: q.ekey ? [q.ekey] : [] };
+  }
+  return {
+    ...base,
+    q: q.q || undefined,
+    bodyPart: q.body,
+    target: q.muscles,
+    secondary: q.also,
+    equipmentKey: q.kit,
+    pattern: q.pattern,
+    level: q.level,
+    logType: q.counted,
+    category: q.type,
+    source: q.source !== 'all' ? q.source : undefined,
+  };
+}
+
+export async function requireExercises(query: LibraryQuery): Promise<ExercisesResult> {
   if (!(await getToken())) redirect('/sign-in');
 
-  const q = (query.q ?? '').trim();
-  const group = (query.group ?? '').trim();
-  const equipment = (query.equipment ?? '').trim();
-  const source = query.source ?? 'all';
-  const page = query.page && query.page > 0 ? query.page : 0;
-
   try {
-    const [initial, meta, categories] = await Promise.all([
-      getExercises({
-        size: EXERCISES_PAGE_SIZE,
-        page,
-        ...(q ? { q } : {}),
-        ...(group ? { muscleGroup: group } : {}),
-        ...(equipment ? { equipment } : {}),
-        ...(source !== 'all' ? { source } : {}),
-      }),
-      getExercisesMeta(),
-      getExerciseCategories(),
-    ]);
-    return {
-      ok: true,
-      data: {
-        initial,
-        meta,
-        categories,
-        query: { q, group, equipment, source, page },
-        size: EXERCISES_PAGE_SIZE,
-      },
-    };
+    /* The facets first: whether an opened equipment category lists or shows tiles depends on how many kinds it holds.
+       `getLibraryMeta` is cached for the request and the server answers it from an ETag. */
+    const [meta, createMeta] = await Promise.all([getLibraryMeta(), getExercisesMeta()]);
+    const initial = wantsList(query, meta) ? await getExercises(searchOf(query)) : null;
+    return { ok: true, data: { initial, meta, createMeta, query, size: EXERCISES_PAGE_SIZE } };
   } catch (error) {
     if (error instanceof ExercisesApiError) {
       if (error.status === 401 || error.status === 403) redirect('/sign-in');

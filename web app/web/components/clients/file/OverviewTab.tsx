@@ -3,11 +3,14 @@ import { DAY_MS, daysBetween, formatMinute, rupees, startOfDay, startOfWeek } fr
 import { normaliseSlots, slotMinutes, type StandingSlot } from '@/lib/clients/booking';
 import { packBand } from '@/lib/today/deck';
 import type { ClientFilePayload } from '@/lib/clients/client-api';
+import type { ProgressView } from '@/lib/log/log';
+import { currentPack, isLive, packBalance } from '@/lib/clients/packs';
+import { ResumeButton } from './ResumeButton';
 
 import { NudgeButton } from '@/components/nudge/NudgeButton';
 
 import { FollowUps } from './FollowUps';
-import { BodyIcon, CalendarIcon, ListIcon, dateStr, isoDateStr, num, shortTime } from './shared';
+import { CalendarIcon, ListIcon, dateStr, isoDateStr, num, shortTime } from './shared';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
 import { Figure, Figures } from '@/web-components/ui/Figures';
@@ -16,7 +19,6 @@ import { HeroCard } from '@/web-components/ui/HeroCard';
 import { KeyValueRow } from '@/web-components/ui/KeyValue';
 import { Meter } from '@/web-components/ui/Meter';
 import { Tag } from '@/web-components/ui/Tag';
-import { TrendChart } from '@/web-components/ui/TrendChart';
 import { WeekDots, type WeekDay } from '@/web-components/ui/WeekDots';
 
 /**
@@ -194,37 +196,46 @@ function whenPhrase(at: number, now: number): string {
   return `in ${Math.round(d / 7)} weeks`;
 }
 
-/**
- * One measurement's readings, oldest first, for the chart. Read out of
- * completed assessments (R30) — the server already sends them oldest first.
- */
-function series(readings: ClientFilePayload['readings'], key: string) {
-  return readings
-    .filter((r) => r.key === key)
-    .map((r) => ({ value: r.value, unit: r.unit, recordedAt: r.at }));
-}
+export function OverviewTab({
+  payload,
+  now,
+  progress = null,
+}: {
+  payload: ClientFilePayload;
+  now: number;
+  progress?: ProgressView | null;
+}) {
+  const { client, packages, sessions } = payload;
 
-export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now: number }) {
-  const { client, packages, sessions, readings } = payload;
-
-  const activePkg = packages.find((p) => p.status === 'active') ?? null;
-  const billed = activePkg ? num(activePkg.amount) : 0;
+  /* THE PACK THE NEXT SESSION COMES OFF, and the balance across every live one —
+     `lib/clients/packs.ts` has the argument. This read `find(status === 'active')`,
+     which the wire's newest-first order made the pack NOT being spent, and the card
+     disagreed with the header (the same client read *Unlimited* in one and *—* in the
+     other). The money below is the SUMS, for the same reason: the header adds every
+     pack's `amountDue`, and a card that showed only one pack's owed beside a header
+     that showed all of them was two answers to *do they owe me*. */
+  const activePkg = currentPack(packages);
+  const balance = packBalance(packages);
+  const live = packages.filter(isLive);
+  const billed = live.reduce((sum, p) => sum + num(p.amount), 0);
   /* Server-computed, never re-added from payments here: summing rows on the
      page is how every paid-up client once showed as owing everything. */
-  const paid = activePkg ? num(activePkg.amountPaid) : 0;
-  const owed = activePkg ? num(activePkg.amountDue) : 0;
+  const paid = live.reduce((sum, p) => sum + num(p.amountPaid), 0);
+  const owed = packages.reduce((sum, p) => sum + num(p.amountDue), 0);
+  /* How long it has been owed runs from the OLDEST due date among the packs still
+     owing, which is the one a trainer is actually chasing. */
+  const oldestDue =
+    packages
+      .filter((p) => num(p.amountDue) > 0 && p.dueDate)
+      .map((p) => p.dueDate as string)
+      .sort()[0] ?? null;
 
-  /*
-   * HOW LATE. An amount is a fact and a number of days is a job, and the file
-   * a trainer opens before walking over to somebody is the one place the
-   * difference is worth a colour.
-   */
-  const dueAt = activePkg?.dueDate ? new Date(activePkg.dueDate).getTime() : null;
+  const dueAt = oldestDue ? new Date(oldestDue).getTime() : null;
   const daysLate = dueAt !== null && owed > 0 ? daysBetween(dueAt, now) : 0;
   const overdue = daysLate > 0;
 
-  const left = activePkg?.sessionsRemaining ?? null;
-  const total = activePkg?.sessionsTotal ?? null;
+  const left = balance.left;
+  const total = balance.total;
   /*
    * ONE RULE FOR *IS THIS PACK IN TROUBLE*, and it is `deck.ts`'s.
    *
@@ -254,6 +265,10 @@ export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now:
      what changes is what the trainer is being offered, and offering to RENEW a
      pack with eighteen sessions left is offering to sell a third one. */
   const packVerb = !activePkg ? 'Sell a pack' : band ? 'Renew' : 'Add sessions';
+
+  /* A PAUSED CLIENT'S FILE ASKS ONE QUESTION: ARE THEY COMING BACK. */
+  const paused = client.status === 'paused';
+  const backAt = client.pausedUntil ? new Date(client.pausedUntil).getTime() : null;
 
   const nextSession =
     sessions
@@ -315,35 +330,21 @@ export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now:
     doneThisWeek,
   );
 
-  const weights = series(readings, 'weight');
-  const fats = series(readings, 'body_fat');
-  const latestWeight = weights[weights.length - 1] ?? null;
-  /* The sitting BEFORE the last one, not the first ever. *57.1 -> 56.4* is the
-     movement a trainer is about to talk about; eight months back is a different
-     claim and belongs on the Progress tab, where the whole series is. The chart
-     under it still draws every reading, so nothing is hidden by the choice. */
-  const priorWeight = weights.length > 1 ? weights[weights.length - 2] : null;
-  /* The two readings this card can act on, and only where there are TWO of
-     them: a single measurement is not a change, and `Change` would draw
-     `84.6 cm → 84.6 cm`, which claims a sitting happened twice. Body fat first
-     because it is the one that qualifies the weight above it. */
-  const tape = (
-    [
-      { key: 'body_fat', label: 'Body fat' },
-      { key: 'waist', label: 'Waist' },
-    ] as const
-  ).flatMap(({ key, label }) => {
-    const rows = key === 'body_fat' ? fats : series(readings, key);
-    if (rows.length < 2) return [];
-    const to = rows[rows.length - 1];
-    const from = rows[rows.length - 2];
-    return [{ label, from: from.value, to: to.value, unit: to.unit }];
-  });
-
-  /* Lowercase, because it lands inside a sentence — the record stores
-     `Fat loss` / `Muscle gain`, and *Toward Fat loss* is title case arriving
-     half-way through a phrase. */
-  const goal = client.goal ? client.goal.toLowerCase() : null;
+  /* THE RECORDS THIS CARD DRAWS. The body is measured in assessments and nowhere
+     else, so the Progress tab and the Assessments tab own it; what this card
+     answers is *is the training working*, from the sets themselves. Ranked by
+     records first, then by the day it was last done, and total-sorted by name so
+     two movements that tie never swap between loads (trap 29). */
+  const top = progress
+    ? [...progress.movements]
+        .sort(
+          (a, b) =>
+            b.records - a.records ||
+            b.lastOn.localeCompare(a.lastOn) ||
+            a.name.localeCompare(b.name),
+        )
+        .slice(0, 4)
+    : [];
 
   return (
     /* THE TRACKS ARE IN THE SHEET. Inline, `gridTemplateColumns` outranked the
@@ -421,33 +422,63 @@ export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now:
       ) : (
         <HeroCard
           quiet
-          label={`No session booked with ${client.name}`}
-          kicker="Next session"
-          name="Nothing booked"
+          label={paused ? `${client.name} is paused` : `No session booked with ${client.name}`}
+          kicker={paused ? 'Paused' : 'Next session'}
+          name={paused ? 'On hold' : 'Nothing booked'}
           detail={
-            activeProgram
-              ? `${activeProgram.name} is assigned and nothing is on the calendar.`
-              : 'No plan assigned and nothing on the calendar.'
+            paused
+              ? backAt === null
+                ? 'Paused with no return date.'
+                : backAt < now
+                  ? `Was due back ${isoDateStr(client.pausedUntil as string)}.`
+                  : `Due back ${isoDateStr(client.pausedUntil as string)}.`
+              : activeProgram
+                ? `${activeProgram.name} is assigned and nothing is on the calendar.`
+                : 'No plan assigned and nothing on the calendar.'
           }
           band={{
             icon: <Clock size={15} />,
-            tone: left !== null && left > 0 ? 'warn' : undefined,
+            tone: !paused && left !== null && left > 0 ? 'warn' : undefined,
             text:
               left !== null && left > 0 ? (
                 <>
                   <b>
                     {left} session{left === 1 ? '' : 's'}
                   </b>{' '}
-                  are paid for and none are booked.
+                  {paused ? 'are paid for and wait for them.' : 'are paid for and none are booked.'}
                 </>
+              ) : paused ? (
+                'Nothing is booked while they are away.'
               ) : (
                 'Book one to put this client back on the calendar.'
               ),
           }}
           actions={
-            <Button href="/schedule" variant="primary" size="sm" icon={<CalendarIcon />}>
-              Book a session
-            </Button>
+            paused ? (
+              <>
+                {/* THE ONE LIME ON A PAUSED FILE. Bringing them back is the thing that
+                    changes their situation; booking a session for somebody who is away
+                    is the thing this used to offer. */}
+                <ResumeButton clientId={client.id} />
+                <Button
+                  href={`/schedule?new=1&client=${client.id}`}
+                  variant="secondary"
+                  size="sm"
+                  icon={<CalendarIcon />}
+                >
+                  Book a session
+                </Button>
+              </>
+            ) : (
+              <Button
+                href={`/schedule?new=1&client=${client.id}`}
+                variant="primary"
+                size="sm"
+                icon={<CalendarIcon />}
+              >
+                Book a session
+              </Button>
+            )
           }
         />
       )}
@@ -526,8 +557,10 @@ export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now:
             <Card.Body flush>
               <Figures>
                 <Figure
-                  label="Sessions left"
-                  value={left ?? '\u2014'}
+                  label={balance.unlimited ? 'Sessions' : 'Sessions left'}
+                  /* A monthly pack has no count to run down, and \u2014 beside the header's
+                     *Unlimited* was two answers to one question. */
+                  value={left ?? (balance.unlimited ? 'Unlimited' : '\u2014')}
                   of={total ?? undefined}
                   tone={left === 0 ? 'danger' : packLow ? 'warn' : 'neutral'}
                   /* The PACK, not the session history: this figure is the
@@ -574,13 +607,13 @@ export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now:
                      phrase as one raised this morning. */
                   <>
                     <b className="cfov__late">
-                      {rupees(owed)} was due {isoDateStr(activePkg.dueDate as string)}
+                      {rupees(owed)} was due {isoDateStr(oldestDue as string)}
                     </b>{' '}
                     — {daysLate} day{daysLate === 1 ? '' : 's'} ago.
                   </>
                 ) : (
                   <>
-                    {rupees(owed)} due {isoDateStr(activePkg.dueDate as string)}.
+                    {rupees(owed)} due {isoDateStr(oldestDue as string)}.
                   </>
                 )}
               </p>
@@ -696,90 +729,57 @@ export function OverviewTab({ payload, now }: { payload: ClientFilePayload; now:
       </Card>
 
       {/* ── 4 · IS IT WORKING ─────────────────────────────────────────────── */}
-      <Card className="cfov__body">
+      {/* EXERCISE RECORDS, NOT THE BODY. A body is measured in an assessment and nowhere
+          else (`body_metric` is gone), so a weight and a tape here were readings the trainer
+          could neither take nor correct from this screen. What a trainer CAN see move from
+          here is the lift, and a personal best is the figure a client is told first.
+          Nothing on it carries a tone: a held lift is a state, not a failure. */}
+      <Card className="cfov__rec">
         <Card.Head
           className="card__hd--wrap"
-          title={goal ? `Toward ${goal}` : 'The body'}
+          title="Exercise records"
           actions={
-            <Button
-              href={`/clients/${client.id}/progress`}
-              variant="secondary"
-              size="sm"
-              icon={<BodyIcon />}
-            >
-              Record
+            <Button href={`/clients/${client.id}/progress`} variant="secondary" size="sm">
+              All progress
             </Button>
           }
         />
-        <Card.Body>
-          {latestWeight && priorWeight ? (
-            <>
-              {/* NO DELTA CLAUSE, AND THAT IS A STANDING RULE RATHER THAN
-                  taste: `Change`'s `delta` is the one part of that component
-                  that may carry the accent, and *weight carries no tone,
-                  anywhere*. A trainer cutting and a trainer bulking read the
-                  same 0.7 kg in opposite directions, so a lime figure here
-                  takes a side in a conversation the product was not in. The
-                  movement is the two numbers and the arrow between them. */}
-              <Change
-                size="lg"
-                from={priorWeight.value}
-                to={latestWeight.value}
-                unit={latestWeight.unit}
-              />
-              <TrendChart
-                size="sm"
-                label="Weight"
-                values={weights.map((m) => m.value)}
-                from={dateStr(weights[0].recordedAt)}
-                to={dateStr(latestWeight.recordedAt)}
-              />
-            </>
-          ) : latestWeight ? (
-            <>
-              <p className="tx-fig cfov__solo">
-                {latestWeight.value}
-                <span className="ink3"> {latestWeight.unit}</span>
-              </p>
-              <p className="small ink3">
-                One reading, taken {dateStr(latestWeight.recordedAt)}. A second one is what turns
-                it into a direction.
-              </p>
-            </>
-          ) : (
+        {!progress ? (
+          <Card.Body>
+            <p className="small ink3">Records could not be loaded just now. Progress has the full history.</p>
+          </Card.Body>
+        ) : top.length === 0 ? (
+          <Card.Body>
             <p className="small ink3">
-              Nothing measured yet. A starting weight is what every later reading is read
-              against.
+              No sets logged yet. Personal bests appear here once a session has been logged.
             </p>
-          )}
-        </Card.Body>
-        {tape.length > 0 && (
-          /* THE TAPE, and it is the half of *toward fat loss* the scale cannot
-             answer. A waist coming down on a client whose weight has held is
-             the plan working, and this card said only the weight — while
-             an assessment carries waist, chest, hip and arm whenever the
-             template asks for them.
-
-             `Change` and not a figure each: a tape reading alone is a number
-             nobody can place, and this component exists precisely because
-             `25 kg → 27.5 kg` was being hand-written four different ways on one
-             screen. Two at a time, because a four-up of 12px pairs in a 300px
-             column is a table nobody reads — the rest are on Progress. */
-          <Card.Body divided className="cfov__tape">
-            {tape.map((row) => (
-              <Change
-                key={row.label}
-                label={row.label}
-                from={row.from}
-                to={row.to}
-                unit={row.unit}
-              />
-            ))}
+          </Card.Body>
+        ) : (
+          <Card.Body flush>
+            <ol className="cfxr">
+              {top.map((m) => (
+                <li key={m.exerciseId} className="cfxr__r">
+                  <span className="cfxr__n">
+                    <b>{m.name}</b>
+                    <span className="small ink3">
+                      {m.records > 0
+                        ? `${m.records} ${m.records === 1 ? 'record' : 'records'} · `
+                        : ''}
+                      last {isoDateStr(m.lastOn)}
+                    </span>
+                  </span>
+                  <Change from={m.from === m.to ? null : m.from} to={m.to} unit={m.unit} />
+                </li>
+              ))}
+            </ol>
           </Card.Body>
         )}
-        {latestWeight && (
+        {progress && progress.records > 0 && (
           <Card.Band>
-            <span className="small">Last measured {dateStr(latestWeight.recordedAt)}</span>
+            <span className="small">
+              {progress.records} {progress.records === 1 ? 'record' : 'records'} across{' '}
+              {progress.exerciseCount} {progress.exerciseCount === 1 ? 'movement' : 'movements'}
+            </span>
           </Card.Band>
         )}
       </Card>

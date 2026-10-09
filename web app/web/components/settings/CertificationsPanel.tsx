@@ -91,11 +91,11 @@ export function CertificationsPanel({ initial }: { initial: Identity }) {
         submit();
       }}
     >
-      <h2 className="card__t">What you hold</h2>
-      <p className="small" style={{ marginTop: 3, maxWidth: 560 }}>
-        In your own words, and optional. India has no licensing requirement for personal trainers —
-        no mandated certificate, no register, no protected title — so “Not certified yet” is a real
-        answer here rather than a blank.
+      <h2 className="card__t">Certifications</h2>
+      {/* One sentence. The licensing background that used to be three lines here is the reason "Not certified yet" is on the
+          list; the notice under the chips says the rest, once. */}
+      <p className="small" style={{ marginTop: 3 }}>
+        Optional. “Not certified yet” is a real answer — India has no licence for personal trainers.
       </p>
 
       <CertificationPicker
@@ -108,13 +108,9 @@ export function CertificationsPanel({ initial }: { initial: Identity }) {
         }}
       />
 
-      <MessageSlot message={message} />
+      {dirty || pending || message ? <MessageSlot message={message} /> : null}
 
-      <SaveRow
-        pending={pending}
-        dirty={dirty}
-        note="Shown on your profile, marked self-declared."
-      />
+      <SaveRow pending={pending} dirty={dirty} />
     </form>
   );
 }

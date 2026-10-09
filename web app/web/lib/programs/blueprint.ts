@@ -1392,7 +1392,7 @@ export function shapeParts(days: number, weeks: number, clients: number): string
   return [
     `${days} day${days === 1 ? '' : 's'} a week`,
     `${weeks} week${weeks === 1 ? '' : 's'}`,
-    clients === 0 ? 'nobody on it yet' : `${clients} client${clients === 1 ? '' : 's'} on a copy`,
+    clients === 0 ? 'not used yet' : `${clients} client${clients === 1 ? '' : 's'} on a copy`,
   ];
 }
 

@@ -60,3 +60,38 @@ export function typeFromTerms(terms: Pick<PackTerms, 'basis' | 'sessions'>): Pac
   if (terms.basis === 'period') return 'monthly';
   return terms.sessions === 1 ? 'single' : 'session_pack';
 }
+
+/** A length of time in the words a trainer says it in: 30 → *1 month*, 84 → *12 weeks*. */
+export function periodLabel(days: number): string {
+  if (days % 30 === 0) {
+    const m = days / 30;
+    return m === 1 ? '1 month' : `${m} months`;
+  }
+  if (days % 7 === 0) return `${days / 7} weeks`;
+  return `${days} days`;
+}
+
+/** The lengths a period pack is usually sold for. */
+export const PERIOD_CHOICES: { days: number; label: string }[] = [
+  { days: 30, label: '1 month' },
+  { days: 60, label: '2 months' },
+  { days: 84, label: '12 weeks' },
+  { days: 90, label: '3 months' },
+  { days: 180, label: '6 months' },
+];
+
+/** How long a block of sessions is usually good for; `null` is no expiry. */
+export const VALIDITY_CHOICES: { days: number | null; label: string }[] = [
+  { days: null, label: 'No expiry' },
+  { days: 30, label: '30 days' },
+  { days: 60, label: '60 days' },
+  { days: 90, label: '90 days' },
+  { days: 120, label: '120 days' },
+];
+
+/** What a new price list can start from. Terms only: the price is the trainer's to say. */
+export const PRESETS: { id: string; title: string; note: string; terms: Omit<PackTerms, 'validityDays'> & { validityDays: number | null } }[] = [
+  { id: 'twelve', title: '12 sessions', note: 'In person · valid 60 days', terms: { service: 'floor', basis: 'sessions', sessions: 12, validityDays: 60 } },
+  { id: 'monthly', title: 'Monthly', note: 'In person · unlimited for a month', terms: { service: 'floor', basis: 'period', sessions: null, validityDays: 30 } },
+  { id: 'single', title: 'Single session', note: 'In person · pay as you go', terms: { service: 'floor', basis: 'sessions', sessions: 1, validityDays: null } },
+];

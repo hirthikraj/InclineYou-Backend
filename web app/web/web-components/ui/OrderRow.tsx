@@ -104,6 +104,7 @@ export function OrderRow({
   return (
     <div
       className={cls}
+      role="listitem"
       style={style}
       draggable={armed || undefined}
       onDragStart={onDragStart}
@@ -117,6 +118,9 @@ export function OrderRow({
           type="button"
           className="orow__g"
           aria-label={gripLabel ?? 'Reorder'}
+          /* A mouse affordance only: it does nothing on Enter, so it is not a tab stop (one dead stop per
+             question, sixty in an editor of eleven). The keyboard route is the row menu's Move up / down. */
+          tabIndex={-1}
           /* `mousedown` arms and `mouseup` disarms, so `draggable` is true for
              exactly as long as the grip is held. `onClick` is deliberately
              absent: the grip does nothing on a click, and the keyboard path is

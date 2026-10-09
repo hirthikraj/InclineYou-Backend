@@ -12,7 +12,7 @@ import {
   type WorkoutTemplateInput,
   type WorkoutTemplateWire,
 } from './api';
-import { getExercises } from '@/lib/exercises/api';
+import { getExercise } from '@/lib/exercises/api';
 import type { ExerciseWire } from '@/lib/exercises/api';
 
 /**
@@ -139,10 +139,11 @@ export async function fetchWorkoutTemplate(id: string): Promise<
     );
     const names: Record<string, ExerciseWire> = {};
     if (wanted.size > 0) {
-      const page = await getExercises({ size: 200 });
-      for (const row of page.exercises) {
-        if (wanted.has(row.id)) names[row.id] = row;
-      }
+      /* BY ID, NOT BY WINDOW. This read the first 200 rows of the library (it holds 1,324) and kept the ones it
+         wanted, so every movement past the 200th alphabetically drew *Exercise not in your library* and counted for
+         nothing. The wire answers one id at a time; in parallel that is as fast as one read, and a retired id fails alone. */
+      const found = await Promise.allSettled([...wanted].map(id => getExercise(id)));
+      for (const r of found) if (r.status === 'fulfilled') names[r.value.id] = r.value;
     }
     return { ok: true, template, names };
   } catch (error) {

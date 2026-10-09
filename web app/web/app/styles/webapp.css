@@ -176,8 +176,20 @@
   /* web-only: the rail sits one step below the canvas so the content plane
      reads as the thing in front */
   --w-rail-bg:#060709;
-  --w-pane-bg:#08090B;
-  --w-top-bg:rgba(8,9,11,.86);
+  /* PANE AND TOP SHARE A STEP IN DARK TOO — light says so in its own block below
+     ("they are the same distance from the content: both touch it"), and dark did
+     not do it: the pane was `--tx-canvas`, so MEASURED it sat at 1.00:1 against
+     the content and the seam was a 1.25:1 hairline alone, while the top bar
+     beside its header was a full step lighter — three tones across one 56px band
+     where light draws two. The pane is `--tx-surface` now, the value the glass
+     bar composites to over the canvas (#111418, one unit off). */
+  --w-pane-bg:#101216;
+  /* The bar's own fill when glass is off, and it has to land where glass does:
+     `.top__n` punches its 2px ring out of THIS token, so a bar that is #111418
+     under glass and #08090B without it shows a dark halo round the bell count on
+     one of the two paths — light's block says the same about its own pair.
+     .90 over #08090B composites to #101216. */
+  --w-top-bg:rgba(17,19,23,.90);
   --w-hover:rgba(255,255,255,.038);
   --w-selected:rgba(198,242,78,.10);
   --w-grid:rgba(255,255,255,.045);
@@ -845,7 +857,11 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
    user can arrive anywhere from a URL, so where-am-I has to be written down. */
 .top{
   grid-area:top;background:var(--w-top-bg);border-bottom:1px solid var(--tx-line);
-  display:flex;align-items:center;gap:14px;padding:0 18px;min-width:0;
+  display:flex;align-items:center;gap:14px;padding:0 24px;min-width:0;
+  /* 24px IS `--w-gutter`, the inset `.ph` and `.body` use. It was 18, which put the
+     workspace name at x=294 and the search's right edge at 1422 against page
+     content at x=300 and 1416 — a 6px step on both ends of the one line the eye
+     runs down. The phone's rule restates its own padding, so this is desk-only. */
 }
 /* THE SLACK LIVES HERE, AND THAT IS THE WHOLE ALIGNMENT MODEL.
    One auto margin, on the FIRST child, so everything after the breadcrumb —
@@ -903,7 +919,7 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
    no menu. A dropdown whose list has one row takes a click, opens a panel and
    offers nothing — the dead control this shell keeps deleting. The name is
    still the answer to *which book*, so it is drawn as a plain label. */
-.wsw--one{align-items:center;gap:9px;padding:0 2px;max-width:320px}
+.wsw--one{align-items:center;gap:9px;padding:0;max-width:320px}
 .wsw__b{
   display:flex;align-items:center;gap:9px;min-width:0;max-width:320px;
   height:38px;padding:0 8px 0 6px;border:0;border-radius:var(--tx-r2);
@@ -1010,7 +1026,7 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
 
 .omni{
   display:flex;align-items:center;gap:9px;   /* the push is `.crumbs`' — see above */
-  width:320px;height:34px;padding:0 11px;
+  width:372px;height:34px;padding:0 11px;
   background:var(--tx-field);border:1px solid var(--tx-field-line);
   border-radius:var(--tx-r2);color:var(--tx-ink-3);font-size:13px;cursor:text;
 }
@@ -2295,6 +2311,11 @@ select.ctl{appearance:none;cursor:pointer;
    So the stickiness becomes opt-OUT rather than a thing every `.tbl` inherits:
    long tables keep it untouched, and a table whose rows all fit says so. */
 .tbl--flow thead th{position:static}
+/* A numeric HEADER is a header: `.tbl .num` is ink and was winning, so *Pack* measured
+   18:1 beside 6:1 siblings and read as the sorted column (the sorted one is
+   *What's up*). Declared BEFORE the aria-sort rule so a sorted numeric column
+   still steps up to ink-2. */
+.tbl thead th.num{color:var(--tx-ink-3)}
 .tbl thead th[aria-sort]{cursor:pointer;color:var(--tx-ink-2)}
 .tbl thead th[aria-sort]:hover{color:var(--tx-ink)}
 .tbl thead th[aria-sort="ascending"]::after{content:' ↑';color:var(--tx-accent-text)}
@@ -2718,6 +2739,17 @@ select.ctl{appearance:none;cursor:pointer;
 .ev--ghost{background:var(--tx-accent-soft);border-left-color:var(--tx-accent);
   border-style:dashed;border-width:0 0 0 2px}
 .ev--conflict{box-shadow:inset 0 0 0 1px var(--tx-danger)}
+/* DARK BLOCKS ARE OPAQUE. The soft fills are 12–13% alpha in dark, so the hour
+   hairlines (DOM-earlier) ran straight through a block's plan line, name and time
+   and read as strikethrough (MEASURED on the day view at 7:15, 8:30 and 9:45).
+   The same tint, mixed onto the canvas instead of over whatever is behind it —
+   light's soft fills are already opaque, which is why only dark had the defect.
+   And the plan line steps to ink-2: ink-3 on this fill was 4.07:1. */
+:root[data-theme="dark"] .ev{background-color:color-mix(in srgb,var(--tx-floor) 12%,var(--tx-canvas))}
+:root[data-theme="dark"] .ev--remote{background-color:color-mix(in srgb,var(--tx-remote) 12%,var(--tx-canvas))}
+:root[data-theme="dark"] .ev--noshow{background-color:color-mix(in srgb,var(--tx-danger) 13%,var(--tx-canvas))}
+:root[data-theme="dark"] .ev--ghost{background-color:color-mix(in srgb,var(--tx-accent) 12%,var(--tx-canvas))}
+:root[data-theme="dark"] .ev .ev__p{color:var(--tx-ink-2)}
 
 /* ── the week, minute-true ───────────────────────────────────────────────
    ONE MINUTE IS ONE PIXEL. `--cw-hour:60px` is not a tuning value, it is the
@@ -3032,7 +3064,11 @@ button.ev--late{border-left-color:var(--tx-warn)}
   border-bottom:1px solid var(--tx-line-strong);border-right:1px solid var(--tx-line);
   padding:8px 10px;text-align:center;font-family:var(--tx-mono);font-size:10.5px;
   letter-spacing:.11em;text-transform:uppercase;color:var(--tx-ink-3)}
-.mo__c{min-height:var(--mo-cell);border-right:1px solid var(--tx-line);
+.mo__c{min-height:var(--mo-cell);
+  /* `border:0` FIRST. A day cell is a <button>, and a button's UA border is a 2px
+     `outset` on every side: with only right and bottom redrawn, the top and left
+     were a white lattice in dark and a black one in light (MEASURED). */
+  border:0;border-right:1px solid var(--tx-line);
   border-bottom:1px solid var(--tx-line);padding:var(--mo-strip) 9px 9px;
   display:flex;flex-direction:column;gap:6px;text-align:left;font:inherit;
   background:none;cursor:pointer;position:relative}
@@ -3084,7 +3120,7 @@ button.ev--late{border-left-color:var(--tx-warn)}
 /* one row of the week, on the right. The month's rows ARE weeks, which is how
    a trainer talks about a month, so the row gets the same four figures the
    week view's own header carries. */
-.mo__wk{border-bottom:1px solid var(--tx-line);border-left:1px solid var(--tx-line);
+.mo__wk{border:0;border-bottom:1px solid var(--tx-line);border-left:1px solid var(--tx-line);
   padding:var(--mo-strip) 12px 9px;display:flex;flex-direction:column;gap:3px;
   text-align:left;font:inherit;background:none;cursor:pointer}
 .mo__wk:hover{background:var(--w-hover)}
@@ -4042,7 +4078,7 @@ button.ev--late{border-left-color:var(--tx-warn)}
 /* Planned, still to come. Dashed rather than tinted: a tint reads as a weaker
    version of done, and *not yet* is not a weaker version of anything. */
 .wkd__c--plan{
-  background:transparent;box-shadow:inset 0 0 0 1px var(--tx-accent-line);
+  background:transparent;box-shadow:inset 0 0 0 1px var(--tx-accent-text);
 }
 /* A rest day the plan asked for. Flat, unmarked, and deliberately identical in
    weight to a missed one — the difference between them is the label, not the
@@ -4051,7 +4087,11 @@ button.ev--late{border-left-color:var(--tx-warn)}
 .wkd__c--miss{background:var(--tx-surface-2);box-shadow:inset 0 0 0 1px var(--tx-line)}
 /* Today, whatever else it is. A ring OUTSIDE the cell so it composes with all
    four states above rather than replacing one. */
-.wkd__d--now .wkd__c{outline:2px solid var(--tx-accent-line);outline-offset:2px}
+.wkd__d--now .wkd__c{outline:2px solid var(--tx-accent-text);outline-offset:2px}
+/* THE TWO RINGS ARE STROKES, AND A STROKE IS `--tx-accent-text`. `--tx-accent-line` is the lime
+   WASH's edge — a hairline tint — and as a ring around a dot it measured 1.29:1 on light
+   (today) and 1.3:1 (planned), against the 3:1 a non-text mark needs; this is the stylesheet's
+   own opening rule (lime is a fill, never a stroke on light) applied to two rings it missed. */
 .wkd__n{
   font-family:var(--tx-brand);font-weight:800;font-size:19px;letter-spacing:-.02em;
   color:var(--tx-ink);
@@ -4088,7 +4128,7 @@ button.ev--late{border-left-color:var(--tx-warn)}
 .wkd__d--go{text-decoration:none;color:inherit;border-radius:var(--tx-r1)}
 .wkd__d--go:hover .wkd__c{box-shadow:inset 0 0 0 1px var(--tx-accent-line)}
 .wkd__d--go:hover .wkd__l{color:var(--tx-ink)}
-.wkd__d--go:focus-visible{outline:2px solid var(--tx-accent-line);outline-offset:3px}
+.wkd__d--go:focus-visible{outline:2px solid var(--tx-focus);outline-offset:3px}
 
 /* ── .trend · a line, smoothed ───────────────────────────────────────────────
 
@@ -5175,7 +5215,12 @@ button.ev--late{border-left-color:var(--tx-warn)}
   background:var(--g-fill);
   -webkit-backdrop-filter:blur(var(--g-blur)) saturate(var(--g-sat)) var(--g-lift);
   backdrop-filter:blur(var(--g-blur)) saturate(var(--g-sat)) var(--g-lift);
-  border-bottom-color:var(--g-line);
+  /* The bar's hairline is the SAME colour as `.rail__top` and `.pane__top` it joins
+     at y=56. `--g-line` is the glass edge colour (white at 10% over a blur), which
+     measured about #292c2f against the rail's #1e222a in dark — a seam in a rule
+     that is meant to read as one line across the shell. Glass keeps its fill and
+     blur; only the edge is the shell's own. */
+  border-bottom-color:var(--tx-line);
 }
 
 /* 2 · the right panel. The payments table behind it staying legible IS the reason the
@@ -6006,7 +6051,7 @@ button.lrow,label.lrow{
   /* `fixed` reads widths off this row and only this row. */
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
-.rst__c-who{width:212px}
+.rst__c-who{width:228px}   /* 212 until the phone number was formatted: `+91 98765 00006 · Online` is one line at 228 */
 .rst__c-up{width:300px}
 .rst__c-tag{width:92px}
 .rst__c-left{width:96px}
@@ -6033,8 +6078,17 @@ button.lrow,label.lrow{
    nothing left for the algorithm to have an opinion about. The subtrahend is
    the sum of every OTHER track at that band, `.kb` included, and it is restated
    in each block below because that is the number that changes. */
-.rst .kb{width:44px;padding:0 8px 0 0;text-align:right}
-.rst .act{width:calc(100% - 868px);text-align:right;padding-right:6px;min-width:0}
+/* THE ORDER IS NOW  Client · What's up · [verb] · Status · Pack · Last attended · ⋯
+   (4 Oct 2026). The verb stood at the far right with the band's surplus in front of
+   it, ~600px from the sentence it answers at 1853px (MEASURED: the action track was
+   646px of a 1514px table). It is a fixed 240px beside the sentence now — the verb
+   and the "Messaged yesterday" whisper side by side — and the surplus falls into the
+   LAST track, the ⋯, which is ranged right and does not mind being far away.
+   Every subtrahend below is the sum of every OTHER track at that band, `calc` for
+   the reason the section above gives: state them all and nothing is left for the
+   algorithm to have an opinion about. */
+.rst .kb{width:calc(100% - 1080px);min-width:44px;padding:0 8px 0 0;text-align:right}
+.rst .act{width:240px;text-align:left;padding:0 6px 0 12px;min-width:0}
 
 /* ── THE BAND IS THE CONTAINER, BECAUSE THE RAIL IS WORTH 184px ──────────────
 
@@ -6093,20 +6147,50 @@ button.lrow,label.lrow{
    `fixed` reads, so the columns come out of it correctly. A band that narrow
    means a 1024px window with the rail expanded AND the section pane up; the
    card list takes over 100px later. */
-@container roster (max-width:975px){
+/* Seven columns need 1,124px of band (1,080 of tracks + the ⋯'s 44). What drops, in
+   the order it drops, is the order these columns repeat something the row has
+   already said — the ladder the section above argues for, with the verb's 220px now
+   inside every sum.
+
+     7 columns            tracks 1080 + 44  →  band 1124 and up
+     less LAST            956  + 44         →  1000 – 1123
+     less STATUS          864  + 44         →  908 – 999
+     what's up → 240      804  + 44         →  848 – 907
+     narrower tracks      616  + 44         →  660 – 847
+     less PACK            516  + 44         →  560 – 659   (a 901px window with the
+                                                            section pane open is 577) */
+@container roster (max-width:1123px){
   .rst__c-last,.rst .rst__c-last{display:none}
-  .rst .act{width:calc(100% - 744px)}
+  .rst .kb{width:calc(100% - 956px)}
 }
-@container roster (max-width:851px){
+@container roster (max-width:999px){
   .rst__c-tag,.rst .rst__c-tag{display:none}
-  .rst .act{width:calc(100% - 652px)}
+  .rst .kb{width:calc(100% - 864px)}
 }
-@container roster (max-width:759px){
+@container roster (max-width:907px){
   /* and the sentence gives up its own slack LAST, rather than the name cell:
      a truncated line still says which kind of thing is wrong, a truncated name
      does not say who. */
   .rst__c-up{width:240px}
-  .rst .act{width:calc(100% - 592px)}
+  .rst .kb{width:calc(100% - 804px)}
+}
+@container roster (max-width:847px){
+  /* Pack stays as long as it fits: 190 + 200 + 130 + 96 of tracks + the ⋯'s 44 is
+     660px of band, and a 1100px window with the section pane open is 757. */
+  .rst__c-who{width:190px}
+  .rst__c-up{width:200px}
+  .rst .act{width:130px;padding-left:8px}
+  .rst .kb{width:calc(100% - 616px)}
+}
+@container roster (max-width:659px){
+  /* The pack gauge goes here, and it is the right thing to lose: a pack row says so
+     in its sentence ("Pack ends in 2 sessions") and the gauge only repeats the
+     fraction. Below this there is nothing honest left to drop, and a window this
+     narrow (901px with the section pane open is 577) used to scroll the table
+     sideways with the verb clipped to an icon. */
+  .rst__c-left,.rst .rst__c-left{display:none}
+  .rst__c-up{width:196px}
+  .rst .kb{width:calc(100% - 516px)}
 }
 /* ── THE FLOOR IS ON A BOX INSIDE THE BAND, NOT ON THE TABLE ─────────────────
 
@@ -6132,8 +6216,8 @@ button.lrow,label.lrow{
    container itself is a `min-width` the container query would then MEASURE, and
    the whole ladder would latch at its floor. */
 .rstband__t{min-width:0}
-@container roster (max-width:699px){
-  .rstband__t{min-width:700px}
+@container roster (max-width:559px){
+  .rstband__t{min-width:560px}
 }
 
 /* `th` as well: the client cell is the row's `<th scope="row">`, and a
@@ -6197,12 +6281,12 @@ button.lrow,label.lrow{
    There is room for it only because of the column model at the top of this
    section: the action track is the auto one, so at 1,424px of band it is 354px
    wide against the 118 it was pinned to. The two changes are one change. */
-.rst .act .ndg{flex-direction:row-reverse;align-items:center;gap:10px}
+.rst .act .ndg{flex-direction:row;align-items:center;gap:10px}
 /* The error note is the one that wraps (`.ndg__note.err` is `normal` + 22ch),
    which in a row would make the span two lines tall and undo the rule. It is a
    failed send — rare, and worth the height — but it must not drag the column
    off its line while it is up. */
-.rst .act .ndg__note.err{text-align:right;align-self:center}
+.rst .act .ndg__note.err{text-align:left;align-self:center}
 /* The action column is the AUTO track, so its width is whatever the band has
    left over — which is a continuum, not four steps, and a `display:none` at one
    number would make the note vanish on a window drag. It ellipsises instead:
@@ -6394,7 +6478,12 @@ button.lrow,label.lrow{
 /* The tile that counts nothing is still drawn, greyed and inert, because a
    strip whose cells appear and vanish as the roster changes is a strip whose
    positions a trainer cannot learn. Six tiles, always, in one order. */
-.strip--pick>button:disabled{cursor:default;opacity:.45}
+.strip--pick>button:disabled{cursor:default}
+/* A ZERO IS AN ANSWER, NOT A BROKEN TILE. `opacity:.45` took the label to 1.94:1 and the
+   figure to 2.0:1 on light, so "nobody is late" read as disabled UI. The tile is
+   still inert and still drawn, but its figure steps to ink-3 and its label keeps
+   its own 5.7:1. */
+.strip--pick>button:disabled b{color:var(--tx-ink-3)}
 .strip--pick>button:disabled:hover{background-color:transparent}
 
 /* ── THE PACK GAUGE · how much of what they bought is left ──────────────────
@@ -6967,6 +7056,9 @@ button.lrow,label.lrow{
   background:color-mix(in oklab, var(--tx-ink-3) 34%, var(--tx-surface-3));
   box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--tx-ink-3) 70%, transparent);
   display:block;min-height:2px;position:relative;
+  /* A ONE-WEEK SERIES WAS A 760PX SLAB. Capped, and left-aligned like a series that has only
+     started; the label row below takes the same cap so each label stays under its bar. */
+  max-width:96px;
   transition:background var(--tx-t-instant) var(--tx-ease)}
 .vb__c:hover{background:color-mix(in oklab, var(--tx-ink-3) 52%, var(--tx-surface-3))}
 .vb__c--on{background:var(--tx-accent);box-shadow:none}
@@ -7009,9 +7101,12 @@ button.lrow,label.lrow{
 .vb__c b em{display:block;font-style:normal;font-size:10px;font-weight:400;
   color:var(--tx-ink-3);text-align:center}
 .vb__c--pin:not(:hover) b em{display:none}
+/* Eight weeks or fewer: every figure is on its bar. The date stays a hover thing. */
+.vb--all .vb__c b{opacity:1}
+.vb--all .vb__c:not(:hover) b em{display:none}
 @media (prefers-reduced-motion:reduce){.vb__c{transition:none}}
 .vb__x{display:flex;gap:6px;margin-top:6px}
-.vb__x span{flex:1;text-align:center;font-family:var(--tx-mono);font-size:10.5px;
+.vb__x span{flex:1;min-width:0;max-width:96px;text-align:center;font-family:var(--tx-mono);font-size:10.5px;
   color:var(--tx-ink-3)}
 /* How to READ the chart, never why it is drawn this way. The argument travels
    on `title`; the instruction is on the face, because a reader who misses it
@@ -7038,6 +7133,7 @@ button.lrow,label.lrow{
    the only scale there is. It keeps its 44px; what goes is the bar gap, which
    at 26 weeks in a 342px card left the columns under 7px each. */
 @media (max-width:620px){
+  .vb--all .vb__c:not(.vb__c--pin):not(:hover) b{opacity:0}
   .vb__cols,.vb__x{gap:3px}
   .vb{--vb-h:150px}
 }
@@ -7046,7 +7142,10 @@ button.lrow,label.lrow{
       week is two pixels, and from a 50 kg baseline it is everything. */
 .seq{font-family:var(--tx-mono);font-size:19px;font-weight:500;
   color:var(--tx-ink);letter-spacing:-.01em;line-height:1.45}
-.seq b{color:var(--tx-pr);font-weight:600}
+.seq b{color:var(--tx-ink);font-weight:600}
+/* ONLY A RECORD IS GOLD. `.seq b` was the PR amber for the LATEST number whether or not it was
+   a record, so 27.5 → 27.5 → 27.5 → 27.5 ended in a gold figure beside Records 0. */
+.seq b.seq__pr{color:var(--tx-pr)}
 
 /* ── a swap scope, with its blast radius on its own row, before the tap ─── */
 .scp{display:flex;align-items:flex-start;gap:11px;padding:12px;
@@ -7755,19 +7854,20 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
 .scal__key{display:flex;align-items:center;gap:var(--tx-s3);flex-wrap:wrap}
 .scal__k{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;
   color:var(--tx-ink-2)}
-.scal__k i{width:10px;height:10px;border-radius:3px;display:inline-block;
-  flex:0 0 auto}
+.scal__k i{width:12px;height:12px;display:inline-flex;flex:0 0 auto}
+.scal__k i svg,.scal__s i svg{width:100%;height:100%;display:block}
 .scal__k b{font-family:var(--tx-mono);font-weight:500;color:var(--tx-ink-3);
   font-variant-numeric:tabular-nums}
-/* The swatch is the state at FULL strength, while the pill it explains is the
-   same hue at `-soft` behind a 1px border of it. A key drawn in the tint would
-   be a 10px square of a colour that is 13% opaque — legible on nothing, and the
-   one element on the screen whose entire job is to be identifiable. */
-.scal__k--done i{background:var(--tx-ok)}
-.scal__k--booked i{background:var(--tx-info)}
-.scal__k--missed i{background:var(--tx-danger)}
-.scal__k--unmarked i{background:var(--tx-warn)}
-.scal__k--cancelled i{background:var(--tx-ink-3);opacity:.55}
+/* THE KEY IS THE PILL'S OWN GLYPH, in the state's full-strength ink. Four hues with
+   near-identical luminance (1.01-1.10 between them, measured) are one colour to a
+   reader who cannot separate red from green, so each state also has a SHAPE —
+   check, ring, cross, half-moon, dash — drawn in the legend, on the desk pill and on
+   the phone's dot alike, from one `StateGlyph`. */
+.scal__k--done i{color:var(--tx-ok)}
+.scal__k--booked i{color:var(--tx-info)}
+.scal__k--missed i{color:var(--tx-danger)}
+.scal__k--unmarked i{color:var(--tx-warn)}
+.scal__k--cancelled i{color:var(--tx-ink-3)}
 
 .scal__r{display:grid;grid-template-columns:repeat(7,minmax(0,1fr))}
 .scal__hd{border-bottom:1px solid var(--tx-line-strong);
@@ -7808,8 +7908,13 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
    way `.wkd__d--now` splits from `.wkd__c--*`: the fill is WHAT HAPPENED, the
    ring is WHEN IT IS, and they compose on every one of the five states. The
    ring goes to 2px to carry the weight the fill was carrying. */
-.scal__c--today{box-shadow:inset 0 0 0 2px var(--tx-accent-line)}
-.scal__c--today .scal__d{color:var(--tx-accent-text);font-weight:800}
+.scal__c--today{box-shadow:inset 0 0 0 2px var(--tx-accent-text)}
+/* THE RING WAS `--tx-accent-line` AND MEASURED 1.21:1 ON LIGHT (2.6 on dark) — a lime
+   hairline over a lime-tinted wash. A stroke takes the stroke form of the accent, and
+   the date is a filled chip as a second channel, so today still reads on an
+   out-of-month cell where the ring has little to ring. The lime is a FILL behind ink. */
+.scal__c--today .scal__d{align-self:flex-start;padding:0 6px;border-radius:var(--tx-rfull);
+  background:var(--tx-accent);color:var(--tx-accent-ink);font-weight:800}
 
 /* ── THE WASHED CELL ─────────────────────────────────────────────────────────
    On this product a client trains once a day, so on almost every cell that
@@ -7882,7 +7987,7 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
    from. `--tx-r1` and not a full pill: a 999px radius on a 20px box with a
    clock time in it loses two characters to its own corners. */
 .scal__s{display:flex;align-items:center;gap:5px;min-width:0;
-  padding:3px 6px;border-radius:var(--tx-r1);text-decoration:none;
+  padding:4px 6px;border-radius:var(--tx-r1);text-decoration:none;
   border:1px solid transparent;font-size:11px;line-height:1.35;
   transition:filter var(--tx-t-instant) var(--tx-ease)}
 .scal__s:hover{filter:brightness(1.12)}
@@ -7891,10 +7996,9 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
   font-variant-numeric:tabular-nums;white-space:nowrap;flex:0 0 auto}
 .scal__s span{min-width:0;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap;color:var(--tx-ink-2)}
-/* The dot is what survives when the pill cannot — see the phone block. It is
-   declared at every width so the two forms cannot drift apart. */
-.scal__s i{display:none;width:7px;height:7px;border-radius:var(--tx-rfull);
-  flex:0 0 auto}
+/* The glyph is what survives when the pill cannot — see the phone block. It is
+   drawn at every width so the two forms cannot drift apart. */
+.scal__s i{display:inline-flex;width:11px;height:11px;flex:0 0 auto}
 
 .scal__s--done{background:var(--tx-ok-soft);border-color:var(--tx-ok);
   color:var(--tx-ok)}
@@ -7930,16 +8034,26 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
   .scal__ss{flex-direction:row;flex-wrap:wrap;gap:3px;justify-content:center}
   .scal__s{padding:0;border:0;background:none}
   .scal__s b,.scal__s span{display:none}
-  .scal__s i{display:block}
-  .scal__s--done i{background:var(--tx-ok)}
-  .scal__s--booked i{background:var(--tx-info)}
-  .scal__s--missed i{background:var(--tx-danger)}
-  .scal__s--unmarked i{background:var(--tx-warn)}
-  .scal__s--cancelled i{background:var(--tx-ink-3);opacity:.55}
+  .scal__s i{width:13px;height:13px}
+  /* THE LINK WAS THE 7px DOT — 7×7 in a 50×58 cell, so a tap ten pixels beside it
+     missed all 17 of 17. A cell holding ONE session is that session's link end to
+     end (`::after` over the cell, so the date and the wash are the target too and
+     nothing changes visually); the focus ring moves onto that stretched box. A day
+     with two keeps two links, each given a 24px floor, because one box cannot be
+     two destinations. */
+  .scal__c{position:relative}
+  .scal__s--only::after{content:"";position:absolute;inset:0}
+  .scal__s--only:focus-visible{outline:none}
+  .scal__s--only:focus-visible::after{outline:2px solid var(--tx-focus);outline-offset:-3px}
+  .scal__s:not(.scal__s--only){min-width:24px;min-height:24px;justify-content:center}
   .scal__bar{gap:var(--tx-s2)}
   .scal__tot{margin-left:0}
   .scal__key{width:100%;order:3}
 }
+
+/* The month arrows are 28px under a fine pointer (`.btn--sm`) and 36 under a coarse
+   one; this is the screen a trainer flips through with a thumb, so 44. */
+@media (pointer:coarse){.scal__mon .btn--icon{min-width:44px;min-height:44px}}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    25 · TODAY, AS ONE RULED COLUMN
@@ -8100,7 +8214,7 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
 .slab__link::before{content:'';position:absolute;inset:-8px -6px}
 .slab__link:hover{color:var(--tx-ink);text-decoration:underline;text-underline-offset:3px}
 .slab__link:focus-visible{
-  outline:2px solid var(--tx-accent-line);outline-offset:3px;border-radius:var(--tx-r1);
+  outline:2px solid var(--tx-focus);outline-offset:3px;border-radius:var(--tx-r1);
 }
 
 /* ── AND THE CONTROLS SLOT NEEDS A FOOT ────────────────────────────────────
@@ -8126,7 +8240,7 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
 /* the companion. no fill and no shadow: it is next, not now. */
 .hro--quiet{
   background:transparent;
-  border-color:var(--tx-line);
+  border-color:var(--tx-line-strong);
 }
 
 .hro__k{
@@ -8416,7 +8530,55 @@ a.agn__r:active{background:var(--tx-surface-3)}
   font-size:var(--tx-meta);font-weight:650;color:var(--tx-ink-2);
 }
 .atn__more:hover{color:var(--tx-ink);text-decoration:underline;text-underline-offset:3px}
-.atn__more:focus-visible{outline:2px solid var(--tx-accent-line);outline-offset:3px;border-radius:var(--tx-r1)}
+.atn__more:focus-visible{outline:2px solid var(--tx-focus);outline-offset:3px;border-radius:var(--tx-r1)}
+/* ── THE QUEUE'S LEAD WORD, AND WHAT THE FOLD HIDES · 4 Oct 2026 ─────────────
+   A queue row led with a name and a grey sentence, and its only urgency cue was
+   the 2px red edge — colour alone, on eleven rows that otherwise look the same.
+   `.q__k` is the row's KIND (Money, Renewal, Quiet…) in the system's mono
+   eyebrow voice, first in the reason cell and the same width on every row so the
+   sentences start on one edge. `aria-hidden` in the markup: the sentence beside
+   it says the same thing in words. 10.5px at --tx-ink-3 is 6.1:1 on a card.
+
+   `.atn__more-k` is what is BEHIND *Show 5 more rows* — "2 money · 1 renewal ·
+   2 quiet" — set off by a rule rather than a glyph so it is read as a second
+   clause and not as part of the verb. */
+.q__k{
+  display:inline-block;min-width:80px;margin-right:10px;
+  font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--tx-ink-3);
+}
+.atn__more-k{
+  margin-left:2px;padding-left:8px;border-left:1px solid var(--tx-line-strong);
+  font-weight:500;color:var(--tx-ink-3);
+}
+/* `.tbl--stack` is on this table at EVERY width and only reflows under 620, so the
+   override has to carry the same condition or it un-aligns the desk's column too
+   (MEASURED: the lead drew 36–50px wide and the sentences started on five edges). */
+@media (max-width:620px){
+  .atn .q__k{min-width:0;margin-right:8px}
+  /* The fold's summary takes its own line: beside the verb it left both halves too
+     narrow and wrapped the label itself to two lines (MEASURED at 390). */
+  .atn__more{flex-wrap:wrap;row-gap:2px}
+  .atn__more-k{flex-basis:100%;margin:0;padding:0;border-left:0;text-align:left}
+}
+
+/* THE HERO'S NAME LINK IS A TARGET TOO — 19px tall, under the 24px floor. Slop on the
+   TARGET itself (it is not `overflow:hidden`, which would clip it and its hit
+   area). The slab's action link already carries its own (`.slab__link::before`). The hero's name link is the
+   `<a>` INSIDE `p.hro__n` (the paragraph is not the link). */
+.hro__n a{position:relative}
+.hro__n a::before{content:'';position:absolute;inset:-6px -4px}
+
+/* `.figs__h` — a figure's one-line definition. *Clients at risk 6* was a number with
+   a name and no way to check it; the hint says what the queue counts. Micro size,
+   ink-3 (6.1:1), under the figure so the figure keeps its row. The queue's reason
+   takes `--tx-meta` in app.css (12.5px was a seventh size half a pixel from the
+   sixth), and the quiet hero's edge is `--tx-line-strong`: no fill is the point of
+   "next, not now", which in dark is the page's own colour — MEASURED 1.00:1 with a
+   1.25:1 hairline. */
+.figs__h{display:block;margin-top:3px;font-size:var(--tx-micro);line-height:1.35;
+  font-weight:400;color:var(--tx-ink-3)}
+
 
 /* below 620px `.tbl--stack` owns the row: it makes each `<tr>` a grid, and a
    fixed table layout would fight it for every track. Hand it back cleanly
@@ -8539,7 +8701,7 @@ a.figs__i:hover{background:var(--w-hover)}
 }
 .seg__b[aria-pressed="true"] .seg__n,
 .seg__b[aria-checked="true"] .seg__n{color:var(--tx-ink-2)}
-.seg__b:focus-visible{outline:2px solid var(--tx-accent-line);outline-offset:2px}
+.seg__b:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
 .seg__n{
   font-variant-numeric:tabular-nums;font-weight:600;color:var(--tx-ink-3);
 }
@@ -9426,7 +9588,152 @@ a.figs__i:hover{background:var(--w-hover)}
 
 /* Clients · the Archived list under the roster (api-contract 1.1: unarchive). */
 .rst__archived { margin: 24px 0 8px; font-size: 13px; }
-.rst__archived > summary { cursor: pointer; color: var(--tx-ink-3); }
+.rst__archived > summary { cursor: pointer; color: var(--tx-ink-3);
+  /* 18.8px tall was under the 24px floor (and 40 on a phone, below). */
+  display: flex; align-items: center; min-height: 24px; }
+@media (pointer:coarse){ .rst__archived > summary { min-height: 40px; } }
 .rst__archived ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
 .rst__archived li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .menu--confirm label.menu__note { display: flex; gap: 6px; align-items: center; }
+
+
+/* ── DATE FIELD · `.dfld`, AND ITS CALENDAR `.dpop` ──────────────────────────
+   `ui/DateField.tsx` has the argument; this is the skin.
+
+   THE BOX IS `.tfld`'S, SEGMENTS AND ALL. Three typed segments in the mono face
+   with the focus ring on the BOX (`:focus-within`), not on the digit being edited
+   — ringing two characters in the middle of a field lights the part and darkens
+   the thing it belongs to. The segment being edited is SELECTED, and a selection
+   is how this field says which of the three has focus.
+
+   The calendar button is a real button at the right edge, not a glyph in the
+   field: it is the way in for a thumb, so it has the 44px target on a phone and a
+   hover/focus of its own. */
+.dfld{
+  display:inline-flex;align-items:center;gap:1px;
+  height:34px;padding:0 4px 0 11px;border-radius:var(--tx-r2);
+  background:var(--tx-field);border:1px solid var(--tx-field-line);
+  box-shadow:var(--tx-field-inset);
+  font-family:var(--tx-mono);font-size:13.5px;color:var(--tx-ink);
+  flex:0 0 auto;width:fit-content;
+  transition:border-color var(--tx-t-fast) var(--tx-ease),
+             background-color var(--tx-t-fast) var(--tx-ease),
+             box-shadow var(--tx-t-fast) var(--tx-ease);
+}
+.dfld--block{display:flex;width:100%}
+.dfld:hover{border-color:var(--tx-field-line-hover)}
+.dfld:focus-within{
+  border-color:var(--tx-focus);background-color:var(--tx-field-hover);
+  box-shadow:0 0 0 3px var(--tx-focus-halo),var(--tx-field-inset);
+}
+/* Red is never the only carrier: the message under the field says it in words. */
+.dfld[data-invalid]{border-color:var(--tx-danger)}
+.dfld[data-off]{opacity:.55}
+.dfld__n{
+  width:2.1ch;min-width:0;padding:0;border:0;background:none;
+  font:inherit;color:inherit;text-align:center;
+  font-variant-numeric:tabular-nums;outline:none;
+}
+.dfld__n--y{width:4.2ch}
+.dfld__n::placeholder{color:var(--tx-ink-3);opacity:1}
+.dfld__n::selection{background:var(--tx-focus-halo);color:var(--tx-ink)}
+.dfld__s{font-weight:600;opacity:.5;padding:0 2px}
+.dfld__b{
+  margin-left:auto;width:28px;height:28px;flex:0 0 auto;
+  display:grid;place-items:center;border:0;border-radius:var(--tx-r1);
+  background-color:transparent;color:var(--tx-ink-3);cursor:pointer;
+}
+.dfld__b:hover{background-color:var(--w-hover);color:var(--tx-ink)}
+.dfld__b[aria-expanded="true"]{color:var(--tx-ink);background-color:var(--w-hover)}
+.dfld__b:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2px}
+
+/* THE CALENDAR. On a desk it is a popover placed from `--dpop-x` / `--dpop-y`
+   (custom properties, so the phone's sheet rule below is not outranked by an inline
+   `left` — trap 2). Flat on `--tx-surface` with the system's floating shadow: it is
+   an overlay, so it may have one. */
+.dpop{
+  position:fixed;z-index:400;left:var(--dpop-x,0);top:var(--dpop-y,0);
+  width:296px;padding:10px;border-radius:var(--tx-r3);
+  background:var(--tx-surface);border:1px solid var(--tx-line-strong);
+  box-shadow:var(--tx-e3);color:var(--tx-ink);
+  font-family:var(--tx-font);
+  transition:opacity var(--tx-t-fast) var(--tx-ease),translate var(--tx-t-fast) var(--tx-ease);
+}
+@starting-style{.dpop{opacity:0;translate:0 -4px}}
+.dpop[data-up]{transform-origin:bottom}
+.dpop__scrim{display:none}
+.dpop__hd{display:flex;align-items:center;justify-content:space-between;gap:4px;margin-bottom:6px}
+.dpop__t{
+  flex:1;height:32px;padding:0 10px;border:0;border-radius:var(--tx-r2);
+  background-color:transparent;color:var(--tx-ink);cursor:pointer;
+  font-family:var(--tx-brand);font-weight:800;font-size:15px;letter-spacing:-.01em;
+  font-variant-numeric:tabular-nums;
+}
+.dpop__t:hover{background-color:var(--w-hover)}
+.dpop__nav{
+  width:32px;height:32px;flex:0 0 auto;display:grid;place-items:center;
+  border:0;border-radius:var(--tx-r2);background-color:transparent;
+  color:var(--tx-ink-2);cursor:pointer;
+}
+.dpop__nav:hover:not(:disabled){background-color:var(--w-hover);color:var(--tx-ink)}
+.dpop__nav:disabled{opacity:.32;cursor:default}
+.dpop__t:focus-visible,.dpop__nav:focus-visible,.dpop__d:focus-visible,.dpop__c:focus-visible{
+  outline:2px solid var(--tx-focus);outline-offset:-2px}
+.dpop__wk,.dpop__g{display:grid;grid-template-columns:repeat(7,1fr)}
+.dpop__wk span{
+  height:24px;display:grid;place-items:center;
+  font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--tx-ink-3);
+}
+.dpop__d{
+  height:36px;border:0;border-radius:var(--tx-r2);background-color:transparent;
+  color:var(--tx-ink);cursor:pointer;
+  font-family:var(--tx-font);font-size:13px;font-weight:500;font-variant-numeric:tabular-nums;
+}
+.dpop__d[data-out]{color:var(--tx-ink-3)}
+/* Today is a ring in the strong line — lime is a FILL, and the fill is the choice. */
+.dpop__d[data-today]{box-shadow:inset 0 0 0 1px var(--tx-line-strong);font-weight:700}
+.dpop__d:hover:not([aria-selected="true"]):not([aria-disabled]){background-color:var(--w-hover)}
+.dpop__d[aria-selected="true"]{background-color:var(--tx-accent);color:var(--tx-accent-ink);font-weight:700;box-shadow:none}
+.dpop__d[aria-disabled]{opacity:.32;cursor:default}
+.dpop__p{display:grid;grid-template-columns:repeat(4,1fr);gap:4px;padding-top:2px}
+.dpop__c{
+  height:44px;border:0;border-radius:var(--tx-r2);background-color:transparent;
+  color:var(--tx-ink);cursor:pointer;
+  font-family:var(--tx-mono);font-size:13px;font-variant-numeric:tabular-nums;
+}
+.dpop__c[data-today]{box-shadow:inset 0 0 0 1px var(--tx-line-strong)}
+.dpop__c:hover:not([aria-selected="true"]):not([aria-disabled]){background-color:var(--w-hover)}
+.dpop__c[aria-selected="true"]{background-color:var(--tx-accent);color:var(--tx-accent-ink);font-weight:700;box-shadow:none}
+.dpop__c[aria-disabled]{opacity:.32;cursor:default}
+
+/* ON A PHONE IT IS A SHEET: pinned to the bottom edge, full width, 44px cells, the
+   safe area under it, and a scrim that takes the first tap outside. A popover under
+   a thumb-sized field would sit behind the keyboard's last row. */
+@media (max-width:900px){
+  .dfld{height:44px;font-size:16px;padding-left:12px}
+  .dfld__b{width:36px;height:36px}
+  .dpop__scrim{display:block;position:fixed;inset:0;z-index:399;background:rgba(0,0,0,.4)}
+  .dpop{
+    left:0;right:0;top:auto;bottom:0;width:auto;
+    border-radius:var(--tx-r4,18px) var(--tx-r4,18px) 0 0;border-bottom:0;
+    padding:12px 12px calc(14px + env(safe-area-inset-bottom));
+    box-shadow:var(--tx-e4,0 -8px 40px -12px rgba(0,0,0,.4));
+  }
+  @starting-style{.dpop{opacity:1;translate:0 24px}}
+  .dpop__hd{margin-bottom:8px}
+  .dpop__t,.dpop__nav{height:44px}
+  .dpop__nav{width:44px}
+  .dpop__d{height:44px;font-size:15px}
+  .dpop__wk span{height:28px}
+}
+@media (prefers-reduced-motion:reduce){
+  .dpop{transition:none}
+  @starting-style{.dpop{opacity:1;translate:none}}
+}
+
+
+/* A DANGER TAG ON SLATE. `--tx-danger` text on its own soft tint measured 4.4:1 at 11px bold in
+   dark — a hair under the 4.5 that small text needs — and it is the tag a late payment wears.
+   A step lighter red, the same hue, only in the theme where the tint is darker than the ink. */
+:root[data-theme="dark"] .tag--danger{color:#FF7373}

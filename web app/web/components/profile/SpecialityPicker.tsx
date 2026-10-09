@@ -90,36 +90,43 @@ export function SpecialityPicker({
 
   return (
     <>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 }}>
+      {/* The counter and what to do about it on ONE line. At the cap this was an amber warning on its own line — nothing is
+          wrong at five, it is the point of the screen — and it sat apart from the counter it was about. */}
+      <div className="spk__count">
         <Tag tone={atCap ? 'acc' : undefined}>
           {value.length}/{SPECIALITY_CAP}
         </Tag>
-        {atCap ? (
-          <span className="small" style={{ color: 'var(--tx-warn)' }}>
-            That’s {SPECIALITY_CAP}. Click one of the chosen to swap it out.
-          </span>
-        ) : null}
+        <span className="small">
+          {atCap
+            ? `That is all ${SPECIALITY_CAP}. Unpick one to swap it.`
+            : value.length === 0
+              ? 'The first you pick leads your profile.'
+              : 'The number on a chip is its place on your profile.'}
+        </span>
       </div>
 
-      <ChipRow>
-        {chips.map((id) => (
-          <Chip
-            key={id}
-            label={labelFor(id, SPECIALITIES)}
-            pressed={value.includes(id)}
-            dimmed={atCap && !value.includes(id)}
-            disabled={disabled}
-            onClick={() => toggle(id)}
-          />
-        ))}
-        {adding ? null : (
-          <AddChip
-            label="Add your own"
-            disabled={disabled || atCap}
-            onClick={() => setAdding(true)}
-          />
-        )}
-      </ChipRow>
+      <div role="group" aria-label="Specialities">
+        <ChipRow>
+          {chips.map((id) => (
+            <Chip
+              key={id}
+              label={labelFor(id, SPECIALITIES)}
+              pressed={value.includes(id)}
+              rank={value.includes(id) ? value.indexOf(id) + 1 : undefined}
+              dimmed={atCap && !value.includes(id)}
+              disabled={disabled}
+              onClick={() => toggle(id)}
+            />
+          ))}
+          {adding ? null : (
+            <AddChip
+              label="Add your own"
+              disabled={disabled || atCap}
+              onClick={() => setAdding(true)}
+            />
+          )}
+        </ChipRow>
+      </div>
 
       {adding ? (
         <AddOwn

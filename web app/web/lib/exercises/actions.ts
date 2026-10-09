@@ -9,6 +9,7 @@ import {
   patchExercise,
   ExercisesApiError,
   type ExerciseWire,
+  type NewExercise,
   type ExercisesMeta,
   type ExerciseSearchParams,
 } from './api';
@@ -42,24 +43,19 @@ export async function fetchExerciseMeta(): Promise<ExercisesMeta | null> {
 }
 
 export async function createCustomExercise(
-  name: string,
-  muscleGroup: string,
-  target: string,
-  equipment: string,
-  descriptionSteps: string[],
-  /** `true` from the form's *Save as draft*. A draft is kept out of the library
-   *  proper until the trainer finishes it — see `ExerciseRow.status`. */
-  asDraft = false,
+  input: NewExercise,
 ): Promise<{ ok: true; exercise: ExerciseWire } | { ok: false; error: string }> {
   try {
-    const filledSteps = descriptionSteps.map(s => s.trim()).filter(Boolean);
+    const clean = (xs?: string[]) => (xs ?? []).map(x => x.trim()).filter(Boolean);
     const exercise = await createExercise({
-      name: name.trim(),
-      muscleGroup: muscleGroup || undefined,
-      target: target || undefined,
-      equipment: equipment || undefined,
-      description: filledSteps.length > 0 ? filledSteps.join('\n\n') : undefined,
-      ...(asDraft ? { status: 'draft' as const } : {}),
+      ...input,
+      name: input.name.trim(),
+      secondaryTargets: clean(input.secondaryTargets),
+      formCues: clean(input.formCues),
+      aliases: clean(input.aliases),
+      commonMistakes: clean(input.commonMistakes),
+      safety: clean(input.safety),
+      equipmentNeeded: clean(input.equipmentNeeded),
     });
     return { ok: true, exercise };
   } catch (error) {
@@ -67,7 +63,6 @@ export async function createCustomExercise(
   }
 }
 
-/** The sentence for a refusal: the server's reason when it gave one the trainer can act on. */
 function refusal(error: unknown): string {
   if (error instanceof ExercisesApiError) {
     if (error.status === null) return 'Could not reach the server. Check your connection.';

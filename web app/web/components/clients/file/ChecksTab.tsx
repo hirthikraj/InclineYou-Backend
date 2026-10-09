@@ -1,15 +1,14 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, type ReactNode } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-import { Chevron } from '@/components/shell/Icons';
+import { Chevron, Plus } from '@/components/shell/Icons';
 import { ScheduleSheet } from '@/components/clients/assessments/ScheduleSheet';
 import { endCycle } from '@/lib/assessments/actions';
 import { assessmentHref } from '@/lib/assessments/address';
 import {
-  STATUS_LABEL,
-  STATUS_TONE,
   blockCount,
   type AssessmentStatus,
   type AssessmentWire,
@@ -23,6 +22,8 @@ import { EmptyState } from '@/web-components/ui/EmptyState';
 import { Message } from '@/web-components/ui/Message';
 import { Row, Table, type Column } from '@/web-components/ui/Table';
 import { Tag } from '@/web-components/ui/Tag';
+
+import { DAY_MS, startOfDay } from '@/lib/today/time';
 
 import { longDateStr } from './shared';
 
@@ -53,15 +54,48 @@ import { longDateStr } from './shared';
  * year, and a disclosure over four rows is a control that exists to say *there
  * is no more*.
  */
+/**
+ * ── v1 · THE TRAINER TAKES IT, SO THE WORDS ARE THE TRAINER'S ───────────────
+ *
+ * Nothing is sent to the client in v1, so this tab says what a trainer does and not what a client
+ * did: *To take* and *Taken*, never *asked for and not back yet* / *has sent back*; a row that has
+ * gone by is *Not taken*, in neutral ink and with how long ago — a trainer's own omission is a
+ * debt to nobody, and an amber tag beside a client on the screen said otherwise. The one verb
+ * that matters in the room is *Take it*, and it is on the row.
+ */
+const STATE_LABEL: Record<AssessmentStatus, string> = {
+  booked: 'Booked',
+  missed: 'Not taken',
+  done: 'Done',
+};
+const STATE_TONE: Record<AssessmentStatus, 'neutral' | 'ok'> = {
+  booked: 'neutral',
+  missed: 'neutral',
+  done: 'ok',
+};
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** *Today*, *Tomorrow*, *5 days ago* — against the server's instant, never `Date.now()` (trap 20). */
+function relative(dueOn: string, now: number): string {
+  const d = Math.round((Date.parse(`${dueOn}T00:00:00`) - startOfDay(now)) / DAY_MS);
+  if (d === 0) return 'Today';
+  if (d === 1) return 'Tomorrow';
+  if (d === -1) return 'Yesterday';
+  return d > 0 ? `in ${d} days` : `${-d} days ago`;
+}
+
 export function ChecksTab({
   clientId,
   clientName,
   rows,
   schedules,
   templates,
+  now,
 }: {
   clientId: string;
   clientName: string;
+  now: number;
   /** `null` where the read failed — see `loadClientAssessments`. */
   rows: AssessmentWire[] | null;
   /** This client's cycles, live first. `null` where the read failed. */
@@ -103,12 +137,23 @@ export function ChecksTab({
     .slice()
     .sort((a, b) => whenOf(b) - whenOf(a));
 
+  const schedule = () => setAssigning(true);
+  /* THE VERB LIVES IN THE FIRST CARD'S HEAD, not on a bar of its own. It was a lone lime pill
+     right-aligned on a row between the pinned note and the first card — on a phone a 190px button
+     with nothing beside it and 30px of air either side, and on a desk a 1,200px gap from the title it
+     belongs to. In the head it sits with the thing it adds to; *Schedule* is enough there, and the
+     accessible name keeps the whole phrase. */
   const assign = (
-    <div className="cfchk__bar">
-      <Button variant="primary" onClick={() => setAssigning(true)} disabled={templates === null}>
-        Assign an assessment
-      </Button>
-    </div>
+    <Button
+      variant="primary"
+      size="sm"
+      icon={<Plus size={14} />}
+      aria-label="Schedule an assessment"
+      onClick={schedule}
+      disabled={templates === null}
+    >
+      Schedule
+    </Button>
   );
   const sheet = assigning && templates && (
     <ScheduleSheet
@@ -125,8 +170,9 @@ export function ChecksTab({
   if (rows.length === 0 && (schedules?.length ?? 0) === 0) {
     return (
       <>
-        <Nothing clientName={clientName} />
-        {assign}
+        {/* The empty card's OWN action is the page's primary one. It was a secondary *Go to
+            Assessments* that left the file, with the real button drawn after it at the far right. */}
+        <Nothing clientName={clientName} onSchedule={schedule} disabled={templates === null} />
         {sheet}
       </>
     );
@@ -134,27 +180,32 @@ export function ChecksTab({
 
   return (
     <div className="cfchk">
-      {assign}
       {sheet}
-      {schedules && schedules.length > 0 && <Cycles rows={schedules} clientId={clientId} />}
+      {schedules && schedules.length > 0 && (
+        <Cycles rows={schedules} clientId={clientId} action={assign} />
+      )}
       {owed.length > 0 && (
         <Section
-          title="Outstanding"
-          caption={`${owed.length} check-ins asked for and not back yet, soonest first`}
+          title="To take"
+          caption={`${plural(owed.length, 'assessment', 'assessments')} to take, soonest first`}
           n={owed.length}
           rows={owed}
           when={(r) => Date.parse(`${r.dueOn}T00:00:00`)}
           clientId={clientId}
+          now={now}
+          action={schedules && schedules.some((c) => c.endedAt === null) ? undefined : assign}
         />
       )}
       {back.length > 0 && (
         <Section
-          title="Answered"
-          caption={`${back.length} check-ins ${clientName} has sent back, newest first`}
+          title="Taken"
+          caption={`${plural(back.length, 'assessment', 'assessments')} taken with ${clientName}, newest first`}
           n={back.length}
           rows={back}
           when={whenOf}
           clientId={clientId}
+          now={now}
+          action={owed.length === 0 && !(schedules && schedules.some((c) => c.endedAt === null)) ? assign : undefined}
         />
       )}
     </div>
@@ -168,6 +219,8 @@ function Section({
   rows,
   when,
   clientId,
+  now,
+  action,
 }: {
   title: string;
   caption: string;
@@ -181,11 +234,13 @@ function Section({
      the trainer came from Meera and went back to forty strangers. The nested
      route's own page carries the rest of the argument. */
   clientId: string;
+  now: number;
+  /** The page's one primary verb, drawn in whichever card is first on the page. */
+  action?: ReactNode;
 }) {
-  const router = useRouter();
   return (
     <Card className="cfchk__card">
-      <Card.Head title={title} level={3}>
+      <Card.Head title={title} level={3} actions={action}>
         <CountBadge n={n} label={caption} />
       </Card.Head>
       <Card.Body flush>
@@ -199,27 +254,16 @@ function Section({
           {rows.map((r) => (
             <Row
               key={r.id}
-              /* THE WHOLE ROW IS THE DOOR, which is `SessionsTab`'s form one
-                 tab along and the reason this table grew a chevron column: a
-                 date carrying a link and a chevron carrying another would be
-                 two targets to the same screen on one row, and the file's
-                 other table settled that. `role="link"` plus a key handler
-                 rather than wrapping the cells in an anchor — a `<tr>` cannot
-                 be one, and a row that answers Enter is the half a `<div>`
-                 with an onClick forgets. */
-              role="link"
-              tabIndex={0}
-              aria-label={`Open ${r.name}, ${longDateStr(when(r))}`}
-              onClick={() => router.push(assessmentHref(r.id, 'summary', null, clientId))}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  router.push(assessmentHref(r.id, 'summary', null, clientId));
-                }
-              }}
+              /* THE WHOLE ROW IS THE DOOR, AND THE DOOR IS A REAL LINK. It was `role="link"` on the `<tr>`
+                 with a key handler, which replaced the row's own role (a reader heard only *Open Monthly
+                 check, 4 Oct 2026* and lost the status and both counts) and was not an anchor: no new tab,
+                 no copy-link, and Space navigated. Now the name is an `<a>` whose `::after` is stretched over
+                 the `<tr>` (`position:relative`), so the row keeps its table semantics and the click, the
+                 middle-click and the keyboard all do what a link does. *Take it* sits above that layer. */
               header={
                 <span className="cfchk__d">
                   {longDateStr(when(r))}
+                  {r.state !== 'done' && <span className="cfchk__rel"> · {relative(r.dueOn, now)}</span>}
                 </span>
               }
               cells={[
@@ -229,7 +273,15 @@ function Section({
                      head — the two tables name the same column the same way. */
                   label: 'Assessment',
                   className: 'cfchk__c-name',
-                  content: <span title={r.name}>{r.name}</span>,
+                  content: (
+                    <Link
+                      className="cfchk__lk"
+                      href={assessmentHref(r.id, 'summary', null, clientId)}
+                      title={r.name}
+                    >
+                      {r.name}
+                    </Link>
+                  ),
                 },
                 {
                   key: 'measurements',
@@ -249,15 +301,29 @@ function Section({
                   key: 'status',
                   label: 'Status',
                   className: 'cfchk__c-st',
-                  content: <Tag tone={STATUS_TONE[r.state]}>{STATUS_LABEL[r.state]}</Tag>,
+                  content: <Tag tone={STATE_TONE[r.state]}>{STATE_LABEL[r.state]}</Tag>,
                 },
                 {
                   key: 'go',
                   /* `data-l=""` is how the phone rung marks the cell that takes
                      no label — this one is not a fact, it is the affordance. */
                   label: '',
-                  className: 'cfchk__go',
-                  content: <Chevron size={15} />,
+                  className: r.state === 'done' ? 'cfchk__go cfchk__go--done' : 'cfchk__go',
+                  content: (
+                    <>
+                      {r.state !== 'done' && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          className="cfchk__take"
+                          href={`/clients/assessments/${r.id}/take`}
+                        >
+                          Take it
+                        </Button>
+                      )}
+                      <Chevron size={15} />
+                    </>
+                  ),
                 },
               ]}
             />
@@ -278,7 +344,15 @@ function whenOf(r: AssessmentWire): number {
  * what is next and how to take it; ending one books nothing more (an
  * assessment somebody has already started stays takeable).
  */
-function Cycles({ rows, clientId }: { rows: ScheduleWire[]; clientId: string }) {
+function Cycles({
+  rows,
+  clientId,
+  action,
+}: {
+  rows: ScheduleWire[];
+  clientId: string;
+  action?: ReactNode;
+}) {
   const router = useRouter();
   const [busy, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -296,7 +370,7 @@ function Cycles({ rows, clientId }: { rows: ScheduleWire[]; clientId: string }) 
 
   return (
     <Card className="cfchk__card">
-      <Card.Head title="Cycles" level={3}>
+      <Card.Head title="Cycles" level={3} actions={action}>
         <CountBadge n={live.length} label={`${live.length} live cycles`} />
       </Card.Head>
       <Card.Body>
@@ -355,23 +429,38 @@ function Count({
   status: AssessmentStatus;
 }) {
   const count = blockCount(block, status);
-  if (!count) return <span className="cfchk__n cfchk__n--none">&mdash;</span>;
-  return (
-    <span className={count.short ? 'cfchk__n cfchk__n--short' : 'cfchk__n'}>{count.text}</span>
-  );
+  if (!count) {
+    return (
+      <span className="cfchk__n cfchk__n--none">
+        <span aria-hidden="true">&mdash;</span>
+        <span className="vh">Not asked</span>
+      </span>
+    );
+  }
+  /* `12 / 15` takes no tone any more: a short count on a screen a client may be looking at read as
+     a mark against them, and the figure says it. */
+  return <span className="cfchk__n">{count.text}</span>;
 }
 
-function Nothing({ clientName }: { clientName: string }) {
+function Nothing({
+  clientName,
+  onSchedule,
+  disabled,
+}: {
+  clientName: string;
+  onSchedule: () => void;
+  disabled: boolean;
+}) {
   const first = clientName.split(' ')[0];
   return (
     <div className="cfchk">
       <EmptyState
         kind="first-run"
-        title="No check-ins yet"
-        body={`A check-in is a set of measurements and questions you send on a date. Nothing has been asked of ${first} yet.`}
+        title="No assessments yet"
+        body={`Take a set of measurements and questions with ${first} in a session, and it is kept here.`}
         action={
-          <Button variant="secondary" href="/clients/assessments">
-            Go to Assessments
+          <Button variant="primary" onClick={onSchedule} disabled={disabled}>
+            Schedule the first assessment
           </Button>
         }
       />

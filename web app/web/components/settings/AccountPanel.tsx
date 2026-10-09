@@ -19,7 +19,6 @@ import {
 import type { Account } from '@/lib/account/api';
 import { MAX_EMAIL, MAX_NAME, looksLikeEmail } from '@/lib/account/rules';
 import { Card } from '@/web-components/ui/Card';
-import { Sidecar } from '@/web-components/ui/Sidecar';
 import { Tag } from '@/web-components/ui/Tag';
 import { Field, TextField } from '@/web-components/ui/Field';
 
@@ -106,29 +105,24 @@ export function AccountPanel({
 
   return (
     /*
-      ── WHY THIS IS A SIDECAR AND NOT A 620px COLUMN ────────────────────────
+      ── FOUR CARDS IN TWO BY TWO, NOT A COLUMN AND A SIDECAR ──────────────────
 
-      It WAS the column, and it was the profile's own defect one level up.
-      MEASURED at 1536×695 before this: 620px of cards in a 1472px content area
-      — 852px, 58% of the page, empty — while the same screen overflowed its
-      window by 355px, so *Delete your account* was entirely below the fold.
-      Width nobody could use, and not enough height.
+      It was a 600px column of three cards beside a 310px aside: 820px of a
+      1440px page, with *Delete your account* below the fold and a card of dead
+      space under the one button in *Signing in* (the cards stretched to their
+      column's height). Two by two uses the width: the form beside what it is
+      about, and the two things a trainer rarely does — change the number,
+      leave — side by side underneath. Each card is its own height
+      (`align-items:stretch`: the cards in a row end on one line), and the
+      content stays at the top of the taller card.
 
-      `settings/profile/layout.tsx` had already made this move for the same
-      measurement; see `ui/Sidecar.tsx` for the tracks and why the rung is a
-      container query rather than a breakpoint. The aside is the read-back of
-      the account the form is editing, which is what the pattern is for.
-
-      The class goes on `mainClassName`, not on the wrapper: `.sdc__main` is the
-      form column, and `col gap4` is how these three cards have always stacked.
+      The rung is a CONTAINER query on `.acxw`, not a viewport one: the rail
+      expands and collapses, so the same window hands this page two widths (the
+      same reason `ui/Sidecar.tsx` gives). One column below it, in the order
+      you, this account, signing in, delete.
     */
-    <Sidecar
-      asideLabel="This account"
-      mainClassName="col gap4"
-      aside={
-        <AccountAside name={name} email={email} phone={saved.phone} clientCount={clientCount} />
-      }
-    >
+    <div className="acxw">
+    <div className="acx">
       {/* ── 1 · you ───────────────────────────────────────────────────────── */}
       <Card title="You">
         <form
@@ -149,7 +143,7 @@ export function AccountPanel({
           */}
           <TextField
             label="Your name"
-            hint="What a client sees when you invite them, and what every screen here greets you by."
+            hint="What a client sees when you invite them."
             id="ac-name"
             value={name}
             maxLength={MAX_NAME}
@@ -183,7 +177,7 @@ export function AccountPanel({
                 app sends nothing to it today, which is the same promise as
                 "never with this" from the other side.
               */
-              'You sign in with your number, never with this. We keep it so there is a way to reach you that is not a WhatsApp message.'
+              'You sign in with your number, never with this. It is how we reach you outside WhatsApp.'
             }
           >
             {(props) => (
@@ -237,10 +231,13 @@ export function AccountPanel({
           <SaveRow
             pending={pending}
             dirty={dirty}
-            note="Only your name leaves this screen. Your email is never shown to a client."
+            note="Your email is never shown to a client."
           />
         </form>
       </Card>
+
+      {/* ── what this account is, beside the form that edits it ─────────────── */}
+      <AccountAside phone={saved.phone} email={saved.email} clientCount={clientCount} />
 
       {/* ── 2 · signing in ──────────────────────────────────────────────────
 
@@ -272,7 +269,8 @@ export function AccountPanel({
       >
         <DeleteAccount phone={saved.phone} clientCount={clientCount} />
       </Card>
-    </Sidecar>
+    </div>
+    </div>
   );
 }
 

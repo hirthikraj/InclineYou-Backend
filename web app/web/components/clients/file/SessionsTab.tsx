@@ -1,9 +1,12 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useTransition } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import { Chevron } from '@/components/shell/Icons';
+import { markDone, markNoShow, reopenSession } from '@/lib/schedule/actions';
+import { useToast } from '@/lib/toast/store';
 import type { ClientSessionWire } from '@/lib/clients/client-api';
 import {
   buildSessionRows,
@@ -119,6 +122,7 @@ const NONE = <span className="ink3 cfses__none">—</span>;
  * happens to have been logged under a different one.
  */
 function cellFor(column: SessionColumn, r: SessionTableRow, showPlan: boolean): Cell {
+  const href = `/sessions/${r.id}`;
   switch (column) {
     case 'date':
       /* THE WEEKDAY LEADS, and it is new. A standing arrangement is spoken in
@@ -130,11 +134,15 @@ function cellFor(column: SessionColumn, r: SessionTableRow, showPlan: boolean): 
       return {
         key: 'date',
         label: 'Date',
+        /* THE DOOR: a real anchor, stretched over the `<tr>` by `.cfses__lk::after`. The row was
+           `role="link"` with an `aria-label`, which replaced its row role (a screen reader heard the date
+           and the name and never the outcome), was not an anchor (no new tab, no copy-link) and answered
+           Space. Now the cells keep their own names, in order, and the link does what a link does. */
         content: (
-          <>
+          <Link className="cfses__lk" href={href}>
             <span className="cfses__wd">{r.weekday}</span>
             {r.date}
-          </>
+          </Link>
         ),
       };
     case 'clock':
@@ -156,7 +164,9 @@ function cellFor(column: SessionColumn, r: SessionTableRow, showPlan: boolean): 
         label: 'Session',
         content: (
           <>
-            <span className="cfses__nm">{r.name ?? r.program}</span>
+            <span className="cfses__nm" title={r.name ?? r.program ?? undefined}>
+              {r.name ?? r.program}
+            </span>
             {sub ? (
               <span className="cfses__sub" title={r.note ?? undefined}>
                 {sub}
@@ -189,23 +199,70 @@ function cellFor(column: SessionColumn, r: SessionTableRow, showPlan: boolean): 
            This one takes none because it is not a fact; it is the affordance. */
         label: '',
         className: 'cfses__go',
-        content: <Chevron size={15} />,
+        /* An UNMARKED row is the only one on this tab that is silently making the pack wrong, so its
+           edge is the two answers rather than a chevron — the same two the diary gives, and both undoable. */
+        content: r.cls === 'not_marked' ? <MarkButtons row={r} /> : <Chevron size={15} />,
       };
   }
 }
 
 /* ────────────────────────────────────────────────────────── the sections ── */
 
+/**
+ * *Done* and *No-show* on an unmarked row. `POST /v1/sessions/{id}/done` charges the pack under a row
+ * lock; `no-show` charges too (the diary's own button sends `true`, and the session screen is where a
+ * trainer says otherwise). Neither is a one-way door: the receipt carries *Undo*, which is
+ * `reopenSession` — the charge is reversed, never deleted.
+ */
+function MarkButtons({ row }: { row: SessionTableRow }) {
+  const router = useRouter();
+  const { show } = useToast();
+  const [pending, start] = useTransition();
+
+  const run = (kind: 'done' | 'no-show') =>
+    start(async () => {
+      const res = kind === 'done' ? await markDone(row.id) : await markNoShow({ id: row.id, costsASession: true });
+      if (!res.ok) {
+        show({ tone: 'danger', title: <>Could not mark it</>, body: res.message });
+        return;
+      }
+      router.refresh();
+      show({
+        tone: 'ok',
+        variant: 'receipt',
+        title: <>{kind === 'done' ? 'Marked done' : 'No-show recorded'}</>,
+        body: <>{row.weekday} {row.date}.{res.message ? <> {res.message}</> : null}</>,
+        action: {
+          label: 'Undo',
+          onClick: () =>
+            void reopenSession(row.id).then((back) => {
+              if (back.ok) router.refresh();
+              else show({ tone: 'danger', title: <>Could not undo</>, body: back.message });
+            }),
+        },
+      });
+    });
+
+  return (
+    <span className="cfses__mark">
+      <Button variant="secondary" size="sm" disabled={pending} onClick={() => run('done')}>
+        Done
+      </Button>
+      <Button variant="ghost" size="sm" disabled={pending} onClick={() => run('no-show')}>
+        No-show
+      </Button>
+    </span>
+  );
+}
+
 function Rows({
   rows,
   columns,
   showPlan,
-  open,
 }: {
   rows: SessionTableRow[];
   columns: SessionColumn[];
   showPlan: boolean;
-  open: (id: string) => void;
 }) {
   return (
     <>
@@ -215,16 +272,6 @@ function Rows({
           className={
             r.cls === 'no_show' ? 'crit' : r.cls === 'not_marked' ? 'alert' : undefined
           }
-          role="link"
-          tabIndex={0}
-          aria-label={`Open the session on ${r.weekday} ${r.date}${r.name ? `, ${r.name}` : ''}`}
-          onClick={() => open(r.id)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              open(r.id);
-            }
-          }}
           cells={columns.map((c) => cellFor(c, r, showPlan))}
         />
       ))}
@@ -237,12 +284,15 @@ function Section({
   caption,
   plan,
   aside,
+  note,
   columns,
   variant,
   foot,
   children,
 }: {
   title: string;
+  /** A line over the table that is about the table's rows as a set. */
+  note?: React.ReactNode;
   caption: string;
   /**
    * The one plan every row is on, said once in the head instead of 26 times
@@ -272,6 +322,7 @@ function Section({
         {aside}
       </Card.Head>
       <Card.Body flush>
+        {note ? <p className="cfses__warn">{note}</p> : null}
         <Table
           caption={caption}
           /* NOT `.cftbl`, and that is trap 13 read properly. That rule turns
@@ -326,8 +377,14 @@ const DIARY_PREVIEW = 4;
 const WINDOWS: { value: '30d' | '90d' | 'all'; label: string }[] = [
   { value: '30d', label: 'Last 30 days' },
   { value: '90d', label: 'Last 90 days' },
-  { value: 'all', label: 'All' },
+  { value: 'all', label: 'All time' },
 ];
+
+/** *the last 30 days*, or the window before it — said so, rather than *no sessions on this file*. */
+function windowPhrase(range: '30d' | '90d' | 'all', older: number): string {
+  if (older > 0) return `the ${older === 1 ? 'window' : `${older} windows`} before the latest`;
+  return range === '30d' ? 'the last 30 days' : range === '90d' ? 'the last 90 days' : 'the last 400 days';
+}
 
 export function SessionsTab({
   clientId,
@@ -345,7 +402,6 @@ export function SessionsTab({
   const router = useRouter();
   const [filter, setFilter] = useState<SessionStatusFilter>('all');
   const [wholeDiary, setWholeDiary] = useState(false);
-  const open = (id: string) => router.push(`/sessions/${id}`);
 
   const place = (r: string, n: number) =>
     router.push(`/clients/${clientId}/sessions?range=${r}${n > 0 ? `&older=${n}` : ''}`);
@@ -365,6 +421,8 @@ export function SessionsTab({
   const upcomingCols = columnsFor('upcoming', upcomingStatus);
   const historyCols = columnsFor('history', true);
   const label = options.find((o) => o.value === filter)?.label ?? 'All';
+  const phrase = windowPhrase(range, older);
+  const unmarkedCount = counts.unmarked;
 
   /* Off the WHOLE file, not the filtered view: a heading that appeared and
      disappeared as pills were pressed would be a heading nobody trusts. */
@@ -384,13 +442,15 @@ export function SessionsTab({
             <SegmentButton
               key={w.value}
               mode="single"
-              pressed={range === w.value && older === 0}
+              pressed={range === w.value}
               onClick={() => place(w.value, 0)}
             >
               {w.label}
             </SegmentButton>
           ))}
         </Segment>
+        {/* No outcome pills over a window with nothing in it: four zeros are a control with nothing to filter. */}
+        {counts.all > 0 && (
         <Segment label="Filter sessions by outcome" mode="single">
           {options.map((o) => (
             <SegmentButton
@@ -404,6 +464,7 @@ export function SessionsTab({
             </SegmentButton>
           ))}
         </Segment>
+        )}
       </div>
 
       {/* TWO EMPTY STATES, BECAUSE THEY ARE TWO DIFFERENT FACTS. A filter that
@@ -414,18 +475,50 @@ export function SessionsTab({
           live region, because only it appears in response to a press. */}
       {counts.all === 0 ? (
         <Card bare>
-          <EmptyState
-            inCard
-            title="No sessions on this file yet"
-            body="Nothing was booked or trained in this window."
-          />
+          {/* WHAT IS EMPTY IS THE WINDOW, not the client: Rohan's file says 10 sessions logged, and
+              *Load older* used to land on "No sessions on this file yet". Each answer names its window and
+              offers the next step — back to the latest, all time, or the first booking. */}
+          {older > 0 ? (
+            <EmptyState
+              inCard
+              title={`Nothing in ${phrase}`}
+              body="Their earlier sessions are not in this window."
+              action={
+                <Button variant="secondary" size="sm" onClick={() => place(range, 0)}>
+                  Back to the latest
+                </Button>
+              }
+            />
+          ) : range !== 'all' ? (
+            <EmptyState
+              inCard
+              title={`No sessions in ${phrase}`}
+              body="Look further back, or book the next one."
+              action={
+                <Button variant="secondary" size="sm" onClick={() => place('all', 0)}>
+                  Show all time
+                </Button>
+              }
+            />
+          ) : (
+            <EmptyState
+              inCard
+              title="No sessions on this file yet"
+              body="Book the first one and it is kept here."
+              action={
+                <Button variant="primary" size="sm" href={`/schedule?new=1&client=${clientId}`}>
+                  Book the first session
+                </Button>
+              }
+            />
+          )}
         </Card>
       ) : visible.length === 0 ? (
         <Card bare>
           <EmptyState
             kind="filtered"
             inCard
-            title={`Nothing ${label.toLowerCase()} on this file`}
+            title={`Nothing ${label.toLowerCase()} in ${phrase}`}
             body="Every other outcome is still on the record."
             action={
               <Button variant="secondary" size="sm" onClick={() => setFilter('all')}>
@@ -436,6 +529,24 @@ export function SessionsTab({
         </Card>
       ) : (
         <>
+          {/* NOTHING BOOKED IS SAID, not shown by a card that is simply not there. For a client who has
+              drifted it is the most useful fact on the tab. */}
+          {upcoming.length === 0 && filter === 'all' && older === 0 && history.length > 0 && (
+            <Card className="cfses">
+              <Card.Head title="Upcoming" level={3}>
+                <span className="cfses__n">nothing booked ahead</span>
+              </Card.Head>
+              <Card.Body>
+                <div className="cfses__none-up">
+                  <span className="small ink3">No session is booked after today.</span>
+                  <Button variant="secondary" size="sm" href={`/schedule?new=1&client=${clientId}`}>
+                    Book a session
+                  </Button>
+                </div>
+              </Card.Body>
+            </Card>
+          )}
+
           {upcoming.length > 0 && (
             <Section
               title="Upcoming"
@@ -466,7 +577,7 @@ export function SessionsTab({
                 ) : null
               }
             >
-              <Rows rows={diary} columns={upcomingCols} showPlan={showPlan} open={open} />
+              <Rows rows={diary} columns={upcomingCols} showPlan={showPlan} />
             </Section>
           )}
 
@@ -475,6 +586,14 @@ export function SessionsTab({
               title="History"
               caption={`${history.length} sessions on this client's record — ${label}`}
               aside={<span className="cfses__n">{history.length} on the record</span>}
+              note={
+                unmarkedCount > 0 ? (
+                  <>
+                    {unmarkedCount} unmarked. A pack moves on <b>Done</b> or <b>No-show</b>, so{' '}
+                    {unmarkedCount === 1 ? 'this one has' : 'these have'} not counted yet.
+                  </>
+                ) : undefined
+              }
               plan={onePlan}
               columns={historyCols}
               variant="hist"
@@ -487,7 +606,7 @@ export function SessionsTab({
                   filtered={filter !== 'all'}
                   columns={historyCols}
                   showPlan={showPlan}
-                  open={open}
+                  filterLabel={label}
                 />
               ))}
             </Section>
@@ -497,10 +616,15 @@ export function SessionsTab({
 
       <p className="cfses__note">
         {older > 0 ? `${older} window${older === 1 ? '' : 's'} back. ` : ''}
-        Older sessions are on the record.{' '}
+        {counts.all > 0 || older > 0 ? 'Older sessions are on the record. ' : ''}
         <Button variant="ghost" size="sm" onClick={() => place(range, older + 1)}>
           Load older
         </Button>
+        {older > 0 && counts.all > 0 && (
+          <Button variant="ghost" size="sm" onClick={() => place(range, 0)}>
+            Back to the latest
+          </Button>
+        )}
       </p>
     </div>
   );
@@ -522,7 +646,7 @@ function MonthRows({
   filtered,
   columns,
   showPlan,
-  open,
+  filterLabel,
 }: {
   month: MonthGroup;
   /** The month's own record, before the filter. See `monthRecords`. */
@@ -531,14 +655,15 @@ function MonthRows({
   filtered: boolean;
   columns: SessionColumn[];
   showPlan: boolean;
-  open: (id: string) => void;
+  /** The outcome the pill says, so a filtered band keeps its noun. */
+  filterLabel: string;
 }) {
   /* Unfiltered, the band answers the question a month raises — how much of it
      was kept. Filtered, that figure describes rows that are not on the screen,
      so the band says how much of the month IS on the screen instead. Both
      denominators are the month's own. */
   const trailing = filtered
-    ? `${month.rows.length} of ${record?.total ?? month.rows.length}`
+    ? `${month.rows.length} ${filterLabel.toLowerCase()} of ${record?.total ?? month.rows.length}`
     : record && record.spent > 0
       ? `${record.kept} of ${record.spent} kept`
       : `${month.rows.length} sessions`;
@@ -547,7 +672,7 @@ function MonthRows({
       <GroupRow span={columns.length}>
         <DayRule className="dayr--sec" day={month.label} trailing={<span className="dayr__n">{trailing}</span>} />
       </GroupRow>
-      <Rows rows={month.rows} columns={columns} showPlan={showPlan} open={open} />
+      <Rows rows={month.rows} columns={columns} showPlan={showPlan} />
     </>
   );
 }

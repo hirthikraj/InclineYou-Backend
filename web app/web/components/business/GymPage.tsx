@@ -111,100 +111,104 @@ export function GymPage({ start }: { start: { now: number; gym: GymMoney } }) {
             />
           ) : (
             <>
-              {/* ── how the split came out ─────────────────────────────────── */}
-              <div className="stats stats--4 mnystats" style={{ marginTop: 0 }}>
-                <Stat
-                  /* Every tile on this row is BILLED-basis (the sale month), and the settlement below is
-                     COLLECTED-basis (when the money landed). The same month can read ₹0 up here and ₹60
-                     down there — both true — so each says which it is. */
-                  label={<>Billed · gym floor · {periodTag(period)}</>}
-                  value={rupees(stats.floorBilled)}
-                  detail={`${stats.floorSessions} session${stats.floorSessions === 1 ? '' : 's'} on the floor`}
-                />
-                <Stat
-                  label={`${name}’s cut · of billed`}
-                  value={rupees(stats.gymCut)}
-                  detail={stats.floorBilled > 0 ? `${stats.gymCutPercent}% of gym sales, on average` : 'Nothing sold'}
-                  tone="warn"
-                />
-                <Stat
-                  label="Yours · of billed"
-                  value={rupees(stats.yours)}
-                  detail={stats.remoteBilled > 0
-                    ? `Including ${rupees(stats.remoteBilled)} of your own, ${stats.remoteSessions} sessions`
-                    : 'After the gym’s cut'}
-                  tone="acc"
-                />
-                <Stat
-                  label="Per session · of billed"
-                  value={stats.floorSessions > 0
-                    ? rupees(Math.round((stats.floorBilled - stats.gymCut) / stats.floorSessions))
-                    : '—'}
-                  detail="On the gym floor, after the cut"
-                />
-              </div>
-
-              <Card className="mt4">
-                <Card.Head title="Pack by pack">
-                  <Tag>{gym.shares.length} pack{gym.shares.length === 1 ? '' : 's'}</Tag>
-                </Card.Head>
-                {gym.shares.length === 0 ? (
-                  <Card.Body>
-                    <p className="empty__b">
-                      You have no gym packs yet. Add what {name}&rsquo;s counter charges, with your part of
-                      each, on the <Link href="/business/packages">packages page</Link>.
-                    </p>
-                  </Card.Body>
-                ) : (
-                  <Card.Body flush>
-                    <div className="tblwrap">
-                      <table className="tbl pk__tbl">
-                        <thead>
-                          <tr>
-                            <th>Pack</th>
-                            <th className="num">Your part</th>
-                            <th className="num">Sold</th>
-                            <th className="num">Billed</th>
-                            <th className="num">You took</th>
-                            <th className="num">Gym took</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {gym.shares.map((s) => (
-                            <tr key={s.packId ?? 'custom'}>
-                              <td data-l=""><b>{s.packName}</b></td>
-                              <td className="num" data-l="Your part">
-                                {s.trainerSharePercent !== null
-                                  ? `${s.trainerSharePercent}%`
-                                  : s.trainerShareAmount !== null ? `${rupees(s.trainerShareAmount)} flat` : '—'}
-                              </td>
-                              <td className="num" data-l="Sold">{s.sold}</td>
-                              <td className="num" data-l="Billed">{rupees(s.billed)}</td>
-                              <td className="num" data-l="You took">{rupees(s.trainerTake)}</td>
-                              <td className="num" data-l="Gym took">{rupees(s.gymCut)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </Card.Body>
-                )}
-                <Card.Body style={{ borderTop: '1px solid var(--tx-line)' }}>
-                  <p className="small" style={{ lineHeight: 1.6 }}>
-                    <b>The gym&rsquo;s part is worked out for you</b> — what the pack costs less what you
-                    get. Each payment&rsquo;s split is on its row in{' '}
-                    <Link href="/business/transactions?filter=gymshare">Transactions</Link>.
-                  </p>
-                </Card.Body>
-              </Card>
-
-              {/* ── what the gym owes ───────────────────────────────────────── */}
               <GymSettlement
                 gymName={gym.gymName}
                 settlement={gym.settlement}
                 now={start.now}
                 onChanged={reload}
-              />
+              >
+                {/* ── how this period came out ─────────────────────────────────
+                    Under the balance, not above it: on the fourth of a month these
+                    four read ₹0, and a page that opens on zeros has told the
+                    trainer nothing. They count what was BILLED in the month a pack
+                    was sold; the month-by-month table below counts money when it
+                    landed, and says so under its own numbers. */}
+                <h2 className="gsx-h">
+                  {periodProse(period)} <span>by when a pack was sold</span>
+                </h2>
+                <div className="stats stats--4 mnystats" style={{ marginTop: 0 }}>
+                  <Stat
+                    label={<>Billed · gym floor · {periodTag(period)}</>}
+                    value={rupees(stats.floorBilled)}
+                    detail={`${stats.floorSessions} session${stats.floorSessions === 1 ? '' : 's'} on the floor`}
+                  />
+                  <Stat
+                    label={`${name}’s cut`}
+                    value={rupees(stats.gymCut)}
+                    detail={stats.floorBilled > 0 ? `${stats.gymCutPercent}% of gym sales, on average` : 'Nothing sold'}
+                    tone="warn"
+                  />
+                  <Stat
+                    label="Yours"
+                    value={rupees(stats.yours)}
+                    detail={stats.remoteBilled > 0
+                      ? `Includes ${rupees(stats.remoteBilled)} from your own clients`
+                      : 'After the gym’s cut'}
+                    tone="acc"
+                  />
+                  <Stat
+                    label="Per session"
+                    value={stats.floorSessions > 0
+                      ? rupees(Math.round((stats.floorBilled - stats.gymCut) / stats.floorSessions))
+                      : '—'}
+                    detail="On the floor, after the cut"
+                  />
+                </div>
+
+                <Card className="mt4">
+                  <Card.Head title="Pack by pack">
+                    <Tag>{gym.shares.length} pack{gym.shares.length === 1 ? '' : 's'}</Tag>
+                  </Card.Head>
+                  {gym.shares.length === 0 ? (
+                    <Card.Body>
+                      <p className="gsx-note">
+                        You have no gym packs yet. Add what {name}&rsquo;s counter charges, with your part of
+                        each, on the <Link href="/business/packages">packages page</Link>.
+                      </p>
+                    </Card.Body>
+                  ) : (
+                    <Card.Body flush>
+                      <div className="tblwrap">
+                        <table className="tbl gsx-tbl gsx-tbl--packs">
+                          <thead>
+                            <tr>
+                              <th>Pack</th>
+                              <th className="num">Your part</th>
+                              <th className="num">Sold</th>
+                              <th className="num gsx-opt">Billed</th>
+                              <th className="num">You took</th>
+                              <th className="num">Gym took</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {gym.shares.map((s) => (
+                              <tr key={s.packId ?? 'custom'} data-idle={s.sold === 0 || undefined}>
+                                <td data-l=""><b>{s.packName}</b></td>
+                                <td className="num" data-l="Your part">
+                                  {s.trainerSharePercent !== null
+                                    ? `${s.trainerSharePercent}%`
+                                    : s.trainerShareAmount !== null ? `${rupees(s.trainerShareAmount)} flat` : '—'}
+                                </td>
+                                <td className="num" data-l="Sold">{s.sold}</td>
+                                <td className="num gsx-opt" data-l="Billed">{rupees(s.billed)}</td>
+                                <td className="num" data-l="You took">{rupees(s.trainerTake)}</td>
+                                <td className="num" data-l="Gym took">{rupees(s.gymCut)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </Card.Body>
+                  )}
+                  <Card.Body style={{ borderTop: '1px solid var(--tx-line)' }}>
+                    <p className="gsx-note">
+                      The gym&rsquo;s part is worked out for you: what the pack costs, less what you get. Each
+                      payment&rsquo;s split is on its row in{' '}
+                      <Link href="/business/transactions?filter=gymshare">Transactions</Link>.
+                    </p>
+                  </Card.Body>
+                </Card>
+              </GymSettlement>
             </>
           )}
         </div>

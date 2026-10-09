@@ -2,9 +2,8 @@
 
 import { useEffect, useState, useTransition } from 'react';
 
-import { MessageSlot } from '@/components/auth/MessageSlot';
 import { weekProblem, type Week } from '@/components/profile/WeekPicker';
-import { SaveRow } from '@/components/settings/IdentityForm';
+import { SavePin } from '@/components/settings/IdentityForm';
 import { usePublishDraft } from '@/components/settings/ProfileDraft';
 import { WorkPlaceFields, atGym, type PlaceDraft } from '@/components/settings/WorkPlaceFields';
 import { WorkingWeekFields, weekFrom } from '@/components/settings/WorkingWeekFields';
@@ -201,6 +200,12 @@ export function WorkPanel({
         submit();
       }}
     >
+      <nav className="rpt-jump pfx-jump" aria-label="Sections of this page">
+        <a href="#wk-place">Where you work</a>
+        <a href="#wk-week">Your hours</a>
+      </nav>
+
+      <section id="wk-place" className="pfx-sec">
       <WorkPlaceFields
         value={place}
         saved={savedPlace}
@@ -211,6 +216,9 @@ export function WorkPanel({
         }}
       />
 
+      </section>
+
+      <section id="wk-week" className="pfx-sec">
       <WorkingWeekFields
         value={week}
         stored={storedHours}
@@ -223,12 +231,12 @@ export function WorkPanel({
         }}
       />
 
-      <MessageSlot message={message} />
+      </section>
 
-      <SaveRow
+      <SavePin
         pending={pending}
         dirty={dirty}
-        note="Where you are, how you coach, and the hours a client can book out of."
+        message={message}
         // The button says which records it is about to write, because on this
         // tab that is genuinely two and the trainer cannot see the seam.
         unsaved={

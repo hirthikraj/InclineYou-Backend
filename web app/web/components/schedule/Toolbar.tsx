@@ -87,6 +87,8 @@ export function Toolbar({
             type="button"
             aria-pressed={v === view}
             onClick={() => onView(v)}
+            title={`${VIEW_LABELS[v]} · ${v[0].toUpperCase()}`}
+            aria-keyshortcuts={v[0]}
           >
             {VIEW_LABELS[v]}
           </button>
@@ -133,6 +135,8 @@ export function Toolbar({
           className="btn btn--icon btn--secondary"
           type="button"
           aria-label={STEP_LABELS[view].prev}
+          title={`${STEP_LABELS[view].prev} · [`}
+          aria-keyshortcuts="["
           onClick={() => onStep(-1)}
         >
           <ChevronLeft size={18} />
@@ -144,7 +148,7 @@ export function Toolbar({
           the duplication the Today pass fixed in the other direction. What this
           needs to do is ANNOUNCE, because it changes without the focus moving.
         */}
-        <span className="h5 sch__label" aria-live="polite">
+        <span className="h5 sch__label" aria-live="polite" title="Press T to jump to today">
           {label}
         </span>
 
@@ -152,6 +156,8 @@ export function Toolbar({
           className="btn btn--icon btn--secondary"
           type="button"
           aria-label={STEP_LABELS[view].next}
+          title={`${STEP_LABELS[view].next} · ]`}
+          aria-keyshortcuts="]"
           onClick={() => onStep(1)}
         >
           <Chevron size={18} />
@@ -227,7 +233,7 @@ export function Toolbar({
         {view !== 'month' && !pivoting && (
           <Chip
             pressed={gaps}
-            className={gapSlots === 0 ? 'chip--zero' : undefined}
+            className={gapSlots === 0 ? 'sch__gaps chip--zero' : 'sch__gaps'}
             onClick={onGaps}
           >
             {gapSlots > 0 ? `Show gaps · ${gapSlots}` : 'Show gaps'}

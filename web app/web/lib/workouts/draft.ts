@@ -956,3 +956,38 @@ function dissolveLoners(rows: DraftExercise[]): DraftExercise[] {
     row.groupId && (sizes.get(row.groupId) ?? 0) < 2 ? { ...row, groupId: null } : row,
   );
 }
+
+
+/**
+ * ONE LINE FOR A MOVEMENT'S SETS — what a phone card says instead of a table.
+ *
+ * *3 × 12 · 20 kg · 45s rest* when every set agrees, and only the parts that agree: a pyramid reads *4 sets*, never a
+ * made-up average. The per-set rows are one step deeper, where a trainer who wants them goes; most sessions are straight
+ * sets and need exactly this. Shared (no `server-only`) so the week sheet's day editor draws the same sentence.
+ */
+export function setsSummary(sets: DraftSet[]): string {
+  const n = sets.length;
+  if (n === 0) return 'No sets';
+  const same = <T,>(pick: (s: DraftSet) => T): boolean => sets.every(s => pick(s) === pick(sets[0]));
+  const first = sets[0];
+  const out: string[] = [];
+
+  if (same(s => s.effortKind) && same(s => s.effortValue) && effortTakesNumber(first.effortKind) && first.effortValue !== null) {
+    const unit = first.effortKind === 'reps' || first.effortKind === 'rep_interval' ? '' : ` ${effortOption(first.effortKind).hint}`;
+    out.push(`${n} × ${first.effortValue}${unit}`);
+  } else {
+    out.push(`${n} set${n === 1 ? '' : 's'}`);
+  }
+
+  if (same(s => s.loadKind) && same(s => s.loadValue)) {
+    if (first.loadKind === 'bodyweight') out.push('bodyweight');
+    else if (loadTakesNumber(first.loadKind) && first.loadValue !== null) out.push(`${first.loadValue} ${loadOption(first.loadKind).unit ?? ''}`.trim());
+  }
+
+  if (same(s => s.restSeconds) && first.restSeconds) {
+    const m = Math.floor(first.restSeconds / 60);
+    const sec = first.restSeconds % 60;
+    out.push(`${m > 0 ? `${m}m${sec ? ` ${sec}s` : ''}` : `${sec}s`} rest`);
+  }
+  return out.join(' · ');
+}

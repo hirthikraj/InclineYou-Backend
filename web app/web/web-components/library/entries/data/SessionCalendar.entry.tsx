@@ -7,6 +7,7 @@
 import {
   SessionCalendar,
   CALENDAR_STATE_LABEL,
+  StateGlyph,
   type CalendarDay,
   type CalendarSession,
   type CalendarState,
@@ -147,7 +148,9 @@ export function SessionCalendarEntry() {
                       <div className="scal__ss">
                         {d.sessions.map((s) => (
                           <span className={`scal__s scal__s--${s.state}`} key={s.id}>
-                            <i aria-hidden="true" />
+                            <i aria-hidden="true">
+                              <StateGlyph state={s.state} />
+                            </i>
                             <b>{s.time}</b>
                             <span>{s.label}</span>
                           </span>
@@ -215,7 +218,9 @@ export function SessionCalendarEntry() {
               {(['done', 'booked', 'missed', 'unmarked', 'cancelled'] as CalendarState[]).map(
                 (s) => (
                   <span className={`scal__s scal__s--${s}`} key={s}>
-                    <i aria-hidden="true" />
+                    <i aria-hidden="true">
+                      <StateGlyph state={s} />
+                    </i>
                     <b>6:00 AM</b>
                     <span>{CALENDAR_STATE_LABEL[s]}</span>
                   </span>
@@ -227,7 +232,9 @@ export function SessionCalendarEntry() {
             <ul className="scal__key">
               {legend.map((l) => (
                 <li className={`scal__k scal__k--${l.state}`} key={l.state}>
-                  <i aria-hidden="true" />
+                  <i aria-hidden="true">
+                    <StateGlyph state={l.state} />
+                  </i>
                   {CALENDAR_STATE_LABEL[l.state]}
                   <b>{l.count}</b>
                 </li>
@@ -274,7 +281,9 @@ export function SessionCalendarEntry() {
                       <span className="scal__d">{i + 1}</span>
                       <div className="scal__ss">
                         <span className={`scal__s scal__s--${st}`}>
-                          <i aria-hidden="true" />
+                          <i aria-hidden="true">
+                            <StateGlyph state={st} />
+                          </i>
                           <b>6:00 AM</b>
                         </span>
                       </div>
@@ -291,12 +300,16 @@ export function SessionCalendarEntry() {
                   <span className="scal__d">19</span>
                   <div className="scal__ss">
                     <span className="scal__s scal__s--done">
-                      <i aria-hidden="true" />
+                      <i aria-hidden="true">
+                        <StateGlyph state={'done'} />
+                      </i>
                       <b>7:30 AM</b>
                       <span>Legs</span>
                     </span>
                     <span className="scal__s scal__s--missed">
-                      <i aria-hidden="true" />
+                      <i aria-hidden="true">
+                        <StateGlyph state={'missed'} />
+                      </i>
                       <b>5:00 PM</b>
                       <span>Cond.</span>
                     </span>

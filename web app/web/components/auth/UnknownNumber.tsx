@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState, useTransition } from 'react';
 
-import { abandonPending, claimTrainer } from '@/lib/auth/actions';
+import { abandonPending, claimTrainer, signOut } from '@/lib/auth/actions';
 import { SETUP_STEPS } from '@/lib/setup/steps';
 import {
   IconChevronRight,
@@ -181,6 +181,15 @@ export function UnknownNumber({
         This question comes <b>after</b> the code, never before. Telling you which numbers exist
         before you have proved you own one would hand anybody the customer list.
       </TrustLine>
+
+      {/* A way out that is not a choice between the two exits: the token here is a
+          15-minute pending one, so signing out only clears the sitting. A form
+          posting the server action, so it works before hydration too. */}
+      <form action={signOut} style={{ marginTop: 8, textAlign: 'center' }}>
+        <Button type="submit" variant="ghost" size="sm" disabled={pending}>
+          Sign out
+        </Button>
+      </form>
 
       {howOpen && <HowSheet phone={phone} onClose={() => setHowOpen(false)} />}
     </>

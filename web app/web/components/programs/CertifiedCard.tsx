@@ -9,6 +9,7 @@ import { useToast } from '@/lib/toast/store';
 import { daysOf, toEntries, weekCountOf } from '@/lib/programs/blueprint';
 import { EQUIPMENT, LEVELS } from '@/lib/programs/certified';
 import { CheckIcon, PlusIcon } from './Icons';
+import { useForClient, withClient } from '@/lib/programs/for-client';
 import { Button } from '@/web-components/ui/Button';
 import { Tag } from '@/web-components/ui/Tag';
 import { TemplateCard } from '@/web-components/ui/TemplateCard';
@@ -78,6 +79,7 @@ export function CertifiedCard({ row, topUsed }: { row: CertifiedWire; topUsed?: 
   const [busy, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const { show } = useToast();
+  const forClient = useForClient();
 
   /* Derived rather than read: the list response carries no blueprint, so
      `daysOf` falls back to `trainingDays` — which is the authority anyway, and
@@ -115,7 +117,7 @@ export function CertifiedCard({ row, topUsed }: { row: CertifiedWire; topUsed?: 
         // Straight into the builder, not back to the list. The next thing a
         // trainer does with a copied program is change something in it, and
         // landing on a list makes them find the thing they just made.
-        router.push(`/programs/${result.value.id}`);
+        router.push(withClient(`/programs/${result.value.id}`, forClient));
       } else {
         setError(result.message);
       }
@@ -125,7 +127,7 @@ export function CertifiedCard({ row, topUsed }: { row: CertifiedWire; topUsed?: 
   return (
     <TemplateCard
       name={row.name}
-      href={`/programs/certified/${row.id}`}
+      href={withClient(`/programs/certified/${row.id}`, forClient)}
       mine={Boolean(mine)}
       tag={
         mine ? (
@@ -176,8 +178,12 @@ export function CertifiedCard({ row, topUsed }: { row: CertifiedWire; topUsed?: 
           </>
         ) : (
           <>
-            Used by <b>{meta?.usedCount ?? 0}</b>
-            {meta ? <> · reviewed {monthOf(meta.reviewedAt)}</> : null}
+            {meta?.usedCount ? (
+              <>
+                Used by <b>{meta.usedCount}</b> ·{' '}
+              </>
+            ) : null}
+            {meta ? <>Reviewed {monthOf(meta.reviewedAt)}</> : null}
           </>
         )
       }
@@ -196,7 +202,7 @@ export function CertifiedCard({ row, topUsed }: { row: CertifiedWire; topUsed?: 
                 weighted controls on one footer is three primaries, and on this
                 card the trainer's own copy is the thing they want. */}
             <Button
-              href={`/programs/certified/${row.id}`}
+              href={withClient(`/programs/certified/${row.id}`, forClient)}
               variant="ghost"
               size="sm"
               aria-label={`Preview the certified ${row.name}`}
@@ -212,14 +218,14 @@ export function CertifiedCard({ row, topUsed }: { row: CertifiedWire; topUsed?: 
             >
               {busy ? 'Copying…' : 'Use again'}
             </Button>
-            <Button href={`/programs/${mine.id}`} variant="secondary" size="sm">
+            <Button href={withClient(`/programs/${mine.id}`, forClient)} variant="secondary" size="sm">
               Open your copy
             </Button>
           </>
         ) : (
           <>
             <Button
-              href={`/programs/certified/${row.id}`}
+              href={withClient(`/programs/certified/${row.id}`, forClient)}
               variant="secondary"
               size="sm"
               aria-label={`Preview ${row.name}`}

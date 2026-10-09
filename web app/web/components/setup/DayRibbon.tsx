@@ -25,7 +25,22 @@ import { WEEKDAY_SHORT } from '@/lib/setup/hours';
  * screen reader announcing forty absolutely-positioned divs would be reading out
  * a rendering rather than a week.
  */
-export function DayRibbon({ days, windows }: { days: number[]; windows: HourWindow[] }) {
+export function DayRibbon({
+  days,
+  windows,
+  fit = false,
+}: {
+  days: number[];
+  windows: HourWindow[];
+  /**
+   * Scale the band to its box instead of one pixel a minute. Setup keeps the fixed band: a step with a 332px sibling has no
+   * width to give. Settings has the width of a column, and a ten-hour day in a band that scrolls sideways — with a sentence
+   * telling you to scroll it — is a wire to be read through a letterbox. Every offset is a percentage of the span, so the
+   * proportions are the same; only the unit changed.
+   */
+  fit?: boolean;
+}) {
+  const at = (px: number) => (fit ? `${(px / RIBBON_MINUTES) * 100}%` : px);
   const bands = ribbon(windows);
   const dayNames = days
     .slice()
@@ -46,14 +61,14 @@ export function DayRibbon({ days, windows }: { days: number[]; windows: HourWind
     // 52px band, and it had no edge shading, so a clipped day read as a whole
     // one.
     <>
-    <div className="dr__scroll">
-      <div className="dr" style={{ width: RIBBON_MINUTES }} role="img" aria-label={spoken}>
+    <div className={fit ? 'dr__scroll dr__scroll--fit' : 'dr__scroll'}>
+      <div className={fit ? 'dr dr--fit' : 'dr'} style={fit ? undefined : { width: RIBBON_MINUTES }} role="img" aria-label={spoken}>
         {bands.off.map((seg) => (
           <div
             key={`off-${seg.left}`}
             className="dr__off"
             aria-hidden="true"
-            style={{ left: seg.left, width: seg.width }}
+            style={{ left: at(seg.left), width: at(seg.width) }}
           />
         ))}
         {bands.windows.map((seg) => (
@@ -61,7 +76,7 @@ export function DayRibbon({ days, windows }: { days: number[]; windows: HourWind
             key={`win-${seg.left}`}
             className="dr__win"
             aria-hidden="true"
-            style={{ left: seg.left, width: seg.width }}
+            style={{ left: at(seg.left), width: at(seg.width) }}
           />
         ))}
         {/* `.dr__hole` is the schedule file's class for labelling a GAP; frame
@@ -72,7 +87,7 @@ export function DayRibbon({ days, windows }: { days: number[]; windows: HourWind
           <div
             key={`lbl-${label.left}`}
             className="dr__hole"
-            style={{ left: label.left, background: 'var(--tx-surface)' }}
+            style={{ left: at(label.left), background: 'var(--tx-surface)' }}
           >
             <b>{label.text}</b>
           </div>
@@ -82,11 +97,11 @@ export function DayRibbon({ days, windows }: { days: number[]; windows: HourWind
             key={`l-${line.left}`}
             className={`dr__l${line.edge ? ' dr__l--h' : ''}`}
             aria-hidden="true"
-            style={{ left: line.left }}
+            style={{ left: at(line.left) }}
           />
         ))}
       </div>
-      <div className="dr__ax" style={{ width: RIBBON_MINUTES }}>
+      <div className={fit ? 'dr__ax dr__ax--fit' : 'dr__ax'} style={fit ? undefined : { width: RIBBON_MINUTES }}>
         {bands.ticks.map((tick) => (
           <span
             key={`t-${tick.left}`}
@@ -100,7 +115,7 @@ export function DayRibbon({ days, windows }: { days: number[]; windows: HourWind
                 ? { left: 0, transform: 'none' }
                 : tick.end === 'last'
                   ? { left: 'auto', right: 0, transform: 'none' }
-                  : { left: tick.left }
+                  : { left: at(tick.left) }
             }
           >
             {tick.label}
@@ -113,9 +128,11 @@ export function DayRibbon({ days, windows }: { days: number[]; windows: HourWind
         visible edge would see it vanish and conclude it had not saved — on the
         one step whose entire job is showing the answer back before it is
         committed. Shown only where it is true (app.css, under 1080px). */}
-    <p className="small dr__hint">
-      05:30 to 21:30, one pixel a minute. Scroll the band sideways for the rest of the day.
-    </p>
+    {fit ? null : (
+      <p className="small dr__hint">
+        05:30 to 21:30, one pixel a minute. Scroll the band sideways for the rest of the day.
+      </p>
+    )}
     </>
   );
 }

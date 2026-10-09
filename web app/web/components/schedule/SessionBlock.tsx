@@ -84,6 +84,9 @@ export interface BlockProps {
   dim?: boolean;
   /** Ringed for the ten seconds after a move, so the row that changed is findable. */
   just?: boolean;
+  /** Today's next session — the one running or coming up. Marked by an accent edge
+   *  along its top and by the words "next up" in its label, never by colour alone. */
+  next?: boolean;
   /** Set by the roving tab index — exactly one block in the grid is tabbable. */
   tabbable?: boolean;
   /** The column's own midnight. `useGridKeys` groups by it, so it must be the
@@ -108,7 +111,7 @@ export interface BlockProps {
 }
 
 export function SessionBlock({
-  placed, segFrom, segTo, scale, onOpen, dim, just, tabbable, dayAt,
+  placed, segFrom, segTo, scale, onOpen, dim, just, next, tabbable, dayAt,
 }: BlockProps) {
   const { session: s, startMinute, endMinute, lane, lanes, clashesWith } = placed;
 
@@ -144,6 +147,7 @@ export function SessionBlock({
   // horizontal padding out of a 38px lane is a third of it. See `.ev--sp3`.
   if (lanes >= 3) classes.push('ev--sp3');
   if (just) classes.push('ev--just');
+  if (next) classes.push('ev--next');
   // A cut edge is drawn square, so a block continuing past a seam does not look
   // like a block that ends there.
   if (fromAbove) classes.push('ev--from-above');
@@ -289,6 +293,7 @@ export function SessionBlock({
     state,
     clash ? `clashes with ${clashesWith.join(', ')}` : null,
     just ? 'just moved, undo available' : null,
+    next ? 'next up' : null,
   ]
     .filter(Boolean)
     .join(', ');

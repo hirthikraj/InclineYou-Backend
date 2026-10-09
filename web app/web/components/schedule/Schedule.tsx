@@ -191,13 +191,20 @@ export function Schedule({ data }: { data: ScheduleData }) {
 
   /** `new` → the default slot; `book=<minute>` → that minute on the anchor's day. */
   const asked = params.get('new') === '1' ? 'new' : params.get('book');
+  /* `?client=<id>` rides with either: a client's own file says WHO, so the form opens
+     with them chosen instead of asking again. A bare `/schedule?new=1` is unchanged. */
+  const askedClient = params.get('client') ?? undefined;
   const slotAsked = (instant: number) => {
     if (asked === null) return null;
     const slot = defaultSlot(anchor, view, instant);
-    if (asked === 'new') return slot;
+    if (asked === 'new') return { ...slot, clientId: askedClient };
     const minute = Number(asked);
     if (!Number.isFinite(minute) || minute < 0 || minute >= 24 * 60) return null;
-    return { dayAt: slot.dayAt, minute: Math.round(minute / SNAP_MINUTES) * SNAP_MINUTES };
+    return {
+      dayAt: slot.dayAt,
+      minute: Math.round(minute / SNAP_MINUTES) * SNAP_MINUTES,
+      clientId: askedClient,
+    };
   };
 
   /* `clientId` is the pivot's own contribution to a booking and nothing else

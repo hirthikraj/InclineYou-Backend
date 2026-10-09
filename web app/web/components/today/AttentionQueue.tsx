@@ -11,7 +11,7 @@ import {
 } from '@/lib/today/actions';
 import { HELD_VERBS, HOLD_SECONDS } from '@/lib/today/hold';
 import { contactedLabel } from '@/lib/nudges/cooldown';
-import { clientsNeedYou, sessionsToday } from '@/lib/today/copy';
+import { KIND_LEAD, clientsNeedYou, foldedSummary, sessionsToday } from '@/lib/today/copy';
 import { DAY_MS } from '@/lib/today/time';
 import { BellOff, Check, Ellipsis } from '@/components/shell/Icons';
 import { Button } from '@/web-components/ui/Button';
@@ -408,6 +408,9 @@ export function AttentionQueue({
         {folded > 0 && (
           <button className="atn__more" type="button" onClick={() => setExpanded(true)}>
             Show {folded} more {folded === 1 ? 'row' : 'rows'}
+            <span className="atn__more-k">
+              {foldedSummary(items.slice(QUEUE_CAP).map((i) => i.kind))}
+            </span>
           </button>
         )}
         {expanded && items.length > QUEUE_CAP && (
@@ -765,6 +768,13 @@ function Row({
     <tr className={rowClass}>
       {who}
       <td className="q__why">
+        {/* THE KIND, FIRST, in the same place on every row — see `KIND_LEAD`. It is
+            the second cue beside the critical edge, so urgency no longer rides on
+            colour alone, and it is `aria-hidden` for a reason a reader will
+            thank it for: the sentence beside it already says the same thing in
+            words, and a screen reader announcing "Money, ₹6,400 overdue" on every
+            row is the category read out twice. */}
+        <span className="q__k" aria-hidden="true">{KIND_LEAD[item.kind]}</span>
         {item.line}
         {/* THE MOMENT THE PROGRESS REPORT EXISTS FOR. Clients renew when they
             can see progress, and a pack running out is when that is decided —
@@ -772,8 +782,10 @@ function Row({
             text and not beside the verb: `.q__act` is sized for one button. */}
         {item.action === 'Renew' && (
           <>
-            {' · '}
-            <InlineLink href={`/clients/${item.clientId}/report`}>Send progress report</InlineLink>
+            <span className="q__dot" aria-hidden="true">{' · '}</span>
+            <span className="q__rep">
+              <InlineLink href={`/clients/${item.clientId}/report`}>Send progress report</InlineLink>
+            </span>
           </>
         )}
         {/*
@@ -791,7 +803,10 @@ function Row({
           log for every client rather than enforcing the cap for one.
         */}
         {item.contactedAt !== undefined && (
-          <span className="q__seen"> · messaged {contactedLabel(item.contactedAt, now)}</span>
+          <span className="q__seen">
+            <span className="q__dot" aria-hidden="true">{' · '}</span>
+            messaged {contactedLabel(item.contactedAt, now)}
+          </span>
         )}
       </td>
       <td className="q__act">

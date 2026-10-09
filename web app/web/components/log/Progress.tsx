@@ -1,11 +1,15 @@
 'use client';
 
-import { shortDate, type ProgressRange, type ProgressView } from '@/lib/log/log';
+import { useState } from 'react';
+
+import { shortDate, type ProgressMovement, type ProgressRange, type ProgressView } from '@/lib/log/log';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
-import { Chip } from '@/web-components/ui/Chip';
+import { Change } from '@/web-components/ui/Change';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 import { Segment, SegmentButton } from '@/web-components/ui/Segment';
+import { Select } from '@/web-components/ui/Select';
+import { Tag } from '@/web-components/ui/Tag';
 import { Stat } from '@/web-components/ui/Stat';
 import { Meter } from '@/web-components/ui/Meter';
 import { Table, Row } from '@/web-components/ui/Table';
@@ -170,6 +174,30 @@ function signed(n: number): string {
   return `${n > 0 ? '+' : '−'}${Math.abs(n)}`;
 }
 
+type MovementSort = 'volume' | 'change' | 'recent';
+
+const SORTS: { key: MovementSort; label: string; caption: string }[] = [
+  { key: 'volume', label: 'Volume', caption: 'kilos moved' },
+  { key: 'change', label: 'Change', caption: 'change in top set' },
+  { key: 'recent', label: 'Last done', caption: 'last done' },
+];
+
+/** The relative size of a move, so a +2.5 kg on a 20 kg press outranks +2.5 on a 120 kg pull. */
+function growth(m: ProgressMovement): number {
+  if (m.delta === null || m.delta <= 0) return 0;
+  return m.delta / (m.from && m.from > 0 ? m.from : m.to || 1);
+}
+
+/** Total orders only — a tie must never reshuffle between loads (AGENTS trap 29). */
+function sortMovements(list: ProgressMovement[], by: MovementSort): ProgressMovement[] {
+  const byName = (a: ProgressMovement, b: ProgressMovement) => a.name.localeCompare(b.name);
+  return [...list].sort((a, b) => {
+    if (by === 'change') return growth(b) - growth(a) || b.volumeKg - a.volumeKg || byName(a, b);
+    if (by === 'recent') return b.lastOn.localeCompare(a.lastOn) || b.volumeKg - a.volumeKg || byName(a, b);
+    return b.volumeKg - a.volumeKg || byName(a, b);
+  });
+}
+
 /**
  * Everything below the page header: the four figures, the volume bars, the
  * top-set sequence with its picker, and the movements table.
@@ -190,19 +218,62 @@ export function ProgressBody({
      *how does this compare with the one above it*, and the tallest is the
      only reference that makes that visible. The accessible name still says
      the share of the whole, because that is the honest number in words. */
+  const [sort, setSort] = useState<MovementSort>('volume');
+  const ranked = sortMovements(data.movements, sort);
+  /* THE ANSWER THIS TAB IS OPENED FOR: *is this client getting stronger*. It was a 96px
+     column in the middle of a table and read `—` on every row of a client in their first
+     fortnight, while four counts led the page. Three movements, ranked by how far their top
+     set moved relative to where it started; a lift that held is not on it, and it carries no
+     colour except the accent `Change` already reserves for a strength gain. */
+  const risers = sortMovements(data.movements, 'change').filter((m) => growth(m) > 0).slice(0, 3);
   const latestWeek = data.weeks.length ? data.weeks[data.weeks.length - 1] : null;
   const peakVolume = data.movements.reduce((max, m) => Math.max(max, m.volumeKg), 0) || 1;
   const volumeTotal = data.movements.reduce((sum, m) => sum + m.volumeKg, 0) || 1;
 
   return (
     <>
-      <div className="stats stats--4">
-        <Stat label="Sessions" value={data.sessions} detail="with something logged" />
+      {data.movements.length > 0 && (
+        <Card
+          title="Getting stronger"
+          aside={
+            data.records > 0 ? (
+              <Tag tone="pr" className="pgs__pr">
+                {data.records} {data.records === 1 ? 'record' : 'records'}
+              </Tag>
+            ) : null
+          }
+        >
+          {risers.length > 0 ? (
+            <ul className="pgs">
+              {risers.map((m) => (
+                <li key={m.exerciseId} className="pgs__r">
+                  <span className="pgs__n" title={m.name}>
+                    {m.name}
+                  </span>
+                  <Change from={m.from} to={m.to} unit={m.unit} delta={m.delta === null ? undefined : signed(m.delta)} />
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="small ink3">
+              Nothing has moved yet. A change shows once a movement has been logged in two
+              sessions, so the first fortnight is the baseline rather than a result.
+            </p>
+          )}
+        </Card>
+      )}
+
+      <div className="stats stats--4" style={data.movements.length > 0 ? { marginTop: 12 } : undefined}>
+        <Stat label="Sessions" value={data.sessions} detail="with sets logged" />
         <Stat label="Sets" value={data.sets} detail={<>across {data.exerciseCount} exercises</>} />
         <Stat
           label="Records"
           value={data.records}
-          detail={<span title={RECORDS_RULE}>judged on read, never stored</span>}
+          detail={
+            <span title={RECORDS_RULE}>
+              {data.records ? 'beaten in this range' : 'the first sessions set the baseline'}
+            </span>
+          }
           tone={data.records ? 'acc' : undefined}
         />
         {/* ── *VOLUME THIS WEEK* WAS NOT ALWAYS THIS WEEK ──────────────────
@@ -253,6 +324,10 @@ export function ProgressBody({
         >
           {data.weeks.length ? (
             <VolumeBars
+              /* A series of one or two weeks has nothing to be tall about: 190px of empty plot beside
+                 one bar left a 100px void under the top-set card. The short chart is the one the
+                 progress report already uses for small series. */
+              size={data.weeks.length < 3 ? 'sm' : 'md'}
               label="Volume per week"
               unit="kg"
               format={inr}
@@ -264,10 +339,17 @@ export function ProgressBody({
                 when: shortDate(w.weekOf),
               }))}
               note={
-                <span title={VOLUME_RULE}>
-                  <b>Bars, from zero.</b> A week with nothing in it keeps its bar. Point at one to
-                  read it.
-                </span>
+                data.weeks.length < 3 ? (
+                  <span title={VOLUME_RULE}>
+                    <b>The start of the record.</b> Two or three weeks make a trend; until then
+                    each bar is a baseline to measure the next one against.
+                  </span>
+                ) : (
+                  <span title={VOLUME_RULE}>
+                    <b>Bars, from zero.</b> A week with nothing in it keeps its bar. Point at one
+                    to read it.
+                  </span>
+                )
               }
             />
           ) : (
@@ -287,11 +369,31 @@ export function ProgressBody({
         >
           {data.focus && data.focus.sequence.length ? (
             <>
+              {/* THE LATEST IS BOLD IN INK, AND ONLY A RECORD IS GOLD — and the first point never is:
+                  `best` is `figure > running` from zero, so the opening session of any sequence beats
+                  nothing and is flagged. That is a baseline, not a record. It was `<b>` on the last number
+                  and `.seq b` was the PR amber, so a plateau (27.5 → 27.5 → 27.5) read as a record,
+                  or as a caution, beside a Records tile that said 0. The arrows are hidden from a
+                  reader and replaced by a spoken *then*; `→` is announced as "rightwards arrow". */}
               <p className="seq" title={SEQUENCE_RULE}>
                 {data.focus.sequence.map((p, i, all) => (
                   <span key={`${p.value}-${i}`}>
-                    {i > 0 ? ' → ' : ''}
-                    {i === all.length - 1 ? <b>{p.value}</b> : p.value}
+                    {i > 0 ? (
+                      <>
+                        <span aria-hidden="true"> → </span>
+                        <span className="vh">, then </span>
+                      </>
+                    ) : null}
+                    {p.best && i > 0 ? (
+                      <b className="seq__pr">
+                        {p.value}
+                        <span className="vh"> (record)</span>
+                      </b>
+                    ) : i === all.length - 1 ? (
+                      <b>{p.value}</b>
+                    ) : (
+                      p.value
+                    )}
                   </span>
                 ))}{' '}
                 {data.focus.unit}
@@ -312,20 +414,21 @@ export function ProgressBody({
           )}
 
           {data.choices.length > 1 ? (
+            /* A SELECT, NOT EIGHT CHIPS. The chips were `aria-pressed` toggles standing in for a
+               one-of-N choice, silently stopped at the eighth movement (a client with twelve could
+               not focus the other four), and a long custom name made a chip 494px wide in a 363px
+               card. A native select is all of that for free, and on a phone it is the OS's own
+               picker. */
             <div className="pfoc" title={PICKER_RULE}>
-              <p className="micro">Which exercise</p>
-              <div className="wk">
-                {data.choices.slice(0, 8).map((c) => (
-                  <Chip
-                    pressed={data.focus?.exerciseId === c.exerciseId}
-                    key={c.exerciseId}
-                    onClick={() => go({ focus: c.exerciseId })}
-                  >
-                    {c.name}
-                    <span className="rail__n">{c.sessions}</span>
-                  </Chip>
-                ))}
-              </div>
+              <Select
+                label="Which exercise"
+                value={data.focus?.exerciseId ?? ''}
+                onChange={(e) => go({ focus: e.target.value })}
+                options={data.choices.map((c) => ({
+                  value: c.exerciseId,
+                  label: `${c.name} · ${c.sessions} sessions`,
+                }))}
+              />
             </div>
           ) : null}
         </Card>
@@ -339,7 +442,7 @@ export function ProgressBody({
       <Card title="Every movement" style={{ marginTop: 12 }}
         aside={
           <span className="small mono" style={{ marginLeft: 'auto' }} title={MOVEMENTS_RULE}>
-            first top set → last
+            top set, first → last
           </span>
         }
       >
@@ -350,8 +453,26 @@ export function ProgressBody({
             inCard
           />
         ) : (
+          <>
+            {data.movements.length > 1 && (
+              <div className="pmv__sort">
+                <span className="micro">Sort by</span>
+                <Segment label="Sort movements by" mode="single">
+                  {SORTS.map((x) => (
+                    <SegmentButton
+                      key={x.key}
+                      mode="single"
+                      pressed={sort === x.key}
+                      onClick={() => setSort(x.key)}
+                    >
+                      {x.label}
+                    </SegmentButton>
+                  ))}
+                </Segment>
+              </div>
+            )}
           <Table
-            caption={`${data.movements.length} movements, ranked by kilos moved`}
+            caption={`${data.movements.length} movements, ranked by ${SORTS.find((x) => x.key === sort)?.caption}`}
             className="pmv"
             columns={[
               { key: 'name', label: 'Movement' },
@@ -361,10 +482,10 @@ export function ProgressBody({
               { key: 'chg', label: 'Change', numeric: true },
               { key: 'pr', label: 'Records', numeric: true },
               { key: 'vol', label: 'Volume' },
-              { key: 'go', label: '', bare: true },
+              { key: 'go', label: <span className="vh">Open</span>, bare: true },
             ]}
           >
-            {data.movements.map((m) => (
+            {ranked.map((m) => (
               <Row
                 key={m.exerciseId}
                 header={<span className="pmv__nm" title={m.name}>{m.name}</span>}
@@ -456,6 +577,7 @@ export function ProgressBody({
               />
             ))}
           </Table>
+          </>
         )}
       </Card>
     </>

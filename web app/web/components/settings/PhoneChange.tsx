@@ -271,7 +271,9 @@ export function PhoneChange({
         >
           {pending ? 'Sending…' : step.at === 'done' ? 'Change it again' : 'Change my number'}
         </Button>
-        <MessageSlot message={message} />
+        {/* Mounted only when there is something to say. The slot reserves its height, which on the resting card was 38px of
+            empty space under the only button; a refusal still lands BELOW the button that caused it, so nothing above moves. */}
+        {message ? <MessageSlot message={message} /> : null}
       </>
     );
   }

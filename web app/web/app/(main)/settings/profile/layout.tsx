@@ -58,27 +58,26 @@ export default async function ProfileLayout({ children }: { children: React.Reac
       <SettingsBar crumb="Settings / Your profile" />
 
       <main className="main" id="main-content">
-        <div className="ph ph--named">
-          <div style={{ marginBottom: 10 }}>
-            <Button
-              href="/settings"
-              variant="ghost"
-              size="sm"
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-            >
-              <span style={{ display: 'inline-flex', transform: 'rotate(180deg)' }}>
-                <Chevron size={14} />
-              </span>
-              Settings
-            </Button>
-          </div>
-
+        <div className="ph ph--named pfx-hd">
+          {/* The way back is on the title's row, not a row of its own: a 28px button plus its margin was 38px above the
+              title, which with a subtitle and seven tabs put the first field ~180px down the page. */}
           <div className="ph__row">
             <div className="ph__id">
               <h1 className="ph__t">Your profile</h1>
-              <p className="ph__sub">
-                Who a client sees when you invite them — and before they accept.
-              </p>
+              <p className="ph__sub">Who a client sees when you invite them.</p>
+            </div>
+            <div className="ph__acts">
+              <Button
+                href="/settings"
+                variant="ghost"
+                size="sm"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+              >
+                <span style={{ display: 'inline-flex', transform: 'rotate(180deg)' }}>
+                  <Chevron size={14} />
+                </span>
+                Settings
+              </Button>
             </div>
           </div>
 
@@ -87,7 +86,7 @@ export default async function ProfileLayout({ children }: { children: React.Reac
 
         <ProfileDraftProvider initial={identity}>
           <div className="body">
-            <Sidecar aside={<ProfileAside />} asideLabel="How clients see you">
+            <Sidecar className="pfx" aside={<ProfileAside />} asideLabel="How clients see you">
               {children}
             </Sidecar>
           </div>

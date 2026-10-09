@@ -1,5 +1,6 @@
 import { Programs } from '@/components/programs/Programs';
 import { Unavailable } from '@/components/today/Unavailable';
+import { getClientName } from '@/lib/programs/api';
 import { requireCertifiedShelf, requireShelf } from '@/lib/programs/guard';
 
 /**
@@ -41,7 +42,13 @@ import { requireCertifiedShelf, requireShelf } from '@/lib/programs/guard';
  */
 export const metadata = { title: 'My templates · Fitness · InclineYou' };
 
-export default async function Page() {
+export default async function Page({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const q = await searchParams;
+  const forClient = typeof q.client === 'string' ? q.client : null;
   const result = await requireShelf();
   if (!result.ok) {
     return (
@@ -59,10 +66,15 @@ export default async function Page() {
   const catalogue = await requireCertifiedShelf();
   const certified = catalogue.ok ? catalogue.data.certified : [];
 
+  /* Who the trainer is choosing for, by first name — read only when they arrived from a client's file. A
+     failed read is an absence: the banner then says *a client*, as it did. */
+  const forClientName = forClient ? ((await getClientName(forClient))?.split(' ')[0] ?? null) : null;
+
   return (
     <Programs
       data={result.data}
       open={null}
+      forClientName={forClientName}
       /* Ranked by how many trainers have copied it, and nothing cleverer. Three,
          because the row holds three at 1440 and a fourth is below the fold on
          the screen whose whole job is the first impression. */

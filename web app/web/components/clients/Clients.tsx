@@ -29,6 +29,8 @@ import {
   type SortKey,
 } from '@/lib/clients/roster';
 import { relativePast, rupees } from '@/lib/today/time';
+import { formatPhone } from '@/lib/auth/policy';
+import { exportRoster } from '@/lib/clients/export';
 import { TopBar } from '@/components/shell/TopBar';
 import {
   Bars,
@@ -670,9 +672,24 @@ function RowMenu({
     (row.attention ? templateForKind(row.attention.kind) : null) ??
     (row.tag === 'lapsed' ? 're_engagement' : 'check_in');
 
+  /* WHERE FOCUS GOES BACK TO. The menu moves focus to its first item on mount, so
+     whatever opened it — the ⋯ — is read DURING RENDER, before that happens. An
+     effect cannot do it: in development React runs every effect twice, and the
+     second run found the menu item already focused and remembered that. Without
+     this, closing with Escape left focus on <body> and a keyboard user re-walked
+     the page. */
+  const [returnTo] = useState<Element | null>(() =>
+    typeof document === 'undefined' ? null : document.activeElement,
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+        (returnTo as HTMLElement | null)?.focus?.();
+        return;
+      }
       const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
       if (!keys.includes(e.key) || !wrap.current) return;
       e.preventDefault();
@@ -695,7 +712,7 @@ function RowMenu({
       document.removeEventListener('keydown', onKey);
       document.removeEventListener('pointerdown', onDown);
     };
-  }, [onClose]);
+  }, [onClose, returnTo]);
 
   /* Focus follows the view. The confirm swaps the rows out from under whatever
      held it, and a menu whose focus has fallen back to `<body>` is a menu the
@@ -893,6 +910,42 @@ function RowMenu({
   );
 }
 
+/**
+ * THE ROW'S VERB, ONE COMPONENT FOR BOTH VIEWS. The desk table and the phone card
+ * each carried their own copy of this branch (the card carried none, which is why
+ * Check in / Renew / Remind could not be reached from a phone). Three message- or
+ * money-shaped bands act in place; the rest only STATE their verb as a tag, because
+ * the screen that does them is another route.
+ */
+function RowVerb({ row }: { row: RosterRow }) {
+  const a = row.attention;
+  if (!a) return null;
+  if (a.kind === 'pack' && a.packageId) return <RenewButton packageId={a.packageId} label={a.action} />;
+  const template = templateForKind(a.kind);
+  if (template) {
+    return (
+      <NudgeButton
+        clientId={row.id}
+        clientName={row.name}
+        template={template}
+        label={a.action}
+        className="btn btn--secondary btn--sm"
+      />
+    );
+  }
+  return <Tag>{a.action}</Tag>;
+}
+
+/** What an empty list says, and why — a bare "No clients match" gave no reason. */
+function emptyCopy(searching: boolean, query: string, segment: Segment, filterCount: number): string {
+  if (searching) return `Nobody on the roster matches “${query.trim()}”`;
+  if (segment !== 'all') {
+    const label = SEGMENTS.find((x) => x.key === segment)?.label ?? segment;
+    return `Nobody is in “${label}” right now. Choose All to see everyone.`;
+  }
+  return filterCount > 0 ? 'No clients match these filters.' : 'No clients match';
+}
+
 function ClientRow({
   row,
   now,
@@ -921,7 +974,31 @@ function ClientRow({
       className={trClass || undefined}
       style={{ cursor: 'pointer' }}
       onClick={() => router.push(href)}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') router.push(href); }}
+      /* ONLY WHEN THE ROW ITSELF HAS FOCUS. This handler ran for any Enter or Space
+         that bubbled up from inside the row, so pressing Enter on the ⋯ button — or
+         on Check in, Renew, Remind — opened the client's file instead of the menu
+         or the action (live-verified), and a keyboard user could not act from a row
+         at all. A key pressed on a control belongs to that control. */
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          router.push(href);
+          return;
+        }
+        /* ↑ / ↓ MOVE BETWEEN ROWS. A row is three tab stops (row, verb, ⋯), so nine
+           clients was 27 stops to reach the last one; the arrows walk the people. */
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          const rows = [
+            ...(e.currentTarget.closest('tbody')?.querySelectorAll<HTMLElement>('tr[role="link"]') ?? []),
+          ];
+          const to = rows[rows.indexOf(e.currentTarget) + (e.key === 'ArrowDown' ? 1 : -1)];
+          if (to) {
+            e.preventDefault();
+            to.focus();
+          }
+        }
+      }}
       tabIndex={0}
       role="link"
       aria-label={`Open ${row.name}'s file`}
@@ -943,9 +1020,11 @@ function ClientRow({
                 have is the Status column now. The number stays visible on every
                 row on purpose: it is half of what this screen searches. */}
             <i>
-              {row.phone ?? '—'}
-              {' · '}
-              {row.mode === 'floor' ? 'In Person' : 'Online'}
+              {row.phone ? formatPhone(row.phone) : '—'}
+              {/* In person is the default and most rows are it, so only the
+                  exception is printed: the line stays one line, which it was not
+                  (`+919876500006 · In Person` wrapped to three in a 52px row). */}
+              {row.mode !== 'floor' && ' · Online'}
             </i>
           </span>
         </span>
@@ -966,6 +1045,33 @@ function ClientRow({
           ) : (
             <span className="attn attn--calm" title={row.line}>{row.line}</span>
           ),
+        },
+        {
+          /*
+            Action column.
+
+            ── IT USED TO BE A BUTTON THAT DID NOTHING ──────────────────
+            Every row with an attention band drew `{row.attention.action}` as
+            a bare `<button>` with no handler: *Remind*, *Check in* and
+            *Renew*, live on every roster since this screen was written, and
+            none of them wired to anything. Pressing one selected the row's
+            text.
+
+            Now the three message-shaped bands send. The other three —
+            *Mark*, *Assign*, *Close* — are the trainer's own housekeeping
+            and belong on the screens that do them, so the row states the
+            verb without offering it rather than offering a second button
+            that also does nothing.
+
+            IT IS ALSO THE TRACK THAT TAKES THE BAND'S SURPLUS, which is
+            what makes `Messaged 2 days ago` fit beside its button instead
+            of under it — see §14. At 1,424px of band this cell is 354px
+            wide against the 118 it used to be pinned to.
+          */
+          key: 'act',
+          className: 'act',
+          content: <RowVerb row={row} />,
+          onClick: (e) => e.stopPropagation(),
         },
         {
           key: 'tag',
@@ -1014,46 +1120,6 @@ function ClientRow({
           content: lastAttended ?? <span className="ink3">Never</span>,
         },
         {
-          /*
-            Action column.
-
-            ── IT USED TO BE A BUTTON THAT DID NOTHING ──────────────────
-            Every row with an attention band drew `{row.attention.action}` as
-            a bare `<button>` with no handler: *Remind*, *Check in* and
-            *Renew*, live on every roster since this screen was written, and
-            none of them wired to anything. Pressing one selected the row's
-            text.
-
-            Now the three message-shaped bands send. The other three —
-            *Mark*, *Assign*, *Close* — are the trainer's own housekeeping
-            and belong on the screens that do them, so the row states the
-            verb without offering it rather than offering a second button
-            that also does nothing.
-
-            IT IS ALSO THE TRACK THAT TAKES THE BAND'S SURPLUS, which is
-            what makes `Messaged 2 days ago` fit beside its button instead
-            of under it — see §14. At 1,424px of band this cell is 354px
-            wide against the 118 it used to be pinned to.
-          */
-          key: 'act',
-          className: 'act',
-          content: row.attention &&
-            (row.attention.kind === 'pack' && row.attention.packageId ? (
-              <RenewButton packageId={row.attention.packageId} label={row.attention.action} />
-            ) : templateForKind(row.attention.kind) ? (
-              <NudgeButton
-                clientId={row.id}
-                clientName={row.name}
-                template={templateForKind(row.attention.kind)!}
-                label={row.attention.action}
-                className="btn btn--secondary btn--sm"
-              />
-            ) : (
-              <Tag>{row.attention.action}</Tag>
-            )),
-          onClick: (e) => e.stopPropagation(),
-        },
-        {
           key: 'kb',
           className: 'kb',
           style: { position: 'relative' },
@@ -1099,6 +1165,13 @@ function ClientRow({
 const ROSTER_COLUMNS: Column[] = [
   { key: 'who', label: 'Client', className: 'rst__c-who' },
   { key: 'up', label: 'What’s up', className: 'rst__c-up' },
+  /* THE VERB SITS NEXT TO THE SENTENCE THAT JUSTIFIES IT. It was the sixth column,
+     with the surplus in front of it, so at 1853px *Check in* stood ~600px from
+     "Missed the last 2 sessions" and the eye lost the row between them (MEASURED:
+     the action track was 646px of a 1514px table). The facts about the client —
+     status, pack, last attended — follow it, and the ⋯ at the far edge is the one
+     column that takes the surplus. */
+  { key: 'act', label: '', bare: true, className: 'act' },
   { key: 'tag', label: 'Status', className: 'rst__c-tag' },
   /* *Sessions left* until this pass, and the rename is what the gauge bought.
      A header only has to NAME the column when the column can be read; the cell
@@ -1114,7 +1187,6 @@ const ROSTER_COLUMNS: Column[] = [
     className: 'rst__c-left',
   },
   { key: 'last', label: 'Last attended', className: 'rst__c-last' },
-  { key: 'act', label: '', bare: true, className: 'act' },
   { key: 'kb', label: '', bare: true, className: 'kb' },
 ];
 
@@ -1137,7 +1209,7 @@ const SORT_COLUMN: Record<SortKey, string> = {
 
 /* ───────────────────────────────────────── phone card row (≤900 px) ── */
 
-function PhoneRow({ row, now }: { row: RosterRow; now: number }) {
+function PhoneRow({ row }: { row: RosterRow; now: number }) {
   const router = useRouter();
 
   const rowClass = [
@@ -1153,29 +1225,42 @@ function PhoneRow({ row, now }: { row: RosterRow; now: number }) {
 
   const pack = row.pack;
 
+  /* A CARD THAT CAN ACT. It was one `<button>` around everything, so a phone could
+     open a client's file and nothing else — Check in, Renew and Remind, the verbs
+     the desk row carries, were unreachable on the surface a trainer holds at the
+     gym. A button may not contain a button, so the card is a row of two siblings:
+     the OPEN control (avatar, name, tag, reason) and the verb column beside it.
+
+     Name and tag share a line, the reason takes two lines instead of being cut
+     ("Pack expires Wedne…" was the whole explanation of why the row exists), and
+     the gauge moves under the verb so the tag no longer jumps with whether a pack
+     exists (it sat at x=237, 247 or 301). */
+  const hasSide = Boolean(row.attention) || pack != null;
+
   return (
-    <button
-      className={rowClass}
-      type="button"
-      onClick={() => router.push(`/clients/${row.id}`)}
-      aria-label={`Open ${row.name}'s file`}
-    >
-      <Avatar name={row.name} id={row.id} size="sm" />
-      <span className="crd-row__main">
-        <b>{row.name}</b>
-        {row.line && <span>{row.line}</span>}
-      </span>
-      {/* A SIBLING of .crd-row__main, never a child: `.crd-row__main span` sets
-          display:block on every span inside it and outranks `.tag`, so a tag
-          nested in there would render as a full-width block. */}
-      <span style={{ flex: '0 0 auto' }}>
-        <StatusTag tag={row.tag} />
-      </span>
-      {/* `.crd-pk` was this card's own class, in `app.css`, at this one
-          call-site — while the DESK row four hundred lines up drew the same
-          fact as a bare `20/24`. It is `c-packgauge` now and both draw it. */}
-      {pack != null && <PackGauge remaining={pack.remaining} total={pack.total} />}
-    </button>
+    <div className={rowClass}>
+      <button
+        className="crd-row__open"
+        type="button"
+        onClick={() => router.push(`/clients/${row.id}`)}
+        aria-label={`Open ${row.name}'s file`}
+      >
+        <Avatar name={row.name} id={row.id} size="sm" />
+        <span className="crd-row__text">
+          <span className="crd-row__top">
+            <b>{row.name}</b>
+            <StatusTag tag={row.tag} />
+          </span>
+          {row.line && <span className="crd-row__line">{row.line}</span>}
+        </span>
+      </button>
+      {hasSide && (
+        <span className="crd-row__side">
+          {row.attention && <RowVerb row={row} />}
+          {pack != null && <PackGauge remaining={pack.remaining} total={pack.total} />}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -1518,7 +1603,7 @@ export function Clients({
               <>
                 {/* Desktop: Export + Add client text buttons */}
                 <div className="ph__acts ph__acts--pair crd-deskacts">
-                  <Button variant="secondary">
+                  <Button variant="secondary" onClick={() => exportRoster(visible, now)}>
                     <ExportIcon size={15} />
                     Export
                   </Button>
@@ -1584,7 +1669,7 @@ export function Clients({
             </div>
           )}
 
-          <div className="ph__tabs" style={{ gap: 7 }}>
+          <div className="ph__tabs" style={{ gap: 7 }} role="group" aria-label="Show clients">
             {SEGMENTS.map(s => {
               const count = roster.counts[s.key];
               const active = segment === s.key;
@@ -1824,14 +1909,12 @@ export function Clients({
                           whiteSpace: 'normal',
                         }}
                       >
-                        {searching
-                          ? `Nobody on the roster matches “${query.trim()}”`
-                          : 'No clients match'}
+                        {emptyCopy(searching, query, segment, fc)}
                       </td>
+                      <td className="act" />
                       <td className="rst__c-tag" />
                       <td className="rst__c-left" />
                       <td className="rst__c-last" />
-                      <td className="act" />
                       <td className="kb" />
                     </tr>
                   )}
@@ -1892,9 +1975,7 @@ export function Clients({
                           color: 'var(--tx-ink-3)',
                         }}
                       >
-                        {searching
-                          ? `Nobody on the roster matches “${query.trim()}”`
-                          : 'No clients match'}
+                        {emptyCopy(searching, query, segment, fc)}
                       </p>
                     )}
                   </div>

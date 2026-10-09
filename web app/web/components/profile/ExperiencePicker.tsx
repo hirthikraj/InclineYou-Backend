@@ -1,32 +1,21 @@
 'use client';
 
-import { Chip, ChipRow } from '@/components/setup/Chips';
+import { useRef } from 'react';
+
 import { EXPERIENCE_BANDS } from '@/lib/setup/options';
 
 /**
- * THE EXPERIENCE PICKER — five chips, one answer.
+ * How long a trainer has been coaching — ONE of five bands.
  *
- * One component, two callers: setup step 2 (`ExperienceForm`) and the
- * Experience tab of `/settings/profile`. Extracted for the reason
- * `CertificationPicker` was — a trainer editing an answer later must not meet a
- * second, subtly different version of the screen that collected it.
+ * It was five `aria-pressed` chips, which is the grammar of independent toggles: a
+ * screen reader heard "button, not pressed" five times and never *one of five*, the
+ * arrow keys did nothing, and the whole decision on the screen was drawn at the
+ * smallest size on it. It is a labelled radio group now, drawn as option cards (the
+ * Packages panel's `pkx-o`, so a trainer meets one way of choosing between a few
+ * things): one tab stop, the arrow keys move AND choose, as a radio group does, and
+ * the picked card says so with a tick as well as a stroke.
  *
- * **Experience is a band, not a number.** There is no dominant value so a
- * stepper is wrong; nothing changes visibly as you drag so a slider is wrong;
- * and a free field invites `0.5` and `50` and needs validation for a value you
- * would bucket anyway. Stored as one of five bands it also stays true next year
- * without anybody editing it — which matters more on the profile than in setup,
- * because the profile is where a stale number would sit for years.
- *
- * **The click selects; it does not save.** Setup writes on Continue, the
- * profile writes on Save. This used to write and navigate on the click itself
- * and that was wrong for a reason worth keeping written down: *a trainer who
- * mis-clicked has no way to see they did before the page has gone.*
- *
- * `value` is `null`/`''` for never answered, which on the profile is a real
- * state — the phone can finish setup with this step skipped in ways this half
- * cannot, and a screen that pre-selected a band to avoid drawing an empty row
- * would be answering the question for them.
+ * Shared by setup step 3 and Settings, deliberately — see `CertificationPicker`.
  */
 export function ExperiencePicker({
   value,
@@ -35,20 +24,50 @@ export function ExperiencePicker({
 }: {
   value: string | null;
   onChange: (id: string) => void;
-  /** A write is in flight. */
   disabled?: boolean;
 }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const n = EXPERIENCE_BANDS.length;
+  const current = EXPERIENCE_BANDS.findIndex((b) => b.id === value);
+
+  function move(to: number) {
+    const i = (to + n) % n;
+    onChange(EXPERIENCE_BANDS[i].id);
+    refs.current[i]?.focus();
+  }
+
   return (
-    <ChipRow>
-      {EXPERIENCE_BANDS.map((band) => (
-        <Chip
-          key={band.id}
-          label={band.label}
-          pressed={value === band.id}
-          disabled={disabled}
-          onClick={() => onChange(band.id)}
-        />
-      ))}
-    </ChipRow>
+    <div
+      className="xpk"
+      role="radiogroup"
+      aria-label="How long you have been coaching"
+      onKeyDown={(e) => {
+        const at = current < 0 ? 0 : current;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') { e.preventDefault(); move(at + 1); }
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') { e.preventDefault(); move(current < 0 ? n - 1 : at - 1); }
+        else if (e.key === 'Home') { e.preventDefault(); move(0); }
+        else if (e.key === 'End') { e.preventDefault(); move(n - 1); }
+      }}
+    >
+      {EXPERIENCE_BANDS.map((band, i) => {
+        const on = value === band.id;
+        return (
+          <button
+            key={band.id}
+            ref={(el) => { refs.current[i] = el; }}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            /* a radio group is ONE tab stop: the chosen card, or the first when none is chosen */
+            tabIndex={on || (current < 0 && i === 0) ? 0 : -1}
+            className="pkx-o xpk__o"
+            disabled={disabled}
+            onClick={() => onChange(band.id)}
+          >
+            <b>{band.label}</b>
+          </button>
+        );
+      })}
+    </div>
   );
 }

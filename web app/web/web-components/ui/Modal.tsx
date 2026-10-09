@@ -160,7 +160,11 @@ export function useEscapeGuard(open: boolean) {
     const token = Symbol('popover');
     guards.add(token);
     return () => {
-      guards.delete(token);
+      /* RELEASED A TICK LATE. A popup that closes on this very keypress is unmounted (and its guard dropped) between two
+         capture listeners if React flushes in between — and a host that re-registers its listener each render (the
+         workout builder's `onClose` is inline) runs AFTER the popup's. It then saw no guard, and one Escape closed the
+         menu AND opened *Close without saving?*. Deferring the delete lets the same key event still see it. */
+      setTimeout(() => guards.delete(token), 0);
     };
   }, [open]);
 }

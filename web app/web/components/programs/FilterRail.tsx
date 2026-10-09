@@ -178,6 +178,8 @@ export function FilterRail({
      one place where a group is declared. */
   const groups = (
     <>
+      {/* Four templates are four different goals: every chip counts 1 and filters nothing. */}
+      {rows.length >= 8 && (
       <Group label="Goal">
         {GOALS.map(g => {
           if (inCatalogue(r => r.goalKey === g.key) === 0) return null;
@@ -193,6 +195,7 @@ export function FilterRail({
           );
         })}
       </Group>
+      )}
 
       {/* THE LABEL STAYS A BARE NUMBER AND THE DISAMBIGUATION IS THE ARIA NAME.
           `3 days` reads better in a pill beside a `.chip__n` — and MEASURED in
@@ -400,18 +403,23 @@ export function FilterRail({
     </>
   );
 
-  if (collapsed) {
-    return (
-      <div className="split__l cert__l split__l--min">
+  /* ONE ELEMENT, FOLDED OR NOT. The fold used to return two different trees (the column, or a spine), so the track
+     width snapped and the contents were swapped under it. Both stay mounted now: the track animates 276 -> 44px
+     (`--w-list`), the filters cross-fade out while the spine fades in. Under 900px the column is the phone's bar and
+     none of this applies. */
+  return (
+    <div className={collapsed ? 'split__l cert__l split__l--min' : 'split__l cert__l'}>
         <button
           className={active > 0 ? 'pgspine pgspine--on' : 'pgspine'}
           type="button"
+          tabIndex={collapsed ? 0 : -1}
+          aria-hidden={collapsed ? undefined : true}
           aria-label={
             active > 0
               ? `Show filters — ${active} in use: ${describeFilter(filter).join(', ')}`
               : 'Show filters'
           }
-          aria-expanded="false"
+          aria-expanded={!collapsed}
           onClick={toggleCollapsed}
         >
           <span className="pgspine__i">
@@ -421,21 +429,7 @@ export function FilterRail({
             Filters{active > 0 && <b>{active}</b>}
           </span>
         </button>
-
-        {/* The phone's bar, which the spine is not. See `filterButton`. */}
-        <div className="split__hd">
-          <div className="pgsh__q">
-            {search}
-            {filterButton}
-          </div>
-        </div>
-        {theSheet}
-      </div>
-    );
-  }
-
-  return (
-    <div className="split__l cert__l">
+      <div className="cert__inner">
       <div className="split__hd">
         <div className="pgsh__q">
           {search}
@@ -465,6 +459,7 @@ export function FilterRail({
       {!filterIsEmpty(filter) && (
         <div className="cert__railfoot">{clearAll}</div>
       )}
+      </div>
       {theSheet}
     </div>
   );

@@ -335,6 +335,15 @@ function clientOf(c: ClientSummaryWire): ClientWire {
   };
 }
 
+/** One client's name, for a banner that says who a plan is for. Null on any failure: the banner then says *a client*. */
+export async function getClientName(id: string): Promise<string | null> {
+  try {
+    return (await get<{ name?: string }>(`/v1/clients/${encodeURIComponent(id)}`))?.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function clients(): Promise<ClientWire[]> {
   return (await items<ClientSummaryWire>('/v1/clients?view=summary')).map(clientOf);
 }

@@ -58,6 +58,7 @@ import { SearchFieldEntry } from './forms/SearchField.entry';
 import { SearchSelectEntry } from './forms/SearchSelect.entry';
 import { SelectEntry } from './forms/Select.entry';
 import { SwitchEntry } from './forms/Switch.entry';
+import { DateFieldEntry } from './forms/DateField.entry';
 import { MarkupFieldEntry } from './forms/MarkupField.entry';
 import { TextareaEntry } from './forms/Textarea.entry';
 import { ActionBarEntry } from './nav/ActionBar.entry';
@@ -110,6 +111,7 @@ export const ENTRY_VIEWS: Record<string, () => ReactNode> = {
   'c-choicelist': ChoiceListEntry,
   'c-scale': ScaleEntry,
   'c-switch': SwitchEntry,
+  'c-datefield': DateFieldEntry,
   'c-search': SearchFieldEntry,
   'c-formgroup': FormGroupEntry,
 

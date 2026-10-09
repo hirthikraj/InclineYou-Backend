@@ -231,7 +231,7 @@ export function IdentityForm({ initial }: { initial: Identity }) {
           id="pf-bio"
         >
           {(a) => (
-            <textarea className="ctl" {...a} rows={8} value={bio} maxLength={MAX_BIO} disabled={pending} placeholder={BIO_PLACEHOLDER} onChange={(e) => {
+            <textarea className="ctl pfx-bio" {...a} rows={5} value={bio} maxLength={MAX_BIO} disabled={pending} placeholder={BIO_PLACEHOLDER} onChange={(e) => {
               setBio(e.target.value);
               if (message) setMessage(null);
             }} />
@@ -272,7 +272,9 @@ export function IdentityForm({ initial }: { initial: Identity }) {
         />
       </FormGroup>
 
-      <MessageSlot message={message} />
+      {/* Only while a message is possible: Save is drawn while `dirty || pending`, and a message can only follow it. At rest the
+          reserved slot was 38px of empty space between the last field and the note. */}
+      {dirty || pending || message ? <MessageSlot message={message} /> : null}
 
       <SaveRow pending={pending} dirty={dirty} note="Clients see this before they accept an invite." />
     </form>
@@ -326,8 +328,8 @@ export function SaveRow({
 }: {
   pending: boolean;
   dirty: boolean;
-  /** What is at stake, when nothing is unsaved. */
-  note: string;
+  /** What is at stake, when nothing is unsaved. Omit it where the card already says it: an empty row draws nothing. */
+  note?: string;
   /**
    * Replaces the default *Unsaved changes* line. One caller passes it: the Work
    * & hours tab, whose single Save writes two different records, so the line
@@ -338,6 +340,7 @@ export function SaveRow({
   // Kept while a write is in flight even though `dirty` has usually gone false
   // by then — the row must not vanish out from under the "Saving…" it is showing.
   if (!dirty && !pending) {
+    if (!note) return null;
     return (
       <p className="small" style={{ marginTop: 16 }}>
         {note}
@@ -364,6 +367,32 @@ export function SaveRow({
 }
 
 /** The same inline marker `PackSheet` and the setup name step use. */
+/**
+ * A save bar that is always in reach. On Work & hours the Save row was at the very end of a 1,570px page (2,900px on a phone),
+ * so a trainer who changed a day saw neither Save nor any sign that something was unsaved until they scrolled to the end — and
+ * a confirmation that lands there lands off-screen. This sticks to the foot of the scroller while there is anything to say
+ * (unsaved, saving, or a result) and draws nothing at rest, so the resting page has no row to be orphaned.
+ */
+export function SavePin({
+  pending,
+  dirty,
+  message,
+  unsaved,
+}: {
+  pending: boolean;
+  dirty: boolean;
+  message: Message | null;
+  unsaved?: React.ReactNode;
+}) {
+  if (!dirty && !pending && !message) return null;
+  return (
+    <div className="pfx-pin">
+      {message ? <MessageSlot message={message} /> : null}
+      {dirty || pending ? <SaveRow pending={pending} dirty={dirty} unsaved={unsaved} /> : null}
+    </div>
+  );
+}
+
 function Optional() {
   return <span style={{ fontWeight: 400, color: 'var(--tx-ink-3)' }}>optional</span>;
 }

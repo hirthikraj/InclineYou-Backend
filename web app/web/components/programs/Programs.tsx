@@ -22,6 +22,7 @@ import { Shelf } from './Shelf';
 import { PageTabs } from '@/components/shell/PageTabs';
 import { SubTabs } from '@/web-components/ui/SubTabs';
 import { programsTabs, templateTabs } from '@/lib/programs/tabs';
+import { useForClient, withClient } from '@/lib/programs/for-client';
 import { Button } from '@/web-components/ui/Button';
 import { Chip } from '@/web-components/ui/Chip';
 import { TextField } from '@/web-components/ui/Field';
@@ -57,6 +58,7 @@ export function Programs({
   recommended = [],
   certifiedCount,
   now,
+  forClientName = null,
 }: {
   data: ShelfData;
   /** The template being built, when the URL names one. */
@@ -69,8 +71,11 @@ export function Programs({
   /** The server's clock, for *edited today*. `Shelf`'s `now` prop says why it
    *  cannot be read during render. */
   now: number;
+  /** The client being chosen for, by first name (`?client=`), when the page knows it. */
+  forClientName?: string | null;
 }) {
   const [creating, setCreating] = useState(false);
+  const forClient = useForClient();
   /* THE LIST'S QUERY, HELD HERE because the FIELD is drawn here — on the tab
      strip's row rather than inside the list's own header. `Shelf` takes it as
      `search` and then draws no field of its own; see that prop's note. It is
@@ -140,6 +145,19 @@ export function Programs({
       />
 
       <main className="main body--flush pg" id="main-content">
+        {/* COMING FROM A CLIENT'S PLAN: said once, with the way back. The page used to open on the shelf
+            with no mention of who the plan was for. */}
+        {forClient && (
+          <p className="pg__for" role="status">
+            <span>
+              Choosing a plan for {forClientName ?? 'a client'}. Open a template and it is ready to assign
+              {forClientName ? ` to ${forClientName}` : ''}.
+            </span>
+            <Button href={`/clients/${forClient}/program`} variant="ghost" size="sm">
+              Back to their plan
+            </Button>
+          </p>
+        )}
         {open ? (
           <Builder
             template={open.template}
@@ -229,7 +247,7 @@ export function Programs({
                     `search` and then draws neither, which is the whole of that
                     prop's contract. It stays on `/programs` only — the pane and
                     the sheet have no strip to sit on and keep their own. */}
-                <label className="search pgtabs__q">
+                <label className="search pgtabs__q pgtabs__q--desk">
                   <SearchIcon />
                   <input
                     type="search"
@@ -263,8 +281,26 @@ export function Programs({
             <SubTabs
               label="Template shelves"
               current="mine"
-              tabs={templateTabs('mine', { certified: certifiedCount ?? null })}
+              tabs={templateTabs('mine', { certified: certifiedCount ?? null }).map((t) => ({
+                ...t,
+                href: withClient(t.href, forClient),
+              }))}
             />
+
+            {/* THE SAME FIELD, BELOW THE SHELF SWITCH, FOR A PHONE. The certified shelf reads *pick the shelf, then search
+                it*; here the field sat above the pills. Both are drawn and CSS shows one, so the order matches at every width. */}
+            <div className="pg__qphone">
+              <label className="search pgtabs__q">
+                <SearchIcon />
+                <input
+                  type="search"
+                  placeholder="Search your templates"
+                  aria-label="Search your templates"
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                />
+              </label>
+            </div>
 
             {/* NO `.split` HERE ANY MORE. The pane it held was 70% of the
                 working area saying one sentence, and the sentence was an
@@ -276,6 +312,7 @@ export function Programs({
               onNew={() => setCreating(true)}
               now={now}
               search={{ query, onQuery: setQuery }}
+              forClientName={forClientName}
             />
           </>
         )}
@@ -506,7 +543,7 @@ function choiceOption(c: StartChoice) {
  */
 function NewProgram({
   templates,
-  onClose,
+  onClose: closeNow,
 }: {
   /** The trainer's own shelf, for the *Start from* list. Already in the
    *  browser — the screen is holding it to draw the list behind this dialog,
@@ -537,6 +574,14 @@ function NewProgram({
      templates replaces what a template wrote and never what the trainer
      typed. Without it, picking a second template silently discards a
      description somebody was half-way through. */
+  /* THE EXIT: the dialog plays its leave transition, then unmounts. Skipped under reduced motion. */
+  const [leaving, setLeaving] = useState(false);
+  const onClose = () => {
+    if (leaving) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return closeNow();
+    setLeaving(true);
+    window.setTimeout(closeNow, 180);
+  };
   const [seed, setSeed] = useState({ name: '', description: '', goal: '' });
 
   const own: StartChoice[] = templates.map(t => ({
@@ -605,7 +650,7 @@ function NewProgram({
   async function submit() {
     if (busy) return;
     if (!name.trim()) {
-      setNameError('Give this program a name.');
+      setNameError('Give this template a name.');
       document.getElementById('np-name')?.focus();
       return;
     }
@@ -646,7 +691,7 @@ function NewProgram({
             {from.exercises === 1 ? '' : 's'}. The original is untouched.
           </>
         ) : (
-          <>It is on your shelf. Nobody is on it yet.</>
+          <>It is on your shelf. Not used yet.</>
         ),
       });
       router.push(`/programs/${result.value.id}`);
@@ -685,7 +730,7 @@ function NewProgram({
       initialFocus="#np-name"
       covered={pickerOpen}
     >
-      <div className="pg__dialog" role="dialog" aria-modal="true" aria-label="New template">
+      <div className="pg__dialog" data-leaving={leaving ? '' : undefined} role="dialog" aria-modal="true" aria-label="New template">
         <DockPanel.Head
           className="pg__newhd"
           title="New template"
@@ -713,8 +758,8 @@ function NewProgram({
               truncates wherever it likes. */}
           <SearchSelect
             label="Start from"
-            searchLabel="Search your programs and templates"
-            noun="programs"
+            searchLabel="Search templates"
+            noun="templates"
             placeholder="An empty template"
             value={fromId}
             onChange={chooseFrom}
@@ -726,13 +771,13 @@ function NewProgram({
             options={[
               {
                 value: '',
-                label: 'An empty program',
+                label: 'An empty template',
                 meta: 'Days and weeks are yours to set. Nothing in it yet.',
                 keywords: 'empty blank scratch new nothing',
               },
             ]}
             groups={[
-              { label: 'Your programs', options: own.map(choiceOption) },
+              { label: 'Your templates', options: own.map(choiceOption) },
               { label: 'InclineYou templates', options: catalogue.map(choiceOption) },
             ]}
             hint={
@@ -888,9 +933,9 @@ function NewProgram({
             <span className="pg__newprevk">On your shelf</span>
             <div className="pg__newprevrow">
               <span className="pg__newprevm">
-                <b>{name.trim() || 'Untitled program'}</b>
+                <b>{name.trim() || 'Untitled template'}</b>
                 <span>
-                  Nobody on this yet · {shownDays} day{shownDays === 1 ? '' : 's'} a week
+                  Not used yet · {shownDays} day{shownDays === 1 ? '' : 's'} a week
                   {goal ? ` · ${goal}` : description.trim() ? ` · ${description.trim()}` : ''}
                 </span>
               </span>

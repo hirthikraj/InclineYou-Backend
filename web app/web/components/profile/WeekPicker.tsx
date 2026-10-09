@@ -67,16 +67,22 @@ export function WeekPicker({
   value,
   onChange,
   disabled = false,
+  fitRibbon = false,
 }: {
   value: Week;
   onChange: (next: Week) => void;
   /** A write is in flight. See `Chips.tsx` on why this is `disabled` and not `dimmed`. */
   disabled?: boolean;
+  /** Scale the day ribbon to the width it has (Settings) instead of the fixed band setup uses. */
+  fitRibbon?: boolean;
 }) {
   const { days, windows } = value;
   const merged = mergeWindows(windows);
   const tooShort = weekProblem(value) === 'too-short';
   const perDay = minutesPerDay(windows);
+  const custom = windows.filter(
+    (w) => !WINDOW_PRESETS.some((p) => p.window.startMinute === w.startMinute && p.window.endMinute === w.endMinute),
+  );
 
   const setDays = (next: number[]) => onChange({ days: next, windows });
   const setWindows = (next: HourWindow[]) => onChange({ days, windows: next });
@@ -138,6 +144,15 @@ export function WeekPicker({
           />
         ))}
       </ChipRow>
+
+      {/* A window that is none of the presets is not lit by any of them, and the row said nothing — so a day of 5–10pm read as
+          *no evening set*. Say so, once, where the trainer is looking. */}
+      {custom.length > 0 ? (
+        <p className="small" style={{ marginTop: 8 }}>
+          {custom.length === 1 ? 'One window is' : `${custom.length} windows are`} custom, set below, so no preset above is lit for{' '}
+          {custom.length === 1 ? 'it' : 'them'}.
+        </p>
+      ) : null}
 
       {/* MEASURED BUG, FIXED — and kept here because this is now the only copy.
           Each window used to be a `.fld` at a fixed `width:190`, holding two
@@ -201,8 +216,8 @@ export function WeekPicker({
         </Button>
       </div>
 
-      <GroupLabel>EVERY DAY YOU PICKED, AT ONE PIXEL PER MINUTE</GroupLabel>
-      <DayRibbon days={days} windows={windows} />
+      <GroupLabel>{fitRibbon ? 'YOUR DAY AT A GLANCE' : 'EVERY DAY YOU PICKED, AT ONE PIXEL PER MINUTE'}</GroupLabel>
+      <DayRibbon days={days} windows={windows} fit={fitRibbon} />
 
       <div className="row" style={{ gap: 20, marginTop: 18, flexWrap: 'wrap' }}>
         <span className="small">

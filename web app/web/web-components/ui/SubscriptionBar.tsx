@@ -90,7 +90,7 @@ export function SubscriptionBar({
       aria-label={label}
     >
       <div className="subbar__id">
-        <span className="subbar__nm">{name}</span>
+        <span className="subbar__nm" title={typeof name === 'string' ? name : undefined}>{name}</span>
         {status}
       </div>
       {facts.map((f, i) => (

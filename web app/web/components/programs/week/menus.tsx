@@ -23,6 +23,10 @@ import {
  * §13.4 is written against.
  */
 export interface DayActions {
+  /** Open a workout in the workout builder. The PHONE's way in: the desk opens it by clicking the container, which a phone's day
+   *  screen does not draw. Offered through the day menu so a program's day is written in the same builder, in the same
+   *  layout, as a workout template. */
+  onEditWorkout?: (workoutId: string) => void;
   onOpenRow?: (entry: Entry) => void;
   onInfoRow?: (entry: Entry) => void;
   onNudge?: (entry: Entry, direction: -1 | 1) => void;
@@ -359,10 +363,13 @@ export function DayMenuItems({
   day,
   actions,
   close,
+  workouts = [],
 }: {
   day: number;
   actions: DayActions;
   close: () => void;
+  /** The workouts on this day, for *Edit workout*. Empty draws nothing. */
+  workouts?: { id: string; name: string }[];
 }) {
   const run = (fn?: (d: number) => void) => (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -400,6 +407,23 @@ export function DayMenuItems({
             ))}
         </>
       )}
+      {/* With the day's tap already opening the builder (`onList` is set), one workout needs no menu row of its own; several do. */}
+      {actions.onEditWorkout &&
+        workouts.map(w => (
+          <button
+            key={w.id}
+            className="menu__i"
+            role="menuitem"
+            type="button"
+            onClick={e => {
+              e.stopPropagation();
+              close();
+              actions.onEditWorkout?.(w.id);
+            }}
+          >
+            {workouts.length > 1 ? `Edit ${w.name || 'workout'}` : 'Edit as a workout'}
+          </button>
+        ))}
       {(actions.onClearDay || actions.onMakeRest || actions.onRemoveDay) && (
         <div className="menu__sep" />
       )}

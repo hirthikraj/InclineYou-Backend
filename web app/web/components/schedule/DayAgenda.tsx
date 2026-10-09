@@ -5,6 +5,8 @@ import { gridStart } from '@/lib/schedule/view';
 import type { ScheduleGrid, Placed } from '@/lib/schedule/grid';
 import type { Gap } from '@/lib/today/day';
 import { Button } from '@/web-components/ui/Button';
+import { Check } from '@/components/shell/Icons';
+import { Cross } from './Icons';
 
 /** 0 = Monday … 6 = Sunday — matches `working_hours.weekday` convention. */
 const DAY_SHORT = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -217,7 +219,15 @@ export function DayAgenda({
                     {initials(session.clientName)}
                   </span>
                   <span className="dag__main">
-                    <b>{session.clientName}</b>
+                    <b>
+                      {session.clientName}
+                      {status && (
+                        <i className={`dag__st dag__st--${status}`}>
+                          {status === 'done' ? <Check size={12} /> : <Cross size={12} />}
+                          {status === 'done' ? 'Done' : 'No-show'}
+                        </i>
+                      )}
+                    </b>
                     <span>{session.programName ?? `${session.minutes} min`}</span>
                   </span>
                   <span className={`dag__tag dag__tag--${session.mode}`} aria-hidden="true">

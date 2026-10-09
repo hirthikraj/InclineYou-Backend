@@ -7,12 +7,12 @@ import {
   CERTIFICATIONS,
   EXPERIENCE_BANDS,
   LANGUAGES,
+  LANGUAGES_ON_CARD,
   NOT_CERTIFIED,
   SPECIALITIES,
   labelFor,
   labelList,
 } from '@/lib/setup/options';
-import { Card } from '@/web-components/ui/Card';
 import { Chip } from '@/web-components/ui/Chip';
 import { ProfileCard } from '@/web-components/ui/ProfileCard';
 
@@ -44,7 +44,7 @@ export function ProfileAside() {
   if (!d) return null;
 
   const band = EXPERIENCE_BANDS.find((b) => b.id === d.experienceBand)?.label ?? '';
-  const meta = [band, d.languages.length > 0 ? labelList(d.languages, LANGUAGES, 4) : '']
+  const meta = [band, d.languages.length > 0 ? labelList(d.languages, LANGUAGES, LANGUAGES_ON_CARD) : '']
     .filter(Boolean)
     .join(' · ');
 
@@ -89,46 +89,43 @@ export function ProfileAside() {
         meta={meta}
         specialities={d.specialities.map((id) => labelFor(id, SPECIALITIES))}
         credentials={credentials}
-        credentialNote="Self-declared"
+        credentialNote="Credentials are self-declared"
         noCredentials={
           declaredNone ? 'No certifications listed — which plenty of excellent trainers don’t have.' : null
         }
         work={[how, where].filter(Boolean).join(' — ')}
         socials={socials}
-      />
-
-      <p className="small">Your initials stand in until profile photos arrive.</p>
-
-      {empty.length > 0 ? (
-        <Card
-          title={
-            empty.length === 1
-              ? 'One section is still empty'
-              : `${COUNT_WORD[empty.length] ?? empty.length} sections are still empty`
-          }
-        >
-          <p className="small">Nothing here is required. A client simply sees less of you.</p>
-          {/* Chips, and chips that NAVIGATE — `Chip` renders a `next/link` when
-              it is given an href, so each is a real 28px target rather than a
-              14px inline link. A wrapped row rather than a list of rows is what
-              keeps the card's height bounded: seven of these is three lines,
-              and seven rows was 979px of sticky column in a 454px window. See
-              `lib/profile/completeness.ts`. */}
-          <div className="row row--wrap mt2">
-            {empty.map((s) => (
-              <Chip key={s.key} href={s.href}>
-                {s.label}
-              </Chip>
-            ))}
-          </div>
-        </Card>
-      ) : null}
+      >
+        {/* ONE CARD, NOT THREE THINGS. The caption used to float between two cards belonging to neither, and the list of
+            empty sections was a second card under the first. Both are facts ABOUT this preview, so they sit at its foot. */}
+        <div className="pfx-foot">
+          <p className="small">Your initials stand in until profile photos arrive.</p>
+          {empty.length > 0 ? (
+            <>
+              <p className="pfx-foot__h">
+                {empty.length === 1
+                  ? 'One section is still empty'
+                  : `${COUNT_WORD[empty.length] ?? empty.length} sections are still empty`}
+              </p>
+              <p className="small">Nothing here is required. A client simply sees less of you.</p>
+              {/* Chips that NAVIGATE: `Chip` renders a `next/link` when given an href, so each is a real target. A wrapped
+                  row keeps the card's height bounded (seven of these is three lines; seven rows was 979px of sticky
+                  column in a 454px window). See `lib/profile/completeness.ts`. */}
+              <div className="row row--wrap mt2">
+                {empty.map((s) => (
+                  <Chip key={s.key} href={s.href}>
+                    {s.label}
+                  </Chip>
+                ))}
+              </div>
+            </>
+          ) : null}
+        </div>
+      </ProfileCard>
     </>
   );
 }
 
-/** Two through seven, because *3 sections are still empty* is a heading with a
- *  figure in it and nothing here is a quantity worth counting. */
 const COUNT_WORD: Record<number, string> = {
   2: 'Two',
   3: 'Three',

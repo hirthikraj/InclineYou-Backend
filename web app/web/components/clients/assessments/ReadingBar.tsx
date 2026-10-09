@@ -68,6 +68,7 @@ export function ReadingBar({
   note,
   mark: flag,
   className,
+  quiet = false,
 }: {
   /** The measurement's name on the Summary; the check-in's date on the record. */
   label: string;
@@ -93,6 +94,8 @@ export function ReadingBar({
   /** Lights the row: the check-in being read, or the one chosen to compare. */
   mark?: 'here' | 'there';
   className?: string;
+  /** Say nothing under a row with no bar: the screen has already said once that this is the first reading. */
+  quiet?: boolean;
 }) {
   const span = track === null ? 0 : track.high - track.low;
   const step = from === null ? null : Math.round((value - from) * 10) / 10;
@@ -152,7 +155,7 @@ export function ReadingBar({
             </div>
           )}
         </>
-      ) : (
+      ) : quiet && (track === null || track.n < 2) ? null : (
         <p className="asmv__barf asmv__barf--one">
           {track === null || track.n < 2
             ? 'The first reading on record'

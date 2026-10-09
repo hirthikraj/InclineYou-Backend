@@ -77,6 +77,7 @@ export function ProgramRow({
   weeks,
   goal,
   edited,
+  editedLabel = 'edited ',
   certified,
   select,
   actions,
@@ -134,6 +135,8 @@ export function ProgramRow({
   goal?: string | null;
   /** Already relative-formatted against the server's clock — see above. */
   edited: string;
+  /** The small word before the last column's value. `''` where the value says what it is (*Week 3 of 8*). */
+  editedLabel?: string;
   /** Copied from the certified shelf. Provenance, and it is permanent. */
   certified?: boolean;
   /**
@@ -179,6 +182,8 @@ export function ProgramRow({
         {sub && <span className="ptrow__sub">{sub}</span>}
       </span>
 
+      {/* The link's accessible name is its text, and the spans ran together (*Day 33 days a week8 weeks*). */}
+      <span className="vh">. </span>
       <span
         className="ptrow__sh"
         /* THE STRIP IS NOT SELF-EXPLANATORY AND NEVER WAS. Seven cells with
@@ -228,7 +233,7 @@ export function ProgramRow({
             ) : clients === 0 ? (
               <>
                 <b className="ptrow__none">&mdash;</b>
-                <span className="ptrow__k"> nobody on this yet</span>
+                <span className="ptrow__k"> not used yet</span>
               </>
             ) : (
               <>
@@ -249,7 +254,7 @@ export function ProgramRow({
         <span className="ptrow__g">{goal ?? ''}</span>
 
         <span className="ptrow__e">
-          <span className="ptrow__k">edited </span>
+          {editedLabel && <span className="ptrow__k">{editedLabel}</span>}
           {edited}
         </span>
       </span>
@@ -311,8 +316,18 @@ export function ProgramRowHead({
    *  `client` prop. The word is the only thing that changes; the track does
    *  not, which is the point of that prop. */
   client,
-}: { pickable?: boolean; actionable?: boolean; client?: boolean } = {}) {
-  const cls = ['ptrow', 'ptrow--hd', pickable ? 'ptrow--pick' : '', actionable ? 'ptrow--act' : '']
+  lastHead = 'Edited',
+  className,
+}: {
+  pickable?: boolean;
+  actionable?: boolean;
+  client?: boolean;
+  /** The last column's name — *Progress* on the list of what clients are on. */
+  lastHead?: string;
+  /** The row's own modifiers (`ptrow--cp`, `ptrow--nog`), so the head's tracks match the rows under it. */
+  className?: string;
+} = {}) {
+  const cls = ['ptrow', 'ptrow--hd', pickable ? 'ptrow--pick' : '', actionable ? 'ptrow--act' : '', className]
     .filter(Boolean)
     .join(' ');
 
@@ -324,7 +339,7 @@ export function ProgramRowHead({
       <span>Weeks</span>
       <span>{client ? 'Client' : 'Clients'}</span>
       <span>Goal</span>
-      <span>Edited</span>
+      <span>{lastHead}</span>
     </div>
   );
 }

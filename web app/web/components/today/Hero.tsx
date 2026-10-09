@@ -418,7 +418,10 @@ function Next({
       nameHref={`/sessions/${session.id}`}
       detail={<>{session.detail}<i>{formatSpan(session.minutes)}</i></>}
       chips={chips}
-      band={band}
+      /* The free-slot band is ONE sentence about the day, so it is said once, on
+         the lead card. Both cards drew it verbatim at 1853px, a full row of height
+         twice for one fact. */
+      band={after ? undefined : band}
       /*
        * ONE PRIMARY BUTTON, AND IT IS ALWAYS *START SESSION*.
        *
@@ -458,6 +461,7 @@ function Next({
               clientId={session.clientId}
               clientName={session.clientName}
               template="session_reminder"
+              label="Ask to confirm"
               className="btn btn--sm btn--ghost"
               showContactedNote={false}
             />
@@ -564,6 +568,7 @@ function Tomorrow({
             clientId={session.clientId}
             clientName={session.clientName}
             template="session_reminder"
+            label="Ask to confirm"
             className="btn btn--sm btn--ghost"
             showContactedNote={false}
           />

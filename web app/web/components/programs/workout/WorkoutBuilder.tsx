@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from 'react';
 
 import type { ExerciseWire } from '@/lib/exercises/api';
 import type { WorkoutTemplateWire } from '@/lib/workouts/api';
@@ -39,17 +39,19 @@ import {
   unchainExercise,
   type Draft,
   type DraftDivider,
+  type DraftExercise,
   type DraftSet,
 } from '@/lib/workouts/draft';
 import { durationLabel, estimateKcal, estimateMinutes, kcalLabel, restLabel } from '@/lib/workouts/estimate';
 import { Button } from '@/web-components/ui/Button';
-import { Modal, ModalHost } from '@/web-components/ui/Modal';
+import { Modal, ModalHost, useEscapeGuard } from '@/web-components/ui/Modal';
 import { AltPanel, type AltActions } from './AltPanel';
 import { ExerciseCard, type CardActions } from './ExerciseCard';
+import type { SheetPosition } from './ExerciseSheet';
 import { LibraryPane } from './LibraryPane';
 import { NoteDialog } from './NoteDialog';
 import { ClockIcon, DumbbellIcon, FlameIcon, Grip, RedoIcon, SlidersIcon, UndoIcon } from './Icons';
-import { TrashIcon } from '../Icons';
+import { PlusIcon, TrashIcon } from '../Icons';
 import {
   DIVIDER_MIME,
   carriesCard,
@@ -240,6 +242,11 @@ export function WorkoutBuilder({
   const [drop, setDrop] = useState<DropTarget | null>(null);
 
   const [noteOpen, setNoteOpen] = useState(Boolean(initial?.notes));
+  /* THE PHONE'S LIBRARY IS A SHEET over the workout, opened from the pinned *Add exercise* bar and left open while a
+     trainer adds several in a row. `added` counts this visit so *Done* can say what it did, and so *Undo* is one press
+     away without closing the sheet. Above 900px neither exists: the library is the column beside the canvas. */
+  const [libOpen, setLibOpen] = useState(false);
+  const [added, setAdded] = useState(0);
   /* `'discard'` is the close confirm; `'delete'` is the destructive one. One
      piece of state, because the two are the same rung of the Escape ladder and
      two booleans could both be true. */
@@ -254,6 +261,40 @@ export function WorkoutBuilder({
   const [alting, setAlting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, start] = useTransition();
+
+  const addBarBtn = useRef<HTMLButtonElement>(null);
+  const doneBtn = useRef<HTMLButtonElement>(null);
+  /* Focus goes to *Done* when the sheet opens (not the search box: that raises the keyboard over the list before the trainer
+     has chosen to type) and returns to the bar's button when it closes. The sheet is a phone layout, so growing the window past
+     900px puts it away rather than leaving the canvas inert behind a sheet that no longer exists. */
+  useEffect(() => {
+    if (!libOpen) return;
+    /* `preventScroll`: the sheet is still below the screen when this runs, and focusing an off-screen control makes the browser
+       scroll the nearest scroller to reveal it — here the dialog itself (it moved 446px), shifting the whole workout up while the
+       sheet slid into the wrong place. */
+    doneBtn.current?.focus({ preventScroll: true });
+    const back = addBarBtn.current;
+    const m = window.matchMedia('(max-width: 900px)');
+    const wide = () => {
+      if (!m.matches) setLibOpen(false);
+    };
+    m.addEventListener('change', wide);
+    return () => {
+      m.removeEventListener('change', wide);
+      back?.focus({ preventScroll: true });
+    };
+  }, [libOpen]);
+
+  /* Escape puts the sheet away first, and holds the key from the builder's own ladder while it is up (trap 49). */
+  useEscapeGuard(libOpen);
+  useEffect(() => {
+    if (!libOpen) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setLibOpen(false);
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [libOpen]);
 
   const canvas = useRef<HTMLDivElement>(null);
   const versionRef = useRef(version);
@@ -296,6 +337,44 @@ export function WorkoutBuilder({
         write(d => patchSet(d, uid, setUid, patch)),
       onRemove: uid => write(d => removeExercise(d, uid)),
       onUnchain: uid => write(d => unchainExercise(d, uid)),
+      onMove: (uid, direction) =>
+        write(d => {
+          const i = d.exercises.findIndex(e => e.uid === uid);
+          if (i < 0 || (direction < 0 && i === 0) || (direction > 0 && i === d.exercises.length - 1)) return d;
+          const me = d.exercises[i];
+          const other = d.exercises[i + direction];
+          /* INSIDE A CIRCUIT a movement swaps with its neighbour and keeps its group; `moveExercise` would drop it out of the
+             circuit. At the circuit's edge it does not move — taking it out first is a deliberate step. */
+          if (me.groupId) {
+            if (other.groupId !== me.groupId) return d;
+            const next = [...d.exercises];
+            next[i] = other;
+            next[i + direction] = me;
+            return { ...d, exercises: next };
+          }
+          /* `moveExercise` lands a card BEFORE a target: up is before the one above, down is before the one two below (or the foot). */
+          const before = direction < 0 ? d.exercises[i - 1].uid : (d.exercises[i + 2]?.uid ?? null);
+          return moveExercise(d, uid, before);
+        }),
+      onChainNext: uid =>
+        write(d => {
+          const i = d.exercises.findIndex(e => e.uid === uid);
+          const next = d.exercises[i + 1];
+          return i < 0 || !next ? d : chainExercise(d, next.uid, uid);
+        }),
+      onHeading: uid => {
+        write(d => addDivider(d, 'Section', uid));
+        /* THE NEW HEADING TAKES THE CARET, selected: its name is the one thing a trainer does next, and *Section* is a
+           placeholder they type over. */
+        window.setTimeout(() => {
+          const boxes = [...document.querySelectorAll<HTMLInputElement>('.wkb__canvas input.wkdv__t')].filter(
+            i => i.value === 'Section',
+          );
+          const box = boxes[0];
+          box?.focus();
+          box?.select();
+        }, 80);
+      },
       onNote: (uid, setUid) => setNoting({ uid, setUid }),
       onAlternates: setAlting,
     }),
@@ -522,10 +601,12 @@ export function WorkoutBuilder({
         (noting !== null && noted !== undefined) ||
         (alting !== null && alted !== undefined)
       }
-      initialFocus=".wkb__name"
+      /* NOT THE NAME FIELD ON A PHONE: focusing a text box on open raises the keyboard over the workout before the trainer has
+         chosen to type. The first control (the note toggle) takes it there instead. */
+      initialFocus={typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches ? '.wkb__gear' : '.wkb__name'}
     >
-      <div className="wkb" role="dialog" aria-modal="true" aria-label="Write a workout">
-        <header className="wkb__hd">
+      <div className={`wkb${libOpen ? ' wkb--lib' : ''}`} role="dialog" aria-modal="true" aria-label="Write a workout">
+        <header className="wkb__hd" inert={libOpen || undefined}>
           <button
             className={`wkb__gear${noteOpen ? ' wkb__gear--on' : ''}`}
             type="button"
@@ -603,7 +684,7 @@ export function WorkoutBuilder({
             disabled={empty || saving}
             onClick={save}
           >
-            {saving ? 'Saving…' : onLocalSave ? 'Save to this day' : 'Save'}
+            {saving ? 'Saving…' : onLocalSave ? <>Save<span className="wkb__sv"> to this day</span></> : 'Save'}
           </Button>
         </header>
 
@@ -627,17 +708,65 @@ export function WorkoutBuilder({
         )}
 
         <div className="wkb__b">
+          {/* ALWAYS MOUNTED, shown by `.wkb--lib`: a scrim that mounts and unmounts cannot fade, and the sheet slides back out on
+              close for the same reason. Out of the tab order and the accessibility tree until the sheet is up. */}
+          <button
+            className="wkb__scrim"
+            type="button"
+            aria-label="Close the exercise list"
+            tabIndex={libOpen ? 0 : -1}
+            aria-hidden={libOpen ? undefined : true}
+            onClick={() => setLibOpen(false)}
+          />
+          <div className="wkb__sheet" role={libOpen ? 'region' : undefined} aria-label="Add exercises">
+          <div className="wkb__sheethd">
+            <b>Add exercises</b>
+            {added > 0 && (
+              <button
+                className="wkb__undo"
+                type="button"
+                onClick={() => {
+                  dispatch({ kind: 'undo' });
+                  setAdded(n => Math.max(0, n - 1));
+                }}
+              >
+                Undo
+              </button>
+            )}
+            <Button variant="primary" size="sm" ref={doneBtn} onClick={() => setLibOpen(false)}>
+              {added > 0 ? `Done (${added} added)` : 'Done'}
+            </Button>
+          </div>
           <LibraryPane
             countFor={countFor}
             onCarry={setCarriedExercise}
-            onAdd={movement => write(d => addExercise(d, movement, null))}
+            onAdd={movement => {
+              write(d => addExercise(d, movement, null));
+              if (libOpen) setAdded(n => n + 1);
+            }}
             onAddTemplate={pour}
             onCarryTemplate={setCarriedTemplate}
-            onAddDivider={label => write(d => addDivider(d, label, null))}
+            onAddDivider={label => {
+              write(d => addDivider(d, label, null));
+              /* ON A PHONE THE SHEET COVERS THE CANVAS, so a heading added from it looked like nothing had happened. The sheet
+                 closes and the new heading takes the caret, scrolled into view: the answer to *did it go in?* is the heading
+                 itself. Nothing changes above 900px, where the library sits beside the canvas. */
+              if (libOpen) {
+                setLibOpen(false);
+                window.setTimeout(() => {
+                  const boxes = [...document.querySelectorAll<HTMLInputElement>('.wkb__canvas input.wkdv__t')];
+                  const box = [...boxes].reverse().find(i => i.value === label) ?? boxes[boxes.length - 1];
+                  box?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                  box?.focus({ preventScroll: true });
+                  box?.select();
+                }, 260);
+              }
+            }}
             onCarryDivider={label => setCarriedDivider(label === null ? null : { label })}
           />
+          </div>
 
-          <div className="wkb__pane">
+          <div className="wkb__pane" inert={libOpen || undefined}>
             {/* THE THREE FIGURES, AND TWO OF THEM ARE ESTIMATES DRAWN AS
                 ESTIMATES. `lib/workouts/estimate.ts` carries the rule; the
                 short version is that nothing here knows this client's
@@ -707,12 +836,22 @@ export function WorkoutBuilder({
                         onCarry={setCarriedCard}
                         carrying={carriedCard === entry.uid}
                         chainTarget={drop?.kind === 'chain' && drop.onto === entry.uid}
+                        position={sheetPosition(draft.exercises, entry.uid)}
                       />
                     ));
-                    if (chain.length === 1) return [...heads, ...cards];
+                    /* KEYED BY THE CHAIN'S FIRST CARD. The outer array had no key of its own, so a card that moved to another
+                       position was a different child of a different slot and remounted — losing its open sheet mid-reorder. */
+                    if (chain.length === 1) {
+                      return (
+                        <Fragment key={chain[0].uid}>
+                          {heads}
+                          {cards}
+                        </Fragment>
+                      );
+                    }
                     const rest = chain[chain.length - 1].sets[0]?.restSeconds ?? null;
                     return (
-                      <div key={chain[0].uid} className="wkcir__wrap">
+                      <div key={chain[0].groupId ?? chain[0].uid} className="wkcir__wrap">
                         {heads}
                         <div className="wkcir">
                         {cards}
@@ -747,6 +886,24 @@ export function WorkoutBuilder({
               )}
             </div>
           </div>
+        </div>
+
+        {/* THE PHONE'S ONE PRIMARY, PINNED — the same bar the template shelves draw. Hidden from 901px up, where the library
+            is already on screen beside the canvas. */}
+        <div className="wkb__addbar" inert={libOpen || undefined}>
+          <Button
+            variant="secondary"
+            size="lg"
+            wide
+            ref={addBarBtn}
+            onClick={() => {
+              setAdded(0);
+              setLibOpen(true);
+            }}
+          >
+            <PlusIcon />
+            Add exercise
+          </Button>
         </div>
       </div>
 
@@ -955,6 +1112,23 @@ function Divider({
           }
         }}
       />
+      {/* ↑ ↓ — THE PHONE'S WAY TO PLACE A HEADING, where the grip above cannot be dragged. Drawn from 901px down only. */}
+      <button
+        className="wkdv__mv"
+        type="button"
+        aria-label={`Move the ${divider.label} heading up`}
+        onClick={() => write(d => stepDivider(d, divider.uid, -1))}
+      >
+        ↑
+      </button>
+      <button
+        className="wkdv__mv"
+        type="button"
+        aria-label={`Move the ${divider.label} heading down`}
+        onClick={() => write(d => stepDivider(d, divider.uid, 1))}
+      >
+        ↓
+      </button>
       <button
         className="wkdv__x"
         type="button"
@@ -984,6 +1158,32 @@ function Divider({
  * something right now*. The second line changes under a live drag, which is the
  * one moment a trainer needs to know this whole area is a target.
  */
+/** A heading one movement up or down. It anchors BEFORE a movement (null is the foot), so up is before the previous one and down
+ *  is before the one after the movement it currently heads — a heading never lands inside a circuit's gap, `moveDivider` is the
+ *  same write the desk's drag makes. */
+function stepDivider(d: Draft, dividerUid: string, direction: -1 | 1): Draft {
+  const div = d.dividers.find(x => x.uid === dividerUid);
+  if (!div) return d;
+  const at = div.before === null ? d.exercises.length : d.exercises.findIndex(e => e.uid === div.before);
+  const to = at + direction;
+  if (at < 0 || to < 0 || to > d.exercises.length) return d;
+  return moveDivider(d, dividerUid, to === d.exercises.length ? null : d.exercises[to].uid);
+}
+
+/** Where a movement sits, as the phone sheet needs it: which way it can move, and whether the next one can join it. */
+function sheetPosition(exercises: DraftExercise[], uid: string): SheetPosition {
+  const i = exercises.findIndex(e => e.uid === uid);
+  const me = exercises[i];
+  const prev = exercises[i - 1];
+  const next = exercises[i + 1];
+  const within = (o: DraftExercise | undefined) => Boolean(o) && (!me.groupId || o!.groupId === me.groupId);
+  return {
+    canUp: within(prev),
+    canDown: within(next),
+    nextName: next && (!me.groupId || next.groupId !== me.groupId) ? next.name : null,
+  };
+}
+
 function Empty({ carrying }: { carrying: boolean }) {
   return (
     <div className={`wkb__none${carrying ? ' wkb__none--armed' : ''}`}>
@@ -992,9 +1192,15 @@ function Empty({ carrying }: { carrying: boolean }) {
       </span>
       <h2>This workout is empty</h2>
       <p>
-        {carrying
-          ? 'Let go anywhere in here to add it.'
-          : 'Click an exercise on the left to add it, or drag one in by its grip. An empty workout saves nothing.'}
+        {carrying ? (
+          'Let go anywhere in here to add it.'
+        ) : (
+          <>
+            <span className="wkb__ondesk">Click an exercise on the left to add it, or drag one in by its grip. </span>
+            <span className="wkb__onphone">Tap <b>Add exercise</b> below to pick your first one. </span>
+            An empty workout saves nothing.
+          </>
+        )}
       </p>
     </div>
   );

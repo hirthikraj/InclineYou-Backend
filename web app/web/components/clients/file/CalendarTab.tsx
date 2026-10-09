@@ -50,6 +50,11 @@ export function CalendarTab({
     return keys.map((state) => ({ state, count: month.counts[state] }));
   }, [month, sessions, now]);
 
+  /* The legend counts THIS month; the dimmed days at the grid's edges are drawn with their
+     own sessions. Said in a line, so "Missed 1" beside two red cells is not a contradiction
+     a trainer has to resolve alone. */
+  const outside = month.weeks.flat().reduce((n, d) => (d.inMonth ? n : n + d.sessions.length), 0);
+
   const total = month.sessions === 1 ? '1 session' : `${month.sessions} sessions`;
   const go = (delta: number) =>
     router.push(`/clients/${clientId}/calendar?month=${monthParam(shiftMonth(anchor, delta))}`);
@@ -62,6 +67,11 @@ export function CalendarTab({
       total={total}
       onPrev={() => go(-1)}
       onNext={() => go(1)}
+      footnote={
+        outside > 0
+          ? `Counts are for ${month.label}. ${outside} more ${outside === 1 ? 'session sits' : 'sessions sit'} on the dimmed days from the neighbouring months.`
+          : undefined
+      }
     />
   );
 }

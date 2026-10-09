@@ -9,6 +9,7 @@ import type { ClientDetailWire, ClientNoteWire } from '@/lib/clients/client-api'
 import { formatPhone } from '@/lib/auth/policy';
 import { saveContact, savePhysical } from '@/lib/clients/contact-actions';
 import { ageFrom, birthDateStr } from '@/lib/clients/physical';
+import { adultCutoff } from '@/lib/clients/adult';
 import {
   archiveClient,
   deleteClient,
@@ -32,6 +33,7 @@ import { TrashIcon, longDateStr, shortDate } from './shared';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
 import { Checkbox } from '@/web-components/ui/Checkbox';
+import { DateField } from '@/web-components/ui/DateField';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 import { FactList } from '@/web-components/ui/FactList';
 import { Markup } from '@/web-components/ui/Markup';
@@ -414,6 +416,13 @@ function ContactCard({
             e.preventDefault();
             submit();
           }}
+          /* Escape is the way out of a form, as it is of every dialog in the product. */
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && !pending) {
+              e.stopPropagation();
+              cancel();
+            }
+          }}
         >
           <TextField
             label="Full name"
@@ -432,7 +441,8 @@ function ContactCard({
             hint="Ten digits, no country code. This is the number they sign in with."
             value={draftPhone}
             inputMode="numeric"
-            autoComplete="off"
+            autoComplete="tel-national"
+            maxLength={15}
             numeric
             disabled={pending}
             style={{ marginTop: 12 }}
@@ -564,9 +574,15 @@ function PhysicalCard({
   }
 
   const age = ageFrom(client.dateOfBirth ?? null, now);
+  const dirty =
+    height !== (client.heightCm == null ? '' : String(client.heightCm)) ||
+    dob !== (client.dateOfBirth ?? '') ||
+    activity !== (client.activityLevel ?? '');
+  const adultAt = adultCutoff(now);
+  const bare = client.heightCm == null && client.dateOfBirth == null && client.activityLevel == null && weightKg == null;
 
   function submit() {
-    if (pending) return;
+    if (pending || !dirty) return;
     setError(null);
     start(async () => {
       const result = await savePhysical(clientId, client.version, {
@@ -595,6 +611,12 @@ function PhysicalCard({
             e.preventDefault();
             submit();
           }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && !pending) {
+              e.stopPropagation();
+              cancel();
+            }
+          }}
         >
           <TextField
             label="Height"
@@ -607,14 +629,23 @@ function PhysicalCard({
             disabled={pending}
             onChange={(e) => setHeight(e.target.value)}
           />
-          <TextField
-            label="Birth day"
-            type="date"
-            value={dob}
-            disabled={pending}
-            style={{ marginTop: 12 }}
-            onChange={(e) => setDob(e.target.value)}
-          />
+          {/* The themed date field, with the rule said before the press: the native one drew mm/dd (an
+              American order in an India-first app), took any date and found out about 18 at Save. */}
+          <div style={{ marginTop: 12 }}>
+            <DateField
+              id="ph-dob"
+              label="Birth day"
+              block
+              value={dob}
+              min="1900-01-01"
+              max={adultAt}
+              openAt={adultAt}
+              disabled={pending}
+              describedBy="ph-dob-h"
+              onChange={(v) => setDob(v)}
+            />
+            <p id="ph-dob-h" className="fld__h">Clients must be 18 or over.</p>
+          </div>
           <Select
             label="Activity level"
             value={activity}
@@ -624,7 +655,7 @@ function PhysicalCard({
             onChange={(e) => setActivity(e.target.value)}
           />
           <div className="cffm">
-            <Button type="submit" variant="primary" disabled={pending}>
+            <Button type="submit" variant="primary" disabled={pending || !dirty}>
               Save changes
             </Button>
             <Button variant="ghost" disabled={pending} onClick={cancel}>
@@ -654,6 +685,10 @@ function PhysicalCard({
       }
       flush
     >
+      {bare ? (
+        /* FOUR DASHES WERE HOMEWORK. A client with nothing measured gets one sentence and the Edit above it. */
+        <p className="cfrec__none">Height, birth day and activity level are not set yet.</p>
+      ) : (
       <FactList>
         <FactList.Row k="Height">
           {client.heightCm == null ? <FactList.Blank /> : `${client.heightCm} cm`}
@@ -687,6 +722,7 @@ function PhysicalCard({
             : ACTIVITY.find((o) => o.value === client.activityLevel)?.label ?? client.activityLevel}
         </FactList.Row>
       </FactList>
+      )}
     </Card>
   );
 }
@@ -763,6 +799,11 @@ function ManageCard({ client }: { client: ClientDetailWire }) {
   const router = useRouter();
   const first = client.name.split(' ')[0];
   const paused = client.status === 'paused';
+  /* The verbs that opened a form unmount with it, so closing returns focus to the first of them. */
+  const closeForm = () => {
+    setAction(null);
+    queueMicrotask(() => document.getElementById(`cfdz-manage-${client.id}`)?.focus());
+  };
 
   function write(fn: () => Promise<StatusWriteResult>, then?: () => void) {
     setError(null);
@@ -787,6 +828,7 @@ function ManageCard({ client }: { client: ClientDetailWire }) {
             </p>
             <div className="cfdz__a">
               <Button
+                id={`cfdz-manage-${client.id}`}
                 variant="secondary"
                 disabled={pending}
                 onClick={() => (paused ? write(() => resumeClient(client.id)) : setAction('pause'))}
@@ -811,6 +853,7 @@ function ManageCard({ client }: { client: ClientDetailWire }) {
                 label="Back on"
                 hideLabel
                 type="date"
+                autoFocus
                 value={backOn}
                 disabled={pending}
                 onChange={(e) => setBackOn(e.target.value)}
@@ -822,7 +865,7 @@ function ManageCard({ client }: { client: ClientDetailWire }) {
               >
                 {pending ? 'Pausing…' : `Pause ${first}`}
               </Button>
-              <Button variant="ghost" disabled={pending} onClick={() => setAction(null)}>
+              <Button variant="ghost" disabled={pending} onClick={closeForm}>
                 Not now
               </Button>
             </div>
@@ -838,6 +881,7 @@ function ManageCard({ client }: { client: ClientDetailWire }) {
               <Select
                 label="Why"
                 hideLabel
+                autoFocus
                 value={reason}
                 disabled={pending}
                 options={ARCHIVE_REASONS.map(([value, label]) => ({ value, label }))}
@@ -862,7 +906,7 @@ function ManageCard({ client }: { client: ClientDetailWire }) {
                 {pending ? 'Archiving…' : `Archive ${first}`}
               </Button>
               {/* Dead while the write is away: it cannot be recalled. */}
-              <Button variant="ghost" disabled={pending} onClick={() => setAction(null)}>
+              <Button variant="ghost" disabled={pending} onClick={closeForm}>
                 Keep them
               </Button>
             </div>
@@ -930,13 +974,18 @@ function DeleteCard({ client }: { client: ClientDetailWire }) {
         the money book still shows what was collected and what is still owed. This
         cannot be undone.
       </p>
-      <div className="cfdz__a">
+      <div className="cfdz__a" role="group" aria-label={confirming ? `Confirm deleting ${client.name}` : undefined}>
         {confirming ? (
           <>
             <TextField
               label={`Type "${client.name}" to confirm`}
               hideLabel
               placeholder={`Type "${client.name}" to confirm`}
+              /* Focus goes to the field the moment the confirm opens (it was left on <body>, so a
+                 keyboard or screen-reader user had no sign anything had changed), and a browser must
+                 not offer to autofill a name into the one box whose job is to make you type it. */
+              autoFocus
+              autoComplete="off"
               value={typed}
               disabled={pending}
               width={260}
@@ -948,13 +997,17 @@ function DeleteCard({ client }: { client: ClientDetailWire }) {
             <Button
               variant="ghost"
               disabled={pending}
-              onClick={() => { setConfirming(false); setTyped(''); }}
+              onClick={() => {
+                setConfirming(false);
+                setTyped('');
+                queueMicrotask(() => document.getElementById(`cfdz-delete-${client.id}`)?.focus());
+              }}
             >
               Keep them
             </Button>
           </>
         ) : (
-          <Button variant="danger" onClick={() => setConfirming(true)}>
+          <Button id={`cfdz-delete-${client.id}`} variant="danger" onClick={() => setConfirming(true)}>
             Delete
           </Button>
         )}
@@ -1067,10 +1120,19 @@ export function PersonalTab({
     setError(null);
     setAsked(prompt ?? null);
     setComposing(true);
+    /* Focus goes into the box once it exists (the button that was pressed unmounted, leaving it on
+       <body>). It is an ordinary `.focus()` AFTER the field has mounted, not a caret moved in from
+       outside mid-selection, which is what the note above warns against. */
+    queueMicrotask(() =>
+      queueMicrotask(() =>
+        document.querySelector<HTMLElement>('.cfnw__new [role="textbox"]')?.focus(),
+      ),
+    );
   }
 
   function closeComposer() {
     setComposing(false);
+    queueMicrotask(() => document.querySelector<HTMLElement>('.cfnw__add')?.focus());
     setAsked(null);
     setDraft('');
     setPinNew(false);
@@ -1117,11 +1179,12 @@ export function PersonalTab({
         /* A count, not a filter: a trainer with three notes does not need a
            segment to find one. */
         aside={
-          notes.length > 0 ? (
-            <span className="small ink3">
-              {notes.length === 1 ? '1 note' : `${notes.length} notes`}
-            </span>
-          ) : null
+          /* THE PROMISE IS PERMANENT CHROME. It lived only in the empty state, so the moment a first note
+             existed the one reassurance a trainer needs before writing about a person was gone. */
+          <span className="small ink3">
+            {notes.length > 0 ? `${notes.length === 1 ? '1 note' : `${notes.length} notes`} · ` : ''}
+            Only you can read these
+          </span>
         }
         flush
         className={pending && !composing ? 'cfnotes cfnotes--busy' : 'cfnotes'}
@@ -1209,7 +1272,7 @@ export function PersonalTab({
           </div>
 
           {ordered.length === 0 ? (
-            <EmptyState
+            composing ? null : <EmptyState
               kind="first-run"
               icon={<Note size={22} />}
               title="Nothing written down yet"

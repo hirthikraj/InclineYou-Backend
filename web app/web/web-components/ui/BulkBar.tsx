@@ -57,8 +57,6 @@ export function BulkBar({
   return (
     <div
       className={['bulk', className].filter(Boolean).join(' ')}
-      role="status"
-      aria-live="polite"
       style={inline ? { position: 'static', borderRadius: 'var(--tx-r2)' } : undefined}
     >
       <CheckboxCell
@@ -82,7 +80,9 @@ export function BulkBar({
           rather than as a sentence about them. The noun steps down and tracks
           out. The announced text is unchanged: `role="status"` reads the
           concatenation, and it still says *2 programs selected*. */}
-      <b className="bulk__n">
+      {/* The live region is the COUNT alone: it was the whole bar, so the select-all checkbox and the action
+          button sat inside a `role="status"` and were re-read on every change. */}
+      <b className="bulk__n" role="status" aria-live="polite">
         <span className="bulk__c">{count}</span>{' '}
         {count === 1 ? (one ?? noun) : noun} selected
       </b>

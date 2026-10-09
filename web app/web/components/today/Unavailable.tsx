@@ -1,6 +1,6 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/web-components/ui/Button';
 
@@ -23,11 +23,27 @@ import { Button } from '@/web-components/ui/Button';
 export function Unavailable({
   kind,
   status,
+  kicker,
+  what,
+  back,
 }: {
   kind: 'unreachable' | 'refused';
   status?: number;
+  /** The small caps line over the headline. Defaults to `TODAY` on Today and to nothing elsewhere. */
+  kicker?: string;
+  /**
+   * What the server could not build, as a noun phrase: *your day*, *this check-in*. It was
+   * hard-coded to *your day*, so a check-in that failed to open told a trainer the server could
+   * not build their day, on a screen that was not Today (and so did the 30-odd other call-sites).
+   */
+  what?: string;
+  /** Where *Open the roster* would go, when a nearer door exists — the file the failure happened in. */
+  back?: { href: string; label: string };
 }) {
   const router = useRouter();
+  const onToday = (usePathname() ?? '').startsWith('/today');
+  const noun = what ?? (onToday ? 'your day' : 'this page');
+  const eyebrow = kicker ?? (onToday ? 'TODAY' : null);
   const [retrying, setRetrying] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -62,9 +78,9 @@ export function Unavailable({
       */}
       <div className="midcol">
         <div className="midcol__in">
-          <p className="micro ink3">TODAY</p>
+          {eyebrow ? <p className="micro ink3">{eyebrow}</p> : null}
           <h1 className="stp__hd midcol__hd">
-            {unreachable ? 'The server is not answering' : 'The server could not build your day'}
+            {unreachable ? 'The server is not answering' : `The server could not build ${noun}`}
           </h1>
           <p className="stp__sub midcol__sub">
             {unreachable ? (
@@ -97,8 +113,8 @@ export function Unavailable({
             {/* The roster is one request rather than eight, so it is the thing
                 most likely to work when this one did not, and it is where a
                 trainer can still look someone up. */}
-            <Button href="/clients" variant="secondary" size="lg">
-              Open the roster
+            <Button href={back?.href ?? '/clients'} variant="secondary" size="lg">
+              {back?.label ?? 'Open the roster'}
             </Button>
           </div>
         </div>

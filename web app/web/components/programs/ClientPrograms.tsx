@@ -17,6 +17,8 @@ import { ProgramRow, ProgramRowHead } from '@/web-components/ui/ProgramRow';
 import { RowMenu } from '@/web-components/ui/RowMenu';
 import { Button } from '@/web-components/ui/Button';
 import { Tag } from '@/web-components/ui/Tag';
+import { Avatar } from '@/web-components/ui/Avatar';
+import { DAY_MS, startOfDay } from '@/lib/today/time';
 
 /**
  * `/programs` — **who is training on what**, which is the question the word
@@ -144,6 +146,24 @@ export function ClientPrograms({
     return m;
   }, [forGoal]);
 
+  /* The Goal column is dropped when no row has one (it was 150px of nothing on every row), and the last
+     column is PROGRESS — where a copy is in its block — rather than when it was last edited, which read
+     *today* on all seven rows of a book written this morning. */
+  const noGoal = filtered.every((r) => !r.program.goal);
+  const listClass = ['ptrow--cp', noGoal ? 'ptrow--nog' : null].filter(Boolean).join(' ');
+
+  /* WHO HAS NOTHING ASSIGNED: the header counts them, and now the page names them, each with the verb. The
+     other half of the loop the Plan tab opened — it carries a client into the shelf with `?client=`. */
+  const unassigned = useMemo(() => {
+    const live = new Set(rows.filter((r) => r.program.status === 'active').map((r) => r.program.clientId));
+    return data.clients
+      .filter((c) => c.status !== 'archived' && !live.has(c.id))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [rows, data.clients]);
+  const [allUnassigned, setAllUnassigned] = useState(false);
+  const showUnassigned =
+    unassigned.length > 0 && status !== 'ended' && clientId === null && query.trim() === '' && goal === null;
+
   const narrowed = clientId !== null || status !== 'active' || goal !== null || query.trim() !== '';
 
   return (
@@ -240,8 +260,9 @@ export function ClientPrograms({
                    that opens on every block anybody has ever finished is a list
                    whose first screen is history. */
                 single
-                selected={status === 'all' ? [] : [status]}
-                onChange={next => setStatus((next[0] as StatusKey) ?? 'all')}
+                defaultValue="active"
+                selected={status === 'active' ? [] : [status]}
+                onChange={next => setStatus((next[0] as StatusKey) ?? 'active')}
                 options={STATUSES.map(s => ({
                   value: s.key,
                   label: s.label,
@@ -304,16 +325,40 @@ export function ClientPrograms({
                 }
               />
             ) : (
-              <>
-                <ProgramRowHead client actionable />
+              <div className="pgt__main">
+                <ProgramRowHead client actionable lastHead="Progress" className={listClass} />
                 <ul className="pgt__l" role="list">
                   {filtered.map(r => (
                     <li key={r.program.id}>
-                      <CopyRow row={r} now={now} />
+                      <CopyRow row={r} now={now} className={listClass} />
                     </li>
                   ))}
                 </ul>
-              </>
+              </div>
+            )}
+
+            {showUnassigned && (
+              <section className="pgt__nop" aria-label="Clients with nothing assigned">
+                <h2 className="pgt__nopt">
+                  Nothing assigned <span className="ink3">· {unassigned.length}</span>
+                </h2>
+                <ul className="pgt__nopl" role="list">
+                  {(allUnassigned ? unassigned : unassigned.slice(0, 5)).map((c) => (
+                    <li key={c.id} className="pgt__nopr">
+                      <Avatar id={c.id} name={c.name} size="sm" />
+                      <span className="pgt__nopn">{c.name}</span>
+                      <Button variant="secondary" size="sm" href={`/programs/templates?client=${c.id}`}>
+                        Assign a plan
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+                {unassigned.length > 5 && (
+                  <Button variant="ghost" size="sm" onClick={() => setAllUnassigned((v) => !v)} aria-expanded={allUnassigned}>
+                    {allUnassigned ? 'Show fewer' : `Show all ${unassigned.length}`}
+                  </Button>
+                )}
+              </section>
             )}
           </div>
         </div>
@@ -350,10 +395,18 @@ interface Copy {
  * `template_id` — which by then may be a blueprint the trainer deleted, or one
  * that has moved three times since.
  */
-function CopyRow({ row, now }: { row: Copy; now: number }) {
+function CopyRow({ row, now, className }: { row: Copy; now: number; className?: string }) {
   const { program, client } = row;
   const days = daysOfCopy(program);
   const ended = program.status !== 'active';
+  const progress = progressOf(program, now);
+  /* The real weekdays, where the client's own week agrees with the plan's day count: *Day 1 · Day 2 · Day 3* is
+     slot ordinals and says nothing a trainer can scan. */
+  const week = [...(client?.weeklySchedule ?? [])].sort((a, b) => a.weekday - b.weekday);
+  const weekdays =
+    week.length > 0 && week.length === days.length
+      ? week.map((w) => WEEKDAY[w.weekday - 1]).join(' · ')
+      : null;
 
   return (
     <ProgramRow
@@ -368,7 +421,7 @@ function CopyRow({ row, now }: { row: Copy; now: number }) {
          either, so without the parameter its crumb would send a trainer who
          came off THIS page into a stranger's file. See `plan-origin.ts`. */
       href={planHref(program.clientId, program.id, 'programs')}
-      sub={dayNamesOf(program, days)}
+      sub={weekdays ?? dayNamesOf(program, days)}
       days={days}
       /* Unused on this row: `client` takes the column. Passed as 1 because the
          prop is the count of who is on the thing, and one person is. */
@@ -376,7 +429,9 @@ function CopyRow({ row, now }: { row: Copy; now: number }) {
       client={client ? { id: client.id, name: client.name } : undefined}
       weeks={program.weeks ?? 1}
       goal={program.goal}
-      edited={editedAgo(program.updatedAt, now)}
+      className={className}
+      edited={progress.text}
+      editedLabel=""
       /* ENDED IS DRAWN AND ACTIVE IS NOT. A tag on every row of a list filtered
          to Active is a tag saying nothing; the one that has to be visible is
          the block that is over, because the *All* filter is where a trainer
@@ -386,8 +441,15 @@ function CopyRow({ row, now }: { row: Copy; now: number }) {
          provenance — `--acc` beside it is what *From templates* means on a
          shelf row, and two accent tags on one row would be two claims about
          where the plan came from. */
-      tag={ended ? <Tag>{endedWord(program.status)}</Tag> : undefined}
+      tag={
+        ended ? (
+          <Tag>{endedWord(program.status)}</Tag>
+        ) : progress.tag ? (
+          <Tag tone="warn">{progress.tag}</Tag>
+        ) : undefined
+      }
       actions={
+        program.templateId ? (
         <RowMenu
           label={program.name}
           items={[
@@ -396,11 +458,21 @@ function CopyRow({ row, now }: { row: Copy; now: number }) {
                deleted, which is survivable and not an error — the copy is
                whole on its own, `ProgramWire.templateId`'s own note — so the
                row is dropped rather than drawn dead. */
-            ...(program.templateId
-              ? [{ label: 'Open the template it came from', href: `/programs/${program.templateId}` }]
-              : []),
+            { label: 'Open the template it came from', href: `/programs/${program.templateId}` },
           ]}
         />
+        ) : (
+          /* A menu of one item is an extra press and a focus trap; with nothing else to offer the verb is
+             the control. */
+          <Button
+            href={`/clients/${program.clientId}`}
+            variant="ghost"
+            size="sm"
+            iconOnly
+            label={`Open ${client?.name ?? 'the client'}'s file`}
+            icon={<ChevronRight />}
+          />
+        )
       }
     />
   );
@@ -511,6 +583,37 @@ function headerLine(rows: Copy[], clients: ClientWire[]): string {
  * written before `V2` has neither and draws an empty strip, which is honest:
  * the shape of that block is not on the wire.
  */
+const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function ChevronRight() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="m9 6 6 6-6 6" />
+    </svg>
+  );
+}
+
+/** Where a copy is in its block, against the SERVER's instant. `tag` is set only when the block is about to
+ *  run out or already has — the same rule family as a pack that is ending. */
+function progressOf(p: ProgramWire, now: number): { text: string; tag: string | null } {
+  const weeks = p.weeks ?? null;
+  if (p.status !== 'active') return { text: weeks ? `${weeks} weeks` : '—', tag: null };
+  const today = startOfDay(now);
+  const start = p.startDate ? startOfDay(Date.parse(`${p.startDate}T00:00:00`)) : null;
+  if (start !== null && start > today) {
+    return { text: `Starts ${new Date(start).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`, tag: null };
+  }
+  const week = start === null ? null : Math.max(1, Math.floor((today - start) / (7 * DAY_MS)) + 1);
+  const text = week === null ? '—' : weeks ? `Week ${Math.min(week, weeks)} of ${weeks}` : `Week ${week}`;
+  if (p.endDate) {
+    const left = Math.round((startOfDay(Date.parse(`${p.endDate}T00:00:00`)) - today) / DAY_MS);
+    if (left < 0) return { text, tag: 'Ran out' };
+    if (left === 0) return { text, tag: 'Ends today' };
+    if (left <= 7) return { text, tag: `Ends in ${left} ${left === 1 ? 'day' : 'days'}` };
+  }
+  return { text, tag: null };
+}
+
 function daysOfCopy(p: ProgramWire): number[] {
   if (p.trainingDays && p.trainingDays.length > 0) return [...p.trainingDays].sort((a, b) => a - b);
   const keys = Object.keys(p.dayLabels ?? {})
@@ -527,19 +630,3 @@ function endedWord(status: string): string {
   return status === 'cancelled' ? 'Cancelled' : 'Ended';
 }
 
-/**
- * The stamp, against the SERVER's instant — trap 20, and `ProgramRow`'s own
- * closing note: a relative date computed off the browser's clock disagrees with
- * the HTML that was sent. Same ladder the shelf uses, deliberately not
- * imported from it: that copy is private to a client component two files over,
- * and the two will not drift because neither is a rule — they are both *how
- * long ago*.
- */
-function editedAgo(at: number, now: number): string {
-  const days = Math.floor((now - at) / 86_400_000);
-  if (days <= 0) return 'today';
-  if (days === 1) return 'yesterday';
-  if (days < 7) return `${days}d ago`;
-  if (days < 28) return `${Math.floor(days / 7)}w ago`;
-  return new Date(at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
-}

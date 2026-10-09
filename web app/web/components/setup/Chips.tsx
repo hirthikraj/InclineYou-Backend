@@ -32,6 +32,7 @@ export function Chip({
   dimmed = false,
   disabled = false,
   mono = false,
+  rank,
   onClick,
 }: {
   label: string;
@@ -47,15 +48,19 @@ export function Chip({
    * read-back stops being one.
    */
   mono?: boolean;
+  /** Where a chosen chip stands in an ORDERED choice (1 is first): drawn as a number on the chip and said in its name. */
+  rank?: number;
   onClick: () => void;
 }) {
   return (
     <UiChip
       pressed={pressed}
       aria-disabled={dimmed || undefined}
+      aria-label={rank ? `${label}, number ${rank}` : undefined}
       disabled={disabled}
       onClick={onClick}
     >
+      {rank ? <span className="chip__rank" aria-hidden="true">{rank}</span> : null}
       {mono ? <span className="mono">{label}</span> : label}
     </UiChip>
   );

@@ -467,7 +467,7 @@ export function buildRoster(input: RosterInput, now: number): Roster {
   };
 }
 
-function buildRow(
+export function buildRow(
   client: ClientWire,
   now: number,
   byPackage: Map<string, PackageWire[]>,

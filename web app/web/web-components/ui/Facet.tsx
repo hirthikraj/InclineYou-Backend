@@ -80,6 +80,7 @@ export function Facet({
   selected,
   onChange,
   single = false,
+  defaultValue,
   search,
   summary,
   width = 232,
@@ -92,6 +93,8 @@ export function Facet({
   onChange: (next: string[]) => void;
   /** One value at most, and the menu closes on a pick. */
   single?: boolean;
+  /** Single-select only: the value that reads as chosen while nothing is selected (*All*). */
+  defaultValue?: string;
   /**
    * A find field at the head of the list, for an axis nobody can scan — the
    * roster. `noun` is what the live count counts (*3 of 142 clients*); leave it
@@ -115,7 +118,8 @@ export function Facet({
     key: o.value,
     label: o.count === undefined ? o.label : `${o.label}  ·  ${o.count}`,
     find: o.find,
-    checked: selected.includes(o.value),
+    checked: selected.includes(o.value) || (single && selected.length === 0 && o.value === defaultValue),
+    radio: single,
     disabled: o.disabled,
     onSelect: () => {
       if (single) {

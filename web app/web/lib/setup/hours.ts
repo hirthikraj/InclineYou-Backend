@@ -57,7 +57,7 @@ export const DEFAULT_DAYS = [0, 1, 2, 3, 4, 5];
  * The week a brand-new trainer starts with.
  *
  * The same pair as `DEFAULT_WORKING_HOURS` in `app/src/db/diary.ts` and as
- * `backend/scripts/seed-sample-month.sql`, so a trainer who skips this step on
+ * `backend/scripts/seed-three-months.sql`, so a trainer who skips this step on
  * one half and looks at the diary on the other sees one week rather than two.
  */
 export const DEFAULT_WINDOWS: HourWindow[] = [

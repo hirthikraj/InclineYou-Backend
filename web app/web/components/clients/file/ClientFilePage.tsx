@@ -20,12 +20,20 @@ export async function ClientFilePage({
   clientId: string;
   tab: ClientTab;
   options?: TabOptions;
-  extra?: Promise<Partial<Pick<ClientFileProps, 'progress' | 'assessments' | 'schedules' | 'templates'>>>;
+  extra?: Promise<Partial<Pick<ClientFileProps, 'progress' | 'progressFailed' | 'assessments' | 'schedules' | 'templates'>>>;
 }) {
   const [file, more] = await Promise.all([requireClientFile(clientId, tab, options), extra ?? {}]);
   if (!file.ok) {
     if (file.kind === 'not_found') notFound();
-    return <Unavailable kind={file.kind} status={file.kind === 'refused' ? file.status : undefined} />;
+    return (
+      <Unavailable
+        kind={file.kind}
+        status={file.kind === 'refused' ? file.status : undefined}
+        kicker="CLIENT FILE"
+        what="this client's file"
+        back={{ href: '/clients', label: 'Back to clients' }}
+      />
+    );
   }
   return <ClientFile payload={file.payload} now={file.now} tab={tab} options={options} {...more} />;
 }

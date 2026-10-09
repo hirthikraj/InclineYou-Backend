@@ -64,6 +64,8 @@ export interface ClientFileProps {
   options?: TabOptions;
   /** Only the Progress route loads this; every other tab passes null. */
   progress?: ProgressView | null;
+  /** The Progress read failed — drawn as that, never as an empty client. */
+  progressFailed?: boolean;
   /**
    * Only the Check-ins route loads this, for Progress's own reason: a second
    * read on the payload every tab shares is a read seven tabs pay for.
@@ -84,6 +86,7 @@ export function ClientFile({
   now,
   tab,
   progress = null,
+  progressFailed = false,
   assessments = null,
   schedules = null,
   templates = null,
@@ -112,7 +115,9 @@ export function ClientFile({
 
      It buys 60px of header back on the one tab whose content was 224px below
      the fold. */
-  const pinStrip = tab !== 'information';
+  /* Nor on the Calendar: that tab answers *did they turn up*, and *before every session* is a
+     note about the session, one tab away. It was ~40px of the 766px window above the month. */
+  const pinStrip = tab !== 'information' && tab !== 'calendar';
 
   const { client, packages } = payload;
 
@@ -159,7 +164,7 @@ export function ClientFile({
 
       <main className="main" id="main-content">
         <div className="ph">
-          <Header client={client} packages={packages} />
+          <Header client={client} packages={packages} now={now} />
 
           {/* THE PIN HINT IS THE DESK'S HERE TOO. It is a sentence a trainer
               reads on arrival — *Nothing pinned. Pin a note to keep it in front
@@ -172,14 +177,18 @@ export function ClientFile({
             </div>
           )}
 
-          <div className="ph__tabs" role="tablist" aria-label={client.name}>
+          {/* A NAV OF LINKS, NOT A TABLIST. Each tab is a page load, so `role="tablist"` /
+              `role="tab"` promised arrow-key movement between panels that were already in the
+              document and a tabpanel that never existed — a screen reader announced "tab,
+              1 of 8" and then behaved as eight links. `aria-current="page"` is what a nav
+              of links says (`PageTabs` reached the same conclusion first). */}
+          <nav className="ph__tabs" aria-label={`${client.name}'s file`}>
             {TABS.map((t) => (
               <Link
                 key={t.key}
                 className="tab"
                 href={tabHref(client.id, t.key)}
-                role="tab"
-                aria-selected={tab === t.key}
+                aria-current={tab === t.key ? 'page' : undefined}
                 style={
                   tab === t.key
                     ? { color: 'var(--tx-ink)', borderBottomColor: 'var(--tx-accent)' }
@@ -189,7 +198,7 @@ export function ClientFile({
                 {t.label}
               </Link>
             ))}
-          </div>
+          </nav>
         </div>
 
         <div className="body">
@@ -199,16 +208,16 @@ export function ClientFile({
               not in the layout, not in the tab order and not in the
               accessibility tree. */}
           <div className="cfd cfd--phone">
-            <HeaderDetail client={client} packages={packages} />
+            <HeaderDetail client={client} packages={packages} now={now} />
             {pinStrip && <PinnedStrip clientId={client.id} notes={pinned} />}
           </div>
 
-          {tab === 'overview' && <OverviewTab payload={payload} now={now} />}
+          {tab === 'overview' && <OverviewTab payload={payload} now={now} progress={progress} />}
           {tab === 'calendar' && (
             <CalendarTab clientId={client.id} sessions={payload.sessions} month={options.month ?? null} now={now} />
           )}
           {tab === 'progress' && (
-            <ProgressTab clientId={client.id} progress={progress} />
+            <ProgressTab clientId={client.id} progress={progress} failed={progressFailed} />
           )}
           {tab === 'assessments' && (
             <ChecksTab
@@ -217,6 +226,7 @@ export function ClientFile({
               rows={assessments}
               schedules={schedules}
               templates={templates}
+              now={now}
             />
           )}
           {tab === 'sessions' && (

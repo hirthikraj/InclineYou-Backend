@@ -10,7 +10,7 @@ import { Button } from '@/web-components/ui/Button';
 import { Message } from '@/web-components/ui/Message';
 import { Modal, ModalHost } from '@/web-components/ui/Modal';
 import { Select } from '@/web-components/ui/Select';
-import { TextField } from '@/web-components/ui/Field';
+import { DateField } from '@/web-components/ui/DateField';
 
 /**
  * PUT A CHECK-IN ON THE BOARD — three answers and a switch.
@@ -19,7 +19,7 @@ import { TextField } from '@/web-components/ui/Field';
  *
  * **Nothing is sent to the client in v1** (there is no portal), so the old
  * *send it now* switch is gone: the trainer takes the assessment in the session.
- * That is what the other two buttons are for — *Put it on the board* books it
+ * That is what the other two buttons are for — *Schedule it* books it
  * for the day, and *Take it now* books it for today and opens the take screen.
  * A cycle books the first one in the same write and the server books each next
  * one when the last is finished.
@@ -62,6 +62,10 @@ export function ScheduleSheet({
 
   const chosen = templates.find((t) => t.id === templateId) ?? null;
   const days = EVERY.find((e) => e.value === every)?.days ?? 0;
+  /* A TEMPLATE WITH NOTHING IN IT CANNOT BE TAKEN. The hint said *Nothing asked yet* and both buttons
+     stayed live, so a trainer could book a blank assessment and find out in the room. */
+  const blank = chosen !== null && templateShape(chosen) === 'Nothing asked yet';
+  const cannot = busy || !clientId || !templateId || !date || blank;
 
   /** `takeNow` books for TODAY (the server's own, in the workspace's zone) and opens the take screen. */
   function book(takeNow: boolean) {
@@ -91,12 +95,12 @@ export function ScheduleSheet({
           <>
             <Button variant="ghost" onClick={() => onClose(false)} disabled={busy}>Cancel</Button>
             {days === 0 && (
-              <Button variant="secondary" onClick={() => book(true)} disabled={busy || !clientId || !templateId}>
+              <Button variant="secondary" onClick={() => book(true)} disabled={cannot}>
                 Take it now
               </Button>
             )}
-            <Button variant="primary" onClick={() => book(false)} disabled={busy || !clientId || !templateId}>
-              {busy ? 'Booking…' : days > 0 ? 'Start the cycle' : 'Put it on the board'}
+            <Button variant="primary" onClick={() => book(false)} disabled={cannot}>
+              {busy ? 'Scheduling…' : days > 0 ? 'Start the cycle' : 'Schedule it'}
             </Button>
           </>
         }
@@ -105,7 +109,7 @@ export function ScheduleSheet({
 
         {templates.length === 0 ? (
           <p style={{ margin: 0 }}>
-            There is nothing to send yet. Write an assessment on the Templates tab first — it is
+            There is nothing to take yet. Write an assessment on the Templates tab first — it is
             the set of measurements and questions this would ask for.
           </p>
         ) : (
@@ -129,7 +133,7 @@ export function ScheduleSheet({
               /* The shape, under the field, so the trainer can see WHAT they are
                  about to ask for without opening the editor. It is the same
                  sentence the Templates tab prints on the row. */
-              hint={chosen ? templateShape(chosen) : undefined}
+              hint={chosen ? (blank ? 'Nothing asked yet. Add measurements or questions on the Templates tab first.' : templateShape(chosen)) : undefined}
             />
             <Select
               className="mt3"
@@ -139,14 +143,21 @@ export function ScheduleSheet({
               options={EVERY.map((e) => ({ value: e.value, label: e.label }))}
               hint={days > 0 ? 'The next one is booked from the day each is finished.' : undefined}
             />
-            <TextField
-              className="mt3"
-              type="date"
-              label={days > 0 ? 'First due on' : 'Due on'}
-              value={date}
-              hint="The session you will have a tape in your hand."
-              onChange={(e) => setDate(e.target.value)}
-            />
+            {/* THE THEMED DATE FIELD, not a native `type=date`: that one drew 10/11/2026 in a US-locale
+                browser, which is 11 October to an Indian trainer and 10 November to the field. */}
+            <div className="mt3">
+              <DateField
+                id="asm-due"
+                label={days > 0 ? 'First due on' : 'Due on'}
+                block
+                value={date}
+                describedBy="asm-due-h"
+                onChange={(v) => setDate(v)}
+              />
+              <p id="asm-due-h" className="fld__h">
+                The day you will have the tape in hand.
+              </p>
+            </div>
           </>
         )}
       </Modal>
@@ -154,10 +165,10 @@ export function ScheduleSheet({
   );
 }
 
-/** A week out, as `YYYY-MM-DD` in the browser's own zone. */
+/** TODAY, as `YYYY-MM-DD` in the browser's own zone. It was a week out, which is the wrong default for
+ *  a product whose first verb is *take it now*: the trainer who wants today had to change it. */
 function defaultDate(): string {
   const d = new Date();
-  d.setDate(d.getDate() + 7);
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${m}-${day}`;

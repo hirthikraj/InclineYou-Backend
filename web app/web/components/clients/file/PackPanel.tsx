@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 
 import { rupees } from '@/lib/today/time';
 import type { ClientPackageWire, PriceListPackWire } from '@/lib/clients/client-api';
@@ -81,6 +81,27 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
   /* `lib/ui/dismiss.ts` — the panel puts its closed state back, waits for the
      transition that starts, and only then lets the file unmount it. */
   const { closing, dismiss, dismissThen, ref: panelRef } = useDismiss<HTMLElement>(onClose);
+
+  /* A REAL DIALOG: focus goes in on open, Escape closes, and focus goes back to the control that opened
+     it. It was `role="dialog"` with none of the three — the opener kept focus, Escape did nothing and a
+     keyboard user typed into the page behind a form. Once per open (`[dismiss, panelRef]` are stable), the
+     way `BookPanel` does it. */
+  const returnTo = useRef<Element | null>(null);
+  useEffect(() => {
+    returnTo.current = document.activeElement;
+    panelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        dismiss();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      (returnTo.current as HTMLElement | null)?.focus?.();
+    };
+  }, [dismiss, panelRef]);
 
   /* Minted when the sheet opens and kept across retries: a double tap or a
      retried timeout answers the package the first attempt made. */
@@ -178,12 +199,22 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
   }
 
   return (
+    <>
+    <div
+      className={`scrim scrim--soft${closing ? ' scrim--out' : ''}`}
+      onClick={dismiss}
+      aria-hidden="true"
+    />
+    {/* `rp-panel` and not an inline `width:420`: an inline width outranks every media query, so on a
+        390px phone the panel stood 6px off the left edge and at 320px 76px off — labels and fields
+        unreachable. `.rp-panel` is the fixed desk panel that becomes a bottom sheet at 900px. */}
     <aside
       ref={panelRef}
-      className={`panel${closing ? ' panel--out' : ''}`}
+      tabIndex={-1}
+      className={`panel rp-panel${closing ? ' panel--out' : ''}`}
       role="dialog"
+      aria-modal="true"
       aria-label={isRenewal ? 'Renew this pack' : 'Sell a pack'}
-      style={{ position: 'fixed', right: 0, top: 0, height: '100dvh', width: 420, zIndex: 30 }}
     >
       <div className="panel__hd">
         <span className="panel__t">{isRenewal ? 'Renew the pack' : 'Sell a pack'}</span>
@@ -204,6 +235,20 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
               are copied from your price list if the pack is still on it, otherwise from
               this one. The old pack stays on their file exactly as it is.
             </p>
+            {/* WHAT THIS SELLS, BEFORE THE PRESS: the price and the balance it lands on. A renewal showed
+                neither, so a trainer could not see they were adding a second sum on top of a debt. */}
+            <p className="small mt3" style={{ color: 'var(--tx-ink-2)' }}>
+              A new sale of <b>{rupees(num(renewing.amount))}</b>
+              {renewing.sessionsTotal ? <> for {renewing.sessionsTotal} sessions</> : null}.
+            </p>
+            {num(renewing.amountDue) > 0 && (
+              <p className="msg msg--warn mt3">
+                <span>
+                  {rupees(num(renewing.amountDue))} is still owed on the pack being renewed. Renewing
+                  adds a new sum beside it; it does not settle it. Take that payment first, or after.
+                </span>
+              </p>
+            )}
             <div className="fld mt3">
               <label className="fld__l" htmlFor="pp-start">Starts</label>
               <input className="ctl" id="pp-start" type="date" value={startDate}
@@ -284,7 +329,7 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
               <label className="fld__l" htmlFor="pp-amount">{chosen ? 'What you are charging' : 'Price'}</label>
               <div className="affix">
                 <span className="affix__p">₹</span>
-                <input className="ctl ctl--num" id="pp-amount" type="number" min="1" step="1" value={amount}
+                <input className="ctl ctl--num" id="pp-amount" type="number" inputMode="numeric" min="1" step="1" value={amount}
                   onChange={(e) => setAmount(e.target.value)} placeholder={chosen ? String(listPrice) : '0'} />
               </div>
               {discount > 0 && (
@@ -348,5 +393,6 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
         </p>
       </div>
     </aside>
+    </>
   );
 }

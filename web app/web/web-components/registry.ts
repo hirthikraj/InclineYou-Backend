@@ -142,6 +142,15 @@ export const ENTRIES: Entry[] = [
      accessibility tree and to every geometry probe, and caught only by looking
      at it. */
   { id: 'c-switch', name: 'Switch', group: 'FORMS', page: 'forms', badge: null, impl: 'component', desc: '' },
+  /* Registered the day it was written. Checked against what draws a date first:
+     `TimeField` is the same segmented box for a time of day and has no calendar and
+     no year; `c-field` is a text field and would take a date as free text; and
+     `<input type="date">` — what six screens used — is an OS control that ignores
+     the theme and opens on today. A birth date is thirty years from today, so the
+     calendar's title opens a year grid and then a month grid. Its first call-site
+     is the Add client flow's date of birth (MUST-22). */
+  { id: 'c-datefield', name: 'Date field', group: 'FORMS', page: 'forms', badge: 'NEW', impl: 'component',
+    desc: 'A date you can type in three segments, and a calendar that gets to 1990 in two taps — a popover on a desk, a bottom sheet on a phone.', cls: 'dfld' },
   { id: 'c-search', name: 'Search field', group: 'FORMS', page: 'forms', badge: null, impl: 'component', desc: '' },
   { id: 'c-formgroup', name: 'Form group', group: 'FORMS', page: 'forms', badge: null, impl: 'component', desc: '' },
   /* THE TWO CONTROLS A QUESTION IS ANSWERED WITH, and neither has an anchor in

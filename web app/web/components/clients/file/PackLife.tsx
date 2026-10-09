@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 
 import type { ClientPackageWire, PackageAdjustmentWire } from '@/lib/clients/client-api';
 import { endPack, extendPack, pausePack, resumePack } from '@/lib/clients/package-actions';
@@ -67,6 +67,23 @@ export function PackLife({
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  /* FOCUS FOLLOWS THE FORM. The buttons unmounted when a form opened, so focus fell to <body>; Cancel did
+     it again and Escape did nothing. Opening focuses the form's first field (`data-initial` where a
+     destructive form should open on its safe button); closing puts focus back on the first verb. */
+  const rootRef = useRef<HTMLDivElement>(null);
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    if (mode !== null) {
+      wasOpen.current = true;
+      root.querySelector<HTMLElement>('[data-initial], input, button:not(:disabled)')?.focus();
+    } else if (wasOpen.current) {
+      wasOpen.current = false;
+      root.querySelector<HTMLElement>('button')?.focus();
+    }
+  }, [mode]);
+
   const paused = pkg.pausedAt != null;
   const pausedDays = pkg.pausedDays ?? 0;
   const given = adjustments
@@ -89,7 +106,16 @@ export function PackLife({
   }
 
   return (
-    <div style={{ marginTop: 14, borderTop: '1px solid var(--tx-line)', paddingTop: 12 }}>
+    <div
+      ref={rootRef}
+      style={{ marginTop: 14, borderTop: '1px solid var(--tx-line)', paddingTop: 12 }}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && mode !== null && !pending) {
+          e.stopPropagation();
+          close();
+        }
+      }}
+    >
       {/* ── The paused banner ──────────────────────────────────────────── */}
       {paused && (
         <p className="msg msg--warn" style={{ marginBottom: 10 }}>
@@ -154,7 +180,7 @@ export function PackLife({
               Give more time
             </Button>
           )}
-          <Button variant="ghost" size="sm" onClick={() => setMode('end')}>
+          <Button variant="ghost" size="sm" className="cfpay__end" onClick={() => setMode('end')}>
             End this pack
           </Button>
         </div>
@@ -178,7 +204,7 @@ export function PackLife({
               onClick={() => run(() => endPack(clientId, pkg.id))}>
               {pending ? 'Ending…' : 'End it'}
             </Button>
-            <Button variant="ghost" size="sm" disabled={pending} onClick={close}>
+            <Button variant="ghost" size="sm" disabled={pending} onClick={close} data-initial>
               Keep it running
             </Button>
           </div>

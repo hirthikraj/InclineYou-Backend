@@ -44,12 +44,18 @@ export function Figure({
       the text face at name size rather than as another Archivo figure. */
   of,
   href,
+  hint,
 }: {
   label: string;
   value: ReactNode;
   tone?: FigureTone;
   of?: ReactNode;
   href?: string;
+  /** One short line under the figure saying what it counts. A bare number with a
+      name like *Clients at risk* is a claim the trainer cannot check; this is the
+      definition, in the same words the queue uses. Omitted where the label is
+      already the whole definition. */
+  hint?: string;
 }) {
   const cls = ['figs__i', tone === 'neutral' ? null : `figs__i--${tone}`]
     .filter(Boolean)
@@ -61,6 +67,7 @@ export function Figure({
         {value}
         {of !== undefined && <em>/{of}</em>}
       </span>
+      {hint && <span className="figs__h">{hint}</span>}
     </>
   );
 
