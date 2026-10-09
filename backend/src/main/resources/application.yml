@@ -179,6 +179,9 @@ app:
       resource: seed/exercises.json
       # Text only. Upstream's thumbnails and demo GIFs are © Gym visual and need a
       # licence we do not hold, so no media is seeded and there is no base URL.
+    certified:
+      enabled: ${SEED_CERTIFIED:true}
+      resource: seed/certified-programs.json
 
 # ── The `dev` profile ────────────────────────────────────────────────────────
 # Activated by `./mvnw spring-boot:run` (spring-boot-maven-plugin, see pom.xml)

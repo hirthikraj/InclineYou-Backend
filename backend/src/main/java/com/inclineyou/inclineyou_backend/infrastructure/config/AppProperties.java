@@ -255,6 +255,15 @@ public class AppProperties {
     @Setter
     public static class Seed {
         private Exercises exercises = new Exercises();
+        private Certified certified = new Certified();
+
+        /** The InclineYou starter programs on the shelf; runs after the exercise library, which it names. */
+        @Getter
+        @Setter
+        public static class Certified {
+            private boolean enabled = true;
+            private String resource = "seed/certified-programs.json";
+        }
 
         @Getter
         @Setter

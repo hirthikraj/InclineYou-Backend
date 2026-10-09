@@ -27,6 +27,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.hamcrest.Matchers.hasItem;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * The exercise library on the v1 wire (api-contract 1.1, Programs L6 and A9–A10): the global, text-only catalogue plus
@@ -87,8 +88,8 @@ class ExerciseLibraryTest {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXERCISE_NAME_TAKEN"));
         mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"  \"}"))
                 .andExpect(status().isBadRequest());
-        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Zqx x\",\"logType\":\"time\"}"))
-                .andExpect(status().isBadRequest());
+        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Zqx x\",\"logType\":\"minutes\"}"))
+                .andExpect(status().isBadRequest());   // V9 widened the set to six; anything else is still refused
 
         // Another trainer may use the same NAME (names are per trainer) but not the same id.
         signedInAs(other);
@@ -96,6 +97,21 @@ class ExerciseLibraryTest {
                 .andExpect(status().isCreated());
         mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ID_CONFLICT"));
+    }
+
+    @Test
+    @DisplayName("all six log types are accepted on create and patch, and a seventh is refused")
+    void sixLogTypes() throws Exception {
+        for (String lt : new String[] {"weight_reps", "reps", "time", "distance", "weight_time", "weight_distance"}) {
+            String id = create("{\"name\":\"Zqx " + lt + "\",\"logType\":\"" + lt + "\"}");
+            mvc.perform(get("/v1/exercises/" + id)).andExpect(jsonPath("$.logType").value(lt));
+        }
+        String id = create("{\"name\":\"Zqx patched\"}");
+        mvc.perform(patch("/v1/exercises/" + id).contentType(MediaType.APPLICATION_JSON).content("{\"logType\":\"weight_distance\"}"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/v1/exercises/" + id)).andExpect(jsonPath("$.logType").value("weight_distance"));
+        mvc.perform(patch("/v1/exercises/" + id).contentType(MediaType.APPLICATION_JSON).content("{\"logType\":\"seconds\"}"))
+                .andExpect(status().isBadRequest());
     }
 
     @Test
@@ -213,6 +229,29 @@ class ExerciseLibraryTest {
         mvc.perform(get("/v1/exercises/" + id)).andExpect(status().isNotFound());
         assertNotNull(jdbc.queryForObject("SELECT deleted_at FROM exercise WHERE id = :id::uuid", Map.of("id", id), Object.class));
         create("{\"name\":\"Zqx retire me\"}");                                   // the name is free again
+    }
+
+    @Test
+    @DisplayName("equipment is a lookup: the text resolves to a row, meta groups by category, equipmentKey filters, an unknown string stays unresolved")
+    void equipmentLookup() throws Exception {
+        String known = create("{\"name\":\"Zqx smith thing\",\"equipment\":\"smith machine\"}");
+        String unknown = create("{\"name\":\"Zqx mystery thing\",\"equipment\":\"zqx mystery kit\"}");
+        assertEquals("smith_machine", jdbc.queryForObject(
+                "SELECT q.key FROM exercise e JOIN equipment q ON q.id = e.equipment_id WHERE e.id = :id::uuid", Map.of("id", known), String.class));
+        assertNull(jdbc.queryForObject("SELECT equipment_id FROM exercise WHERE id = :id::uuid", Map.of("id", unknown), Object.class));
+
+        // Changing only the text re-resolves it; the old string column is still what the API returns.
+        mvc.perform(patch("/v1/exercises/" + known).contentType(MediaType.APPLICATION_JSON).content("{\"equipment\":\"kettlebell\"}")).andExpect(status().isOk());
+        assertEquals("kettlebell", jdbc.queryForObject(
+                "SELECT q.key FROM exercise e JOIN equipment q ON q.id = e.equipment_id WHERE e.id = :id::uuid", Map.of("id", known), String.class));
+
+        mvc.perform(get("/v1/exercises/meta")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.equipmentGroups[?(@.category == 'free weights')].items[?(@.key == 'kettlebell')].count").isNotEmpty())
+                .andExpect(jsonPath("$.equipment").isArray());                    // the old facet is still there
+        mvc.perform(get("/v1/exercises").param("q", "Zqx").param("equipmentKey", "kettlebell"))
+                .andExpect(jsonPath("$.items.length()").value(1)).andExpect(jsonPath("$.items[0].name").value("Zqx smith thing"));
+        mvc.perform(get("/v1/exercises").param("q", "Zqx").param("equipmentKey", "no_such_kit"))
+                .andExpect(jsonPath("$.items.length()").value(0));
     }
 
     @Test

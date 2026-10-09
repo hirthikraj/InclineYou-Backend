@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.exercise.dto;
 
+import com.inclineyou.inclineyou_backend.core.exercise.LogTypes;
 import com.inclineyou.inclineyou_backend.shared.util.Text;
 import com.inclineyou.inclineyou_backend.shared.wire.Patch;
 import jakarta.validation.constraints.NotBlank;
@@ -20,7 +21,7 @@ public record PatchExerciseRequest(
         Patch<@Size(max = 30, message = "at most 30 characters") String> bodyPart,
         Patch<@Size(max = 50, message = "at most 50 characters") String> target,
         Patch<@Size(max = 50, message = "at most 50 characters") String> equipment,
-        Patch<@NotNull(message = "weight_reps or reps") @Pattern(regexp = "weight_reps|reps", message = "weight_reps or reps") String> logType,
+        Patch<@NotNull(message = LogTypes.MESSAGE) @Pattern(regexp = LogTypes.REGEX, message = LogTypes.MESSAGE) String> logType,
         Patch<@Size(max = 20, message = "at most 20 characters") String> level,
         Patch<@Size(max = 4000, message = "at most 4000 characters") String> description,
         Patch<@NotNull(message = "a list") @Size(max = 10, message = "at most 10 cues") List<@NotBlank(message = "not blank") @Size(max = 200, message = "at most 200 characters") String>> formCues,

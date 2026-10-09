@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.sessionlog;
 
+import com.inclineyou.inclineyou_backend.core.exercise.LogTypes;
 import com.inclineyou.inclineyou_backend.core.sessionlog.LogExerciseJdbcRepository.ExCtx;
 import com.inclineyou.inclineyou_backend.core.sessionlog.dto.AddExerciseRequest;
 import com.inclineyou.inclineyou_backend.core.sessionlog.dto.ExerciseEntry;
@@ -68,10 +69,10 @@ public class LogExerciseService {
         } catch (DuplicateKeyException e) {
             throw ApiException.idConflict();
         }
-        // Kinds come from the exercise's log type (R49): weight × reps, or bodyweight × reps.
+        // Kinds come from the exercise's log type (R49, widened in V9): weight or bodyweight, by reps, seconds or metres.
         if (sets > 0) {
-            boolean reps = "reps".equals(lib.logType());
-            exercises.insertEmptySets(sxId, sets, reps ? "bodyweight" : "weight", "reps");
+            var kinds = LogTypes.kindsOf(lib.logType());
+            exercises.insertEmptySets(sxId, sets, kinds.loadKind(), kinds.effortKind());
         }
         return new Created<>(reads.entry(trainerId, sessionId, sxId), true);
     }

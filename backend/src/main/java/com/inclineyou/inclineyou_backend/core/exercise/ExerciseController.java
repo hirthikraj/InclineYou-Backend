@@ -28,12 +28,20 @@ public class ExerciseController {
     public ExercisePage search(@RequestParam(required = false) String q,
                                @RequestParam(required = false) String bodyPart,
                                @RequestParam(required = false) String equipment,
+                               @RequestParam(required = false) String equipmentKey,
+                               @RequestParam(required = false) String equipmentCategory,
+                               @RequestParam(required = false) String target,
+                               @RequestParam(required = false) String secondary,
+                               @RequestParam(required = false) String pattern,
+                               @RequestParam(required = false) String logType,
+                               @RequestParam(required = false) String category,
                                @RequestParam(required = false) String level,
                                @RequestParam(required = false) Boolean custom,
                                @RequestParam(required = false) Integer limit,
                                @RequestParam(required = false) String cursor,
                                @RequestParam(defaultValue = "false") boolean includeTotal) {
-        return service.search(trainerId(), q, bodyPart, equipment, level, custom, limit, cursor, includeTotal);
+        return service.search(trainerId(), new ExerciseService.Search(q, bodyPart, equipment, equipmentKey, equipmentCategory,
+                level, target, secondary, pattern, logType, category, custom), limit, cursor, includeTotal);
     }
 
     /**

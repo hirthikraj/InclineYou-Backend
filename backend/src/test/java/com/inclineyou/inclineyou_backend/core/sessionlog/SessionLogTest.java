@@ -515,6 +515,23 @@ class SessionLogTest {
     }
 
     @Test
+    @DisplayName("a timed or carried movement lays down seconds or metres, not reps (V9 log types)")
+    void addTimedAndCarriedExercises() throws Exception {
+        start();
+        UUID plank = exercise("Zqx plank", "time");
+        UUID farmer = exercise("Zqx farmer's walk", "weight_distance");
+        UUID hold = exercise("Zqx weighted hold", "weight_time");
+        UUID run = exercise("Zqx sprint", "distance");
+        String[][] cases = {{plank.toString(), "bodyweight", "time"}, {farmer.toString(), "weight", "distance"},
+                {hold.toString(), "weight", "time"}, {run.toString(), "bodyweight", "distance"}};
+        for (String[] c : cases) {
+            doPost("/v1/sessions/" + session + "/exercises", "{\"exerciseId\":\"" + c[0] + "\",\"sets\":2}")
+                    .andExpect(status().isCreated()).andExpect(jsonPath("$.sets.length()").value(2))
+                    .andExpect(jsonPath("$.sets[0].loadKind").value(c[1])).andExpect(jsonPath("$.sets[0].effortKind").value(c[2]));
+        }
+    }
+
+    @Test
     @DisplayName("remove hides an exercise (its sets stay) and drops it from the totals; undo brings it back; notes and rest have limits")
     void patchExercise() throws Exception {
         start();

@@ -1,0 +1,1538 @@
+[
+ {
+  "slug": "beginner-full-body",
+  "name": "Beginner full body",
+  "goal": "general",
+  "weeks": 4,
+  "level": "beginner",
+  "equipment": "full_gym",
+  "summary": "Three full-body days a week on basic machines, dumbbells and a barbell. Learn the patterns before adding load.",
+  "days": [
+   {
+    "name": "Full body A",
+    "exercises": [
+     {
+      "ex": "dumbbell-goblet-squat",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "machine-chest-press",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "cable-seated-row",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-seated-shoulder-press",
+      "sets": 2,
+      "value": 10,
+      "rest": 75,
+      "section": "Accessory"
+     },
+     {
+      "ex": "plank",
+      "sets": 3,
+      "value": 30,
+      "rest": 45,
+      "section": "Core"
+     }
+    ]
+   },
+   {
+    "name": "Full body B",
+    "exercises": [
+     {
+      "ex": "leg-press",
+      "sets": 3,
+      "value": 12,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "cable-wide-grip-lat-pulldown",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "incline-push-up",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-romanian-deadlift",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Accessory"
+     },
+     {
+      "ex": "dead-bug",
+      "sets": 3,
+      "value": 10,
+      "rest": 45,
+      "section": "Core"
+     }
+    ]
+   },
+   {
+    "name": "Full body C",
+    "exercises": [
+     {
+      "ex": "barbell-hip-thrust",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-bench-press",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-bent-over-row",
+      "sets": 3,
+      "value": 10,
+      "rest": 75,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-forward-lunge",
+      "sets": 2,
+      "value": 10,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "bird-dog",
+      "sets": 3,
+      "value": 10,
+      "rest": 45,
+      "section": "Core"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "slug": "dumbbell-strength",
+  "name": "Dumbbell strength",
+  "goal": "strength",
+  "weeks": 6,
+  "level": "intermediate",
+  "equipment": "dumbbells",
+  "summary": "Three days of heavy dumbbell work for someone with a pair of adjustable dumbbells and a bench.",
+  "days": [
+   {
+    "name": "Squat and press",
+    "exercises": [
+     {
+      "ex": "dumbbell-goblet-squat",
+      "sets": 4,
+      "value": 6,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-bench-press",
+      "sets": 4,
+      "value": 6,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-bent-over-row",
+      "sets": 3,
+      "value": 8,
+      "rest": 90,
+      "section": "Accessory"
+     },
+     {
+      "ex": "dumbbell-lateral-raise",
+      "sets": 3,
+      "value": 12,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Hinge and pull",
+    "exercises": [
+     {
+      "ex": "dumbbell-romanian-deadlift",
+      "sets": 4,
+      "value": 6,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-one-arm-row",
+      "sets": 4,
+      "value": 8,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-overhead-triceps-extension",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "dumbbell-curl",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Legs and core",
+    "exercises": [
+     {
+      "ex": "dumbbell-bulgarian-split-squat",
+      "sets": 4,
+      "value": 8,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-step-up",
+      "sets": 3,
+      "value": 10,
+      "rest": 75,
+      "section": "Accessory"
+     },
+     {
+      "ex": "dumbbell-standing-calf-raise",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     },
+     {
+      "ex": "plank",
+      "sets": 3,
+      "value": 40,
+      "rest": 45,
+      "section": "Core"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "slug": "bodyweight-fat-loss",
+  "name": "Bodyweight fat loss",
+  "goal": "weight_loss",
+  "weeks": 8,
+  "level": "beginner",
+  "equipment": "bodyweight",
+  "summary": "Four short bodyweight days, no equipment: circuits that raise the heart rate and build a habit.",
+  "days": [
+   {
+    "name": "Circuit A",
+    "exercises": [
+     {
+      "ex": "burpee",
+      "sets": 4,
+      "value": 10,
+      "rest": 45,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "push-up",
+      "sets": 4,
+      "value": 10,
+      "rest": 45,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "walking-lunge",
+      "sets": 4,
+      "value": 12,
+      "rest": 45,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "mountain-climber",
+      "sets": 4,
+      "value": 30,
+      "rest": 30,
+      "section": "Finisher"
+     }
+    ]
+   },
+   {
+    "name": "Core and glutes",
+    "exercises": [
+     {
+      "ex": "glute-bridge",
+      "sets": 4,
+      "value": 15,
+      "rest": 45,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "bicycle-crunch",
+      "sets": 4,
+      "value": 20,
+      "rest": 30,
+      "section": "Core"
+     },
+     {
+      "ex": "reverse-crunch",
+      "sets": 3,
+      "value": 15,
+      "rest": 30,
+      "section": "Core"
+     },
+     {
+      "ex": "mountain-climber",
+      "sets": 3,
+      "value": 30,
+      "rest": 30,
+      "section": "Finisher"
+     }
+    ]
+   },
+   {
+    "name": "Circuit B",
+    "exercises": [
+     {
+      "ex": "bench-dip",
+      "sets": 4,
+      "value": 10,
+      "rest": 45,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "jump-squat",
+      "sets": 4,
+      "value": 12,
+      "rest": 45,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "reverse-lunge",
+      "sets": 4,
+      "value": 12,
+      "rest": 45,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "push-up",
+      "sets": 3,
+      "value": 12,
+      "rest": 45,
+      "section": "Finisher"
+     }
+    ]
+   },
+   {
+    "name": "Finisher",
+    "exercises": [
+     {
+      "ex": "burpee",
+      "sets": 5,
+      "value": 10,
+      "rest": 30,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "high-knees",
+      "sets": 5,
+      "value": 30,
+      "rest": 30,
+      "section": "Finisher"
+     },
+     {
+      "ex": "crunch",
+      "sets": 4,
+      "value": 25,
+      "rest": 30,
+      "section": "Core"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "slug": "upper-lower-split",
+  "name": "Upper / lower split",
+  "goal": "muscle_gain",
+  "weeks": 8,
+  "level": "intermediate",
+  "equipment": "full_gym",
+  "summary": "Two upper and two lower days a week for someone with a few months of training behind them.",
+  "days": [
+   {
+    "name": "Upper A",
+    "exercises": [
+     {
+      "ex": "barbell-bench-press",
+      "sets": 4,
+      "value": 8,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "cable-seated-row",
+      "sets": 4,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-seated-shoulder-press",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Accessory"
+     },
+     {
+      "ex": "cable-rope-pushdown",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "dumbbell-curl",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Lower A",
+    "exercises": [
+     {
+      "ex": "barbell-back-squat",
+      "sets": 4,
+      "value": 8,
+      "rest": 150,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-romanian-deadlift",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "leg-extension",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "lying-leg-curl",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "machine-standing-calf-raise",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Upper B",
+    "exercises": [
+     {
+      "ex": "pull-up",
+      "sets": 4,
+      "value": 6,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-incline-bench-press",
+      "sets": 4,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-bent-over-row",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Accessory"
+     },
+     {
+      "ex": "cable-face-pull",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     },
+     {
+      "ex": "cable-lateral-raise",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Lower B",
+    "exercises": [
+     {
+      "ex": "barbell-deadlift",
+      "sets": 4,
+      "value": 5,
+      "rest": 180,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "leg-press",
+      "sets": 3,
+      "value": 12,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "barbell-hip-thrust",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Accessory"
+     },
+     {
+      "ex": "cable-kneeling-crunch",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Core"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "slug": "push-pull-legs",
+  "name": "Push / pull / legs",
+  "goal": "muscle_gain",
+  "weeks": 8,
+  "level": "intermediate",
+  "equipment": "full_gym",
+  "summary": "Three days a week: pushing muscles, pulling muscles, then legs. A simple rotation that suits a trainer who sees the client three times.",
+  "days": [
+   {
+    "name": "Push",
+    "exercises": [
+     {
+      "ex": "barbell-bench-press",
+      "sets": 4,
+      "value": 8,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-seated-shoulder-press",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "pec-deck-fly",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "cable-rope-pushdown",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "dumbbell-lateral-raise",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Pull",
+    "exercises": [
+     {
+      "ex": "cable-wide-grip-lat-pulldown",
+      "sets": 4,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "barbell-bent-over-row",
+      "sets": 4,
+      "value": 8,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "cable-face-pull",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     },
+     {
+      "ex": "dumbbell-curl",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "dumbbell-hammer-curl",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Legs",
+    "exercises": [
+     {
+      "ex": "barbell-back-squat",
+      "sets": 4,
+      "value": 8,
+      "rest": 150,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "barbell-romanian-deadlift",
+      "sets": 3,
+      "value": 10,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "leg-press",
+      "sets": 3,
+      "value": 12,
+      "rest": 90,
+      "section": "Accessory"
+     },
+     {
+      "ex": "lying-leg-curl",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "machine-standing-calf-raise",
+      "sets": 4,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "slug": "strength-base",
+  "name": "Strength base",
+  "goal": "strength",
+  "weeks": 8,
+  "level": "intermediate",
+  "equipment": "full_gym",
+  "summary": "Squat, bench, deadlift and overhead press across three days, with a little pulling and core. Add weight a little each week.",
+  "days": [
+   {
+    "name": "Squat and bench",
+    "exercises": [
+     {
+      "ex": "barbell-back-squat",
+      "sets": 5,
+      "value": 5,
+      "rest": 180,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "barbell-bench-press",
+      "sets": 5,
+      "value": 5,
+      "rest": 180,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "barbell-bent-over-row",
+      "sets": 3,
+      "value": 8,
+      "rest": 120,
+      "section": "Accessory"
+     },
+     {
+      "ex": "plank",
+      "sets": 3,
+      "value": 45,
+      "rest": 45,
+      "section": "Core"
+     }
+    ]
+   },
+   {
+    "name": "Deadlift and press",
+    "exercises": [
+     {
+      "ex": "barbell-deadlift",
+      "sets": 4,
+      "value": 5,
+      "rest": 180,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "barbell-standing-overhead-press",
+      "sets": 4,
+      "value": 6,
+      "rest": 150,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "chin-up",
+      "sets": 3,
+      "value": 6,
+      "rest": 120,
+      "section": "Accessory"
+     },
+     {
+      "ex": "hanging-knee-raise",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Core"
+     }
+    ]
+   },
+   {
+    "name": "Volume day",
+    "exercises": [
+     {
+      "ex": "barbell-front-squat",
+      "sets": 3,
+      "value": 6,
+      "rest": 150,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "barbell-incline-bench-press",
+      "sets": 3,
+      "value": 8,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "barbell-romanian-deadlift",
+      "sets": 3,
+      "value": 8,
+      "rest": 120,
+      "section": "Accessory"
+     },
+     {
+      "ex": "cable-face-pull",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "slug": "home-dumbbell-full-body",
+  "name": "Home dumbbell full body",
+  "goal": "general",
+  "weeks": 6,
+  "level": "beginner",
+  "equipment": "dumbbells",
+  "summary": "Three full-body days at home with one pair of dumbbells and a chair or bench. Good for home-visit clients.",
+  "days": [
+   {
+    "name": "Day 1",
+    "exercises": [
+     {
+      "ex": "dumbbell-goblet-squat",
+      "sets": 3,
+      "value": 12,
+      "rest": 75,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-bench-press",
+      "sets": 3,
+      "value": 10,
+      "rest": 75,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-bent-over-row",
+      "sets": 3,
+      "value": 10,
+      "rest": 75,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dead-bug",
+      "sets": 3,
+      "value": 10,
+      "rest": 45,
+      "section": "Core"
+     }
+    ]
+   },
+   {
+    "name": "Day 2",
+    "exercises": [
+     {
+      "ex": "dumbbell-romanian-deadlift",
+      "sets": 3,
+      "value": 12,
+      "rest": 75,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-seated-shoulder-press",
+      "sets": 3,
+      "value": 10,
+      "rest": 75,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-reverse-lunge",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "plank",
+      "sets": 3,
+      "value": 30,
+      "rest": 45,
+      "section": "Core"
+     }
+    ]
+   },
+   {
+    "name": "Day 3",
+    "exercises": [
+     {
+      "ex": "dumbbell-step-up",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "push-up",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-one-arm-row",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-glute-bridge",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     },
+     {
+      "ex": "bird-dog",
+      "sets": 3,
+      "value": 10,
+      "rest": 45,
+      "section": "Core"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "slug": "glute-and-leg-builder",
+  "name": "Glute and leg builder",
+  "goal": "muscle_gain",
+  "weeks": 8,
+  "level": "intermediate",
+  "equipment": "full_gym",
+  "summary": "Four days with the legs and glutes first: hip thrusts, squats and hinges, with upper-body work kept short.",
+  "days": [
+   {
+    "name": "Glutes and hamstrings",
+    "exercises": [
+     {
+      "ex": "barbell-hip-thrust",
+      "sets": 4,
+      "value": 10,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "barbell-romanian-deadlift",
+      "sets": 4,
+      "value": 10,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "lying-leg-curl",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "cable-glute-kickback",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Upper",
+    "exercises": [
+     {
+      "ex": "cable-wide-grip-lat-pulldown",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-bench-press",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-seated-shoulder-press",
+      "sets": 3,
+      "value": 10,
+      "rest": 75,
+      "section": "Accessory"
+     },
+     {
+      "ex": "dumbbell-curl",
+      "sets": 2,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Quads and glutes",
+    "exercises": [
+     {
+      "ex": "barbell-back-squat",
+      "sets": 4,
+      "value": 8,
+      "rest": 150,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-bulgarian-split-squat",
+      "sets": 3,
+      "value": 10,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "leg-extension",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "seated-hip-abduction",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Glute finisher",
+    "exercises": [
+     {
+      "ex": "leg-press-high-foot",
+      "sets": 4,
+      "value": 12,
+      "rest": 90,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-step-up",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "mini-band-lateral-walk",
+      "sets": 3,
+      "value": 12,
+      "rest": 45,
+      "section": "Accessory"
+     },
+     {
+      "ex": "glute-bridge",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Core"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "slug": "mobility-and-core",
+  "name": "Mobility and core",
+  "goal": "general",
+  "weeks": 4,
+  "level": "beginner",
+  "equipment": "bodyweight",
+  "summary": "Three short sessions of hip, spine and shoulder mobility with core work. Fits before or after training, or on its own.",
+  "days": [
+   {
+    "name": "Hips and legs",
+    "exercises": [
+     {
+      "ex": "deep-squat-hold",
+      "sets": 3,
+      "value": 30,
+      "rest": 30,
+      "section": "Warm-up"
+     },
+     {
+      "ex": "90-90-hip-switch",
+      "sets": 3,
+      "value": 8,
+      "rest": 30,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "worlds-greatest-stretch",
+      "sets": 2,
+      "value": 5,
+      "rest": 30,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "figure-four-stretch",
+      "sets": 2,
+      "value": 30,
+      "rest": 20,
+      "section": "Cool-down"
+     },
+     {
+      "ex": "kneeling-hip-flexor-stretch",
+      "sets": 2,
+      "value": 30,
+      "rest": 20,
+      "section": "Cool-down"
+     }
+    ]
+   },
+   {
+    "name": "Spine and shoulders",
+    "exercises": [
+     {
+      "ex": "cat-cow",
+      "sets": 2,
+      "value": 10,
+      "rest": 20,
+      "section": "Warm-up"
+     },
+     {
+      "ex": "thread-the-needle",
+      "sets": 2,
+      "value": 8,
+      "rest": 20,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "wall-slide",
+      "sets": 3,
+      "value": 10,
+      "rest": 30,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "open-book-rotation",
+      "sets": 2,
+      "value": 8,
+      "rest": 20,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "childs-pose",
+      "sets": 2,
+      "value": 30,
+      "rest": 20,
+      "section": "Cool-down"
+     }
+    ]
+   },
+   {
+    "name": "Core",
+    "exercises": [
+     {
+      "ex": "dead-bug",
+      "sets": 3,
+      "value": 10,
+      "rest": 30,
+      "section": "Core"
+     },
+     {
+      "ex": "bird-dog",
+      "sets": 3,
+      "value": 10,
+      "rest": 30,
+      "section": "Core"
+     },
+     {
+      "ex": "plank",
+      "sets": 3,
+      "value": 30,
+      "rest": 30,
+      "section": "Core"
+     },
+     {
+      "ex": "side-plank",
+      "sets": 2,
+      "value": 20,
+      "rest": 30,
+      "section": "Core"
+     },
+     {
+      "ex": "glute-bridge",
+      "sets": 3,
+      "value": 12,
+      "rest": 30,
+      "section": "Core"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "slug": "gentle-strength",
+  "name": "Gentle strength",
+  "goal": "general",
+  "weeks": 6,
+  "level": "beginner",
+  "equipment": "dumbbells",
+  "summary": "Three easy sessions of joint-friendly strength with light dumbbells: sit-to-stand, bridges, rows and carries. For older clients or anyone returning after a break.",
+  "days": [
+   {
+    "name": "Day 1",
+    "exercises": [
+     {
+      "ex": "bodyweight-squat",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "incline-push-up",
+      "sets": 3,
+      "value": 8,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-bent-over-row",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "glute-bridge",
+      "sets": 3,
+      "value": 12,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Day 2",
+    "exercises": [
+     {
+      "ex": "dumbbell-step-up",
+      "sets": 3,
+      "value": 8,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-seated-shoulder-press",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "bird-dog",
+      "sets": 3,
+      "value": 8,
+      "rest": 45,
+      "section": "Core"
+     },
+     {
+      "ex": "dumbbell-farmers-walk",
+      "sets": 3,
+      "value": 30,
+      "rest": 60,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Day 3",
+    "exercises": [
+     {
+      "ex": "dumbbell-romanian-deadlift",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-bench-press",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "wall-sit",
+      "sets": 3,
+      "value": 20,
+      "rest": 45,
+      "section": "Accessory"
+     },
+     {
+      "ex": "dead-bug",
+      "sets": 3,
+      "value": 8,
+      "rest": 45,
+      "section": "Core"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "slug": "akhara-bodyweight",
+  "name": "Akhara-style bodyweight",
+  "goal": "strength",
+  "weeks": 6,
+  "level": "intermediate",
+  "equipment": "bodyweight",
+  "summary": "Traditional conditioning with dand and baithak in high reps, plus pull-ups and core. Needs only a mat and a bar.",
+  "days": [
+   {
+    "name": "Dand and baithak",
+    "exercises": [
+     {
+      "ex": "hindu-push-up",
+      "sets": 4,
+      "value": 15,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "hindu-squat",
+      "sets": 4,
+      "value": 40,
+      "rest": 60,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "plank",
+      "sets": 3,
+      "value": 40,
+      "rest": 45,
+      "section": "Core"
+     },
+     {
+      "ex": "glute-bridge",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Pull and core",
+    "exercises": [
+     {
+      "ex": "pull-up",
+      "sets": 4,
+      "value": 5,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "inverted-row",
+      "sets": 3,
+      "value": 10,
+      "rest": 75,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "hanging-knee-raise",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Core"
+     },
+     {
+      "ex": "superman",
+      "sets": 3,
+      "value": 12,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Endurance",
+    "exercises": [
+     {
+      "ex": "hindu-push-up",
+      "sets": 5,
+      "value": 15,
+      "rest": 45,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "hindu-squat",
+      "sets": 5,
+      "value": 50,
+      "rest": 45,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "bench-dip",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "mountain-climber",
+      "sets": 3,
+      "value": 30,
+      "rest": 30,
+      "section": "Finisher"
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "slug": "powerbuilding",
+  "name": "Powerbuilding",
+  "goal": "muscle_gain",
+  "weeks": 8,
+  "level": "advanced",
+  "equipment": "full_gym",
+  "summary": "Four days that pair a heavy lift with higher-rep work: strength first, then size. For someone with at least a year of consistent training.",
+  "days": [
+   {
+    "name": "Squat and quads",
+    "exercises": [
+     {
+      "ex": "barbell-back-squat",
+      "sets": 5,
+      "value": 5,
+      "rest": 180,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "leg-press",
+      "sets": 4,
+      "value": 10,
+      "rest": 90,
+      "section": "Accessory"
+     },
+     {
+      "ex": "leg-extension",
+      "sets": 3,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     },
+     {
+      "ex": "machine-standing-calf-raise",
+      "sets": 4,
+      "value": 12,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Bench and chest",
+    "exercises": [
+     {
+      "ex": "barbell-bench-press",
+      "sets": 5,
+      "value": 5,
+      "rest": 180,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-incline-bench-press",
+      "sets": 4,
+      "value": 8,
+      "rest": 90,
+      "section": "Accessory"
+     },
+     {
+      "ex": "pec-deck-fly",
+      "sets": 3,
+      "value": 12,
+      "rest": 60,
+      "section": "Accessory"
+     },
+     {
+      "ex": "cable-rope-pushdown",
+      "sets": 4,
+      "value": 12,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Deadlift and back",
+    "exercises": [
+     {
+      "ex": "barbell-deadlift",
+      "sets": 4,
+      "value": 4,
+      "rest": 210,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "barbell-bent-over-row",
+      "sets": 4,
+      "value": 8,
+      "rest": 120,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "cable-wide-grip-lat-pulldown",
+      "sets": 3,
+      "value": 10,
+      "rest": 75,
+      "section": "Accessory"
+     },
+     {
+      "ex": "dumbbell-curl",
+      "sets": 3,
+      "value": 12,
+      "rest": 45,
+      "section": "Accessory"
+     }
+    ]
+   },
+   {
+    "name": "Press and shoulders",
+    "exercises": [
+     {
+      "ex": "barbell-standing-overhead-press",
+      "sets": 5,
+      "value": 5,
+      "rest": 150,
+      "section": "Main lifts"
+     },
+     {
+      "ex": "dumbbell-lateral-raise",
+      "sets": 4,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     },
+     {
+      "ex": "cable-face-pull",
+      "sets": 4,
+      "value": 15,
+      "rest": 45,
+      "section": "Accessory"
+     },
+     {
+      "ex": "hanging-leg-raise",
+      "sets": 3,
+      "value": 10,
+      "rest": 60,
+      "section": "Core"
+     }
+    ]
+   }
+  ]
+ }
+]

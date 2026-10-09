@@ -23,6 +23,9 @@ final class AssessmentJson {
 
     private static final JsonMapper JSON = JsonMapper.builder()
             .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            // A form written before a flag existed (or by hand, as the seeds do) has no key for it;
+            // an absent boolean means false, and a stored form must stay readable.
+            .disable(DeserializationFeature.FAIL_ON_NULL_FOR_PRIMITIVES)
             .changeDefaultPropertyInclusion(i -> i.withValueInclusion(JsonInclude.Include.NON_NULL))
             .build();
 

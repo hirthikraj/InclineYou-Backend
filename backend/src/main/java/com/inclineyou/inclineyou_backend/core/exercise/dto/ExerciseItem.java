@@ -19,11 +19,19 @@ public record ExerciseItem(
         /* the row's updated_at as epoch ms; what a PATCH's If-Match carries */
         String version,
         @JsonInclude(JsonInclude.Include.NON_NULL) String description,
-        @JsonInclude(JsonInclude.Include.NON_NULL) List<String> formCues
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<String> formCues,
+        /* The rest of what the library knows, on the single-exercise read only (like description and formCues). */
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<String> aliases,
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<String> commonMistakes,
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<String> safety,
+        @JsonInclude(JsonInclude.Include.NON_NULL) List<String> equipmentNeeded,
+        @JsonInclude(JsonInclude.Include.NON_NULL) String category,
+        /* The whole metadata object, so a key added to the library tomorrow reaches the panel without a deploy here. */
+        @JsonInclude(JsonInclude.Include.NON_NULL) java.util.Map<String, Object> metadata
 ) {
     /** The list row as it is without the two detail-only fields. */
     public ExerciseItem summary() {
         return new ExerciseItem(id, name, muscleGroup, bodyPart, target, secondaryTargets, equipment, movementPattern,
-                level, logType, isCustom, status, createdAt, version, null, null);
+                level, logType, isCustom, status, createdAt, version, null, null, null, null, null, null, null, null);
     }
 }

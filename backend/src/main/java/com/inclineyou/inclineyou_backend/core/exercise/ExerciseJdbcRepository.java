@@ -1,6 +1,9 @@
 package com.inclineyou.inclineyou_backend.core.exercise;
 
 import com.inclineyou.inclineyou_backend.core.exercise.dto.ExerciseItem;
+import com.inclineyou.inclineyou_backend.core.exercise.dto.ExerciseMeta;
+import com.inclineyou.inclineyou_backend.core.exercise.dto.ExerciseMeta.EquipmentGroup;
+import com.inclineyou.inclineyou_backend.core.exercise.dto.ExerciseMeta.EquipmentItem;
 import com.inclineyou.inclineyou_backend.core.exercise.dto.ExerciseMeta.Facet;
 import com.inclineyou.inclineyou_backend.core.exercise.dto.ExerciseRequest;
 import com.inclineyou.inclineyou_backend.core.exercise.dto.PatchExerciseRequest;
@@ -36,7 +39,7 @@ public class ExerciseJdbcRepository {
     private static final String COLUMNS = """
             e.id::text AS id, e.name, e.muscle_group, e.body_part, e.target, e.secondary_targets::text AS secondary_targets,
             e.equipment, e.movement_pattern, e.level, e.log_type, e.origin, e.status, e.created_at, e.updated_at,
-            e.description, e.form_cues::text AS form_cues""";
+            e.description, e.form_cues::text AS form_cues, e.metadata::text AS metadata""";
 
     private static final String VISIBLE = "e.deleted_at IS NULL AND (e.origin = 'inclineyou' OR e.trainer_id = :tid::uuid)";
 
@@ -46,7 +49,9 @@ public class ExerciseJdbcRepository {
     public record Hit(ExerciseItem item, int tier, String similarity) {}
 
     /** The filters of a list read, already validated. {@code q} is raw text; this class escapes it. */
-    public record Filter(String q, String bodyPart, String equipment, String level, Boolean custom) {}
+    public record Filter(String q, List<String> bodyPart, List<String> equipment, List<String> level, Boolean custom,
+                         List<String> equipmentKey, List<String> equipmentCategory, List<String> target,
+                         List<String> secondary, List<String> pattern, List<String> logType, List<String> category) {}
 
     /** Where the previous page stopped. {@code tier} and {@code similarity} are unused without a {@code q}. */
     public record After(int tier, String similarity, String name, UUID id) {}
@@ -58,7 +63,10 @@ public class ExerciseJdbcRepository {
                 rs.getString("equipment"), rs.getString("movement_pattern"), rs.getString("level"),
                 rs.getString("log_type"), "trainer".equals(rs.getString("origin")), rs.getString("status"),
                 rs.getTimestamp("created_at").getTime(), String.valueOf(updated.getTime()),
-                rs.getString("description"), list(rs.getString("form_cues")));
+                rs.getString("description"), list(rs.getString("form_cues")),
+                metaList(rs.getString("metadata"), "aliases"), metaList(rs.getString("metadata"), "commonMistakes"),
+                metaList(rs.getString("metadata"), "safety"), metaList(rs.getString("metadata"), "equipmentNeeded"),
+                metaString(rs.getString("metadata"), "category"), metaObject(rs.getString("metadata")));
     };
 
     /* ─────────────────────────────────────────────────────────────── reads ── */
@@ -91,9 +99,38 @@ public class ExerciseJdbcRepository {
 
     /** One facet, counted over what the caller can see: {@code column} is one of ours, never the caller's. */
     public List<Facet> facet(UUID trainerId, String column) {
-        return jdbc.query("SELECT e." + column + " AS id, count(*) AS n FROM exercise e WHERE " + VISIBLE
-                + " AND e." + column + " IS NOT NULL GROUP BY e." + column + " ORDER BY n DESC, id",
+        return facetOf(trainerId, "e." + column);
+    }
+
+    /** The same over an expression of ours (a coalesce, a field of {@code metadata}); never the caller's text. */
+    public List<Facet> facetOf(UUID trainerId, String expr) {
+        return jdbc.query("SELECT " + expr + " AS id, count(*) AS n FROM exercise e WHERE " + VISIBLE
+                + " AND " + expr + " IS NOT NULL GROUP BY " + expr + " ORDER BY n DESC, id",
                 Map.of("tid", trainerId.toString()), (rs, i) -> new Facet(rs.getString("id"), rs.getInt("n")));
+    }
+
+    /** Muscles with the body part each sits under, so a category opens onto its own muscles. */
+    public List<ExerciseMeta.Muscle> muscles(UUID trainerId) {
+        return jdbc.query("SELECT e.body_part, e.target, count(*) AS n FROM exercise e WHERE " + VISIBLE
+                + " AND e.body_part IS NOT NULL AND e.target IS NOT NULL GROUP BY e.body_part, e.target ORDER BY n DESC, e.target",
+                Map.of("tid", trainerId.toString()),
+                (rs, i) -> new ExerciseMeta.Muscle(rs.getString("body_part"), rs.getString("target"), rs.getInt("n")));
+    }
+
+    /** Visible exercises per piece of equipment, in the library's own order (category, then sort_order). */
+    public List<EquipmentGroup> equipmentGroups(UUID trainerId) {
+        record Row(String category, String key, String name, int n, String value) {}
+        var rows = jdbc.query("SELECT q.category, q.key, q.name, count(*) AS n,"
+                + " COALESCE((SELECT a.legacy_value FROM equipment_alias a WHERE a.equipment_id = q.id AND lower(a.legacy_value) = lower(q.name) LIMIT 1),"
+                + " (SELECT min(a.legacy_value) FROM equipment_alias a WHERE a.equipment_id = q.id), lower(q.name)) AS value"
+                + " FROM exercise e JOIN equipment q ON q.id = e.equipment_id"
+                + " WHERE " + VISIBLE + " AND q.is_active"
+                + " GROUP BY q.id, q.category, q.key, q.name, q.sort_order ORDER BY q.sort_order, q.key",
+                Map.of("tid", trainerId.toString()),
+                (rs, i) -> new Row(rs.getString("category"), rs.getString("key"), rs.getString("name"), rs.getInt("n"), rs.getString("value")));
+        var groups = new java.util.LinkedHashMap<String, List<EquipmentItem>>();
+        for (var r : rows) groups.computeIfAbsent(r.category(), c -> new java.util.ArrayList<>()).add(new EquipmentItem(r.key(), r.name(), r.n(), r.value()));
+        return groups.entrySet().stream().map(e -> new EquipmentGroup(e.getKey(), e.getValue())).toList();
     }
 
     public int total(UUID trainerId) {
@@ -139,17 +176,32 @@ public class ExerciseJdbcRepository {
 
     /** {@code muscle_group} mirrors {@code target}, as it does on every seeded row. */
     public void insert(UUID id, UUID trainerId, ExerciseRequest r) {
+        /* The library keeps these in `metadata`, and a custom exercise keeps them in the same place so the one panel and
+           the one search read both. Left null when nothing was given: the column is an object or nothing. */
+        var meta = new java.util.LinkedHashMap<String, Object>();
+        putIfAny(meta, "aliases", r.aliases());
+        putIfAny(meta, "commonMistakes", r.commonMistakes());
+        putIfAny(meta, "safety", r.safety());
+        putIfAny(meta, "equipmentNeeded", r.equipmentNeeded());
         jdbc.update("""
                 INSERT INTO exercise (id, origin, trainer_id, name, muscle_group, body_part, target, equipment, log_type,
-                                      level, description, form_cues, secondary_targets, status)
+                                      level, description, form_cues, secondary_targets, movement_pattern, metadata, status)
                 VALUES (:id::uuid, 'trainer', :tid::uuid, :name, :target, :bodyPart, :target, :equipment, :logType,
-                        :level, :description, CAST(:cues AS jsonb), '[]'::jsonb, :status)
+                        :level, :description, CAST(:cues AS jsonb), CAST(:secondary AS jsonb), :pattern,
+                        CAST(:metadata AS jsonb), :status)
                 """, new MapSqlParameterSource("id", id.toString()).addValue("tid", trainerId.toString())
                 .addValue("name", r.name()).addValue("bodyPart", r.bodyPart()).addValue("target", r.target())
                 .addValue("equipment", r.equipment()).addValue("logType", r.logType() == null ? "weight_reps" : r.logType())
                 .addValue("level", r.level()).addValue("description", r.description())
                 .addValue("cues", json(r.formCues() == null ? List.of() : r.formCues()))
+                .addValue("secondary", json(r.secondaryTargets() == null ? List.of() : r.secondaryTargets()))
+                .addValue("pattern", r.movementPattern())
+                .addValue("metadata", meta.isEmpty() ? null : JSON.writeValueAsString(meta))
                 .addValue("status", r.status() == null ? "published" : r.status()));
+    }
+
+    private static void putIfAny(Map<String, Object> meta, String key, List<String> values) {
+        if (values != null && !values.isEmpty()) meta.put(key, values.stream().map(String::strip).toList());
     }
 
     /** The fields a PATCH sent; {@code target} keeps {@code muscle_group} beside it. Always moves {@code updated_at} (a trigger). */
@@ -192,18 +244,45 @@ public class ExerciseJdbcRepository {
             String like = f.q().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
             p.addValue("q", f.q()).addValue("prefix", like + "%").addValue("contains", "%" + like + "%");
         }
-        if (f.bodyPart() != null) p.addValue("bodyPart", f.bodyPart());
-        if (f.equipment() != null) p.addValue("equipment", f.equipment());
-        if (f.level() != null) p.addValue("level", f.level());
+        put(p, "bodyPart", f.bodyPart());
+        put(p, "equipment", f.equipment());
+        put(p, "equipmentKey", f.equipmentKey());
+        put(p, "equipmentCategory", f.equipmentCategory());
+        put(p, "level", f.level());
+        put(p, "target", f.target());
+        put(p, "secondary", f.secondary());
+        put(p, "pattern", f.pattern());
+        put(p, "logType", f.logType());
+        put(p, "category", f.category());
         return p;
+    }
+
+    /** A list filter is bound as a lower-cased list; empty means the filter is off. */
+    private static void put(MapSqlParameterSource p, String name, List<String> values) {
+        if (values != null && !values.isEmpty()) p.addValue(name, values.stream().map(String::toLowerCase).toList());
+    }
+
+    private static boolean on(List<String> values) {
+        return values != null && !values.isEmpty();
     }
 
     private static String where(Filter f) {
         var w = new StringBuilder(VISIBLE);
-        if (f.q() != null) w.append(" AND (e.name ILIKE :contains ESCAPE '\\' OR similarity(e.name, :q) > 0.3)");
-        if (f.bodyPart() != null) w.append(" AND lower(e.body_part) = lower(:bodyPart)");
-        if (f.equipment() != null) w.append(" AND lower(e.equipment) = lower(:equipment)");
-        if (f.level() != null) w.append(" AND lower(e.level) = lower(:level)");
+        /* The name, or an alternate name from the library's own list (*flat bench* finds the barbell bench press). */
+        if (f.q() != null) w.append(" AND (e.name ILIKE :contains ESCAPE '\\' OR similarity(e.name, :q) > 0.3"
+                + " OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(COALESCE(e.metadata->'aliases', '[]'::jsonb)) AS al(v)"
+                + " WHERE al.v ILIKE :contains ESCAPE '\\'))");
+        if (on(f.bodyPart())) w.append(" AND lower(e.body_part) IN (:bodyPart)");
+        if (on(f.target())) w.append(" AND lower(e.target) IN (:target)");
+        /* A movement's secondary muscles are a jsonb array of lower-case names. */
+        if (on(f.secondary())) w.append(" AND jsonb_exists_any(e.secondary_targets, ARRAY[:secondary]::text[])");
+        if (on(f.equipment())) w.append(" AND lower(e.equipment) IN (:equipment)");
+        if (on(f.equipmentKey())) w.append(" AND e.equipment_id IN (SELECT q.id FROM equipment q WHERE q.key IN (:equipmentKey))");
+        if (on(f.equipmentCategory())) w.append(" AND e.equipment_id IN (SELECT q.id FROM equipment q WHERE q.category IN (:equipmentCategory))");
+        if (on(f.pattern())) w.append(" AND lower(e.movement_pattern) IN (:pattern)");
+        if (on(f.level())) w.append(" AND lower(e.level) IN (:level)");
+        if (on(f.logType())) w.append(" AND COALESCE(e.log_type, 'weight_reps') IN (:logType)");
+        if (on(f.category())) w.append(" AND lower(e.metadata->>'category') IN (:category)");
         if (f.custom() != null) w.append(f.custom() ? " AND e.origin = 'trainer'" : " AND e.origin = 'inclineyou'");
         return w.toString();
     }
@@ -226,6 +305,39 @@ public class ExerciseJdbcRepository {
             return JSON.readValue(json, STRINGS);
         } catch (RuntimeException e) {
             return List.of();
+        }
+    }
+
+    private static final TypeReference<Map<String, Object>> OBJECT = new TypeReference<>() {};
+
+    /** A list kept in {@code metadata} (aliases, common mistakes, safety, kit needed); empty when absent. */
+    private static List<String> metaList(String json, String key) {
+        Object v = metaValue(json, key);
+        if (!(v instanceof List<?> items)) return List.of();
+        return items.stream().filter(java.util.Objects::nonNull).map(Object::toString).toList();
+    }
+
+    /** The metadata object as stored; null when there is none, so the field is left off the wire. */
+    private static Map<String, Object> metaObject(String json) {
+        if (json == null) return null;
+        try {
+            return JSON.readValue(json, OBJECT);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private static String metaString(String json, String key) {
+        Object v = metaValue(json, key);
+        return v == null ? null : v.toString();
+    }
+
+    private static Object metaValue(String json, String key) {
+        if (json == null) return null;
+        try {
+            return JSON.readValue(json, OBJECT).get(key);
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 

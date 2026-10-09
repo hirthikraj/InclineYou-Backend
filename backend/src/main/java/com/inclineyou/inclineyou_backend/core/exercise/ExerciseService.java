@@ -47,13 +47,20 @@ public class ExerciseService {
 
     private final ExerciseJdbcRepository repo;
 
+    /** The raw filters of a list read, as they arrived: comma-separated lists, split and validated here. */
+    public record Search(String q, String bodyPart, String equipment, String equipmentKey, String equipmentCategory,
+                         String level, String target, String secondary, String pattern, String logType, String category,
+                         Boolean custom) {}
+
     @Transactional(readOnly = true)
-    public ExercisePage search(UUID trainerId, String q, String bodyPart, String equipment, String level,
-                               Boolean custom, Integer limit, String cursor, boolean includeTotal) {
+    public ExercisePage search(UUID trainerId, Search s, Integer limit, String cursor, boolean includeTotal) {
         int size = Cursor.limit(limit, DEFAULT_LIMIT, MAX_LIMIT);
+        String q = s.q();
         String text = q == null || q.isBlank() ? null : q.strip();
         if (text != null && text.length() > MAX_Q) throw ApiException.validation("q: at most " + MAX_Q + " characters");
-        var filter = new Filter(text, blankToNull(bodyPart), blankToNull(equipment), blankToNull(level), custom);
+        var filter = new Filter(text, split(s.bodyPart()), split(s.equipment()), split(s.level()), s.custom(),
+                split(s.equipmentKey()), split(s.equipmentCategory()), split(s.target()), split(s.secondary()),
+                split(s.pattern()), split(s.logType()), split(s.category()));
 
         List<Hit> hits = repo.search(trainerId, filter, after(cursor, text != null), size);
         boolean more = hits.size() > size;
@@ -71,7 +78,10 @@ public class ExerciseService {
     @Transactional(readOnly = true)
     public ExerciseMeta meta(UUID trainerId) {
         return new ExerciseMeta(repo.facet(trainerId, "body_part"), repo.facet(trainerId, "equipment"),
-                repo.facet(trainerId, "level"), repo.total(trainerId));
+                repo.facet(trainerId, "level"), repo.total(trainerId), repo.equipmentGroups(trainerId),
+                repo.muscles(trainerId), repo.facet(trainerId, "movement_pattern"),
+                repo.facetOf(trainerId, "COALESCE(e.log_type, 'weight_reps')"),
+                repo.facetOf(trainerId, "e.metadata->>'category'"));
     }
 
     @Transactional(readOnly = true)
@@ -149,6 +159,14 @@ public class ExerciseService {
         } catch (RuntimeException e) {
             throw ApiException.validation("cursor: not a cursor from this list");
         }
+    }
+
+    /** A comma-separated filter as a list: trimmed, de-duplicated, at most twenty values of at most sixty characters. */
+    private static List<String> split(String raw) {
+        if (raw == null || raw.isBlank()) return List.of();
+        var out = java.util.Arrays.stream(raw.split(",")).map(String::strip).filter(v -> !v.isEmpty()).distinct().toList();
+        if (out.size() > 20 || out.stream().anyMatch(v -> v.length() > 60)) throw ApiException.validation("filter: too many values or a value too long");
+        return out;
     }
 
     private static String blankToNull(String s) {

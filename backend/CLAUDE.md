@@ -40,59 +40,65 @@ docker compose -f ../docker-compose.yml up -d   # Postgres 16 + Redis 7
 ./mvnw test                                     # full test suite
 ./mvnw test -Dtest=OtpServiceTest               # one class
 ./mvnw test -Dtest=TenantIsolationTest          # the RLS walls, as `inclineyou_app`
-./scripts/seed-sample-month.sh <phone>          # 6 clients, one month — the small seed
-./scripts/seed-full-demo.sh <phone>             # 44 clients, every feature — the big seed
-./scripts/seed-realistic-20.sh <phone>          # 20 clients, a plausible week — the realistic seed
-./scripts/seed-certified-programs.sh          # 4 InclineYou library programs (is_sample) — no phone, the library has no owner
-./scripts/seed-program-data.sh <phone>          # exercises for the client plans, 6 templates, 4 standalone workouts — layer it on a trainer seed
+./scripts/seed-three-months.sh <phone>          # v1 schema: 16 clients, 13 weeks of diary + logs + money — WIPES that trainer's workspace first
 python3 scripts/refresh-schema-xml.py           # schema.xml + schema.html from the live db; --check to test
 ```
 
-The three trainer seed scripts are alternatives, not layers — running one over another
-duplicates working hours and price lists. All are scoped to the trainer whose
-phone you pass, which must be the phone signed in on the device.
+`seed-three-months.sh` is the only seed, and the only one written for the v1 schema (the earlier
+seeds targeted the pre-v1 tables and were deleted 6 Oct 2026; they are in git history). It
+**wipes the named trainer's workspace** (clients, diary, money, programs, price list) and rebuilds
+three months of it, dated relative to the day it runs. The phone must already exist — sign in once.
+It keeps the sign-in rows. Re-running gives the same diary.
 
-**One trainer coaches one client at a time, and the two newer seeds enforce it.**
-`seed-full-demo` and `seed-realistic-20` both derive the timetable rather than
-typing an hour per client: each `(weekday, band)` is a queue, `row_number()` over
-that partition picks one of four positions, and the position sets the time on a
-75-minute pitch — 06:00 · 07:15 · 08:30 · 09:45, then 17:00 · 18:15 · 19:30 ·
-20:45, inside a 06:00–11:00 / 17:00–22:00 split shift, Mon–Sat. Two clients on
-one day therefore *cannot* be given one time. Both assert it before committing,
-against the rows actually written:
+It builds a timetable with one person on the floor at a time — 06:00 · 07:15 · 08:30 · 09:45, then
+17:00 · 18:15 · 19:30 · 20:45 on a 75-minute pitch, inside a 06:00–11:00 / 17:00–22:00 split shift,
+Mon–Sat — and asserts before committing that no two sessions overlap and none runs outside the
+shift. Its money book goes through the ledger triggers (`package_adjustment` charges each session),
+so a change to those triggers is the likeliest thing to break it. It seeds no batch.
 
-- every client's chosen weekdays cover their template's ordinal days exactly
-  once, the rule `POST /v1/templates/{id}/apply` enforces;
-- no session runs past the shift; and
-- no two of the trainer's sessions **overlap** — measured against each session's
-  own duration, not merely a shared start time.
+### The exercise library seeds itself
 
-Both print the week as a grid when they finish, so it is visible rather than
-merely claimed. **Neither seeds a batch**: a batch is several clients in one
-slot, which is the one shape a one-at-a-time dataset cannot hold. Reach for
-`seed-sample-month` if you need the diary's batch row.
+There is no exercise seed script to run. `ExerciseSeeder` (an `ApplicationRunner` in `infrastructure/seed/`) loads
+`src/main/resources/seed/exercises.json` on **every boot** and upserts by `source_id` (`inclineyou-<id>`), writing only
+rows whose fields changed. **The file is authoritative:** an `inclineyou` exercise whose id is no longer in it is
+retired (`deleted_at`), never deleted. Turn it off with `SEED_EXERCISES=false`. It runs under the `SYSTEM` tenant
+context, the only actor allowed to write an `origin = 'inclineyou'` row. `seed-three-months.sh` looks exercises up by
+that `source_id` and fails naming the missing ones — start the backend once first.
 
-Which one: `seed-sample-month` is the smallest honest dataset, enough for a
-screen to render while you work on it. `seed-realistic-20` aims at PLAUSIBILITY
-— 20 clients, all of them coached, nine weeks of logged history and two ahead.
-`seed-full-demo` aims at COVERAGE: 44 clients so the A–Z rail exists
-(`INDEX_RAIL_MIN = 40`), every state the roster can draw, and rows in every table
-sync pulls.
+**The library is ours (6 Oct 2026), written for Indian trainers, one equipment and one muscle at a time.** It replaced
+the upstream hasaneyldrm/Gym-visual dataset entirely. The single place to edit is `exercise-library/exercises-india.json`
+(655 exercises, plus a `parked` list of ones cut on purpose and the allowed vocabulary); then run
+`python3 scripts/build-exercise-seed.py` to regenerate the seed (`--check` fails if it is stale) and restart.
+**Every entry is a `draft`** — nothing has been reviewed by a qualified trainer; the status rides in `metadata.review`.
+The traditional-tool entries (gada, mudgar, tyre, dand, baithak, surya namaskar) are the least verified.
 
-Forty-four is more than one person can coach — 138 sessions and 137 hours a week
-against a 48-session shift — so full-demo splits the roster with a `books`
-column: **19 clients are on the diary, 25 are on the books**. The other 25 keep
-their plan, pack, payments, measurements and a weekly slot on file, in states
-that legitimately have no sessions this quarter (paused, inactive, invited,
-archived, declined, removed, not yet set up). Their slot may be one a coached
-client also holds — they never meet on a real date. That split is what lets the
-same file be both a 44-client roster and a diary one person could work; the old
-version resolved it by double-booking five people at 6am.
+What lands in `exercise`: `name`, `muscle_group` = `target` (19 values), `body_part` (10), `equipment` (text), `level`,
+`movement_pattern`, `log_type`, `description` (steps joined by blank lines), `secondary_targets`, `form_cues`, and
+`metadata` (`aliases`, `commonMistakes`, `safety`, `reviewNote`, `equipmentNeeded`, `category`, `review`, `source`).
+Names are unique in the file. No media columns exist.
 
-All three are now on V24 semantics — ordinal template days, `program.schedule`,
-weekdays translated onto `program_exercise.day_of_week` exactly as apply does it.
-`seed-sample-month` is the exception and still bakes weekdays into the
-blueprint, so copy from one of the other two.
+**V9 added two lookups.** `log_type` is now one of six — `weight_reps`, `reps`, `time`, `distance`, `weight_time`,
+`weight_distance` — each the default shape of a `set_log` row (`LogTypes.kindsOf` maps it to load and effort kind when
+an exercise is added to a session). `equipment` (59 rows: key, name, category) and `equipment_alias` (65 raw strings →
+an equipment row) back `exercise.equipment_id`, which a trigger fills from the text; `exercise.equipment` stays as the
+legacy string the API returns. A new equipment string needs one row in `equipment_alias` and nothing else. `GET
+/v1/exercises/meta` gained `equipmentGroups` (grouped by category) and `GET /v1/exercises` an `equipmentKey` filter —
+both additive.
+
+**The starter programs seed themselves too (V10, 6 Oct 2026).** `CertifiedSeeder` runs right after `ExerciseSeeder`
+(`@Order(2)`) and writes the 12 InclineYou programs on the shelf from `src/main/resources/seed/certified-programs.json`,
+which names each movement by its library id. Edit that file by hand — it is the source, there is no build step — and
+restart. Each program is **week 1 only**, one workout per training day (a week with nothing of its own repeats week 1 in
+the builder); a set's kinds come from the movement's `log_type`, and the load is left null for the coach to fill in per
+client. Program and workout ids are fixed (a name-based UUID of the slug), so a re-run changes nothing; a program is
+rewritten only when `certified_program.content_hash` says its content changed — workouts are updated in place and their
+movements replaced, `revised_at` moves (so every trainer's copy shows as behind) and `used_count` is never touched. A
+program that leaves the file is retired, not deleted. **All 12 are `is_sample = true` with `reviewed_at` NULL** — written
+by us, not signed off; the schema refuses a reviewed sample, so marking one reviewed is a person's act, not the seeder's.
+`SEED_CERTIFIED=false` turns it off. If a named exercise is missing from the library the program is skipped and logged,
+never half-written.
+
+Not built yet: aliases have no column (they live in `metadata`), and a time/distance entry screen on the web.
 
 ## Architecture
 
@@ -248,7 +254,7 @@ historical labels, not files.** `V30 gave the sold package pause/resume` still
 tells you why `paused_at` is a column; it no longer points at a migration you
 can open. `git log` has them.
 
-**25 Sep 2026 — rebuilt as a fresh v1.** `V1__init_schema.sql` was replaced by a new baseline that builds the 41 tables approved in `../release/proposed-schema.html` (that page carries the reasoning; later-release tables are in `../release/later-schema.html`). The old baseline and `V2`–`V22` are archived in `db-archive/pre-v1-2026-09-25/` — `V4`–`V22` were never in git, so that folder is their only copy. **`V2__slot_program_day_and_cancel_reason.sql` (28 Sep 2026) added `client_schedule_slot.program_day` (R45) and `scheduled_session.cancel_reason` (R68); `V3`–`V6` followed (V5, 30 Sep, adds `certified_program_count_use()`; V6 the exercise trigram index and custom-name uniqueness); the next migration is `V7`.** Until every module is adapted, `ddl-auto` is `none` (put `validate` back when the five entities match), and `SCHEMA.md`, `API.md` and the three seed scripts describe the old schema. A stale `target/classes/db/migration` from an earlier build will make Flyway run the archived files — run `./mvnw clean` first.
+**25 Sep 2026 — rebuilt as a fresh v1.** `V1__init_schema.sql` was replaced by a new baseline that builds the 41 tables approved in `../release/proposed-schema.html` (that page carries the reasoning; later-release tables are in `../release/later-schema.html`). The old baseline and `V2`–`V22` are archived in `db-archive/pre-v1-2026-09-25/` — `V4`–`V22` were never in git, so that folder is their only copy. **`V2__slot_program_day_and_cancel_reason.sql` (28 Sep 2026) added `client_schedule_slot.program_day` (R45) and `scheduled_session.cancel_reason` (R68); `V3`–`V6` followed (V5, 30 Sep, adds `certified_program_count_use()`; V6 the exercise trigram index and custom-name uniqueness); the next migration is `V11` (V7 money integrity, V8 gym place, V9 equipment and log types, V10 certified-program content hash are in).** Until every module is adapted, `ddl-auto` is `none` (put `validate` back when the five entities match), and `SCHEMA.md`, `API.md` and the three seed scripts describe the old schema. A stale `target/classes/db/migration` from an earlier build will make Flyway run the archived files — run `./mvnw clean` first.
 
 From here the law is what it always was: **never edit a migration that has
 run** — append a new `V{n}__name.sql`. Never drop or repurpose a column, and

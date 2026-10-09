@@ -1001,6 +1001,34 @@ its own. `imageUrl` / `videoUrl` are still on the shape and always null since V2
 `targets[]`, `equipment[]`, `levels[]` — so the filter sheet is populated from the
 data rather than a hardcoded list. Read off the catalogue only, alphabetical.
 
+### Library filters and facets (the India edition, 7 Oct 2026)
+
+The prose above is the older contract. The list answers `{ items, nextCursor, total? }` (keyset paging,
+`limit` ≤ 200, `includeTotal=true`), and **every filter below is additive**.
+
+**`GET /v1/exercises` query:** `q` · `bodyPart` · `target` (the muscle) · `secondary` (a muscle it also works) ·
+`equipment` (the stored text) · `equipmentKey` · `equipmentCategory` · `pattern` · `level` · `logType` ·
+`category` (yoga, static stretch, mobility drill, foam rolling) · `custom`. **Each filter takes a comma-separated
+list: several values of one filter are OR-ed, different filters are AND-ed.** At most 20 values of 60 characters
+each, else `400`. Values compare lower-cased. **`q` also matches an alternate name** from the exercise's
+`metadata.aliases` (*flat bench* finds the barbell bench press).
+
+**`GET /v1/exercises/meta`** now also answers, beside `bodyParts`, `equipment`, `levels`, `total` and
+`equipmentGroups`: `muscles[{ bodyPart, target, count }]`, `patterns[{ id, count }]`,
+`logTypes[{ id, count }]` (a null `log_type` counts as `weight_reps`) and `categories[{ id, count }]`.
+Counts are of the whole visible library, not of the current filter.
+
+**`GET /v1/exercises/{id}`** also carries, **on this read only** (like `description` and `formCues`),
+`aliases[]`, `commonMistakes[]`, `safety[]`, `equipmentNeeded[]` and `category` — all read from `metadata`. It also carries **`metadata`**, the whole object as stored (`source`, `review`, `reviewNote` and any key added later), so the panel can show what it has no named field for.
+
+**`POST /v1/exercises` also takes** (all optional, additive): `movementPattern`, `secondaryTargets[]` (stored lower-case,
+≤ 10), and four lists kept in `metadata` like the library's own — `aliases[]`, `commonMistakes[]`, `safety[]`,
+`equipmentNeeded[]` (≤ 10 each). A custom exercise therefore shows the same detail panel and is found by the same
+alias search and filters as a library one. `PATCH` does not take these yet.
+
+**`GET /v1/exercises/meta` → `equipmentGroups[].items[].value`** is the string the `equipment` column holds for that
+kit (`gada (mace)`, `body weight`), which is what a create must send so the kit resolves to its `equipment` row.
+
 ### `GET /v1/exercises/categories`
 **Purpose:** the library's *By categories* view. **V9.**
 
