@@ -137,7 +137,14 @@ app:
     policy-version: ${PRIVACY_POLICY_VERSION:2026-09}
   otp:
     expiry-minutes: 10
-    sms-enabled: false       # stub in dev; set true + configure provider in prod
+    # log | whatsapp. `log` is development only; see dev-codes-in-log below.
+    delivery: ${OTP_DELIVERY:log}
+    whatsapp:
+      api-version: ${WHATSAPP_API_VERSION:v21.0}
+      phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:}
+      access-token: ${WHATSAPP_ACCESS_TOKEN:}
+      template-name: ${WHATSAPP_OTP_TEMPLATE:}
+      template-language: ${WHATSAPP_OTP_TEMPLATE_LANGUAGE:en}
     # Print the code to the log. A separate decision from not sending it, because
     # a log is storage: shipped to an aggregator, retained, and read by more
     # people than the database. TransportSecurityCheck refuses to start when this

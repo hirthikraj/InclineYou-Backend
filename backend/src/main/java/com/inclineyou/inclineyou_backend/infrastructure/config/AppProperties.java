@@ -136,7 +136,62 @@ public class AppProperties {
     @Setter
     public static class Otp {
         private int expiryMinutes;
-        private boolean smsEnabled;
+
+        /**
+         * How a code reaches a phone: {@code log} (development — see
+         * {@link #devCodesInLog}) or {@code whatsapp} (Meta's Cloud API,
+         * authentication template). A mode rather than a boolean because a third
+         * answer — reverse OTP, where the user messages us — is the planned
+         * escape hatch if the unverified account's 250-recipient daily ceiling
+         * is ever exhausted, and it must be a config change, not a rewrite.
+         */
+        private String delivery = "log";
+
+        private WhatsApp whatsapp = new WhatsApp();
+
+        private Abuse abuse = new Abuse();
+
+        /**
+         * Guards on {@code POST /v1/auth/otp/request} that sit above the per-number
+         * ladder. That ladder cannot see an attacker who asks for a DIFFERENT number
+         * each time, and on an unverified Meta account that is the attack that
+         * matters: the account may message ~250 unique recipients a day, so
+         * somebody scripting 250 random numbers shuts sign-in for everyone.
+         */
+        @Getter
+        @Setter
+        public static class Abuse {
+            /** Different numbers one IP may ask codes for inside {@link #windowMinutes}; the next one blocks it. */
+            private int maxNumbersPerIp = 5;
+            /** Codes refused by the per-number limits that one IP may collect inside the window before it is blocked. */
+            private int maxStrikesPerIp = 5;
+            private int windowMinutes = 60;
+            /** How long a blocked IP is refused. Clears itself — a shared carrier IP must not be punished for ever. */
+            private int blockHours = 24;
+            /**
+             * Numbers with no account that may be sent a first code per rolling day,
+             * system-wide. Known numbers are never counted, so the rest of Meta's
+             * ceiling stays free for trainers who already exist.
+             */
+            private int newNumbersPerDay = 100;
+        }
+
+        /** Meta WhatsApp Cloud API. Every field is a deployment secret or an id; none has a usable default. */
+        @Getter
+        @Setter
+        public static class WhatsApp {
+            /** The Graph API version in the URL, e.g. {@code v21.0}. */
+            private String apiVersion = "v21.0";
+            /** The sending number's id (not the number itself) from the WhatsApp Manager. */
+            private String phoneNumberId;
+            /** A System User token — the 24-hour temporary one in the console dashboard dies mid-demo. */
+            private String accessToken;
+            /** An approved Authentication-category template with a copy-code button. */
+            private String templateName;
+            private String templateLanguage = "en";
+            private String baseUrl = "https://graph.facebook.com";
+            private int timeoutSeconds = 5;
+        }
 
         /**
          * Write the generated code to the application log.

@@ -104,6 +104,9 @@ branches on (`exception/GlobalExceptionHandler.java`):
 | `SESSION_REVOKED` | 401 | The session was signed out elsewhere or by an account change. |
 | `OTP_LOCKED` | 429 | Too many wrong codes — number locked, carries a countdown. |
 | `OTP_THROTTLED` | 429 | Codes requested too fast — carries the real wait. |
+| `SIGN_IN_BLOCKED` | 403 | `POST /v1/auth/otp/request` from an address that asked codes for more than 5 different numbers in an hour, or collected 5 refused sends. Blocked for 24 h, then clears itself; nothing is sent. Carries `retryAfterSeconds`. Never a phone number — that would let anyone lock a trainer out. |
+| `SIGNUPS_PAUSED` | 503 | The day's budget for numbers with no account (100, system-wide) is spent. Known numbers are unaffected. Carries `retryAfterSeconds`. |
+| `OTP_DELIVERY_FAILED` | 502 | WhatsApp refused or did not answer; the request is marked `failed`. |
 | `PHONE_IS_TRAINER` | 409 | That's the caller's own number — trainer/client duality is allowed for everyone else's. |
 | `PHONE_ON_ANOTHER_ROSTER` | 409 | That number is another coach's client **in this workspace**. Narrowed by V38: it used to mean "anywhere in the product", which made it impossible for one person to be a client of a private trainer and, separately, a client at a gym. |
 | `RATE_LIMITED` | 429 | Tier budget exhausted. |

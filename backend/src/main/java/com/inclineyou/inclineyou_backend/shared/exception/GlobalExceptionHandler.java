@@ -4,6 +4,7 @@ import com.inclineyou.inclineyou_backend.core.auth.InvalidOtpException;
 import com.inclineyou.inclineyou_backend.core.auth.OtpExpiredException;
 import com.inclineyou.inclineyou_backend.core.auth.OtpLockedException;
 import com.inclineyou.inclineyou_backend.core.auth.OtpThrottledException;
+import com.inclineyou.inclineyou_backend.core.auth.SignInBlockedException;
 import com.inclineyou.inclineyou_backend.core.client.ClientRuleException;
 import com.inclineyou.inclineyou_backend.core.client.PhoneUnavailableException;
 import com.inclineyou.inclineyou_backend.core.attention.AttentionRuleException;
@@ -76,6 +77,19 @@ public class GlobalExceptionHandler {
         pd.setProperty("code", "OTP_LOCKED");
         pd.setProperty("retryAfterSeconds", ex.getRetryAfterSeconds());
         return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
+                .body(pd);
+    }
+
+    /** 403 {@code SIGN_IN_BLOCKED}, or 503 {@code SIGNUPS_PAUSED} when only the day's budget for new numbers is spent. */
+    @ExceptionHandler(SignInBlockedException.class)
+    ResponseEntity<ProblemDetail> handleSignInBlocked(SignInBlockedException ex) {
+        HttpStatus status = SignInBlockedException.SIGNUPS_PAUSED.equals(ex.getCode())
+                ? HttpStatus.SERVICE_UNAVAILABLE : HttpStatus.FORBIDDEN;
+        ProblemDetail pd = ProblemDetail.forStatusAndDetail(status, ex.getMessage());
+        pd.setProperty("code", ex.getCode());
+        pd.setProperty("retryAfterSeconds", ex.getRetryAfterSeconds());
+        return ResponseEntity.status(status)
                 .header("Retry-After", String.valueOf(ex.getRetryAfterSeconds()))
                 .body(pd);
     }
