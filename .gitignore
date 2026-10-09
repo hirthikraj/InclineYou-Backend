@@ -64,3 +64,12 @@ __pycache__/
 *.pyc
 # macOS zip artefacts from the design hand-offs.
 __MACOSX/
+
+# ── Local AI-tooling state ────────────────────────────────────────────────────
+# Per-machine agent setup and design-tool caches (.claude alone is ~20 MB).
+# .github/workflows stays tracked; only the agent folders beside it are ignored.
+.claude/
+.impeccable/
+.github/agents/
+.github/hooks/
+.github/skills/
