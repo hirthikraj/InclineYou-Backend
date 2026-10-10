@@ -492,7 +492,7 @@ public class ProgramJdbcRepository {
         return jdbc.queryForList("""
                 SELECT id::text FROM scheduled_session
                 WHERE client_id = :cid::uuid AND workout_id = ANY(CAST(:w AS uuid[])) AND status = 'scheduled'
-                  AND started_at IS NULL AND scheduled_at > now() AND deleted_at IS NULL
+                  AND logged_by = 'trainer' AND started_at IS NULL   -- R107 AND scheduled_at > now() AND deleted_at IS NULL
                 """, Map.of("cid", clientId, "w", PlanTreeJdbcRepository.strings(workoutIds)), String.class);
     }
 

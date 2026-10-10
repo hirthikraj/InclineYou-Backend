@@ -67,6 +67,7 @@ public class SessionStartService {
     /** Idempotent: an already-started session is left alone, so the replay of a walk-in lays nothing down. */
     private void startLocked(UUID trainerId, UUID sessionId, Instant at) {
         var head = repo.head(trainerId, sessionId, true).orElseThrow(SessionLogReadService::notYours);
+        if (!"trainer".equals(head.loggedBy())) throw SessionLogReadService.notYours();   // R107: a client's own workout is theirs to start
         if ("cancelled".equals(head.status())) {
             throw ApiException.conflict("SESSION_CANCELLED", "This session was cancelled, so it can't be logged.");
         }
@@ -87,6 +88,7 @@ public class SessionStartService {
     @Transactional
     public SessionRow end(UUID trainerId, UUID sessionId, EndRequest req) {
         var head = repo.head(trainerId, sessionId, true).orElseThrow(SessionLogReadService::notYours);
+        if (!"trainer".equals(head.loggedBy())) throw SessionLogReadService.notYours();   // R107: and theirs to finish
         if (head.startedAt() == null) {
             throw ApiException.conflict("SESSION_NOT_STARTED", "This session's log was never opened, so there is nothing to close.");
         }

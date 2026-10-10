@@ -137,7 +137,7 @@ public class NudgeLogJdbcRepository {
     public int noShowsInLast30Days(UUID clientId) {
         Integer n = jdbc.queryForObject("""
                 SELECT count(*)::int FROM scheduled_session
-                WHERE client_id = :cid::uuid AND status = 'no_show' AND deleted_at IS NULL
+                WHERE client_id = :cid::uuid AND status = 'no_show' AND deleted_at IS NULL AND logged_by = 'trainer'   -- R107
                   AND scheduled_at >= now() - interval '30 days'
                 """, Map.of("cid", clientId.toString()), Integer.class);
         return n == null ? 0 : n;
@@ -147,7 +147,7 @@ public class NudgeLogJdbcRepository {
     public int doneSessions(UUID clientId) {
         Integer n = jdbc.queryForObject("""
                 SELECT count(*)::int FROM scheduled_session
-                WHERE client_id = :cid::uuid AND status = 'done' AND deleted_at IS NULL
+                WHERE client_id = :cid::uuid AND status = 'done' AND deleted_at IS NULL AND logged_by = 'trainer'   -- R107
                 """, Map.of("cid", clientId.toString()), Integer.class);
         return n == null ? 0 : n;
     }
@@ -159,7 +159,7 @@ public class NudgeLogJdbcRepository {
     public Integer daysSinceLastDone(UUID clientId, String zoneId, LocalDate today) {
         return jdbc.queryForObject("""
                 SELECT (:today - max((scheduled_at AT TIME ZONE :tz)::date))::int FROM scheduled_session
-                WHERE client_id = :cid::uuid AND status = 'done' AND deleted_at IS NULL
+                WHERE client_id = :cid::uuid AND status = 'done' AND deleted_at IS NULL AND logged_by = 'trainer'   -- R107
                 """, Map.of("cid", clientId.toString(), "tz", zoneId, "today", java.sql.Date.valueOf(today)),
                 Integer.class);
     }

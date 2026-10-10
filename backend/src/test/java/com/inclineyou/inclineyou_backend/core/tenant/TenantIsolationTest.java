@@ -46,9 +46,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * <h2>What is being pinned</h2>
  *
  * Cross-tenant reads, fail-closed on an unset context, the combined-versus-money
- * split, the write check, immutability, the catalogue tiers, and — since v1 has
- * no client lens policy at all — that a {@code client} actor reads and writes
- * nothing of the books.
+ * split, the write check, immutability, the catalogue tiers, and — since V11
+ * added the client lens (tier 4) — that a {@code client} actor reads exactly its
+ * own rows and writes only what the column guards allow.
  *
  * <h2>The shared development database</h2>
  *
@@ -73,6 +73,10 @@ class TenantIsolationTest {
     private UUID meeraPrivate, meeraGym, sanjay;
     private UUID packageMeera, packageSanjay;
     private String phoneMeera;
+
+    // The portal fixtures (portalFixtures()): built only by the tests that need them, so the other tests stay as light as they were.
+    private UUID sessionLed, sessionSelf, sessionSanjay, setLed, setSelf, setSanjay;
+    private UUID assessmentSent, assessmentUnsent, notificationMeera;
 
     /** Everything the test minted, so cleanUp() can find it however far the seed got. */
     private final List<String> phones = new ArrayList<>();
@@ -138,6 +142,7 @@ class TenantIsolationTest {
         // Children before parents. Each table is keyed by whichever of
         // tenant_id / trainer_id it carries.
         for (String table : List.of(
+                "client_message", "client_notification", "workout_feedback", "milestone", "client_prefs", "client_invite",
                 "set_log", "session_exercise", "workout_set", "workout_exercise", "package_adjustment",
                 "scheduled_session", "payment", "package", "pack", "assessment", "assessment_schedule",
                 "assessment_template", "client_note", "client_schedule_slot", "client_schedule",
@@ -229,62 +234,231 @@ class TenantIsolationTest {
     }
 
     @Test
-    @DisplayName("v1 has no client lens: a client session reads nothing of the books, even on its own rows")
-    void clientActorReadsNothing() throws SQLException {
-        // v1 shipped without tier 4 (the client portal is the next release), so
-        // the portal's old lens tests — shared notes, its own pack, a sent
-        // assessment, its own messages — have no v1 counterpart except this:
-        // with the context a client session really carries (TenantContext.client:
-        // phone, both workspaces, both roster ids), every staff-gated table
-        // starves. When the lens is built these assertions are the ones to
-        // replace with "exactly their own rows".
-        UUID tpl = template(tenantA, trainerPriya, "tpl " + tag);
-        assessmentFor(meeraPrivate, trainerPriya, tenantA, tpl);
-        jdbc.update("INSERT INTO client_note (tenant_id, client_id, trainer_id, body) VALUES (:t::uuid, :c::uuid, :r::uuid, 'note')",
-                Map.of("t", tenantA.toString(), "c", meeraPrivate.toString(), "r", trainerPriya.toString()));
+    @DisplayName("tier 4 · a client session reads exactly its own rows, on both its rosters, and nobody else's")
+    void clientLensReadsExactlyItsOwnRows() throws SQLException {
+        portalFixtures();
 
         try (Connection c = asAppRole()) {
-            clientSession(c);
-            for (String table : List.of("client", "client_note", "pack", "package", "package_adjustment", "payment",
-                    "assessment", "assessment_template", "scheduled_session", "session_exercise", "set_log",
-                    "nudge_log", "client_schedule", "tenant_member")) {
+            clientSession(c);   // Meera: two roster rows, one person, in two workspaces under two trainers' care
+
+            // who she is — never Sanjay, who is another trainer's client in the same gym
+            assertThat(strings(c, "SELECT name FROM client ORDER BY name")).containsExactly("Meera gym", "Meera private");
+
+            // the coaching rows: hers, the trainer-led and the ones she ran herself, and nothing of Sanjay's
+            assertThat(strings(c, "SELECT id::text FROM scheduled_session"))
+                    .containsExactlyInAnyOrder(sessionLed.toString(), sessionSelf.toString());
+            assertThat(strings(c, "SELECT id::text FROM set_log"))
+                    .containsExactlyInAnyOrder(setLed.toString(), setSelf.toString());
+            assertThat(count(c, "SELECT count(*) FROM session_exercise")).isEqualTo(2);
+            // the InclineYou starter programs are on everyone's shelf (client_id is null); a client plan is hers alone
+            assertThat(strings(c, "SELECT name FROM program WHERE client_id IS NOT NULL")).containsExactly("Plan Meera");
+            assertThat(strings(c, "SELECT w.name FROM workout w JOIN program p ON p.id = w.program_id WHERE p.client_id IS NOT NULL"))
+                    .containsExactly("Day Meera");
+
+            // a note is hers only when the trainer shared it; a check-in only once it was sent
+            assertThat(strings(c, "SELECT body FROM client_note")).containsExactly("shared with Meera");
+            assertThat(strings(c, "SELECT name FROM assessment")).containsExactly("sent to Meera");
+
+            // the money wall, switch on (the default): her own package and payment, not Sanjay's, not the price list
+            assertThat(strings(c, "SELECT amount::text FROM package")).containsExactly("6000.00");
+            assertThat(strings(c, "SELECT amount::text FROM payment")).containsExactly("3000.00");
+            assertThat(count(c, "SELECT count(*) FROM pack")).isZero();
+
+            // V11's own tables, hers only
+            assertThat(count(c, "SELECT count(*) FROM client_prefs")).isOne();
+            assertThat(strings(c, "SELECT body FROM client_message")).containsExactly("note to Meera");
+            assertThat(strings(c, "SELECT text FROM client_notification")).containsExactly("notice for Meera");
+            assertThat(strings(c, "SELECT label FROM milestone")).containsExactly("milestone Meera");
+            assertThat(count(c, "SELECT count(*) FROM workout_feedback")).isOne();
+
+            // what stays the trainer's: nothing here has a client policy
+            for (String table : List.of("assessment_template", "assessment_schedule", "nudge_log", "client_schedule",
+                    "attention_dismissal", "tenant_member", "client_invite", "package_adjustment", "gym_arrangement",
+                    "trainer_payout")) {
                 assertThat(count(c, "SELECT count(*) FROM " + table)).as(table).isZero();
             }
-            // The one thing a client may know is the workspaces its roster ids
-            // name — never another trainer's.
+            // the one thing a client may know beyond its rows is the workspaces its roster ids name
             assertThat(strings(c, "SELECT id::text FROM tenant"))
                     .containsExactlyInAnyOrder(tenantA.toString(), tenantB.toString());
+        }
+
+        // The ids are the whole story: accepted only at the gym, she reads that row and none of the private one's.
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            set(c, "app.client_ids", "{" + meeraGym + "}");
+            assertThat(strings(c, "SELECT name FROM client")).containsExactly("Meera gym");
+            for (String table : List.of("scheduled_session", "package", "payment", "client_note", "assessment",
+                    "client_message", "client_prefs")) {
+                assertThat(count(c, "SELECT count(*) FROM " + table)).as(table).isZero();
+            }
+            assertThat(count(c, "SELECT count(*) FROM program WHERE client_id IS NOT NULL")).isZero();
+        }
+
+        // And with no accepted row at all a client session is worth nothing — it fails closed, like an unset context.
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            set(c, "app.client_ids", "");
+            for (String table : List.of("client", "scheduled_session", "set_log", "package", "payment", "client_note",
+                    "assessment", "client_message", "client_notification", "client_prefs", "milestone")) {
+                assertThat(count(c, "SELECT count(*) FROM " + table)).as(table).isZero();
+            }
+            assertThat(count(c, "SELECT count(*) FROM program WHERE client_id IS NOT NULL")).isZero();
         }
     }
 
     @Test
-    @DisplayName("a client session cannot write, nor touch an assessment — its own or another's")
-    void clientActorWritesNothing() throws SQLException {
-        UUID tpl = template(tenantA, trainerPriya, "tpl " + tag);
-        assessmentFor(meeraPrivate, trainerPriya, tenantA, tpl);
+    @DisplayName("tier 4 · the trainer's money switch decides what a client reads of the books; the balance never needs it")
+    void clientMoneyFollowsTheTrainersSwitch() throws SQLException {
+        portalFixtures();
+        String balance = "SELECT client_package_balance('" + meeraPrivate + "')";
+
+        jdbc.update("UPDATE trainer SET clients_see_money = false WHERE id = :t::uuid", Map.of("t", trainerPriya.toString()));
         try (Connection c = asAppRole()) {
             clientSession(c);
-            // Answering one's own assessment was the portal's write path; with no
-            // lens the row is invisible to the UPDATE, so nothing changes.
-            assertThat(update(c, "UPDATE assessment SET answers = '{}'")).isZero();
-            assertThat(update(c, "UPDATE client SET name = 'Hijacked'")).isZero();
-            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> exec(c,
-                    "INSERT INTO client_note (tenant_id, client_id, trainer_id, body) VALUES ('%s', '%s', '%s', 'forged')"
-                            .formatted(tenantA, meeraPrivate, trainerPriya)))
-                    .hasMessageContaining("row-level security"));
-            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> exec(c,
-                    "INSERT INTO payment (tenant_id, trainer_id, client_id, package_id, amount, currency, status, paid_at, method) "
-                            + "VALUES ('%s', '%s', '%s', '%s', 1, 'INR', 'paid', now(), 'cash')"
-                            .formatted(tenantA, trainerPriya, meeraPrivate, packageMeera)))
-                    .hasMessageContaining("row-level security"));
-            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> exec(c,
-                    "INSERT INTO client (tenant_id, trainer_id, name, client_type) VALUES ('%s', '%s', 'Planted', 'independent')"
-                            .formatted(tenantA, trainerPriya)))
-                    .hasMessageContaining("row-level security"));
+            assertThat(count(c, "SELECT count(*) FROM package")).isZero();
+            assertThat(count(c, "SELECT count(*) FROM payment")).isZero();
+            // but "7 sessions left" is not money: the definer function answers, and carries no amount
+            assertThat(strings(c, "SELECT (client_package_balance('" + meeraPrivate + "')->0->>'sessions_left')")).containsExactly("10");
+            assertThat(strings(c, balance)).noneMatch(json -> json.contains("6000") || json.contains("amount"));
+            // and only for her own row
+            assertThatThrownBy(() -> strings(c, "SELECT client_package_balance('" + sanjay + "')"))
+                    .hasMessageContaining("your own rows");
         }
-        // Nothing was changed.
-        assertThat(jdbc.queryForObject("SELECT name FROM client WHERE id = :id::uuid",
-                Map.of("id", meeraPrivate.toString()), String.class)).isEqualTo("Meera private");
+
+        // a per-client override beats the trainer's switch, either way
+        jdbc.update("UPDATE client SET portal_show_money = true WHERE id = :c::uuid", Map.of("c", meeraPrivate.toString()));
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            assertThat(strings(c, "SELECT amount::text FROM package")).containsExactly("6000.00");
+            assertThat(strings(c, "SELECT amount::text FROM payment")).containsExactly("3000.00");
+        }
+        jdbc.update("UPDATE trainer SET clients_see_money = true WHERE id = :t::uuid", Map.of("t", trainerPriya.toString()));
+        jdbc.update("UPDATE client SET portal_show_money = false WHERE id = :c::uuid", Map.of("c", meeraPrivate.toString()));
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            assertThat(count(c, "SELECT count(*) FROM package")).isZero();
+        }
+
+        // staff are not a client: the function is not a staff route
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            assertThatThrownBy(() -> strings(c, balance)).hasMessageContaining("your own rows");
+        }
+    }
+
+    @Test
+    @DisplayName("tier 4 · a client session writes only what the column guards and policies allow")
+    void clientLensWritesOnlyWhatItMay() throws SQLException {
+        portalFixtures();
+        // Every probe runs in a transaction that is rolled back: this database is the developer's, and a probe that
+        // succeeds (as several here must) leaves nothing behind. The settings are written before the transaction opens.
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+
+            // ── her own row: the five columns she may edit, and nothing else
+            inRolledBackTransaction(c, () -> assertThat(update(c,
+                    "UPDATE client SET name = 'Meera N', goal = 'strength', height_cm = 165, timezone = 'Asia/Kolkata', activity_level = 'light' "
+                            + "WHERE id = '" + meeraPrivate + "'")).isOne());
+            for (String column : List.of("phone = '+919000000000'", "status = 'archived'", "date_of_birth = '1990-01-01'",
+                    "membership_status = 'removed'", "trainer_id = '" + trainerArun + "'")) {
+                inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                        "UPDATE client SET " + column + " WHERE id = '" + meeraPrivate + "'"))
+                        .as(column).hasMessageContaining("may not change"));
+            }
+            // …and somebody else's client is simply not there to update
+            inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE client SET name = 'Hijacked' WHERE id = '" + sanjay + "'")).isZero());
+
+            // ── a check-in: save a draft, submit it once, never reshape it, never reopen a finished one
+            inRolledBackTransaction(c, () -> {
+                assertThat(update(c, "UPDATE assessment SET answers = '{}'::jsonb, readings = '{}'::jsonb WHERE id = '" + assessmentSent + "'"))
+                        .as("a draft saved for later: entered_by stays null until it is submitted").isOne();
+                assertThat(update(c, "UPDATE assessment SET completed_at = now(), entered_by = 'client' WHERE id = '" + assessmentSent + "'")).isOne();
+                assertThat(update(c, "UPDATE assessment SET answers = '{}'::jsonb WHERE id = '" + assessmentSent + "'"))
+                        .as("a submitted check-in is final for the client").isZero();
+            });
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                    "UPDATE assessment SET entered_by = 'client' WHERE id = '" + assessmentSent + "'"))
+                    .as("a draft cannot claim to be submitted").hasMessageContaining("assessment_entered_by_on_completion"));
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                    "UPDATE assessment SET completed_at = now(), entered_by = 'trainer' WHERE id = '" + assessmentSent + "'"))
+                    .as("and she cannot submit as the trainer").hasMessageContaining("row-level security"));
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                    "UPDATE assessment SET due_on = due_on + 7 WHERE id = '" + assessmentSent + "'"))
+                    .hasMessageContaining("may not change"));
+            inRolledBackTransaction(c, () -> assertThat(update(c,
+                    "UPDATE assessment SET answers = '{}'::jsonb WHERE id = '" + assessmentUnsent + "'"))
+                    .as("a check-in the trainer has not sent is not hers").isZero());
+
+            // ── workouts: she starts and logs her own; the trainer's session is read-only to her
+            UUID mine = UUID.randomUUID();
+            inRolledBackTransaction(c, () -> assertThat(update(c, ("INSERT INTO scheduled_session (id, tenant_id, trainer_id, client_id, scheduled_at, "
+                    + "duration_minutes, ends_at, logged_by, started_at) VALUES ('%s', '%s', '%s', '%s', now(), 40, now(), 'client', now())")
+                    .formatted(mine, tenantA, trainerPriya, meeraPrivate))).isOne());
+            for (String as : List.of(
+                    "'trainer', '%s', '%s'".formatted(trainerPriya, meeraPrivate),    // a booking in the trainer's diary: not hers to make
+                    "'client', '%s', '%s'".formatted(trainerArun, meeraPrivate),      // under someone else's trainer id
+                    "'client', '%s', '%s'".formatted(trainerPriya, sanjay))) {        // for another person's client
+                inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                        ("INSERT INTO scheduled_session (tenant_id, logged_by, trainer_id, client_id, scheduled_at, duration_minutes, ends_at) "
+                                + "VALUES ('%s', %s, now(), 40, now())").formatted(tenantA, as)))
+                        .as(as).hasMessageContaining("row-level security"));
+            }
+            inRolledBackTransaction(c, () -> {
+                assertThat(update(c, "UPDATE scheduled_session SET status = 'done', ended_at = now(), paused_seconds = 30 WHERE id = '" + sessionSelf + "'")).isOne();
+                assertThatThrownBy(() -> update(c, "UPDATE scheduled_session SET notes = 'x' WHERE id = '" + sessionSelf + "'"))
+                        .hasMessageContaining("may not change");
+            });
+            for (String change : List.of("status = 'done'", "scheduled_at = scheduled_at + interval '1 day'", "workout_id = NULL")) {
+                inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE scheduled_session SET " + change + " WHERE id = '" + sessionLed + "'"))
+                        .as("a trainer-led session is read-only to the client: " + change).isZero());
+            }
+
+            // ── sets: she logs on her own day, as herself; the trainer's sets are not hers to touch
+            inRolledBackTransaction(c, () -> assertThat(update(c,
+                    "UPDATE set_log SET load_value = 45, effort_value = 6, rpe = 8, entered_by = 'client' WHERE id = '" + setSelf + "'")).isOne());
+            inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE set_log SET load_value = 99 WHERE id = '" + setLed + "'")).isZero());
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                    "UPDATE set_log SET entered_by = 'trainer' WHERE id = '" + setSelf + "'")).hasMessageContaining("row-level security"));
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                    "UPDATE set_log SET planned = true WHERE id = '" + setSelf + "'")).hasMessageContaining("may not change"));
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                    ("INSERT INTO set_log (tenant_id, session_exercise_id, position, planned, load_kind, effort_kind, load_value, effort_value, done_at, entered_by) "
+                            + "SELECT tenant_id, id, 9, false, 'weight', 'reps', 1, 1, now(), 'client' FROM session_exercise WHERE session_id = '%s'")
+                            .formatted(sessionLed))).hasMessageContaining("row-level security"));
+
+            // ── her own settings, and her bell: switches and read marks, never the content
+            inRolledBackTransaction(c, () -> assertThat(update(c,
+                    "UPDATE client_prefs SET hide_weight = true, notify_session_reminder = false, auto_rest_timer = false, "
+                            + "nominee_name = 'Asha', nominee_phone = '+919800000001' WHERE client_id = '" + meeraPrivate + "'")).isOne());
+            inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE client_prefs SET hide_weight = true WHERE client_id = '" + sanjay + "'")).isZero());
+            inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE client_notification SET read_at = now() WHERE id = '" + notificationMeera + "'")).isOne());
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                    "UPDATE client_notification SET text = 'rewritten' WHERE id = '" + notificationMeera + "'")).hasMessageContaining("may not change"));
+            inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE client_message SET read_at = now() WHERE client_id = '" + meeraPrivate + "'")).isOne());
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                    "UPDATE client_message SET body = 'rewritten' WHERE client_id = '" + meeraPrivate + "'")).hasMessageContaining("may not change"));
+
+            // ── what she can never write: the books, the trainer's words, her own milestones, an invite
+            for (String insert : List.of(
+                    "INSERT INTO client_note (tenant_id, client_id, trainer_id, body) VALUES ('%s', '%s', '%s', 'forged')".formatted(tenantA, meeraPrivate, trainerPriya),
+                    "INSERT INTO payment (tenant_id, trainer_id, client_id, package_id, amount, currency, status, paid_at, method) VALUES ('%s', '%s', '%s', '%s', 1, 'INR', 'paid', now(), 'cash')".formatted(tenantA, trainerPriya, meeraPrivate, packageMeera),
+                    "INSERT INTO package_adjustment (tenant_id, trainer_id, package_id, client_id, kind, sessions) VALUES ('%s', '%s', '%s', '%s', 'sessions', 5)".formatted(tenantA, trainerPriya, packageMeera, meeraPrivate),
+                    "INSERT INTO client (tenant_id, trainer_id, name, client_type) VALUES ('%s', '%s', 'Planted', 'independent')".formatted(tenantA, trainerPriya),
+                    "INSERT INTO client_message (tenant_id, client_id, trainer_id, body) VALUES ('%s', '%s', '%s', 'from the trainer?')".formatted(tenantA, meeraPrivate, trainerPriya),
+                    "INSERT INTO client_notification (tenant_id, client_id, kind, text) VALUES ('%s', '%s', 'note', 'self-sent')".formatted(tenantA, meeraPrivate),
+                    "INSERT INTO milestone (tenant_id, client_id, kind, label, value) VALUES ('%s', '%s', 'sessions_50', 'self-awarded', 50)".formatted(tenantA, meeraPrivate),
+                    "INSERT INTO client_invite (tenant_id, trainer_id, client_id, phone, token_hash) VALUES ('%s', '%s', '%s', '+919111111111', repeat('a', 64))".formatted(tenantA, trainerPriya, meeraPrivate),
+                    "INSERT INTO assessment (client_id, trainer_id, tenant_id, name, form, due_on, sent_at) VALUES ('%s', '%s', '%s', 'self-made', '{\"measurements\":[],\"questions\":[]}'::jsonb, CURRENT_DATE, now())".formatted(meeraPrivate, trainerPriya, tenantA))) {
+                inRolledBackTransaction(c, () -> assertThatThrownBy(() -> exec(c, insert))
+                        .as(insert).hasMessageContaining("row-level security"));
+            }
+        }
+
+        // Nothing the probes did survived: the rows are as the fixtures left them.
+        assertThat(jdbc.queryForObject("SELECT name FROM client WHERE id = :id::uuid", Map.of("id", meeraPrivate.toString()), String.class))
+                .isEqualTo("Meera private");
+        assertThat(jdbc.queryForObject("SELECT status FROM scheduled_session WHERE id = :id::uuid", Map.of("id", sessionSelf.toString()), String.class))
+                .isEqualTo("scheduled");
     }
 
     @Test
@@ -789,5 +963,102 @@ class TenantIsolationTest {
                         '{"measurements":[],"questions":[]}'::jsonb, CURRENT_DATE, now())
                 """, Map.of("c", clientId.toString(), "t", trainerId.toString(),
                             "tid", tenantId.toString(), "tpl", templateId.toString()));
+    }
+
+    /**
+     * What the portal tests read and write, built as the owner. Meera has a trainer-led session and a workout she ran
+     * herself, each with a set; a shared and a private note; a sent and an unsent check-in; a plan; and one row in each
+     * of V11's tables. Sanjay, another trainer's client at the gym, has a counterpart of every one of them, so a read
+     * that forgot to filter would show up as a second row.
+     */
+    private void portalFixtures() {
+        UUID exercise = UUID.randomUUID();
+        jdbc.update("INSERT INTO exercise (id, name, origin, log_type, source_id) VALUES (:id::uuid, 'Squat', 'inclineyou', 'weight_reps', :src)",
+                Map.of("id", exercise.toString(), "src", "tiso-" + tag));
+
+        sessionLed = session(tenantA, trainerPriya, meeraPrivate, "trainer", "scheduled");
+        sessionSelf = session(tenantA, trainerPriya, meeraPrivate, "client", "scheduled");
+        sessionSanjay = session(tenantB, trainerArun, sanjay, "trainer", "scheduled");
+        setLed = setOn(tenantA, sessionLed, meeraPrivate, exercise, "trainer");
+        setSelf = setOn(tenantA, sessionSelf, meeraPrivate, exercise, "client");
+        setSanjay = setOn(tenantB, sessionSanjay, sanjay, exercise, "trainer");
+
+        UUID tplA = template(tenantA, trainerPriya, "tpl " + tag);
+        UUID tplB = template(tenantB, trainerArun, "tpl b " + tag);
+        assessmentSent = assessment(tenantA, trainerPriya, meeraPrivate, tplA, "sent to Meera", true);
+        assessmentUnsent = assessment(tenantA, trainerPriya, meeraPrivate, tplA, "unsent to Meera", false);
+        assessment(tenantB, trainerArun, sanjay, tplB, "sent to Sanjay", true);
+
+        note(tenantA, trainerPriya, meeraPrivate, "private to Priya", false);
+        note(tenantA, trainerPriya, meeraPrivate, "shared with Meera", true);
+        note(tenantB, trainerArun, sanjay, "shared with Sanjay", true);
+
+        plan(tenantA, trainerPriya, meeraPrivate, "Plan Meera", "Day Meera");
+        plan(tenantB, trainerArun, sanjay, "Plan Sanjay", "Day Sanjay");
+
+        for (var who : List.of(new Object[]{tenantA, trainerPriya, meeraPrivate, sessionSelf, "Meera"},
+                               new Object[]{tenantB, trainerArun, sanjay, sessionSanjay, "Sanjay"})) {
+            var p = new HashMap<String, Object>();
+            p.put("ten", who[0].toString()); p.put("tr", who[1].toString()); p.put("c", who[2].toString());
+            p.put("s", who[3].toString()); p.put("n", who[4]);
+            jdbc.update("INSERT INTO client_prefs (client_id, tenant_id) VALUES (:c::uuid, :ten::uuid)", p);
+            jdbc.update("INSERT INTO client_message (tenant_id, client_id, trainer_id, body) VALUES (:ten::uuid, :c::uuid, :tr::uuid, 'note to ' || :n)", p);
+            jdbc.update("INSERT INTO milestone (tenant_id, client_id, kind, label, value) VALUES (:ten::uuid, :c::uuid, 'sessions_10', 'milestone ' || :n, 10)", p);
+            jdbc.update("INSERT INTO workout_feedback (tenant_id, session_id, client_id, effort) VALUES (:ten::uuid, :s::uuid, :c::uuid, 'right')", p);
+            UUID n = UUID.randomUUID();
+            p.put("id", n.toString());
+            jdbc.update("INSERT INTO client_notification (id, tenant_id, client_id, kind, text) VALUES (:id::uuid, :ten::uuid, :c::uuid, 'note', 'notice for ' || :n)", p);
+            if ("Meera".equals(who[4])) notificationMeera = n;
+        }
+    }
+
+    private UUID session(UUID tenantId, UUID trainerId, UUID clientId, String loggedBy, String status) {
+        UUID id = UUID.randomUUID();
+        var p = new HashMap<String, Object>();
+        p.put("id", id.toString()); p.put("ten", tenantId.toString()); p.put("tr", trainerId.toString());
+        p.put("c", clientId.toString()); p.put("by", loggedBy); p.put("st", status);
+        jdbc.update("""
+                INSERT INTO scheduled_session (id, tenant_id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at, status, logged_by, started_at)
+                VALUES (:id::uuid, :ten::uuid, :tr::uuid, :c::uuid, now(), 60, now(), :st, :by, now())
+                """, p);
+        return id;
+    }
+
+    /** One planned-then-logged set on a fresh exercise row of the session; returns the set's id. */
+    private UUID setOn(UUID tenantId, UUID sessionId, UUID clientId, UUID exercise, String enteredBy) {
+        UUID sx = UUID.randomUUID(), set = UUID.randomUUID();
+        jdbc.update("INSERT INTO session_exercise (id, tenant_id, session_id, client_id, exercise_id, position) VALUES (:id::uuid, :ten::uuid, :s::uuid, :c::uuid, :e::uuid, 0)",
+                Map.of("id", sx.toString(), "ten", tenantId.toString(), "s", sessionId.toString(), "c", clientId.toString(), "e", exercise.toString()));
+        jdbc.update("""
+                INSERT INTO set_log (id, tenant_id, session_exercise_id, position, planned, load_kind, effort_kind, load_value, effort_value, done_at, entered_by)
+                VALUES (:id::uuid, :ten::uuid, :sx::uuid, 1, false, 'weight', 'reps', 40, 8, now(), :by)
+                """, Map.of("id", set.toString(), "ten", tenantId.toString(), "sx", sx.toString(), "by", enteredBy));
+        return set;
+    }
+
+    private UUID assessment(UUID tenantId, UUID trainerId, UUID clientId, UUID templateId, String name, boolean sent) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO assessment (id, client_id, trainer_id, tenant_id, template_id, name, form, due_on, sent_at)
+                VALUES (:id::uuid, :c::uuid, :t::uuid, :ten::uuid, :tpl::uuid, :n, '{"measurements":[],"questions":[]}'::jsonb, CURRENT_DATE,
+                        CASE WHEN :sent THEN now() END)
+                """, Map.of("id", id.toString(), "c", clientId.toString(), "t", trainerId.toString(), "ten", tenantId.toString(),
+                            "tpl", templateId.toString(), "n", name, "sent", sent));
+        return id;
+    }
+
+    private void note(UUID tenantId, UUID trainerId, UUID clientId, String body, boolean shared) {
+        jdbc.update("""
+                INSERT INTO client_note (tenant_id, client_id, trainer_id, body, shared_with_client, shared_at)
+                VALUES (:ten::uuid, :c::uuid, :t::uuid, :b, :sh, CASE WHEN :sh THEN now() END)
+                """, Map.of("ten", tenantId.toString(), "c", clientId.toString(), "t", trainerId.toString(), "b", body, "sh", shared));
+    }
+
+    private void plan(UUID tenantId, UUID trainerId, UUID clientId, String program, String workout) {
+        UUID p = UUID.randomUUID();
+        jdbc.update("INSERT INTO program (id, origin, trainer_id, tenant_id, client_id, status, name, weeks) VALUES (:id::uuid, 'trainer', :t::uuid, :ten::uuid, :c::uuid, 'active', :n, 4)",
+                Map.of("id", p.toString(), "t", trainerId.toString(), "ten", tenantId.toString(), "c", clientId.toString(), "n", program));
+        jdbc.update("INSERT INTO workout (id, origin, trainer_id, tenant_id, program_id, week, day, position, name) VALUES (gen_random_uuid(), 'trainer', :t::uuid, :ten::uuid, :p::uuid, 1, 1, 0, :n)",
+                Map.of("t", trainerId.toString(), "ten", tenantId.toString(), "p", p.toString(), "n", workout));
     }
 }

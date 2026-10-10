@@ -253,6 +253,7 @@ public class ClientScheduleJdbcRepository {
                     SELECT coalesce((
                         SELECT plan.n FROM scheduled_session x JOIN plan ON plan.id = x.workout_id
                         WHERE x.client_id = :cid::uuid AND x.deleted_at IS NULL AND x.status <> 'cancelled'
+                          AND (x.logged_by = 'trainer' OR x.status = 'done')   -- R107: a finished self-run day counts as done
                           AND x.scheduled_at < (SELECT min(scheduled_at) FROM t)
                           AND NOT (x.id = ANY(CAST(:ids AS uuid[])))
                         ORDER BY x.scheduled_at DESC LIMIT 1), 0) AS n
@@ -279,7 +280,7 @@ public class ClientScheduleJdbcRepository {
     public List<String> futureOpen(UUID clientId) {
         return jdbc.queryForList("""
                 SELECT id::text FROM scheduled_session
-                WHERE client_id = :cid::uuid AND status = 'scheduled' AND started_at IS NULL
+                WHERE client_id = :cid::uuid AND status = 'scheduled' AND started_at IS NULL AND logged_by = 'trainer'   -- R107
                   AND scheduled_at > now() AND deleted_at IS NULL
                 """, Map.of("cid", clientId.toString()), String.class);
     }
@@ -294,6 +295,7 @@ public class ClientScheduleJdbcRepository {
         return jdbc.update("""
                 UPDATE scheduled_session SET status = 'cancelled', cancel_reason = :reason
                 WHERE client_id = :cid::uuid AND status = 'scheduled' AND started_at IS NULL AND deleted_at IS NULL
+                  AND logged_by = 'trainer'   -- R107: a client's own workout can never be cancelled (scheduled_session_client_logged)
                   AND scheduled_at > now()
                   AND (CAST(:until AS date) IS NULL OR scheduled_at < (CAST(:until AS date)::timestamp AT TIME ZONE :tz))
                 """, window(clientId, reason, until, zone));

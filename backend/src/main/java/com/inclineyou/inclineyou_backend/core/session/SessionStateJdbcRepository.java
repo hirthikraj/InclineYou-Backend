@@ -55,7 +55,7 @@ public class SessionStateJdbcRepository {
                 FROM scheduled_session s
                 LEFT JOIN client_schedule_slot sl ON sl.id = s.slot_id
                 LEFT JOIN client_schedule cs ON cs.client_id = s.client_id
-                WHERE s.id = :sid::uuid AND s.trainer_id = :tid::uuid
+                WHERE s.id = :sid::uuid AND s.trainer_id = :tid::uuid AND s.logged_by = 'trainer'   -- R107
                 FOR UPDATE OF s
                 """, of(trainerId, sessionId),
                 (rs, i) -> new LockedSession(rs.getString("status"), rs.getString("client_id"),
@@ -156,7 +156,7 @@ public class SessionStateJdbcRepository {
         return new HashSet<>(jdbc.queryForList("""
                 UPDATE scheduled_session
                 SET ended_at = now(), updated_at = now()
-                WHERE id IN (:ids) AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                WHERE id IN (:ids) AND trainer_id = :tid::uuid AND deleted_at IS NULL AND logged_by = 'trainer'   -- R107
                   AND started_at IS NOT NULL AND ended_at IS NULL
                 RETURNING id::text
                 """, Map.of("ids", ids, "tid", trainerId.toString()), String.class));
@@ -168,7 +168,7 @@ public class SessionStateJdbcRepository {
         jdbc.query("""
                 SELECT id::text AS id, started_at IS NULL AS never_started
                 FROM scheduled_session
-                WHERE id IN (:ids) AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                WHERE id IN (:ids) AND trainer_id = :tid::uuid AND deleted_at IS NULL AND logged_by = 'trainer'   -- R107
                 """, Map.of("ids", ids, "tid", trainerId.toString()),
                 rs -> { out.put(rs.getString("id"), rs.getBoolean("never_started")); });
         return out;
@@ -179,7 +179,7 @@ public class SessionStateJdbcRepository {
         var out = new HashMap<String, Long>();
         jdbc.query("""
                 SELECT id::text AS id, scheduled_at FROM scheduled_session
-                WHERE id IN (:ids) AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                WHERE id IN (:ids) AND trainer_id = :tid::uuid AND deleted_at IS NULL AND logged_by = 'trainer'   -- R107
                 """, Map.of("ids", ids, "tid", trainerId.toString()),
                 rs -> { out.put(rs.getString("id"), rs.getTimestamp("scheduled_at").getTime()); });
         return out;
@@ -197,7 +197,7 @@ public class SessionStateJdbcRepository {
                 FROM scheduled_session s
                 LEFT JOIN client_schedule_slot sl ON sl.id = s.slot_id
                 LEFT JOIN client_schedule cs ON cs.client_id = s.client_id
-                WHERE s.id = :sid::uuid AND s.trainer_id = :tid::uuid AND s.deleted_at IS NULL
+                WHERE s.id = :sid::uuid AND s.trainer_id = :tid::uuid AND s.deleted_at IS NULL AND s.logged_by = 'trainer'   -- R107
                 FOR UPDATE OF s
                 """, of(trainerId, sessionId),
                 (rs, i) -> new MarkTarget(rs.getString("status"), rs.getString("client_id"),

@@ -342,6 +342,7 @@ public class ClientJdbcRepository {
                            min(s.scheduled_at) FILTER (WHERE s.status = 'scheduled' AND s.scheduled_at >= now()) AS next_at
                     FROM scheduled_session s
                     WHERE s.client_id IN (SELECT id FROM roster) AND s.deleted_at IS NULL
+                      AND s.logged_by = 'trainer'   -- R107: a self-run is not a delivered session and must not hide a quiet client
                     GROUP BY s.client_id
                 ),
                 settled AS (
@@ -349,7 +350,7 @@ public class ClientJdbcRepository {
                            count(*) FILTER (WHERE s.status = 'done')
                                OVER (PARTITION BY s.client_id ORDER BY s.scheduled_at DESC, s.id DESC) AS done_since
                     FROM scheduled_session s
-                    WHERE s.client_id IN (SELECT id FROM roster) AND s.deleted_at IS NULL
+                    WHERE s.client_id IN (SELECT id FROM roster) AND s.deleted_at IS NULL AND s.logged_by = 'trainer'   -- R107
                       AND s.status IN ('done', 'no_show') AND s.scheduled_at < now()
                 ),
                 streak AS (

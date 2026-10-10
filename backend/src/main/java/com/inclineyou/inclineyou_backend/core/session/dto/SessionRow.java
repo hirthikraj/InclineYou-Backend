@@ -19,6 +19,8 @@ public record SessionRow(
         String deliveryMode,
         String notes,
         String slotId,
+        /** {@code trainer} (a booking, in the diary) or {@code client} (a workout they did alone; only in that client's own history). */
+        String loggedBy,
         SessionWorkout workout,
         Long startedAt,
         Long endedAt,

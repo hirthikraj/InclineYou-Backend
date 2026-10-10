@@ -53,7 +53,8 @@ public class PracticeReportJdbcRepository {
                        count(*) FILTER (WHERE status = 'cancelled') AS cancelled,
                        count(DISTINCT client_id) FILTER (WHERE status = 'done') AS active
                 FROM scheduled_session
-                WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND scheduled_at >= :fromAt AND scheduled_at < :toAt
+                WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND logged_by = 'trainer'   -- R107: delivered trainer sessions only
+                  AND scheduled_at >= :fromAt AND scheduled_at < :toAt
                 GROUP BY 1
                 """, s.params(), (rs, i) -> new SessionMonth(rs.getString("m"), rs.getInt("delivered"),
                 rs.getInt("no_shows"), rs.getInt("cancelled"), rs.getInt("active")));
@@ -108,7 +109,7 @@ public class PracticeReportJdbcRepository {
     public int clientsWithSessions(Span s) {
         Integer n = jdbc.queryForObject("""
                 SELECT count(DISTINCT client_id) FROM scheduled_session
-                WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND status = 'done'
+                WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND logged_by = 'trainer' AND status = 'done'   -- R107
                   AND scheduled_at >= :fromAt AND scheduled_at < :toAt
                 """, s.params(), Integer.class);
         return n == null ? 0 : n;
@@ -120,7 +121,7 @@ public class PracticeReportJdbcRepository {
                        coalesce(y.collected, 0) AS collected, coalesce(y.yours, 0) AS yours
                 FROM client c
                 LEFT JOIN (SELECT client_id, count(*) AS n FROM scheduled_session
-                           WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND status = 'done'
+                           WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND logged_by = 'trainer' AND status = 'done'   -- R107
                              AND scheduled_at >= :fromAt AND scheduled_at < :toAt GROUP BY client_id) s ON s.client_id = c.id
                 LEFT JOIN (SELECT y.client_id, sum(y.amount) AS collected, sum(coalesce(sh.share, y.amount)) AS yours
                            FROM payment y LEFT JOIN payment_trainer_share sh ON sh.payment_id = y.id

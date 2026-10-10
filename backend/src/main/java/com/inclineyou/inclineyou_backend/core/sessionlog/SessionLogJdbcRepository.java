@@ -31,7 +31,7 @@ public class SessionLogJdbcRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
     /** The session row as the verbs need it. */
-    public record Head(UUID id, UUID clientId, String status, Timestamp startedAt, Timestamp endedAt, UUID workoutId) {}
+    public record Head(UUID id, UUID clientId, String status, Timestamp startedAt, Timestamp endedAt, UUID workoutId, String loggedBy) {}
 
     /** One session_exercise (or, in a preview, one main plan row) before its sets are attached. */
     public record ExRow(UUID id, UUID exerciseId, String name, String equipment, int position, String section, UUID groupId,
@@ -49,13 +49,13 @@ public class SessionLogJdbcRepository {
     /** Read, or read under {@code FOR UPDATE} when a write is about to decide on what it sees. */
     public Optional<Head> head(UUID trainerId, UUID sessionId, boolean lock) {
         return jdbc.query("""
-                SELECT s.id, s.client_id, s.status, s.started_at, s.ended_at, s.workout_id
+                SELECT s.id, s.client_id, s.status, s.started_at, s.ended_at, s.workout_id, s.logged_by
                 FROM scheduled_session s
                 WHERE s.id = :sid::uuid AND s.trainer_id = :tid::uuid AND s.deleted_at IS NULL
                 """ + (lock ? " FOR UPDATE OF s" : ""),
                 Map.of("sid", sessionId.toString(), "tid", trainerId.toString()),
                 (rs, i) -> new Head(uuid(rs.getObject("id")), uuid(rs.getObject("client_id")), rs.getString("status"),
-                        rs.getTimestamp("started_at"), rs.getTimestamp("ended_at"), uuid(rs.getObject("workout_id"))))
+                        rs.getTimestamp("started_at"), rs.getTimestamp("ended_at"), uuid(rs.getObject("workout_id")), rs.getString("logged_by")))
                 .stream().findFirst();
     }
 
@@ -113,10 +113,11 @@ public class SessionLogJdbcRepository {
                     FROM session_exercise se JOIN set_log sl ON sl.session_exercise_id = se.id
                     WHERE se.removed_at IS NULL AND se.session_id IN (
                         SELECT o.id FROM scheduled_session o
-                        WHERE o.trainer_id = :tid::uuid AND o.deleted_at IS NULL AND o.started_at IS NOT NULL AND o.ended_at IS NULL)
+                        WHERE o.trainer_id = :tid::uuid AND o.deleted_at IS NULL AND o.logged_by = 'trainer'
+                          AND o.started_at IS NOT NULL AND o.ended_at IS NULL)
                     GROUP BY se.session_id
                 ) t ON t.session_id = s.id
-                WHERE s.trainer_id = :tid::uuid AND s.deleted_at IS NULL
+                WHERE s.trainer_id = :tid::uuid AND s.deleted_at IS NULL AND s.logged_by = 'trainer'   -- R107
                   AND s.started_at IS NOT NULL AND s.ended_at IS NULL
                 ORDER BY s.started_at DESC, s.id
                 """.formatted(volume("sl")), Map.of("tid", trainerId.toString()),
@@ -132,7 +133,7 @@ public class SessionLogJdbcRepository {
                 FROM scheduled_session s
                 JOIN client c ON c.id = s.client_id
                 LEFT JOIN workout w ON w.id = s.workout_id
-                WHERE s.trainer_id = :tid::uuid AND s.deleted_at IS NULL AND s.status = 'scheduled'
+                WHERE s.trainer_id = :tid::uuid AND s.deleted_at IS NULL AND s.logged_by = 'trainer' AND s.status = 'scheduled'   -- R107
                   AND s.started_at IS NULL AND s.scheduled_at >= :from AND s.scheduled_at < :to
                 ORDER BY s.scheduled_at, s.id
                 """, Map.of("tid", trainerId.toString(), "from", from, "to", to),
@@ -157,12 +158,13 @@ public class SessionLogJdbcRepository {
                     SELECT DISTINCT ON (s.client_id) s.client_id, plan.n
                     FROM scheduled_session s JOIN plan ON plan.id = s.workout_id AND plan.client_id = s.client_id
                     WHERE s.trainer_id = :tid::uuid AND s.deleted_at IS NULL AND s.status <> 'cancelled'
+                      AND (s.logged_by = 'trainer' OR s.status = 'done')   -- R107: a finished self-run day counts as done
                       AND s.scheduled_at < :now
                     ORDER BY s.client_id, s.scheduled_at DESC, s.id DESC
                 ),
                 done AS (
                     SELECT client_id, max(scheduled_at) AS last_done FROM scheduled_session
-                    WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND status = 'done' GROUP BY client_id
+                    WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND logged_by = 'trainer' AND status = 'done' GROUP BY client_id   -- R107
                 )
                 SELECT c.id, c.name, p.name AS next_name, d.last_done
                 FROM client c

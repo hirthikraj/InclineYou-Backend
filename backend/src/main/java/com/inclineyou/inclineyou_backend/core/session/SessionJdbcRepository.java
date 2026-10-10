@@ -73,6 +73,9 @@ public class SessionJdbcRepository {
                     ? " AND (s.scheduled_at, s.id) < (:afterAt, :afterId::uuid)"
                     : " AND (s.scheduled_at, s.id) > (:afterAt, :afterId::uuid)");
         }
+        // R107: a workout the client did alone is not in the trainer's time. The diary never lists it; one client's own
+        // history does, but only once a set is done, so an abandoned Start leaves no trace.
+        where.append(clientId == null ? " AND s.logged_by = 'trainer'" : " AND " + HAS_WORK);
         String dir = desc ? "DESC" : "ASC";
         return jdbc.query(SELECT + """
                 WHERE s.trainer_id = :tid::uuid AND s.deleted_at IS NULL
@@ -92,10 +95,16 @@ public class SessionJdbcRepository {
                 .stream().findFirst();
     }
 
+    /** A trainer's booking, or a client's own workout with at least one set done. */
+    private static final String HAS_WORK = """
+            (s.logged_by = 'trainer' OR EXISTS (
+                SELECT 1 FROM session_exercise hx JOIN set_log hs ON hs.session_exercise_id = hx.id
+                WHERE hx.session_id = s.id AND hx.removed_at IS NULL AND hs.done_at IS NOT NULL))""";
+
     private static final String SELECT = """
             SELECT s.id::text AS id, s.client_id::text AS client_id, s.scheduled_at, s.ends_at,
                    s.duration_minutes, s.status, s.delivery_mode, s.notes, s.slot_id::text AS slot_id,
-                   s.started_at, s.ended_at, s.updated_at,
+                   s.logged_by, s.started_at, s.ended_at, s.updated_at,
                    w.id::text AS workout_id, w.name AS workout_name, w.program_id::text AS program_id,
                    w.week, w.day,
                    lg.exercises, lg.sets_done, lg.volume, lg.last_set_at,
@@ -132,6 +141,7 @@ public class SessionJdbcRepository {
                 rs.getString("delivery_mode"),
                 rs.getString("notes"),
                 rs.getString("slot_id"),
+                rs.getString("logged_by"),
                 workoutId == null ? null : new SessionWorkout(workoutId, rs.getString("workout_name"),
                         rs.getString("program_id"), intOrNull(rs, "week"), intOrNull(rs, "day")),
                 started == null ? null : started.getTime(),
@@ -215,6 +225,7 @@ public class SessionJdbcRepository {
                 last AS (
                     SELECT plan.n FROM scheduled_session s JOIN plan ON plan.id = s.workout_id
                     WHERE s.client_id = :cid::uuid AND s.deleted_at IS NULL AND s.status <> 'cancelled'
+                      AND (s.logged_by = 'trainer' OR s.status = 'done')   -- R107: a finished self-run day counts as done
                       AND s.scheduled_at < :at
                     ORDER BY s.scheduled_at DESC, s.id DESC
                     LIMIT 1
