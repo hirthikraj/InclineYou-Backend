@@ -2597,9 +2597,12 @@ The one gate that costs nothing and catches a real class:
 
 # Open, and not an oversight
 
-- **The client portal has no backend.** Every `/v1/me/*` route is a mock route in
-  the sibling repo; `backend/API.md` documents none of them. This is the largest
-  entry in `BACKEND_GAPS.md` and the largest thing between here and a launch.
+- **The client portal has no backend.** Every `/v1/me/*` route was a mock route in
+  the sibling repo; `backend/API.md` documents none of them, and the Spring `portal/`
+  package that briefly served them was deleted in `41710f0`. The scope decision of
+  10 Oct 2026 (full trainer–client product first) makes this the largest piece of
+  work, not a deferred one: rebuild it on the V1 tables, contract first. Use cases:
+  `release/prd-trainer-client-product.html`, module *Client portal*.
 - **`X-InclineYou-Client: web` is never sent**, so this app holds an unrevocable
   7-day JWT rather than the session V41 built for it.
 - **`ResponseStatusException`'s sentence never reaches the trainer** — trap 31.

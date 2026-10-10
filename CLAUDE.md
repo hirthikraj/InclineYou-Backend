@@ -33,19 +33,44 @@ and a not-yet-claimed number gets a 15-minute JWT that can only claim, because
 `web_session` needs an `app_user` row.) **OTP goes over
 WhatsApp only, no SMS** (decided 24 Sep 2026).
 
-**v1 is the trainer web app alone** (decided 24 Sep 2026, `WEB_LAUNCH.md` §3).
-The client portal, which was to ship in v1, moved to the next release — most of
-`/me` and the client REST under it (V16–V19) are built since, and the invite +
-consent screen and the paused/removed walls are what remain (§5.13). Also out
-of v1: the phone app, team coaching, the workspace switcher, Google sign-in,
-the GST summary page, the assessment catalogue's blood pressure and resting
-heart rate, and notes shared with the client. Their code stays; hiding it is
-MUST-19. With no portal, **assessments are taken by the trainer in the
-session** — a write path that does not exist yet (MUST-21). **The v1 engineering
-priority is making session logging extremely fast.** **Clients are adults only** (decided 25 Sep
-2026): no client under 18 is accepted, so there is no guardian-consent flow —
-the Terms and the *Add client* notice say 18+, and a date of birth under 18 is
-refused (`WEB_LAUNCH.md` MUST-22).
+**The scope is the full trainer–client product, built before anything else**
+(decided 10 Oct 2026; `release/prd-trainer-client-product.html` is the PRD, one
+row per use case). This **reverses the 24 Sep decision** that v1 would be the
+trainer web app alone and that the client portal, shared notes, send-to-client
+assessments, the GST summary and the assessment catalogue's blood pressure and
+resting heart rate would wait; MUST-19 (*hide what v1 does not ship*) is
+withdrawn for those, so none of them gets a flag and the ones already hidden are
+turned back on. **Still out, and the next PRDs:** the phone app, team coaching,
+the workspace switcher, the gym platform, AI chat and Google sign-in (that last
+one is a W3 extension in the PRD, pending the fallback decision). **The client
+portal has no backend today:** `portal/` was deleted in `41710f0` against the
+pre-v1 schema, so the web's `/me` screens call `/v1/me/*` routes that do not
+exist; it is rebuilt on the V1 tables from git history, and the routes go into
+`api-contract` first. `/invite`, `/sign-in/paused` and `/sign-in/removed` are
+still 5-line stubs and the invite is where a client first consents
+(`WEB_LAUNCH.md` §5.13). **The v1 engineering priority is still making session
+logging extremely fast.** Assessments are still taken by the trainer in the
+session (MUST-21) and may now also be sent to the client. **Clients are adults
+only** (decided 25 Sep 2026): no client under 18 is accepted, so there is no
+guardian-consent flow — the Terms and the *Add client* notice say 18+, and a
+date of birth under 18 is refused (`WEB_LAUNCH.md` MUST-22); the portal must not
+become a way round it, because only a number a trainer added can ever sign in.
+**Entry rule (10 Oct 2026): one login page for everyone, routed by the number.**
+It never asks *trainer or client?*: a trainer goes to Today or setup, an accepted
+client is redirected straight to the client portal, and a number the product has
+not seen opens a trainer account (Terms notice, then setup). **One number, one
+role, for now** — both roles on one number can be added on demand. A client only
+ever arrives through a trainer's personal invite link, sent over WhatsApp from the
+trainer's own number (the pattern Trainerize and Gymkee use, by email). The link
+opens an **invite page, once**: the trainer's details, the privacy policy and the
+client's own date of birth (18 or over), then a code to the number on record and
+*Let me in*, which sets the portal up. After that the client signs in on the
+regular login page and the link is never needed again. The web's two-exit
+`/sign-in/new` and `/sign-in/client` go. The invite's schema is designed after
+the PRD is agreed (PRD D-06, D-13, D-14, D-15, D-16). The portal
+design spec's collisions with standing rules (no images, weight only through
+assessments, online-only web) are decisions D-02…D-08 in the PRD, not settled in
+its favour.
 
 `PRICING.md` beside it is the pricing proposal built on that running cost:
 **flat on clients, per seat on trainers** — Free (3 clients) · **Pro ₹499/mo,
@@ -103,7 +128,7 @@ forty-two produced; the app's eighteen WatermelonDB steps are now schema v1 with
 an empty migrations list. Both sets of old files are in git history, and the
 V-numbers quoted throughout these notes (V26, V30, V33 …) are **historical
 labels for decisions, not files on disk** — they still name the argument, they
-no longer name a migration you can open. **Rebuilt again on 25 Sep 2026 as a fresh v1.** The schema was redesigned table by table and approved in `release/proposed-schema.html` (41 tables); `backend/src/main/resources/db/migration/V1__init_schema.sql` now builds exactly those, and the previous baseline plus `V2`–`V22` are archived, never run, in `backend/db-archive/pre-v1-2026-09-25/`. Tables held for a later release are in `release/later-schema.html`. The local database was dropped and rebuilt from the new V1. **`V2` (28 Sep 2026) added `client_schedule_slot.program_day` and `scheduled_session.cancel_reason`; `V3`–`V6` followed (V5, 30 Sep, adds `certified_program_count_use()`; V6 the exercise trigram index and custom-name uniqueness); the next backend migration is `V7`.** The application code is being adapted to the new schema module by module, so until that is done `SCHEMA.md`, `API.md`, the seed scripts and much of the service code describe the OLD schema, `spring.jpa.hibernate.ddl-auto` is temporarily `none`, and the backend CI job is expected to fail.
+no longer name a migration you can open. **Rebuilt again on 25 Sep 2026 as a fresh v1.** The schema was redesigned table by table and approved in `release/proposed-schema.html` (41 tables); `backend/src/main/resources/db/migration/V1__init_schema.sql` now builds exactly those, and the previous baseline plus `V2`–`V22` are archived, never run, in `backend/db-archive/pre-v1-2026-09-25/`. Tables held for a later release are in `release/later-schema.html`. The local database was dropped and rebuilt from the new V1. **`V2` (28 Sep 2026) added `client_schedule_slot.program_day` and `scheduled_session.cancel_reason`; `V3`–`V6` followed (V5, 30 Sep, adds `certified_program_count_use()`; V6 the exercise trigram index and custom-name uniqueness); the next backend migration is `V12` (`V11__client_portal.sql` is in).** The application code is being adapted to the new schema module by module, so until that is done `SCHEMA.md`, `API.md`, the seed scripts and much of the service code describe the OLD schema, `spring.jpa.hibernate.ddl-auto` is temporarily `none`, and the backend CI job is expected to fail.
 
 **From the baseline, schema evolution is additive-only, on both sides, in
 lockstep.** The backend's Flyway migrations
@@ -180,7 +205,12 @@ Rules that touch both halves:
   roster, the dues list, the packs that are ending, a no-show — and the wording is
   a settings screen. Delivery is a `wa.me` deep link the trainer reviews and sends
   from their own number; the WhatsApp Business API is v2, and a platform number
-  would be a worse product, not merely a later one. **The
+  would be a worse product, not merely a later one — **for nudges and invites,
+  which stay that way.** One narrow exception was decided on 10 Oct 2026 (PRD
+  D-17): a trainer who switches it on has the platform send one WhatsApp utility
+  message per session they booked, from the platform number. It is transactional
+  (it restates the booking), opt-in on both sides, and logged apart from
+  `nudge_log` so it never starts the 7-day quiet period. **The
   once-per-client-per-7-days cap is now readable by both halves and enforced by
   neither** — the queue goes quiet about somebody already contacted rather than a
   server refusing a button, because a refusal teaches the trainer to open WhatsApp

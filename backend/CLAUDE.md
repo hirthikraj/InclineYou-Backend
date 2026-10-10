@@ -20,6 +20,9 @@ and has its own `CLAUDE.md`.
   why.
 - `../../release/api-contract-v1.1.html` — **the final v1 wire contract**; the backend serves
   exactly its routes. Where `API.md` and it differ, the contract wins.
+  **`../../release/api-contract-v1.2.html` (10 Oct 2026) adds the client portal** — the invite, `/v1/portal/**`,
+  the trainer-side invite/message/reminder routes and the bell — on top of 1.1, written against `V11`. Its
+  *Schema review* lists three open schema calls (R99–R101) and one build-order trap (R107).
 - `API.md` — per-route notes, the authorization table, the rate-limit
   tiers, and the error `code` catalogue. **Keep it in sync with any endpoint change.**
 - `SCHEMA.md` — the same thing for the database: all 46 tables, every column with
@@ -132,6 +135,23 @@ for "owed today" rather than copying it; and money formatting and the workspace 
 PATCH routes keep a raw `Map` body on purpose — presence of a key is the contract (absent = leave,
 null = clear), which a record cannot say — and validate it into typed values at the service's entry.
 
+**Scope reversed 10 Oct 2026: the cut below is a snapshot, not a ceiling.** The product is now the full
+trainer–client product (`../../release/prd-trainer-client-product.html`), so the client portal comes back:
+`/v1/me/*`, the invite and consent write, the paused / removed states and a client's own sign-in all have to be
+rebuilt, from `41710f0^` in git history but on the V1 tables and this section's conventions (`shared/wire`, strict
+binding, `*JdbcRepository`, no SQL in services). Write each route into `api-contract` before the code; the contract
+still wins over `API.md`. **Entry rule (10 Oct):** `otp/verify` on the public path must no longer answer
+`role: client` / `403 CLIENT_SIGN_IN_UNAVAILABLE` — the one login page routes by the number — a number with no account is claimable as a trainer, a number held by an
+*accepted client* account is redirected to the portal (so `otp/verify` answers `role: client` as a real destination, not
+a 403), and a number with a pending invite goes to the invite page (one number, one role: `app_user.role` stays
+single-valued; both roles are an on-demand later change). A client's first entry is a personal invite link, sent over
+WhatsApp from the trainer's own number, bound to one client and the number on record; the invite page collects the
+client's own date of birth (18 or over) and consent, verifies the number, and on *Let me in* creates the client account
+in one transaction. `client` has no token or expiry columns yet, and that schema is deliberately designed after the PRD
+is agreed (PRD D-06, D-13, D-14, D-16). The client lens (RLS tier 4) and a per-client rate-limit key need the same test evidence the
+trainer walls have before any client can sign in. Team, workspaces, gym, the phone's sync and AI stay out; for them
+the paragraph below still describes the tree.
+
 **The v1 cut (3 Oct 2026).** The backend carries exactly the routes in `../../release/api-contract-v1.1.html`
 and nothing else. Removed in that pass, all of it in git history: the workspace routes under `/v1/tenants`
 (switch, members, shares, revenue, stale clients, assign — `TenantScope`, `TenantContext` and `WorkspaceClock`
@@ -220,7 +240,7 @@ Three consequences for anything you write:
   `@Transactional` test holds one connection borrowed before any request exists
   and an unlabelled connection is correctly worth nothing under RLS.
   `TenantIsolationTest` is where the walls are actually asserted — it opens its
-  own `inclineyou_app` connections. If you add a code path that creates a workspace,
+  own `inclineyou_app` connections. Since V11 it also asserts the client lens: a client session reads exactly its own rows, the money switch, and what a client may write. If you add a code path that creates a workspace,
   test it there or it is untested.
 - **Two roles, two pairs of environment variables.** `APP_DB_USERNAME` /
   `APP_DB_PASSWORD` are the request path (`inclineyou_app`); `MIGRATION_DB_USERNAME` /
@@ -254,7 +274,7 @@ historical labels, not files.** `V30 gave the sold package pause/resume` still
 tells you why `paused_at` is a column; it no longer points at a migration you
 can open. `git log` has them.
 
-**25 Sep 2026 — rebuilt as a fresh v1.** `V1__init_schema.sql` was replaced by a new baseline that builds the 41 tables approved in `../release/proposed-schema.html` (that page carries the reasoning; later-release tables are in `../release/later-schema.html`). The old baseline and `V2`–`V22` are archived in `db-archive/pre-v1-2026-09-25/` — `V4`–`V22` were never in git, so that folder is their only copy. **`V2__slot_program_day_and_cancel_reason.sql` (28 Sep 2026) added `client_schedule_slot.program_day` (R45) and `scheduled_session.cancel_reason` (R68); `V3`–`V6` followed (V5, 30 Sep, adds `certified_program_count_use()`; V6 the exercise trigram index and custom-name uniqueness); the next migration is `V11` (V7 money integrity, V8 gym place, V9 equipment and log types, V10 certified-program content hash are in).** Until every module is adapted, `ddl-auto` is `none` (put `validate` back when the five entities match), and `SCHEMA.md`, `API.md` and the three seed scripts describe the old schema. A stale `target/classes/db/migration` from an earlier build will make Flyway run the archived files — run `./mvnw clean` first.
+**25 Sep 2026 — rebuilt as a fresh v1.** `V1__init_schema.sql` was replaced by a new baseline that builds the 41 tables approved in `../release/proposed-schema.html` (that page carries the reasoning; later-release tables are in `../release/later-schema.html`). The old baseline and `V2`–`V22` are archived in `db-archive/pre-v1-2026-09-25/` — `V4`–`V22` were never in git, so that folder is their only copy. **`V2__slot_program_day_and_cancel_reason.sql` (28 Sep 2026) added `client_schedule_slot.program_day` (R45) and `scheduled_session.cancel_reason` (R68); `V3`–`V6` followed (V5, 30 Sep, adds `certified_program_count_use()`; V6 the exercise trigram index and custom-name uniqueness); the next migration is `V12` (V7 money integrity, V8 gym place, V9 equipment and log types, V10 certified-program content hash, **V11 the client portal** are in).** `V11__client_portal.sql` (10 Oct 2026) adds seven tables, sixteen columns, the client lens of row-level security with a column guard on every table a client may write (staff and clients share one database role, so a GRANT cannot limit a client's columns), and ten functions, and replaces `erase_clients`, `erase_account` and `purge_closed_tenants` in place; it was tested against a scratch database built from V1–V10 (107 assertions) and by the 340-test suite on a scratch database (`DATABASE_URL=…/<scratch>`, so tests never touch the dev database) and **was applied to the local dev database on 10 Oct 2026 (Flyway v11, rows untouched), so it is now immutable: any change is a V12**. It was amended in place before that, after the API contract: `client_package_balance()` (a package balance with no money, because a policy cannot hide a column), `invite_card_by_id()` and `trainer.bell_seen_at`. **A client's own workout is not the trainer's time (R107, 10 Oct 2026).** `scheduled_session.logged_by = 'client'` rows (a self-run day) are excluded from every trainer read that means *my diary* — the diary window, the picker, the roster's figures, the practice report, pause/resume — and refused as 404 by every trainer status verb; they are included in one client's own history (`GET /v1/sessions?clientId=`) once a set is done, in set-history and in plan-day counting. **A new query over `scheduled_session` must pick a side** and carry `logged_by = 'trainer'` or say why not; `ClientLoggedSessionsTest` is where it is pinned. **Inside a `SECURITY DEFINER` function `current_user` is the owner, never the caller: recognise the request role with `session_user`** (V1's `erase_account` got this wrong and V11 fixes it). Until every module is adapted, `ddl-auto` is `none` (put `validate` back when the five entities match), and `SCHEMA.md`, `API.md` and the three seed scripts describe the old schema. A stale `target/classes/db/migration` from an earlier build will make Flyway run the archived files — run `./mvnw clean` first.
 
 From here the law is what it always was: **never edit a migration that has
 run** — append a new `V{n}__name.sql`. Never drop or repurpose a column, and
@@ -359,9 +379,10 @@ propagate the tombstone to every device. Every read filters `deleted_at IS NULL`
 
 ### The web writes straight to the server
 
-v1 is the trainer web app, which is online-only: there is no sync endpoint, and
-the phone's offline-first protocol is out of this backend until that build
-returns.
+The web — the trainer app and, from 10 Oct 2026, the client portal — is online-only: there is no sync endpoint,
+and the phone's offline-first protocol is out of this backend until that build returns. The one open question
+is the client's workout flow with no signal (PRD decision D-03): if it gets a queue, it is a service worker that
+replays client-UUID writes against REST, not a sync endpoint.
 
 ## Security
 
