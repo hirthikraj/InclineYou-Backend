@@ -128,7 +128,7 @@ forty-two produced; the app's eighteen WatermelonDB steps are now schema v1 with
 an empty migrations list. Both sets of old files are in git history, and the
 V-numbers quoted throughout these notes (V26, V30, V33 …) are **historical
 labels for decisions, not files on disk** — they still name the argument, they
-no longer name a migration you can open. **Rebuilt again on 25 Sep 2026 as a fresh v1.** The schema was redesigned table by table and approved in `release/proposed-schema.html` (41 tables); `backend/src/main/resources/db/migration/V1__init_schema.sql` now builds exactly those, and the previous baseline plus `V2`–`V22` are archived, never run, in `backend/db-archive/pre-v1-2026-09-25/`. Tables held for a later release are in `release/later-schema.html`. The local database was dropped and rebuilt from the new V1. **`V2` (28 Sep 2026) added `client_schedule_slot.program_day` and `scheduled_session.cancel_reason`; `V3`–`V6` followed (V5, 30 Sep, adds `certified_program_count_use()`; V6 the exercise trigram index and custom-name uniqueness); the next backend migration is `V12` (`V11__client_portal.sql` is in).** The application code is being adapted to the new schema module by module, so until that is done `SCHEMA.md`, `API.md`, the seed scripts and much of the service code describe the OLD schema, `spring.jpa.hibernate.ddl-auto` is temporarily `none`, and the backend CI job is expected to fail.
+no longer name a migration you can open. **Rebuilt again on 25 Sep 2026 as a fresh v1.** The schema was redesigned table by table and approved in `release/proposed-schema.html` (41 tables); `backend/src/main/resources/db/migration/V1__init_schema.sql` now builds exactly those, and the previous baseline plus `V2`–`V22` are archived, never run, in `backend/db-archive/pre-v1-2026-09-25/`. Tables held for a later release are in `release/later-schema.html`. The local database was dropped and rebuilt from the new V1. **`V2` (28 Sep 2026) added `client_schedule_slot.program_day` and `scheduled_session.cancel_reason`; `V3`–`V6` followed (V5, 30 Sep, adds `certified_program_count_use()`; V6 the exercise trigram index and custom-name uniqueness); `V11__client_portal.sql` is applied (immutable); `V12__client_assessments.sql` is written and tested but **not yet applied to the dev database**, so V12 (client assessments) is applied to the dev database; `V13__trainer_reminder_reach.sql` (11 Oct 2026) adds `trainer_reminder_reach()`, three counts of the caller's own clients, because the trainer's connection cannot read `client_prefs`, and is not yet applied to it; `V14__invite_card_expiry.sql` (12 Oct 2026) replaces `invite_card()` in place so the public invite card can say when the link lapses, and `V15__invite_send_target.sql` adds `invite_send_target()`, the one door by which a live link's code finds the number it goes to, and `V16__invite_for_accept.sql` adds `invite_for_accept()`, what "Let me in" needs to know about a link in any state, and `V17__decline_client_invite.sql` adds `decline_client_invite()`, the one thing a public link may do to an invite (end a live one as not-for-me), and `V18__client_sign_in_state.sql` adds `client_sign_in_state()` (which wall a client is on) and replaces `pending_invites_for_phone()` in place so each invite says when it lapses, and `V19__decline_client_invite_by_id.sql` adds `decline_client_invite_by_id()` (the same not-for-me for a number that has already signed in, refusing any other number's id), and `V20__client_lens.sql` adds `client_ids_for_phone()`, `portal_wall()` and `client_best_row()` and replaces `client_sign_in_state()` — the client lens is now built (`ClientLensResolver` in `AuthTokenFilter`) and `/v1/portal/**` is open to a client session; `V21__portal_wall_gym.sql` replaces `portal_wall()` in place to carry the trainer's gym name, and `V22__client_portal_doors.sql` adds `client_ack_removed()` and `client_accept_policy()` (the two writes a client's session cannot make itself), and `V23__client_workout.sql` adds `client_finish_extras()` (the milestones and best notice a finished self-run records, which no client policy can write) and widens the swap reasons to busy / pain / other, and `V24__client_assessment_cycle.sql` adds `client_cycle_template()` and `client_book_next_assessment()` (what a client's submit needs to move its cycle on), and `V25__client_settings.sql` adds `client_reminder_offered()` and `client_export()` (the one fact about the trainer's settings the reminder opt-in needs, and the whole of a person's data for the download, which the removed wall must still be able to take); the next free number is `V26`.** The application code is being adapted to the new schema module by module, so until that is done `SCHEMA.md`, `API.md`, the seed scripts and much of the service code describe the OLD schema, `spring.jpa.hibernate.ddl-auto` is temporarily `none`, and the backend CI job is expected to fail.
 
 **From the baseline, schema evolution is additive-only, on both sides, in
 lockstep.** The backend's Flyway migrations
@@ -145,9 +145,12 @@ along with `body_metrics` in both sync directions,
 `POST /v1/clients/{id}/body-metrics`, its `PUT` / `DELETE` correction routes and
 the portal's `POST /v1/me/metrics`. It was allowed because the phone build and
 sync are out of v1 scope and nothing was in production; it is **not** a
-precedent. The two history reads (`GET /v1/clients/{id}/body-metrics`,
-`GET /v1/me/metrics`) keep their shape and read V5's six ids out of completed
-assessments through `MetricReadings`.
+precedent. **The two history reads that followed it were then removed too (10 Oct
+2026):** there is no measurement history endpoint of any kind — not
+`/body-metrics`, not `GET /v1/clients/{id}/readings`, not a portal
+`/progress/measurements`. A body is measured in an assessment and nowhere else, so
+a client's measurements are an assessment's own readings, and `MetricReadings` (the
+reader that served the history) is deleted.
 
 **Offline-first is the architecture, not a feature — on the phone.** `app/`
 writes to local SQLite and reconciles through `/v1/sync/pull` + `/v1/sync/push`.
@@ -334,8 +337,8 @@ Rules that touch both halves:
   route did; wiring a returned V14 assessment to it is an open product call.
   V14's rules: status (`booked` · `waiting` · `missed` · `done`) is **derived,
   never stored**; readings live on the assessment row and **nowhere else** — the
-  measurement history, the report's latest weight and the portal's progress all
-  read them from there (`MetricReadings`); a sent assessment **outlives its template**
+  assessment's own detail (its `history`) is the only series; there is no
+  measurement history read, and `MetricReadings` is gone (10 Oct 2026); a sent assessment **outlives its template**
   (`template_id` nulled on delete); and its timestamps are **ISO strings**, the one
   deliberate exception to epoch ms. **Its catalogue includes health items** —
   Vitals (`resting_hr`, `bp`), visceral fat, a *did anything hurt* question —
