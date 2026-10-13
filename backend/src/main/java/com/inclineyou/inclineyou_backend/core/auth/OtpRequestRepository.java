@@ -78,10 +78,30 @@ public interface OtpRequestRepository extends JpaRepository<OtpRequest, UUID> {
     @Query("UPDATE OtpRequest o SET o.consumedAt = :now WHERE o.phone = :phone AND o.consumedAt IS NULL")
     int supersede(@Param("phone") String phone, @Param("now") Instant now);
 
-    /** queued → sent, once the sender has taken the code. Any other state is left alone. */
+    /** queued → sent, once the sender has taken the code, keeping the provider's id for the status webhook. Any other state is left alone. */
     @Modifying(clearAutomatically = true)
-    @Query("UPDATE OtpRequest o SET o.deliveryStatus = 'sent' WHERE o.id = :id AND o.deliveryStatus = 'queued'")
-    int markSent(@Param("id") UUID id);
+    @Query("UPDATE OtpRequest o SET o.deliveryStatus = 'sent', o.providerMessageId = :providerId WHERE o.id = :id AND o.deliveryStatus = 'queued'")
+    int markSent(@Param("id") UUID id, @Param("providerId") String providerId);
+
+    /**
+     * The provider's word on a message, found by its id. Monotonic: queued → sent → delivered → read, never back, so a replay or
+     * a late {@code delivered} after {@code read} changes nothing; {@code failed} is final and cannot overwrite a delivered or
+     * read one. {@code delivery_error} is tied to {@code failed} by the schema, so it is written only with it.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query(value = """
+            UPDATE otp_request
+               SET delivery_status = CAST(:status AS text),
+                   delivery_error = CASE WHEN CAST(:status AS text) = 'failed' THEN left(coalesce(nullif(btrim(CAST(:error AS text)), ''), 'failed'), 64) END
+             WHERE provider_message_id = :providerId
+               AND CASE CAST(:status AS text)
+                     WHEN 'sent'      THEN delivery_status = 'queued'
+                     WHEN 'delivered' THEN delivery_status IN ('queued', 'sent', 'failed')
+                     WHEN 'read'      THEN delivery_status IN ('queued', 'sent', 'delivered', 'failed')
+                     WHEN 'failed'    THEN delivery_status IN ('queued', 'sent')
+                   END
+            """, nativeQuery = true)
+    int applyDelivery(@Param("providerId") String providerId, @Param("status") String status, @Param("error") String error);
 
     /** The sender refused the code. The schema ties {@code delivery_error} to {@code failed}. */
     @Modifying(clearAutomatically = true)

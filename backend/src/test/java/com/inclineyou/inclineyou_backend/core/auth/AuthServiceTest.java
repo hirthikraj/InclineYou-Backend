@@ -32,10 +32,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * What sign-in decides in v1, where the only product is the trainer's: a
- * trainer opens, a number with no account may claim one, and a number that is
- * only somebody's client is refused with {@code CLIENT_SIGN_IN_UNAVAILABLE} and
- * given no credential (api-contract R60). The wire flow is {@code SignInFlowTest}.
+ * What sign-in decides: a trainer opens, a number with no account may claim one (and is shown any invites waiting for it), and a
+ * number that is somebody's client lands on the portal (api-contract 1.2, inv-a5) — {@code CLIENT_SIGN_IN_UNAVAILABLE} is retired.
+ * The wire flow is {@code SignInFlowTest} and {@code ClientSignInTest}.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -50,6 +49,7 @@ class AuthServiceTest {
     @Mock OtpService otpService;
     @Mock AuthTokenService tokens;
     @Mock TenantScope tenantScope;
+    @Mock ClientSignInLookup clientLookup;
 
     AppProperties props = new AppProperties();
     AuthService auth;
@@ -57,7 +57,7 @@ class AuthServiceTest {
     @BeforeEach
     void setUp() {
         props.getPrivacy().setPolicyVersion("2026-09");
-        auth = new AuthService(appUserRepo, trainerRepo, otpService, tokens, tenantScope, props);
+        auth = new AuthService(appUserRepo, trainerRepo, otpService, tokens, tenantScope, props, clientLookup);
         when(otpService.verifyRequest(any(UUID.class), anyString())).thenReturn(PHONE);
     }
 
@@ -125,18 +125,21 @@ class AuthServiceTest {
     }
 
     @Test
-    @DisplayName("a number that is only a client's is refused and gets no credential")
-    void clientOnlyNumberIsRefused() {
+    @DisplayName("a number that is a client's is a client now: a credential, role client, and the wall it is on")
+    void clientNumberLandsOnThePortal() {
         stubTokens();
         when(appUserRepo.findIdentityByPhone(PHONE)).thenReturn(List.of(
                 row(AppUser.ROLE_CLIENT, null, null, null, null)));
+        when(clientLookup.stateOf(PHONE)).thenReturn(new ClientSignInLookup.State("active",
+                new com.inclineyou.inclineyou_backend.core.auth.dto.AuthResponse.ClientTrainer("Arun Prakash", "Strength")));
 
-        assertThatThrownBy(() -> auth.verifyOtp(new VerifyOtpRequest(REQUEST.toString(), "123456")))
-                .isInstanceOfSatisfying(ApiException.class, e -> {
-                    assertThat(e.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
-                    assertThat(e.getCode()).isEqualTo("CLIENT_SIGN_IN_UNAVAILABLE");
-                });
-        verify(tokens, never()).issueForCurrentRequest(any());
+        var res = auth.verifyOtp(new VerifyOtpRequest(REQUEST.toString(), "123456"));
+
+        assertThat(res.role()).isEqualTo("client");
+        assertThat(res.access()).isEqualTo("active");
+        assertThat(res.trainer().name()).isEqualTo("Arun Prakash");
+        assertThat(res.pendingInvites()).isEmpty();
+        verify(tokens).issueForCurrentRequest(any());
     }
 
     @Test

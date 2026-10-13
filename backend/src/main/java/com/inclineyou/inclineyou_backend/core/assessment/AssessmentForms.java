@@ -52,6 +52,7 @@ final class AssessmentForms {
                 r.scheduleId() == null ? null : r.scheduleId().toString(), r.name(), r.dueOn().toString(),
                 state(r.done(), r.dueOn(), today), r.completedAt() == null ? null : r.completedAt().toEpochMilli(),
                 r.enteredBy(), new Count(readings.size(), form.measurements().size()),
-                new Count(answers.size(), form.questions().size()), r.createdAt().toEpochMilli(), r.version());
+                new Count(answers.size(), form.questions().size()), r.createdAt().toEpochMilli(), r.version(),
+                r.sentAt() == null ? null : r.sentAt().toEpochMilli());
     }
 }

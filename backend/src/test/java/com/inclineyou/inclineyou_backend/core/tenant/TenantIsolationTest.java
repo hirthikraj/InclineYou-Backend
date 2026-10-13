@@ -775,6 +775,426 @@ class TenantIsolationTest {
         }
     }
 
+    /* ------------------------------------------------- V12 · assessments the client takes */
+
+    private static final String WEEKLY_FORM = "{\"measurements\":[{\"key\":\"weight\",\"label\":\"Weight\",\"group\":\"Body\",\"unit\":\"kg\"}],"
+            + "\"questions\":[{\"id\":\"q1\",\"text\":\"Energy\",\"kind\":\"rating\",\"scale\":5}]}";
+
+    @Test
+    @DisplayName("V12 · a client reads only the startable templates of their own trainer, and nothing else of the shelf")
+    void clientReadsOnlyStartableTemplates() throws SQLException {
+        accept(meeraPrivate);   // Meera is Priya's accepted client; her gym row is not accepted (one client, one trainer)
+        UUID offered = startable(tenantA, trainerPriya, "weekly " + tag, true);
+        startable(tenantA, trainerPriya, "private " + tag, false);
+        UUID retired = startable(tenantA, trainerPriya, "retired " + tag, true);
+        jdbc.update("UPDATE assessment_template SET deleted_at = now() WHERE id = :id::uuid", Map.of("id", retired.toString()));
+        startable(tenantB, trainerArun, "arun " + tag, true);   // another trainer's offered template
+
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            assertThat(strings(c, "SELECT id::text FROM assessment_template")).containsExactly(offered.toString());
+            // an id that is not an accepted row opens nothing: the policy asks the row, not just the id set
+            set(c, "app.client_ids", "{" + meeraGym + "}");
+            assertThat(count(c, "SELECT count(*) FROM assessment_template")).isZero();
+            // a client with no accepted row reads none of it
+            set(c, "app.client_ids", "");
+            assertThat(count(c, "SELECT count(*) FROM assessment_template")).isZero();
+            // and cannot write to the shelf
+            clientSession(c);
+            inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE assessment_template SET client_can_start = false")).isZero());
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                    "INSERT INTO assessment_template (tenant_id, trainer_id, name, client_can_start) VALUES ('%s', '%s', 'forged', true)"
+                            .formatted(tenantA, trainerPriya))).hasMessageContaining("row-level security"));
+        }
+        // the trainer's own tier is untouched: Priya still sees her three live templates
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            assertThat(count(c, "SELECT count(*) FROM assessment_template WHERE deleted_at IS NULL")).isEqualTo(2);
+        }
+    }
+
+    @Test
+    @DisplayName("V12 · a client starts an assessment only through start_client_assessment, for their own row, one waiting at a time")
+    void clientStartsAssessmentsThroughTheFunction() throws SQLException {
+        accept(meeraPrivate);
+        UUID offered = startable(tenantA, trainerPriya, "weekly " + tag, true);
+        UUID hidden = startable(tenantA, trainerPriya, "private " + tag, false);
+        UUID arun = startable(tenantB, trainerArun, "arun " + tag, true);
+        UUID id1 = UUID.randomUUID(), id2 = UUID.randomUUID();
+
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+
+            // no INSERT policy: the table refuses a client's own row, however well-formed
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                    ("INSERT INTO assessment (client_id, trainer_id, tenant_id, template_id, name, form, due_on, sent_at) "
+                            + "VALUES ('%s', '%s', '%s', '%s', 'mine', '%s'::jsonb, CURRENT_DATE, now())")
+                            .formatted(meeraPrivate, trainerPriya, tenantA, offered, WEEKLY_FORM))).hasMessageContaining("row-level security"));
+
+            // the function creates it: sent, open, nobody's draft yet, in the client's workspace under the client's trainer
+            assertThat(start(c, id1, meeraPrivate, offered, WEEKLY_FORM)).containsExactly("created", id1.toString());
+            var row = jdbc.queryForMap("SELECT tenant_id::text t, trainer_id::text r, client_id::text c, template_id::text tpl, schedule_id, "
+                    + "sent_at IS NOT NULL AS sent, completed_at, entered_by, name FROM assessment WHERE id = :id::uuid", Map.of("id", id1.toString()));
+            assertThat(row.get("t")).isEqualTo(tenantA.toString());
+            assertThat(row.get("r")).isEqualTo(trainerPriya.toString());
+            assertThat(row.get("c")).isEqualTo(meeraPrivate.toString());
+            assertThat(row.get("tpl")).isEqualTo(offered.toString());
+            assertThat(row.get("sent")).isEqualTo(true);
+            assertThat(row.get("schedule_id")).isNull();
+            assertThat(row.get("completed_at")).isNull();
+            assertThat(row.get("entered_by")).isNull();
+            // and it is the client's to answer straight away, as any sent assessment is
+            assertThat(strings(c, "SELECT id::text FROM assessment")).containsExactly(id1.toString());
+            inRolledBackTransaction(c, () -> assertThat(update(c,
+                    "UPDATE assessment SET answers = '{}'::jsonb WHERE id = '" + id1 + "'")).isOne());
+
+            // a replay of the same id, and a second tap with a new id, both answer with the one that is waiting
+            assertThat(start(c, id1, meeraPrivate, offered, WEEKLY_FORM)).containsExactly("existing", id1.toString());
+            assertThat(start(c, id2, meeraPrivate, offered, WEEKLY_FORM)).containsExactly("existing", id1.toString());
+            assertThat(jdbc.queryForObject("SELECT count(*) FROM assessment WHERE client_id = :c::uuid AND template_id = :t::uuid",
+                    Map.of("c", meeraPrivate.toString(), "t", offered.toString()), Integer.class)).isOne();
+
+            // a template that is not offered, not their trainer's, or retired is one answer, and nothing is written
+            assertThat(start(c, UUID.randomUUID(), meeraPrivate, hidden, WEEKLY_FORM)[0]).isEqualTo("unavailable");
+            assertThat(start(c, UUID.randomUUID(), meeraPrivate, arun, WEEKLY_FORM)[0]).isEqualTo("unavailable");
+            assertThat(start(c, UUID.randomUUID(), meeraPrivate, UUID.randomUUID(), WEEKLY_FORM)[0]).isEqualTo("unavailable");
+
+            // an id that belongs to somebody else's assessment is a conflict and says nothing more
+            UUID theirs = assessment(tenantB, trainerArun, sanjay, template(tenantB, trainerArun, "tpl s " + tag), "theirs", true);
+            assertThat(start(c, theirs, meeraPrivate, offered, WEEKLY_FORM)[0]).isEqualTo("conflict");
+
+            // someone else's row is not theirs to start for; neither is anyone's, without being that client
+            assertThatThrownBy(() -> start(c, UUID.randomUUID(), sanjay, offered, WEEKLY_FORM)).hasMessageContaining("your own row");
+            // the form may not ask what the template does not: a measurement, or a question, of the client's own devising
+            String widerMeasure = WEEKLY_FORM.replace("\"key\":\"weight\"", "\"key\":\"waist\"");
+            String widerQuestion = WEEKLY_FORM.replace("\"id\":\"q1\"", "\"id\":\"q9\"");
+            UUID second = startable(tenantA, trainerPriya, "second " + tag, true);
+            assertThatThrownBy(() -> start(c, UUID.randomUUID(), meeraPrivate, second, widerMeasure)).hasMessageContaining("template");
+            assertThatThrownBy(() -> start(c, UUID.randomUUID(), meeraPrivate, second, widerQuestion)).hasMessageContaining("template");
+        }
+
+        // staff are not a client: the function is not theirs to call
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            assertThatThrownBy(() -> start(c, UUID.randomUUID(), meeraPrivate, offered, WEEKLY_FORM)).hasMessageContaining("your own row");
+        }
+
+        // once it is submitted, a new one may be started again; a paused client, or one who has left, may not start any
+        jdbc.update("UPDATE assessment SET completed_at = now(), entered_by = 'client' WHERE id = :id::uuid", Map.of("id", id1.toString()));
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            UUID again = UUID.randomUUID();
+            assertThat(start(c, again, meeraPrivate, offered, WEEKLY_FORM)).containsExactly("created", again.toString());
+
+            jdbc.update("UPDATE client SET status = 'paused', paused_at = now() WHERE id = :id::uuid", Map.of("id", meeraPrivate.toString()));
+            assertThatThrownBy(() -> start(c, UUID.randomUUID(), meeraPrivate, offered, WEEKLY_FORM)).hasMessageContaining("cannot start");
+            jdbc.update("UPDATE client SET status = 'active', paused_at = NULL WHERE id = :id::uuid", Map.of("id", meeraPrivate.toString()));
+        }
+    }
+
+    @Test
+    @DisplayName("V12 · one client, one trainer: a second accepted row for the same number is refused by the database")
+    void oneClientOneTrainerHasADatabaseBackstop() {
+        // Meera has a row with Priya privately and a row at Iron House, in two workspaces; uq_client_phone_live is per workspace
+        accept(meeraPrivate);
+        assertThatThrownBy(() -> accept(meeraGym))
+                .isInstanceOf(DataIntegrityViolationException.class)
+                .hasMessageContaining("uq_client_one_trainer");
+
+        // a client who has left (removed) is outside the index, and can be accepted by a new trainer
+        jdbc.update("UPDATE client SET membership_status = 'removed', removed_at = now(), removed_by = 'client' WHERE id = :id::uuid",
+                Map.of("id", meeraPrivate.toString()));
+        accept(meeraGym);
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM client WHERE phone = :p AND membership_status = 'accepted'",
+                Map.of("p", phoneMeera), Integer.class)).isOne();
+
+        // and a number that is only invited, or declined, is not an accepted row at all
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM client WHERE phone = :p", Map.of("p", phoneMeera), Integer.class)).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("V12 · the two new flags default to the safe side: a template is the trainer's until offered, a cycle sends")
+    void newFlagsDefault() {
+        assertThat(jdbc.queryForObject("SELECT column_default FROM information_schema.columns WHERE table_name = 'assessment_template' AND column_name = 'client_can_start'",
+                Map.of(), String.class)).isEqualTo("false");
+        assertThat(jdbc.queryForObject("SELECT column_default FROM information_schema.columns WHERE table_name = 'assessment_schedule' AND column_name = 'send_to_client'",
+                Map.of(), String.class)).isEqualTo("true");
+        UUID t = template(tenantA, trainerPriya, "plain " + tag);
+        assertThat(jdbc.queryForObject("SELECT client_can_start FROM assessment_template WHERE id = :id::uuid", Map.of("id", t.toString()), Boolean.class)).isFalse();
+    }
+
+    @Test
+    @DisplayName("V13 · the trainer's reminder reach reads opt-ins the trainer cannot read, for their own clients and nobody else's")
+    void reminderReachIsTheCallersOwn() throws SQLException {
+        // Meera is one person in two workspaces and may be on the portal in only one (uq_client_one_trainer), so the gym half
+        // of Priya's roster is a second client with no number, who has joined and has not opted in.
+        UUID gymClient = insertClient(tenantB, trainerPriya, "Gym client", null);
+        accept(meeraPrivate);
+        accept(gymClient);
+        accept(sanjay);
+        UUID tenantOfMeera = tenantA;
+        jdbc.update("INSERT INTO client_prefs (client_id, tenant_id, whatsapp_opt_in_at) VALUES (:c::uuid, :t::uuid, now())",
+                Map.of("c", meeraPrivate.toString(), "t", tenantOfMeera.toString()));
+        jdbc.update("INSERT INTO client_prefs (client_id, tenant_id, whatsapp_opt_in_at) VALUES (:c::uuid, :t::uuid, now())",
+                Map.of("c", sanjay.toString(), "t", tenantB.toString()));
+        jdbc.update("UPDATE client SET reminders_excluded = true WHERE id = :c::uuid", Map.of("c", sanjay.toString()));
+
+        // Priya, in her private workspace only: one client on the portal, and she has opted in.
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            assertThat(count(c, "SELECT count(*) FROM client_prefs")).as("the table itself is closed to her").isZero();
+            assertThat(strings(c, "SELECT on_portal || ',' || opted_in || ',' || excluded FROM trainer_reminder_reach()")).containsExactly("1,1,0");
+        }
+        // Priya across both workspaces: her gym client has joined and has not opted in.
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA, tenantB), trainerPriya);
+            assertThat(strings(c, "SELECT on_portal || ',' || opted_in || ',' || excluded FROM trainer_reminder_reach()")).containsExactly("2,1,0");
+        }
+        // Arun: Sanjay opted in and was excluded, so nobody would be sent one; and Priya's clients are not in his numbers.
+        try (Connection c = asAppRole()) {
+            staff(c, tenantB, List.of(tenantB), trainerArun);
+            assertThat(strings(c, "SELECT on_portal || ',' || opted_in || ',' || excluded FROM trainer_reminder_reach()")).containsExactly("1,0,1");
+        }
+        // A client asking gets nothing: the function is the trainer's door.
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            assertThat(strings(c, "SELECT on_portal || ',' || opted_in || ',' || excluded FROM trainer_reminder_reach()")).containsExactly("0,0,0");
+        }
+    }
+
+    @Test
+    @DisplayName("V20 · the client lens is built from LIVE rows only, and the three functions answer only for the number that signed in")
+    void clientLensIsBuiltFromLiveRowsOnly() throws SQLException {
+        accept(meeraPrivate);            // joined with Priya privately; the gym row stays merely invited
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            assertThat(strings(c, "SELECT unnest(client_ids_for_phone('" + phoneMeera + "'))::text")).containsExactly(meeraPrivate.toString());
+            assertThat(strings(c, "SELECT portal_wall('" + phoneMeera + "') ->> 'access'")).containsExactly("active");
+            assertThat(strings(c, "SELECT client_sign_in_state('" + phoneMeera + "') ->> 'access'")).containsExactly("active");
+            // Another number's rows are not hers to ask about — each function refuses, it does not answer empty.
+            String other = newPhone();
+            assertThatThrownBy(() -> strings(c, "SELECT client_ids_for_phone('" + other + "')")).hasMessageContaining("only for the number that signed in");
+            assertThatThrownBy(() -> strings(c, "SELECT portal_wall('" + other + "')")).hasMessageContaining("only for the number that signed in");
+            assertThatThrownBy(() -> strings(c, "SELECT client_sign_in_state('" + other + "')")).hasMessageContaining("only for the number that signed in");
+            // The helper that orders a number's rows is the owner's: the request role cannot call it.
+            assertThatThrownBy(() -> strings(c, "SELECT client_best_row('" + phoneMeera + "')")).hasMessageContaining("permission denied");
+        }
+        // Paused by the trainer: no live row, so the lens is empty — and with it every table the lens opens — yet the wall still answers.
+        jdbc.update("UPDATE client SET status = 'paused', paused_at = now(), paused_until = current_date + 7 WHERE id = :id::uuid", Map.of("id", meeraPrivate.toString()));
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            assertThat(strings(c, "SELECT unnest(client_ids_for_phone('" + phoneMeera + "'))::text")).isEmpty();
+            assertThat(strings(c, "SELECT portal_wall('" + phoneMeera + "') ->> 'access'")).containsExactly("paused");
+            assertThat(strings(c, "SELECT portal_wall('" + phoneMeera + "') -> 'trainer' ->> 'name'")).hasSize(1);
+            // The session a paused client really has: the lens built from that empty list.
+            set(c, "app.client_ids", "");
+            assertThat(count(c, "SELECT count(*) FROM client")).isZero();
+            assertThat(count(c, "SELECT count(*) FROM scheduled_session")).isZero();
+            assertThat(count(c, "SELECT count(*) FROM client_notification")).isZero();
+        }
+        // Removed: the wall gives the trainer's name and nothing of the arrangement.
+        jdbc.update("UPDATE client SET membership_status = 'removed', status = 'active', paused_at = NULL, paused_until = NULL, removed_at = now(), removed_by = 'client' WHERE id = :id::uuid", Map.of("id", meeraPrivate.toString()));
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            assertThat(strings(c, "SELECT portal_wall('" + phoneMeera + "') ->> 'access'")).containsExactly("removed");
+            assertThat(strings(c, "SELECT portal_wall('" + phoneMeera + "') -> 'trainer' ->> 'bio'")).isNotNull();
+            assertThat(strings(c, "SELECT (portal_wall('" + phoneMeera + "') -> 'trainer') ? 'bio'")).containsExactly("f");
+            assertThat(strings(c, "SELECT unnest(client_ids_for_phone('" + phoneMeera + "'))::text")).isEmpty();
+        }
+    }
+
+    @Test
+    @DisplayName("V22 · a client edits only their five columns through the lens; the two doors answer only for their own number, and acknowledging is once")
+    void clientWritesGoThroughTheGuardAndTwoDoors() throws SQLException {
+        accept(meeraPrivate);
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            // PATCH /v1/portal/me writes through the lens: the five columns pass, and the row is found by the policy.
+            inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE client SET goal = 'Run a 10k', height_cm = 168, activity_level = 'active', timezone = 'Asia/Dubai' WHERE id = '" + meeraPrivate + "'")).isEqualTo(1));
+            // Everything else on the row is the trainer's, refused by the column guard — the consent version included.
+            for (String col : new String[]{"accepted_policy_version = '2026-09'", "phone = '+919000000000'", "status = 'archived'", "portal_show_money = true", "membership_status = 'removed'"}) {
+                inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c, "UPDATE client SET " + col + " WHERE id = '" + meeraPrivate + "'"))
+                        .hasMessageContaining("a client may not change"));
+            }
+        }
+        String other = newPhone();
+        // Consent: the version lands on the number's accepted rows, only for the number that signed in.
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            inRolledBackTransaction(c, () -> {
+                exec(c, "SELECT client_accept_policy('" + phoneMeera + "', '2026-09')");
+                assertThat(strings(c, "SELECT accepted_policy_version FROM client WHERE id = '" + meeraPrivate + "'")).containsExactly("2026-09");
+            });
+            assertThatThrownBy(() -> strings(c, "SELECT client_accept_policy('" + other + "', '2026-09')::text")).hasMessageContaining("only the number that signed in");
+            assertThatThrownBy(() -> strings(c, "SELECT client_ack_removed('" + other + "')")).hasMessageContaining("only the number that signed in");
+        }
+        // Acknowledging: nothing to acknowledge while they are not removed; once removed the first call moves it and a replay does not.
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            assertThat(strings(c, "SELECT client_ack_removed('" + phoneMeera + "')")).containsExactly("f");
+        }
+        jdbc.update("UPDATE client SET membership_status = 'removed', removed_at = now(), removed_by = 'trainer' WHERE id = :id::uuid", Map.of("id", meeraPrivate.toString()));
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            inRolledBackTransaction(c, () -> {
+                assertThat(strings(c, "SELECT client_ack_removed('" + phoneMeera + "')")).containsExactly("t");
+                assertThat(strings(c, "SELECT client_ack_removed('" + phoneMeera + "')")).containsExactly("f");
+            });
+        }
+    }
+
+    @Test
+    @DisplayName("V23 · a client runs a self-run workout through their lens — start, log, finish, feedback — and nothing of a trainer's session or another client's; finishing's door is their own session's")
+    void clientRunsAWorkoutThroughTheLens() throws SQLException {
+        portalFixtures();
+        accept(meeraPrivate);
+        UUID strangerRun = session(tenantB, trainerArun, sanjay, "client", "done");
+        UUID s = UUID.randomUUID(), sx = UUID.randomUUID(), set = UUID.randomUUID();
+        String own = "INSERT INTO scheduled_session (id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at, status, started_at, logged_by) "
+                + "VALUES ('" + s + "', '" + trainerPriya + "', '" + meeraPrivate + "', now(), 30, now() + interval '30 minutes', 'scheduled', now(), 'client')";
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            // a real client request has no active workspace (TenantContext.client is built with none), so the tenant of what they write is
+            // stamped from the parent row — the client's own — and not from a workspace they happen to have open
+            set(c, "app.tenant_id", "");
+            String ex = strings(c, "SELECT id::text FROM exercise WHERE deleted_at IS NULL LIMIT 1").getFirst();
+            // the whole run, in the order the portal does it
+            inRolledBackTransaction(c, () -> {
+                assertThat(update(c, own)).isEqualTo(1);
+                assertThat(update(c, "INSERT INTO session_exercise (id, session_id, client_id, exercise_id, position) VALUES ('" + sx + "', '" + s + "', '" + meeraPrivate + "', '" + ex + "', 0)")).isEqualTo(1);
+                assertThat(update(c, "INSERT INTO set_log (id, session_exercise_id, position, planned, load_kind, effort_kind, target_load_value, target_effort_value, rest_seconds, entered_by) "
+                        + "VALUES ('" + set + "', '" + sx + "', 1, true, 'weight', 'reps', 60, 8, 90, 'client')")).isEqualTo(1);
+                assertThat(update(c, "UPDATE set_log SET load_value = 60, effort_value = 8, done_at = now() WHERE id = '" + set + "'")).isEqualTo(1);
+                assertThat(update(c, "UPDATE scheduled_session SET status = 'done', ended_at = now(), paused_seconds = 30 WHERE id = '" + s + "'")).isEqualTo(1);
+                assertThat(update(c, "INSERT INTO workout_feedback (session_id, client_id, effort) VALUES ('" + s + "', '" + meeraPrivate + "', 'right')")).isEqualTo(1);
+                // the door for what the client cannot write: the first-session milestone, once, and the best notice
+                assertThat(strings(c, "SELECT client_finish_extras('" + s + "', '[{\"kind\":\"sessions_1\",\"label\":\"Your first session\",\"value\":1}]'::jsonb, 'New best: Squat', 1) -> 0 ->> 'kind'"))
+                        .containsExactly("sessions_1");
+                assertThat(strings(c, "SELECT jsonb_array_length(client_finish_extras('" + s + "', '[{\"kind\":\"sessions_1\",\"label\":\"Your first session\",\"value\":1}]'::jsonb, 'New best: Squat', 1))")).containsExactly("0");
+                assertThat(count(c, "SELECT count(*) FROM client_notification WHERE session_id = '" + s + "' AND kind = 'best'")).isEqualTo(1);
+                // only the kinds finishing can produce; a stranger's finished self-run is not theirs to add to
+                assertThat(strings(c, "SELECT jsonb_array_length(client_finish_extras('" + s + "', '[{\"kind\":\"anything\",\"label\":\"x\",\"value\":5}]'::jsonb, NULL, 0))")).containsExactly("0");
+                assertThatThrownBy(() -> strings(c, "SELECT client_finish_extras('" + strangerRun + "', '[]'::jsonb, NULL, 0)::text")).hasMessageContaining("not yours to finish");
+            });
+            // the walls round it: a set the client enters says so; a session is under their own coach; a trainer-led session is not theirs to start
+            inRolledBackTransaction(c, () -> {
+                assertThat(update(c, own)).isEqualTo(1);
+                assertThat(update(c, "INSERT INTO session_exercise (id, session_id, client_id, exercise_id, position) VALUES ('" + sx + "', '" + s + "', '" + meeraPrivate + "', '" + ex + "', 0)")).isEqualTo(1);
+                assertThatThrownBy(() -> update(c, "INSERT INTO set_log (session_exercise_id, position, planned, load_kind, effort_kind, entered_by) VALUES ('" + sx + "', 1, true, 'weight', 'reps', 'trainer')"))
+                        .hasMessageContaining("row-level security");
+            });
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c, own.replace(trainerPriya.toString(), trainerArun.toString()))).hasMessageContaining("row-level security"));
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c, own.replace("'client')", "'trainer')"))).hasMessageContaining("row-level security"));
+            inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE scheduled_session SET paused_seconds = 5 WHERE id = '" + sessionLed + "'")).isZero());
+            inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE set_log SET done_at = now() WHERE id = '" + setLed + "'")).isZero());
+        }
+    }
+
+    @Test
+    @DisplayName("V24 · a client submits their own assessment through the lens, and moves its cycle on only through two doors that answer for their own assessment")
+    void clientSubmitsAnAssessmentAndAdvancesItsCycle() throws SQLException {
+        portalFixtures();
+        accept(meeraPrivate);
+        UUID tpl = template(tenantA, trainerPriya, "cycle " + tag);
+        UUID cycle = schedule(tenantA, trainerPriya, meeraPrivate, tpl);
+        UUID mine = assessment(tenantA, trainerPriya, meeraPrivate, tpl, "cycle one", false);   // unsent while its form is set: a sent form is fixed
+        jdbc.update("UPDATE assessment SET schedule_id = :s::uuid, form = '{\"measurements\":[{\"key\":\"waist\",\"label\":\"Waist\",\"group\":\"Girths\",\"unit\":\"cm\"}],\"questions\":[]}'::jsonb WHERE id = :a::uuid", Map.of("s", cycle.toString(), "a", mine.toString()));
+        jdbc.update("UPDATE assessment SET sent_at = now() WHERE id = :a::uuid", Map.of("a", mine.toString()));
+        UUID tplB = template(tenantB, trainerArun, "other " + tag);
+        UUID cycleB = schedule(tenantB, trainerArun, sanjay, tplB);
+        UUID theirs = assessment(tenantB, trainerArun, sanjay, tplB, "theirs", true);
+        jdbc.update("UPDATE assessment SET schedule_id = :s::uuid, completed_at = now(), entered_by = 'client' WHERE id = :a::uuid", Map.of("s", cycleB.toString(), "a", theirs.toString()));
+        String empty = "'{\"measurements\":[],\"questions\":[]}'::jsonb";
+
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            set(c, "app.tenant_id", "");
+            // nothing to advance while it is a draft: the door says so rather than answering for an unfinished one
+            inRolledBackTransaction(c, () -> {
+                assertThat(update(c, "UPDATE assessment SET readings = '{\"waist\": 80}'::jsonb, answers = '{}'::jsonb WHERE id = '" + mine + "'")).isEqualTo(1);
+                assertThat(strings(c, "SELECT client_cycle_template('" + mine + "')::text")).containsNull();
+            });
+            // the submit, then the two doors
+            inRolledBackTransaction(c, () -> {
+                assertThat(update(c, "UPDATE assessment SET readings = '{\"waist\": 80}'::jsonb, completed_at = now(), entered_by = 'client' WHERE id = '" + mine + "'")).isEqualTo(1);
+                assertThat(strings(c, "SELECT client_cycle_template('" + mine + "') ->> 'schedule_id'")).containsExactly(cycle.toString());
+                String next = strings(c, "SELECT client_book_next_assessment('" + mine + "', current_date + 14, " + empty + ", 'cycle one')::text").getFirst();
+                assertThat(strings(c, "SELECT next_due_on::text FROM assessment_schedule WHERE id = '" + cycle + "'")).hasSize(0);   // a client cannot READ a schedule
+                assertThat(count(c, "SELECT count(*) FROM assessment WHERE id = '" + next + "'")).isZero();                         // …nor the unsent one it booked
+            });
+            // not theirs: neither door answers for another client's assessment
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> strings(c, "SELECT client_cycle_template('" + theirs + "')::text")).hasMessageContaining("is not yours"));
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> strings(c, "SELECT client_book_next_assessment('" + theirs + "', current_date + 14, " + empty + ", 'x')::text")).hasMessageContaining("is not yours"));
+            // an assessment that is not finished has no cycle to advance
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> strings(c, "SELECT client_book_next_assessment('" + mine + "', current_date + 14, " + empty + ", 'x')::text")).hasMessageContaining("no cycle to advance"));
+            // what a client may not write on an assessment
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c, "UPDATE assessment SET entered_by = 'trainer' WHERE id = '" + mine + "'")).hasMessageContaining("row-level security"));
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c, "UPDATE assessment SET due_on = current_date + 30 WHERE id = '" + mine + "'")).hasMessageContaining("a client may not change"));
+            inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE assessment SET readings = '{}'::jsonb WHERE id = '" + theirs + "'")).isZero());
+        }
+    }
+
+    @Test
+    @DisplayName("V25 · the download and the reminder question answer only for the caller's own number and rows; a client edits their own prefs through the lens and nobody else's")
+    void clientSettingsDoorsAnswerOnlyForTheCaller() throws SQLException {
+        portalFixtures();
+        accept(meeraPrivate);
+        String other = newPhone();
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            assertThat(strings(c, "SELECT client_export('" + phoneMeera + "') -> 'arrangements' -> 0 ->> 'status'")).containsExactly("accepted");
+            assertThat(strings(c, "SELECT client_reminder_offered('" + meeraPrivate + "')::text")).hasSize(1);
+            assertThatThrownBy(() -> strings(c, "SELECT client_export('" + other + "')::text")).hasMessageContaining("only for the number that signed in");
+            assertThatThrownBy(() -> strings(c, "SELECT client_reminder_offered('" + sanjay + "')::text")).hasMessageContaining("is not yours");
+            // prefs: the row is made and changed through the lens, and only the columns the guard names
+            set(c, "app.tenant_id", "");
+            inRolledBackTransaction(c, () -> {
+                assertThat(update(c, "INSERT INTO client_prefs (client_id, tenant_id) VALUES ('" + meeraPrivate + "', '" + tenantA + "') ON CONFLICT (client_id) DO NOTHING")).isBetween(0, 1);
+                assertThat(update(c, "UPDATE client_prefs SET hide_weight = true, notify_checkin = false, nominee_name = 'M', nominee_phone = '+919841000001', whatsapp_opt_in_at = now() WHERE client_id = '" + meeraPrivate + "'")).isEqualTo(1);
+                assertThat(update(c, "UPDATE client_prefs SET hide_weight = true WHERE client_id = '" + sanjay + "'")).isZero();
+            });
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c, "INSERT INTO client_prefs (client_id, tenant_id) VALUES ('" + sanjay + "', '" + tenantB + "')")).hasMessageContaining("row-level security"));
+        }
+    }
+
+    private UUID schedule(UUID tenantId, UUID trainerId, UUID clientId, UUID templateId) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO assessment_schedule (id, tenant_id, trainer_id, client_id, template_id, interval_days, next_due_on) VALUES (:id::uuid, :ten::uuid, :t::uuid, :c::uuid, :tpl::uuid, 14, CURRENT_DATE)",
+                Map.of("id", id.toString(), "ten", tenantId.toString(), "t", trainerId.toString(), "c", clientId.toString(), "tpl", templateId.toString()));
+        return id;
+    }
+
+    private void accept(UUID clientId) {
+        jdbc.update("UPDATE client SET membership_status = 'accepted', invited_at = now(), accepted_at = now() WHERE id = :id::uuid",
+                Map.of("id", clientId.toString()));
+    }
+
+    /** A template with the weekly form's one measurement and one question, offered to clients or not. */
+    private UUID startable(UUID tenantId, UUID trainerId, String name, boolean clientCanStart) {
+        UUID id = template(tenantId, trainerId, name);
+        jdbc.update("""
+                UPDATE assessment_template SET client_can_start = :on,
+                       measurements = '{"on": true, "keys": ["weight"]}'::jsonb,
+                       questions = '{"on": true, "items": [{"id": "q1", "text": "Energy", "kind": "rating", "scale": 5}]}'::jsonb
+                WHERE id = :id::uuid
+                """, Map.of("id", id.toString(), "on", clientCanStart));
+        return id;
+    }
+
+    /** Calls the function as the connection's role; answers {result, id}. */
+    private static String[] start(Connection c, UUID id, UUID client, UUID template, String form) throws SQLException {
+        try (var ps = c.prepareStatement("SELECT r ->> 'result', r ->> 'id' FROM (SELECT start_client_assessment(?::uuid, ?::uuid, ?::uuid, ?::jsonb, 'Weekly check-in', CURRENT_DATE) AS r) q")) {
+            ps.setString(1, id.toString());
+            ps.setString(2, client.toString());
+            ps.setString(3, template.toString());
+            ps.setString(4, form);
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return new String[]{rs.getString(1), rs.getString(2)};
+            }
+        }
+    }
+
     /* ----------------------------------------------------------- machinery */
 
     @FunctionalInterface

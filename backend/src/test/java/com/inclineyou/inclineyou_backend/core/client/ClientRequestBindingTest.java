@@ -102,8 +102,9 @@ class ClientRequestBindingTest {
                 "{\"slots\":[{\"start\":\"07:00\"}]}", "slots[0].weekday: required");
         refused(post("/v1/clients/" + client + "/archive"), "{\"reason\":\"bored\"}",
                 "reason: goal_reached, moved_away, cost, no_time, switched_trainer or other");
-        refused(post("/v1/clients/" + client + "/notes"), "{\"body\":\"x\",\"sharedWithClient\":true}",
-                "sharedWithClient: notes shared with the client are not in v1");
+        // 1.2: a note can be shared, so the flag is a boolean like any other and is refused only when it is not one
+        refused(post("/v1/clients/" + client + "/notes"), "{\"body\":\"x\",\"sharedWithClient\":\"yes\"}",
+                "sharedWithClient: not a valid value");
         refused(post("/v1/clients"), "", "body: required");
     }
 

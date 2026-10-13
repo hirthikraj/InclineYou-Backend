@@ -3,7 +3,9 @@ package com.inclineyou.inclineyou_backend.core.session;
 import com.inclineyou.inclineyou_backend.core.session.dto.ClientStanding;
 import com.inclineyou.inclineyou_backend.core.session.dto.NewSession;
 import com.inclineyou.inclineyou_backend.core.session.dto.SessionCharge;
+import com.inclineyou.inclineyou_backend.core.session.dto.SessionFeedback;
 import com.inclineyou.inclineyou_backend.core.session.dto.SessionLogTotals;
+import com.inclineyou.inclineyou_backend.core.session.dto.SessionRecap;
 import com.inclineyou.inclineyou_backend.core.session.dto.SessionOwner;
 import com.inclineyou.inclineyou_backend.core.session.dto.SessionRow;
 import com.inclineyou.inclineyou_backend.core.session.dto.SessionWorkout;
@@ -108,7 +110,9 @@ public class SessionJdbcRepository {
                    w.id::text AS workout_id, w.name AS workout_name, w.program_id::text AS program_id,
                    w.week, w.day,
                    lg.exercises, lg.sets_done, lg.volume, lg.last_set_at,
-                   ch.package_id::text AS charge_package_id
+                   ch.package_id::text AS charge_package_id,
+                   wf.effort AS fb_effort, wf.note AS fb_note, wf.at AS fb_at,
+                   rc.id::text AS recap_id, rc.read_at AS recap_read_at
             FROM scheduled_session s
             LEFT JOIN workout w ON w.id = s.workout_id
             LEFT JOIN LATERAL (
@@ -124,6 +128,8 @@ public class SessionJdbcRepository {
             ) lg ON s.started_at IS NOT NULL
             LEFT JOIN package_adjustment ch
                    ON ch.session_id = s.id AND ch.kind = 'session' AND ch.reversed_at IS NULL
+            LEFT JOIN workout_feedback wf ON wf.session_id = s.id AND wf.deleted_at IS NULL
+            LEFT JOIN client_message rc ON rc.session_id = s.id AND rc.kind = 'recap' AND rc.deleted_at IS NULL
             """;
 
     private static SessionRow row(ResultSet rs, int i) throws SQLException {
@@ -152,6 +158,10 @@ public class SessionJdbcRepository {
                         volume(rs.getBigDecimal("volume")),
                         epochOrNull(rs.getTimestamp("last_set_at"))),
                 chargedTo == null ? null : new SessionCharge(chargedTo),
+                rs.getTimestamp("fb_at") == null ? null
+                        : new SessionFeedback(rs.getString("fb_effort"), rs.getString("fb_note"), rs.getTimestamp("fb_at").getTime()),
+                rs.getString("recap_id") == null ? null
+                        : new SessionRecap(rs.getString("recap_id"), epochOrNull(rs.getTimestamp("recap_read_at"))),
                 rs.getTimestamp("updated_at").getTime(),
                 String.valueOf(rs.getTimestamp("updated_at").getTime()),
                 Cursor.key(rs.getTimestamp("scheduled_at")));

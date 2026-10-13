@@ -99,6 +99,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         AppProperties.Tier limits = switch (tier) {
             case AUTH -> config.getAuth();
             case MESSAGING -> config.getMessaging();
+            case WEBHOOK -> config.getWebhook();
             case STANDARD -> config.getStandard();
         };
 
@@ -109,6 +110,26 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 "rl:" + tier.name() + ':' + caller,
                 limits.getLimit(),
                 java.time.Duration.ofSeconds(Math.max(1, limits.getWindowSeconds())));
+        if (decision.allowed() && tier == Tier.AUTH && request.getRequestURI().startsWith("/v1/invites/")) {
+            // The second key: one link, whoever asks. A guess is cheap from many addresses, so the link is a ceiling of its own.
+            // Only a hash of the segment is kept — the raw token is a credential and does not belong in Redis or a log.
+            var byLink = limiter.tryConsume("rl:INVITE:" + linkKey(request.getRequestURI()), limits.getLimit(),
+                    java.time.Duration.ofSeconds(Math.max(1, limits.getWindowSeconds())));
+            if (!byLink.allowed()) {
+                log.warn("rate limited {} an invite link — retry in {}s", request.getMethod(), byLink.retryAfterSeconds());
+                refuse(request, response, byLink.retryAfterSeconds());
+                return;
+            }
+        }
+        if (decision.allowed() && "/v1/portal/export".equals(request.getRequestURI())) {
+            // The heaviest read in the portal: a person may take their data five times an hour, whatever else they are doing.
+            var byExport = limiter.tryConsume("rl:EXPORT:" + caller, 5, java.time.Duration.ofHours(1));
+            if (!byExport.allowed()) {
+                log.warn("rate limited a data download for {} — retry in {}s", masked(caller), byExport.retryAfterSeconds());
+                refuse(request, response, byExport.retryAfterSeconds());
+                return;
+            }
+        }
         if (decision.allowed()) {
             chain.doFilter(request, response);
             return;
@@ -119,7 +140,20 @@ public class RateLimitFilter extends OncePerRequestFilter {
         refuse(request, response, decision.retryAfterSeconds());
     }
 
-    private enum Tier { STANDARD, AUTH, MESSAGING }
+    private enum Tier { STANDARD, AUTH, MESSAGING, WEBHOOK }
+
+    /** The token is the path segment after {@code /v1/invites/}; a short hash of it is the bucket's name. */
+    private static String linkKey(String path) {
+        String rest = path.substring("/v1/invites/".length());
+        int slash = rest.indexOf('/');
+        String token = slash < 0 ? rest : rest.substring(0, slash);
+        try {
+            var d = java.security.MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(d, 0, 12);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
 
     /** Null means exempt. */
     private Tier tierFor(HttpServletRequest request) {
@@ -137,6 +171,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return Tier.STANDARD;
         }
         if (path.startsWith("/v1/auth/")) return Tier.AUTH;
+        // The invite link is a bearer secret opened with no session: it is counted as a sign-in attempt (api-contract 1.2),
+        // by address here and by the link itself in doFilterInternal.
+        if (path.startsWith("/v1/invites/")) return Tier.AUTH;
+        // The provider's status callbacks come from Meta's addresses in bursts and are retried: their own generous bucket, by IP,
+        // so a flood of forged posts cannot spend a trainer's or a sign-in's budget (the HMAC is the gate, this is the ceiling).
+        if (path.startsWith("/v1/webhooks/")) return Tier.WEBHOOK;
         // Changing the number sends a code to the NEW number and ends in a swap of the
         // sign-in credential: it is an authentication act, so it is counted as one
         // (api-contract v1.1 names "the AUTH tier" for these two).

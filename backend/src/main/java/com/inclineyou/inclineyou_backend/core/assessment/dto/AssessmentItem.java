@@ -7,6 +7,7 @@ package com.inclineyou.inclineyou_backend.core.assessment.dto;
  * @param state   booked · missed · done — derived from {@code completed_at} and
  *                {@code due_on}, never stored
  * @param version opaque; {@code updated_at} as epoch ms, sent back as If-Match
+ * @param sentAt  epoch ms it was sent to the client, or null while it is the trainer's alone (api-contract 1.2, tr-a6)
  */
 public record AssessmentItem(
         String id,
@@ -21,5 +22,7 @@ public record AssessmentItem(
         Count measurements,
         Count questions,
         long createdAt,
-        String version
+        String version,
+        /* When it was sent to the client, or null: the one thing that makes it visible to them (V12). */
+        Long sentAt
 ) {}

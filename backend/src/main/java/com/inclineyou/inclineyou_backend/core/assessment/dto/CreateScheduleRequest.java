@@ -13,5 +13,7 @@ public record CreateScheduleRequest(
         @NotNull(message = "required") UUID clientId,
         @NotNull(message = "required") UUID templateId,
         @NotNull(message = "required") @Min(value = 1, message = "between 1 and 366") @Max(value = 366, message = "between 1 and 366") Integer intervalDays,
-        LocalDate firstDueOn
+        LocalDate firstDueOn,
+        /* The assessment this cycle books is sent on its due date (V12). Default true. */
+        Boolean sendToClient
 ) {}

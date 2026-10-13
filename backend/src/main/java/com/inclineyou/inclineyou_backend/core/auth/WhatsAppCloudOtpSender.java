@@ -17,6 +17,7 @@ import java.net.http.HttpClient;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Sends the code through Meta's WhatsApp Cloud API, as an Authentication template.
@@ -26,8 +27,9 @@ import java.util.Map;
  * a second time — Meta rejects the send if the button parameter is missing.
  *
  * Meta answers 200 once it has ACCEPTED the message, not delivered it, which is
- * exactly what {@code otp_request.delivery_status = 'sent'} means. `delivered` and
- * `read` need the status webhook, which is not wired.
+ * exactly what {@code otp_request.delivery_status = 'sent'} means. The message id it
+ * answers is kept on the row, and `delivered` / `read` arrive later through the status
+ * webhook ({@code WhatsAppWebhookController}).
  *
  * The access token is never logged and an error body is logged only as Meta's
  * error code and message — the request body holds the code and the number.
@@ -66,6 +68,11 @@ public class WhatsAppCloudOtpSender implements OtpSender {
 
     @Override
     public void send(String phone, String code) {
+        sendTracked(phone, code);
+    }
+
+    @Override
+    public Optional<String> sendTracked(String phone, String code) {
         var wa = props.getOtp().getWhatsapp();
         Map<String, Object> body = Map.of(
                 "messaging_product", "whatsapp",
@@ -81,13 +88,14 @@ public class WhatsAppCloudOtpSender implements OtpSender {
                                 Map.of("type", "button", "sub_type", "url", "index", "0",
                                         "parameters", List.of(Map.of("type", "text", "text", code))))));
         try {
-            client.post()
+            Map<?, ?> accepted = client.post()
                     .uri("/{version}/{id}/messages", wa.getApiVersion(), wa.getPhoneNumberId())
                     .header("Authorization", "Bearer " + wa.getAccessToken())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(body)
                     .retrieve()
-                    .toBodilessEntity();
+                    .body(Map.class);
+            return messageId(accepted);
         } catch (RestClientResponseException e) {
             // Meta's `error.code` is the useful part (131030: number not on the test allow-list; 131048/130429: throttled).
             log.warn("WhatsApp send refused for {}: HTTP {} {}", masked(phone), e.getStatusCode().value(), metaError(e));
@@ -96,6 +104,15 @@ public class WhatsAppCloudOtpSender implements OtpSender {
             log.warn("WhatsApp send failed for {}: {}", masked(phone), e.toString());
             throw delivery();
         }
+    }
+
+    /** {@code {"messages":[{"id":"wamid.…"}]}} — the id the status webhook will quote. Absent is tolerated: the code was sent. */
+    private static Optional<String> messageId(Map<?, ?> accepted) {
+        if (accepted != null && accepted.get("messages") instanceof List<?> messages && !messages.isEmpty()
+                && messages.get(0) instanceof Map<?, ?> first && first.get("id") instanceof String id && !id.isBlank()) {
+            return Optional.of(id.length() <= 100 ? id : id.substring(0, 100));
+        }
+        return Optional.empty();
     }
 
     private static ApiException delivery() {

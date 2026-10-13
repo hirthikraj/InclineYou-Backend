@@ -50,6 +50,7 @@ public class AuthService {
     private final AuthTokenService tokens;
     private final com.inclineyou.inclineyou_backend.core.tenant.TenantScope tenantScope;
     private final AppProperties props;
+    private final ClientSignInLookup clientLookup;
 
     public static final String VIEW_TRAINER = "trainer";
     public static final String VIEW_PENDING = "pending";
@@ -98,9 +99,23 @@ public class AuthService {
         if (AppUser.ROLE_TRAINER.equals(head.getRole())) {
             return trainerView(head);
         }
+        return clientView(head);
+    }
 
-        throw new ApiException(HttpStatus.FORBIDDEN, "CLIENT_SIGN_IN_UNAVAILABLE",
-                "Client sign-in opens soon. Your trainer will share it.");
+    /**
+     * A number that belongs to a client lands on the portal (api-contract 1.2): {@code active} opens it, {@code paused} and
+     * {@code removed} are the walls, and a removed client who has since been invited by somebody new is shown that invite too.
+     * Nobody is asked which they are. A client with no row left to show (every one erased) is a removed client of nobody, not a
+     * stranger — the account exists and it is not a trainer's.
+     */
+    private AuthResponse clientView(Identity head) {
+        var state = clientLookup.stateOf(head.getPhone());
+        String access = state == null ? "removed" : state.access();
+        var invites = "removed".equals(access) ? clientLookup.invitesFor(head.getPhone()) : null;
+        IssuedToken token = mint(head.getPhone(), head.getPhone(), "client", null);
+        return new AuthResponse(token.value(), token.sessionId(), token.expiresAt().toEpochMilli(), "client", false, null, null, null,
+                head.getPrivacyPolicyVersion(), props.getPrivacy().getPolicyVersion(), access,
+                state == null ? null : state.trainer(), invites == null ? List.of() : invites);
     }
 
     /** A malformed id is the same 404 as an unknown one: no third answer to learn from. */
@@ -124,8 +139,11 @@ public class AuthService {
     }
 
     private AuthResponse pending(String phone) {
-        return response(mint(phone, phone, JwtService.ROLE_PENDING, null),
+        var r = response(mint(phone, phone, JwtService.ROLE_PENDING, null),
                 VIEW_PENDING, true, null, null, null, null);
+        // A number with no account may still have been invited: the login page shows those instead of "new trainer" (D-16).
+        return new AuthResponse(r.token(), r.sessionId(), r.expiresAt(), r.role(), r.isNewUser(), r.trainerId(), r.trainerName(),
+                r.setupCompletedAt(), r.privacyPolicyVersion(), r.currentPolicyVersion(), null, null, clientLookup.invitesFor(phone));
     }
 
     private AuthResponse response(IssuedToken token, String role, boolean isNewUser, UUID trainerId,

@@ -86,9 +86,14 @@ public class JwtService {
      */
     /** See {@link #ROLE_STEP_UP}: who, why, where and against which number. */
     public String generateStepUpTicket(UUID trainerId, String currentPhone, String purpose, String sessionBinding) {
+        return generateStepUpTicket(trainerId.toString(), currentPhone, purpose, sessionBinding);
+    }
+
+    /** The same ticket for a subject that is not a trainer id — a client's token subject is their phone. */
+    public String generateStepUpTicket(String subject, String currentPhone, String purpose, String sessionBinding) {
         long now = System.currentTimeMillis();
         return Jwts.builder()
-                .subject(trainerId.toString())
+                .subject(subject)
                 .claim("phone", currentPhone)
                 .claim("role", ROLE_STEP_UP)
                 .claim(PURPOSE_CLAIM, purpose)

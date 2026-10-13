@@ -237,12 +237,12 @@ class AssessmentApiTest {
         // a done assessment has no date to move
         mvc.perform(patch("/v1/assessments/" + id).contentType(MediaType.APPLICATION_JSON).content("{\"dueOn\":\"" + today.plusDays(3) + "\"}"))
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ASSESSMENT_COMPLETED"));
-        // the client file's readings read it back (a correction is an edit here)
-        mvc.perform(get("/v1/clients/" + meera + "/readings").param("key", "weight")).andExpect(status().isOk());
+        // there is no separate readings read (removed 10 Oct 2026): the assessment itself carries them, corrected above
+        mvc.perform(get("/v1/assessments/" + id)).andExpect(jsonPath("$.readings[0].value").value(77.9));
     }
 
     @Test
-    @DisplayName("create: a replayed id is 200, somebody else's client and template are 404, an archived client is 409, sendNow is 400")
+    @DisplayName("create: a replayed id is 200, somebody else's client and template are 404, an archived client is 409, sendNow is a no-op without a portal")
     void createRules() throws Exception {
         String tpl = template().read("$.id");
         String id = UUID.randomUUID().toString();
@@ -255,8 +255,12 @@ class AssessmentApiTest {
                 .content("{\"clientId\":\"" + theirs + "\",\"templateId\":\"" + tpl + "\"}")).andExpect(status().isNotFound());
         mvc.perform(post("/v1/assessments").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"clientId\":\"" + meera + "\",\"templateId\":\"" + UUID.randomUUID() + "\"}")).andExpect(status().isNotFound());
+        // sendNow is real in 1.2 and, for a client with no portal, a no-op rather than a refusal.
         mvc.perform(post("/v1/assessments").contentType(MediaType.APPLICATION_JSON)
-                .content(body.replace(id, UUID.randomUUID().toString()).replace("}", ",\"sendNow\":true}"))).andExpect(status().isBadRequest());
+                .content(body.replace(id, UUID.randomUUID().toString()).replace("}", ",\"sendNow\":true}")))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.sentAt").value(org.hamcrest.Matchers.nullValue()));
+        mvc.perform(post("/v1/assessments").contentType(MediaType.APPLICATION_JSON)
+                .content(body.replace(id, UUID.randomUUID().toString()).replace("}", ",\"sendNow\":\"yes\"}"))).andExpect(status().isBadRequest());
         mvc.perform(post("/v1/assessments").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"clientId\":\"" + meera + "\",\"templateId\":\"" + tpl + "\",\"dueOn\":\"soon\"}")).andExpect(status().isBadRequest());
 

@@ -1,6 +1,7 @@
 package com.inclineyou.inclineyou_backend.core.client;
 
 import com.inclineyou.inclineyou_backend.core.client.dto.ClientSummary;
+import com.inclineyou.inclineyou_backend.core.client.dto.Portal;
 import com.inclineyou.inclineyou_backend.core.client.dto.CreateClientRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.UpdateClientRequest;
 import com.inclineyou.inclineyou_backend.shared.wire.Patch;
@@ -38,7 +39,7 @@ public class ClientJdbcRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
     /** The client row a PATCH decides on, locked. */
-    public record PatchTarget(String phone, String version) {}
+    public record PatchTarget(String phone, String version, String membershipStatus) {}
 
     /** A running pack and what is still owed on it. */
     public record OpenPackage(String id, BigDecimal due) {}
@@ -78,10 +79,11 @@ public class ClientJdbcRepository {
 
     public Optional<PatchTarget> lockForPatch(UUID trainerId, UUID clientId) {
         return jdbc.query("""
-                SELECT phone, updated_at FROM client
+                SELECT phone, updated_at, membership_status FROM client
                 WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL FOR UPDATE
                 """, params(trainerId, clientId), (rs, i) -> new PatchTarget(rs.getString("phone"),
-                String.valueOf(rs.getTimestamp("updated_at").getTime()))).stream().findFirst();
+                String.valueOf(rs.getTimestamp("updated_at").getTime()), rs.getString("membership_status")))
+                .stream().findFirst();
     }
 
     /** Only the fields that were sent; the caller has refused an empty patch. */
@@ -100,6 +102,11 @@ public class ClientJdbcRepository {
         set(sets, p, "goal", "goal", req.goal());
         set(sets, p, "height_cm", "height", req.heightCm());
         set(sets, p, "activity_level", "activity", req.activityLevel());
+        if (req.remindersExcluded() != null) {
+            p.put("excluded", req.remindersExcluded());
+            sets.append(", reminders_excluded = :excluded");
+        }
+        set(sets, p, "portal_show_money", "showMoney", req.portalShowMoney());
         jdbc.update("UPDATE client SET " + sets.substring(2) + " WHERE id = :cid::uuid", p);
     }
 
@@ -159,7 +166,8 @@ public class ClientJdbcRepository {
         p.put("note", note);
         jdbc.update("""
                 UPDATE client SET status = 'archived', archived_at = now(), archive_reason = :reason, archive_note = :note,
-                       paused_at = NULL, paused_until = NULL, membership_status = 'removed', removed_at = now()
+                       paused_at = NULL, paused_until = NULL, membership_status = 'removed', removed_at = now(),
+                       removed_by = 'trainer'
                 WHERE id = :cid::uuid
                 """, p);
     }
@@ -199,7 +207,7 @@ public class ClientJdbcRepository {
         jdbc.update("""
                 UPDATE client SET deleted_at = now(), phone = NULL, date_of_birth = NULL, goal = NULL,
                        height_cm = NULL, activity_level = NULL, metadata = NULL,
-                       membership_status = 'removed', removed_at = now()
+                       membership_status = 'removed', removed_at = now(), removed_by = 'trainer'
                 WHERE id = :cid::uuid
                 """, Map.of("cid", clientId.toString()));
     }
@@ -208,7 +216,7 @@ public class ClientJdbcRepository {
     public void unarchive(UUID clientId) {
         jdbc.update("""
                 UPDATE client SET status = 'active', archived_at = NULL, archive_reason = NULL, archive_note = NULL,
-                       membership_status = 'not_invited', removed_at = NULL
+                       membership_status = 'not_invited', removed_at = NULL, removed_by = NULL
                 WHERE id = :cid::uuid
                 """, Map.of("cid", clientId.toString()));
     }
@@ -242,11 +250,16 @@ public class ClientJdbcRepository {
 
         var slots = slotsByClient(p);
         var stats = statsByClient(p);
+        var selfRuns = selfRunsByClient(p);
 
         return jdbc.query("""
                 SELECT c.id::text AS id, c.name, c.phone, c.status, c.paused_at, c.paused_until::text AS paused_until,
                        c.archived_at, c.archive_reason, c.archive_note, c.created_at, c.updated_at,
-                       c.membership_status, c.client_type,
+                       c.membership_status, c.client_type, c.invited_at, c.accepted_at, c.last_portal_seen_at,
+                       -- true: a pending invitation past its date; false: a live one; null: none. uq_client_invite_pending
+                       -- allows one pending row per client, so this is a single-row lookup on that index.
+                       (SELECT i.expires_at <= now() FROM client_invite i
+                        WHERE i.client_id = c.id AND i.status = 'pending') AS invite_lapsed,
                        EXISTS (SELECT 1 FROM client_note n
                                WHERE n.client_id = c.id AND n.pinned AND n.deleted_at IS NULL) AS has_pinned_note,
                        cs.client_id IS NOT NULL AS has_schedule,
@@ -292,8 +305,74 @@ public class ClientJdbcRepository {
                                                         rs.getString("start_date"), rs.getString("end_date")),
                     stats.getOrDefault(id, NO_SESSIONS),
                     rs.getTimestamp("created_at").getTime(),
-                    String.valueOf(rs.getTimestamp("updated_at").getTime()));
+                    String.valueOf(rs.getTimestamp("updated_at").getTime()),
+                    portal(rs, selfRuns.get(id)));
         });
+    }
+
+    /**
+     * {@code expired} is the one state that is derived: a pending invitation whose date has passed. A client who is
+     * {@code not_invited} has no invited or accepted date, whatever the columns still hold from an earlier arrangement.
+     */
+    private static Portal portal(ResultSet rs, Long lastSelfRunAt) throws SQLException {
+        String membership = rs.getString("membership_status");
+        Boolean lapsed = (Boolean) rs.getObject("invite_lapsed");
+        String state = "invited".equals(membership) && Boolean.TRUE.equals(lapsed) ? "expired" : membership;
+        boolean fresh = "not_invited".equals(membership);
+        return new Portal(state,
+                fresh ? null : epochOrNull(rs.getTimestamp("invited_at")),
+                fresh ? null : epochOrNull(rs.getTimestamp("accepted_at")),
+                epochOrNull(rs.getTimestamp("last_portal_seen_at")),
+                lastSelfRunAt, null);
+    }
+
+    /** The end of each client's latest finished self-run workout (R107's other half: the time the trainer does not own). */
+    private Map<String, Long> selfRunsByClient(Map<String, Object> p) {
+        var out = new HashMap<String, Long>();
+        jdbc.query("""
+                SELECT s.client_id::text AS client_id, max(coalesce(s.ended_at, s.scheduled_at)) AS at
+                FROM scheduled_session s
+                JOIN client c ON c.id = s.client_id
+                WHERE c.trainer_id = :tid::uuid AND c.deleted_at IS NULL AND c.status IN (:statuses)
+                  AND (CAST(:cid AS uuid) IS NULL OR c.id = CAST(:cid AS uuid))
+                  AND s.logged_by = 'client' AND s.status = 'done' AND s.deleted_at IS NULL
+                GROUP BY s.client_id
+                """, p, rs -> {
+            out.put(rs.getString("client_id"), rs.getTimestamp("at").getTime());
+        });
+        return out;
+    }
+
+    /**
+     * What the file's Access panel adds to the roster's portal block: the live invitation, who removed them, the two
+     * per-client overrides with the answer they add up to, and the last three reminders. One client, so a few small
+     * lookups rather than a join that would multiply rows.
+     */
+    public Portal.Extras portalExtras(UUID clientId) {
+        var p = Map.of("cid", clientId.toString());
+        var row = jdbc.queryForObject("""
+                SELECT c.removed_by, c.reminders_excluded, c.portal_show_money, t.clients_see_money,
+                       i.id::text AS invite_id, i.expires_at AS invite_expires_at
+                FROM client c
+                JOIN trainer t ON t.id = c.trainer_id
+                LEFT JOIN client_invite i ON i.client_id = c.id AND i.status = 'pending'
+                WHERE c.id = :cid::uuid
+                """, p, (rs, n) -> {
+            Boolean override = (Boolean) rs.getObject("portal_show_money");
+            return new Portal.Extras(rs.getString("invite_id"), epochOrNull(rs.getTimestamp("invite_expires_at")),
+                    rs.getString("removed_by"), rs.getBoolean("reminders_excluded"),
+                    override != null ? override : rs.getBoolean("clients_see_money"), override, List.of());
+        });
+        var reminders = jdbc.query("""
+                SELECT session_id::text AS session_id, whatsapp_status, whatsapp_skip_reason, whatsapp_error, whatsapp_sent_at
+                FROM client_notification
+                WHERE client_id = :cid::uuid AND kind = 'reminder' AND deleted_at IS NULL
+                ORDER BY at DESC, id DESC LIMIT 3
+                """, p, (rs, n) -> new Portal.Reminder(rs.getString("session_id"), rs.getString("whatsapp_status"),
+                rs.getString("whatsapp_skip_reason"), rs.getString("whatsapp_error"),
+                epochOrNull(rs.getTimestamp("whatsapp_sent_at"))));
+        return new Portal.Extras(row.inviteId(), row.inviteExpiresAt(), row.removedBy(), row.remindersExcluded(),
+                row.showMoney(), row.showMoneyOverride(), reminders);
     }
 
     private Map<String, List<ClientSummary.Slot>> slotsByClient(Map<String, Object> p) {

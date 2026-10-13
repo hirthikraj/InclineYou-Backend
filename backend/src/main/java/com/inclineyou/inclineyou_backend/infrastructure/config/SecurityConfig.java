@@ -105,8 +105,18 @@ public class SecurityConfig {
                         // v1.1: the signed-in browsers (any role), and the step-up proof (trainers only).
                         // Both sit under /v1/auth/, which is otherwise public, so they must be named.
                         .requestMatchers("/v1/auth/sessions", "/v1/auth/sessions/**").authenticated()
-                        .requestMatchers("/v1/auth/step-up", "/v1/auth/step-up/**").hasRole("TRAINER")
+                        .requestMatchers("/v1/auth/step-up", "/v1/auth/step-up/**").hasAnyRole("TRAINER", "CLIENT")
                         .requestMatchers("/v1/auth/**", "/health").permitAll()
+                        // The invites waiting for a number that has just proved itself (api-contract 1.2): a `pending` session and a
+                        // client session — whether a CLIENT may see them depends on their access, which the controller reads.
+                        .requestMatchers("/v1/me/invites", "/v1/me/invites/**").hasAnyRole("PENDING", "CLIENT")
+                        // The client portal: a client session and nothing else. What a client may SEE is the database's lens
+                        // (ClientLensResolver); whether their access is live is each route's own business — only /me answers a wall.
+                        .requestMatchers("/v1/portal/**").hasRole("CLIENT")
+                        // The invite link is the credential: a client has no account to sign in with until they accept it.
+                        .requestMatchers("/v1/invites/**").permitAll()
+                        // The provider's status callbacks: no session, authenticated by the HMAC the controller checks over the raw body.
+                        .requestMatchers("/v1/webhooks/**").permitAll()
                         // The client portal (module 11, /v1/me/* and /v1/client/**)
                         // is out of v1 scope (WEB_LAUNCH.md §3) and its controllers
                         // were removed rather than kept unreachable — so GET /v1/me

@@ -13,5 +13,7 @@ public record ScheduleItem(
         String openAssessmentId,
         long createdAt,
         long updatedAt,
-        String version
+        String version,
+        /* The cycle sends the assessment it books on its due date (V12). */
+        boolean sendToClient
 ) {}

@@ -31,14 +31,24 @@ public class StepUpController {
     @PostMapping
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void send(@Valid @RequestBody StepUpRequest body) {
-        service.send(trainerId(), body.purpose());
+        if (isClient()) service.sendToClient(name(), body.purpose());
+        else service.send(trainerId(), body.purpose());
     }
 
     /** That code back; the ticket is valid ten minutes, once, for this purpose and this session. */
     @PostMapping("/verify")
     public StepUpTicketResponse verify(@Valid @RequestBody StepUpVerifyRequest body, HttpServletRequest request) {
-        return service.verify(trainerId(), body.purpose(), body.otp(),
-                (String) request.getAttribute(AuthTokenFilter.TOKEN_ATTRIBUTE));
+        String raw = (String) request.getAttribute(AuthTokenFilter.TOKEN_ATTRIBUTE);
+        return isClient() ? service.verifyForClient(name(), body.purpose(), body.otp(), raw) : service.verify(trainerId(), body.purpose(), body.otp(), raw);
+    }
+
+    /** A client's session is a person with a phone, not a trainer id — {@code SecurityConfig} admits both roles here. */
+    private static boolean isClient() {
+        return SecurityContextHolder.getContext().getAuthentication().getAuthorities().stream().anyMatch(a -> "ROLE_CLIENT".equals(a.getAuthority()));
+    }
+
+    private static String name() {
+        return SecurityContextHolder.getContext().getAuthentication().getName();
     }
 
     private UUID trainerId() {

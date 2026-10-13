@@ -32,7 +32,7 @@ public class TrainerController {
     public ResponseEntity<TrainerResponse> me(
             @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
         TrainerResponse profile = service.get(trainerId());
-        if (matches(ifNoneMatch, profile.version())) {
+        if (matches(ifNoneMatch, tag(profile))) {
             return ResponseEntity.status(HttpStatus.NOT_MODIFIED).eTag(etag(profile)).build();
         }
         return ok(profile);
@@ -63,7 +63,18 @@ public class TrainerController {
     }
 
     private static String etag(TrainerResponse p) {
-        return "\"" + p.version() + "\"";
+        return "\"" + tag(p) + "\"";
+    }
+
+    /**
+     * The profile's version AND who a reminder would reach. The reach is derived from other people's rows (a client joins,
+     * opts in or is excluded) without the profile's own version moving, so a tag made of the version alone would answer 304
+     * with numbers that are no longer true. It is only a tag: {@code version}, the body field and the {@code If-Match}
+     * for a PATCH, is unchanged.
+     */
+    private static String tag(TrainerResponse p) {
+        var r = p.clientPortal() == null ? null : p.clientPortal().reminderReach();
+        return r == null ? p.version() : p.version() + "-" + r.onPortal() + "-" + r.optedIn() + "-" + r.excluded();
     }
 
     private static boolean matches(String header, String version) {

@@ -97,13 +97,13 @@ public class AssessmentEntryService {
         var tpl = templates.find(trainerId, cycle.templateId()).filter(t -> !t.deleted()).orElse(null);
         if (tpl == null) return;
         LocalDate next = completedAt.atZone(clock.zone()).toLocalDate().plusDays(cycle.intervalDays());
-        schedules.update(cycle.id(), next, null);
+        schedules.update(cycle.id(), next, null, null);
         booker.book(trainerId, row.clientId(), tpl, cycle.id(), next, null);
     }
 
     // ── readings ──────────────────────────────────────────────────────────────
 
-    private static Map<String, BigDecimal> readings(AssessmentForms.Form form, Map<String, BigDecimal> sent) {
+    static Map<String, BigDecimal> readings(AssessmentForms.Form form, Map<String, BigDecimal> sent) {
         var asked = form.measurements().stream().map(AssessmentDetail.FormMeasurement::key).collect(Collectors.toSet());
         var out = new LinkedHashMap<String, BigDecimal>();
         for (var e : sent.entrySet()) {
@@ -120,7 +120,7 @@ public class AssessmentEntryService {
 
     // ── answers ───────────────────────────────────────────────────────────────
 
-    private static Map<String, EntryRequest.Answer> answers(AssessmentForms.Form form, Map<String, EntryRequest.Answer> sent) {
+    static Map<String, EntryRequest.Answer> answers(AssessmentForms.Form form, Map<String, EntryRequest.Answer> sent) {
         var questions = new LinkedHashMap<String, AssessmentCatalogue.Question>();
         form.questions().forEach(q -> questions.put(q.id(), q));
         var out = new LinkedHashMap<String, EntryRequest.Answer>();

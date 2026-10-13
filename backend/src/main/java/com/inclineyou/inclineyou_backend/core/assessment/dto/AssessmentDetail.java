@@ -23,7 +23,8 @@ public record AssessmentDetail(
         List<History> history,
         List<Returned> returned
 ) {
-    public record ClientRef(String id, String name, String status) {}
+    /** {@code onPortal}: accepted or paused — whether <em>send</em> has anywhere to go (api-contract 1.2). */
+    public record ClientRef(String id, String name, String status, boolean onPortal) {}
 
     /** {@code deleted} because an assessment outlives its template — its form is its own copy. */
     public record TemplateRef(String id, String name, String description, boolean deleted) {}

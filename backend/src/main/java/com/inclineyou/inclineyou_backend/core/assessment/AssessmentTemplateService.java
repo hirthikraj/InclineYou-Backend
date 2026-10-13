@@ -32,6 +32,11 @@ import java.util.UUID;
  * {@code allowCustom} are cleared unless it is {@code choice}. What is stored is
  * what the client will be shown.
  *
+ * <p>api-contract 1.2 adds two things to the shelf. {@code clientCanStart} is whether clients on the portal may start the
+ * form themselves, and a PUT that does not send it leaves it alone, so a client of the 1.1 shape cannot switch it off by
+ * saving a rename. {@code systemKey} is how the product's own weekly check-in gets onto the shelf: asked for, never written
+ * by a read, and idempotent — the trainer's one live template of that key comes back with 200, or is made with 201.
+ *
  * <p>An edit reaches the open assessments nobody has started (R36); a started
  * one keeps the form it is being answered against. A delete is soft, ends every
  * live cycle on the template, and leaves every assessment already given as it
@@ -47,6 +52,8 @@ public class AssessmentTemplateService {
     private static final int MAX_ID = 64;
     private static final Set<String> KINDS = Set.of("yesno", "rating", "text", "choice");
     private static final Set<Integer> SCALES = Set.of(5, 10, 20);
+    private static final Set<String> SYSTEM_KEYS = Set.of("weekly_check_in");
+    private static final String WEEKLY_NAME = "Weekly check-in";
 
     private final AssessmentTemplateJdbcRepository templates;
     private final AssessmentScheduleJdbcRepository schedules;
@@ -67,16 +74,53 @@ public class AssessmentTemplateService {
                 return new TemplateCreated(one(trainerId, req.id()), false);
             }
         }
+        if (req.systemKey() != null) return createSystem(trainerId, req);
         var form = normalise(req);
         if (templates.nameTaken(trainerId, form.name(), null)) throw nameTaken();
         UUID id = req.id() == null ? UUID.randomUUID() : req.id();
         try {
             if (!templates.insert(id, trainerId, form.name(), form.description(),
-                    AssessmentJson.write(form.measurements()), AssessmentJson.write(form.questions()))) {
+                    AssessmentJson.write(form.measurements()), AssessmentJson.write(form.questions()),
+                    null, Boolean.TRUE.equals(req.clientCanStart()))) {
                 throw ApiException.idConflict();
             }
         } catch (DuplicateKeyException e) {
             throw duplicate(e);
+        }
+        return new TemplateCreated(one(trainerId, id), true);
+    }
+
+    /**
+     * The weekly check-in: weight (optional, like every reading), how the week felt out of five, and one free line. It ships
+     * offered to clients, because it is the one form a client is expected to start on their own. The name is the trainer's
+     * to change afterwards; if they already have a form of theirs called that, this one is told apart rather than refused.
+     */
+    private TemplateCreated createSystem(UUID trainerId, TemplateRequest req) {
+        if (!SYSTEM_KEYS.contains(req.systemKey())) {
+            throw ApiException.validation("systemKey: weekly_check_in is the only one");
+        }
+        if (req.name() != null || req.description() != null || req.measurements() != null || req.questions() != null
+                || req.clientCanStart() != null) {
+            throw ApiException.validation("systemKey: send it alone — the product writes the form");
+        }
+        var existing = templates.findSystem(trainerId, req.systemKey());
+        if (existing.isPresent()) return new TemplateCreated(item(existing.get(), templates.liveCycles(trainerId, existing.get().id())), false);
+
+        UUID id = req.id() == null ? UUID.randomUUID() : req.id();
+        String name = templates.nameTaken(trainerId, WEEKLY_NAME, null) ? WEEKLY_NAME + " (default)" : WEEKLY_NAME;
+        var measurements = new TemplateItem.Measurements(true, List.of("weight"));
+        var questions = new TemplateItem.Questions(true, List.of(
+                new AssessmentCatalogue.Question("wk_energy", "Energy this week", "rating", 5, List.of(), false, false),
+                new AssessmentCatalogue.Question("wk_note", "Anything you want your trainer to know?", "text", null, List.of(), false, false)));
+        try {
+            if (!templates.insert(id, trainerId, name, null, AssessmentJson.write(measurements), AssessmentJson.write(questions),
+                    req.systemKey(), true)) {
+                throw ApiException.idConflict();
+            }
+        } catch (DuplicateKeyException e) {
+            // Two asks racing: the other one made it, and that is the answer.
+            var raced = templates.findSystem(trainerId, req.systemKey()).orElseThrow(() -> duplicate(e));
+            return new TemplateCreated(item(raced, templates.liveCycles(trainerId, raced.id())), false);
         }
         return new TemplateCreated(one(trainerId, id), true);
     }
@@ -93,7 +137,7 @@ public class AssessmentTemplateService {
         if (templates.nameTaken(trainerId, form.name(), id)) throw nameTaken();
         try {
             templates.update(id, form.name(), form.description(),
-                    AssessmentJson.write(form.measurements()), AssessmentJson.write(form.questions()));
+                    AssessmentJson.write(form.measurements()), AssessmentJson.write(form.questions()), req.clientCanStart());
         } catch (DuplicateKeyException e) {
             throw duplicate(e);
         }
@@ -121,7 +165,7 @@ public class AssessmentTemplateService {
 
     static TemplateItem item(AssessmentTemplateJdbcRepository.Stored t, int liveCycles) {
         return new TemplateItem(t.id().toString(), t.name(), t.description(), t.measurements(), t.questions(),
-                liveCycles, t.createdAt().toEpochMilli(), t.updatedAt().toEpochMilli(), t.version());
+                liveCycles, t.createdAt().toEpochMilli(), t.updatedAt().toEpochMilli(), t.version(), t.systemKey(), t.clientCanStart());
     }
 
     // ── validation ────────────────────────────────────────────────────────────
@@ -130,8 +174,11 @@ public class AssessmentTemplateService {
                               TemplateItem.Measurements measurements, TemplateItem.Questions questions) {}
 
     private static Normalised normalise(TemplateRequest req) {
+        if (req.systemKey() != null) throw ApiException.validation("systemKey: only a POST can ask for the product's own form");
+        if (req.name() == null || req.name().isBlank()) throw ApiException.validation("name: required");
+        if (req.measurements() == null) throw ApiException.validation("measurements: required");
+        if (req.questions() == null) throw ApiException.validation("questions: required");
         String name = req.name().strip();
-        if (name.isEmpty()) throw ApiException.validation("name: required");
         String description = req.description() == null || req.description().isBlank() ? null : req.description().strip();
 
         var keys = new LinkedHashSet<String>();

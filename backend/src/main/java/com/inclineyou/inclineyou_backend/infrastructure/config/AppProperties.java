@@ -21,6 +21,8 @@ public class AppProperties {
     private Database database = new Database();
     private Security security = new Security();
     private Privacy privacy = new Privacy();
+    private Web web = new Web();
+    private Push push = new Push();
 
     /**
      * Transport security — the parts of it that are ours rather than the
@@ -126,10 +128,40 @@ public class AppProperties {
      * person was not shown is not consent. A new notice is a config change, and
      * every trainer is then asked once more.
      */
+    /**
+     * Where the web app lives, for the one thing the backend must write into a message: the invite link a trainer
+     * sends from their own WhatsApp. The browser never talks to this API, so nothing else needs it (no CORS here).
+     */
+    @Getter
+    @Setter
+    public static class Web {
+        /** No trailing slash. {@code WEB_BASE_URL}; production must set it or invite links point at localhost. */
+        private String baseUrl = "http://localhost:3000";
+    }
+
+    /** Browser push for the client portal (api-contract 1.2). Nothing is sent until a key pair exists; the portal hides the switch until then. */
+    @Getter
+    @Setter
+    public static class Push {
+        /** {@code VAPID_PUBLIC_KEY}: what the browser subscribes with. Empty means push is not set up. */
+        private String vapidPublicKey = "";
+    }
+
     @Getter
     @Setter
     public static class Privacy {
         private String policyVersion = "2026-09";
+
+        /**
+         * The plain lines the invite page shows under <em>what your trainer can see</em> (api-contract 1.2). Data and not copy
+         * in the web app, so the wording can follow the lawyer (PRD D-04) with a config change and no deploy of the page.
+         */
+        private java.util.List<String> inviteSummary = new java.util.ArrayList<>(java.util.List.of(
+                "Your trainer sees your name, your phone number and your date of birth.",
+                "They see the workouts you log, set by set, and how each one felt.",
+                "They see the assessments you take and the measurements in them.",
+                "They see your package and your payments — they are the ones who keep that record.",
+                "Nobody else can see any of it, and you can leave this trainer or delete your account at any time."));
     }
 
     @Getter
@@ -191,6 +223,10 @@ public class AppProperties {
             private String templateLanguage = "en";
             private String baseUrl = "https://graph.facebook.com";
             private int timeoutSeconds = 5;
+            /** The Meta app's secret: the key of the HMAC on every status webhook. Blank refuses them all. */
+            private String appSecret;
+            /** The string typed into Meta's console when the webhook is registered; echoed back once, on the GET. */
+            private String verifyToken;
         }
 
         /**
@@ -309,6 +345,9 @@ public class AppProperties {
 
         /** Anything that spends money per call: a WhatsApp nudge, a weekly report. */
         private Tier messaging = new Tier(10, 60);
+
+        /** The provider's status webhook: public, so by IP; generous, because Meta sends in bursts and retries. */
+        private Tier webhook = new Tier(600, 60);
     }
 
     /** `limit` requests per `windowSeconds`, refilled smoothly rather than in steps. */

@@ -10,7 +10,6 @@ import com.inclineyou.inclineyou_backend.core.client.dto.Note;
 import com.inclineyou.inclineyou_backend.core.client.dto.PauseRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.PhoneCheckRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.PutScheduleRequest;
-import com.inclineyou.inclineyou_backend.core.client.dto.Reading;
 import com.inclineyou.inclineyou_backend.core.client.dto.ScheduleSaved;
 import com.inclineyou.inclineyou_backend.core.client.dto.StateResult;
 import com.inclineyou.inclineyou_backend.core.client.dto.UpdateClientRequest;
@@ -138,12 +137,6 @@ public class ClientController {
         String etag = detail.etag();
         if (request.checkNotModified(etag)) return null;
         return ResponseEntity.ok().eTag(etag).cacheControl(CacheControl.noCache().cachePrivate()).body(detail);
-    }
-
-    /** Read out of completed assessments — a correction is an edit to the assessment. */
-    @GetMapping("/{id}/readings")
-    public Items<Reading> readings(@PathVariable UUID id, @RequestParam(required = false) String key) {
-        return Items.of(files.readings(trainerId(), id, key));
     }
 
     /* Notes — under the client, and the note id under the client too: a note is

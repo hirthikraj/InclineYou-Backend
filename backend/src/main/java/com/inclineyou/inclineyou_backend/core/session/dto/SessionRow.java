@@ -26,6 +26,10 @@ public record SessionRow(
         Long endedAt,
         SessionLogTotals log,
         SessionCharge charge,
+        /** How the client said the workout felt, or null (api-contract 1.2). */
+        SessionFeedback feedback,
+        /** The trainer's recap line for this session, or null; {@code readAt} says whether the client opened it. */
+        SessionRecap recapMessage,
         long updatedAt,
         String version,
         /** scheduled_at at full precision, for the cursor only — never on the wire. */

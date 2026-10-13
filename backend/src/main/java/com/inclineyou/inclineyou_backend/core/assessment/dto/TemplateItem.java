@@ -15,7 +15,11 @@ public record TemplateItem(
         int liveCycles,
         long createdAt,
         long updatedAt,
-        String version
+        String version,
+        /* The product's own default (only "weekly_check_in" today), or null for a trainer's own form. */
+        String systemKey,
+        /* Clients on the portal may start this one themselves (V12). */
+        boolean clientCanStart
 ) {
     public record Measurements(boolean on, List<String> keys) {}
 

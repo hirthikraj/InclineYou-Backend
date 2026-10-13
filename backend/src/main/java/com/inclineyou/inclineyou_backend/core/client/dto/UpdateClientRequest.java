@@ -33,6 +33,10 @@ public record UpdateClientRequest(
               @DecimalMax(value = "250", message = "between 50 and 250") BigDecimal> heightCm,
         Patch<@Pattern(regexp = "sedentary|light|moderate|active|very_active",
                        message = "sedentary, light, moderate, active, very_active or null") String> activityLevel,
+        /** v1.2: no WhatsApp session reminders for this client, whatever the trainer's switch says. */
+        Boolean remindersExcluded,
+        /** v1.2: {@code true} / {@code false} is the trainer's answer for this client, {@code null} follows {@code clients_see_money}. */
+        Patch<Boolean> portalShowMoney,
         @Null(message = "use pause, resume, archive or unarchive") Object status
 ) {
     public UpdateClientRequest {
@@ -43,6 +47,7 @@ public record UpdateClientRequest(
 
     public boolean isEmpty() {
         return name == null && phone == null && dateOfBirth == null && clientType == null
-                && goal == null && heightCm == null && activityLevel == null;
+                && goal == null && heightCm == null && activityLevel == null
+                && remindersExcluded == null && portalShowMoney == null;
     }
 }

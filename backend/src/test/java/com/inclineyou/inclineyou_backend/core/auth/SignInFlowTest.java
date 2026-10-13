@@ -195,14 +195,16 @@ class SignInFlowTest {
     }
 
     @Test
-    @DisplayName("a number that is only a client's is refused and gets no credential")
-    void clientOnlyNumber() throws Exception {
+    @DisplayName("a number that is a client's signs in as one (inv-a5): role client, a revocable session, and no trainer fields")
+    void clientNumber() throws Exception {
         jdbc.update("INSERT INTO app_user (phone, role) VALUES (:p, 'client')", Map.of("p", phone));
         String id = requestCode();
 
-        verify(id, sender.codeFor(phone)).andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.code").value("CLIENT_SIGN_IN_UNAVAILABLE"))
-                .andExpect(jsonPath("$.token").doesNotExist());
+        verify(id, sender.codeFor(phone)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value("client"))
+                .andExpect(jsonPath("$.access").value("removed"))
+                .andExpect(jsonPath("$.token").value(org.hamcrest.Matchers.startsWith("xs_")))
+                .andExpect(jsonPath("$.trainerId").value(org.hamcrest.Matchers.nullValue()));
     }
 
     /* --------------------------------------------------------- become a trainer */

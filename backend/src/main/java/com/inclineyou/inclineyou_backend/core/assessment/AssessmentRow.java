@@ -13,11 +13,15 @@ import java.util.UUID;
  */
 record AssessmentRow(UUID id, UUID clientId, UUID templateId, UUID scheduleId, String name, LocalDate dueOn,
                      Instant completedAt, String enteredBy, String form, String readings, String answers,
-                     Instant createdAt, Instant updatedAt, boolean deleted) {
+                     Instant createdAt, Instant updatedAt, boolean deleted, Instant sentAt) {
 
     /** The If-Match value: {@code updated_at} as epoch ms. */
     String version() {
         return String.valueOf(updatedAt.toEpochMilli());
+    }
+
+    boolean sent() {
+        return sentAt != null;
     }
 
     boolean done() {

@@ -74,7 +74,7 @@ public class AssessmentListJdbcRepository {
         return jdbc.query("""
                 SELECT a.id::text AS id, a.client_id::text AS client_id, a.template_id::text AS template_id,
                        a.schedule_id::text AS schedule_id, a.name, a.due_on::text AS due_on,
-                       %s AS state, a.completed_at, a.entered_by, a.created_at, a.updated_at,
+                       %s AS state, a.completed_at, a.entered_by, a.created_at, a.updated_at, a.sent_at,
                        (SELECT count(*) FROM jsonb_object_keys(a.readings)) AS readings_got,
                        jsonb_array_length(a.form -> 'measurements') AS readings_asked,
                        (SELECT count(*) FROM jsonb_object_keys(a.answers)) AS answers_got,
@@ -96,7 +96,8 @@ public class AssessmentListJdbcRepository {
                     new Count(rs.getInt("readings_got"), rs.getInt("readings_asked")),
                     new Count(rs.getInt("answers_got"), rs.getInt("answers_asked")),
                     rs.getTimestamp("created_at").getTime(),
-                    String.valueOf(rs.getTimestamp("updated_at").getTime()));
+                    String.valueOf(rs.getTimestamp("updated_at").getTime()),
+                    rs.getTimestamp("sent_at") == null ? null : rs.getTimestamp("sent_at").getTime());
         });
     }
 

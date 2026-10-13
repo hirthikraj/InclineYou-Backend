@@ -24,7 +24,8 @@ import java.util.UUID;
  * moves the cycle on ({@link AssessmentEntryService}); deleting the open one skips
  * it ({@link AssessmentService#delete}); and stopping it is {@code …/end}, a verb
  * like every other state change on this wire, so PATCH only ever moves dates and
- * pace. An assessment somebody has started survives the cycle ending or being
+ * pace and whether the cycle sends what it books (api-contract 1.2, {@code sendToClient}: the flag is kept here, and the
+ * daily sender that acts on it is the System's). An assessment somebody has started survives the cycle ending or being
  * deleted — the trainer has real numbers on it — and an unstarted one goes with it.
  */
 @Service
@@ -65,7 +66,8 @@ public class AssessmentScheduleService {
         LocalDate first = req.firstDueOn() == null ? WorkspaceClock.today(clock.zone()) : req.firstDueOn();
         UUID id = req.id() == null ? UUID.randomUUID() : req.id();
         try {
-            if (!schedules.insert(id, trainerId, req.clientId(), tpl.id(), req.intervalDays(), first)) {
+            if (!schedules.insert(id, trainerId, req.clientId(), tpl.id(), req.intervalDays(), first,
+                    req.sendToClient() == null || req.sendToClient())) {
                 throw ApiException.idConflict();
             }
         } catch (DuplicateKeyException e) {
@@ -80,14 +82,15 @@ public class AssessmentScheduleService {
     /** Send only what changed. {@code nextDueOn} also moves the open assessment's date. */
     @Transactional
     public ScheduleItem patch(UUID trainerId, UUID id, String ifMatch, UpdateScheduleRequest req) {
-        if (req.isEmpty()) throw ApiException.validation("nextDueOn: send nextDueOn or intervalDays");
+        if (req.isEmpty()) throw ApiException.validation("nextDueOn: send nextDueOn, intervalDays or sendToClient");
         var cycle = live(trainerId, id);
         if (cycle.endedAt() != null) {
             throw ApiException.conflict("SCHEDULE_ENDED", "That cycle has ended, so it cannot be moved or re-paced.");
         }
         IfMatch.check(ifMatch, cycle.version(), "This cycle changed since you opened it. Reload to see it.");
         LocalDate due = req.nextDueOn() == null ? null : req.nextDueOn().value();
-        schedules.update(id, due, req.intervalDays() == null ? null : req.intervalDays().value());
+        schedules.update(id, due, req.intervalDays() == null ? null : req.intervalDays().value(),
+                req.sendToClient() == null ? null : req.sendToClient().value());
         if (due != null) assessments.moveOpenDue(id, due);
         return one(trainerId, id);
     }

@@ -32,6 +32,7 @@ import java.util.UUID;
 public class ClientWriteService {
 
     private final ClientJdbcRepository clients;
+    private final ClientInviteJdbcRepository invites;
     private final ClientScheduleJdbcRepository schedules;
     private final ClientPhoneGuard phoneGuard;
     private final ClientSummaryService summaries;
@@ -71,12 +72,25 @@ public class ClientWriteService {
         }
         if (req.dateOfBirth() != null) requireAdult(req.dateOfBirth().value());
         String phone = req.phone() == null ? null : req.phone().value();
-        // Only when it moves: re-saving an accepted number never starts failing.
-        if (phone != null && !phone.equals(row.phone())) requirePhone(trainerId, phone);
+        boolean numberMoves = req.phone() != null && !java.util.Objects.equals(phone, row.phone());
+        // On the portal the number IS their sign-in (an OTP to it), so it is theirs to keep: changing it here would hand
+        // their account to whoever holds the new number. Re-saving the same number is still fine.
+        if (numberMoves && ("accepted".equals(row.membershipStatus()) || "paused".equals(row.membershipStatus()))) {
+            throw ApiException.conflict("CLIENT_ALREADY_ACCEPTED",
+                    "They are on the portal, and this number is how they sign in. It can't be changed here.");
+        }
+        // Only when it moves: re-saving a number never starts failing.
+        if (numberMoves && phone != null) requirePhone(trainerId, phone);
         try {
             clients.update(clientId, req);
         } catch (DuplicateKeyException e) {
             throw duplicate(trainerId, phone, e);
+        }
+        // The invitation was to the old number, and its link would still open for whoever holds it. Withdrawn and the
+        // client put back at the start; the trainer invites the new number when they are ready.
+        if (numberMoves) {
+            invites.revokePending(clientId, "number_changed");
+            invites.startOver(clientId);
         }
         return summaries.one(trainerId, clientId).orElseThrow();
     }

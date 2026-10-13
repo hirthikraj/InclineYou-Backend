@@ -6,6 +6,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
+import java.util.Optional;
+
 /**
  * How a code actually reaches a phone.
  *
@@ -17,6 +19,15 @@ public interface OtpSender {
 
     /** Deliver, or throw — a failure must not look like a successful send. */
     void send(String phone, String code);
+
+    /**
+     * {@link #send}, answering the provider's id for the message when it gives one — what the status webhook finds the
+     * {@code otp_request} row by. A sender with no provider (the log one) has none to give.
+     */
+    default Optional<String> sendTracked(String phone, String code) {
+        send(phone, code);
+        return Optional.empty();
+    }
 
     /**
      * The one that exists today: the code goes to the application log.

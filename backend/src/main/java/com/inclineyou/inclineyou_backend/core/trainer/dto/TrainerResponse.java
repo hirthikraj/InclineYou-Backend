@@ -67,5 +67,7 @@ public record TrainerResponse(
         /** Epoch ms of that acceptance — evidence, so it never moves on a retry. */
         Long privacyAcceptedAt,
         /** The later of trainer.updated_at and trainer_business.updated_at as epoch ms; also the ETag. */
-        String version
+        String version,
+        /* ---- v1.2 (11 Oct). The portal's two settings; appended last like every field before it. ---- */
+        ClientPortalSettings clientPortal
 ) {}

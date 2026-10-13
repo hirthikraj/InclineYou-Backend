@@ -33,6 +33,7 @@ public class ProgramController {
     private final ProgramReadService read;
     private final ProgramWriteService write;
     private final ProgramApplyService apply;
+    private final ProgramNotifyService notify;
 
     /** L1 — summaries, no tree. {@code clientId} adds {@code progress}, for the client file. */
     @GetMapping
@@ -114,6 +115,16 @@ public class ProgramController {
                            @RequestHeader(value = "If-Match", required = false) String ifMatch,
                            @RequestBody(required = false) EmptyBody body) {
         return write.resync(trainerId(), id, ifMatch);
+    }
+
+    /**
+     * Tell the client the plan changed (tr-a11). 200 {@code {sent}}; the trainer chooses to press it, and no save ever does.
+     * {@code sent: false} is not a failure: the client has plan notices switched off. A template is 422
+     * {@code PROGRAM_IS_TEMPLATE}, a client who has not joined the portal 409 {@code CLIENT_NOT_ON_PORTAL}.
+     */
+    @PostMapping("/{id}/notify")
+    public java.util.Map<String, Boolean> notifyClient(@PathVariable UUID id, @RequestBody(required = false) EmptyBody body) {
+        return java.util.Map.of("sent", notify.notifyClient(trainerId(), id));
     }
 
     private UUID trainerId() {

@@ -27,8 +27,16 @@ public record ClientSummary(
         Stats stats,
         long createdAt,
         /** {@code client.updated_at} as epoch ms — If-Match for {@code PATCH /v1/clients/{id}}. */
-        String version
+        String version,
+        /** v1.2, tr-a5: where the client stands on the portal. Added to the end, so a 1.1 reader never notices. */
+        Portal portal
 ) {
+    public ClientSummary withPortal(Portal replacement) {
+        return new ClientSummary(id, name, phone, status, pausedAt, pausedUntil, archivedAt, archiveReason, archiveNote,
+                membershipStatus, clientType, hasPinnedNote, schedule, slots, program, stats, createdAt, version,
+                replacement);
+    }
+
     /**
      * @param version opaque — {@code client_schedule.updated_at} as epoch ms, the
      *                {@code If-Match} value for {@code PUT /v1/clients/{id}/schedule}

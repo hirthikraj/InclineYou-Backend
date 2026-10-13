@@ -43,6 +43,20 @@ public class ProgramJdbcRepository {
         }
     }
 
+    /** What telling a client about their plan decides on: the plan's name and who it belongs to, and whether they are on the portal. */
+    public record NotifyTarget(String clientId, String name, String membershipStatus) {}
+
+    /** The trainer's own program, template or plan. Empty when it is not theirs or is gone. */
+    public Optional<NotifyTarget> notifyTarget(UUID trainerId, UUID programId) {
+        return jdbc.query("""
+                SELECT p.client_id::text AS client_id, p.name, c.membership_status
+                FROM program p LEFT JOIN client c ON c.id = p.client_id AND c.deleted_at IS NULL AND c.erased_at IS NULL
+                WHERE p.id = :id::uuid AND p.trainer_id = :tid::uuid AND p.deleted_at IS NULL
+                """, Map.of("id", programId.toString(), "tid", trainerId.toString()),
+                (rs, i) -> new NotifyTarget(rs.getString("client_id"), rs.getString("name"), rs.getString("membership_status")))
+                .stream().findFirst();
+    }
+
     /** Whom a copy would come from: the trainer's own program or a library one. */
     public record Source(String name, String clientId, String origin) {}
 

@@ -36,7 +36,7 @@ public class SessionLogJdbcRepository {
     /** One session_exercise (or, in a preview, one main plan row) before its sets are attached. */
     public record ExRow(UUID id, UUID exerciseId, String name, String equipment, int position, String section, UUID groupId,
                         String source, UUID plannedFrom, UUID swappedFrom, String swappedFromName, String swapReason,
-                        Timestamp removedAt, String notes) {}
+                        String swapSource, Timestamp removedAt, String notes) {}
 
     /** The kinds a movement is being logged in, for the one history read. */
     public record Want(UUID exerciseId, String loadKind, String effortKind) {}
@@ -208,7 +208,7 @@ public class SessionLogJdbcRepository {
         return jdbc.query("""
                 SELECT se.id, se.exercise_id, e.name, e.equipment, se.position, we.section, we.group_id, se.source,
                        se.planned_from, se.swapped_from_exercise_id, sf.name AS swapped_from_name, se.swap_reason,
-                       se.removed_at, se.notes
+                       se.swap_source, se.removed_at, se.notes
                 FROM session_exercise se
                 JOIN exercise e ON e.id = se.exercise_id
                 LEFT JOIN exercise sf ON sf.id = se.swapped_from_exercise_id
@@ -225,7 +225,7 @@ public class SessionLogJdbcRepository {
                        (row_number() OVER (ORDER BY we.position, we.id) - 1)::int AS position,
                        we.section, we.group_id, 'planned' AS source, we.id AS planned_from,
                        NULL::uuid AS swapped_from_exercise_id, NULL AS swapped_from_name, NULL AS swap_reason,
-                       NULL::timestamptz AS removed_at, NULL AS notes
+                       NULL AS swap_source, NULL::timestamptz AS removed_at, NULL AS notes
                 FROM workout_exercise we JOIN exercise e ON e.id = we.exercise_id
                 WHERE we.workout_id = :wid::uuid AND we.alternative_of IS NULL
                 ORDER BY we.position, we.id
@@ -236,7 +236,8 @@ public class SessionLogJdbcRepository {
         return new ExRow(uuid(rs.getObject("id")), uuid(rs.getObject("exercise_id")), rs.getString("name"),
                 rs.getString("equipment"), rs.getInt("position"), rs.getString("section"), uuid(rs.getObject("group_id")),
                 rs.getString("source"), uuid(rs.getObject("planned_from")), uuid(rs.getObject("swapped_from_exercise_id")),
-                rs.getString("swapped_from_name"), rs.getString("swap_reason"), rs.getTimestamp("removed_at"), rs.getString("notes"));
+                rs.getString("swapped_from_name"), rs.getString("swap_reason"), rs.getString("swap_source"),
+                rs.getTimestamp("removed_at"), rs.getString("notes"));
     }
 
     /** Each exercise's sets, keyed by session_exercise.id, in position order. */
@@ -265,7 +266,7 @@ public class SessionLogJdbcRepository {
                     .add(new SetRow(null, rs.getInt("position"), true, rs.getString("load_kind"), rs.getString("effort_kind"),
                             new SetTarget(num(rs.getBigDecimal("load_value")), num(rs.getBigDecimal("effort_value")),
                                     (Integer) rs.getObject("rest_seconds"), rs.getString("tempo")),
-                            null, null, null, null, null));
+                            null, null, null, null, null, null));
         });
         return out;
     }
@@ -295,7 +296,7 @@ public class SessionLogJdbcRepository {
         return new SetRow(rs.getString("id"), rs.getInt("position"), planned, rs.getString("load_kind"),
                 rs.getString("effort_kind"), hasTarget ? new SetTarget(num(tl), num(te), rest, tempo) : null,
                 num(rs.getBigDecimal("load_value")), num(rs.getBigDecimal("effort_value")), num(rs.getBigDecimal("rpe")),
-                rs.getString("notes"), ms(rs.getTimestamp("done_at")));
+                rs.getString("notes"), ms(rs.getTimestamp("done_at")), rs.getString("entered_by"));
     }
 
     /**

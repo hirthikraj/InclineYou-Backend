@@ -182,6 +182,65 @@ class ClientLoggedSessionsTest {
                 .andExpect(jsonPath("$.exercises.length()").value(1));
     }
 
+    /* ─────────────────────────────────────────── what the log learns (api-contract 1.2) ── */
+
+    @Test
+    @DisplayName("the log says who typed each set, where a client's swap came from, how the workout felt and whether the recap was opened")
+    void logCarriesTheClientsFields() throws Exception {
+        UUID s = selfRun(yesterday, w1, true);
+        mvc.perform(get("/v1/sessions/" + s + "/log")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.exercises[0].sets[0].enteredBy").value("client"))
+                .andExpect(jsonPath("$.exercises[0].swapSource").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.session.feedback").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.session.recapMessage").value(org.hamcrest.Matchers.nullValue()));
+
+        UUID original = UUID.randomUUID();
+        jdbc.update("INSERT INTO exercise (id, name, origin, log_type, source_id) VALUES (:id::uuid, 'Leg press', 'inclineyou', 'weight_reps', :src)",
+                Map.of("id", original.toString(), "src", "test-" + original));
+        jdbc.update("UPDATE session_exercise SET swapped_from_exercise_id = :o::uuid, swap_reason = 'unavailable', swap_source = 'approved' WHERE session_id = :s::uuid",
+                Map.of("o", original.toString(), "s", s.toString()));
+        jdbc.update("INSERT INTO workout_feedback (id, tenant_id, session_id, client_id, effort, note, at) VALUES (gen_random_uuid(), :ten::uuid, :s::uuid, :c::uuid, 'hard', 'knee a bit stiff', :at)",
+                Map.of("ten", tenant.toString(), "s", s.toString(), "c", client.toString(), "at", Timestamp.from(yesterday.plusSeconds(2000))));
+        UUID recap = UUID.randomUUID();
+        jdbc.update("INSERT INTO client_message (id, tenant_id, client_id, trainer_id, session_id, body, kind) VALUES (:id::uuid, :ten::uuid, :c::uuid, :t::uuid, :s::uuid, 'Depth was spot on.', 'recap')",
+                Map.of("id", recap.toString(), "ten", tenant.toString(), "c", client.toString(), "t", me.toString(), "s", s.toString()));
+
+        mvc.perform(get("/v1/sessions/" + s + "/log")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.exercises[0].swapSource").value("approved"))
+                .andExpect(jsonPath("$.exercises[0].swapReason").value("unavailable"))
+                .andExpect(jsonPath("$.session.feedback.effort").value("hard"))
+                .andExpect(jsonPath("$.session.feedback.note").value("knee a bit stiff"))
+                .andExpect(jsonPath("$.session.feedback.at").isNumber())
+                .andExpect(jsonPath("$.session.recapMessage.id").value(recap.toString()))
+                .andExpect(jsonPath("$.session.recapMessage.readAt").value(org.hamcrest.Matchers.nullValue()));
+
+        jdbc.update("UPDATE client_message SET read_at = now() WHERE id = :id::uuid", Map.of("id", recap.toString()));
+        mvc.perform(get("/v1/sessions/" + s + "/log")).andExpect(jsonPath("$.session.recapMessage.readAt").isNumber());
+
+        // The same two fields ride the Schedule row, so a client's history list can say "found it hard" without opening each log.
+        mvc.perform(get("/v1/sessions").param("clientId", client.toString()).param("from", day(twoDaysAgo)).param("to", day(tomorrow)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items[?(@.id=='" + s + "')].feedback.effort").value("hard"));
+    }
+
+    @Test
+    @DisplayName("a trainer's own session answers feedback null, recapMessage null and enteredBy trainer, and a deleted feedback or recap shows as none")
+    void trainerSessionIsUnchanged() throws Exception {
+        UUID s = trainerSession(yesterday, "done");
+        jdbc.update("UPDATE scheduled_session SET started_at = scheduled_at, ended_at = scheduled_at + interval '30 minutes' WHERE id = :s::uuid", Map.of("s", s.toString()));
+        UUID sx = UUID.randomUUID();
+        jdbc.update("INSERT INTO session_exercise (id, session_id, client_id, exercise_id, position) VALUES (:x::uuid, :s::uuid, :c::uuid, :e::uuid, 0)",
+                Map.of("x", sx.toString(), "s", s.toString(), "c", client.toString(), "e", exercise.toString()));
+        jdbc.update("INSERT INTO set_log (session_exercise_id, position, planned, load_kind, effort_kind, load_value, effort_value, done_at) VALUES (:x::uuid, 1, false, 'weight', 'reps', 60, 5, :at)",
+                Map.of("x", sx.toString(), "at", Timestamp.from(yesterday)));
+        jdbc.update("INSERT INTO workout_feedback (id, tenant_id, session_id, client_id, effort, at, deleted_at) VALUES (gen_random_uuid(), :ten::uuid, :s::uuid, :c::uuid, 'easy', now(), now())",
+                Map.of("ten", tenant.toString(), "s", s.toString(), "c", client.toString()));
+        mvc.perform(get("/v1/sessions/" + s + "/log")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.exercises[0].sets[0].enteredBy").value("trainer"))
+                .andExpect(jsonPath("$.session.feedback").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.session.recapMessage").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.session.loggedBy").value("trainer"));
+    }
+
     /* ──────────────────────────────────────── the plan's day counting, and pause ── */
 
     @Test

@@ -61,6 +61,7 @@ public class AuthTokenFilter extends OncePerRequestFilter {
 
     private final AuthTokenService tokens;
     private final TenantScope tenantScope;
+    private final ClientLensResolver clientLens;
 
     /** {@code combined} (default) or {@code focused}. */
     public static final String VIEW_HEADER = "X-InclineYou-View";
@@ -115,6 +116,12 @@ public class AuthTokenFilter extends OncePerRequestFilter {
     }
 
     private TenantContext tenantContextFor(AuthPrincipal p, boolean combined) {
+        if ("client".equals(p.role())) {
+            // The client lens: this person's own live client rows, and no workspace — a client belongs to none. Resolved on a
+            // bootstrap context for their number (the database function answers only for it), then replaced by the full one.
+            TenantContext.set(TenantContext.bootstrap(p.phone()));
+            return TenantContext.client(p.phone(), null, List.of(), clientLens.idsFor(p.phone()));
+        }
         if (!JwtService.ROLE_TRAINER.equals(p.role())) {
             // `pending` and the step-up ticket have proved a number and belong
             // to no workspace. The bootstrap context lets them look up their

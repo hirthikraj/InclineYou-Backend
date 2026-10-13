@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -92,14 +93,15 @@ public class OtpService {
         OtpRequest request = ledger.open(phone, purpose, hash, expiresAt);
         store.saveCode(phone, hash, expiresAt);
         store.recordSend(phone, now);
+        Optional<String> providerId;
         try {
-            sender.send(phone, otp);
+            providerId = sender.sendTracked(phone, otp);
         } catch (RuntimeException e) {
             // The request exists and nothing will ever arrive for it: say so on the row, so the screen polling it can offer the second path, then let the failure through as it always did.
             ledger.failed(request.getId(), "provider_error");
             throw e;
         }
-        ledger.sent(request.getId());
+        ledger.sent(request.getId(), providerId.orElse(null));
         return new Issued(request.getId(), expiresAt, limiter.resendAfterSeconds(phone, now));
     }
 
@@ -129,6 +131,29 @@ public class OtpService {
         check(phone, otp, Instant.now(), r.getExpiresAt());
         ledger.consume(requestId);
         return phone;
+    }
+
+    /**
+     * {@link #verifyRequest}, for a caller that already knows which number the code must be for (an invite link names one).
+     * A request for any other number is the same 404 as an unknown one and its code is not looked at, so presenting somebody
+     * else's request id spends nobody's attempts.
+     */
+    public String verifyRequestFor(UUID requestId, String otp, String expectedPhone) {
+        OtpRequest r = openSignIn(requestId);
+        if (!r.getPhone().equals(expectedPhone)) throw requestNotFound();
+        return verifyRequest(requestId, otp);
+    }
+
+    /**
+     * Whether this request, for this number, was used up within {@code window} — what makes a repeated "Let me in" a replay of the
+     * acceptance that just happened rather than somebody else's second go with an old link.
+     */
+    public boolean consumedRecentlyFor(UUID requestId, String phone, java.time.Duration window) {
+        return ledger.find(requestId)
+                .filter(r -> OtpRequest.SIGN_IN.equals(r.getPurpose()) && r.getPhone().equals(phone))
+                .map(OtpRequest::getConsumedAt)
+                .filter(at -> at != null && at.isAfter(Instant.now().minus(window)))
+                .isPresent();
     }
 
     /** A request that exists, is for sign-in and has not been used or superseded. */

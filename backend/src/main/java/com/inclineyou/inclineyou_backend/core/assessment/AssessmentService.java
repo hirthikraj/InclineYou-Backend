@@ -7,6 +7,7 @@ import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentItem;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.Catalog;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.CreateAssessmentRequest;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.MoveAssessmentRequest;
+import com.inclineyou.inclineyou_backend.core.client.ClientNoticeJdbcRepository;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import com.inclineyou.inclineyou_backend.shared.wire.IfMatch;
@@ -29,6 +30,11 @@ import java.util.UUID;
  * <p>{@code state} is derived (V14), and "today" is the workspace's calendar day.
  * The form an assessment asks is its own copy of the template, so an assessment
  * whose template was deleted still opens ({@code template.deleted: true}).
+ *
+ * <p>api-contract 1.2: an assessment given to a client on the portal is visible to them at once ({@code sendNow}, default
+ * true), because {@code sent_at} is the one thing that makes it so. {@code false} keeps it the trainer's to take in the
+ * session, and {@link #send} sends it later. Sending writes one {@code checkin} notice, through the same door as every other
+ * trainer-to-client notice, so the client's own switch for it is honoured and a refused notice is no row and no error.
  */
 @Service
 @RequiredArgsConstructor
@@ -38,6 +44,7 @@ public class AssessmentService {
     private final AssessmentScheduleJdbcRepository schedules;
     private final AssessmentTemplateJdbcRepository templates;
     private final AssessmentBooker booker;
+    private final ClientNoticeJdbcRepository notices;
     private final WorkspaceClock clock;
 
     /** Served from code, not a table; it changes only on a deploy. */
@@ -140,7 +147,43 @@ public class AssessmentService {
                 .orElseThrow(() -> ApiException.notFound("That assessment template is not in your library."));
         LocalDate today = today();
         UUID id = booker.book(trainerId, req.clientId(), tpl, null, req.dueOn() == null ? today : req.dueOn(), req.id());
+        // sendNow is ignored for a client with nowhere to receive it, rather than refused: "Take now" is the same button either way.
+        if ((req.sendNow() == null || req.sendNow()) && onPortal(trainerId, req.clientId())) {
+            deliver(id, req.clientId(), tpl.name());
+        }
         return new AssessmentCreated(AssessmentForms.item(assessments.find(trainerId, id).orElseThrow(), today), true);
+    }
+
+    /**
+     * Send one that was kept in person only. Idempotent by target state: one already sent answers as it is, with no second
+     * notice — a retry after a dropped response must not tell the client twice.
+     */
+    @Transactional
+    public AssessmentItem send(UUID trainerId, UUID id) {
+        var row = assessments.lock(trainerId, id).filter(r -> !r.deleted()).orElseThrow(AssessmentService::notFound);
+        var status = assessments.clientStatus(trainerId, row.clientId()).orElseThrow(AssessmentService::notFound);
+        if ("archived".equals(status)) {
+            throw ApiException.conflict("CLIENT_ARCHIVED", "This client is archived. Unarchive them first.");
+        }
+        if (row.done()) {
+            throw ApiException.conflict("ASSESSMENT_COMPLETED", "That assessment is already done, so there is nothing to send.");
+        }
+        if (!onPortal(trainerId, row.clientId())) {
+            throw ApiException.conflict("CLIENT_NOT_ON_PORTAL", "They haven’t joined the portal yet, so there is nowhere to send it.");
+        }
+        if (!row.sent()) deliver(id, row.clientId(), row.name());
+        return AssessmentForms.item(assessments.find(trainerId, id).orElseThrow(), today());
+    }
+
+    /** {@code sent_at}, then the notice. The notice is the client being told; the row is what makes it theirs to open. */
+    private void deliver(UUID id, UUID clientId, String name) {
+        assessments.markSent(id);
+        notices.mint(clientId, "checkin", "A new assessment is waiting: " + name + ".", null);
+    }
+
+    /** A paused client is still on the portal (they cannot open it, and are not told); one who never joined, or left, is not. */
+    private boolean onPortal(UUID trainerId, UUID clientId) {
+        return assessments.membership(trainerId, clientId).map(m -> m.equals("accepted") || m.equals("paused")).orElse(false);
     }
 
     /** Move the date. A cycle's open assessment also moves the cycle's own next date. */
@@ -154,7 +197,7 @@ public class AssessmentService {
         assessments.setDue(id, req.dueOn());
         if (row.scheduleId() != null) {
             schedules.lock(trainerId, row.scheduleId()).filter(AssessmentScheduleJdbcRepository.Locked::live)
-                    .ifPresent(s -> schedules.update(s.id(), req.dueOn(), null));
+                    .ifPresent(s -> schedules.update(s.id(), req.dueOn(), null, null));
         }
         return AssessmentForms.item(assessments.find(trainerId, id).orElseThrow(), today());
     }
@@ -175,7 +218,7 @@ public class AssessmentService {
         var tpl = cycle == null ? null : templates.find(trainerId, cycle.templateId()).filter(t -> !t.deleted()).orElse(null);
         if (tpl == null) return new AssessmentDeleted(null);
         LocalDate next = row.dueOn().plusDays(cycle.intervalDays());
-        schedules.update(cycle.id(), next, null);
+        schedules.update(cycle.id(), next, null, null);
         UUID booked = booker.book(trainerId, row.clientId(), tpl, cycle.id(), next, null);
         return new AssessmentDeleted(AssessmentForms.item(assessments.find(trainerId, booked).orElseThrow(), today()));
     }

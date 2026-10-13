@@ -55,6 +55,40 @@ public class TrainerJdbcRepository {
         return v == null ? 0L : v;
     }
 
+    /** The trainer's own portal columns (V11): not mapped on the entity, which no sync path reads. */
+    public record PortalRow(boolean sessionReminders, String reminderTiming, boolean clientsSeeMoney) {}
+
+    public PortalRow portal(UUID trainerId) {
+        return jdbc.queryForObject("SELECT session_reminders, reminder_timing, clients_see_money FROM trainer WHERE id = :tid::uuid",
+                Map.of("tid", trainerId.toString()),
+                (rs, i) -> new PortalRow(rs.getBoolean("session_reminders"), rs.getString("reminder_timing"), rs.getBoolean("clients_see_money")));
+    }
+
+    /** Only what was sent. The {@code set_updated_at} trigger moves the profile's version, so an If-Match from before is stale. */
+    public void updatePortal(UUID trainerId, Boolean sessionReminders, String reminderTiming, Boolean clientsSeeMoney) {
+        var p = new java.util.HashMap<String, Object>();
+        p.put("tid", trainerId.toString());
+        var sets = new StringBuilder();
+        if (sessionReminders != null) { p.put("rem", sessionReminders); sets.append(", session_reminders = :rem"); }
+        if (reminderTiming != null) { p.put("timing", reminderTiming); sets.append(", reminder_timing = :timing"); }
+        if (clientsSeeMoney != null) { p.put("money", clientsSeeMoney); sets.append(", clients_see_money = :money"); }
+        if (sets.length() == 0) return;
+        jdbc.update("UPDATE trainer SET " + sets.substring(2) + " WHERE id = :tid::uuid", p);
+    }
+
+    /**
+     * Who a reminder would actually reach (R105): switching reminders on opts nobody in.
+     *
+     * <p>Asked of {@code trainer_reminder_reach()} and not computed here, because the answer depends on {@code client_prefs}
+     * and the trainer's own connection cannot read it (V11 gave the table no staff policy: a client's preferences are theirs).
+     * The function returns three counts and nothing else, for the caller's own clients only.
+     */
+    public com.inclineyou.inclineyou_backend.core.trainer.dto.ClientPortalSettings.ReminderReach reminderReach(UUID trainerId) {
+        return jdbc.queryForObject("SELECT on_portal, opted_in, excluded FROM trainer_reminder_reach()", Map.of(),
+                (rs, i) -> new com.inclineyou.inclineyou_backend.core.trainer.dto.ClientPortalSettings.ReminderReach(
+                        rs.getInt("on_portal"), rs.getInt("opted_in"), rs.getInt("excluded")));
+    }
+
     /** Soft-deletes every live window on these weekdays — the first half of replacing a day. */
     public void softDeleteDays(UUID trainerId, java.util.Collection<Integer> weekdays) {
         if (weekdays.isEmpty()) return;

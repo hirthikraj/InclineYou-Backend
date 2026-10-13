@@ -132,6 +132,12 @@ app:
   jwt:
     secret: ${JWT_SECRET:dev-only-secret-change-before-production-32chars}
     expiry-minutes: 10080   # 7 days
+  web:
+    # The web app's public origin: the host in an invite link (/invite/{token}). WEB_BASE_URL, no trailing slash.
+    base-url: ${WEB_BASE_URL:http://localhost:3000}
+  push:
+    # The public half of the VAPID key pair the client portal's browsers subscribe with. Empty = push is off (the switch is hidden).
+    vapid-public-key: ${VAPID_PUBLIC_KEY:}
   privacy:
     # The notice a trainer must have accepted (POST /v1/trainers/me/consent). One string, one place.
     policy-version: ${PRIVACY_POLICY_VERSION:2026-09}
@@ -145,6 +151,9 @@ app:
       access-token: ${WHATSAPP_ACCESS_TOKEN:}
       template-name: ${WHATSAPP_OTP_TEMPLATE:}
       template-language: ${WHATSAPP_OTP_TEMPLATE_LANGUAGE:en}
+      # The status webhook (POST/GET /v1/webhooks/whatsapp). Blank app-secret refuses every POST; blank verify-token every GET.
+      app-secret: ${WHATSAPP_APP_SECRET:}
+      verify-token: ${WHATSAPP_VERIFY_TOKEN:}
     # Print the code to the log. A separate decision from not sending it, because
     # a log is storage: shipped to an aggregator, retained, and read by more
     # people than the database. TransportSecurityCheck refuses to start when this
@@ -172,6 +181,7 @@ app:
     standard:  { limit: 120, window-seconds: 60 }
     auth:      { limit: 300, window-seconds: 60 }   # loose: may be keyed by a shared proxy IP
     messaging: { limit: 10,  window-seconds: 60 }   # each call spends a WhatsApp message
+    webhook:   { limit: 600, window-seconds: 60 }   # the provider's own bursts, keyed by IP; the HMAC is the real gate
 
   seed:
     exercises:
@@ -203,3 +213,26 @@ app:
     #
     # Still the same env flag: RATE_LIMIT_ENABLED=true turns it back on here.
     enabled: ${RATE_LIMIT_ENABLED:false}
+  otp:
+    # THE SIGN-IN ABUSE GUARD IS A RATE LIMIT TOO, AND IT IS THE ONE THAT BIT. `rate-limit.enabled` above governs the
+    # request filter only; OtpAbuseGuard blocks an IP for `block-hours` once it asks codes for too many numbers or
+    # collects too many per-number refusals — and on a laptop every curl, Expo build and Next dev server is the same IP.
+    # A handful of test numbers and a few resend refusals were enough to lock the machine out of sign-in for a day, and
+    # the web shows that as "We couldn't send the code" with nothing to say why. Lifted here, so development never
+    # trips it; production, CI and Railway run with no profile and keep the defaults in AppProperties.
+    #
+    # THE PER-NUMBER LIMITS ARE LIFTED TOO (11 Oct, at the owner's request: "disable OTP blocking if required for sign-in").
+    # They were left alone at first because both front ends carry the resend ladder and the lock is the behaviour a sign-in
+    # screen is built around. In development they cost more than they protect: a mistyped code three times locked the number for
+    # ten minutes, and a resend wait of 30 to 120 seconds made every retest a pause. The ladder is one second (not empty: the
+    # server's own `resendAfterSeconds` feeds the web's countdown, so it follows and shows one second), and a wrong code is
+    # allowed a thousand times with a one-minute lock. A packaged jar, CI and Railway run with no profile and keep 3 / 10 / 30-60-120.
+    max-attempts: 1000
+    lock-minutes: 1
+    resend-ladder-seconds: [1]
+    abuse:
+      max-numbers-per-ip: 100000
+      max-strikes-per-ip: 100000
+      block-hours: 1
+      new-numbers-per-day: 100000
+    max-sends-per-day: 1000

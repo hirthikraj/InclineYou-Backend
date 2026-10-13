@@ -121,6 +121,17 @@ public class PackageJdbcRepository {
     }
 
     /**
+     * What one client still owes across every package, off the ONE ledger definition above — the client's own portal reads it, so what they are
+     * shown as owing and what the trainer's books say can never be two different sums. Zero, not null, when nothing is owed.
+     */
+    public java.math.BigDecimal dueForClient(UUID trainerId, UUID clientId) {
+        var p = new HashMap<String, Object>();
+        p.put("tid", trainerId.toString());
+        p.put("cid", clientId.toString());
+        return jdbc.queryForObject("WITH " + LEDGER_CTE + " SELECT coalesce(sum(amount_due), 0) FROM ledger WHERE client_id = :cid::uuid", p, java.math.BigDecimal.class);
+    }
+
+    /**
      * Owed as of today, across every package: pending is all of it, overdue is what is past its
      * due date by more than the grace ({@code overdueBefore} is the cut-off day).
      */

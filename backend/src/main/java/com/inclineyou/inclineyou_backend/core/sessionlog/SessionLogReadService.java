@@ -89,7 +89,7 @@ public class SessionLogReadService {
         for (var r : rows) {
             var h = history.get(r.exerciseId());
             out.add(new ExerciseEntry(started ? id(r.id()) : null, id(r.exerciseId()), r.name(), r.equipment(), r.position(),
-                    r.section(), id(r.groupId()), r.source(), id(r.plannedFrom()), id(r.swappedFrom()), r.swappedFromName(), r.swapReason(),
+                    r.section(), id(r.groupId()), r.source(), id(r.plannedFrom()), id(r.swappedFrom()), r.swappedFromName(), r.swapReason(), r.swapSource(),
                     ms(r.removedAt()), r.notes(), sets.getOrDefault(r.id(), List.of()),
                     r.plannedFrom() == null ? List.<Alternative>of() : alts.getOrDefault(r.plannedFrom(), List.of()), h == null ? null : h.last(), h == null ? null : h.best()));
         }

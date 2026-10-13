@@ -41,7 +41,7 @@ public class AssessmentScheduleJdbcRepository {
                    t.name AS template_name, s.interval_days, s.next_due_on, s.ended_at,
                    (SELECT a.id::text FROM assessment a
                      WHERE a.schedule_id = s.id AND a.completed_at IS NULL AND a.deleted_at IS NULL) AS open_id,
-                   s.created_at, s.updated_at
+                   s.created_at, s.updated_at, s.send_to_client
               FROM assessment_schedule s JOIN assessment_template t ON t.id = s.template_id""";
 
     private static ScheduleItem item(ResultSet rs, int i) throws SQLException {
@@ -50,7 +50,8 @@ public class AssessmentScheduleJdbcRepository {
         return new ScheduleItem(rs.getString("id"), rs.getString("client_id"), rs.getString("template_id"),
                 rs.getString("template_name"), rs.getInt("interval_days"), rs.getDate("next_due_on").toString(),
                 ended == null ? null : ended.getTime(), rs.getString("open_id"),
-                rs.getTimestamp("created_at").getTime(), updated.getTime(), String.valueOf(updated.getTime()));
+                rs.getTimestamp("created_at").getTime(), updated.getTime(), String.valueOf(updated.getTime()),
+                rs.getBoolean("send_to_client"));
     }
 
     /** Live first, then ended, newest first — served by idx_assessment_schedule_client. */
@@ -101,7 +102,8 @@ public class AssessmentScheduleJdbcRepository {
     }
 
     /** False when the id was taken meanwhile. uq_assessment_schedule_live raises for a second live cycle. */
-    public boolean insert(UUID id, UUID trainerId, UUID clientId, UUID templateId, int intervalDays, LocalDate nextDueOn) {
+    public boolean insert(UUID id, UUID trainerId, UUID clientId, UUID templateId, int intervalDays, LocalDate nextDueOn,
+                          boolean sendToClient) {
         var p = new HashMap<String, Object>();
         p.put("id", id.toString());
         p.put("tid", trainerId.toString());
@@ -109,19 +111,21 @@ public class AssessmentScheduleJdbcRepository {
         p.put("tpl", templateId.toString());
         p.put("days", intervalDays);
         p.put("due", Date.valueOf(nextDueOn));
+        p.put("send", sendToClient);
         return jdbc.update("""
-                INSERT INTO assessment_schedule (id, trainer_id, client_id, template_id, interval_days, next_due_on)
-                VALUES (:id::uuid, :tid::uuid, :cid::uuid, :tpl::uuid, :days, :due)
+                INSERT INTO assessment_schedule (id, trainer_id, client_id, template_id, interval_days, next_due_on, send_to_client)
+                VALUES (:id::uuid, :tid::uuid, :cid::uuid, :tpl::uuid, :days, :due, :send)
                 ON CONFLICT (id) DO NOTHING""", p) > 0;
     }
 
     /** Only what was sent. */
-    public void update(UUID id, LocalDate nextDueOn, Integer intervalDays) {
+    public void update(UUID id, LocalDate nextDueOn, Integer intervalDays, Boolean sendToClient) {
         var p = new HashMap<String, Object>();
         p.put("id", id.toString());
         var sets = new StringBuilder("updated_at = now()");
         if (nextDueOn != null) { p.put("due", Date.valueOf(nextDueOn)); sets.append(", next_due_on = :due"); }
         if (intervalDays != null) { p.put("days", intervalDays); sets.append(", interval_days = :days"); }
+        if (sendToClient != null) { p.put("send", sendToClient); sets.append(", send_to_client = :send"); }
         jdbc.update("UPDATE assessment_schedule SET " + sets + " WHERE id = :id::uuid", p);
     }
 

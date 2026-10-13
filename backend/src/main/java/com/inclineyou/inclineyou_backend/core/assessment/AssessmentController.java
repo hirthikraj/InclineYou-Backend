@@ -75,6 +75,13 @@ public class AssessmentController {
         return ResponseEntity.status(made.created() ? HttpStatus.CREATED : HttpStatus.OK).body(made.item());
     }
 
+    /** Send one that was kept in person only. 200 with the item, whether it was sent now or already. */
+    @PostMapping("/assessments/{id}/send")
+    public ResponseEntity<AssessmentItem> send(@PathVariable UUID id, @RequestBody(required = false) EmptyBody body) {
+        var sent = assessments.send(trainerId(), id);
+        return ResponseEntity.ok().eTag(sent.version()).body(sent);
+    }
+
     /** Record readings and answers — save for later, finish, or correct. If-Match required. */
     @PutMapping("/assessments/{id}/entry")
     public ResponseEntity<AssessmentDetail> entry(

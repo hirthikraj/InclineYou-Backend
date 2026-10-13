@@ -92,6 +92,12 @@ public class SetLogService {
     /** An extra set at the next position, logged as it is added. 201, or 200 on a replayed id with the same row. */
     @Transactional
     public Created<SetAdded> add(UUID trainerId, UUID sessionId, UUID sxId, AddSetRequest req) {
+        return add(trainerId, sessionId, sxId, req, "trainer");
+    }
+
+    /** {@code enteredBy} is who typed the set: the trainer here, or the client on their own self-run day (the portal). */
+    @Transactional
+    public Created<SetAdded> add(UUID trainerId, UUID sessionId, UUID sxId, AddSetRequest req, String enteredBy) {
         if (req == null) throw ApiException.validation("body: required");
         UUID id = Body.uuid(req.id(), "id");
         if (id != null) {
@@ -119,7 +125,7 @@ public class SetLogService {
         if (position > MAX_SETS) throw ApiException.conflict("SET_LIMIT", "That exercise already has " + MAX_SETS + " sets.");
         UUID setId = id != null ? id : UUID.randomUUID();
         try {
-            sets.insertExtra(setId, sxId, position, lk, ek, req.loadValue(), req.effortValue(), req.rpe(), notes);
+            sets.insertExtra(setId, sxId, position, lk, ek, req.loadValue(), req.effortValue(), req.rpe(), notes, enteredBy);
         } catch (DuplicateKeyException e) {
             throw ApiException.idConflict();   // an id taken by a row this trainer cannot see
         }

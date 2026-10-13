@@ -36,7 +36,7 @@ public class AssessmentJdbcRepository {
             a.id::text AS id, a.client_id::text AS client_id, a.template_id::text AS template_id,
             a.schedule_id::text AS schedule_id, a.name, a.due_on, a.completed_at, a.entered_by,
             a.form::text AS form, a.readings::text AS readings, a.answers::text AS answers,
-            a.created_at, a.updated_at, (a.deleted_at IS NOT NULL) AS deleted""" + " ";
+            a.created_at, a.updated_at, (a.deleted_at IS NOT NULL) AS deleted, a.sent_at""" + " ";
 
     private static AssessmentRow row(ResultSet rs, int i) throws SQLException {
         Timestamp completed = rs.getTimestamp("completed_at");
@@ -47,7 +47,8 @@ public class AssessmentJdbcRepository {
                 completed == null ? null : completed.toInstant(), rs.getString("entered_by"),
                 rs.getString("form"), rs.getString("readings"), rs.getString("answers"),
                 rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
-                rs.getBoolean("deleted"));
+                rs.getBoolean("deleted"),
+                rs.getTimestamp("sent_at") == null ? null : rs.getTimestamp("sent_at").toInstant());
     }
 
     private static HashMap<String, Object> params(UUID trainerId, UUID id) {
@@ -55,6 +56,25 @@ public class AssessmentJdbcRepository {
         p.put("tid", trainerId.toString());
         p.put("id", id.toString());
         return p;
+    }
+
+    /** One of the CLIENT's assessments, visible to them only once sent; {@code lock} when a write is about to decide on what it sees. */
+    public Optional<AssessmentRow> findForClient(UUID clientId, UUID id, boolean lock) {
+        var p = new HashMap<String, Object>();
+        p.put("cid", clientId.toString());
+        p.put("id", id.toString());
+        return jdbc.query("SELECT " + COLUMNS + " FROM assessment a WHERE a.id = :id::uuid AND a.client_id = :cid::uuid AND a.sent_at IS NOT NULL AND a.deleted_at IS NULL"
+                + (lock ? " FOR UPDATE OF a" : ""), p, AssessmentJdbcRepository::row).stream().findFirst();
+    }
+
+    /**
+     * The client's write of an entry. A draft leaves {@code completed_at} and {@code entered_by} alone; a submit sets both, because the schema
+     * ties them (assessment_entered_by_on_completion). The column guard lets a client change exactly these four and nothing else.
+     */
+    public void saveClientEntry(UUID id, String readingsJson, String answersJson, boolean submit) {
+        jdbc.update("UPDATE assessment SET readings = CAST(:r AS jsonb), answers = CAST(:a AS jsonb)"
+                + (submit ? ", completed_at = now(), entered_by = 'client'" : "") + " WHERE id = :id::uuid",
+                java.util.Map.of("r", readingsJson, "a", answersJson, "id", id.toString()));
     }
 
     /** The trainer's live assessment, or empty. */
@@ -176,10 +196,25 @@ public class AssessmentJdbcRepository {
                 .stream().findFirst();
     }
 
+    /** {@code membership_status} of the trainer's live client — whether there is a portal to send to. */
+    public Optional<String> membership(UUID trainerId, UUID clientId) {
+        return jdbc.queryForList("""
+                SELECT membership_status FROM client
+                 WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL AND erased_at IS NULL""",
+                java.util.Map.of("cid", clientId.toString(), "tid", trainerId.toString()), String.class)
+                .stream().findFirst();
+    }
+
+    /** The one thing that makes an assessment visible to the client. Only ever set once. */
+    public void markSent(UUID id) {
+        jdbc.update("UPDATE assessment SET sent_at = now() WHERE id = :id::uuid AND sent_at IS NULL",
+                java.util.Map.of("id", id.toString()));
+    }
+
     public Optional<AssessmentDetail.ClientRef> clientRef(UUID clientId) {
-        return jdbc.query("SELECT id::text, name, status FROM client WHERE id = :cid::uuid",
+        return jdbc.query("SELECT id::text, name, status, membership_status IN ('accepted', 'paused') FROM client WHERE id = :cid::uuid",
                 java.util.Map.of("cid", clientId.toString()),
-                (rs, i) -> new AssessmentDetail.ClientRef(rs.getString(1), rs.getString(2), rs.getString(3)))
+                (rs, i) -> new AssessmentDetail.ClientRef(rs.getString(1), rs.getString(2), rs.getString(3), rs.getBoolean(4)))
                 .stream().findFirst();
     }
 

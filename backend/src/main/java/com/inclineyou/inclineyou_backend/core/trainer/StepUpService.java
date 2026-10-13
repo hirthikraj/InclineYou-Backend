@@ -101,6 +101,46 @@ public class StepUpService {
         }
     }
 
+    // ── a client's step-up ───────────────────────────────────────────────────────────────────────
+    //
+    // The same proof, keyed on the number the session is signed in with (a client's token subject is their phone), and for ONE purpose:
+    // closing the account. A changed number goes through the trainer, so a client's phone_change is a 400, not a second ladder.
+
+    private static void requireClientPurpose(String purpose) {
+        requirePurpose(purpose);
+        if (!ACCOUNT_DELETION.equals(purpose)) throw ApiException.validation("purpose: account_deletion");
+    }
+
+    public void sendToClient(String phone, String purpose) {
+        requireClientPurpose(purpose);
+        otpService.send(phone, OtpRequest.CHANGE_PHONE_OLD);
+    }
+
+    public StepUpTicketResponse verifyForClient(String phone, String purpose, String code, String rawToken) {
+        requireClientPurpose(purpose);
+        otpService.verify(phone, code);
+        String ticket = jwtService.generateStepUpTicket(phone, phone, purpose, binding(rawToken));
+        return new StepUpTicketResponse(ticket, jwtService.parse(ticket).getExpiration().getTime());
+    }
+
+    /** Is this ticket this client's, for this purpose, on this session, and unexpired? Returns normally or throws — the trainer's two refusals. */
+    public void requireForClient(String ticket, String purpose, String phone, String rawToken) {
+        if (ticket == null || ticket.isBlank()) throw AccountRuleException.stepUpRequired();
+        Claims claims;
+        try {
+            claims = jwtService.parse(ticket.strip());
+        } catch (ExpiredJwtException e) {
+            throw AccountRuleException.ticketExpired();
+        } catch (JwtException | IllegalArgumentException e) {
+            throw AccountRuleException.stepUpRequired();
+        }
+        boolean ours = JwtService.ROLE_STEP_UP.equals(jwtService.extractRole(claims))
+                && purpose.equals(claims.get(JwtService.PURPOSE_CLAIM, String.class))
+                && phone.equals(claims.getSubject())
+                && binding(rawToken).equals(claims.get(JwtService.SESSION_CLAIM, String.class));
+        if (!ours) throw AccountRuleException.stepUpRequired();
+    }
+
     /** What a ticket binds to: a hash of the bearer token the caller proved it with. */
     public static String binding(String rawToken) {
         return rawToken == null ? "-" : SessionTokenIssuer.hash(rawToken);

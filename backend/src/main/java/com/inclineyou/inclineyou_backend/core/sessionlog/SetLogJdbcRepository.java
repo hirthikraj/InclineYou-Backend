@@ -138,11 +138,12 @@ public class SetLogJdbcRepository {
 
     /** An extra set is always a logged one (the schema's set_log_done: only a planned row may be empty). */
     public void insertExtra(UUID id, UUID sxId, int position, String loadKind, String effortKind, BigDecimal load,
-                            BigDecimal effort, BigDecimal rpe, String notes) {
+                            BigDecimal effort, BigDecimal rpe, String notes, String enteredBy) {
         var p = new HashMap<String, Object>();
         p.put("id", id.toString());
         p.put("sx", sxId.toString());
         p.put("notes", notes);
+        p.put("by", enteredBy);
         p.put("pos", position);
         p.put("lk", loadKind);
         p.put("ek", effortKind);
@@ -151,8 +152,8 @@ public class SetLogJdbcRepository {
         p.put("r", rpe);
         jdbc.update("""
                 INSERT INTO set_log (id, session_exercise_id, position, planned, load_kind, effort_kind, load_value,
-                                     effort_value, rpe, notes, done_at)
-                VALUES (:id::uuid, :sx::uuid, :pos, false, :lk, :ek, :l, :e, :r, :notes, now())
+                                     effort_value, rpe, notes, done_at, entered_by)
+                VALUES (:id::uuid, :sx::uuid, :pos, false, :lk, :ek, :l, :e, :r, :notes, now(), :by)
                 """, p);
     }
 

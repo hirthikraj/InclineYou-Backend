@@ -42,6 +42,7 @@ import java.util.UUID;
 public class ClientStateService {
 
     private final ClientJdbcRepository clients;
+    private final ClientInviteJdbcRepository invites;
     private final ClientScheduleJdbcRepository sessions;
     private final ClientNoteJdbcRepository clientNotes;
     private final WorkspaceClock clock;
@@ -109,6 +110,8 @@ public class ClientStateService {
         if (client.archived()) return result(trainerId, clientId, effects);
 
         clients.archive(clientId, req.reason(), req.note());
+        // Archive is how a trainer ends a client's access (R98), so a link they were sent stops opening with it.
+        invites.revokePending(clientId, "trainer");
         effects.put("sessionsCancelled", sessions.cancelUpcoming(clientId, "client_archived", null, clock.zone()));
         // A pack with nothing owed closes; one still owed stays open, so Business keeps chasing it.
         var close = new ArrayList<String>();
@@ -179,6 +182,8 @@ public class ClientStateService {
         effects.put("notesDeleted", clientNotes.softDeleteAllForClient(clientId));
 
         clients.delete(clientId);
+        // Same reason as archive, and stronger: nobody should be able to open a link to a client who no longer exists.
+        invites.revokePending(clientId, "trainer");
         log.info("client deleted trainer={} client={} effects={}", trainerId, clientId, effects);
         return new StateResult(summary, effects);
     }

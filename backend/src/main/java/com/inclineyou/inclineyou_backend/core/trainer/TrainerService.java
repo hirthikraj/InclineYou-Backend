@@ -2,6 +2,7 @@ package com.inclineyou.inclineyou_backend.core.trainer;
 
 import com.inclineyou.inclineyou_backend.core.auth.AppUser;
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
+import com.inclineyou.inclineyou_backend.core.trainer.dto.ClientPortalSettings;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.GymPlaceInput;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.TrainerResponse;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.UpdateTrainerRequest;
@@ -177,6 +178,8 @@ public class TrainerService {
         // Flushed, not merely saved: the place read-back below is policied by the row this writes,
         // and the version is read from the database's own updated_at after it.
         TrainerBusiness savedBusiness = businessRepo.saveAndFlush(b);
+        // The portal's columns are not on the entity, so they are written by hand, after the flush and before the version is read.
+        sql.updatePortal(trainerId, req.sessionReminders(), req.reminderTiming(), req.clientsSeeMoney());
         return toResponse(saved, savedBusiness);
     }
 
@@ -381,8 +384,15 @@ public class TrainerService {
                 gymPlaces.find(b.getGymPlaceId()).orElse(null),
                 user.getPrivacyPolicyVersion(),
                 user.getPrivacyAcceptedAt() == null ? null : user.getPrivacyAcceptedAt().toEpochMilli(),
-                String.valueOf(sql.profileVersion(t.getId()))
+                String.valueOf(sql.profileVersion(t.getId())),
+                clientPortal(t.getId())
         );
+    }
+
+    private ClientPortalSettings clientPortal(UUID trainerId) {
+        var row = sql.portal(trainerId);
+        return new ClientPortalSettings(row.sessionReminders(), row.reminderTiming(), row.clientsSeeMoney(),
+                ClientPortalSettings.REMINDER_TEXT, sql.reminderReach(trainerId));
     }
 
     /** One of {@link #GENDERS}, compared case-insensitively and stored lower-case. */

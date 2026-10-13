@@ -22,7 +22,8 @@ public class AssessmentTemplateJdbcRepository {
 
     /** A template as the assessment and cycle writes copy it. Read whether deleted or not. */
     record Stored(UUID id, String name, String description, TemplateItem.Measurements measurements,
-                  TemplateItem.Questions questions, Instant createdAt, Instant updatedAt, boolean deleted) {
+                  TemplateItem.Questions questions, Instant createdAt, Instant updatedAt, boolean deleted,
+                  String systemKey, boolean clientCanStart) {
         String version() {
             return String.valueOf(updatedAt.toEpochMilli());
         }
@@ -30,14 +31,14 @@ public class AssessmentTemplateJdbcRepository {
 
     private static final String COLUMNS = """
             id::text AS id, name, description, measurements::text AS measurements, questions::text AS questions,
-            created_at, updated_at, (deleted_at IS NOT NULL) AS deleted""" + " ";
+            created_at, updated_at, (deleted_at IS NOT NULL) AS deleted, system_key, client_can_start""" + " ";
 
     private static Stored stored(java.sql.ResultSet rs, int i) throws java.sql.SQLException {
         return new Stored(UUID.fromString(rs.getString("id")), rs.getString("name"), rs.getString("description"),
                 AssessmentJson.read(rs.getString("measurements"), TemplateItem.Measurements.class),
                 AssessmentJson.read(rs.getString("questions"), TemplateItem.Questions.class),
                 rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
-                rs.getBoolean("deleted"));
+                rs.getBoolean("deleted"), rs.getString("system_key"), rs.getBoolean("client_can_start"));
     }
 
     /** A shelf is a handful of forms, so there is no cursor. Most recently edited first. */
@@ -82,6 +83,13 @@ public class AssessmentTemplateJdbcRepository {
                 .stream().findFirst();
     }
 
+    /** The trainer's live template of a product key — at most one, uq_assessment_template_system. */
+    public Optional<Stored> findSystem(UUID trainerId, String systemKey) {
+        return jdbc.query("SELECT " + COLUMNS + " FROM assessment_template WHERE trainer_id = :tid::uuid AND system_key = :key AND deleted_at IS NULL",
+                Map.of("tid", trainerId.toString(), "key", systemKey), AssessmentTemplateJdbcRepository::stored)
+                .stream().findFirst();
+    }
+
     /** Empty when nothing has the id; otherwise whether it is this trainer's live template. */
     public Optional<Boolean> isMine(UUID id, UUID trainerId) {
         return jdbc.queryForList("SELECT (trainer_id = :tid::uuid AND deleted_at IS NULL) FROM assessment_template WHERE id = :id::uuid",
@@ -101,7 +109,8 @@ public class AssessmentTemplateJdbcRepository {
     }
 
     /** False when the id was taken meanwhile; uq_assessment_template_name raises for a taken name. */
-    public boolean insert(UUID id, UUID trainerId, String name, String description, String measurementsJson, String questionsJson) {
+    public boolean insert(UUID id, UUID trainerId, String name, String description, String measurementsJson, String questionsJson,
+                          String systemKey, boolean clientCanStart) {
         var p = new HashMap<String, Object>();
         p.put("id", id.toString());
         p.put("tid", trainerId.toString());
@@ -109,14 +118,18 @@ public class AssessmentTemplateJdbcRepository {
         p.put("description", description);
         p.put("m", measurementsJson);
         p.put("q", questionsJson);
+        p.put("key", systemKey);
+        p.put("offer", clientCanStart);
         return jdbc.update("""
-                INSERT INTO assessment_template (id, trainer_id, name, description, measurements, questions)
-                VALUES (:id::uuid, :tid::uuid, :name, :description, CAST(:m AS jsonb), CAST(:q AS jsonb))
+                INSERT INTO assessment_template (id, trainer_id, name, description, measurements, questions, system_key, client_can_start)
+                VALUES (:id::uuid, :tid::uuid, :name, :description, CAST(:m AS jsonb), CAST(:q AS jsonb), :key, :offer)
                 ON CONFLICT (id) DO NOTHING""", p) > 0;
     }
 
-    public void update(UUID id, String name, String description, String measurementsJson, String questionsJson) {
+    /** {@code clientCanStart} null leaves the offer as it was: a whole-form PUT from before 1.2 must not switch it off. */
+    public void update(UUID id, String name, String description, String measurementsJson, String questionsJson, Boolean clientCanStart) {
         var p = new HashMap<String, Object>();
+        p.put("offer", clientCanStart);
         p.put("id", id.toString());
         p.put("name", name);
         p.put("description", description);
@@ -124,7 +137,8 @@ public class AssessmentTemplateJdbcRepository {
         p.put("q", questionsJson);
         jdbc.update("""
                 UPDATE assessment_template SET name = :name, description = :description,
-                       measurements = CAST(:m AS jsonb), questions = CAST(:q AS jsonb)
+                       measurements = CAST(:m AS jsonb), questions = CAST(:q AS jsonb),
+                       client_can_start = COALESCE(CAST(:offer AS boolean), client_can_start)
                  WHERE id = :id::uuid""", p);
     }
 

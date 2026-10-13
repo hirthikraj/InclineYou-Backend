@@ -48,7 +48,18 @@ public class OtpRequestLedger {
 
     @Transactional
     public void sent(UUID id) {
-        requests.markSent(id);
+        sent(id, null);
+    }
+
+    @Transactional
+    public void sent(UUID id, String providerMessageId) {
+        requests.markSent(id, providerMessageId);
+    }
+
+    /** What the status webhook learned; see {@link OtpRequestRepository#applyDelivery}. */
+    @Transactional
+    public int delivery(String providerMessageId, String status, String error) {
+        return requests.applyDelivery(providerMessageId, status, error);
     }
 
     @Transactional

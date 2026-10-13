@@ -57,7 +57,11 @@ public record UpdateTrainerRequest(
          * The gym picked from the place search. {@code gymName} alone stays free text and
          * unlinks; sending both is refused, because they disagree about who wins.
          */
-        Patch<GymPlaceInput> gymPlace
+        Patch<GymPlaceInput> gymPlace,
+        /* ---- v1.2 (tr-a10). Null leaves alone. The trainer's two decisions about the client portal. ---- */
+        Boolean sessionReminders,
+        @Pattern(regexp = "evening_before|two_hours_before", message = "evening_before or two_hours_before") String reminderTiming,
+        Boolean clientsSeeMoney
 ) {
     /**
      * The five capped fields are REFUSED over their cap (V33–V35), measured

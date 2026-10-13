@@ -25,9 +25,9 @@ public class ClientNoteJdbcRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
     /** A note locked for a write. */
-    public record LockedNote(String version, boolean deleted) {}
+    public record LockedNote(String version, boolean deleted, boolean shared) {}
 
-    private static final String COLUMNS = "id::text AS id, body, pinned, created_at, updated_at";
+    private static final String COLUMNS = "id::text AS id, body, pinned, created_at, updated_at, shared_with_client, shared_at";
 
     /** Pinned first, then newest, in one read of idx_client_note_list. */
     public List<Note> list(UUID trainerId, UUID clientId) {
@@ -50,15 +50,24 @@ public class ClientNoteJdbcRepository {
                 FROM client_note WHERE id = :id::uuid""", p, Boolean.class).stream().findFirst();
     }
 
-    /** False when the id was taken meanwhile. */
-    public boolean insert(UUID noteId, UUID trainerId, UUID clientId, String body, boolean pinned) {
+    /** The client's membership, which decides whether a note may be shared with them. Empty when not this trainer's client. */
+    public Optional<String> membership(UUID trainerId, UUID clientId) {
+        return jdbc.queryForList("""
+                SELECT membership_status FROM client
+                WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL AND erased_at IS NULL""",
+                params(trainerId, clientId), String.class).stream().findFirst();
+    }
+
+    /** False when the id was taken meanwhile. {@code shared} stamps {@code shared_at} with the same instant, as the table demands. */
+    public boolean insert(UUID noteId, UUID trainerId, UUID clientId, String body, boolean pinned, boolean shared) {
         var p = params(trainerId, clientId);
         p.put("id", noteId.toString());
         p.put("body", body);
         p.put("pinned", pinned);
+        p.put("shared", shared);
         return jdbc.update("""
-                INSERT INTO client_note (id, client_id, trainer_id, body, pinned)
-                VALUES (:id::uuid, :cid::uuid, :tid::uuid, :body, :pinned)
+                INSERT INTO client_note (id, client_id, trainer_id, body, pinned, shared_with_client, shared_at)
+                VALUES (:id::uuid, :cid::uuid, :tid::uuid, :body, :pinned, :shared, CASE WHEN :shared THEN now() END)
                 ON CONFLICT (id) DO NOTHING""", p) > 0;
     }
 
@@ -66,10 +75,10 @@ public class ClientNoteJdbcRepository {
         var p = params(trainerId, clientId);
         p.put("nid", noteId.toString());
         return jdbc.query("""
-                SELECT updated_at, deleted_at FROM client_note
+                SELECT updated_at, deleted_at, shared_with_client FROM client_note
                 WHERE id = :nid::uuid AND client_id = :cid::uuid AND trainer_id = :tid::uuid FOR UPDATE
                 """, p, (rs, i) -> new LockedNote(String.valueOf(rs.getTimestamp("updated_at").getTime()),
-                rs.getTimestamp("deleted_at") != null)).stream().findFirst();
+                rs.getTimestamp("deleted_at") != null, rs.getBoolean("shared_with_client"))).stream().findFirst();
     }
 
     /** Only the fields that were sent; the caller has refused an empty patch. */
@@ -79,6 +88,12 @@ public class ClientNoteJdbcRepository {
         var sets = new StringBuilder();
         if (req.body() != null) { p.put("body", req.body().value()); sets.append(", body = :body"); }
         if (req.pinned() != null) { p.put("pinned", req.pinned().value()); sets.append(", pinned = :pinned"); }
+        // Sharing and unsharing move the two columns together (client_note_shared). Re-sharing a note that is already shared
+        // keeps the date it was first shown: that is the date the client saw it, and nothing new happened.
+        if (req.sharedWithClient() != null) {
+            p.put("shared", req.sharedWithClient().value());
+            sets.append(", shared_with_client = :shared, shared_at = CASE WHEN :shared THEN COALESCE(shared_at, now()) END");
+        }
         jdbc.update("UPDATE client_note SET " + sets.substring(2) + " WHERE id = :nid::uuid", p);
     }
 
@@ -115,7 +130,9 @@ public class ClientNoteJdbcRepository {
 
     private static Note row(ResultSet rs, int i) throws SQLException {
         long updated = rs.getTimestamp("updated_at").getTime();
+        var sharedAt = rs.getTimestamp("shared_at");
         return new Note(rs.getString("id"), rs.getString("body"), rs.getBoolean("pinned"),
-                rs.getTimestamp("created_at").getTime(), updated, String.valueOf(updated));
+                rs.getTimestamp("created_at").getTime(), updated, String.valueOf(updated),
+                rs.getBoolean("shared_with_client"), sharedAt == null ? null : sharedAt.getTime());
     }
 }
