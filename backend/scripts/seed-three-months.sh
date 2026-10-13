@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Rebuilds one trainer's workspace as three months of working life on the v1 schema:
-# 16 clients, a diary with logged sets, a money book that obeys the ledger triggers,
-# a gym arrangement, assessments, nudges. See the header of seed-three-months.sql.
+# 14 clients, a diary with logged sets, a money book that obeys the ledger triggers,
+# a gym arrangement, assessments, nudges, and the client portal behind them. See the header of seed-three-months.sql.
 #
 # DESTRUCTIVE for the trainer you name: their clients, diary, money, programs and
 # price list are deleted first. The sign-in itself is kept. Development only.

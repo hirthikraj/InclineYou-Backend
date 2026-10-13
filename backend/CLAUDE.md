@@ -43,15 +43,17 @@ docker compose -f ../docker-compose.yml up -d   # Postgres 16 + Redis 7
 ./mvnw test                                     # full test suite
 ./mvnw test -Dtest=OtpServiceTest               # one class
 ./mvnw test -Dtest=TenantIsolationTest          # the RLS walls, as `inclineyou_app`
-./scripts/seed-three-months.sh <phone>          # v1 schema: 16 clients, 13 weeks of diary + logs + money — WIPES that trainer's workspace first
+./scripts/seed-three-months.sh <phone>          # v1 schema: 14 clients, 13 weeks of diary + logs + money + the client portal — WIPES that trainer's workspace first
 python3 scripts/refresh-schema-xml.py           # schema.xml + schema.html from the live db; --check to test
 ```
 
 `seed-three-months.sh` is the only seed, and the only one written for the v1 schema (the earlier
 seeds targeted the pre-v1 tables and were deleted 6 Oct 2026; they are in git history). It
-**wipes the named trainer's workspace** (clients, diary, money, programs, price list) and rebuilds
+**wipes the named trainer's workspace** (clients, diary, money, programs, price list, and the portal's invites, messages, bell, feedback and milestones, plus the `app_user` rows it made for clients) and rebuilds
 three months of it, dated relative to the day it runs. The phone must already exist — sign in once.
-It keeps the sign-in rows. Re-running gives the same diary.
+It keeps the trainer's own sign-in rows. Re-running gives the same diary and the same portal.
+
+The portal half (V11–V25): nine clients have accepted and can sign in as `role: client` (`+91988401010x` — the OTP is in the backend log), one of them paused and one who left, so both walls open; one invite link is live (printed at the end), one is declined. They have the trainer's recaps and weekly notes, a bell in every WhatsApp delivery state, how-it-felt feedback, milestones, shared notes, Sunday workouts they ran alone (`logged_by = 'client'`) and weekly / monthly assessments they took themselves, some waiting and some late.
 
 It builds a timetable with one person on the floor at a time — 06:00 · 07:15 · 08:30 · 09:45, then
 17:00 · 18:15 · 19:30 · 20:45 on a 75-minute pitch, inside a 06:00–11:00 / 17:00–22:00 split shift,

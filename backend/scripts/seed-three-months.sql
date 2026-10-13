@@ -1,24 +1,38 @@
--- Three months of one trainer's working life, on the v1 schema (V1–V8).
+-- Three months of one trainer's working life, on the v1 schema (V1–V26), with the client portal behind it.
 -- Run through seed-three-months.sh <trainer-phone>.
 --
 -- WHAT IT DOES TO THE TRAINER YOU NAME
 --   It HARD-DELETES everything the trainer's workspace holds — clients, diary, logs,
---   packages, payments, programs, assessments, nudges, price list, custom
---   exercises — and rebuilds it. The sign-in itself (app_user, trainer, tenant,
---   tenant_member, subscription) is kept, so you stay signed in. Development
---   only; never run it against production.
+--   packages, payments, programs, assessments, nudges, the portal's messages / bell /
+--   feedback / milestones / invites, price list, custom exercises, and the sign-in rows of
+--   the clients it seeded — and rebuilds it. The trainer's own sign-in (app_user, trainer,
+--   tenant, tenant_member, subscription) is kept, so you stay signed in. Development only;
+--   never run it against production.
 --
 -- WHAT IT BUILDS (dated relative to the day it runs, in the workspace's clock)
---   16 clients: 12 active (two of them gym clients), 1 paused, 1 archived,
---   1 prospect, and the two states a roster only shows when they exist — a client
---   who went quiet and one with money outstanding.
+--   14 clients: 11 active (two of them gym clients), 1 paused, 1 archived,
+--   1 prospect — and the states a roster only shows when they exist: a client who went
+--   quiet and one with money outstanding.
 --   13 weeks of diary behind today and 2 weeks ahead, on a timetable with one
 --   person on the floor at a time (asserted before COMMIT, not just claimed).
---   Programs, workouts and per-set logs; a money book that obeys V1–V8's ledger
---   triggers (every package is charged by package_adjustment, every payment is
---   capped by the package) including a pause, an extension, a bonus, a moved due
---   date, a write-off and a refund; a gym arrangement with payouts; assessments
---   on a 30-day cadence with readings that trend; nudges; notes.
+--   Programs, workouts and per-set logs; a money book that obeys the ledger triggers
+--   (every package is charged by package_adjustment, every payment is capped by the
+--   package) including a pause, an extension, a bonus, a moved due date, a write-off and a
+--   refund; a gym arrangement with payouts; assessments; nudges; notes.
+--
+-- THE CLIENT PORTAL (V11–V25) — every portal state a trainer can meet is on the roster:
+--   9 clients who accepted their invite and have a client sign-in (app_user role 'client',
+--   client_prefs, an accepted client_invite), one of them PAUSED (the paused wall), one who
+--   LEFT (the removed wall, farhan), one with a LIVE invite link that is printed at the end
+--   (arjun), one who declined (kavya), one never invited (nisha), one prospect (ritu).
+--   For the accepted clients: the trainer's recap / weekly / free notes, the bell (plan, note,
+--   session, pack, best, check-in, session reminders in every WhatsApp delivery state),
+--   how-it-felt feedback, session-count milestones, notes shared by the trainer, workouts a
+--   client did alone on a Sunday (logged_by = 'client' — not in the trainer's diary), and
+--   assessments the client took in the portal: a monthly body check and a weekly check-in,
+--   with some waiting, some late, and some returned for the trainer to read.
+--   Signing in as a client: the OTP is printed in the backend log (OTP_DELIVERY=log) —
+--   use any of the phones the summary lists.
 --
 -- Package sizes are fixed per client and consumption is measured, so which pack is
 -- "ending" or "empty" depends on the day this runs. The summary at the end prints
@@ -57,6 +71,20 @@ SELECT set_config('app.tenant_id', (SELECT ten::text FROM k), true),
 
 /* ── 1. wipe the workspace's books ───────────────────────────────────────── */
 
+-- The clients' sign-ins go with the clients they were made for. Found by phone BEFORE the client rows go.
+CREATE TEMP TABLE old_client_users ON COMMIT DROP AS
+SELECT u.id FROM app_user u
+WHERE u.role = 'client' AND u.phone IN (SELECT c.phone FROM client c WHERE c.tenant_id = (SELECT ten FROM k) AND c.phone IS NOT NULL);
+DELETE FROM web_session         WHERE app_user_id IN (SELECT id FROM old_client_users);
+DELETE FROM push_subscription   WHERE app_user_id IN (SELECT id FROM old_client_users);
+DELETE FROM tenant_member       WHERE app_user_id IN (SELECT id FROM old_client_users);
+
+DELETE FROM client_notification WHERE tenant_id = (SELECT ten FROM k);
+DELETE FROM client_message      WHERE tenant_id = (SELECT ten FROM k);
+DELETE FROM workout_feedback    WHERE tenant_id = (SELECT ten FROM k);
+DELETE FROM milestone           WHERE tenant_id = (SELECT ten FROM k);
+DELETE FROM client_prefs        WHERE tenant_id = (SELECT ten FROM k);
+DELETE FROM client_invite       WHERE tenant_id = (SELECT ten FROM k);
 DELETE FROM nudge_log           WHERE tenant_id = (SELECT ten FROM k);
 DELETE FROM attention_dismissal WHERE tenant_id = (SELECT ten FROM k);
 DELETE FROM package_adjustment  WHERE tenant_id = (SELECT ten FROM k);
@@ -78,6 +106,7 @@ DELETE FROM client_assignment   WHERE tenant_id = (SELECT ten FROM k);
 DELETE FROM client_schedule_slot WHERE tenant_id = (SELECT ten FROM k);
 DELETE FROM client_schedule     WHERE tenant_id = (SELECT ten FROM k);
 DELETE FROM client              WHERE tenant_id = (SELECT ten FROM k);
+DELETE FROM app_user            WHERE id IN (SELECT id FROM old_client_users);
 DELETE FROM trainer_exercise    WHERE tenant_id = (SELECT ten FROM k);
 DELETE FROM exercise            WHERE tenant_id = (SELECT ten FROM k);   -- custom ones; the library has no tenant
 DELETE FROM nudge_template      WHERE trainer_id = (SELECT tid FROM k);
@@ -206,29 +235,30 @@ FROM (VALUES
   ('meera',   'Meera Iyer',          '+919884010101', 'active',   'independent','floor',       60,  91, 180, 'barbell', 0.75, 'Deadlift bodyweight by December',                 '1992-03-14', 163.0, 'light',    'accepted',   NULL::text,       NULL::int, 14),
   ('vikram',  'Vikram Singh',        '+919884010102', 'active',   'independent','floor',       60,  91, 240, 'barbell', 1.30, 'Add 8 kg of muscle before the new year',           '1988-11-02', 178.0, 'moderate', 'accepted',   NULL,             NULL,      14),
   ('priya',   'Priya Nair',          '+919884010103', 'active',   'independent','floor',       60,  86,  86, 'db',      0.50, 'Lose 6 kg before the wedding',                    '1995-07-21', 160.0, 'sedentary','accepted',   NULL,             NULL,      14),
-  ('sneha',   'Sneha Kulkarni',      '+919884010104', 'active',   'gym',        'floor',       60,  60,  60, 'db',      0.50, 'Tone up and build a gym habit',                   '1997-01-30', 158.0, 'light',    'not_invited',NULL,             NULL,      14),
+  ('sneha',   'Sneha Kulkarni',      '+919884010104', 'active',   'gym',        'floor',       60,  60,  60, 'db',      0.50, 'Tone up and build a gym habit',                   '1997-01-30', 158.0, 'light',    'accepted',NULL,             NULL,      14),
   ('arjun',   'Arjun Reddy',         '+919884010105', 'active',   'independent','floor',       60,  33,  33, 'db',      0.90, 'Gain size, he is 62 kg at 176 cm',                '2001-05-09', 176.0, 'moderate', 'invited',    NULL,             NULL,      14),
-  ('karthik', 'Karthik Menon',       '+919884010106', 'active',   'independent','home_visit',  45,  91, 150, 'home',    0.80, 'Stay strong through a desk job and a bad back',   '1984-09-17', 172.0, 'sedentary','not_invited',NULL,             NULL,      14),
-  ('divya',   'Divya Menon',         '+919884010107', 'active',   'independent','remote',      45,  62,  62, 'home',    0.50, 'Mobility and core, travels for work',             '1990-12-05', 165.0, 'light',    'not_invited',NULL,             NULL,      14),
-  ('rohan',   'Rohan Das',           '+919884010108', 'active',   'independent','floor',       60,  76,  76, 'barbell', 1.00, 'Get back to lifting after a long layoff',         '1993-04-26', 174.0, 'moderate', 'not_invited',NULL,             NULL,     -22),
+  ('karthik', 'Karthik Menon',       '+919884010106', 'active',   'independent','home_visit',  45,  91, 150, 'home',    0.80, 'Stay strong through a desk job and a bad back',   '1984-09-17', 172.0, 'sedentary','accepted',NULL,             NULL,      14),
+  ('divya',   'Divya Menon',         '+919884010107', 'active',   'independent','remote',      45,  62,  62, 'home',    0.50, 'Mobility and core, travels for work',             '1990-12-05', 165.0, 'light',    'accepted',NULL,             NULL,      14),
+  ('rohan',   'Rohan Das',           '+919884010108', 'active',   'independent','floor',       60,  76,  76, 'barbell', 1.00, 'Get back to lifting after a long layoff',         '1993-04-26', 174.0, 'moderate', 'accepted',NULL,             NULL,     -22),
   ('kavya',   'Kavya Subramanian',   '+919884010109', 'active',   'independent','floor',       60,  91, 130, 'db',      0.55, 'Tone arms and legs, no bulk',                     '1996-08-11', 161.0, 'light',    'declined',   NULL,             NULL,      14),
-  ('suresh',  'Suresh Babu',         '+919884010110', 'active',   'independent','floor',       60,  55,  55, 'barbell', 1.10, 'Bench 100 kg',                                    '1986-02-19', 179.0, 'active',   'not_invited',NULL,             NULL,      14),
+  ('suresh',  'Suresh Babu',         '+919884010110', 'active',   'independent','floor',       60,  55,  55, 'barbell', 1.10, 'Bench 100 kg',                                    '1986-02-19', 179.0, 'active',   'accepted',NULL,             NULL,      14),
   ('nisha',   'Nisha Fernandes',     '+919884010111', 'active',   'gym',        'floor',       60,  45,  45, 'db',      0.55, 'Get fit after the baby',                          '1994-10-03', 164.0, 'light',    'not_invited',NULL,             NULL,      14),
-  ('imran',   'Imran Khan',          '+919884010112', 'active',   'independent','floor',       60,  70,  70, 'barbell', 0.90, 'Build a base for cricket season',                 '1999-06-28', 181.0, 'active',   'not_invited',NULL,             NULL,      14),
-  ('lakshmi', 'Lakshmi Narayanan',   '+919884010113', 'active',   'independent','home_visit',  45,  90,  90, 'home',    0.40, 'Knee rehab and balance, she is 58',               '1968-03-08', 156.0, 'sedentary','not_invited',NULL,             NULL,      14),
-  ('anjali',  'Anjali Rao',          '+919884010114', 'paused',   'independent','floor',       60,  85,  85, 'db',      0.50, 'Lose 8 kg',                                        '1991-05-15', 162.0, 'light',    'not_invited','client_paused', -22,       -7),
-  ('farhan',  'Farhan Ali',          '+919884010115', 'archived', 'independent','floor',       60,  78,  78, 'barbell', 0.95, 'Get stronger',                                     '1995-09-01', 175.0, 'moderate', 'not_invited','client_archived',-36,      -22),
+  ('anjali',  'Anjali Rao',          '+919884010114', 'paused',   'independent','floor',       60,  85,  85, 'db',      0.50, 'Lose 8 kg',                                        '1991-05-15', 162.0, 'light',    'accepted','client_paused', -22,       -7),
+  ('farhan',  'Farhan Ali',          '+919884010115', 'archived', 'independent','floor',       60,  78,  78, 'barbell', 0.95, 'Get stronger',                                     '1995-09-01', 175.0, 'moderate', 'removed','client_archived',-36,      -22),
   ('ritu',    'Ritu Sharma',         '+919884010116', 'prospect', 'independent','floor',       60,   3,   3, 'db',      0.50, 'Wants to start after Diwali',                     '1998-02-12', 159.0, 'sedentary','not_invited',NULL,             NULL,      14)
 ) v(key, name, phone, status, ctype, mode, minutes, begin, since, style, f, goal, dob, height, activity, mship, reason, stop, gen_to);
 
 INSERT INTO client (id, trainer_id, name, phone, status, client_type, metadata, goal, date_of_birth, height_cm,
-                    activity_level, membership_status, invited_at, accepted_at, declined_at,
-                    paused_at, paused_until, archived_at, archive_reason, archive_note, created_at)
+                    activity_level, membership_status, invited_at, accepted_at, accepted_policy_version, declined_at,
+                    removed_at, removed_by, paused_at, paused_until, archived_at, archive_reason, archive_note, created_at)
 SELECT r.id, k.tid, r.name, r.phone, r.status, r.ctype, '{"seed": "three_months"}'::jsonb, r.goal,
        r.dob::date, r.height, r.activity, r.mship,
        CASE WHEN r.mship <> 'not_invited' THEN pg_temp.ist(k.today - r.since + 1, '11:00') END,
-       CASE WHEN r.mship = 'accepted' THEN pg_temp.ist(k.today - r.since + 2, '19:30') END,
+       CASE WHEN r.mship IN ('accepted', 'removed') THEN pg_temp.ist(k.today - r.since + 2, '19:30') END,
+       CASE WHEN r.mship IN ('accepted', 'removed') THEN '2026-09' END,           -- the notice in force (app.privacy.policy-version)
        CASE WHEN r.mship = 'declined' THEN pg_temp.ist(k.today - r.since + 4, '12:00') END,
+       CASE WHEN r.mship = 'removed' THEN now() - interval '36 days' END,          -- Farhan left; the trainer archived him the day after
+       CASE WHEN r.mship = 'removed' THEN 'client' END,
        CASE WHEN r.status = 'paused' THEN now() - interval '21 days' END,
        CASE WHEN r.status = 'paused' THEN k.today + 9 END,
        CASE WHEN r.status = 'archived' THEN now() - interval '35 days' END,
@@ -252,9 +282,7 @@ FROM (VALUES
   ('kavya',   2, '06:00', 1),       ('kavya',   4, '06:00', 2), ('kavya',   6, '06:00', 3),
   ('suresh',  2, '07:15', 1),       ('suresh',  4, '07:15', 2), ('suresh',  6, '07:15', 3),
   ('nisha',   2, '08:30', 1),       ('nisha',   4, '08:30', 2), ('nisha',   6, '08:30', 3),
-  ('imran',   2, '09:45', 1),       ('imran',   6, '09:45', 2),
   ('divya',   2, '17:00', 1),       ('divya',   4, '17:00', 2),
-  ('lakshmi', 2, '18:15', 1),       ('lakshmi', 4, '18:15', 2),
   ('anjali',  2, '19:30', 1),       ('anjali',  4, '19:30', 2), ('anjali',  6, '19:30', 3),
   ('farhan',  2, '20:45', 1),       ('farhan',  4, '20:45', 2)
 ) v(key, weekday, t, day_no);
@@ -286,8 +314,6 @@ FROM r, k, (VALUES
   ('kavya',   'Does not want to get bulky — reassure, then explain why we are still lifting heavy.',                 true,  88),
   ('suresh',  'Travelling for work most of last month: extended the pack by two weeks.',                             false, 32),
   ('nisha',   'Eight months post-natal. Cleared by her doctor for strength work. No crunches, no planks yet.',       true,  43),
-  ('imran',   'Cricket nets on Wednesdays — keep Tuesday light on legs.',                                           true,  68),
-  ('lakshmi', 'Right knee replaced two years ago. Nothing past 90 degrees of knee flexion under load.',              true,  88),
   ('anjali',  'Paused for a family wedding and a trip home to Hyderabad. Back after the 15th.',                      true,  21),
   ('farhan',  'Left because of cost, not because of the coaching. Door is open.',                                    false, 35),
   ('ritu',    'Came in for a free assessment on a Saturday. Starting after Diwali, wants mornings.',                 true,   9)
@@ -361,8 +387,6 @@ FROM r JOIN (VALUES
   ('kavya',   'Toning plan',        12, 'db',      35, 'active',    NULL),
   ('suresh',  'Powerbuilding',      12, 'barbell', 55, 'active',    NULL),
   ('nisha',   'Gym starter',        10, 'db',      45, 'active',    'cert:Beginner full body'),
-  ('imran',   'Beginner 2-day',      6, 'db',      70, 'completed', NULL),
-  ('imran',   'Strength base 2-day', 8, 'barbell', 28, 'active',    NULL),
   ('anjali',  'Fat loss phase 1',   12, 'db',      85, 'paused',    NULL),
   ('farhan',  'Strength base',       8, 'barbell', 78, 'completed', NULL)
 ) v(key, name, weeks, style, start_off, status, copy) ON v.key = r.key;
@@ -435,7 +459,8 @@ SELECT gen_random_uuid() AS id, r.id AS client_id, r.key, sl.id AS slot_id, r.mo
        d::date AS day, pg_temp.ist(d::date, sl.t) AS at,
        pg_temp.h(r.key || d::date::text) AS h,        -- by key, not id: the same diary every run
        false AS opened,
-       NULL::text AS outcome, NULL::text AS cancel_reason, NULL::text AS note
+       NULL::text AS outcome, NULL::text AS cancel_reason, NULL::text AS note,
+       'trainer'::text AS logged_by
 FROM r
 JOIN sl ON sl.key = r.key
 CROSS JOIN k
@@ -465,21 +490,36 @@ UPDATE ses s SET outcome = 'no_show', cancel_reason = NULL                  -- K
 FROM (SELECT id FROM ses WHERE key = 'karthik' AND outcome = 'done' ORDER BY at DESC LIMIT 2) x
 WHERE s.id = x.id;
 
-UPDATE ses s SET outcome = 'scheduled'                                      -- Kavya's latest was never marked
-FROM (SELECT id FROM ses WHERE key = 'kavya' AND outcome = 'done' ORDER BY at DESC LIMIT 1) x
-WHERE s.id = x.id;
-
-UPDATE ses s SET outcome = 'scheduled', opened = true                       -- Suresh's latest is a log nobody finished
-FROM (SELECT id FROM ses WHERE key = 'suresh' AND outcome = 'done' ORDER BY at DESC LIMIT 1) x
-WHERE s.id = x.id;
+-- Every session that has already happened is settled (done, no-show or cancelled): nothing is left unmarked or half-logged,
+-- so Today's hero never shows a forgotten session as a running one.
 
 UPDATE ses SET note = (ARRAY['Left knee a little tight, kept depth shallow', 'Hit a rep PR on the main lift',
                              'Short on sleep — dropped the last set', 'Great energy today',
                              'Asked about protein; sent the cheat sheet', 'Shoulder niggle, swapped the press'])[1 + h % 6]
 WHERE outcome = 'done' AND h % 25 = 0;
 
+-- Workouts a client did ALONE, from the portal, on the trainer's day off: logged_by = 'client', no slot, no delivery
+-- mode, never charged to a pack, and not in the trainer's diary. They run the day their own plan names, on the program
+-- that was live that Sunday (a Sunday between blocks gets none).
+INSERT INTO ses (id, client_id, key, slot_id, mode, minutes, day_no, day, at, h, opened, outcome, cancel_reason, note, logged_by)
+SELECT gen_random_uuid(), r.id, r.key, NULL, NULL, 40 + pg_temp.h(r.key || d::date::text || 'len') % 15,
+       1 + pg_temp.h(r.key || d::date::text || 'day') % (SELECT count(*) FROM sl WHERE sl.key = r.key)::int,
+       d::date, pg_temp.ist(d::date, '07:30'), pg_temp.h(r.key || d::date::text || 'solo'), false, 'done', NULL,
+       CASE WHEN pg_temp.h(r.key || d::date::text || 'n') % 4 = 0 THEN 'Did this one at home, felt good' END, 'client'
+FROM r CROSS JOIN k
+JOIN LATERAL generate_series(k.today - least(r.begin, 63), k.today - 1, interval '1 day') d ON extract(isodow FROM d) = 7
+WHERE r.key IN ('meera', 'vikram', 'priya', 'divya', 'suresh', 'karthik')
+  AND pg_temp.h(r.key || d::date::text || 'solo') % 100 < 55;
+
+DELETE FROM ses s                                                    -- no live program that day: nothing to run
+WHERE s.logged_by = 'client' AND NOT EXISTS (
+  SELECT 1 FROM pg JOIN workout wk ON wk.program_id = pg.id
+  WHERE pg.client_id = s.client_id AND s.day BETWEEN pg.sd AND pg.ed
+    AND wk.week = least(pg.weeks, (s.day - pg.sd) / 7 + 1) AND wk.day = s.day_no);
+
 INSERT INTO scheduled_session (id, trainer_id, client_id, workout_id, slot_id, scheduled_at, duration_minutes,
-                               status, delivery_mode, cancel_reason, started_at, ended_at, notes, created_at)
+                               status, delivery_mode, cancel_reason, started_at, ended_at, notes, created_at,
+                               logged_by, paused_seconds)
 SELECT s.id, k.tid, s.client_id,
        (SELECT wk.id FROM workout wk JOIN pg ON pg.id = wk.program_id
         WHERE pg.client_id = s.client_id AND s.day BETWEEN pg.sd AND pg.ed
@@ -489,7 +529,9 @@ SELECT s.id, k.tid, s.client_id,
        CASE WHEN s.outcome = 'done' OR s.opened THEN s.at + interval '3 minutes' END,
        CASE WHEN s.outcome = 'done' THEN s.at + make_interval(mins => s.minutes - 3) END,
        s.note,
-       least(s.at, now()) - interval '9 days'
+       CASE WHEN s.logged_by = 'client' THEN s.at - interval '10 minutes' ELSE least(s.at, now()) - interval '9 days' END,
+       s.logged_by,
+       CASE WHEN s.logged_by = 'client' THEN s.h % 240 ELSE 0 END
 FROM ses s, k;
 
 /* ── 9. what was logged in the sessions ──────────────────────────────────── */
@@ -507,6 +549,7 @@ SELECT s.id, s.client_id, coalesce(sw.to_id, we.exercise_id), we.position, 'plan
 FROM scheduled_session s
 JOIN workout_exercise we ON we.workout_id = s.workout_id
 LEFT JOIN swp sw ON sw.from_id = we.exercise_id AND pg_temp.h(s.id::text || we.position::text) % sw.every = 0
+                 AND s.logged_by = 'trainer'
 WHERE s.started_at IS NOT NULL AND s.tenant_id = (SELECT ten FROM k);
 
 -- A movement the trainer added on the day.
@@ -514,7 +557,7 @@ INSERT INTO session_exercise (session_id, client_id, exercise_id, position, sour
 SELECT s.id, s.client_id, (SELECT id FROM ex WHERE key = 'plank'),
        (SELECT max(position) + 1 FROM session_exercise WHERE session_id = s.id), 'added'
 FROM scheduled_session s
-WHERE s.status = 'done' AND s.workout_id IS NOT NULL AND pg_temp.h(s.id::text || 'add') % 7 = 0
+WHERE s.status = 'done' AND s.logged_by = 'trainer' AND s.workout_id IS NOT NULL AND pg_temp.h(s.id::text || 'add') % 7 = 0
   AND s.tenant_id = (SELECT ten FROM k);
 
 -- Clients with no program (Lakshmi, and the days a block had lapsed): the trainer builds the session as it goes.
@@ -523,17 +566,17 @@ SELECT s.id, s.client_id, ex.id, v.pos, 'added'
 FROM scheduled_session s
 JOIN (VALUES (0, 'glute'), (1, 'stepup'), (2, 'deadbug'), (3, 'plank')) v(pos, key) ON true
 JOIN ex ON ex.key = v.key
-WHERE s.status = 'done' AND s.workout_id IS NULL AND s.tenant_id = (SELECT ten FROM k);
+WHERE s.status = 'done' AND s.logged_by = 'trainer' AND s.workout_id IS NULL AND s.tenant_id = (SELECT ten FROM k);
 
 UPDATE session_exercise se SET removed_at = s.started_at + interval '40 minutes'
 FROM scheduled_session s
 WHERE s.id = se.session_id AND se.source = 'planned' AND se.position = 5
-  AND s.status = 'done' AND pg_temp.h(se.id::text) % 40 = 0 AND s.tenant_id = (SELECT ten FROM k);
+  AND s.status = 'done' AND s.logged_by = 'trainer' AND pg_temp.h(se.id::text) % 40 = 0 AND s.tenant_id = (SELECT ten FROM k);
 
 -- Planned sets: the prescription copied, the actuals a little below or above it.
 INSERT INTO set_log (session_exercise_id, position, planned, load_kind, effort_kind,
                      target_load_value, target_effort_value, rest_seconds,
-                     load_value, effort_value, rpe, done_at)
+                     load_value, effort_value, rpe, done_at, entered_by)
 SELECT se.id, ws.position, true, ws.load_kind, ws.effort_kind, ws.load_value, ws.effort_value, ws.rest_seconds,
        CASE WHEN d.done AND ws.load_kind = 'weight' THEN
          greatest(2.5, round((ws.load_value * coalesce(sw.lf, 1)
@@ -542,7 +585,8 @@ SELECT se.id, ws.position, true, ws.load_kind, ws.effort_kind, ws.load_value, ws
          greatest(1, ws.effort_value - CASE WHEN ws.effort_kind = 'reps'
                                             THEN (x.h % 4 = 0)::int + (ws.position = 3 AND x.h % 2 = 0)::int ELSE 0 END) END,
        CASE WHEN d.done THEN least(9.5, 6 + 0.5 * (ws.position - 1) + 0.5 * (x.h % 3)) END,
-       CASE WHEN d.done THEN s.started_at + make_interval(mins => se.position * 8 + ws.position * 2) END
+       CASE WHEN d.done THEN s.started_at + make_interval(mins => se.position * 8 + ws.position * 2) END,
+       s.logged_by
 FROM session_exercise se
 JOIN scheduled_session s ON s.id = se.session_id
 JOIN workout_set ws ON ws.workout_exercise_id = se.planned_from
@@ -571,7 +615,7 @@ CREATE TEMP TABLE dn ON COMMIT DROP AS
 SELECT s.id, s.client_id, s.ended_at, s.scheduled_at,
        row_number() OVER (PARTITION BY s.client_id ORDER BY s.scheduled_at) AS rn
 FROM scheduled_session s
-WHERE s.status = 'done' AND s.tenant_id = (SELECT ten FROM k);
+WHERE s.status = 'done' AND s.logged_by = 'trainer' AND s.tenant_id = (SELECT ten FROM k);   -- a solo workout charges nothing
 
 -- Pack size sequence per client. A pack exists only once the client has reached it.
 CREATE TEMP TABLE pp ON COMMIT DROP AS
@@ -599,8 +643,6 @@ SELECT * FROM (VALUES
   ('suresh',  2, '12 sessions · floor',       'none',        3),
   ('nisha',   1, '12 sessions · Iron Temple', 'full',        NULL),
   ('nisha',   2, '12 sessions · Iron Temple', 'full',        NULL),
-  ('imran',   1, '12 sessions · floor',       'full',        NULL),
-  ('imran',   2, '12 sessions · floor',       'part:4500',   8),
   ('anjali',  1, '12 sessions · floor',       'full',        NULL),
   ('anjali',  2, '24 sessions · floor',       'full',        NULL),
   ('farhan',  1, '12 sessions · floor',       'full+refund', NULL)
@@ -625,9 +667,8 @@ UPDATE sp SET first_day = (SELECT (min(dn.scheduled_at) AT TIME ZONE 'Asia/Kolka
 CREATE TEMP TABLE pm ON COMMIT DROP AS
 SELECT gen_random_uuid() AS id, r.id AS client_id, v.key, pk.id AS pack_id, pk.name, pk.service, pk.amount,
        pk.validity_days, (SELECT today FROM k) - v.start_off AS start_date
-FROM (VALUES ('divya', 'Monthly · online', 62), ('divya', 'Monthly · online', 32), ('divya', 'Monthly · online', 2),
-             ('lakshmi', 'Monthly · home visits', 88), ('lakshmi', 'Monthly · home visits', 58),
-             ('lakshmi', 'Monthly · home visits', 28)) v(key, pack, start_off)
+FROM (VALUES ('divya', 'Monthly · online', 62), ('divya', 'Monthly · online', 32), ('divya', 'Monthly · online', 2)
+             ) v(key, pack, start_off)
 JOIN r ON r.key = v.key
 JOIN pack pk ON pk.name = v.pack AND pk.tenant_id = (SELECT ten FROM k) AND pk.deleted_at IS NULL;
 
@@ -752,9 +793,18 @@ FROM k, (VALUES
    '{"on": true, "items": [{"id": "q_progress", "text": "How would you rate your overall progress this block?", "kind": "rating", "scale": 10, "options": [], "allowMultiple": false, "allowCustom": false}, {"id": "q_consistency", "text": "How consistent were you with your training sessions?", "kind": "choice", "scale": null, "options": [{"id": "a", "text": "100% — hit every session"}, {"id": "b", "text": "75 to 99% — missed one or two"}, {"id": "c", "text": "50 to 74% — missed several"}, {"id": "d", "text": "Below 50% — struggled to show up"}], "allowMultiple": false, "allowCustom": false}, {"id": "q_blockers", "text": "What got in the way most often?", "kind": "choice", "scale": null, "options": [{"id": "a", "text": "Work"}, {"id": "b", "text": "Travel"}, {"id": "c", "text": "Illness"}, {"id": "d", "text": "Motivation"}, {"id": "e", "text": "Nothing, it was a clean block"}], "allowMultiple": true, "allowCustom": false}, {"id": "q_strongest", "text": "Which lift felt strongest this block?", "kind": "text", "scale": null, "options": [], "allowMultiple": false, "allowCustom": false}]}')
 ) v(id, name, descr, m, q);
 
+-- The product's own weekly check-in (system_key), offered to clients under "Start a new one" in the portal:
+-- weight, how the week felt out of five, one free line. The monthly body check is sent by its cycle, not started by a client.
+INSERT INTO assessment_template (trainer_id, name, description, measurements, questions, system_key, client_can_start, created_at)
+SELECT k.tid, 'Weekly check-in', 'A quick weekly word: weight, how the week felt, anything to tell me.',
+       '{"on": true, "keys": ["weight"]}'::jsonb,
+       '{"on": true, "items": [{"id": "q_energy", "text": "Energy this week", "kind": "rating", "scale": 5, "options": [], "allowMultiple": false, "allowCustom": false}, {"id": "q_note", "text": "Anything you want to tell me?", "kind": "text", "scale": null, "options": [], "allowMultiple": false, "allowCustom": false}]}'::jsonb,
+       'weekly_check_in', true, now() - interval '95 days'
+FROM k;
+
 -- Where each client''s body is now, and how fast it is moving (kg or cm per thirty days; negative is gaining).
 CREATE TEMP TABLE ap ON COMMIT DROP AS
-SELECT r.id AS client_id, v.*, r.begin
+SELECT r.id AS client_id, r.mship, v.*, r.begin
 FROM r JOIN (VALUES
   --  key       next  weight  wl    fat   fl   waist wal  hip   chest arm
   ('meera',    3,   62.4,   0.4,  27.5, 0.5, 76.0, 1.0,  98.0,  90.0, 27.5),
@@ -778,12 +828,17 @@ WHERE n = 0 OR ((SELECT today FROM k) + ap.next_off - 30 * n <= (SELECT today FR
                 AND (SELECT today FROM k) - ((SELECT today FROM k) + ap.next_off - 30 * n) < ap.begin);
 
 INSERT INTO assessment (client_id, trainer_id, template_id, schedule_id, name, form, due_on,
-                        completed_at, entered_by, readings, answers, created_at)
+                        sent_at, completed_at, read_at, entered_by, readings, answers, created_at)
 SELECT aa.client_id, k.tid, t.id, sc.id, 'Monthly body check',
        '{"measurements": [{"key": "weight", "label": "Body weight", "group": "Body composition", "unit": "kg"}, {"key": "body_fat", "label": "Body fat", "group": "Body composition", "unit": "%"}, {"key": "waist", "label": "Waist, at the navel", "group": "Girths", "unit": "cm"}, {"key": "hip", "label": "Hips, at the widest", "group": "Girths", "unit": "cm"}, {"key": "chest", "label": "Chest, at the nipple", "group": "Girths", "unit": "cm"}, {"key": "arm", "label": "Upper arm, right", "group": "Girths", "unit": "cm"}], "questions": [{"id": "q_pain", "text": "Did anything hurt or feel off while training?", "kind": "yesno", "scale": null, "options": [], "allowMultiple": false, "allowCustom": false}]}'::jsonb,
        aa.due,
-       CASE WHEN aa.n > 0 THEN pg_temp.ist(aa.due, '08:15') END,
-       CASE WHEN aa.n > 0 THEN 'trainer' END,
+       -- A client on the portal is SENT the assessment on its due day (the cycle's send_to_client); every second one comes back
+       -- from the client, the rest were taken by the trainer in the session. The open one waits when its day has come.
+       CASE WHEN aa.mship = 'accepted' AND aa.due <= k.today AND (aa.n = 0 OR aa.n % 2 = 1) THEN pg_temp.ist(aa.due, '08:00') END,
+       CASE WHEN aa.n > 0 AND aa.mship = 'accepted' AND aa.n % 2 = 1 THEN pg_temp.ist(aa.due + 1, '19:40')
+            WHEN aa.n > 0 THEN pg_temp.ist(aa.due, '08:15') END,
+       CASE WHEN aa.n > 1 AND aa.mship = 'accepted' AND aa.n % 2 = 1 THEN pg_temp.ist(aa.due + 2, '09:00') END,   -- the trainer has read it
+       CASE WHEN aa.n > 0 THEN CASE WHEN aa.mship = 'accepted' AND aa.n % 2 = 1 THEN 'client' ELSE 'trainer' END END,
        CASE WHEN aa.n > 0 THEN jsonb_build_object(
          'weight',   round(aa.w + aa.wl * (k.today - aa.due) / 30.0, 1),
          'body_fat', round(aa.fat + aa.fl * (k.today - aa.due) / 30.0, 1),
@@ -845,7 +900,6 @@ FROM r, k, (VALUES
   ('sneha',   'manual',      'check_in',         'Hi Sneha, how are you finding the new split? Tell me if anything feels off.', 20),
   ('kavya',   'manual',      'check_in',         'Hi Kavya, wanted to check in on the shoulder — better?', 58),
   ('vikram',  'session',     'well_done',        'Vikram, 80 kg for sets of five on the bench. That is a new best.', 44),
-  ('imran',   'dues',        'payment_reminder', 'Hi Imran, ₹4,500 remains on your pack, due in about a week. UPI to inclineyou.demo@okicici. Thanks!', 2),
   ('arjun',   'session',     'session_reminder', 'Hi Arjun, tomorrow 5 pm. Bring a banana and your water bottle.', 4),
   ('divya',   'session',     'session_summary',  'Divya, today: goblet squat 4×12, push-ups 3×10, dead bug 3×10. Eat well, send me the form video tonight.', 6),
   ('anjali',  'manual',      'check_in',         'Hi Anjali, safe travels! Message me the day you are back and we will restart gently.', 20)
@@ -855,6 +909,314 @@ WHERE r.key = v.key;
 INSERT INTO attention_dismissal (trainer_id, client_id, kind, band, snoozed_until)
 SELECT k.tid, r.id, 'quiet', 'quiet', now() + interval '5 days'
 FROM r, k WHERE r.key = 'anjali';
+
+/* ── 12b. the weekly check-in cycles ─────────────────────────────────────── */
+
+-- Two clients on a seven-day cycle, taking it in the portal: Divya's came due this morning and is waiting; Karthik's is
+-- three days late. The rest of the weeks came back from the client; the trainer has read all but the latest.
+INSERT INTO assessment_schedule (client_id, trainer_id, template_id, interval_days, next_due_on, send_to_client)
+SELECT r.id, k.tid, t.id, 7, k.today + v.off, true
+FROM k
+JOIN assessment_template t ON t.system_key = 'weekly_check_in' AND t.tenant_id = k.ten
+CROSS JOIN (VALUES ('divya', 0), ('karthik', -3)) v(key, off)
+JOIN r ON r.key = v.key;
+
+CREATE TEMP TABLE wk ON COMMIT DROP AS
+SELECT r.id AS client_id, r.key, sc.id AS schedule_id, sc.template_id, n, sc.next_due_on - 7 * n AS due,
+       CASE r.key WHEN 'divya' THEN 61.8 ELSE 79.9 END AS w0
+FROM r
+JOIN assessment_schedule sc ON sc.client_id = r.id
+JOIN assessment_template t ON t.id = sc.template_id AND t.system_key = 'weekly_check_in'
+CROSS JOIN k
+CROSS JOIN generate_series(0, 12) n
+WHERE n = 0 OR (sc.next_due_on - 7 * n <= k.today AND k.today - (sc.next_due_on - 7 * n) < r.begin - 3);
+
+INSERT INTO assessment (client_id, trainer_id, template_id, schedule_id, name, form, due_on,
+                        sent_at, completed_at, read_at, entered_by, readings, answers, created_at)
+SELECT wk.client_id, k.tid, wk.template_id, wk.schedule_id, 'Weekly check-in',
+       '{"measurements": [{"key": "weight", "label": "Body weight", "group": "Body composition", "unit": "kg"}], "questions": [{"id": "q_energy", "text": "Energy this week", "kind": "rating", "scale": 5, "options": [], "allowMultiple": false, "allowCustom": false}, {"id": "q_note", "text": "Anything you want to tell me?", "kind": "text", "scale": null, "options": [], "allowMultiple": false, "allowCustom": false}]}'::jsonb,
+       wk.due,
+       least(pg_temp.ist(wk.due, '07:00'), now() - interval '1 minute'),
+       CASE WHEN wk.n > 0 THEN pg_temp.ist(wk.due, '07:00') + make_interval(hours => 3 + pg_temp.h(wk.key || wk.n::text) % 30) END,
+       CASE WHEN wk.n > 1 THEN pg_temp.ist(wk.due + 2, '08:30') END,
+       CASE WHEN wk.n > 0 THEN 'client' END,
+       CASE WHEN wk.n > 0 THEN jsonb_build_object('weight', round(wk.w0 + 0.12 * wk.n + (pg_temp.h(wk.key || wk.n::text || 'w') % 5 - 2) * 0.1, 1))
+            ELSE '{}'::jsonb END,
+       CASE WHEN wk.n > 0 THEN jsonb_build_object(
+              'q_energy', jsonb_build_object('rating', CASE WHEN pg_temp.h(wk.key || wk.n::text || 'e') % 9 = 0 THEN 2 ELSE 3 + pg_temp.h(wk.key || wk.n::text || 'e') % 3 END),
+              'q_note',   jsonb_build_object('text', (ARRAY['Good week, slept well.', 'Travel made Wednesday hard but I got the rest done.',
+                                                            'Back felt fine all week.', 'Busy at work, trained twice instead of three times.',
+                                                            'Felt stronger on the lifts than last week.', 'Nothing to report.'])[1 + pg_temp.h(wk.key || wk.n::text || 'q') % 6]))
+            ELSE '{}'::jsonb END,
+       pg_temp.ist(wk.due - 7, '10:00')
+FROM wk CROSS JOIN k;
+
+/* ── 12c. the client portal ──────────────────────────────────────────────── */
+
+-- The trainer's own switches for what clients see: session reminders on, evening before, money visible.
+UPDATE trainer SET session_reminders = true, reminder_timing = 'evening_before', clients_see_money = true
+WHERE id = (SELECT tid FROM k);
+
+-- The accounts. accept_client_invite() makes exactly this: an app_user with role 'client' and the notice's version.
+-- Farhan has one too: he accepted, then left, so he opens the "removed" wall and nothing behind it.
+INSERT INTO app_user (phone, role, privacy_accepted_at, privacy_policy_version, created_at)
+SELECT c.phone, 'client', c.accepted_at, c.accepted_policy_version, c.accepted_at
+FROM client c JOIN r ON r.id = c.id
+WHERE c.membership_status IN ('accepted', 'removed');
+
+-- Arjun's link is live: sent three days ago, good for fourteen. Only the token's SHA-256 is stored, so the raw token is
+-- derived from a fixed phrase and printed at the end — the one place a seed can show a working link.
+UPDATE client SET invited_at = now() - interval '3 days' WHERE id = (SELECT id FROM r WHERE key = 'arjun');
+
+CREATE TEMP TABLE link ON COMMIT DROP AS
+SELECT rtrim(translate(encode(sha256(convert_to('inclineyou-seed-invite-arjun', 'UTF8')), 'base64'), '+/', '-_'), '=') AS token;
+
+INSERT INTO client_invite (trainer_id, client_id, phone, token_hash, status, expires_at, decline_reason, policy_version,
+                           accepted_at, declined_at, created_at, updated_at)
+SELECT k.tid, c.id, c.phone,
+       CASE WHEN r.key = 'arjun' THEN encode(sha256(convert_to((SELECT token FROM link), 'UTF8')), 'hex')
+            ELSE encode(sha256(convert_to('inclineyou-seed-used-' || r.key, 'UTF8')), 'hex') END,
+       CASE c.membership_status WHEN 'invited' THEN 'pending' WHEN 'declined' THEN 'declined' ELSE 'accepted' END,
+       c.invited_at + interval '14 days',
+       CASE WHEN c.membership_status = 'declined' THEN 'not_for_me' END,
+       CASE WHEN c.membership_status IN ('accepted', 'removed') THEN c.accepted_policy_version END,
+       CASE WHEN c.membership_status IN ('accepted', 'removed') THEN c.accepted_at END,
+       CASE WHEN c.membership_status = 'declined' THEN c.declined_at END,
+       c.invited_at, coalesce(c.accepted_at, c.declined_at, c.invited_at)
+FROM client c JOIN r ON r.id = c.id CROSS JOIN k
+WHERE c.membership_status IN ('invited', 'accepted', 'declined', 'removed');
+
+-- The client's own settings. A client with no row has every switch on, so only people who changed something need one — but
+-- every accepted client gets a row, because accept_client_invite() writes one.
+INSERT INTO client_prefs (client_id, hide_weight, notify_session_reminder, notify_personal_best, auto_rest_timer,
+                          channel_whatsapp, channel_push, whatsapp_opt_in_at, nominee_name, nominee_phone)
+SELECT r.id, v.hide, v.rem, v.pb, v.rest, v.wa, v.push,
+       CASE WHEN v.opt THEN c.accepted_at + interval '4 minutes' END, v.nn, v.np
+FROM (VALUES
+  --  key       hide_weight  reminders  best   rest   whatsapp  push   opt-in  nominee
+  ('meera',   false, true,  true,  true,  true,  true,  true,  NULL::text,   NULL::text),
+  ('vikram',  false, true,  false, false, true,  true,  true,  NULL,          NULL),
+  ('priya',   true,  true,  true,  true,  true,  true,  true,  'Lata Nair',   '+919884020103'),   -- hides her weight: the wedding
+  ('sneha',   false, true,  true,  true,  true,  false, true,  NULL,          NULL),
+  ('karthik', false, true,  true,  true,  true,  true,  false, NULL,          NULL),               -- excluded from reminders below
+  ('divya',   false, true,  true,  false, true,  true,  true,  NULL,          NULL),
+  ('rohan',   false, true,  true,  false, false, false, false, NULL,          NULL),               -- everything off: gone quiet
+  ('suresh',  false, true,  true,  true,  true,  true,  false, 'Geetha Babu', '+919884020110'),   -- never opted in to WhatsApp
+  ('anjali',  false, true,  true,  true,  true,  true,  true,  NULL,          NULL),
+  ('farhan',  false, true,  true,  true,  true,  true,  false, NULL,          NULL)
+) v(key, hide, rem, pb, rest, wa, push, opt, nn, np)
+JOIN r ON r.key = v.key
+JOIN client c ON c.id = r.id;
+
+-- When each of them last opened the portal (the lead measure), who the trainer left out of reminders, and the one client
+-- whose money the trainer hides regardless of the workspace switch.
+UPDATE client c SET last_portal_seen_at = now() - make_interval(hours => v.hrs), reminders_excluded = v.excl, portal_show_money = v.pm
+FROM (VALUES
+  ('meera',    2, false, NULL::boolean), ('vikram',  20, false, NULL), ('priya',    5, false, false),
+  ('sneha',  140, false, NULL),         ('karthik', 70, true,  NULL), ('divya',    9, false, NULL),
+  ('rohan',  980, false, NULL),         ('suresh',  48, false, NULL), ('anjali',  550, false, NULL)
+) v(key, hrs, excl, pm)
+JOIN r ON r.key = v.key
+WHERE c.id = r.id;
+
+-- Notes the trainer chose to show the client. Private is the default, and most notes here are exactly that.
+UPDATE client_note n SET shared_with_client = true, shared_at = n.created_at + interval '1 hour'
+FROM r
+WHERE n.client_id = r.id AND (
+     (r.key = 'meera'   AND n.body LIKE 'Wants a deadlift%')
+  OR (r.key = 'priya'   AND n.body LIKE 'Wedding on the 14th%')
+  OR (r.key = 'sneha'   AND n.body LIKE 'Gym membership%')
+  OR (r.key = 'divya'   AND n.body LIKE 'Online only%')
+  OR (r.key = 'karthik' AND n.body LIKE 'Back tightens%'));
+
+-- Everyone with a live portal row, with the switches the bell honours (mint_client_notification() reads the same ones).
+CREATE TEMP TABLE pc ON COMMIT DROP AS
+SELECT r.id AS client_id, r.key, r.status AS cstatus, split_part(r.name, ' ', 1) AS first,
+       coalesce(p.notify_program_updated, true) AS n_plan, coalesce(p.notify_session_reminder, true) AS n_session,
+       coalesce(p.notify_trainer_note, true) AS n_note,    coalesce(p.notify_personal_best, true)   AS n_best,
+       coalesce(p.notify_pack_changed, true) AS n_pack,    coalesce(p.notify_checkin, true)         AS n_checkin,
+       coalesce(p.channel_whatsapp, true) AS wa, p.whatsapp_opt_in_at IS NOT NULL AS opted, c.reminders_excluded AS excl,
+       coalesce(c.portal_show_money, t.clients_see_money) AS money
+FROM r
+JOIN client c ON c.id = r.id
+JOIN trainer t ON t.id = c.trainer_id
+LEFT JOIN client_prefs p ON p.client_id = r.id
+WHERE c.membership_status = 'accepted';
+
+CREATE TEMP TABLE tr ON COMMIT DROP AS
+SELECT split_part(t.name, ' ', 1) AS first FROM trainer t JOIN k ON k.tid = t.id;
+
+/* messages from the trainer: a recap after some sessions, the weekly word, and a free note */
+
+INSERT INTO client_message (trainer_id, client_id, session_id, body, kind, at, read_at, created_at)
+SELECT k.tid, s.client_id, s.id,
+       'Well done, ' || pc.first || '. ' || (ARRAY['Strong session — every set landed. Eat well and sleep early tonight.',
+         'Loads moved up on the main lift. Keep the same next time, and add a rep if it feels easy.',
+         'A tough one, and you stayed with it. Rest tomorrow; walk if you can.',
+         'Form on the second lift was much better than last week. Remember to brace before you lift.',
+         'Short on time today but the main work got done. Stretch tonight.',
+         'Sore the day after is normal — drink water and keep moving gently.'])[1 + pg_temp.h(pc.key || s.scheduled_at::text || 'recap') % 6],
+       'recap', least(s.ended_at + interval '35 minutes', now()),
+       CASE WHEN s.ended_at < now() - interval '2 days' THEN s.ended_at + interval '3 hours' END,
+       least(s.ended_at + interval '35 minutes', now())
+FROM scheduled_session s
+JOIN pc ON pc.client_id = s.client_id
+CROSS JOIN k
+WHERE s.status = 'done' AND s.logged_by = 'trainer' AND s.tenant_id = k.ten AND s.deleted_at IS NULL
+  AND (pg_temp.h(pc.key || s.scheduled_at::text || 'recap') % 7 = 0
+       OR s.id = (SELECT l.id FROM scheduled_session l WHERE l.client_id = s.client_id AND l.status = 'done' AND l.logged_by = 'trainer'
+                  ORDER BY l.scheduled_at DESC LIMIT 1));
+
+-- The weekly word, on Sunday evening, for the last three weeks: what they did, and one line for the week ahead.
+INSERT INTO client_message (trainer_id, client_id, body, kind, at, read_at, created_at)
+SELECT k.tid, pc.client_id,
+       'Week of ' || to_char(w.mon, 'FMDD Mon') || ': you trained ' || c.cnt || CASE WHEN c.cnt = 1 THEN ' time. ' ELSE ' times. ' END ||
+       (ARRAY['Keep the same rhythm next week.', 'Next week we push the main lift a little.',
+              'Protein and sleep are the two things to protect this week.'])[1 + pg_temp.h(pc.key || w.mon::text) % 3],
+       'weekly', pg_temp.ist(w.mon + 6, '19:00'),
+       CASE WHEN w.mon + 6 < k.today - 2 THEN pg_temp.ist(w.mon + 6, '21:30') END,
+       pg_temp.ist(w.mon + 6, '19:00')
+FROM pc
+CROSS JOIN k
+CROSS JOIN LATERAL (SELECT date_trunc('week', (k.today - 7 * g)::timestamp)::date AS mon FROM generate_series(1, 3) g) w
+CROSS JOIN LATERAL (SELECT count(*) AS cnt FROM scheduled_session s
+                    WHERE s.client_id = pc.client_id AND s.status = 'done' AND s.logged_by = 'trainer'
+                      AND (s.scheduled_at AT TIME ZONE 'Asia/Kolkata')::date >= w.mon
+                      AND (s.scheduled_at AT TIME ZONE 'Asia/Kolkata')::date < w.mon + 7) c
+WHERE pc.cstatus = 'active' AND pc.key <> 'rohan' AND c.cnt > 0;
+
+-- A free note, in the trainer's own words. Rohan's has not been opened: he has not opened anything in forty days.
+INSERT INTO client_message (trainer_id, client_id, body, kind, at, read_at, created_at)
+SELECT k.tid, r.id, v.body, 'note', pg_temp.ist(k.today - v.ago, '18:30'),
+       CASE WHEN v.seen THEN pg_temp.ist(k.today - v.ago, '21:00') END, pg_temp.ist(k.today - v.ago, '18:30')
+FROM k, (VALUES
+  ('meera',   9, true,  'Pulled 62.5 for five on Friday. Two more sessions like that and we test a heavier single — proud of you.'),
+  ('vikram', 16, true,  'New block starts Monday: more volume, same lifts. Eat a little more on training days.'),
+  ('priya',   2, false, 'The photographer wants shoulders and back, so I have added two accessories to your upper day. Please keep your water up this week.'),
+  ('sneha',  21, true,  'If you can, take the Tuesday slot — the floor is quieter and we can use the cables freely.'),
+  ('karthik', 4, true,  'No stress about this week. If the back is stiff, do the hinge drill and the dead bug from your plan and message me.'),
+  ('divya',  12, true,  'Great form videos this month. Send me the first set of your squats tonight and I will reply before breakfast.'),
+  ('rohan',  12, false, 'Hi Rohan, whenever you are ready we restart light — no pressure and nothing to explain. Your pack is still here.'),
+  ('suresh',  3, false, 'Bench is moving: 95 for a clean single is closer than you think. Sleep and protein this week.'),
+  ('anjali', 22, true,  'Safe travels, and enjoy the wedding. Walk every day and message me the day you are back.')
+) v(key, ago, seen, body)
+JOIN r ON r.key = v.key;
+
+/* how the sessions felt, in the client's own words — and what they did alone */
+
+INSERT INTO workout_feedback (session_id, client_id, effort, note, at, created_at)
+SELECT s.id, s.client_id,
+       CASE WHEN x.e < 22 THEN 'easy' WHEN x.e < 78 THEN 'right' ELSE 'hard' END,
+       CASE WHEN x.n % 4 = 0 THEN (ARRAY['Legs felt heavy today', 'Loved the finisher', 'Left shoulder a bit tight on pressing',
+                                         'Felt strong — could have gone heavier', 'Slept badly, still got through it',
+                                         'Good session, thanks'])[1 + x.n % 6] END,
+       least(s.ended_at + interval '12 minutes', now()), least(s.ended_at + interval '12 minutes', now())
+FROM scheduled_session s
+JOIN pc ON pc.client_id = s.client_id
+CROSS JOIN LATERAL (SELECT pg_temp.h(pc.key || s.scheduled_at::text || 'eff') % 100 AS e, pg_temp.h(pc.key || s.scheduled_at::text || 'fb') AS n) x
+WHERE s.status = 'done' AND s.ended_at IS NOT NULL AND s.tenant_id = (SELECT ten FROM k) AND s.deleted_at IS NULL
+  AND (s.logged_by = 'client' OR x.n % 100 < 40);
+
+-- The moments finishing a session leaves behind: the 1st, 10th, 25th and 50th, fired once, on the day.
+INSERT INTO milestone (client_id, kind, label, value, at, created_at)
+SELECT dn.client_id, 'sessions_' || dn.rn,
+       CASE WHEN dn.rn = 1 THEN 'Your first session'
+            ELSE dn.rn || CASE WHEN dn.rn % 10 = 1 AND dn.rn <> 11 THEN 'st' WHEN dn.rn % 10 = 2 AND dn.rn <> 12 THEN 'nd'
+                               WHEN dn.rn % 10 = 3 AND dn.rn <> 13 THEN 'rd' ELSE 'th' END || ' session' END,
+       dn.rn, dn.ended_at, dn.ended_at
+FROM dn JOIN pc ON pc.client_id = dn.client_id
+WHERE dn.rn IN (1, 10, 25, 50);
+
+/* the bell — what mint_client_notification() would have written, by kind */
+
+-- plan: a program the trainer built for them
+INSERT INTO client_notification (client_id, kind, text, at, read_at, created_at)
+SELECT pc.client_id, 'plan', 'Your program was updated: ' || pg.name, pg_temp.ist(pg.sd - 1, '18:00'),
+       pg_temp.ist(pg.sd - 1, '21:00'), pg_temp.ist(pg.sd - 1, '18:00')
+FROM pc JOIN pg ON pg.client_id = pc.client_id
+WHERE pc.n_plan;
+
+-- note: a free note from the trainer
+INSERT INTO client_notification (client_id, kind, text, at, read_at, created_at)
+SELECT m.client_id, 'note', left('A note from ' || tr.first || ': ' || m.body, 160), m.at, m.read_at, m.at
+FROM client_message m JOIN pc ON pc.client_id = m.client_id CROSS JOIN tr
+WHERE m.kind = 'note' AND pc.n_note;
+
+-- session: one the trainer cancelled (away for three days) — the client is told on the day it was cancelled
+INSERT INTO client_notification (client_id, kind, text, session_id, subject_at, at, read_at, created_at)
+SELECT s.client_id, 'session',
+       'Your session on ' || to_char(s.scheduled_at AT TIME ZONE 'Asia/Kolkata', 'FMDay, FMDD Mon') || ' is cancelled — ' || tr.first || ' is away.',
+       s.id, s.scheduled_at, s.scheduled_at - interval '3 days', s.scheduled_at - interval '3 days' + interval '2 hours',
+       s.scheduled_at - interval '3 days'
+FROM scheduled_session s JOIN pc ON pc.client_id = s.client_id CROSS JOIN tr
+WHERE s.status = 'cancelled' AND s.cancel_reason = 'trainer' AND s.logged_by = 'trainer' AND pc.n_session
+  AND s.tenant_id = (SELECT ten FROM k);
+
+-- pack: a payment the trainer recorded (only for clients who may see money, and only what the trainer collected) …
+INSERT INTO client_notification (client_id, kind, text, amount, subject_at, at, read_at, created_at)
+SELECT p.client_id, 'pack', 'Payment of ₹' || to_char(p.amount, 'FM999,999,990') || ' received. Thank you!', p.amount, p.paid_at, p.paid_at,
+       CASE WHEN p.paid_at < now() - interval '3 days' THEN p.paid_at + interval '5 hours' END, p.paid_at
+FROM payment p JOIN pc ON pc.client_id = p.client_id
+WHERE p.status = 'paid' AND p.collected_by = 'trainer' AND p.deleted_at IS NULL AND p.paid_at > now() - interval '60 days'
+  AND pc.n_pack AND pc.money AND p.tenant_id = (SELECT ten FROM k);
+
+-- … and a pack about to run out (sessions, not money, so the money switch does not apply)
+INSERT INTO client_notification (client_id, kind, text, at, read_at, created_at)
+SELECT pk.client_id, 'pack',
+       pk.sessions_remaining || CASE WHEN pk.sessions_remaining = 1 THEN ' session' ELSE ' sessions' END || ' left on ' || pk.name,
+       coalesce(last.at, now()), NULL, coalesce(last.at, now())
+FROM package pk JOIN pc ON pc.client_id = pk.client_id
+CROSS JOIN LATERAL (SELECT max(a.effective_at) AS at FROM package_adjustment a WHERE a.package_id = pk.id AND a.kind = 'session') last
+WHERE pk.status = 'active' AND pk.basis = 'sessions' AND pk.sessions_remaining BETWEEN 1 AND 3 AND pk.deleted_at IS NULL
+  AND pc.n_pack AND pk.tenant_id = (SELECT ten FROM k);
+
+-- best: the heaviest set of each client's two heaviest lifts, noticed on the day it happened
+INSERT INTO client_notification (client_id, kind, text, session_id, subject_at, at, read_at, created_at)
+SELECT b.client_id, 'best', 'New best: ' || b.name, b.session_id, b.at, b.at + interval '10 minutes',
+       CASE WHEN b.at < now() - interval '3 days' THEN b.at + interval '6 hours' END, b.at + interval '10 minutes'
+FROM (
+  SELECT m.*, row_number() OVER (PARTITION BY m.client_id ORDER BY m.load_value DESC) AS rk
+  FROM (
+    SELECT DISTINCT ON (s.client_id, se.exercise_id) s.client_id, e.name, l.load_value, s.id AS session_id, s.ended_at AS at
+    FROM set_log l
+    JOIN session_exercise se ON se.id = l.session_exercise_id
+    JOIN scheduled_session s ON s.id = se.session_id
+    JOIN exercise e ON e.id = se.exercise_id
+    WHERE l.done_at IS NOT NULL AND l.load_kind = 'weight' AND l.effort_kind = 'reps' AND l.load_value IS NOT NULL
+      AND s.status = 'done' AND s.ended_at IS NOT NULL AND s.tenant_id = (SELECT ten FROM k)
+    ORDER BY s.client_id, se.exercise_id, l.load_value DESC, s.ended_at DESC
+  ) m
+) b JOIN pc ON pc.client_id = b.client_id
+WHERE b.rk <= 2 AND pc.n_best;
+
+-- checkin: an assessment sent to the portal (waiting ones stay unread)
+INSERT INTO client_notification (client_id, kind, text, subject_at, at, read_at, created_at)
+SELECT a.client_id, 'checkin', 'Your ' || a.name || ' is ready — it takes about two minutes.', pg_temp.ist(a.due_on, '00:00'),
+       a.sent_at, CASE WHEN a.completed_at IS NOT NULL THEN a.sent_at + interval '1 hour' END, a.sent_at
+FROM assessment a JOIN pc ON pc.client_id = a.client_id
+WHERE a.sent_at IS NOT NULL AND a.deleted_at IS NULL AND pc.n_checkin AND a.tenant_id = (SELECT ten FROM k);
+
+-- reminder: the WhatsApp reminder the evening before each session, in every delivery state it can be in —
+-- delivered, queued for later, and skipped for the three reasons a client can cause (excluded, opted out, never opted in).
+INSERT INTO client_notification (client_id, kind, text, session_id, subject_at, send_after, at, read_at, created_at,
+                                 whatsapp_status, whatsapp_skip_reason, whatsapp_message_id, whatsapp_sent_at)
+SELECT s.client_id, 'reminder',
+       'Session tomorrow at ' || to_char(s.scheduled_at AT TIME ZONE 'Asia/Kolkata', 'HH24:MI') || ' with ' || tr.first || '.',
+       s.id, s.scheduled_at, x.sa, least(x.sa, now() - interval '1 hour'),     -- a queued one was written when the session was booked, not when it will be sent
+       CASE WHEN x.sa < now() - interval '1 day' THEN x.sa + interval '2 hours' END, least(x.sa, now() - interval '1 hour'),
+       CASE WHEN x.skip IS NOT NULL THEN 'skipped' WHEN x.sa <= now() THEN 'delivered' ELSE 'queued' END,
+       x.skip,
+       CASE WHEN x.skip IS NULL AND x.sa <= now() THEN 'wamid.seed' || replace(s.id::text, '-', '') END,
+       CASE WHEN x.skip IS NULL AND x.sa <= now() THEN x.sa + interval '40 seconds' END
+FROM scheduled_session s
+JOIN pc ON pc.client_id = s.client_id
+CROSS JOIN tr
+CROSS JOIN LATERAL (SELECT pg_temp.ist((s.scheduled_at AT TIME ZONE 'Asia/Kolkata')::date - 1, '18:00') AS sa,
+                           CASE WHEN pc.excl THEN 'client_excluded' WHEN NOT pc.wa THEN 'client_opt_out'
+                                WHEN NOT pc.opted THEN 'no_opt_in' END AS skip) x
+WHERE s.status IN ('done', 'scheduled', 'no_show') AND s.logged_by = 'trainer' AND s.deleted_at IS NULL AND pc.n_session
+  AND s.tenant_id = (SELECT ten FROM k)
+  AND s.scheduled_at BETWEEN now() - interval '14 days' AND now() + interval '7 days';
 
 /* ── 13. it must be a diary the product could have produced ──────────────── */
 
@@ -867,13 +1229,14 @@ BEGIN
   JOIN scheduled_session b ON b.trainer_id = a.trainer_id AND a.id < b.id
                           AND a.scheduled_at < b.ends_at AND b.scheduled_at < a.ends_at
   WHERE a.deleted_at IS NULL AND b.deleted_at IS NULL AND a.status <> 'cancelled' AND b.status <> 'cancelled'
+    AND a.logged_by = 'trainer' AND b.logged_by = 'trainer'
     AND a.tenant_id = (SELECT ten FROM k);
   IF bad IS NOT NULL THEN RAISE EXCEPTION 'overlapping sessions: %', bad; END IF;
 
   -- Nothing runs outside the working week.
   SELECT string_agg(DISTINCT s.id::text, ', ') INTO bad
   FROM scheduled_session s
-  WHERE s.tenant_id = (SELECT ten FROM k) AND s.deleted_at IS NULL
+  WHERE s.tenant_id = (SELECT ten FROM k) AND s.deleted_at IS NULL AND s.logged_by = 'trainer'
     AND NOT EXISTS (SELECT 1 FROM working_hours w
                     WHERE w.trainer_id = s.trainer_id AND w.weekday = extract(isodow FROM s.scheduled_at AT TIME ZONE 'Asia/Kolkata')
                       AND (s.scheduled_at AT TIME ZONE 'Asia/Kolkata')::time >= w.start_time
@@ -888,8 +1251,8 @@ BEGIN
   -- Every done session was charged to a package, or belongs to a client on a monthly one.
   SELECT string_agg(DISTINCT r.name, ', ') INTO bad
   FROM scheduled_session s JOIN r ON r.id = s.client_id
-  WHERE s.status = 'done' AND s.tenant_id = (SELECT ten FROM k)
-    AND r.key NOT IN ('divya', 'lakshmi')
+  WHERE s.status = 'done' AND s.logged_by = 'trainer' AND s.tenant_id = (SELECT ten FROM k)
+    AND r.key NOT IN ('divya')
     AND NOT EXISTS (SELECT 1 FROM package_adjustment a WHERE a.session_id = s.id AND a.kind = 'session');
   IF bad IS NOT NULL THEN RAISE EXCEPTION 'done sessions not covered by any pack (enlarge pp): %', bad; END IF;
 END $$;
@@ -925,3 +1288,21 @@ UNION ALL SELECT 'set logs', count(*) FROM set_log l JOIN session_exercise se ON
 UNION ALL SELECT 'packages', count(*) FROM package p JOIN trainer t ON t.id = p.trainer_id JOIN app_user u ON u.id = t.app_user_id WHERE u.phone = :'trainer_phone'
 UNION ALL SELECT 'payments', count(*) FROM payment p JOIN trainer t ON t.id = p.trainer_id JOIN app_user u ON u.id = t.app_user_id WHERE u.phone = :'trainer_phone'
 UNION ALL SELECT 'assessments', count(*) FROM assessment a JOIN trainer t ON t.id = a.trainer_id JOIN app_user u ON u.id = t.app_user_id WHERE u.phone = :'trainer_phone';
+
+\echo
+\echo '── client portal (sign in with the phone; the OTP is printed in the backend log) ──'
+SELECT c.name, c.phone, c.membership_status AS membership, c.status,
+       (SELECT count(*) FROM client_message m WHERE m.client_id = c.id) AS messages,
+       (SELECT count(*) FROM client_notification n WHERE n.client_id = c.id) AS bell,
+       (SELECT count(*) FROM client_notification n WHERE n.client_id = c.id AND n.read_at IS NULL) AS unread,
+       (SELECT count(*) FROM workout_feedback f WHERE f.client_id = c.id) AS felt,
+       (SELECT count(*) FROM milestone m WHERE m.client_id = c.id) AS marks,
+       (SELECT count(*) FROM scheduled_session s WHERE s.client_id = c.id AND s.logged_by = 'client') AS solo,
+       (SELECT count(*) FROM assessment a WHERE a.client_id = c.id AND a.sent_at IS NOT NULL AND a.completed_at IS NULL) AS waiting
+FROM client c JOIN trainer t ON t.id = c.trainer_id JOIN app_user u ON u.id = t.app_user_id
+WHERE u.phone = :'trainer_phone' AND c.deleted_at IS NULL AND c.membership_status <> 'not_invited'
+ORDER BY c.created_at, c.name;
+
+\echo
+\echo 'Arjun Reddy''s invite is live. Open this path on the web app (the link a trainer would send):'
+SELECT '/invite/' || rtrim(translate(encode(sha256(convert_to('inclineyou-seed-invite-arjun', 'UTF8')), 'base64'), '+/', '-_'), '=') AS arjun_invite;
