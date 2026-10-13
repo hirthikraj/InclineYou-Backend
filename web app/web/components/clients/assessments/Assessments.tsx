@@ -283,7 +283,9 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                           className: 'asm-c-status',
                           label: 'Status',
                           content: (
-                            <Tag tone={r.state === 'done' ? 'ok' : 'neutral'}>{STATE_LABEL[r.state]}</Tag>
+                            <Tag tone={r.state === 'done' ? 'ok' : 'neutral'}>
+                              {r.sentAt != null && r.state !== 'done' ? 'With client' : STATE_LABEL[r.state]}
+                            </Tag>
                           ),
                         },
                         {

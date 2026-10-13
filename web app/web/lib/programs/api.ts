@@ -303,6 +303,11 @@ export interface ClientWire {
   weeklySchedule: Array<{ templateDay: number; weekday: number; time: string }> | null;
   /** `schedule.version` — the `If-Match` of `PUT /v1/clients/{id}/schedule`. */
   scheduleVersion: string | null;
+  /**
+   * Whether the client is on the portal (accepted, or paused), so *tell them the plan changed* can be offered at all.
+   * `portal.state` on the summary (api-contract 1.2, tr-a5); false against a backend from before it.
+   */
+  onPortal: boolean;
 }
 
 /** `GET /v1/clients?view=summary` (Clients L3), the fields this screen reads. */
@@ -317,6 +322,7 @@ interface ClientSummaryWire {
     version: string;
   } | null;
   slots: { weekday: number; start: string; programDay: number | null }[] | null;
+  portal?: { state: string } | null;
 }
 
 function clientOf(c: ClientSummaryWire): ClientWire {
@@ -332,6 +338,7 @@ function clientOf(c: ClientSummaryWire): ClientWire {
       ? slots.map((s, i) => ({ templateDay: s.programDay ?? i + 1, weekday: s.weekday, time: s.start }))
       : null,
     scheduleVersion: c.schedule?.version ?? null,
+    onPortal: c.portal?.state === 'accepted' || c.portal?.state === 'paused',
   };
 }
 
@@ -992,16 +999,17 @@ export async function patchStatus(
 }
 
 export interface PlanNoticeResultWire {
+  /** False is not a failure: the client has plan notices switched off, or is paused, so nothing was written. */
   sent: boolean;
 }
 
 /**
- * HELD BACK IN v1 (R47). `POST /v1/programs/{id}/notify` writes to the portal's
- * bell, which is out of v1 — the route is gone, so this answers "not sent"
- * without a request. The call sites stay behind the release flag.
+ * `POST /v1/programs/{id}/notify` (api-contract 1.2, tr-a11) — tell the client their plan changed. The trainer presses it; no
+ * save ever does. A client who has not joined the portal is 409 `CLIENT_NOT_ON_PORTAL`, which the screen avoids by not offering
+ * the button, so the call is made only for someone who can be told.
  */
-export async function postPlanNotice(_programId: string): Promise<PlanNoticeResultWire> {
-  return { sent: false };
+export async function postPlanNotice(programId: string): Promise<PlanNoticeResultWire> {
+  return call<PlanNoticeResultWire>(`/v1/programs/${encodeURIComponent(programId)}/notify`, { method: 'POST', body: {} });
 }
 
 /* ═══════════════════════════════ every client's copy, in one list ══ */

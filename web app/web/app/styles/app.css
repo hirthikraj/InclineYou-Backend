@@ -24746,3 +24746,310 @@ button.pchk__r:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2
 
 /* the library switch heads the filter list, with a rule under it like the groups */
 .lf-show{padding:0 0 12px;margin-bottom:2px;border-bottom:1px solid var(--tx-line)}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   INVITATIONS — `/clients/invitations`, and the send sheet it and the client file share
+   ══════════════════════════════════════════════════════════════════════════
+
+   A paged-list skeleton like `.asm` one block up — a header with a tab strip, a scroller, a bordered table — and it
+   agrees with it where it can: the same 22px gutter, the same frame (`--tx-r2`, one hairline), the same stacked row under
+   620. It is its own family for the reason `.asm`'s own comment gives for not borrowing `.pgt`: two call sites are a
+   coincidence, not yet the evidence the catalogue asks for before extracting one.
+
+   ── TWO TABLES AND A WORKLIST, IN THE ORDER THEY ARE USED ─────────────────
+   The work is done top to bottom. A bulk invite's drafts come first, because they are what the trainer is in the middle
+   of (each one is a message still to send); then the people who have not been asked; then the people who have. Both
+   tables share one column model so the eye does not re-learn the page between them.
+
+   ── NO INLINE LAYOUT ──────────────────────────────────────────────────────
+   The first cut of this screen set its gaps and flex rows from `style` attributes. An inline style outranks every media
+   query, so none of it could have folded at 620. Everything below is a class. */
+.ivn{display:flex;flex-direction:column;min-height:0;flex:1}
+.ivn__body{flex:1;min-height:0;overflow-y:auto;padding:20px 22px 28px;
+  display:flex;flex-direction:column;gap:28px}
+.ivn__sec{display:flex;flex-direction:column;gap:10px}
+
+/* The section head: the heading is the name, the count is a figure. Tabular and mono, as `.bulk__c` and the
+   assessment counts are — a number that changes as people are invited must not move the words beside it. */
+.ivn__h{display:flex;align-items:baseline;gap:8px;margin:0;
+  font-size:var(--tx-name);line-height:var(--tx-name-lh);font-weight:600;color:var(--tx-ink)}
+.ivn__n{font-family:var(--tx-mono);font-size:var(--tx-micro);font-weight:500;letter-spacing:.04em;
+  font-variant-numeric:tabular-nums;color:var(--tx-ink-3)}
+.ivn__sub{margin:-4px 0 0;font-size:var(--tx-meta);line-height:var(--tx-meta-lh);color:var(--tx-ink-2);max-width:72ch}
+.ivn__note{margin:0;font-size:var(--tx-meta);line-height:var(--tx-meta-lh);color:var(--tx-ink-3);max-width:72ch}
+
+/* The surface the table sits on, as `.asm__t`. The worklist's own head sits inside it, above the rows. */
+.ivn__t{border:1px solid var(--tx-line);border-radius:var(--tx-r2);background:var(--tx-surface);overflow:hidden}
+.ivn__t .tbl{width:100%;table-layout:fixed}
+.ivn__t .bulk{border-radius:0;border-width:0 0 1px}
+
+.ivn__hd{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--tx-line)}
+.ivn__hd-t{flex:1 1 auto;min-width:0}
+.ivn__hd-t b{display:block;font-size:var(--tx-body);font-weight:600;color:var(--tx-ink)}
+.ivn__hd-t span{display:block;font-size:var(--tx-meta);color:var(--tx-ink-2)}
+
+/* Column tracks: each its widest ink, and the client the one `auto` track, as `.asm`'s column model argues.
+
+   THE TWO TABLES SHARE THEIR RIGHT-HAND TRACKS. *Not invited yet* has no date, but its Status and its verb are in the
+   same places as the table below it, because its action track is the date's and the action's together. A column that
+   jumps 125px between two tables on one screen reads as two different things. */
+.ivn{--ivn-date:148px;--ivn-act:196px}
+.ivn-c-sel,.ivn__t .tbl td.sel{width:44px}
+.ivn-c-status{width:132px}
+.ivn-c-date{width:var(--ivn-date)}
+.ivn-c-act{width:var(--ivn-act)}
+.ivn__t--pick .ivn-c-act{width:calc(var(--ivn-date) + var(--ivn-act))}
+/* WHILE ANYTHING IS TICKED THE BAR IS THE HEAD, as it is on the programs list: it carries the same select-all in the
+   same place, and two of them one above the other is the same control drawn twice. The column names stand down (they
+   stay for assistive tech) and come back the moment the selection is cleared. */
+.ivn__t--sel .tbl thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+/* TWO LINES IN EVERY ROW (a name over a number, a date over what it means), so the rows are the system's two-line
+   height rather than the 44px a one-line row gets. */
+.ivn__t .tbl tbody th,.ivn__t .tbl tbody td{height:var(--w-row-lg)}
+
+/* The person: a disc, a name that opens the file, the number under it. `min-width:0` and the ellipsis on the NAME so a
+   long one shortens instead of pushing the status off the card. */
+.ivn__who{display:flex;align-items:center;gap:10px;min-width:0}
+.ivn__id{display:flex;flex-direction:column;min-width:0}
+.ivn__nm{font-weight:600;color:var(--tx-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+a.ivn__nm:hover{color:var(--tx-accent-text)}
+a.ivn__nm:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px;border-radius:var(--tx-r1)}
+.ivn__ph{font-size:var(--tx-meta);color:var(--tx-ink-3);font-variant-numeric:tabular-nums}
+
+/* A date over what it means: tabular, because a column of dates read down is where proportional digits ripple. */
+.ivn__d{display:block;font-variant-numeric:tabular-nums}
+.ivn__d b{display:block;font-weight:500;color:var(--tx-ink)}
+.ivn__d em{display:block;font-style:normal;font-size:var(--tx-micro);color:var(--tx-ink-3)}
+
+.ivn__acts{display:flex;align-items:center;justify-content:flex-end;gap:6px}
+.ivn__why{color:var(--tx-ink-2);font-size:var(--tx-meta)}
+
+@media (max-width:1200px){
+  .ivn{--ivn-date:128px;--ivn-act:176px}
+}
+@media (max-width:900px){
+  .ivn__body{padding-left:16px;padding-right:16px}
+}
+/* Under 620 there is no table: each row is its own two-line block, as `.asm__t`'s is, and for the same measured
+   reasons — a stated track width is a fact about a TABLE and a `display:block` grid item honours it exactly. */
+@media (max-width:620px){
+  .ivn__t .tbl{table-layout:auto}
+  .ivn__t .tbl thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .ivn__t .tbl tbody tr{display:grid;grid-template-columns:minmax(0,1fr);gap:6px 10px;
+    padding:12px;border-bottom:1px solid var(--tx-line)}
+  .ivn__t .tbl tbody tr:has(> td.sel){grid-template-columns:auto minmax(0,1fr)}
+  .ivn__t .tbl tbody tr:last-child{border-bottom:0}
+  .ivn__t .tbl tbody td,.ivn__t .tbl tbody th{
+    display:block;height:auto;padding:0;border:0;white-space:normal;width:auto;min-width:0;max-width:100%}
+  .ivn__t .tbl td.sel,.ivn__t .tbl th.sel{grid-row:1 / span 3;align-self:start}
+  .ivn__t .tbl td.ivn-c-act{justify-self:end}
+  /* The date is the one stacked cell whose meaning is not in its own words (*11 Oct* of what?), so it keeps its label. */
+  .ivn__t .tbl tbody td.ivn-c-date::before{content:attr(data-l) ' ';font-size:var(--tx-micro);color:var(--tx-ink-3)}
+  /* ...and the date and its meaning run on as one line, so the stacked row keeps its height. */
+  .ivn__t .tbl td.ivn-c-date .ivn__d,.ivn__t .tbl td.ivn-c-date .ivn__d b,.ivn__t .tbl td.ivn-c-date .ivn__d em{display:inline}
+  .ivn__t .tbl td.ivn-c-date .ivn__d em::before{content:' · '}
+  .ivn__hd{flex-wrap:wrap}
+}
+
+/* ── THE SEND SHEET ─────────────────────────────────────────────────────────
+   Who it goes to, what it says, and how long the link lives. The message is the one control that is the point of the
+   sheet, so it gets the room; the person above it is there so the trainer sees the number on the other end of the
+   WhatsApp link before they press it. */
+.ivns{display:flex;flex-direction:column;gap:14px}
+.ivns__to{display:flex;align-items:center;gap:10px;min-width:0}
+.ivns__to .ivn__id{flex:1 1 auto}
+.ivns__msg textarea{min-height:132px;font-size:var(--tx-body);line-height:1.55}
+.ivns__meta{margin:0;font-size:var(--tx-meta);line-height:var(--tx-meta-lh);color:var(--tx-ink-3)}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MESSAGES TO THE CLIENT — the card on Personal information (`MessagesCard`)
+   ══════════════════════════════════════════════════════════════════════════
+   A composer and the newest twenty lines. Everything here is spacing between design-system components (Textarea, Checkbox,
+   Tag, RowMenu, Button); none of it restyles one, and none of it is set from a `style` attribute. `.cmsg` is free: `.msg` is
+   the Message component's, and `.inv` was the invoice's. */
+.cmsg__bar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:10px}
+.cmsg__none{margin:14px 0 0;font-size:var(--tx-meta);line-height:var(--tx-meta-lh);color:var(--tx-ink-3)}
+.cmsg__l{list-style:none;margin:16px 0 0;padding:0;border-top:1px solid var(--tx-line)}
+.cmsg__i{display:grid;gap:6px;padding:12px 0;border-bottom:1px solid var(--tx-line)}
+.cmsg__i:last-child{padding-bottom:0;border-bottom:0}
+/* The words keep the trainer's own line breaks, and a long unbroken string wraps instead of widening the card. */
+.cmsg__t{margin:0;font-size:var(--tx-body);line-height:var(--tx-body-lh);color:var(--tx-ink);white-space:pre-wrap;overflow-wrap:anywhere}
+.cmsg__m{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:var(--tx-meta);color:var(--tx-ink-3)}
+.cmsg__sp{flex:1 1 auto}
+.cmsg__ed{display:grid;gap:8px}
+.cmsg__ed-bar{display:flex;justify-content:flex-end;gap:8px}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SETTINGS · CLIENT PORTAL — `/settings/portal` (`PortalPanel`)
+   ══════════════════════════════════════════════════════════════════════════
+   Spacing between design-system components (SwitchRow, Select, Card); none of it restyles one. The two cards sit in the account
+   page's own `.acxw` / `.acx` grid so the sections of Settings share a rhythm. `.ptl` is free (checked before use). */
+.ptl__row{margin:14px 0 4px}
+.ptl__lbl{margin:16px 0 6px;font-size:var(--tx-meta);font-weight:600;color:var(--tx-ink-2)}
+.ptl__q{margin:0 0 8px;padding:10px 12px;border:1px solid var(--tx-line);border-radius:var(--tx-r2);
+  background:var(--tx-surface-2);font-size:var(--tx-body);line-height:var(--tx-body-lh);color:var(--tx-ink)}
+.ptl__reach{margin:14px 0 4px;font-size:var(--tx-body);line-height:var(--tx-body-lh);font-weight:600;color:var(--tx-ink)}
+
+/* ── the bell's panel on a phone ──────────────────────────────────────────
+   `.ntf` is 400px wide and anchored by `right:14px`, which is right on a desk and
+   120px too wide for a 390px screen — measured, it started at -12px and clipped
+   the heading. Pinned to both gutters instead, so it is exactly the screen less
+   the 12px the rest of the phone chrome keeps. */
+@media (max-width:640px){
+  .ntf{left:12px;right:12px;width:auto}
+}
+
+/* ── the shelf's "offered to clients" mark ────────────────────────────────
+   Beside the name, on one line while there is room and under it when there is not: the name is the elastic part (it
+   ellipsizes), the pill is not, so the pair is a flex row whose first child can shrink. */
+.tpl-name{display:flex;align-items:center;gap:8px;min-width:0}
+.tpl-name .asm-open{min-width:0}
+.tpl-offer{flex:0 0 auto}
+
+/* ── what the client added to a session (the log console) ─────────────────
+   A quiet band above the figures, in the page's own ink: it is information the
+   trainer reads once, not a banner. The client's sentence is a quotation in the
+   serif-free ink-2 so it reads as somebody else's words, and the recap line is
+   dimmer still because it is the trainer's own act reported back. */
+.fromcl{margin:0 0 14px;padding:10px 14px;border:1px solid var(--tx-line);border-radius:var(--tx-r2);
+  background:var(--tx-surface-2);display:flex;flex-direction:column;gap:4px}
+.fromcl__l{margin:0;font-size:13px;line-height:1.5;color:var(--tx-ink-2)}
+.fromcl__l b{color:var(--tx-ink);font-weight:600}
+.fromcl__l--quiet{color:var(--tx-ink-3);font-size:12px}
+.fromcl__q{display:block;margin-top:2px;color:var(--tx-ink-2);quotes:"“" "”";font-style:normal}
+
+/* ── the invite page (/invite/{token}) ─────────────────────────────────────
+   Lives inside `.authwrap__card`, so it takes the card's own width and ink and adds only what a trainer's card needs: the
+   avatar beside the name, the facts as a two-column list, and the plain lines of what is shared as a ruled box — the same
+   register as `.trust`, because both are statements the page makes about the person's own information. */
+.inv-who{display:flex;align-items:center;gap:14px;margin-bottom:14px}
+.inv-who__t{min-width:0}
+.inv-who__h{margin:4px 0 0;font-size:13.5px;line-height:1.4;color:var(--tx-ink-2)}
+.inv-bio{margin:0 0 14px;font-size:14px;line-height:1.55;color:var(--tx-ink-2)}
+.inv-facts{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0 0 14px;font-size:13px}
+.inv-facts dt{font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--tx-ink-3);padding-top:2px}
+.inv-facts dd{margin:0;color:var(--tx-ink)}
+.inv-links{display:flex;flex-wrap:wrap;gap:6px 16px;margin:0 0 16px;font-size:13px}
+.inv-links a{color:var(--tx-accent-text);text-decoration:underline;text-underline-offset:3px}
+.inv-sees{margin:0 0 14px;padding:12px 14px;border:1px solid var(--tx-line);border-radius:var(--tx-r2);background:var(--tx-surface-2)}
+.inv-sees__h{margin:0 0 8px;font-size:12.5px;font-weight:600;color:var(--tx-ink)}
+.inv-sees ul{margin:0;padding-left:18px;display:grid;gap:5px;font-size:12.5px;line-height:1.5;color:var(--tx-ink-2)}
+.inv-num{margin:0;font-size:12px;line-height:1.5;color:var(--tx-ink-3)}
+.inv-num b{color:var(--tx-ink-2);font-family:var(--tx-mono);font-weight:600}
+.inv-actions{margin-top:20px}
+.inv-aside{margin:18px 0 0;font-size:13px;color:var(--tx-ink-3)}
+.inv-aside a{color:var(--tx-accent-text);text-decoration:underline;text-underline-offset:3px}
+.inv-start{display:grid;gap:12px}
+.inv-start .inv-actions{margin-top:6px}
+.inv-agree{font-size:12.5px;line-height:1.5;color:var(--tx-ink-2)}
+.inv-link{background:none;border:0;padding:0;margin:0;font:inherit;color:var(--tx-accent-text);text-decoration:underline;text-underline-offset:3px;cursor:pointer}
+.inv-link:disabled{color:var(--tx-ink-3);text-decoration:none;cursor:default}
+.inv-decline{display:grid;gap:8px}
+.inv-decline__acts{display:flex;gap:8px}
+.inv-list{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:8px}
+.inv-list__i{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid var(--tx-line);border-radius:var(--tx-r2);background:var(--tx-surface-2);color:inherit;text-decoration:none}
+.inv-list__i:hover{border-color:var(--tx-field-line-hover)}
+.inv-list__t{display:flex;flex-direction:column;min-width:0;line-height:1.35}
+.inv-list__t b{font-size:14px;color:var(--tx-ink)}
+.inv-list__t i{font-style:normal;font-size:12.5px;color:var(--tx-ink-3)}
+
+/* ── the client's home (/me/today) ─────────────────────────────────────────
+   A single column that gives the hero its own weight and lets the cards under it be quiet: the hero's heading is the only large type on
+   the screen, the labels over it are the same mono the rest of the product uses for a small caption, and the two small cards sit
+   side by side where there is room and stack where there is not. */
+.pth{display:grid;gap:14px;max-width:720px}
+.pth__hero{border-color:var(--tx-line-strong)}
+.pth__k{margin:0 0 4px;font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx-ink-3)}
+.pth__h{margin:0 0 6px;font-family:var(--tx-brand);font-weight:800;font-size:26px;letter-spacing:-.01em;line-height:1.15;color:var(--tx-ink)}
+.pth__s{margin:0 0 10px;font-size:13.5px;line-height:1.5;color:var(--tx-ink-2)}
+.pth__q{margin:0 0 6px;font-size:14.5px;line-height:1.55;color:var(--tx-ink)}
+.pth__who{display:flex;gap:14px;align-items:flex-start}
+.pth__h2{margin:0 0 4px;font-size:30px;font-weight:700;letter-spacing:-.01em;color:var(--tx-ink)}
+.pth__h2 span{font-size:13px;font-weight:500;color:var(--tx-ink-3);letter-spacing:0}
+.pth__bests{list-style:none;margin:8px 0;padding:0;display:grid;gap:6px;font-size:13.5px;color:var(--tx-ink-2)}
+.pth__row{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px}
+
+/* ── the client's workout (api-contract 1.2, pw-*): preview, player, recap ── */
+.pwk{display:grid;gap:14px;max-width:720px}
+.pwk__hero{border-color:var(--tx-line-strong)}
+.pwk__bar{position:sticky;top:8px;z-index:5}
+.pwk__barrow{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.pwk__barrow>div:first-child{flex:1 1 140px}
+.pwk__k{margin:0 0 4px;font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx-ink-3)}
+.pwk__h{margin:0 0 6px;font-family:var(--tx-brand);font-weight:800;font-size:28px;letter-spacing:-.01em;line-height:1.15;color:var(--tx-ink)}
+.pwk__s{margin:0 0 6px;font-size:13px;line-height:1.5;color:var(--tx-ink-2)}
+.pwk__q{margin:0 0 10px;font-size:14.5px;line-height:1.55;color:var(--tx-ink)}
+.pwk__clock{margin:0;font-family:var(--tx-mono);font-size:26px;font-weight:600;color:var(--tx-ink)}
+.pwk__tot{font-size:13px;color:var(--tx-ink-2)}
+.pwk__tot b{font-family:var(--tx-mono);font-size:20px;color:var(--tx-ink)}
+.pwk__list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.pwk__sect{margin:6px 0 6px;font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx-ink-3)}
+.pwk__row{display:flex;gap:12px;align-items:flex-start}
+.pwk__row>:last-child:not(:only-child){margin-left:auto}
+.pwk__n{flex:0 0 auto;width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-family:var(--tx-mono);font-size:12px;font-weight:600;background:var(--tx-surface-2);color:var(--tx-ink-2)}
+.pwk__name{margin:0;font-size:17px;font-weight:700;letter-spacing:-.005em;color:var(--tx-ink)}
+.pwk__cue{margin:12px 0 0;padding:10px 12px;border-radius:var(--tx-r2);background:var(--tx-surface-2);font-size:13.5px;line-height:1.5;color:var(--tx-ink)}
+.pwk__cue b{display:block;margin-bottom:2px;font-family:var(--tx-mono);font-size:10.5px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--tx-ink-3)}
+.pwk__last{margin:10px 0 0;font-size:12.5px;color:var(--tx-ink-3)}
+.pwk__steps{margin:10px 0 0;font-size:13px;color:var(--tx-ink-2)}
+.pwk__steps summary{cursor:pointer;color:var(--tx-ink-2);font-weight:600}
+.pwk__steps ol{margin:8px 0 0;padding-left:20px;display:grid;gap:6px}
+.pwk__alts{margin:10px 0 0;font-size:12.5px;color:var(--tx-ink-3)}
+.pwk__sets{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:8px}
+.pwk__set{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.pwk__set--done .pwk__setn{background:var(--tx-ok-soft,var(--tx-surface-2));color:var(--tx-ok,var(--tx-ink))}
+.pwk__setn{flex:0 0 auto;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-family:var(--tx-mono);font-size:11.5px;background:var(--tx-surface-2);color:var(--tx-ink-2)}
+.pwk__set .fld{margin-bottom:0}
+.pwk__unit{font-size:12px;color:var(--tx-ink-3);min-width:26px}
+.pwk__err{flex-basis:100%;font-size:12.5px;color:var(--tx-danger)}
+.pwk__sets--read .pwk__set{font-size:14px;color:var(--tx-ink)}
+.pwk__actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:14px}
+.pwk__chips{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.pwk__swap{margin-top:12px;padding-top:12px;border-top:1px solid var(--tx-line)}
+.pwk__alts2{list-style:none;margin:6px 0 12px;padding:0;display:flex;gap:8px;flex-wrap:wrap}
+.pwk__finish .fld{margin-top:10px}
+.pwk__facts{display:flex;gap:28px;flex-wrap:wrap;margin:14px 0 4px}
+.pwk__facts div{display:grid;gap:2px}
+.pwk__facts dt{font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx-ink-3)}
+.pwk__facts dd{margin:0;font-family:var(--tx-mono);font-size:24px;font-weight:600;color:var(--tx-ink)}
+.pwk__facts dd span{font-size:12.5px;font-weight:500;color:var(--tx-ink-3)}
+.pwk__bests{list-style:none;margin:0;padding:0;display:grid;gap:8px;font-size:14px;color:var(--tx-ink-2)}
+@media (max-width:560px){.pwk__h{font-size:24px}.pwk__bar{top:4px}}
+
+/* ── the client's plan and progress (api-contract 1.2, pp-l1 … pp-l6) ── */
+.pl,.ppg{display:grid;gap:14px;max-width:720px}
+.pl__k,.ppg__k{margin:0 0 4px;font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx-ink-3)}
+.pl__h{margin:0 0 4px;font-size:18px;font-weight:700;letter-spacing:-.005em;color:var(--tx-ink)}
+.pl__h a{color:inherit;text-decoration:none}
+.pl__h a:hover{text-decoration:underline}
+.pl__t{margin:0;font-size:14.5px;font-weight:600;color:var(--tx-ink)}
+.pl__t a{color:inherit;text-decoration:none}
+.pl__t a:hover{text-decoration:underline}
+.pl__s{margin:0 0 4px;font-size:13px;line-height:1.5;color:var(--tx-ink-2)}
+.pl__list{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.pl__row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.pl__tags{display:flex;gap:6px;flex-wrap:wrap}
+.pl__ex{display:grid;gap:2px;padding-bottom:12px;border-bottom:1px solid var(--tx-line)}
+.pl__ex:last-child{border-bottom:0;padding-bottom:0}
+.pl__cue{margin:6px 0 0;padding:8px 10px;border-radius:var(--tx-r2);background:var(--tx-surface-2);font-size:13px;line-height:1.5;color:var(--tx-ink)}
+.pl__cue b{display:block;font-family:var(--tx-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--tx-ink-3)}
+.ppg__win{display:flex;gap:8px;flex-wrap:wrap}
+.ppg__hero{border-color:var(--tx-line-strong)}
+.ppg__lead{margin:0 0 8px;font-family:var(--tx-brand);font-weight:700;font-size:22px;line-height:1.3;letter-spacing:-.01em;color:var(--tx-ink)}
+.ppg__s{margin:0;font-size:13.5px;line-height:1.5;color:var(--tx-ink-2)}
+.ppg__grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+
+/* ── the client's assessments (api-contract 1.2, pa-*) ── */
+.as__group{margin-bottom:16px}
+.as__group:last-child{margin-bottom:0}
+.as__grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+.as__qs{display:grid;gap:20px}
+.as__q{margin:0;padding:0;border:0;display:grid;gap:8px}
+.as__q legend{padding:0;margin-bottom:6px}
+
+/* ── the client's inbox (api-contract 1.2, pi-*) ── */
+.inb{border-bottom:1px solid var(--tx-line);padding-bottom:10px}
+.inb__sum{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;list-style:none}
+.inb__sum::-webkit-details-marker{display:none}
+.pl__q{margin:10px 0 6px;font-size:14.5px;line-height:1.55;color:var(--tx-ink)}

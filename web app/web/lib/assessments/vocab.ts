@@ -51,6 +51,10 @@ export interface TemplateWire {
   updatedAt: number;
   /** Opaque; goes back as `If-Match` on the PUT, so an edit made in another tab is a 412 and not a silent overwrite. */
   version: string;
+  /** The product's own form (`weekly_check_in`), or null for one the trainer wrote. Absent from a backend before 1.2. */
+  systemKey?: string | null;
+  /** Clients on the portal may start this one themselves. Absent from a backend before 1.2. */
+  clientCanStart?: boolean;
 }
 
 /** The list item (contract Assessments L1). */
@@ -77,6 +81,8 @@ export interface AssessmentWire {
   questions: { got: number; asked: number };
   createdAt: number;
   version: string;
+  /** Epoch ms it was sent to the client — what makes it theirs to open — or null while it is the trainer's alone. */
+  sentAt?: number | null;
 }
 
 /** A client's cycle on one template (contract Assessments L5). */
@@ -93,6 +99,8 @@ export interface ScheduleWire {
   createdAt: number;
   updatedAt: number;
   version: string;
+  /** The cycle sends what it books on the due date. Absent from a backend before 1.2. */
+  sendToClient?: boolean;
 }
 
 export interface MeasurementWire {

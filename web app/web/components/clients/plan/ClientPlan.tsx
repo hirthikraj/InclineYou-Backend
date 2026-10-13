@@ -629,6 +629,8 @@ export function ClientPlan({
     saveError,
     savedChanges,
     notified,
+    /* Only a client who is on the portal can be told; paused counts (they are on it, they cannot open it yet). */
+    canNotify: client.onPortal,
     notifying,
     notifyError,
     onSave: () => void saveNow(),

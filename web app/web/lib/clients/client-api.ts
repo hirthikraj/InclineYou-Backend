@@ -53,6 +53,46 @@ const itemsOr = <T>(path: string) => items<T>(path).catch(() => [] as T[]);
 
 /* -------------------------------------------------------- wire shapes ── */
 
+/**
+ * The client's place on the portal (api-contract 1.2, tr-a5). `state` is `membershipStatus` plus the one derived value,
+ * `expired`: an invitation still pending but past its date. The second half is on the single read only.
+ */
+export interface PortalWire {
+  state: 'not_invited' | 'invited' | 'expired' | 'accepted' | 'declined' | 'paused' | 'removed';
+  invitedAt: number | null;
+  acceptedAt: number | null;
+  lastSeenAt: number | null;
+  lastSelfRunAt: number | null;
+  inviteId?: string | null;
+  inviteExpiresAt?: number | null;
+  removedBy?: 'trainer' | 'client' | null;
+  remindersExcluded?: boolean;
+  /** The EFFECTIVE answer: the override when there is one, else the trainer's own setting. */
+  showMoney?: boolean;
+  /** `null` follows the trainer's setting. */
+  showMoneyOverride?: boolean | null;
+  recentReminders?: {
+    sessionId: string;
+    status: 'not_sent' | 'queued' | 'sent' | 'delivered' | 'failed' | 'skipped';
+    skipReason: string | null;
+    error: string | null;
+    sentAt: number | null;
+  }[];
+}
+
+/** `GET /v1/clients/{id}/messages` — a line from the trainer to the client (api-contract 1.2, tr-a7). */
+export interface ClientMessageWire {
+  id: string;
+  /** `recap` is derived: it is what a message about a session is. */
+  kind: 'note' | 'weekly' | 'recap';
+  body: string;
+  sessionId: string | null;
+  at: number;
+  /** When the client opened it; null while unread, and an unread message is the only one that can be reworded. */
+  readAt: number | null;
+  version: string;
+}
+
 /** `GET /v1/clients/{id}` — the L3 summary row plus the client's own fields and the pinned notes. */
 export interface ClientDetailWire {
   id: string;
@@ -87,6 +127,7 @@ export interface ClientDetailWire {
   createdAt: number;
   /** `client.updated_at` — the If-Match for `PATCH /v1/clients/{id}`. */
   version: string;
+  portal: PortalWire;
   dateOfBirth: string | null;
   heightCm: number | null;
   activityLevel: string | null;
@@ -105,6 +146,10 @@ export interface ClientSessionWire {
   deliveryMode: string | null;
   notes: string | null;
   slotId: string | null;
+  /** `client` for a workout they did alone (api-contract 1.2). Absent from an older backend. */
+  loggedBy?: 'trainer' | 'client';
+  /** How the client said it felt, or null. */
+  feedback?: { effort: 'easy' | 'right' | 'hard' | null; note: string | null; at: number } | null;
   workout: { id: string; name: string; programId: string | null; week: number | null; day: number | null } | null;
   startedAt: number | null;
   endedAt: number | null;
@@ -230,16 +275,9 @@ export interface ClientNoteWire {
   createdAt: number;
   updatedAt: number;
   version: string;
-}
-
-/** `GET /v1/clients/{id}/readings` — read out of completed assessments, oldest first. */
-export interface ClientReadingWire {
-  assessmentId: string;
-  key: 'weight' | 'body_fat' | 'chest' | 'waist' | 'hip' | 'arm' | string;
-  label: string;
-  unit: string;
-  value: number;
-  at: number;
+  /** Private until the trainer shows it (api-contract 1.2, tr-a9). `sharedAt` is when, and moves with the flag. */
+  sharedWithClient: boolean;
+  sharedAt: number | null;
 }
 
 /* -------------------------------------------------------- the payload ── */
@@ -264,7 +302,8 @@ export interface ClientFilePayload extends ClientFileHeader {
   adjustments: PackageAdjustmentWire[];
   programs: ClientProgramWire[];
   notes: ClientNoteWire[];
-  readings: ClientReadingWire[];
+  /** The newest lines to this client; empty unless they are on the portal. */
+  messages: ClientMessageWire[];
   nudges: NudgeLogEntry[];
 }
 
@@ -325,10 +364,6 @@ export function clientPayments(clientId: string, from?: string, limit?: number):
   return items<ClientPaymentWire>(`/v1/payments?${q}&limit=200`);
 }
 
-export function clientReadings(clientId: string): Promise<ClientReadingWire[]> {
-  return itemsOr<ClientReadingWire>(`/v1/clients/${encodeURIComponent(clientId)}/readings`);
-}
-
 export function clientPrograms(clientId: string): Promise<ClientProgramWire[]> {
   return itemsOr<ClientProgramWire>(`/v1/programs?clientId=${encodeURIComponent(clientId)}`);
 }
@@ -369,6 +404,13 @@ export function livePackage(packages: ClientPackageWire[]): ClientPackageWire | 
   return packages.find((p) => p.status === 'active') ?? packages[0] ?? null;
 }
 
+/** The newest twenty, a tab's secondary read: an empty list rather than a file that will not open. */
+export function clientMessages(clientId: string): Promise<ClientMessageWire[]> {
+  return get<ListEnvelope<ClientMessageWire>>(`/v1/clients/${encodeURIComponent(clientId)}/messages?limit=20`)
+    .then((r) => r?.items ?? [])
+    .catch(() => []);
+}
+
 export interface TabOptions {
   /** Calendar: the month shown, `yyyy-MM`. */
   month?: string;
@@ -380,7 +422,7 @@ export interface TabOptions {
 
 const EMPTY: Omit<ClientFilePayload, keyof ClientFileHeader> = {
   sessions: [], history: [], payments: [], priceList: [], adjustments: [],
-  programs: [], notes: [], readings: [], nudges: [],
+  programs: [], notes: [], messages: [], nudges: [],
 };
 
 /** What one tab reads, per the contract's *Per-tab reads* table. */
@@ -397,12 +439,11 @@ export async function getClientFilePayload(
   switch (tab) {
     case 'overview': {
       // The contract lists L7 here too; nothing on the tab draws a payment, so it isn't read.
-      const [sessions, nudges, readings] = await Promise.all([
+      const [sessions, nudges] = await Promise.all([
         clientSessions(clientId, at(-28), at(15)),
         clientNudges(clientId),
-        clientReadings(clientId),
       ]);
-      return { ...out, sessions, nudges, readings };
+      return { ...out, sessions, nudges };
     }
     case 'calendar': {
       const month = /^\d{4}-\d{2}$/.test(options.month ?? '') ? options.month! : at(0).slice(0, 7);
@@ -439,8 +480,15 @@ export async function getClientFilePayload(
       const adjustments = live ? await packageAdjustments(live.id) : [];
       return { ...out, history, payments, priceList: list.filter((p) => p.status === 'active'), adjustments };
     }
-    case 'information':
-      return { ...out, notes: await clientNotes(clientId), readings: await clientReadings(clientId) };
+    case 'information': {
+      // A line can only go to a client who is on the portal, so there is nothing to read for anyone else.
+      const onPortal = header.client.portal?.state === 'accepted' || header.client.portal?.state === 'paused';
+      const [notes, messages] = await Promise.all([
+        clientNotes(clientId),
+        onPortal ? clientMessages(clientId) : Promise.resolve([] as ClientMessageWire[]),
+      ]);
+      return { ...out, notes, messages };
+    }
     case 'progress':
     case 'assessments':
       return out;
@@ -457,13 +505,28 @@ export interface LedgeredWire {
   package: ClientPackageWire;
 }
 
+/* messages to the client (tr-a7) */
+
+export const postMessage = (clientId: string, input: { id: string; body: string; kind?: 'note' | 'weekly' }) =>
+  call<ClientMessageWire>(`/v1/clients/${cid(clientId)}/messages`, { method: 'POST', body: input });
+
+export const patchMessage = (clientId: string, messageId: string, body: string, version?: string) =>
+  call<ClientMessageWire>(`/v1/clients/${cid(clientId)}/messages/${cid(messageId)}`, {
+    method: 'PATCH',
+    body: { body },
+    headers: version ? { 'if-match': `"${version}"` } : undefined,
+  });
+
+export const deleteMessage = (clientId: string, messageId: string) =>
+  call<null>(`/v1/clients/${cid(clientId)}/messages/${cid(messageId)}`, { method: 'DELETE' });
+
 /* notes */
 
-export const createNote = (clientId: string, input: { id: string; body: string; pinned: boolean }) =>
+export const createNote = (clientId: string, input: { id: string; body: string; pinned: boolean; sharedWithClient?: boolean }) =>
   call<ClientNoteWire>(`/v1/clients/${cid(clientId)}/notes`, { method: 'POST', body: input });
 
-/** Send only what changed — `body`, `pinned`, or both — so the pin toggle cannot clobber an edit. */
-export const editNote = (clientId: string, noteId: string, patch: { body?: string; pinned?: boolean }) =>
+/** Send only what changed — `body`, `pinned`, `sharedWithClient`, or any of them — so a toggle cannot clobber an edit. */
+export const editNote = (clientId: string, noteId: string, patch: { body?: string; pinned?: boolean; sharedWithClient?: boolean }) =>
   call<ClientNoteWire>(`/v1/clients/${cid(clientId)}/notes/${cid(noteId)}`, { method: 'PATCH', body: patch });
 
 export const removeNote = (clientId: string, noteId: string) =>
@@ -477,7 +540,12 @@ export const restoreNote = (clientId: string, noteId: string) =>
 
 export const patchClient = (
   clientId: string,
-  patch: Partial<Pick<ClientDetailWire, 'name' | 'phone' | 'dateOfBirth' | 'goal' | 'heightCm' | 'activityLevel'>>,
+  patch: Partial<Pick<ClientDetailWire, 'name' | 'phone' | 'dateOfBirth' | 'goal' | 'heightCm' | 'activityLevel'>> & {
+    /** v1.2: no session reminders for this client. */
+    remindersExcluded?: boolean;
+    /** v1.2: `true` / `false` is the trainer's answer for this client, `null` follows their own setting. */
+    portalShowMoney?: boolean | null;
+  },
   version?: string,
 ) =>
   call<ClientDetailWire>(`/v1/clients/${cid(clientId)}`, {

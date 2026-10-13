@@ -44,7 +44,7 @@
  * one level down.
  */
 
-export type SettingsTab = 'account' | 'nudges';
+export type SettingsTab = 'account' | 'nudges' | 'portal';
 
 export const SETTINGS_TABS: { key: SettingsTab; label: string }[] = [
   // First because it is the only section that is about the trainer rather than
@@ -53,6 +53,8 @@ export const SETTINGS_TABS: { key: SettingsTab; label: string }[] = [
   // Settings specifically looking for.
   { key: 'account', label: 'Account' },
   { key: 'nudges', label: 'Nudge messages' },
+  // What clients are sent and what they see in the portal: the trainer's two decisions about it, made once.
+  { key: 'portal', label: 'Client portal' },
 ];
 
 /** Account is Settings' root, so `/settings` is never a redirect. */

@@ -191,7 +191,17 @@ function cellFor(column: SessionColumn, r: SessionTableRow, showPlan: boolean): 
         content: r.relative ? <span className="cfses__rel">{r.relative}</span> : <span />,
       };
     case 'status':
-      return { key: 'status', label: 'Status', content: statusTag(r.cls) };
+      return {
+        key: 'status',
+        label: 'Status',
+        content: (
+          <>
+            {statusTag(r.cls)}
+            {r.own && <Tag>Own workout</Tag>}
+            {r.feltHard && <Tag tone="warn">Felt hard</Tag>}
+          </>
+        ),
+      };
     case 'go':
       return {
         key: 'go',

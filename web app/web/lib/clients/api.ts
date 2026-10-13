@@ -68,6 +68,8 @@ export interface ClientWire {
   stats: { sessionsDone: number; lastDoneAt: number | null; nextSessionAt: number | null; missedStreak: number };
   createdAt: number;
   version: string;
+  /** v1.2: where they stand on the portal (the roster's half of it). */
+  portal: { state: string; invitedAt: number | null; acceptedAt: number | null; lastSeenAt: number | null; lastSelfRunAt: number | null };
 }
 
 /** L5 · `PackageReadService.CurrentPackage`, the fields the roster reads. Money is a decimal string. */

@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 
 import { Chevron, Plus } from '@/components/shell/Icons';
 import { ScheduleSheet } from '@/components/clients/assessments/ScheduleSheet';
-import { endCycle } from '@/lib/assessments/actions';
+import { endCycle, updateCycle } from '@/lib/assessments/actions';
 import { assessmentHref } from '@/lib/assessments/address';
 import {
   blockCount,
@@ -55,9 +55,9 @@ import { longDateStr } from './shared';
  * is no more*.
  */
 /**
- * ── v1 · THE TRAINER TAKES IT, SO THE WORDS ARE THE TRAINER'S ───────────────
+ * ── THE TRAINER TAKES IT, SO THE WORDS ARE THE TRAINER'S ────────────────────
  *
- * Nothing is sent to the client in v1, so this tab says what a trainer does and not what a client
+ * Until a check-in is sent (1.2), this tab says what a trainer does and not what a client
  * did: *To take* and *Taken*, never *asked for and not back yet* / *has sent back*; a row that has
  * gone by is *Not taken*, in neutral ink and with how long ago — a trainer's own omission is a
  * debt to nobody, and an amber tag beside a client on the screen said otherwise. The one verb
@@ -88,6 +88,7 @@ function relative(dueOn: string, now: number): string {
 export function ChecksTab({
   clientId,
   clientName,
+  onPortal = false,
   rows,
   schedules,
   templates,
@@ -95,6 +96,8 @@ export function ChecksTab({
 }: {
   clientId: string;
   clientName: string;
+  /** Accepted or paused — whether an assessment can be sent to them. */
+  onPortal?: boolean;
   now: number;
   /** `null` where the read failed — see `loadClientAssessments`. */
   rows: AssessmentWire[] | null;
@@ -159,6 +162,7 @@ export function ChecksTab({
     <ScheduleSheet
       clients={[]}
       clientId={clientId}
+      onPortal={onPortal}
       templates={templates}
       onClose={(booked) => {
         setAssigning(false);
@@ -182,7 +186,7 @@ export function ChecksTab({
     <div className="cfchk">
       {sheet}
       {schedules && schedules.length > 0 && (
-        <Cycles rows={schedules} clientId={clientId} action={assign} />
+        <Cycles rows={schedules} clientId={clientId} onPortal={onPortal} action={assign} />
       )}
       {owed.length > 0 && (
         <Section
@@ -301,7 +305,10 @@ function Section({
                   key: 'status',
                   label: 'Status',
                   className: 'cfchk__c-st',
-                  content: <Tag tone={STATE_TONE[r.state]}>{STATE_LABEL[r.state]}</Tag>,
+                  /* *With client* is a check-in that has been sent and not come back: the one state that is somebody else's move. */
+                  content: (
+                    <Tag tone={STATE_TONE[r.state]}>{r.sentAt != null && r.state !== 'done' ? 'With client' : STATE_LABEL[r.state]}</Tag>
+                  ),
                 },
                 {
                   key: 'go',
@@ -347,10 +354,12 @@ function whenOf(r: AssessmentWire): number {
 function Cycles({
   rows,
   clientId,
+  onPortal,
   action,
 }: {
   rows: ScheduleWire[];
   clientId: string;
+  onPortal: boolean;
   action?: ReactNode;
 }) {
   const router = useRouter();
@@ -363,6 +372,16 @@ function Cycles({
     setError(null);
     start(async () => {
       const res = await endCycle(id, clientId);
+      if (!res.ok) setError(res.message ?? 'That did not save.');
+      else router.refresh();
+    });
+  }
+
+  /* WHETHER A CYCLE SENDS is a switch on the cycle, and it is only said for a client who has a portal to send to. */
+  function toggleSend(c: ScheduleWire) {
+    setError(null);
+    start(async () => {
+      const res = await updateCycle(c.id, c.version, { sendToClient: c.sendToClient === false }, clientId);
       if (!res.ok) setError(res.message ?? 'That did not save.');
       else router.refresh();
     });
@@ -381,7 +400,15 @@ function Cycles({
               <span>
                 <b>{c.templateName}</b> · every {c.intervalDays} days · next{' '}
                 {longDateStr(Date.parse(`${c.nextDueOn}T00:00:00`))}
+                {onPortal && c.sendToClient !== undefined && (
+                  <span className="ink3"> · {c.sendToClient ? 'sent when due' : 'taken in person'}</span>
+                )}
               </span>
+              {onPortal && c.sendToClient !== undefined && (
+                <Button variant="ghost" size="sm" disabled={busy} onClick={() => toggleSend(c)}>
+                  {c.sendToClient ? 'Take in person' : 'Send when due'}
+                </Button>
+              )}
               {c.openAssessmentId && (
                 <Button variant="secondary" size="sm" href={`/clients/assessments/${c.openAssessmentId}/take`}>
                   Take it

@@ -22,6 +22,7 @@ import { AddPanel } from './AddPanel';
 import { ExerciseList } from './ExerciseList';
 import { ExerciseTimeline, HistorySheet, RecordCard } from './RecordCard';
 import { FinishLog } from './FinishLog';
+import { FromClient } from './FromClient';
 import { Chart, Dots, Info, Tick, Warn } from './Icons';
 import { Keys } from './Keys';
 import { hasLoadBox, tickNeedsNumber } from './kindfields';
@@ -710,6 +711,8 @@ export function Console({ data }: { data: ConsoleDataX }) {
               </span>
             </div>
           ) : null}
+
+          <FromClient session={log.session} name={view.clientName} />
 
           {/* Four figures, and none of them is a streak, a score or a completion
               percentage — Harley's vanity metrics, 2019. Sets, kilos, minutes,

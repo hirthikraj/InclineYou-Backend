@@ -1,11 +1,10 @@
 'use client';
 
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 
 import { Note, Plus, Tack } from '@/components/shell/Icons';
-import type { ClientDetailWire, ClientNoteWire } from '@/lib/clients/client-api';
+import type { ClientDetailWire, ClientMessageWire, ClientNoteWire, PortalWire } from '@/lib/clients/client-api';
 import { formatPhone } from '@/lib/auth/policy';
 import { saveContact, savePhysical } from '@/lib/clients/contact-actions';
 import { ageFrom, birthDateStr } from '@/lib/clients/physical';
@@ -24,12 +23,19 @@ import {
   deleteNote,
   saveNote,
   setNotePinned,
+  setNoteShared,
   undeleteNote,
 } from '@/lib/clients/notes-actions';
+import { inviteClient, revokeInvite } from '@/lib/clients/invite-actions';
+import { savePortalPrefs } from '@/lib/clients/portal-actions';
+import type { InviteCreatedWire } from '@/lib/clients/invite-types';
+import { InviteSheet } from '@/components/clients/InviteSheet';
+import { relativePast } from '@/lib/today/time';
 import { useToast } from '@/lib/toast/store';
 import { ARCHIVE_REASONS } from '@/components/clients/Clients';
 
-import { TrashIcon, longDateStr, shortDate } from './shared';
+import { MessagesCard } from './MessagesCard';
+import { TrashIcon, longDateStr } from './shared';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
 import { Checkbox } from '@/web-components/ui/Checkbox';
@@ -41,6 +47,8 @@ import { MarkupField } from '@/web-components/ui/MarkupField';
 import { NoteCard } from '@/web-components/ui/NoteCard';
 import { PromptList } from '@/web-components/ui/PromptList';
 import { Select } from '@/web-components/ui/Select';
+import { Switch } from '@/web-components/ui/Switch';
+import { Tag, type TagTone } from '@/web-components/ui/Tag';
 import { TextField } from '@/web-components/ui/Field';
 import { Message } from '@/web-components/ui/Message';
 
@@ -121,11 +129,16 @@ import { Message } from '@/web-components/ui/Message';
 
 function NoteRow({
   clientId,
+  first,
+  canShare,
   note,
   busy,
   onBusy,
 }: {
   clientId: string;
+  first: string;
+  /** The client is on the portal, so a note can be shown to them. Taking one back is always offered. */
+  canShare: boolean;
   note: ClientNoteWire;
   busy: boolean;
   onBusy: (fn: () => Promise<void>) => void;
@@ -150,6 +163,7 @@ function NoteRow({
            mode change that reads as a state change. `.ncard--edit` overrides the
            ground and nothing else. */
         pinned={note.pinned}
+        shared={note.sharedWithClient}
         meta={longDateStr(stamp)}
         actions={
           <>
@@ -201,6 +215,10 @@ function NoteRow({
   return (
     <NoteCard
       pinned={note.pinned}
+      /* A shared note is marked by the design system's own treatment (`.ncard--shared`) AND in words: the colour is never
+         the only thing saying that somebody else can read this. */
+      shared={note.sharedWithClient}
+      state={note.sharedWithClient ? <Tag tone="acc">Shared with {first}</Tag> : undefined}
       meta={
         <>
           {longDateStr(stamp)}
@@ -209,6 +227,22 @@ function NoteRow({
       }
       actions={
         <>
+          {/* Showing a note is offered while the client can be shown it; taking it back is offered whenever it is shown,
+              because pulling a note back must never depend on where the client now is. */}
+          {(canShare || note.sharedWithClient) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                onBusy(async () => {
+                  await setNoteShared(clientId, note.id, !note.sharedWithClient);
+                })
+              }
+            >
+              {note.sharedWithClient ? 'Stop sharing' : `Share with ${first}`}
+            </Button>
+          )}
           {/* `Button` and not a hand-rolled `.btn btn--ghost btn--sm btn--icon`,
               which is what this was: the icon-only branch makes `label` required
               at the type level, so the name this control needs cannot be
@@ -530,14 +564,10 @@ function ContactCard({
 function PhysicalCard({
   clientId,
   client,
-  weightKg,
-  weightAt,
   now,
 }: {
   clientId: string;
   client: ClientDetailWire;
-  weightKg: number | null;
-  weightAt: number | null;
   now: number;
 }) {
   const [editing, setEditing] = useState(false);
@@ -579,7 +609,7 @@ function PhysicalCard({
     dob !== (client.dateOfBirth ?? '') ||
     activity !== (client.activityLevel ?? '');
   const adultAt = adultCutoff(now);
-  const bare = client.heightCm == null && client.dateOfBirth == null && client.activityLevel == null && weightKg == null;
+  const bare = client.heightCm == null && client.dateOfBirth == null && client.activityLevel == null;
 
   function submit() {
     if (pending || !dirty) return;
@@ -694,20 +724,8 @@ function PhysicalCard({
           {client.heightCm == null ? <FactList.Blank /> : `${client.heightCm} cm`}
         </FactList.Row>
 
-        <FactList.Row
-          k="Weight"
-          /* The date is the point of the link, not decoration: a figure read off
-             a measurement from March is a figure about March. */
-          note={weightKg !== null && weightAt !== null ? shortDate(weightAt) : undefined}
-        >
-          {weightKg == null ? (
-            <FactList.Blank />
-          ) : (
-            <Link className="facts__lk" href={`/clients/${clientId}/progress`}>
-              {weightKg} kg
-            </Link>
-          )}
-        </FactList.Row>
+        {/* No weight row: a body is measured in an assessment and nowhere else, and there is no measurement
+            read (removed 10 Oct 2026), so the card would only ever say "—". */}
 
         <FactList.Row
           k="Birth day"
@@ -736,6 +754,183 @@ const ACTIVITY = [
   { value: 'active', label: 'Active' },
   { value: 'very_active', label: 'Very active' },
 ];
+
+/**
+ * PORTAL ACCESS — WHETHER THIS PERSON CAN SIGN IN, WHAT THEY SEE, AND THE WAY TO ASK THEM.
+ *
+ * It reads `client.portal` (api-contract 1.2, tr-a5) and calls three routes that already exist: invite and withdraw
+ * (`/v1/client-invites`) and the one PATCH that carries the two per-client settings. There is no `…/access` route of its
+ * own — the card is a view over the client, not a resource.
+ *
+ * ONE VERB IN THE HEADER, LIKE THE EDIT BUTTONS BESIDE IT. *Invite* or *Send again* is the primary thing a trainer does
+ * here; *Withdraw* sits next to it only while there is an invitation to withdraw. Archive is the way to end access after
+ * a client has joined, and it lives where it always did, in *Manage*: this card does not repeat it.
+ *
+ * THE TWO SETTINGS ARE FOR A CLIENT WHO IS ON THE PORTAL, and are shown only then. A reminder goes to somebody who has
+ * agreed to receive one, and *what they owe* is something they see. Before that there is nobody for either to apply to,
+ * and two controls that do nothing yet are a question the trainer should not have to answer.
+ *
+ * `expired` is the one state the server derives. It reads *Expired* and offers the same *Send again* as a link nobody
+ * has opened: they are the same problem with the same answer.
+ */
+const ACCESS: Record<PortalWire['state'], { label: string; tone: TagTone; hint: string }> = {
+  not_invited: { label: 'Not invited', tone: 'neutral', hint: 'They can’t see their plan yet.' },
+  invited: { label: 'Invited', tone: 'info', hint: 'Waiting for them to open the link.' },
+  expired: { label: 'Expired', tone: 'warn', hint: 'The link ran out. Send a new one.' },
+  declined: { label: 'Declined', tone: 'warn', hint: 'You can invite them again.' },
+  accepted: { label: 'On the portal', tone: 'ok', hint: 'They sign in with their number.' },
+  paused: { label: 'Paused', tone: 'warn', hint: 'Paused while their plan is.' },
+  removed: { label: 'Removed', tone: 'neutral', hint: 'They no longer have access.' },
+};
+
+/** What became of a reminder, in the trainer's words. The skip reasons are the schema's six. */
+const SKIPPED: Record<string, string> = {
+  trainer_off: 'Reminders were off in your settings.',
+  client_opt_out: 'They turned reminders off.',
+  client_excluded: 'You excluded them.',
+  no_opt_in: 'They haven’t agreed to WhatsApp messages yet.',
+  session_changed: 'The session had moved.',
+  window_passed: 'It was too late to send.',
+};
+
+function reminderNote(r: NonNullable<PortalWire['recentReminders']>[number] | undefined, now: number): string | undefined {
+  if (!r) return 'None sent yet.';
+  if (r.status === 'skipped') return `Last: skipped. ${SKIPPED[r.skipReason ?? ''] ?? ''}`.trim();
+  if (r.status === 'failed') return 'The last one failed to send.';
+  if (r.status === 'queued') return 'One is queued.';
+  return r.sentAt ? `Last sent ${relativePast(r.sentAt, now)}.` : undefined;
+}
+
+function AccessCard({ client, now }: { client: ClientDetailWire; now: number }) {
+  const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState<InviteCreatedWire | null>(null);
+  const [pending, start] = useTransition();
+  const [working, setWorking] = useState<'invite' | 'withdraw' | 'prefs' | null>(null);
+  const portal = client.portal;
+  const info = ACCESS[portal.state] ?? { label: portal.state, tone: 'neutral' as TagTone, hint: '' };
+  const live = portal.state === 'invited' || portal.state === 'expired';
+  const onPortal = portal.state === 'accepted' || portal.state === 'paused';
+  const canInvite = client.status !== 'archived' && (live || portal.state === 'not_invited' || portal.state === 'declined');
+  const effectiveMoney = portal.showMoney ?? true;
+  const moneyValue = portal.showMoneyOverride === true ? 'show' : portal.showMoneyOverride === false ? 'hide' : 'follow';
+
+  function run(kind: 'invite' | 'withdraw' | 'prefs', work: () => Promise<{ ok: boolean; message?: string }>) {
+    setError(null);
+    setWorking(kind);
+    start(async () => {
+      const r = await work();
+      setWorking(null);
+      if (!r.ok) setError(r.message ?? 'That did not save. Nothing changed.');
+    });
+  }
+
+  function invite() {
+    setError(null);
+    setWorking('invite');
+    start(async () => {
+      const r = await inviteClient(client.id);
+      setWorking(null);
+      if (r.ok) setCreated(r.invite);
+      else setError(r.message);
+    });
+  }
+
+  return (
+    <Card
+      as="section"
+      title="Portal access"
+      className="cfrec--cont"
+      flush={!error}
+      actions={
+        canInvite ? (
+          <>
+            {live && portal.inviteId && (
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={working === 'withdraw'}
+                disabled={pending && working !== 'withdraw'}
+                onClick={() => run('withdraw', () => revokeInvite(portal.inviteId!, client.id))}
+              >
+                Withdraw
+              </Button>
+            )}
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={working === 'invite'}
+              disabled={!client.phone || (pending && working !== 'invite')}
+              onClick={invite}
+            >
+              {live ? 'Send again' : 'Invite'}
+            </Button>
+          </>
+        ) : undefined
+      }
+    >
+      <FactList>
+        <FactList.Row k="Status" note={canInvite && !client.phone ? 'Add a number first.' : info.hint}>
+          <Tag tone={info.tone}>{info.label}</Tag>
+        </FactList.Row>
+        {onPortal && (
+          <>
+            <FactList.Row k="Last opened">
+              {portal.lastSeenAt ? relativePast(portal.lastSeenAt, now) : <FactList.Blank />}
+            </FactList.Row>
+            {portal.lastSelfRunAt && (
+              <FactList.Row k="Last workout on their own">{relativePast(portal.lastSelfRunAt, now)}</FactList.Row>
+            )}
+            <FactList.Row k="Session reminders" note={reminderNote(portal.recentReminders?.[0], now)}>
+              <Switch
+                label="Send this client session reminders on WhatsApp"
+                checked={!portal.remindersExcluded}
+                disabled={pending}
+                onChange={(next) =>
+                  run('prefs', () => savePortalPrefs(client.id, client.version, { remindersExcluded: !next }))
+                }
+              />
+            </FactList.Row>
+            <FactList.Row k="Shows what they owe">
+              <Select
+                label="Whether this client sees what they owe"
+                hideLabel
+                width={190}
+                value={moneyValue}
+                disabled={pending}
+                options={[
+                  { value: 'follow', label: moneyValue === 'follow' ? `My setting (${effectiveMoney ? 'shows' : 'hides'})` : 'My setting' },
+                  { value: 'show', label: 'Show' },
+                  { value: 'hide', label: 'Hide' },
+                ]}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  run('prefs', () =>
+                    savePortalPrefs(client.id, client.version, { portalShowMoney: v === 'show' ? true : v === 'hide' ? false : null }),
+                  );
+                }}
+              />
+            </FactList.Row>
+          </>
+        )}
+      </FactList>
+      {error && (
+        <Message tone="err" alert style={{ marginTop: 11 }}>
+          {error}
+        </Message>
+      )}
+      {created && client.phone && (
+        <InviteSheet
+          clientId={client.id}
+          clientName={client.name}
+          phone={client.phone}
+          draft={created.draft}
+          link={created.link}
+          onClose={() => setCreated(null)}
+        />
+      )}
+    </Card>
+  );
+}
 
 /**
  * ARCHIVED — the read-only end state, and the one real way back.
@@ -1068,18 +1263,16 @@ function promptsFor(first: string): string[] {
  */
 export function PersonalTab({
   client,
-  weightKg,
-  weightAt,
   now,
   notes,
+  messages,
 }: {
   /** The header row: the physical card's fields, the contact card's name and number, and the If-Match `version`. */
   client: ClientDetailWire;
-  /** The latest assessment weight reading, already picked out by the file. */
-  weightKg: number | null;
-  weightAt: number | null;
   now: number;
   notes: ClientNoteWire[];
+  /** The newest lines to this client; read only for a client who is on the portal. */
+  messages: ClientMessageWire[];
 }) {
   const [composing, setComposing] = useState(false);
   /* The question a prompt asked, as the composer's placeholder and nothing
@@ -1089,12 +1282,15 @@ export function PersonalTab({
   const [asked, setAsked] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [pinNew, setPinNew] = useState(false);
+  const [shareNew, setShareNew] = useState(false);
   /* Minted when the composer opens and kept until the save lands, so a retry
      answers the note the first attempt made instead of writing two. */
   const [noteId, setNoteId] = useState(() => crypto.randomUUID());
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const { id: clientId, name: clientName, phone: clientPhone } = client;
+  /* A note can be shown only to a client who has somewhere to read it. */
+  const canShare = client.portal.state === 'accepted' || client.portal.state === 'paused';
   const first = clientName.split(' ')[0];
 
   /* Pinned first, then newest. The strip's contents should be at the top of the
@@ -1136,6 +1332,7 @@ export function PersonalTab({
     setAsked(null);
     setDraft('');
     setPinNew(false);
+    setShareNew(false);
     setError(null);
   }
 
@@ -1143,11 +1340,12 @@ export function PersonalTab({
     if (!draft.trim() || pending) return;
     setError(null);
     start(async () => {
-      const result = await addNote(clientId, noteId, draft, pinNew);
+      const result = await addNote(clientId, noteId, draft, pinNew, canShare && shareNew);
       if (result.ok) {
         setNoteId(crypto.randomUUID());
         setDraft('');
         setPinNew(false);
+        setShareNew(false);
         setComposing(false);
         setAsked(null);
       } else {
@@ -1166,11 +1364,13 @@ export function PersonalTab({
         <PhysicalCard
           clientId={clientId}
           client={client}
-          weightKg={weightKg}
-          weightAt={weightAt}
           now={now}
         />
         <ContactCard clientId={clientId} version={client.version} name={clientName} phone={clientPhone} />
+        <AccessCard client={client} now={now} />
+        {(client.portal.state === 'accepted' || client.portal.state === 'paused') && (
+          <MessagesCard clientId={clientId} first={first} messages={messages} now={now} />
+        )}
       </div>
 
       <Card
@@ -1183,7 +1383,7 @@ export function PersonalTab({
              existed the one reassurance a trainer needs before writing about a person was gone. */
           <span className="small ink3">
             {notes.length > 0 ? `${notes.length === 1 ? '1 note' : `${notes.length} notes`} · ` : ''}
-            Only you can read these
+            {canShare || notes.some((n) => n.sharedWithClient) ? 'Private unless you share one' : 'Only you can read these'}
           </span>
         }
         flush
@@ -1245,6 +1445,15 @@ export function PersonalTab({
                       checked={pinNew}
                       onChange={(e) => setPinNew(e.target.checked)}
                     />
+                    {/* Offered only while the client can be shown a note, and OFF: a note is private until the trainer
+                        says otherwise, so the safe answer is the one a distracted press leaves behind. */}
+                    {canShare && (
+                      <Checkbox
+                        label={`Show ${first} this note`}
+                        checked={shareNew}
+                        onChange={(e) => setShareNew(e.target.checked)}
+                      />
+                    )}
                   </div>
                   {/* Written out rather than as ⌘↵. FOUND BY RENDERING: the two
                       glyphs fall outside the mono face and came back as tofu,
@@ -1276,13 +1485,15 @@ export function PersonalTab({
               kind="first-run"
               icon={<Note size={22} />}
               title="Nothing written down yet"
-              body={`The things that never fit in a field — how ${first} likes to train, what their week looks like, what to ask about next time. Only you can read a note.`}
+              body={`The things that never fit in a field — how ${first} likes to train, what their week looks like, what to ask about next time. A note is private until you choose to show it.`}
             />
           ) : (
             ordered.map((note) => (
               <NoteRow
                 key={note.id}
                 clientId={clientId}
+                first={first}
+                canShare={canShare}
                 note={note}
                 busy={pending}
                 onBusy={run}

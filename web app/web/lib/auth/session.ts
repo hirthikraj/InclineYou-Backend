@@ -267,12 +267,24 @@ export function needsConsent(res: AuthResponse): boolean {
 }
 
 /**
- * Which screen this sign-in is owed — api-contract *Sign in*: a new number
+ * Which screen this sign-in is owed — api-contract *Sign in*: a client goes to the portal or the wall they are on; a new number
  * (`pending`) goes to `/sign-in/new`; otherwise a notice that has changed goes
  * to `/sign-in/consent`, then unfinished onboarding to `/setup`, otherwise
  * `/today`.
  */
 export function destinationFor(res: AuthResponse): string {
+  // An invite waiting for the number beats both "new trainer" and a wall (api-contract 1.2, D-16): one goes straight to it, several
+  // show a short list. The code was already proved on this page, so there is no second one.
+  const waiting = res.role === 'pending' || (res.role === 'client' && res.access === 'removed') ? (res.pendingInvites ?? []) : [];
+  if (waiting.length === 1) return `/invite/${waiting[0].inviteId}`;
+  if (waiting.length > 1) return '/sign-in/invites';
+
+  // A client is never asked who they are: the number decided, and the wall they are on is the answer (api-contract 1.2, inv-a5).
+  if (res.role === 'client') {
+    if (res.access === 'paused') return '/sign-in/paused';
+    if (res.access === 'removed') return '/sign-in/removed';
+    return '/me/today';
+  }
   if (res.role === 'pending') return '/sign-in/new';
   if (needsConsent(res)) return '/sign-in/consent';
   return needsSetup(res) ? '/setup' : '/today';

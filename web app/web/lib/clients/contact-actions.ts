@@ -35,6 +35,7 @@ const BY_CODE: Record<string, string> = {
   PHONE_ON_ANOTHER_ROSTER: 'That number belongs to a client of another coach in this workspace.',
   PHONE_IS_TRAINER: 'That is a trainer\'s number, not a client\'s.',
   CLIENT_UNDER_18: 'Clients must be 18 or older.',
+  CLIENT_ALREADY_ACCEPTED: 'They are on the portal, and this number is how they sign in, so it can’t be changed here.',
 };
 
 function fail(error: unknown): ContactWriteResult {

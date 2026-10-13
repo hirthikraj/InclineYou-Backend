@@ -5,7 +5,6 @@ import { cache } from 'react';
 import { api, ApiError } from '@/lib/http/client';
 import {
   ClientDetailApiError,
-  clientReadings,
   clientSessions,
   dayIso,
   getClientHeader,
@@ -29,16 +28,16 @@ import {
  * | `GET /v1/me` | who the card is signed by |
  * | `GET /v1/sessions?clientId&from&to` | adherence |
  * | `GET /v1/clients/{id}/set-history` | every set, ever — the strength half |
- * | `GET /v1/clients/{id}/readings` | weight and measurements |
  *
  * Set-history is read WHOLE, not from the window: a personal best is a claim
  * about everything a client has ever lifted, and this card must never hand
  * somebody a "record" they beat two years ago. It names its own exercises, so
  * there is no library read.
  *
- * Readings fall back to empty (a client with no assessments is a card with no
- * body block); the client, the trainer, the sessions and the sets do not — a
- * report that cannot say who it is about or what was done is not a report.
+ * There is no body block: a body is measured in an assessment and nowhere else, and
+ * there is no measurement history read (removed 10 Oct 2026), so the card carries
+ * none. The client, the trainer, the sessions and the sets are required — a report
+ * that cannot say who it is about or what was done is not a report.
  */
 
 export class ClientReportApiError extends Error {
@@ -77,12 +76,11 @@ export const getClientReport = cache(
     const now = Date.now();
     const from = startOfDay(now - weeks * 7 * DAY_MS);
 
-    const [{ client }, me, sessions, history, readings] = await Promise.all([
+    const [{ client }, me, sessions, history] = await Promise.all([
       mapped(getClientHeader(clientId)),
       mapped(api<MeWire>('/v1/me')),
       mapped(clientSessions(clientId, dayIso(from), dayIso(now + DAY_MS))),
       mapped(fetchSetHistory(clientId)),
-      clientReadings(clientId),
     ]);
 
     const sets: ReportSetRow[] = history.items.map((s) => ({
@@ -104,7 +102,7 @@ export const getClientReport = cache(
         // In v1 the log sits on the session: a training day is a day with a set done.
         workouts: [...new Set(history.items.map((s) => s.date))].map(isoDayToMs),
         sets,
-        metrics: readings.map((r) => ({ metricType: r.key, value: r.value, unit: r.unit, recordedAt: r.at })),
+        metrics: [],
         exerciseNames: new Map(Object.entries(history.exercises).map(([id, e]) => [id, e.name])),
         now,
       },

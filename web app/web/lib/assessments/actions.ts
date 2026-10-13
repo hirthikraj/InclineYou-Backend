@@ -91,6 +91,8 @@ export interface TemplateDraft {
   description: string;
   measurements: { on: boolean; keys: string[] };
   questions: { on: boolean; items: QuestionWire[] };
+  /** Left out, the server leaves the offer as it was — a save that never drew the switch cannot turn it off. */
+  clientCanStart?: boolean;
 }
 
 /** `description` is sent as null when blank: the wire stores *none* as null. */
@@ -151,6 +153,20 @@ export async function saveTemplate(
   }
 }
 
+/**
+ * THE WEEKLY CHECK-IN, ON REQUEST. The product writes the form (weight, energy out of five, one line) and offers it to
+ * clients; asking twice finds the trainer's one rather than making another, so the button needs no guard.
+ */
+export async function addWeeklyCheckIn(): Promise<WriteResult<TemplateWire>> {
+  try {
+    const row = await api<TemplateWire>('/v1/assessment-templates', { method: 'POST', body: { systemKey: 'weekly_check_in' } });
+    refresh();
+    return { ok: true, data: row };
+  } catch (error) {
+    return fail(error, 'That assessment');
+  }
+}
+
 export async function deleteTemplate(id: string): Promise<WriteResult> {
   try {
     await api(`/v1/assessment-templates/${id}`, { method: 'DELETE' });
@@ -164,14 +180,16 @@ export async function deleteTemplate(id: string): Promise<WriteResult> {
 /**
  * Give a client one assessment — for a date, or (`dueOn` today) to take now.
  * `dueOn` is a calendar date and is left out for *today in the workspace's
- * zone*, which the server knows and this server's clock does not. Sending to
- * the client is not in v1, so there is no `sendNow`: the backend refuses the
- * key by name.
+ * zone*, which the server knows and this server's clock does not.
+ *
+ * `sendNow` (1.2) is whether the client gets it: left out, the server sends it to a client on the portal, because
+ * assigned means visible. `false` is *take it in person only*, which is what *Take it now* always is.
  */
 export async function scheduleAssessment(input: {
   clientId: string;
   templateId: string;
   dueOn?: string;
+  sendNow?: boolean;
 }): Promise<WriteResult<AssessmentWire>> {
   if (!input.clientId) return { ok: false, message: 'Pick a client first.' };
   if (!input.templateId) return { ok: false, message: 'Pick an assessment first.' };
@@ -187,12 +205,26 @@ export async function scheduleAssessment(input: {
   }
 }
 
-/** Put a client on a cycle — every `intervalDays`, the first one booked now. */
+/**
+ * Send one that was kept in person only. Idempotent on the server, so a second press tells the client nothing more.
+ */
+export async function sendAssessment(id: string, clientId?: string): Promise<WriteResult<AssessmentWire>> {
+  try {
+    const row = await api<AssessmentWire>(`/v1/assessments/${id}/send`, { method: 'POST', body: {} });
+    refresh(clientId);
+    return { ok: true, data: row };
+  } catch (error) {
+    return fail(error, 'That assessment');
+  }
+}
+
+/** Put a client on a cycle — every `intervalDays`, the first one booked now. `sendToClient` is the cycle's own switch. */
 export async function startCycle(input: {
   clientId: string;
   templateId: string;
   intervalDays: number;
   firstDueOn?: string;
+  sendToClient?: boolean;
 }): Promise<WriteResult<ScheduleWire>> {
   if (!input.clientId) return { ok: false, message: 'Pick a client first.' };
   if (!input.templateId) return { ok: false, message: 'Pick an assessment first.' };
@@ -208,11 +240,11 @@ export async function startCycle(input: {
   }
 }
 
-/** `nextDueOn` and/or `intervalDays`. Ending is its own verb. */
+/** `nextDueOn`, `intervalDays` and/or `sendToClient`. Ending is its own verb. */
 export async function updateCycle(
   id: string,
   version: string,
-  change: { nextDueOn?: string; intervalDays?: number },
+  change: { nextDueOn?: string; intervalDays?: number; sendToClient?: boolean },
   clientId?: string,
 ): Promise<WriteResult<ScheduleWire>> {
   try {

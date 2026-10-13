@@ -247,6 +247,10 @@ export interface SessionTableRow {
   note: string | null;
   /** `Tomorrow`, `In 3 days` — null past six days out, where it is a subtraction. */
   relative: string | null;
+  /** A workout the client did alone — nobody on the floor with them. */
+  own: boolean;
+  /** Only a *hard* answer is carried: it is the one a trainer acts on, and the one the queue and the bell already single out. */
+  feltHard: boolean;
   /** Midnight on the first of its month. The history's grouping key. */
   month: number;
   /** `September 2026`. */
@@ -283,6 +287,8 @@ export function buildSessionRows(sessions: ClientSessionWire[], now: number): Se
         id: s.id,
         at: s.scheduledAt,
         cls,
+        own: s.loggedBy === 'client',
+        feltHard: s.feedback?.effort === 'hard',
         /* TODAY IS UPCOMING, and it is a boundary worth stating. A session at
            six this evening is not history at nine this morning, and the row for
            it belongs where a trainer looks for what is still to come. It leaves

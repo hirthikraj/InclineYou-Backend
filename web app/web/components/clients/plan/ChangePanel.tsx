@@ -1,6 +1,5 @@
 'use client';
 
-import { RELEASE_PLAN_NOTICE } from '@/lib/programs/release';
 import type { ReactNode } from 'react';
 
 import type { PlanDiff } from '@/lib/programs/diff';
@@ -86,6 +85,11 @@ export interface ChangeState {
   /** null while the send has not been asked for; then whether the client's own
    *  settings let it land. */
   notified: boolean | null;
+  /**
+   * Whether the client is on the portal, and so can be told at all. Without it the foot ends at *Done*: offering a button
+   * that can only answer *they haven't joined* is a control that fails by design.
+   */
+  canNotify: boolean;
   notifying: boolean;
   notifyError: string | null;
   onSave: () => void;
@@ -128,11 +132,13 @@ export function ChangeBody({ state: s }: { state: ChangeState }) {
           <p className="small">
             {savedChanges} {savedChanges === 1 ? 'change is' : 'changes are'} now in{' '}
             {firstName(clientName)}&rsquo;s plan.{' '}
-            {notified === null
-              ? `They have not been told about ${savedChanges === 1 ? 'it' : 'them'} yet.`
-              : notified
-                ? `${firstName(clientName)} has been told.`
-                : `${firstName(clientName)} was not told, because plan notifications are off for them.`}
+            {!s.canNotify
+              ? /* Not on the portal: there is nobody to tell, so the card does not promise a telling that cannot come. */ ''
+              : notified === null
+                ? `They have not been told about ${savedChanges === 1 ? 'it' : 'them'} yet.`
+                : notified
+                  ? `${firstName(clientName)} has been told.`
+                  : `${firstName(clientName)} was not told: their plan notifications are off, or their portal is paused.`}
           </p>
         </Card.Body>
       </Card>
@@ -222,8 +228,8 @@ export function ChangeFoot({ state: s, onClose }: { state: ChangeState; onClose?
   const dirty = s.diff.total > 0;
   const busy = s.save === 'saving';
 
-  if (settled && !RELEASE_PLAN_NOTICE) {
-    /* R47 — nobody to tell in v1: the save is the whole act. */
+  if (settled && !s.canNotify) {
+    /* Nobody to tell: the client has not joined the portal, so the save is the whole act. */
     return onClose ? (
       <div className="tools pg__gap">
         <Button variant="secondary" size="sm" onClick={onClose}>

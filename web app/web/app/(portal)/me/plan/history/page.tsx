@@ -1,41 +1,45 @@
-import { PlanHistory } from '@/components/portal/PlanHistory';
-import { getPortalProgram, getPortalPrograms } from '@/lib/portal/api';
-import { requirePortal } from '@/lib/portal/guard';
-import { buildPastPlans } from '@/lib/portal/plan';
+import Link from 'next/link';
 
-export const metadata = { title: 'Past plans · Plan · InclineYou' };
+import { day } from '@/components/portal/plan/format';
+import { requirePortalSession } from '@/lib/portal/session';
+import { portalGet, settle, type PastItemWire } from '@/lib/portal/plan-api';
+import { Button } from '@/web-components/ui/Button';
+import { Card } from '@/web-components/ui/Card';
+import { EmptyState } from '@/web-components/ui/EmptyState';
+import { Message } from '@/web-components/ui/Message';
 
-/**
- * §4 · Plan → **Past plans**.
- *
- * ── THIS TAB IS WHY THE READS ARE SPLIT ─────────────────────────────────────
- *
- * `plan-tabs.ts`'s rule 1 says each page loads only its own panel, and this is
- * the route it buys the most on: nothing else in the portal reads the program
- * history, and *Schedule* and *Workouts* both read a 28-day diary this screen
- * has no use for.
- *
- * Both reads here are `cache()`d and the layout has already made them — the
- * summaries for the count on the tab strip, the active program for the header's
- * arc — so this page adds no request at all.
- *
- * `hasActive` is the one thing the active program is read for: it tells the two
- * empty states apart. *You are on your first block* and *nothing is assigned to
- * you at all* are different facts and want different sentences, and a client in
- * the second case is already being told so on the two tabs above.
- */
+export const metadata = { title: 'Past plans · InclineYou' };
+
+/** `/me/plan/history` — plans that finished, newest first, each readable after a new one starts (api-contract 1.2, pp-l2). */
 export const dynamic = 'force-dynamic';
 
-export default async function Page() {
-  const result = await requirePortal();
-  if (!result.ok) return null;
-  const { me } = result;
-
-  const [rows, program] = await Promise.all([getPortalPrograms(), getPortalProgram()]);
+export default async function Page({ searchParams }: { searchParams: Promise<{ cursor?: string }> }) {
+  const session = await requirePortalSession();
+  if (!session.ok) return null;
+  const { cursor } = await searchParams;
+  const page = settle(await portalGet<{ items: PastItemWire[]; nextCursor: string | null }>(`/v1/portal/plan/history?limit=10${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`));
+  if (!page) return <div className="body"><Message tone="warn">We couldn’t load your past plans just now. Reload in a moment.</Message></div>;
 
   return (
     <div className="body">
-      <PlanHistory me={me} plans={buildPastPlans(rows)} hasActive={program !== null} />
+      <div className="pl">
+        {page.items.length === 0 ? (
+          <EmptyState title="No finished plans yet" body="When a plan wraps up it stays here to read, even after the next one starts." />
+        ) : (
+          page.items.map((p) => (
+            <Card key={p.id}>
+              <Card.Body>
+                <h2 className="pl__h"><Link href={`/me/plan/history/${p.id}`}>{p.name}</Link></h2>
+                <p className="pl__s">
+                  {p.weeks} weeks{p.startDate ? ` · ${day(p.startDate, { day: 'numeric', month: 'short', year: 'numeric' })}` : ''}
+                  {p.endDate ? ` – ${day(p.endDate, { day: 'numeric', month: 'short', year: 'numeric' })}` : ''} · {p.sessionsDone} {p.sessionsDone === 1 ? 'session' : 'sessions'} done
+                </p>
+              </Card.Body>
+            </Card>
+          ))
+        )}
+        {page.nextCursor && <div><Button variant="secondary" href={`/me/plan/history?cursor=${encodeURIComponent(page.nextCursor)}`}>Older plans</Button></div>}
+      </div>
     </div>
   );
 }

@@ -135,7 +135,7 @@ export async function verifyCode(otp: string): Promise<VerifyResult> {
   // The notice in force, for the two screens that must send it back. Kept for a
   // new number and for a trainer whose acceptance is out of date; dropped
   // otherwise, so a stale one cannot outlive its use.
-  if (session.role === 'pending' || needsConsent(session)) {
+  if (session.role === 'pending' || (session.role === 'trainer' && needsConsent(session))) {
     await setPolicyVersion(session.currentPolicyVersion);
   } else {
     await clearPolicyVersion();

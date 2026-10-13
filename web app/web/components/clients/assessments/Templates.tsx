@@ -3,7 +3,7 @@
 import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { deleteTemplate } from '@/lib/assessments/actions';
+import { addWeeklyCheckIn, deleteTemplate } from '@/lib/assessments/actions';
 import type { TemplatesData } from '@/lib/assessments/api';
 import { assessmentsTabs } from '@/lib/assessments/address';
 import { templateShape, type TemplateWire } from '@/lib/assessments/vocab';
@@ -16,6 +16,7 @@ import { Modal, ModalHost } from '@/web-components/ui/Modal';
 import { PageHeader } from '@/web-components/ui/PageHeader';
 import { RowMenu } from '@/web-components/ui/RowMenu';
 import { SearchField } from '@/web-components/ui/SearchField';
+import { Tag } from '@/web-components/ui/Tag';
 import { Table, Row, type Column } from '@/web-components/ui/Table';
 import { Checklist, Plus } from './Icons';
 import { TemplateEditor } from './TemplateEditor';
@@ -52,6 +53,22 @@ export function Templates({ data }: { data: TemplatesData }) {
     ? data.templates.filter((t) => t.name.toLowerCase().includes(q))
     : data.templates;
 
+  /* THE PRODUCT'S OWN WEEKLY FORM, asked for rather than pre-made: a read never writes, and a trainer who does not want it has
+     nothing on their shelf they did not put there. Pressing it twice finds the one they have (the server is idempotent), so it
+     is hidden once it exists only because there is nothing left for it to do. */
+  const hasWeekly = data.templates.some((t) => t.systemKey === 'weekly_check_in');
+  function addWeekly() {
+    setError(null);
+    start(async () => {
+      const result = await addWeeklyCheckIn();
+      if (!result.ok) {
+        setError(result.message ?? 'That did not save.');
+        return;
+      }
+      router.refresh();
+    });
+  }
+
   function remove(row: TemplateWire) {
     setError(null);
     start(async () => {
@@ -79,10 +96,17 @@ export function Templates({ data }: { data: TemplatesData }) {
               : `${data.templates.length} templates`
           }
           actions={
-            <Button variant="primary" onClick={() => setEditing({ row: null })}>
-              <Plus size={15} />
-              New template
-            </Button>
+            <>
+              {!hasWeekly && (
+                <Button variant="secondary" disabled={busy} onClick={addWeekly}>
+                  Add the weekly check-in
+                </Button>
+              )}
+              <Button variant="primary" onClick={() => setEditing({ row: null })}>
+                <Plus size={15} />
+                New template
+              </Button>
+            </>
           }
         >
           <div className="asm__tabs">
@@ -117,11 +141,18 @@ export function Templates({ data }: { data: TemplatesData }) {
                 kind="first-run"
                 icon={<Checklist size={28} />}
                 title="No templates yet"
-                body="A template is the list of measurements and questions you work through with a client in a session. Write one, then schedule it against somebody."
+                body="A template is the list of measurements and questions you work through with a client, in a session or sent to them on the portal. Write one, or start from the weekly check-in."
                 action={
-                  <Button variant="primary" onClick={() => setEditing({ row: null })}>
-                    Write the first one
-                  </Button>
+                  <>
+                    <Button variant="primary" onClick={() => setEditing({ row: null })}>
+                      Write the first one
+                    </Button>
+                    {!hasWeekly && (
+                      <Button variant="secondary" disabled={busy} onClick={addWeekly}>
+                        Add the weekly check-in
+                      </Button>
+                    )}
+                  </>
                 }
               />
             )
@@ -135,14 +166,19 @@ export function Templates({ data }: { data: TemplatesData }) {
                   <Row
                     key={t.id}
                     header={
-                      <button
-                        type="button"
-                        className="asm-open asm-open--name"
-                        title={t.name}
-                        onClick={() => setEditing({ row: t })}
-                      >
-                        {t.name}
-                      </button>
+                      /* THE MARK BESIDE THE NAME, not in the *Asks for* cell: that column is a fixed track sized for a
+                         sentence, and a pill drawn after the sentence ran straight into *Taken*. */
+                      <span className="tpl-name">
+                        <button
+                          type="button"
+                          className="asm-open asm-open--name"
+                          title={t.name}
+                          onClick={() => setEditing({ row: t })}
+                        >
+                          {t.name}
+                        </button>
+                        {t.clientCanStart && <Tag tone="ok" className="tpl-offer">Clients can start it</Tag>}
+                      </span>
                     }
                     cells={[
                       {

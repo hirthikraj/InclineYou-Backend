@@ -2,6 +2,10 @@
 
 import Link from 'next/link';
 
+import { usePathname } from 'next/navigation';
+
+import { PortalBell } from '@/components/portal/PortalBell';
+import { BellMenu } from './BellMenu';
 import { ChevronLeft, Search } from './Icons';
 import { useWorkspace } from './WorkspaceHost';
 import { WorkspaceMenu } from './WorkspaceMenu';
@@ -117,6 +121,8 @@ export function TopBar({
   /* Same contract again: `undefined` outside the shell, and the bar falls back
      to the breadcrumb rather than drawing a switcher with nothing to switch. */
   const workspace = useWorkspace();
+  /* The client portal has no workspace to switch, and its bell is its own: the client's notices, not the trainer's. */
+  const inPortal = usePathname().startsWith('/me');
   /*
    * No search outside the shell — `/sign-in` and `/setup` draw no palette. The
    * box is dropped rather than drawn inert, which is the whole argument of this
@@ -280,6 +286,19 @@ export function TopBar({
               It said ⌘K to everyone, and the app has always bound Ctrl+K too. */}
           <ShortcutKeys letter="K" />
         </button>
+      )}
+
+      {/* The bell is the other half of the pair `.top__acts` was drawn for: search and bell are the two controls that open a
+          surface from anywhere. `BellMenu` draws nothing outside the shell, so the wrapper is rendered only where it holds one. */}
+      {workspace && (
+        <div className="top__acts">
+          <BellMenu />
+        </div>
+      )}
+      {!workspace && inPortal && (
+        <div className="top__acts">
+          <PortalBell />
+        </div>
       )}
     </header>
   );

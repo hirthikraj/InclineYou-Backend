@@ -47,7 +47,7 @@ export class ApiError extends Error {
   constructor(
     readonly status: number | null,
     /** The RFC 7807 body, when the server sent one. */
-    readonly problem: { detail?: string; code?: string } = {},
+    readonly problem: { detail?: string; code?: string; attemptsLeft?: number; retryAfterSeconds?: number } = {},
   ) {
     super(`inclineyou api ${status ?? 'unreachable'}`);
     this.name = 'ApiError';
@@ -119,8 +119,16 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
   record({ method, url, requestBody: body, status: res.status, ms: Date.now() - started, responseBody: parsed });
 
   if (!res.ok) {
-    const problem = parsed && typeof parsed === 'object' ? (parsed as { detail?: string; code?: string }) : {};
-    throw new ApiError(res.status, { detail: problem.detail, code: problem.code });
+    const problem = parsed && typeof parsed === 'object'
+      ? (parsed as { detail?: string; code?: string; attemptsLeft?: number; retryAfterSeconds?: number })
+      : {};
+    throw new ApiError(res.status, {
+      detail: problem.detail,
+      code: problem.code,
+      // The two numbers a sign-in screen words its refusals with. Absent on every other error.
+      attemptsLeft: problem.attemptsLeft,
+      retryAfterSeconds: problem.retryAfterSeconds,
+    });
   }
   return parsed as T;
 }
@@ -139,8 +147,25 @@ function logRequest(method: string, url: string, body: unknown) {
   console.log(`[api] → ${method} ${url}${body === undefined ? '' : `\n${pretty(body)}`}`);
 }
 
-function record(entry: ApiLogEntry) {
+/**
+ * An invitation's `link` is a bearer secret the server returns once (only its hash is stored), and `draft` / `waUrl` embed
+ * it. The dev log and the in-page console would otherwise keep it for the life of the process, so those three keys are
+ * blanked wherever they appear in a logged body. Development only: nothing is logged in production.
+ */
+const INVITE_SECRETS = new Set(['link', 'draft', 'waUrl']);
+function redactInviteSecrets(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactInviteSecrets);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, INVITE_SECRETS.has(k) && typeof v === 'string' ? '[redacted]' : redactInviteSecrets(v)]),
+    );
+  }
+  return value;
+}
+
+function record(raw: ApiLogEntry) {
   if (!DEV) return;
+  const entry = raw.responseBody === null ? raw : { ...raw, responseBody: redactInviteSecrets(raw.responseBody) as typeof raw.responseBody };
   const outcome = entry.status === null ? `✗ no response (${entry.error})` : `← ${entry.status}`;
   console.log(`[api] ${outcome} ${entry.method} ${entry.url} · ${entry.ms} ms`
     + (entry.responseBody === null ? '' : `\n${pretty(entry.responseBody)}`));

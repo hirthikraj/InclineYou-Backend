@@ -10,6 +10,7 @@ import { Button } from '@/web-components/ui/Button';
 import { Message } from '@/web-components/ui/Message';
 import { Modal, ModalHost } from '@/web-components/ui/Modal';
 import { Select } from '@/web-components/ui/Select';
+import { SwitchRow } from '@/web-components/ui/Switch';
 import { DateField } from '@/web-components/ui/DateField';
 
 /**
@@ -17,12 +18,12 @@ import { DateField } from '@/web-components/ui/DateField';
  *
  * Who, which blueprint, and when — once, or on a cycle.
  *
- * **Nothing is sent to the client in v1** (there is no portal), so the old
- * *send it now* switch is gone: the trainer takes the assessment in the session.
- * That is what the other two buttons are for — *Schedule it* books it
- * for the day, and *Take it now* books it for today and opens the take screen.
- * A cycle books the first one in the same write and the server books each next
- * one when the last is finished.
+ * **For a client on the portal, assigned means visible** (api-contract 1.2): the switch is on by default and the
+ * client finds it under *To do* and takes it on their own. Off, it is *take in person only* — the trainer's, to take in
+ * the session — which is also all a client who has not joined can have, so the switch is not drawn for them and the
+ * sheet says why. *Take it now* is always in person: the tape is in the trainer's hand. A cycle carries the same switch
+ * as `sendToClient` — each one is sent on its due date — books the first one in the same write, and the server books
+ * each next one when the last is finished.
  *
  * ── A DIALOG, NOT A ROUTE, AND NOT A DRAWER ─────────────────────────────────
  *
@@ -42,6 +43,7 @@ export function ScheduleSheet({
   clients,
   templates,
   clientId: presetClient,
+  onPortal: presetOnPortal,
   onClose,
 }: {
   /** Not read when `clientId` is given. */
@@ -49,6 +51,8 @@ export function ScheduleSheet({
   templates: TemplateWire[];
   /** The client file this was opened from — the person is not asked twice. */
   clientId?: string;
+  /** Whether that client is on the portal. Not read unless `clientId` is given — the roster says it for a picked one. */
+  onPortal?: boolean;
   onClose: (booked: boolean) => void;
 }) {
   const router = useRouter();
@@ -57,8 +61,15 @@ export function ScheduleSheet({
   const [templateId, setTemplateId] = useState(templates[0]?.id ?? '');
   const [date, setDate] = useState(defaultDate());
   const [every, setEvery] = useState('once');
+  const [send, setSend] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, start] = useTransition();
+
+  const picked = clients.find((c) => c.id === clientId) ?? null;
+  const onPortal = presetClient
+    ? presetOnPortal === true
+    : picked?.membershipStatus === 'accepted' || picked?.membershipStatus === 'paused';
+  const firstName = (picked?.name ?? '').split(' ')[0] || 'them';
 
   const chosen = templates.find((t) => t.id === templateId) ?? null;
   const days = EVERY.find((e) => e.value === every)?.days ?? 0;
@@ -73,8 +84,14 @@ export function ScheduleSheet({
     start(async () => {
       const result =
         days > 0 && !takeNow
-          ? await startCycle({ clientId, templateId, intervalDays: days, firstDueOn: date })
-          : await scheduleAssessment({ clientId, templateId, dueOn: takeNow ? undefined : date });
+          ? await startCycle({ clientId, templateId, intervalDays: days, firstDueOn: date, ...(onPortal ? { sendToClient: send } : {}) })
+          : await scheduleAssessment({
+              clientId,
+              templateId,
+              dueOn: takeNow ? undefined : date,
+              // Taken in the room is taken in person; otherwise the switch, and a client with no portal has none to press.
+              ...(takeNow ? { sendNow: false } : onPortal ? { sendNow: send } : {}),
+            });
       if (!result.ok) {
         setError(result.message ?? 'That did not save.');
         return;
@@ -143,6 +160,24 @@ export function ScheduleSheet({
               options={EVERY.map((e) => ({ value: e.value, label: e.label }))}
               hint={days > 0 ? 'The next one is booked from the day each is finished.' : undefined}
             />
+            {/* THE CLIENT'S DOOR. Drawn only for somebody who has one — a switch a trainer could press and a server would ignore is
+                a promise this sheet cannot keep — and for the person who is not on the portal the line says why there isn't one. */}
+            {clientId && onPortal && (
+              <SwitchRow
+                className="mt3"
+                checked={send}
+                onChange={setSend}
+                title={days > 0 ? 'Send each one when it is due' : `Send it to ${presetClient ? 'them' : firstName} on the portal`}
+                example={
+                  days > 0
+                    ? 'It lands in their To do on the due date, and they are told once. Off, you take each one in person.'
+                    : 'They see it straight away and take it on their own. Off, you take it in person.'
+                }
+              />
+            )}
+            {clientId && !onPortal && (
+              <p className="fld__h mt3">Not on the portal yet, so this one is taken in person.</p>
+            )}
             {/* THE THEMED DATE FIELD, not a native `type=date`: that one drew 10/11/2026 in a US-locale
                 browser, which is 11 October to an Indian trainer and 10 November to the field. */}
             <div className="mt3">
@@ -155,7 +190,9 @@ export function ScheduleSheet({
                 onChange={(v) => setDate(v)}
               />
               <p id="asm-due-h" className="fld__h">
-                The day you will have the tape in hand.
+                {clientId && onPortal && send
+                  ? 'The day it is due. They see it from now.'
+                  : 'The day you will have the tape in hand.'}
               </p>
             </div>
           </>

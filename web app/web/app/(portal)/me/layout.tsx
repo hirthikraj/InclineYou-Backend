@@ -1,6 +1,7 @@
+import { PortalConsent } from '@/components/portal/PortalConsent';
 import { PortalShell } from '@/components/portal/PortalShell';
 import { Unavailable } from '@/components/portal/Unavailable';
-import { requirePortal } from '@/lib/portal/guard';
+import { requirePortalSession } from '@/lib/portal/session';
 
 /**
  * The client portal's shell, for every `/me/*` route.
@@ -28,7 +29,7 @@ import { requirePortal } from '@/lib/portal/guard';
 export const dynamic = 'force-dynamic';
 
 export default async function PortalLayout({ children }: { children: React.ReactNode }) {
-  const result = await requirePortal();
+  const result = await requirePortalSession();
 
   if (!result.ok) {
     /* No shell. There is nothing to navigate to — every `/me/*` route reads the
@@ -45,11 +46,11 @@ export default async function PortalLayout({ children }: { children: React.React
 
   return (
     <PortalShell
-      clientName={result.me.client.name}
-      clientPhone={result.me.client.phone}
-      trainerName={result.me.trainer.name}
+      clientName={result.me.myDetails?.name ?? 'You'}
+      clientPhone={result.me.phone}
+      trainerName={result.me.trainer?.name ?? 'your trainer'}
     >
-      {children}
+      {result.me.policy.accepted === result.me.policy.current ? children : <PortalConsent version={result.me.policy.current} />}
     </PortalShell>
   );
 }

@@ -64,9 +64,10 @@ export interface Membership {
  * What `POST /v1/auth/otp/verify` and `POST /v1/trainers` answer — api-contract
  * *Sign in*. Instants are epoch milliseconds.
  *
- * Only two roles are ever minted in v1: a trainer, or `pending` (a number with
- * no account yet). A number that is only somebody's client is refused with
- * `403 CLIENT_SIGN_IN_UNAVAILABLE` and gets no credential at all.
+ * Three roles (api-contract 1.2): a trainer, a client, or `pending` (a number with
+ * no account yet). One login page for everybody, routed by the number —
+ * `CLIENT_SIGN_IN_UNAVAILABLE` is retired. A client carries `access` (the wall they
+ * are on) and `trainer`; a `pending` number carries the invites waiting for it.
  */
 export interface AuthResponse {
   /** On the web an opaque `xs_…` session; a `pending` sign-in gets a 15-minute JWT instead. */
@@ -74,7 +75,7 @@ export interface AuthResponse {
   /** `web_session.id` — "this device" in Settings. Null for the pending JWT, which has no row. */
   sessionId: string | null;
   expiresAt: number;
-  role: 'trainer' | 'pending';
+  role: 'trainer' | 'client' | 'pending';
   isNewUser: boolean;
   trainerId: string | null;
   trainerName: string | null;
@@ -84,6 +85,12 @@ export interface AuthResponse {
   privacyPolicyVersion: string | null;
   /** What is in force. A mismatch with the above sends them to `/sign-in/consent`. */
   currentPolicyVersion: string;
+  /** Client only: `active` opens the portal; `paused` and `removed` are the walls. */
+  access?: 'active' | 'paused' | 'removed';
+  /** Client only: whose client this is. No id — nothing in the portal is addressed by it. */
+  trainer?: { name: string; headline: string | null };
+  /** A `pending` number, or a client whose access is `removed`: the invites waiting for this number. Never a token. */
+  pendingInvites?: { inviteId: string; trainerName: string; headline: string | null; expiresAt: number }[];
 }
 
 /** `POST /v1/auth/otp/request` → 200. The id carries no phone number. */

@@ -71,7 +71,8 @@ export interface HistoryWire {
 }
 
 export interface AssessmentDetailWire extends AssessmentWire {
-  client: { id: string; name: string; status: string } | null;
+  /** `onPortal`: whether *send* has anywhere to go. Absent from a backend before 1.2. */
+  client: { id: string; name: string; status: string; onPortal?: boolean } | null;
   /** `deleted`: the template was retired since — the form on this page is the assessment's own copy and still opens. */
   template: { id: string; name: string; description: string | null; deleted: boolean };
   /** The cycle it belongs to; null for a one-off. */

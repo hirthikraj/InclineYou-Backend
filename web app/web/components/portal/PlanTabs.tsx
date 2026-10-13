@@ -26,7 +26,7 @@ import { PageTabs } from '@/components/shell/PageTabs';
  * drawing one, which is what makes the badge worth having: a figure there means
  * there is something behind it.
  */
-export function PlanTabs({ pastCount }: { pastCount: number }) {
+export function PlanTabs({ pastCount }: { pastCount?: number }) {
   const pathname = usePathname();
 
   const current: PlanTab =
@@ -40,7 +40,7 @@ export function PlanTabs({ pastCount }: { pastCount: number }) {
         key: t.key,
         label: t.label,
         href: planTabHref(t.key),
-        count: t.key === 'history' ? pastCount : null,
+        count: t.key === 'history' && pastCount ? pastCount : null,
       }))}
       current={current}
       label="Your plan"

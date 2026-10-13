@@ -1603,6 +1603,9 @@ export function Clients({
               <>
                 {/* Desktop: Export + Add client text buttons */}
                 <div className="ph__acts ph__acts--pair crd-deskacts">
+                  <Button variant="ghost" href="/clients/invitations">
+                    Invitations
+                  </Button>
                   <Button variant="secondary" onClick={() => exportRoster(visible, now)}>
                     <ExportIcon size={15} />
                     Export

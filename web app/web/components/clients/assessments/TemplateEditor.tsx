@@ -32,7 +32,7 @@ import { OrderRow, OrderRows } from '@/web-components/ui/OrderRow';
 import { RowMenu, type RowMenuItem } from '@/web-components/ui/RowMenu';
 import { Segment, SegmentButton } from '@/web-components/ui/Segment';
 import { Select } from '@/web-components/ui/Select';
-import { Switch } from '@/web-components/ui/Switch';
+import { Switch, SwitchRow } from '@/web-components/ui/Switch';
 import { TextField } from '@/web-components/ui/Field';
 import { Bin, Checklist, Plus } from './Icons';
 import { Ruler } from '@/components/shell/Icons';
@@ -98,6 +98,8 @@ export function TemplateEditor({
   const [questions, setQuestions] = useState(
     template?.questions ?? { on: true, items: [] as QuestionWire[] },
   );
+  /* Offered to clients on the portal under *Start a new one*. A trainer's own form starts private; the weekly one ships on. */
+  const [clientCanStart, setClientCanStart] = useState(template?.clientCanStart ?? false);
 
   /* WHICH BLOCK IS OPEN, AND ONLY ONE OF THEM IS.
      Both bodies open at once is a twenty-one-row measurement picker above a
@@ -134,7 +136,7 @@ export function TemplateEditor({
 
   function save() {
     setError(null);
-    const draft: TemplateDraft = { name, description, measurements, questions };
+    const draft: TemplateDraft = { name, description, measurements, questions, clientCanStart };
     startSave(async () => {
       const result = template
         ? await saveTemplate(template.id, template.version, draft)
@@ -207,6 +209,16 @@ export function TemplateEditor({
           className="mt3"
         />
 
+        {/* THE CLIENT'S SIDE OF THE FORM, one switch. It says what changes — where it shows up and what stays — because a
+            switch that moves a form into somebody else's portal is the one control here a trainer should not have to guess at. */}
+        <SwitchRow
+          className="mt3"
+          checked={clientCanStart}
+          onChange={(on) => { setClientCanStart(on); touch(); }}
+          title="Clients can start this themselves"
+          example="It shows under Start a new one in their portal. Turning it off hides it; ones already started stay."
+        />
+
         <p className="sh__l" style={{ margin: '18px 0 10px' }}>Assessment content</p>
 
         <Fold
@@ -244,7 +256,7 @@ export function TemplateEditor({
           icon={<Checklist />}
           title="Questions"
           count={questions.items.length}
-          sub="Answers are notes only you read"
+          sub="Answers are kept with the assessment"
           open={open === 'questions'}
           onOpenChange={(next) => setOpen(next ? 'questions' : null)}
           off={!questions.on}

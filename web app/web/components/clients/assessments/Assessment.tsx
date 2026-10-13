@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { deleteAssessment, moveAssessment } from '@/lib/assessments/actions';
+import { deleteAssessment, moveAssessment, sendAssessment } from '@/lib/assessments/actions';
 import { assessmentHref, assessmentTabs, type AssessmentTab } from '@/lib/assessments/address';
 import {
   answerText,
@@ -166,6 +166,21 @@ export function Assessment({
     });
   }
 
+  /* WHETHER IT IS THE CLIENT'S YET is `sentAt`, which the server sets and nothing else does. The button is on a check-in that
+     is not done, not sent, and has a portal to go to; a client who has not joined has no door, so there is no button to be
+     refused by. */
+  const sent = data.sentAt != null;
+  const canSend = !done && !sent && client?.onPortal === true;
+
+  function send() {
+    setError(null);
+    startWrite(async () => {
+      const res = await sendAssessment(data.id, data.clientId);
+      if (!res.ok) return setError(res.message ?? 'That did not send.');
+      router.refresh();
+    });
+  }
+
   function remove() {
     setError(null);
     startWrite(async () => {
@@ -251,6 +266,7 @@ export function Assessment({
                 {done ? 'Answered' : 'Due'} {DATE.format(when)}
               </span>
               <Tag tone={STATUS_TONE[data.state]}>{STATUS_LABEL[data.state]}</Tag>
+              {sent && !done && <Tag>With {client ? client.name.split(' ')[0] : 'the client'}</Tag>}
               {data.schedule && !data.schedule.endedAt && (
                 <Tag>Every {data.schedule.intervalDays} days</Tag>
               )}
@@ -258,10 +274,11 @@ export function Assessment({
           }
           actions={
             <>
-              {/* THE VERBS THIS SCREEN OWNS. In v1 nothing is sent to the client
-                  and nothing comes back on its own: the trainer TAKES the
-                  assessment in the session, so the lead verb on one that is not
-                  done is *Take*, and on a done one it is *Correct* (the same
+              {/* THE VERBS THIS SCREEN OWNS. An assessment is the trainer's to
+                  take in the session, or the client's to take on their own once
+                  it is sent (1.2) — so the lead verb on one that is not done is
+                  still *Take*, with *Send* beside it for one kept in person,
+                  and on a done one it is *Correct* (the same
                   screen, prefilled — a reading exists only here, so this is the
                   only way one is ever corrected). Date and delete are the
                   housekeeping; delete asks twice, in place, rather than in a
@@ -274,6 +291,11 @@ export function Assessment({
               {done && (
                 <Button variant="secondary" href={`/clients/assessments/${data.id}/take`}>
                   Correct readings
+                </Button>
+              )}
+              {canSend && (
+                <Button variant="secondary" disabled={busy} onClick={send}>
+                  Send to {client ? client.name.split(' ')[0] : 'client'}
                 </Button>
               )}
               {!done && (

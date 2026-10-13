@@ -55,11 +55,10 @@
  * tab named for one week would be wrong about the thing it is a tab for. It also
  * holds the typical week, which is not a fact about THIS week at all.
  */
-export type PlanTab = 'schedule' | 'workouts' | 'history';
+export type PlanTab = 'schedule' | 'history';
 
 export const PLAN_TABS: { key: PlanTab; label: string }[] = [
   { key: 'schedule', label: 'Schedule' },
-  { key: 'workouts', label: 'Workouts' },
   { key: 'history', label: 'Past plans' },
 ];
 
@@ -101,10 +100,6 @@ export function planTabHref(tab: PlanTab): string {
  * and needs no encoding. It is still validated against `program.trainingDays`
  * rather than trusted — `historyMonths`' rule for a hand-typed `?month=`.
  */
-export function planDayHref(templateDay: number): string {
-  return `/me/plan/workouts/${templateDay}`;
-}
-
 /**
  * One earlier plan.
  *

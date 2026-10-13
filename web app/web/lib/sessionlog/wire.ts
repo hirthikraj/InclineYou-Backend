@@ -61,6 +61,8 @@ export interface SetWire {
   rpe: number | null;
   notes: string | null;
   doneAt: number | null;
+  /** Who typed it: the trainer, or the client on their own. Null on a plan preview; absent from a backend before 1.2. */
+  enteredBy?: 'trainer' | 'client' | null;
 }
 
 /** One session's totals, kept by one aggregate over its `set_log` rows. */
@@ -112,6 +114,8 @@ export interface ExerciseWire {
   /** The name of the movement it replaced (backend 3 Oct), so 'Swapped from {name}' needs no lookup. */
   swappedFromName?: string | null;
   swapReason: 'unavailable' | 'difficulty' | null;
+  /** Where a client's replacement came from — the plan's own alternatives or the library. Absent from a backend before 1.2. */
+  swapSource?: 'approved' | 'library' | null;
   /** Removed rows stay in the read so the console can offer Undo. */
   removedAt: number | null;
   notes: string | null;
@@ -138,6 +142,12 @@ export interface SessionRowWire {
   /** Only once the log was opened. */
   log: { exercises: number; setsDone: number; volumeKg: number; lastSetAt: number | null } | null;
   charge: { packageId: string } | null;
+  /** `client` for a workout they did alone. Absent from a backend before 1.1's R107. */
+  loggedBy?: 'trainer' | 'client';
+  /** How the client said it felt, or null. Absent from a backend before 1.2. */
+  feedback?: { effort: 'easy' | 'right' | 'hard' | null; note: string | null; at: number } | null;
+  /** The trainer's recap line for this session, or null; `readAt` says whether the client opened it. */
+  recapMessage?: { id: string; readAt: number | null } | null;
   updatedAt: number;
   version: string;
 }

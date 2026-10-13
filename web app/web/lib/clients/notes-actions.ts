@@ -32,6 +32,9 @@ export interface NoteWriteResult {
 
 function fail(error: unknown, subject: string): NoteWriteResult {
   if (error instanceof ClientDetailApiError) {
+    if (error.code === 'CLIENT_NOT_ON_PORTAL') {
+      return { ok: false, message: 'They haven’t joined the portal yet, so there is nowhere to show them a note.' };
+    }
     if (error.status === null) {
       return { ok: false, message: `${subject} could not reach the server. Nothing changed.` };
     }
@@ -74,11 +77,12 @@ export async function addNote(
   id: string,
   body: string,
   pinned = false,
+  shared = false,
 ): Promise<NoteWriteResult> {
   const text = body.trim();
   if (!text) return { ok: false, message: 'A note needs some text.' };
   try {
-    await createNote(clientId, { id, body: text, pinned });
+    await createNote(clientId, { id, body: text, pinned, ...(shared ? { sharedWithClient: true } : {}) });
     refresh(clientId);
     return { ok: true };
   } catch (error) {
@@ -115,6 +119,24 @@ export async function setNotePinned(
     return { ok: true };
   } catch (error) {
     return fail(error, pinned ? 'Pinning it' : 'Unpinning it');
+  }
+}
+
+/**
+ * Show a note to the client, or take it back (api-contract 1.2, tr-a9). Showing mints one notice and needs the client on the
+ * portal; taking it back never does, and does not retract a notice already sent.
+ */
+export async function setNoteShared(
+  clientId: string,
+  noteId: string,
+  shared: boolean,
+): Promise<NoteWriteResult> {
+  try {
+    await editNote(clientId, noteId, { sharedWithClient: shared });
+    refresh(clientId);
+    return { ok: true };
+  } catch (error) {
+    return fail(error, shared ? 'Sharing it' : 'Taking it back');
   }
 }
 

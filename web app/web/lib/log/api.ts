@@ -1,5 +1,5 @@
 import 'server-only';
-import { ClientDetailApiError, clientReadings, dayIso, getClientHeader } from '@/lib/clients/client-api';
+import { ClientDetailApiError, dayIso, getClientHeader } from '@/lib/clients/client-api';
 import { fetchSetHistory, toLogInput } from './set-history';
 
 import { cache } from 'react';
@@ -124,22 +124,18 @@ export const getExerciseHistory = cache(
 const RANGE_FROM_DAYS: Record<ProgressRange, number | null> = { '8w': 56, '6m': 183, all: null };
 
 /**
- * Progress on two reads beside the header: set-history from the range's start
- * (nothing for all time) and the readings, whose weight is the bodyweight line.
+ * Progress on one read beside the header: set-history from the range's start (nothing for all time).
+ * There is no bodyweight line: a body is measured in an assessment and nowhere else, and the measurement
+ * history read was removed (10 Oct 2026), so `buildProgress` gets no weight.
  */
 export const getProgress = cache(
   async (clientId: string, range: ProgressRange, focus: string | null): Promise<ProgressView | null> => {
     const now = Date.now();
     const days = RANGE_FROM_DAYS[range];
-    const [{ client }, history, readings] = await Promise.all([
+    const [{ client }, history] = await Promise.all([
       header(clientId),
       fetchSetHistory(clientId, days == null ? {} : { from: dayIso(now - days * 86_400_000) }),
-      clientReadings(clientId),
     ]);
-
-    const weights = readings.filter((r) => r.key === 'weight');
-    const latest = weights[weights.length - 1];
-    const earlier = weights.find((r) => r.at >= now - (days ?? 3650) * 86_400_000);
 
     return buildProgress(
       { ...EMPTY, ...toLogInput(clientId, history), clients: [{ id: client.id, name: client.name }] },
@@ -147,7 +143,7 @@ export const getProgress = cache(
       range,
       now,
       focus,
-      latest ? { value: latest.value, earlier: earlier && earlier !== latest ? earlier.value : null } : null,
+      null,
     );
   },
 );

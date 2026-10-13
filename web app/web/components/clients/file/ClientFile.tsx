@@ -123,10 +123,12 @@ export function ClientFile({
 
   /* The strip draws the header's pinned notes: every tab has them without
      reading the notes list, which only Personal information does. */
-  const latestWeight = payload.readings.filter((r) => r.key === 'weight').at(-1) ?? null;
 
   const pinned: ClientNoteWire[] = client.pinnedNotes.map((n) => ({
     id: n.id, body: n.body, pinned: true, createdAt: n.updatedAt, updatedAt: n.updatedAt, version: String(n.updatedAt),
+    /* The header does not say whether a pinned note is also shown to the client, and the strip is the trainer's own glance:
+       it draws the words and nothing about who else can read them. The wall is where that is said. */
+    sharedWithClient: false, sharedAt: null,
   }));
 
   return (
@@ -223,6 +225,7 @@ export function ClientFile({
             <ChecksTab
               clientId={client.id}
               clientName={client.name}
+              onPortal={client.portal?.state === 'accepted' || client.portal?.state === 'paused'}
               rows={assessments}
               schedules={schedules}
               templates={templates}
@@ -254,12 +257,9 @@ export function ClientFile({
           {tab === 'information' && (
             <PersonalTab
               client={client}
-              /* The newest weight reading, off the readings the tab loaded
-                 (R30: weight only ever comes from an assessment). */
-              weightKg={latestWeight?.value ?? null}
-              weightAt={latestWeight?.at ?? null}
               now={now}
               notes={payload.notes}
+              messages={payload.messages}
             />
           )}
         </div>
