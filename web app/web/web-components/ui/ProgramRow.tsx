@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 
-import { Avatar, AvatarStack, type StackedPerson } from './Avatar';
+import { Avatar, type StackedPerson } from './Avatar';
 import { CheckboxCell } from './Checkbox';
 
 /**
@@ -24,22 +24,14 @@ import { CheckboxCell } from './Checkbox';
  *   rows ago; and the reflow un-clips nouns that are already in the markup
  *   instead of inventing them. Clipped and not `.vh`, whose `!important` a
  *   media query cannot undo.
- * · ZERO IS A DASH AND A SENTENCE. `0 clients` in a column of figures reads as
- *   a measurement; *— nobody on this yet* is what a trainer scanning for a
- *   program they can edit without reaching anybody is actually looking for.
- * · THE CLIENTS COLUMN IS FACES AT DESK WIDTH AND A FIGURE BELOW 900px, and
- *   both are always in the markup. *Is anybody on this, and is it anybody I am
- *   thinking about* is a question about presence, and a column of `13 clients
- *   on this` / `1 client on this` answers it by making the trainer read three
- *   numbers. A cluster answers it without being read. Under 900px the row is
- *   two lines of 12px prose where a 24px disc would be furniture, so the stack
- *   stands down and the figure — clipped up there — comes back. The exact
- *   count never leaves: `AvatarStack` is `aria-hidden` and the noun beside it
- *   is what a screen reader gets at every width.
- * · AND THE FIGURE IS THE FALLBACK, not just the small screen's reading. A wire
- *   that sent no names (an older build, or a backend that has not added the
- *   field) draws the count visibly at desk width rather than an empty cell —
- *   the column degrades to what it used to be instead of to nothing.
+ * · ZERO IS A DASH AND A SENTENCE. `0` in a column of figures reads as a
+ *   measurement; *— not used yet* says the blueprint has never been handed out.
+ * · THE USED COLUMN IS A FIGURE, NOT FACES (18 Oct 2026). It is how many times
+ *   the blueprint was copied to a client — every copy, finished ones included —
+ *   and not who is on it now. A trainer takes a template, adjusts it and assigns
+ *   it, so the copy is the client's own program from then on; the shelf answers
+ *   *which of mine do I reach for*, and a lifetime count answers that. Who is on
+ *   a copy is the builder's *Assigned* panel.
  * · THE TWO WRAPPERS, which are `display:contents` at desk width and become
  *   real boxes below it. Without them the reflowed row is five stacked lines
  *   instead of two, because a grid item cannot be `display:inline`.
@@ -70,8 +62,7 @@ export function ProgramRow({
   href,
   sub,
   days,
-  clients,
-  assigned = [],
+  used,
   client,
   tag,
   weeks,
@@ -93,16 +84,14 @@ export function ProgramRow({
   sub?: string;
   /** The slots this program trains, 1–7. Drawn as a shape AND counted. */
   days: number[];
-  /** How many are on it. Authoritative — never `assigned.length`. */
-  clients: number;
-  /** A capped sample of who, for the faces. See `TemplateWire.assignedClients`. */
-  assigned?: StackedPerson[];
+  /** How many times this blueprint was copied to a client — `assignedCount`, lifetime. */
+  used: number;
   /**
-   * WHOSE COPY THIS IS — and it REPLACES the clients column rather than adding
+   * WHOSE COPY THIS IS — and it REPLACES the used column rather than adding
    * an eighth one.
    *
    * The row draws two different records now. A BLUEPRINT is written once and
-   * assigned many times, so *how many are on it* is a real column and a
+   * assigned many times, so *how many times it was used* is a real column and a
    * changing one — the only cell on the row that moves without anybody editing
    * the program. A client's COPY is one person's by construction: that column
    * would read `1` on every row of the list forever, which is a track of
@@ -230,22 +219,15 @@ export function ProgramRow({
                 <span className="ptrow__who">{client.name}</span>
                 <span className="ptrow__k"> is on this</span>
               </>
-            ) : clients === 0 ? (
+            ) : used === 0 ? (
               <>
                 <b className="ptrow__none">&mdash;</b>
                 <span className="ptrow__k"> not used yet</span>
               </>
             ) : (
               <>
-                {/* `total` is `clients` and not the sample's length — the whole
-                    of `assignedClients`' contract, and the arithmetic behind
-                    the overflow disc reading `+38` off six names. */}
-                <AvatarStack people={assigned} total={clients} />
-                {/* Clipped beside the faces and shown without them, which is
-                    the fallback in the header's fourth bullet. It un-clips
-                    again under 900px, where the stack is the thing that goes. */}
-                <b className={assigned.length > 0 ? 'ptrow__cn' : undefined}>{clients}</b>
-                <span className="ptrow__k"> client{clients === 1 ? '' : 's'} on this</span>
+                <b>{used}</b>
+                <span className="ptrow__k"> {used === 1 ? 'time' : 'times'} used</span>
               </>
             )}
           </span>
@@ -337,7 +319,7 @@ export function ProgramRowHead({
       <span>Shape</span>
       <span>Days</span>
       <span>Weeks</span>
-      <span>{client ? 'Client' : 'Clients'}</span>
+      <span>{client ? 'Client' : 'Used'}</span>
       <span>Goal</span>
       <span>{lastHead}</span>
     </div>

@@ -5,6 +5,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -36,5 +37,18 @@ public class ClientNoticeJdbcRepository {
         var ids = jdbc.queryForList("SELECT mint_client_notification(:cid::uuid, :kind, :text, CAST(:sid AS uuid), NULL, NULL, NULL)::text AS id",
                 p, String.class);
         return !ids.isEmpty() && ids.get(0) != null;
+    }
+
+    /**
+     * Whether this client already has this exact notice, live, from the last {@code withinSeconds} — what lets a caller treat a
+     * repeat as the one already written (a double press, a retried request) instead of minting it again.
+     * Reads {@code idx_client_notification_feed}.
+     */
+    public boolean recentlyMinted(UUID clientId, String kind, String text, int withinSeconds) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM client_notification
+                               WHERE client_id = :cid::uuid AND kind = :kind AND text = :text AND deleted_at IS NULL
+                                 AND at > now() - make_interval(secs => :within) AND at <= now())
+                """, Map.of("cid", clientId.toString(), "kind", kind, "text", text, "within", withinSeconds), Boolean.class));
     }
 }

@@ -9,6 +9,7 @@ import com.inclineyou.inclineyou_backend.core.program.dto.PlanWorkout.Exercise;
 import com.inclineyou.inclineyou_backend.core.workout.WorkoutTemplateJdbcRepository.Row;
 import com.inclineyou.inclineyou_backend.core.workout.dto.WorkoutTemplateItem;
 import com.inclineyou.inclineyou_backend.core.workout.dto.WorkoutTemplateRequest;
+import com.inclineyou.inclineyou_backend.core.workout.dto.WorkoutTemplateSummary;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import com.inclineyou.inclineyou_backend.shared.wire.IfMatch;
 import lombok.RequiredArgsConstructor;
@@ -46,11 +47,17 @@ public class WorkoutTemplateService {
     private final ProgramJdbcRepository programs;
     private final PlanTreeJdbcRepository trees;
 
+    /** The shelf as summaries: the counts and the duration, never the tree, which is {@link #get}'s. */
     @Transactional(readOnly = true)
-    public List<WorkoutTemplateItem> list(UUID trainerId) {
+    public List<WorkoutTemplateSummary> list(UUID trainerId) {
         List<Row> rows = repo.shelf(trainerId);
-        var exercises = programs.exercisesByWorkout(rows.stream().map(r -> UUID.fromString(r.id())).toList());
-        return rows.stream().map(r -> item(r, exercises.getOrDefault(r.id(), List.of()))).toList();
+        var movements = repo.shelfMovements(trainerId);
+        return rows.stream().map(r -> {
+            var mains = movements.getOrDefault(r.id(), List.of());
+            int sets = mains.stream().mapToInt(m -> m.sets().size()).sum();
+            return new WorkoutTemplateSummary(r.id(), r.name(), r.notes(), mains.size(), sets, WorkoutEstimate.minutes(mains),
+                    r.createdAt().getTime(), r.updatedAt().getTime(), r.version());
+        }).toList();
     }
 
     @Transactional(readOnly = true)

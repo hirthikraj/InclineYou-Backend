@@ -1,8 +1,7 @@
 package com.inclineyou.inclineyou_backend.core.program;
 
-import com.inclineyou.inclineyou_backend.core.program.dto.Assignment;
 import com.inclineyou.inclineyou_backend.core.program.dto.ExerciseRef;
-import com.inclineyou.inclineyou_backend.core.program.dto.PatchProgramRequest;
+import com.inclineyou.inclineyou_backend.core.program.dto.ProgramEdit;
 import com.inclineyou.inclineyou_backend.core.program.dto.PlanWorkout;
 import com.inclineyou.inclineyou_backend.core.program.dto.PlanWorkout.Exercise;
 import com.inclineyou.inclineyou_backend.core.program.dto.PlanWorkout.SetLine;
@@ -17,13 +16,15 @@ import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.sql.Date;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.util.*;
 
 /**
  * The SQL on {@code program} and its reads: the shelf and plan summaries, one
- * program's tree, the InclineYou library, who is on a template — and the row
+ * program's tree, the InclineYou library — and the row
  * writes (create, copy, meta, status, retire) that the tree itself does not
  * need. The tree's own writes are {@link PlanTreeJdbcRepository}.
  *
@@ -36,22 +37,22 @@ public class ProgramJdbcRepository {
 
     private final NamedParameterJdbcTemplate jdbc;
 
-    /** The program row locked, with what every write decides on. */
-    public record Locked(String clientId, String status, Timestamp revisedAt, String copiedFrom) {
-        public String version() {
-            return String.valueOf(revisedAt.getTime());
-        }
-    }
+    /** The program row locked, with what every write decides on. {@code version} is {@code revised_at} as epoch ms. */
+    public record Locked(String clientId, String status, String version, String copiedFrom) {}
 
     /** What telling a client about their plan decides on: the plan's name and who it belongs to, and whether they are on the portal. */
     public record NotifyTarget(String clientId, String name, String membershipStatus) {}
 
-    /** The trainer's own program, template or plan. Empty when it is not theirs or is gone. */
+    /**
+     * The trainer's own program, template or plan, its row locked. Empty when it is not theirs or is gone. The lock is what makes
+     * a double press one notice: the second request waits here, then sees the first one's row.
+     */
     public Optional<NotifyTarget> notifyTarget(UUID trainerId, UUID programId) {
         return jdbc.query("""
                 SELECT p.client_id::text AS client_id, p.name, c.membership_status
                 FROM program p LEFT JOIN client c ON c.id = p.client_id AND c.deleted_at IS NULL AND c.erased_at IS NULL
                 WHERE p.id = :id::uuid AND p.trainer_id = :tid::uuid AND p.deleted_at IS NULL
+                FOR UPDATE OF p
                 """, Map.of("id", programId.toString(), "tid", trainerId.toString()),
                 (rs, i) -> new NotifyTarget(rs.getString("client_id"), rs.getString("name"), rs.getString("membership_status")))
                 .stream().findFirst();
@@ -59,9 +60,6 @@ public class ProgramJdbcRepository {
 
     /** Whom a copy would come from: the trainer's own program or a library one. */
     public record Source(String name, String clientId, String origin) {}
-
-    /** A template's client, for the card: every copy counts, the active ones are sampled. */
-    public record AssignedRow(String source, String clientId, String clientName, String status) {}
 
     /** The trainer's copy of a library program. */
     public record LibraryCopy(String source, String id, long copiedAt, long syncedAt) {}
@@ -76,107 +74,166 @@ public class ProgramJdbcRepository {
                 """, Map.of("cid", clientId.toString(), "tid", trainerId.toString()), Boolean.class));
     }
 
-    /**
-     * The trainer's templates and plans, no tree. {@code kind} and {@code statuses} are already
-     * validated; a null {@code statuses} applies no status filter at all.
+    /* ───────────────────────────────────────────────── the shelf: one query per question ──
+     *
+     * What used to be one method with a StringBuilder and three nullable arguments is four reads, each with a constant WHERE.
+     * The questions are different (a template has no client and no status; a plan has both), and spelling each out removes the
+     * `client_id IS NULL OR …` test that every branch repeated to say "a template passes". It also keeps the literal
+     * `client_id IS NULL` / `deleted_at IS NULL` in the SQL where the partial indexes (`idx_program_shelf`, `idx_program_client`)
+     * can see it. Every value is a bound parameter and every fragment below is a constant: nothing a caller sends is ever
+     * concatenated into the statement.
      */
-    public List<ProgramItem> shelf(UUID trainerId, String kind, UUID clientId, String[] statuses) {
+
+    private static final String MINE = "pr.origin = 'trainer' AND pr.trainer_id = :tid::uuid AND pr.deleted_at IS NULL";
+    /** A plan is listed only while its client is; the join is a LEFT one, so this reads as true for a template and is never used with one. */
+    private static final String CLIENT_LIVE = "cl.deleted_at IS NULL";
+    private static final String RECENT_FIRST = "pr.updated_at DESC, pr.id";
+    private static final String ACTIVE_FIRST = "(pr.status = 'active') DESC, pr.start_date DESC NULLS LAST, pr.created_at DESC, pr.id";
+
+    /** The trainer's templates — blueprints with no client and no status. */
+    public List<ProgramItem> templates(UUID trainerId) {
+        return summaries(MINE + " AND pr.client_id IS NULL", params(trainerId), RECENT_FIRST);
+    }
+
+    /** Every client's plans in {@code statuses}. A template never appears here: it has no client to be live. */
+    public List<ProgramItem> plans(UUID trainerId, String[] statuses) {
+        var p = params(trainerId);
+        p.put("st", statuses);
+        return summaries(MINE + " AND pr.client_id IS NOT NULL AND " + CLIENT_LIVE + " AND pr.status = ANY(CAST(:st AS text[]))",
+                p, RECENT_FIRST);
+    }
+
+    /** One client's plans in {@code statuses}, the active one first — the client file's Program tab and plan switcher. */
+    public List<ProgramItem> plansOf(UUID trainerId, UUID clientId, String[] statuses) {
+        var p = params(trainerId);
+        p.put("cid", clientId.toString());
+        p.put("st", statuses);
+        return summaries(MINE + " AND pr.client_id = :cid::uuid AND " + CLIENT_LIVE + " AND pr.status = ANY(CAST(:st AS text[]))",
+                p, ACTIVE_FIRST);
+    }
+
+    /**
+     * The default shelf: the templates and the plans still in progress (active or paused), newest edit first. This is the one read
+     * that mixes the two, so it is the one place the "a template passes" test has to be written — once, here.
+     */
+    public List<ProgramItem> shelf(UUID trainerId) {
+        return summaries(MINE + " AND (pr.client_id IS NULL OR (" + CLIENT_LIVE + " AND pr.status IN ('active', 'paused')))",
+                params(trainerId), RECENT_FIRST);
+    }
+
+    private static Map<String, Object> params(UUID trainerId) {
         var p = new HashMap<String, Object>();
         p.put("tid", trainerId.toString());
-        var where = new StringBuilder("pr.origin = 'trainer' AND pr.trainer_id = :tid::uuid AND pr.deleted_at IS NULL"
-                + " AND (pr.client_id IS NULL OR cl.deleted_at IS NULL)");
-        if ("client".equals(kind)) where.append(" AND pr.client_id IS NOT NULL");
-        if ("template".equals(kind)) where.append(" AND pr.client_id IS NULL");
-        if (clientId != null) {
-            p.put("cid", clientId.toString());
-            where.append(" AND pr.client_id = :cid::uuid");
-        }
-        if (statuses != null) {
-            p.put("st", statuses);
-            where.append(" AND (pr.client_id IS NULL OR pr.status = ANY(CAST(:st AS text[])))");
-        }
-        return summaries(where.toString(), p, clientId != null
-                ? "(pr.status = 'active') DESC, pr.start_date DESC NULLS LAST, pr.created_at DESC, pr.id"
-                : "pr.updated_at DESC, pr.id");
+        return p;
     }
 
     /** The trainer's own program by id — a library id is not one. */
     public Optional<ProgramItem> mine(UUID trainerId, UUID id) {
         return summaries("pr.id = :id::uuid AND pr.origin = 'trainer' AND pr.trainer_id = :tid::uuid"
-                + " AND pr.deleted_at IS NULL", new HashMap<>(Map.of("id", id.toString(), "tid", trainerId.toString())),
+                + " AND pr.deleted_at IS NULL", Map.of("id", id.toString(), "tid", trainerId.toString()),
                 "pr.id").stream().findFirst();
     }
 
     public List<ProgramItem> library() {
-        return summaries("pr.origin = 'inclineyou' AND pr.deleted_at IS NULL", new HashMap<>(), "pr.name, pr.id");
+        return summaries("pr.origin = 'inclineyou' AND pr.deleted_at IS NULL", Map.of(), "pr.name, pr.id");
     }
 
     public Optional<ProgramItem> libraryOne(UUID id) {
         return summaries("pr.id = :id::uuid AND pr.origin = 'inclineyou' AND pr.deleted_at IS NULL",
-                new HashMap<>(Map.of("id", id.toString())), "pr.id").stream().findFirst();
+                Map.of("id", id.toString()), "pr.id").stream().findFirst();
     }
 
-    /** The row query behind every read. The caller supplies the filter and order, never a value. */
+    /* ───────────────────────────────────────────────────────── the summary behind every read ──
+     *
+     * `summaries` is the one place a program row becomes a ProgramItem: the shelf, one program, the library and one library
+     * program all go through it, in three steps — the rows ({@link #SUMMARY_SQL}), each row's shape ({@link #summaryOf}), and
+     * how many workouts and exercises each has ({@link #treeCounts}). The caller supplies the filter and the order as constants
+     * of this class; a value is only ever a bound parameter.
+     *
+     * <p>A template's {@code assigned_count} — how many times it was copied onto a client — rides the row as a correlated
+     * count, so it costs no query and no join of its own: one probe of {@code idx_program_copied_from} per template, and the
+     * CASE skips it for a plan or a library program, where it is 0 by definition. It is LIFETIME and counts by the copy,
+     * not the person: a finished plan counts, and so does the copy of a client deleted since (their plan rows stay; only
+     * erasure removes them). There is deliberately no {@code u.trainer_id} test: a copy of a trainer's template is that
+     * trainer's row already (and RLS keeps it to the workspace), and with one the planner left the index for
+     * {@code idx_program_tenant_trainer} and read every program the trainer has, per template. The shelf used to carry
+     * the active count and six clients' names as well, from a second query over every copy; both came off the wire on
+     * 18 Oct 2026, when the shelf stopped drawing them.
+     */
+
+    private static final String SUMMARY_SQL = """
+            SELECT pr.id::text AS id, pr.origin, pr.client_id::text AS client_id, cl.name AS client_name,
+                   pr.name, pr.goal, pr.description, pr.weeks, pr.days, pr.status,
+                   pr.start_date::text AS start_date, pr.end_date::text AS end_date,
+                   pr.copied_from_program_id::text AS copied_from_id, pr.synced_at, pr.revised_at,
+                   pr.created_at, pr.updated_at,
+                   src.name AS src_name, src.revised_at AS src_revised, (src.revised_at > pr.synced_at) AS behind,
+                   cp.summary, cp.level, cp.equipment, cp.reviewed_at, cp.is_sample, cp.used_count,
+                   CASE WHEN pr.origin = 'trainer' AND pr.client_id IS NULL THEN
+                       (SELECT count(*) FROM program u
+                        WHERE u.copied_from_program_id = pr.id AND u.client_id IS NOT NULL AND u.deleted_at IS NULL)
+                   ELSE 0 END AS assigned_count
+            FROM program pr
+            LEFT JOIN client cl ON cl.id = pr.client_id
+            LEFT JOIN program src ON src.id = pr.copied_from_program_id
+            LEFT JOIN certified_program cp ON cp.program_id = pr.id""";
+
+    /**
+     * Workouts and main exercises per program, one row each, for a page of programs.
+     *
+     * <p>The exercise count is a correlated subquery and not a join with {@code count(DISTINCT …)} on purpose: its
+     * {@code alternative_of IS NULL} is the predicate of {@code uq_workout_exercise_order}, so each workout is one index probe.
+     * As a join the planner chose {@code uq_workout_exercise_main}, whose first column is not {@code workout_id}, and read ~113
+     * index pages per workout — 48 ms against 9 ms for the same 35 programs under row-level security.
+     */
+    private static final String TREE_COUNTS_SQL = """
+            SELECT w.program_id::text AS program_id, count(*) AS workouts,
+                   sum((SELECT count(*) FROM workout_exercise we
+                        WHERE we.workout_id = w.id AND we.alternative_of IS NULL)) AS exercises
+            FROM workout w
+            WHERE w.program_id = ANY(CAST(:ids AS uuid[])) AND w.deleted_at IS NULL
+            GROUP BY w.program_id""";
+
+    private record Counts(int workouts, int exercises) {
+        static final Counts NONE = new Counts(0, 0);
+    }
+
     private List<ProgramItem> summaries(String where, Map<String, Object> params, String order) {
-        List<ProgramItem> rows = jdbc.query("""
-                SELECT pr.id::text AS id, pr.origin, pr.client_id::text AS client_id, cl.name AS client_name,
-                       pr.name, pr.goal, pr.description, pr.weeks, pr.days, pr.status,
-                       pr.start_date::text AS start_date, pr.end_date::text AS end_date,
-                       pr.copied_from_program_id::text AS copied_from_id, pr.synced_at, pr.revised_at,
-                       pr.created_at, pr.updated_at,
-                       src.name AS src_name, src.revised_at AS src_revised, (src.revised_at > pr.synced_at) AS behind,
-                       cp.summary, cp.level, cp.equipment, cp.reviewed_at, cp.is_sample, cp.used_count
-                FROM program pr
-                LEFT JOIN client cl ON cl.id = pr.client_id
-                LEFT JOIN program src ON src.id = pr.copied_from_program_id
-                LEFT JOIN certified_program cp ON cp.program_id = pr.id
-                WHERE\s""" + where + " ORDER BY " + order, params, (rs, i) -> {
-            long revised = rs.getTimestamp("revised_at").getTime();
-            String copiedFromId = rs.getString("copied_from_id");
-            return new ProgramItem(rs.getString("id"), rs.getString("origin"), rs.getString("client_id"),
-                    rs.getString("client_id") == null ? null
-                            : new ClientRef(rs.getString("client_id"), rs.getString("client_name")),
-                    rs.getString("name"), rs.getString("goal"), rs.getString("description"),
-                    rs.getInt("weeks"), rs.getInt("days"), rs.getString("status"),
-                    rs.getString("start_date"), rs.getString("end_date"), copiedFromId,
-                    millis(rs.getTimestamp("synced_at")), revised, String.valueOf(revised), 0, 0,
-                    copiedFromId == null ? null
-                            : new CopiedFrom(copiedFromId, rs.getString("src_name"), rs.getTimestamp("src_revised").getTime()),
-                    rs.getBoolean("behind"), 0, 0, List.of(),
-                    rs.getTimestamp("created_at").getTime(), rs.getTimestamp("updated_at").getTime(),
-                    rs.getString("summary") == null ? null
-                            : new Certified(rs.getString("summary"), rs.getString("level"), rs.getString("equipment"),
-                            millis(rs.getTimestamp("reviewed_at")), rs.getBoolean("is_sample"), rs.getInt("used_count")),
-                    null, null, null, null, null);
-        });
+        List<ProgramItem> rows = jdbc.query(SUMMARY_SQL + " WHERE " + where + " ORDER BY " + order, params, ProgramJdbcRepository::summaryOf);
         if (rows.isEmpty()) return rows;
-        var counts = new HashMap<String, int[]>();
-        jdbc.query("""
-                SELECT w.program_id::text AS pid, count(DISTINCT w.id) AS workouts,
-                       count(we.id) FILTER (WHERE we.alternative_of IS NULL) AS exercises
-                FROM workout w LEFT JOIN workout_exercise we ON we.workout_id = w.id
-                WHERE w.program_id = ANY(CAST(:ids AS uuid[])) AND w.deleted_at IS NULL
-                GROUP BY w.program_id
-                """, Map.of("ids", rows.stream().map(ProgramItem::id).toArray(String[]::new)), rs -> {
-            counts.put(rs.getString("pid"), new int[]{rs.getInt("workouts"), rs.getInt("exercises")});
-        });
+        Map<String, Counts> counts = treeCounts(rows);
         return rows.stream().map(r -> {
-            int[] c = counts.getOrDefault(r.id(), new int[]{0, 0});
-            return r.withCounts(c[0], c[1]);
+            Counts c = counts.getOrDefault(r.id(), Counts.NONE);
+            return r.withCounts(c.workouts(), c.exercises());
         }).toList();
     }
 
-    /** Copies of these templates, by client name — the page's whole assignment picture in one query. */
-    public List<AssignedRow> assignedTo(UUID trainerId, String[] templateIds) {
-        return jdbc.query("""
-                SELECT c.copied_from_program_id::text AS src, c.client_id::text AS client_id, cl.name, c.status
-                FROM program c JOIN client cl ON cl.id = c.client_id AND cl.deleted_at IS NULL
-                WHERE c.copied_from_program_id = ANY(CAST(:ids AS uuid[])) AND c.trainer_id = :tid::uuid
-                  AND c.deleted_at IS NULL
-                ORDER BY cl.name, c.id
-                """, Map.of("ids", templateIds, "tid", trainerId.toString()),
-                (rs, i) -> new AssignedRow(rs.getString("src"), rs.getString("client_id"), rs.getString("name"),
-                        rs.getString("status")));
+    /** One row of {@link #SUMMARY_SQL}. The workout and exercise counts are filled in afterwards. */
+    private static ProgramItem summaryOf(ResultSet rs, int row) throws SQLException {
+        String clientId = rs.getString("client_id");
+        String copiedFromId = rs.getString("copied_from_id");
+        boolean inLibrary = rs.getString("summary") != null;   // only a library program has a certified_program row
+        return ProgramItem.ofRow(
+                rs.getString("id"), rs.getString("origin"),
+                clientId == null ? null : new ClientRef(clientId, rs.getString("client_name")),
+                rs.getString("name"), rs.getString("goal"), rs.getString("description"),
+                rs.getInt("weeks"), rs.getInt("days"), rs.getString("status"),
+                rs.getString("start_date"), rs.getString("end_date"),
+                millis(rs.getTimestamp("synced_at")), rs.getTimestamp("revised_at").getTime(),
+                copiedFromId == null ? null
+                        : new CopiedFrom(copiedFromId, rs.getString("src_name"), rs.getTimestamp("src_revised").getTime()),
+                rs.getBoolean("behind"), rs.getInt("assigned_count"),
+                rs.getTimestamp("created_at").getTime(), rs.getTimestamp("updated_at").getTime(),
+                !inLibrary ? null
+                        : new Certified(rs.getString("summary"), rs.getString("level"), rs.getString("equipment"),
+                                millis(rs.getTimestamp("reviewed_at")), rs.getBoolean("is_sample"), rs.getInt("used_count")));
+    }
+
+    private Map<String, Counts> treeCounts(List<ProgramItem> programs) {
+        var counts = new HashMap<String, Counts>();
+        jdbc.query(TREE_COUNTS_SQL, Map.of("ids", programs.stream().map(ProgramItem::id).toArray(String[]::new)),
+                rs -> { counts.put(rs.getString("program_id"), new Counts(rs.getInt("workouts"), rs.getInt("exercises"))); });
+        return counts;
     }
 
     /** The trainer's newest copy of each of these library programs. */
@@ -203,30 +260,6 @@ public class ProgramJdbcRepository {
                 GROUP BY w.program_id
                 """, Map.of("ids", programIds), rs -> { done.put(rs.getString("pid"), rs.getInt("done")); });
         return done;
-    }
-
-    public boolean templateIsMine(UUID trainerId, UUID id) {
-        return Boolean.TRUE.equals(jdbc.queryForObject("""
-                SELECT EXISTS (SELECT 1 FROM program WHERE id = :id::uuid AND trainer_id = :tid::uuid
-                               AND origin = 'trainer' AND client_id IS NULL AND deleted_at IS NULL)
-                """, Map.of("id", id.toString(), "tid", trainerId.toString()), Boolean.class));
-    }
-
-    public List<Assignment> assignments(UUID trainerId, UUID templateId) {
-        return jdbc.query("""
-                SELECT c.id::text AS program_id, c.name AS program_name, c.client_id::text AS client_id, cl.name,
-                       c.status, c.start_date::text AS start_date, c.end_date::text AS end_date, c.synced_at,
-                       c.revised_at, (src.revised_at > c.synced_at) AS behind
-                FROM program c
-                JOIN client cl ON cl.id = c.client_id AND cl.deleted_at IS NULL
-                JOIN program src ON src.id = c.copied_from_program_id
-                WHERE c.copied_from_program_id = :id::uuid AND c.trainer_id = :tid::uuid AND c.deleted_at IS NULL
-                ORDER BY (c.status = 'active') DESC, cl.name, c.id
-                """, Map.of("tid", trainerId.toString(), "id", templateId.toString()),
-                (rs, i) -> new Assignment(rs.getString("program_id"), rs.getString("program_name"),
-                        rs.getString("client_id"), rs.getString("name"), rs.getString("status"),
-                        rs.getString("start_date"), rs.getString("end_date"), millis(rs.getTimestamp("synced_at")),
-                        rs.getBoolean("behind"), String.valueOf(rs.getTimestamp("revised_at").getTime())));
     }
 
     /** One program's four levels — a set-based query each — plus the names of the exercises it uses. */
@@ -330,7 +363,12 @@ public class ProgramJdbcRepository {
         return String.valueOf(t.getTime());
     }
 
-    /* ────────────────────────────────────────────────────────────── writes ── */
+    /* ────────────────────────────────────────────────────────────── writes ── *
+     *
+     * Every write that takes a program id also takes the trainer and filters on both. The service has always proved
+     * ownership first (the row lock, or retireTarget) and RLS is underneath; the repeated filter keeps a write harmless
+     * if a future caller skips that step.
+     */
 
     /** The trainer's program row, locked — a library program and somebody else's are the same absence. */
     public Optional<Locked> lock(UUID trainerId, UUID id) {
@@ -340,8 +378,9 @@ public class ProgramJdbcRepository {
                 WHERE id = :id::uuid AND trainer_id = :tid::uuid AND origin = 'trainer' AND deleted_at IS NULL
                 FOR UPDATE
                 """, Map.of("id", id.toString(), "tid", trainerId.toString()),
-                (rs, i) -> new Locked(rs.getString("client_id"), rs.getString("status"), rs.getTimestamp("revised_at"),
-                        rs.getString("copied_from"))).stream().findFirst();
+                (rs, i) -> new Locked(rs.getString("client_id"), rs.getString("status"),
+                        String.valueOf(rs.getTimestamp("revised_at").getTime()), rs.getString("copied_from")))
+                .stream().findFirst();
     }
 
     /** Does this id exist, and is it the trainer's live template? Empty when nothing has it. */
@@ -393,38 +432,46 @@ public class ProgramJdbcRepository {
     }
 
     /** A save's shape: bumps the version, which is what makes copies of a template show as behind. */
-    public void updateShape(UUID id, String name, String goal, String description, int weeks, int days) {
+    public void updateShape(UUID trainerId, UUID id, String name, String goal, String description, int weeks, int days) {
         jdbc.update("""
                 UPDATE program SET name = :name, goal = :goal, description = :description, weeks = :weeks,
                                    days = :days, revised_at = now()
-                WHERE id = :id::uuid
-                """, new MapSqlParameterSource("id", id.toString()).addValue("name", name).addValue("goal", goal)
+                WHERE id = :id::uuid AND trainer_id = :tid::uuid
+                """, new MapSqlParameterSource("id", id.toString()).addValue("tid", trainerId.toString())
+                .addValue("name", name).addValue("goal", goal)
                 .addValue("description", description).addValue("weeks", weeks).addValue("days", days));
     }
 
-    public Optional<LocalDate[]> dates(UUID id) {
-        return jdbc.query("SELECT start_date, end_date FROM program WHERE id = :id::uuid", Map.of("id", id.toString()),
+    public Optional<LocalDate[]> dates(UUID trainerId, UUID id) {
+        return jdbc.query("SELECT start_date, end_date FROM program WHERE id = :id::uuid AND trainer_id = :tid::uuid",
+                Map.of("id", id.toString(), "tid", trainerId.toString()),
                 (rs, i) -> new LocalDate[]{
                         rs.getDate(1) == null ? null : rs.getDate(1).toLocalDate(),
                         rs.getDate(2) == null ? null : rs.getDate(2).toLocalDate()}).stream().findFirst();
     }
 
-    /** A PATCH's non-status fields; any of them bumps the version. Dates arrive already merged with the row's. */
-    public void patchFields(UUID id, PatchProgramRequest req, boolean datesTouched, LocalDate start, LocalDate end) {
+    /**
+     * A PATCH's non-status fields; any of them bumps the version. Every fragment is a constant and every value a bound
+     * parameter. The trainer filter repeats the row lock's: the lock already proved ownership in this transaction, and this
+     * keeps the write safe if it is ever called without one.
+     */
+    public void patchFields(UUID trainerId, UUID id, ProgramEdit edit) {
         var sets = new StringBuilder();
-        var p = new MapSqlParameterSource("id", id.toString());
-        if (req.name() != null) { sets.append(", name = :name"); p.addValue("name", req.name().value()); }
-        if (req.goal() != null) { sets.append(", goal = :goal"); p.addValue("goal", req.goal().value()); }
-        if (req.description() != null) {
+        var p = new MapSqlParameterSource("id", id.toString()).addValue("tid", trainerId.toString());
+        if (edit.name() != null) { sets.append(", name = :name"); p.addValue("name", edit.name().value()); }
+        if (edit.goal() != null) { sets.append(", goal = :goal"); p.addValue("goal", edit.goal().value()); }
+        if (edit.description() != null) {
             sets.append(", description = :description");
-            p.addValue("description", req.description().value());
+            p.addValue("description", edit.description().value());
         }
-        if (datesTouched) {
+        if (edit.dates() != null) {
+            LocalDate start = edit.dates().start();
+            LocalDate end = edit.dates().end();
             sets.append(", start_date = :start, end_date = :end");
             p.addValue("start", start == null ? null : Date.valueOf(start)).addValue("end", end == null ? null : Date.valueOf(end));
         }
         if (sets.isEmpty()) return;
-        jdbc.update("UPDATE program SET revised_at = now()" + sets + " WHERE id = :id::uuid", p);
+        jdbc.update("UPDATE program SET revised_at = now()" + sets + " WHERE id = :id::uuid AND trainer_id = :tid::uuid", p);
     }
 
     /** One active plan per client ({@code uq_program_client_active}): the old one completes first. */
@@ -435,9 +482,9 @@ public class ProgramJdbcRepository {
                 """, Map.of("cid", clientId, "id", except.toString()));
     }
 
-    public void setStatus(UUID id, String status) {
-        jdbc.update("UPDATE program SET status = :status WHERE id = :id::uuid",
-                Map.of("status", status, "id", id.toString()));
+    public void setStatus(UUID trainerId, UUID id, String status) {
+        jdbc.update("UPDATE program SET status = :status WHERE id = :id::uuid AND trainer_id = :tid::uuid",
+                Map.of("status", status, "id", id.toString(), "tid", trainerId.toString()));
     }
 
     /** Whether the trainer has this template (live or retired) and whether it is a client's plan. */
@@ -452,10 +499,11 @@ public class ProgramJdbcRepository {
     public record RetireTarget(boolean clientPlan, boolean alreadyGone) {}
 
     /** Soft: the copies already made are their own rows and keep pointing here. */
-    public void retire(UUID id) {
-        var p = Map.of("id", id.toString());
-        jdbc.update("UPDATE program SET deleted_at = now() WHERE id = :id::uuid", p);
-        jdbc.update("UPDATE workout SET deleted_at = now() WHERE program_id = :id::uuid AND deleted_at IS NULL", p);
+    public void retire(UUID trainerId, UUID id) {
+        var p = Map.of("id", id.toString(), "tid", trainerId.toString());
+        jdbc.update("UPDATE program SET deleted_at = now() WHERE id = :id::uuid AND trainer_id = :tid::uuid", p);
+        jdbc.update("UPDATE workout SET deleted_at = now() WHERE program_id = :id::uuid AND trainer_id = :tid::uuid"
+                + " AND deleted_at IS NULL", p);
     }
 
     /** The client locked, and their status — empty when they are not on this trainer's roster. */
@@ -506,7 +554,7 @@ public class ProgramJdbcRepository {
         return jdbc.queryForList("""
                 SELECT id::text FROM scheduled_session
                 WHERE client_id = :cid::uuid AND workout_id = ANY(CAST(:w AS uuid[])) AND status = 'scheduled'
-                  AND logged_by = 'trainer' AND started_at IS NULL   -- R107 AND scheduled_at > now() AND deleted_at IS NULL
+                  AND logged_by = 'trainer' AND started_at IS NULL AND scheduled_at > now() AND deleted_at IS NULL   -- R107
                 """, Map.of("cid", clientId, "w", PlanTreeJdbcRepository.strings(workoutIds)), String.class);
     }
 

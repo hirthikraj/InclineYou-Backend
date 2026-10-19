@@ -46,6 +46,7 @@ public class ExerciseService {
     private static final int MAX_Q = 100;
 
     private final ExerciseJdbcRepository repo;
+    private final CatalogueCache catalogue;
 
     /** The raw filters of a list read, as they arrived: comma-separated lists, split and validated here. */
     public record Search(String q, String bodyPart, String equipment, String equipmentKey, String equipmentCategory,
@@ -62,6 +63,19 @@ public class ExerciseService {
                 split(s.equipmentKey()), split(s.equipmentCategory()), split(s.target()), split(s.secondary()),
                 split(s.pattern()), split(s.logType()), split(s.category()));
 
+        /* NOTHING TO SEARCH AND NOTHING TO FILTER is a picker's first page, the read that happens most, and it is
+           answered from memory (`CatalogueCache` says why that is exact). Anything else — a typed search, any chip —
+           is SQL, and so is the first-page read whenever the cache declines. */
+        if (browsing(filter)) {
+            var cached = catalogue.page(trainerId, filter.custom(), size, cursor, includeTotal);
+            if (cached.isPresent()) return cached.get();
+        }
+        return sqlSearch(trainerId, filter, size, cursor, includeTotal);
+    }
+
+    /** The list read in SQL alone. Package-private so the cache's parity test can ask both sides. */
+    ExercisePage sqlSearch(UUID trainerId, Filter filter, int size, String cursor, boolean includeTotal) {
+        String text = filter.q();
         List<Hit> hits = repo.search(trainerId, filter, after(cursor, text != null), size);
         boolean more = hits.size() > size;
         List<Hit> page = more ? hits.subList(0, size) : hits;
@@ -77,6 +91,11 @@ public class ExerciseService {
 
     @Transactional(readOnly = true)
     public ExerciseMeta meta(UUID trainerId) {
+        return catalogue.meta(trainerId).orElseGet(() -> sqlMeta(trainerId));
+    }
+
+    /** The facets in SQL alone; see {@link #sqlSearch}. */
+    ExerciseMeta sqlMeta(UUID trainerId) {
         return new ExerciseMeta(repo.facet(trainerId, "body_part"), repo.facet(trainerId, "equipment"),
                 repo.facet(trainerId, "level"), repo.total(trainerId), repo.equipmentGroups(trainerId),
                 repo.muscles(trainerId), repo.facet(trainerId, "movement_pattern"),
@@ -159,6 +178,13 @@ public class ExerciseService {
         } catch (RuntimeException e) {
             throw ApiException.validation("cursor: not a cursor from this list");
         }
+    }
+
+    /** No {@code q} and no filter but {@code custom}, which only says whose rows. */
+    private static boolean browsing(Filter f) {
+        return f.q() == null && f.bodyPart().isEmpty() && f.equipment().isEmpty() && f.level().isEmpty()
+                && f.equipmentKey().isEmpty() && f.equipmentCategory().isEmpty() && f.target().isEmpty()
+                && f.secondary().isEmpty() && f.pattern().isEmpty() && f.logType().isEmpty() && f.category().isEmpty();
     }
 
     /** A comma-separated filter as a list: trimmed, de-duplicated, at most twenty values of at most sixty characters. */

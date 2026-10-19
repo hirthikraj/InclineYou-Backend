@@ -32,6 +32,20 @@ import { useWorkspace } from './WorkspaceHost';
 
 const ICONS = { user: User, dumbbell: Dumbbell, check: Check } as const;
 
+/**
+ * ONE LOAD IN FLIGHT AT A TIME. The bell loads on mount, and in development React mounts every effect twice (StrictMode runs
+ * mount → cleanup → mount to prove cleanups are right), so each page made two `/v1/notifications` calls a few milliseconds apart —
+ * the same answer asked for twice, on every screen the bar is on. Calls that overlap now share the one promise; a call made after
+ * it settles (a tab coming back to the front, the bell opening) is a new read, so nothing is cached and nothing goes stale.
+ */
+let loading: Promise<BellWire | null> | null = null;
+function loadBellOnce(): Promise<BellWire | null> {
+  loading ??= loadBell().finally(() => {
+    loading = null;
+  });
+  return loading;
+}
+
 /** *Today* / *Yesterday* / *Thursday 8 Oct* — the ladder the rest of the product dates things with. */
 function dayOf(ms: number, now: number): string {
   const d = new Date(ms);
@@ -72,7 +86,7 @@ export function BellMenu() {
   useEffect(() => {
     let alive = true;
     const pull = () => {
-      void loadBell().then((next) => {
+      void loadBellOnce().then((next) => {
         if (!alive || !next) return;
         setBell(next);
         setCleared(false);

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
-import type { AssignmentWire, ClientWire, ExerciseNameWire, TemplateWire } from '@/lib/programs/api';
+import type { ClientWire, ExerciseNameWire, TemplateWire } from '@/lib/programs/api';
 import type { ExerciseWire } from '@/lib/exercises/api';
 import { balance, placementOf } from '@/lib/programs/balance';
 import { prescribeFor } from '@/lib/programs/prescribe';
@@ -12,13 +12,12 @@ import { ExerciseInfoPanel, type ProgramContext } from './ExerciseInfo';
 import { WeekBoard } from './week/WeekBoard';
 import { PhoneProgram } from './week/PhoneProgram';
 import { assignTemplate, duplicateTemplate, removeTemplate, saveTemplate } from '@/lib/programs/actions';
-import { useBlueprintDraft, patchOf, type SaveState } from '@/lib/programs/draft';
+import { useBlueprintDraft, type SaveState } from '@/lib/programs/draft';
 import { entriesFromWorkout, exerciseIdsOf, workoutWireOf } from '@/lib/programs/fromWorkout';
 import { fromWire as draftFromWire, toWire as workoutToWire, type Draft } from '@/lib/workouts/draft';
 import { fetchExercise } from '@/lib/exercises/actions';
 import type { WorkoutTemplateWire } from '@/lib/workouts/api';
 import { useDayReflow } from '@/lib/programs/reflow';
-import { diffPlans, type DiffRow } from '@/lib/programs/diff';
 import { useToast } from '@/lib/toast/store';
 import {
   addEntries,
@@ -57,8 +56,7 @@ import {
 } from '@/lib/programs/blueprint';
 import { AssignPanel } from './AssignPanel';
 import { useForClient } from '@/lib/programs/for-client';
-import { AssignedList } from './AssignedList';
-import { CloseIcon, CopyIcon, DotsIcon, PlusIcon, UsersIcon } from './Icons';
+import { CopyIcon, DotsIcon, PlusIcon } from './Icons';
 import { LibraryPanel, type Prescription } from './LibraryPanel';
 import { WorkoutBuilder } from './workout/WorkoutBuilder';
 import { LibraryDock } from './week/LibraryDock';
@@ -116,7 +114,6 @@ type Panel =
   | { kind: 'progression' }
   | { kind: 'duplicate' }
   | { kind: 'assign' }
-  | { kind: 'assigned' }
   | null;
 
 /** The row density the strip's *Compact / Full* pair sets. */
@@ -124,14 +121,12 @@ export type Detail = 'compact' | 'full';
 
 export function Builder({
   template,
-  assignments,
   clients,
   names: serverNames,
   switcher,
   switcherOpen = false,
 }: {
   template: TemplateWire;
-  assignments: AssignmentWire[];
   clients: ClientWire[];
   names: Record<string, ExerciseNameWire>;
   /** The shelf, as a bottom sheet behind the program's name — the phone's whole
@@ -245,10 +240,6 @@ export function Builder({
   const [assignBusy, setAssignBusy] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
-  /** The trainer has read the push prompt and said not now. Per sitting, and
-   *  per program — it is dismissed by identity below, not by a boolean, so
-   *  opening a second program does not inherit the first one's dismissal. */
-  const [pushHidden, setPushHidden] = useState<string | null>(null);
 
   /* ── A BOARD THAT RE-PLACES ITSELF, ANIMATED ───────────────────────────────
      The scoped view transition, the `flushSync`, the `html.vt-days` window and
@@ -350,56 +341,6 @@ export function Builder({
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, panel, library, menu, workoutDay, editing, copied]);
 
-  /* ── WHAT THIS SITTING CHANGED, AND WHO IS DOWNSTREAM OF IT ────────────────
-     The prompt's two figures, and both of them are subtle enough to be worth
-     stating.
-
-     The BASELINE is frozen at mount and never re-read. `template` refreshes
-     after every autosave — that is what keeps the shelf's *edited 2m ago*
-     honest — so diffing the draft against the live prop would answer *what have
-     you changed since your last keystroke*, which is nothing, always. What a
-     trainer means by "I edited this plan" is the whole sitting.
-
-     And it is NOT the same question as `behindTemplate`. That is a per-copy
-     clock comparison and it is true of a client who was assigned six months ago
-     and never resynced, whether or not anybody has touched the blueprint today.
-     This prompt is about an edit the trainer has just made. */
-  const [baseline, setBaseline] = useState(() => snapshotOf(template));
-  /* ADJUSTED DURING RENDER when another program is opened, which is React's own
-     documented pattern for deriving state from a changed prop — `Schedule.tsx`
-     uses it for `?new=1` and records why an effect is wrong here: an effect
-     would paint one frame of the new program diffed against the old one's rows,
-     and every row would read as changed. */
-  if (baseline.id !== template.id) {
-    setBaseline(snapshotOf(template));
-    setPushHidden(null);
-  }
-
-  const sessionDiff = useMemo(() => {
-    const mine = patchOf(entries, labels, days, weeks);
-    return diffPlans({
-      base: baseline.exercises as DiffRow[],
-      copy: (mine.exercises ?? []) as DiffRow[],
-      baseShape: {
-        weeks: baseline.weeks,
-        trainingDays: baseline.trainingDays,
-        dayLabels: baseline.dayLabels,
-      },
-      copyShape: { weeks, trainingDays: days, dayLabels: labels },
-    });
-  }, [baseline, entries, labels, days, weeks]);
-
-  const liveCount = assignments.filter(a => a.status === 'active').length;
-  /* SHOWN ONLY WHEN ALL THREE ARE TRUE: somebody is on this, this sitting
-     changed something, and the trainer has not said not now. Never while the
-     draft is still dirty — offering to send a version the server does not have
-     yet is offering to send the previous one. */
-  const showPush =
-    liveCount > 0 &&
-    sessionDiff.total > 0 &&
-    save === 'clean' &&
-    pushHidden !== template.id &&
-    panel?.kind !== 'assigned';
 
   /* ── derived ── */
   const shown = effectiveWeek(entries, week);
@@ -1250,7 +1191,7 @@ export function Builder({
                   `::before` on every span but the first, so a hidden clause
                   takes its own `·` with it and the line never ends in one. */}
               <span className="pg__shape">
-                {shapeParts(days.length, weeks, template.activeAssignedCount).map((part, i) => (
+                {shapeParts(days.length, weeks, template.assignedCount).map((part, i) => (
                   <span key={i} className={i === 2 ? 'pg__shapecl' : undefined}>
                     {part}
                   </span>
@@ -1270,18 +1211,13 @@ export function Builder({
             </p>
           </div>
           <div className="ph__acts">
-            {/* THE TWO SECONDARIES STAND DOWN ON A PHONE and are re-offered as
-                rows in the menu below — §13.5's own IA table already files both
-                there (*Assign to client, publish → L1 program menu*; *Duplicate
-                day / week / program → … program menu*). `Assign` stays on the
-                row: it is the primary, and a primary behind an unlabelled ⋯ is a
-                primary a trainer has to already know about. */}
-            <Button variant="secondary" className="pg__act--desk" onClick={() => openPanel({ kind: 'assigned' })}>
-              <UsersIcon />
-              {template.assignedCount === 0
-                ? 'Clients'
-                : `${template.activeAssignedCount} on this`}
-            </Button>
+            {/* THE SECONDARY STANDS DOWN ON A PHONE and is re-offered as a row
+                in the menu below — §13.5's own IA table files it there
+                (*Duplicate day / week / program → … program menu*). `Assign`
+                stays on the row: it is the primary, and a primary behind an
+                unlabelled ⋯ is a primary a trainer has to already know about.
+                There is no *Clients* button: a template does not list who is on
+                its copies (18 Oct 2026) — each client's plan is on Programs. */}
             {/* DUPLICATE IS THE MOST-USED ACTION ON THIS SCREEN, so it is a
                 labelled secondary beside the primary rather than a row in the
                 overflow. Trainers build one good program and tweak it per
@@ -1329,19 +1265,6 @@ export function Builder({
                       disagree with the row above it about what this program can
                       do. `.menu__i--phone` is `display:none` over 900px, where
                       both are labelled buttons in `.ph__acts`. */}
-                  <button
-                    className="menu__i menu__i--phone"
-                    role="menuitem"
-                    type="button"
-                    onClick={() => {
-                      setMenu(false);
-                      openPanel({ kind: 'assigned' });
-                    }}
-                  >
-                    {template.assignedCount === 0
-                      ? 'Clients'
-                      : `${template.activeAssignedCount} on this`}
-                  </button>
                   <button
                     className="menu__i menu__i--phone"
                     role="menuitem"
@@ -1396,44 +1319,6 @@ export function Builder({
 
       </div>
 
-      {/* ── YOU CHANGED THIS, AND THIRTEEN PEOPLE ARE ON IT ──────────────────
-
-          The mirror of the band on `/clients/:id/program/:pid`: there a client's
-          copy is open and its blueprint has moved; here the blueprint is open
-          and its copies have not. **Neither one propagates anything.** Both name
-          the act and leave it to the trainer, which is the rule the two-table
-          design exists to enforce — see `AssignedList`, which is where this
-          button leads and which is the screen that does the sending.
-
-          It is a PROMPT and not a confirm: it appears after the autosave has
-          landed, it names the count, and it is dismissible. A trainer tidying a
-          blueprint nobody is on never sees it. */}
-      {showPush && (
-        <p className="pg__push" role="status">
-          <span>
-            <b>
-              {liveCount} client{liveCount === 1 ? '' : 's'}
-            </b>{' '}
-            {liveCount === 1 ? 'is' : 'are'} on this plan. You have made{' '}
-            <b>
-              {sessionDiff.total} change{sessionDiff.total === 1 ? '' : 's'}
-            </b>{' '}
-            &mdash; their copies still say what it said before.
-          </span>
-          <Button variant="secondary" size="sm" onClick={() => openPanel({ kind: 'assigned' })}>
-            <UsersIcon />
-            Review who gets it
-          </Button>
-          <Button
-            variant="ghost"
-            iconOnly
-            label="Not now"
-            title={undefined}
-            onClick={() => setPushHidden(template.id)}
-            icon={<CloseIcon />}
-          />
-        </p>
-      )}
 
       <div className="split split--solo">
         <div className="split__r pg__builder">
@@ -1861,33 +1746,9 @@ export function Builder({
           />
         )}
 
-        {panel?.kind === 'assigned' && (
-          <AssignedList
-            templateId={template.id}
-            assignments={assignments}
-            /* The DRAFT's week count, not `template.weeks` — a trainer who has
-               just added week 9 is asking about the block they are looking at. */
-            weeks={weeks}
-            onDone={() => setPanel(null)}
-          />
-        )}
       </div>
     </>
   );
-}
-
-/** THE BLUEPRINT AS IT WAS WHEN THIS SITTING OPENED IT — see the push prompt.
- *  A plain object rather than the `TemplateWire` itself, so it cannot be
- *  mistaken for the live prop by a later reader: the whole point is that this
- *  one does not move when the template refreshes. */
-function snapshotOf(template: TemplateWire) {
-  return {
-    id: template.id,
-    exercises: template.exercises,
-    dayLabels: template.dayLabels,
-    weeks: template.weeks,
-    trainingDays: template.trainingDays,
-  };
 }
 
 /* ─────────────────────────────────────────── the save line ── */

@@ -10,7 +10,6 @@ import {
   filterIsEmpty,
   rank,
   readRows,
-  topUsedId,
   type CertifiedFilter,
 } from '@/lib/programs/certified';
 import { TopBar } from '@/components/shell/TopBar';
@@ -31,7 +30,7 @@ import { PageHeader } from '@/web-components/ui/PageHeader';
  *
  * The filter rail beside a card grid. Read-only: nothing on this screen edits a
  * certified program, and nothing on it assigns one, because a certified
- * blueprint has no owner a trainer can edit — *Use this* copies it first and the
+ * blueprint has no owner a trainer can edit — *Copy* puts it on their own shelf first and the
  * copy is what gets assigned. `lib/programs/actions.ts` carries that argument.
  *
  * ── THE WHOLE CATALOGUE COMES DOWN ONCE ──────────────────────────────────────
@@ -48,24 +47,12 @@ import { PageHeader } from '@/web-components/ui/PageHeader';
  * intermediate", and a reload drops the filters. The thing a trainer DOES link
  * to is one program, and that is a route.
  *
- * ── AND THE ORDER IS A FACT THE SCREEN NOW STATES ────────────────────────────
+ * ── THE ORDER IS THE NAME, AND THE SHELF SAYS NOTHING ABOUT USE ─────────────
  *
- * `rank()` has always sorted this grid most-used-first, tie-broken on the name,
- * and the screen said nothing about it — so five cards read as five arbitrary
- * cards, and the thing the catalogue actually knows about them was spent on
- * their order alone, where nobody could see it. Two lines carry it now and they
- * are the same claim said twice on purpose: `.cert__count` says *most used
- * first* over the grid, and the leading card wears *Most used*. Neither would
- * be worth much on its own — a badge with no stated ordering is an assertion,
- * and an ordering with nothing marking its head is a sentence about a list you
- * then have to count.
- *
- * Both stand down under a filter, and for different reasons. The line stands
- * down because `4 of 5 · 3 days a week` is what a trainer needs the instant
- * they tick a chip. The BADGE does not move: it rides the row that leads the
- * whole catalogue, not the row that happens to lead the filtered grid, because
- * *most used of the four things still on screen* is a claim nobody asked for.
- * If the filter hides that row, nothing is badged.
+ * It was most-used-first with a *Most used* badge on the leader and *Used by N*
+ * on every card. All three came off on 18 Oct 2026: the shelf just shows the
+ * templates, alphabetically, so the order is one a trainer can see without
+ * being told. `certified.usedCount` still rides the wire.
  */
 export function CertifiedShelf({
   data,
@@ -80,10 +67,6 @@ export function CertifiedShelf({
   const rows = useMemo(() => readRows(data.certified), [data.certified]);
   const shown = useMemo(() => rank(applyFilter(rows, filter)), [rows, filter]);
   const mineCount = rows.filter(r => r.row.mine).length;
-  /* Computed over EVERY row, never over `shown` — see the block above. `null`
-     when the lead is shared, which is the only honest answer to *which one is
-     the most used* when two are. */
-  const topId = useMemo(() => topUsedId(rows), [rows]);
 
   return (
     <>
@@ -148,14 +131,13 @@ export function CertifiedShelf({
         {/* THE SECOND LEVEL, and this is the tab that reaches the trainer's own
             shelf. It sits OUTSIDE `PageHeader` for `.ph`'s reason — the active
             `.tab` carries `margin-bottom:-1px` so its underline lands on the
-            rule under the header, and a row inside would push it off. The count
-            is the trainer's own shelf, which `getCertifiedShelf` already reads
-            for exactly this: a tab that counts nothing on one of its pages is a
-            tab that looks broken on that page. */}
+            rule under the header, and a row inside would push it off. No count on
+            *My templates*: it was the only reason this page read the trainer's
+            whole shelf, and *My templates* draws none on this tab either. */}
         <SubTabs
           label="Template shelves"
           current="certified"
-          tabs={templateTabs('certified', { mine: data.ownCount }).map((t) => ({
+          tabs={templateTabs('certified').map((t) => ({
             ...t,
             href: withClient(t.href, forClient),
           }))}
@@ -179,13 +161,7 @@ export function CertifiedShelf({
                   screen reader is otherwise told nothing at all. */}
               <p className="cert__count" aria-live="polite">
                 {shown.length === rows.length ? (
-                  <>
-                    {rows.length} template{rows.length === 1 ? '' : 's'}
-                    {/* Plain text, never a `<b>` — see `.cert__count` in
-                        app.css for the contrast measurement that took the
-                        second colour back off this clause. */}
-                    {topId !== null && ' · most used first'}
-                  </>
+                  `${rows.length} template${rows.length === 1 ? '' : 's'}`
                 ) : (
                   `${shown.length} of ${rows.length} · ${describeFilter(filter).join(' · ')}`
                 )}
@@ -199,7 +175,7 @@ export function CertifiedShelf({
                 <ul className="cert__grid" role="list">
                   {shown.map(({ row }) => (
                     <li key={row.id}>
-                      <CertifiedCard row={row} topUsed={row.id === topId} />
+                      <CertifiedCard row={row} />
                     </li>
                   ))}
                 </ul>

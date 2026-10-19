@@ -15,7 +15,10 @@ import java.util.UUID;
  *
  * <p><b>The trainer chooses.</b> Saving a plan never notifies by itself, on any route: a trainer fixing a typo, building a
  * week over a few sittings or trying a change they may undo must not send the client a notice each time. This is the one
- * door, and it is a button the trainer presses once they mean it. Each call is one notice; the screen shows it sent.
+ * door, and it is a button the trainer presses once they mean it. Each call is one notice, except a repeat: the same notice to
+ * the same client inside {@link #COOLDOWN_SECONDS} is the one already written, not a second (19 Oct 2026). A double press, a
+ * retried request or a script would otherwise fill the client's bell — and, once push is wired, buzz their phone each time.
+ * A repeat answers {@code sent: true}, because the client does have that notice; a renamed plan is a new notice.
  *
  * <p>It writes a {@code plan} notice through {@code mint_client_notification()}, which applies the client's own switch
  * ({@code notify_program_updated}): a client who turned plan notices off is told nothing and the call is still a success,
@@ -26,6 +29,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 @Slf4j
 public class ProgramNotifyService {
+
+    /** Long enough to swallow a double press and a retry, short enough that a second real change the same morning is told. */
+    static final int COOLDOWN_SECONDS = 5 * 60;
 
     private final ProgramJdbcRepository programs;
     private final ClientNoticeJdbcRepository notices;
@@ -43,7 +49,13 @@ public class ProgramNotifyService {
         if (!"accepted".equals(plan.membershipStatus()) && !"paused".equals(plan.membershipStatus())) {
             throw ApiException.conflict("CLIENT_NOT_ON_PORTAL", "They haven’t joined the portal yet, so there is nobody to tell.");
         }
-        boolean sent = notices.mint(UUID.fromString(plan.clientId()), "plan", "Your plan, " + plan.name().strip() + ", was updated.", null);
+        UUID clientId = UUID.fromString(plan.clientId());
+        String text = "Your plan, " + plan.name().strip() + ", was updated.";
+        if (notices.recentlyMinted(clientId, "plan", text, COOLDOWN_SECONDS)) {
+            log.info("plan notice trainer={} program={} skipped: the same notice went out under {}s ago", trainerId, programId, COOLDOWN_SECONDS);
+            return true;
+        }
+        boolean sent = notices.mint(clientId, "plan", text, null);
         log.info("plan notice trainer={} program={} sent={}", trainerId, programId, sent);
         return sent;
     }

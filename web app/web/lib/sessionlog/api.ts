@@ -162,21 +162,6 @@ const getProgramRow = cache(async (programId: string): Promise<ProgramRowWire | 
   }
 });
 
-/** Frame 3b's third scope counts the clients a template edit would reach: those on a live copy of it. */
-const DEAD = new Set(['cancelled', 'canceled', 'completed', 'archived']);
-const getTemplateReach = cache(async (templateId: string): Promise<number | null> => {
-  try {
-    const res = await get<{ items: { clientId: string; status: string | null }[] }>(
-      `/v1/programs/${encodeURIComponent(templateId)}/assignments`,
-    );
-    return new Set(
-      (res.items ?? []).filter((a) => !DEAD.has((a.status ?? 'active').toLowerCase())).map((a) => a.clientId),
-    ).size;
-  } catch {
-    return null;
-  }
-});
-
 /**
  * The add panel's starting list — the first page of the library by name, in the
  * shape the panel already searches. The panel's real answer is `exerciseSearch`
@@ -223,8 +208,10 @@ function sessionWire(s: SessionRowWire, programId: string | null): NonNullable<C
  * state it rebuilds from. Null: no such session.
  *
  * Requests: the log (1), then in parallel the history (1+), the pack (1), the
- * program (1) and the library's first page (1); a template's reach and the repeat
- * label add one each, only when there is a template or a repeat to describe.
+ * program (1) and the library's first page (1). Nothing waits on a second round:
+ * the template scope used to count the clients on the template's copies here, a
+ * read after the others, until 18 Oct 2026 — a template edit never reaches a
+ * copy, so there was nothing true for that count to say.
  */
 export const getConsoleData = cache(async (routeId: string): Promise<ConsoleDataX | null> => {
   const now = Date.now();
@@ -243,7 +230,6 @@ export const getConsoleData = cache(async (routeId: string): Promise<ConsoleData
   /* The repeat offer's label is the workout's name, which the history now carries per session
      (`sessions`), so it no longer costs a read of that session's row. */
   const repeatName = repeatId ? history.sessions?.[repeatId]?.workoutName ?? null : null;
-  const templateReach = program?.copiedFromProgramId ? await getTemplateReach(program.copiedFromProgramId) : null;
 
   const ctx: ViewContext = {
     now,
@@ -272,7 +258,6 @@ export const getConsoleData = cache(async (routeId: string): Promise<ConsoleData
     timelines: buildTimelines(log, parts, ctx),
     library,
     recents: buildRecents(history, onCard, log.session.id),
-    templateReach,
     now,
     state: { log, history: parts, ctx },
   };

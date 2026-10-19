@@ -13,6 +13,19 @@
  *
  * It reads no clock, no cookie and no request, which is what makes that safe.
  *
+ * ── AND YET THERE IS NOW A SECOND COPY (19 Oct 2026) ─────────────────────────
+ *
+ * The shelf row stopped computing its figure here. `GET /v1/workout-templates`
+ * used to carry every set of every template so this module could run over
+ * them, and a phone on mobile data downloaded ~35 KB gzip at 32 templates
+ * (~114 KB at 100) to print one number per row; the list is now summaries and
+ * the server sends `estimatedMinutes`, worked out by the backend's
+ * `core/workout/WorkoutEstimate.java`. The builder still runs THIS file, on
+ * the draft. So the drift the paragraph above warns about is now a cost we
+ * chose to pay: **change a constant or a rule here, change it there in the
+ * same commit.** `WorkoutEstimateTest` holds cases whose expected minutes were
+ * produced by running this file; a change that moves one moves both sides.
+ *
  * ── IT IS AN ESTIMATE AND IT IS DRAWN AS ONE ────────────────────────────────
  *
  * `~50 min`, never `50 min`. Nothing here knows how long this person takes to

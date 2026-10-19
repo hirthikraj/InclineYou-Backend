@@ -33,7 +33,6 @@ export function SwapModal({
   hasProgram,
   hasTemplate,
   programWeeksLeft,
-  templateReach,
   busy,
   message,
   onSwap,
@@ -47,7 +46,6 @@ export function SwapModal({
   hasProgram: boolean;
   hasTemplate: boolean;
   programWeeksLeft: number | null;
-  templateReach: number | null;
   busy: boolean;
   message: string | null;
   onSwap: (toExerciseId: string, scope: SwapScope) => void;
@@ -178,13 +176,16 @@ export function SwapModal({
             <span className="scp__m">
               <span className="scp__t">The template</span>
               <span className="scp__b">
+                {/* NOT *every client on it*. A template edit never reaches a
+                    copy — each client's plan is their own from the moment it was
+                    copied — so the honest reach is the next copy made. */}
                 {hasTemplate
-                  ? `The template itself — so every client on it, which is ${templateReach ?? 'more than one'} ${templateReach === 1 ? 'person' : 'people'}. The one change that reaches somebody who is not in the room.`
+                  ? 'The template itself — every plan copied from it from now on. Plans already copied, this one included, stay as they are.'
                   : 'The program did not come from a template, so there is nothing wider than the plan.'}
               </span>
             </span>
             <span className="scp__n">
-              {hasTemplate ? `${templateReach ?? '?'} client${templateReach === 1 ? '' : 's'}` : 'none'}
+              {hasTemplate ? 'new copies' : 'none'}
             </span>
           </button>
 

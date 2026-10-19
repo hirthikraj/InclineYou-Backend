@@ -55,13 +55,13 @@ export function ProgramRowEntry() {
             <ProgramRowHead actionable />
             <ul className="pgt__l" role="list">
               <li>
-                <ProgramRow href="#c-programrow" name="Upper / Lower · Intermediate" sub="Upper A · Lower A · Upper B · Lower B" days={[1, 2, 4, 5]} clients={6} weeks={8} goal="Hypertrophy" edited="3d ago" certified actions={<RowMenu label="Upper / Lower · Intermediate" items={[{ label: 'Duplicate', href: '#c-programrow' }, { separator: true }, { label: 'Delete…', href: '#c-programrow', danger: true }]} />} />
+                <ProgramRow href="#c-programrow" name="Upper / Lower · Intermediate" sub="Upper A · Lower A · Upper B · Lower B" days={[1, 2, 4, 5]} used={6} weeks={8} goal="Hypertrophy" edited="3d ago" certified actions={<RowMenu label="Upper / Lower · Intermediate" items={[{ label: 'Duplicate', href: '#c-programrow' }, { separator: true }, { label: 'Delete…', href: '#c-programrow', danger: true }]} />} />
               </li>
               <li>
-                <ProgramRow href="#c-programrow" name="Push Pull Legs" sub="Push · Pull · Legs · Push · Pull" days={[1, 2, 3, 5, 6]} clients={11} weeks={12} goal="Strength" edited="yesterday" actions={<RowMenu label="Push Pull Legs" items={[{ label: 'Duplicate', href: '#c-programrow' }, { separator: true }, { label: 'Delete…', href: '#c-programrow', danger: true }]} />} />
+                <ProgramRow href="#c-programrow" name="Push Pull Legs" sub="Push · Pull · Legs · Push · Pull" days={[1, 2, 3, 5, 6]} used={11} weeks={12} goal="Strength" edited="yesterday" actions={<RowMenu label="Push Pull Legs" items={[{ label: 'Duplicate', href: '#c-programrow' }, { separator: true }, { label: 'Delete…', href: '#c-programrow', danger: true }]} />} />
               </li>
               <li>
-                <ProgramRow href="#c-programrow" name="Post-injury return · shoulder" sub="Rebuild A · Rebuild B" days={[2, 4]} clients={0} weeks={6} goal="Rehab" edited="14 Aug" actions={<RowMenu label="Post-injury return · shoulder" items={[{ label: 'Duplicate', href: '#c-programrow' }, { separator: true }, { label: 'Delete…', href: '#c-programrow', danger: true }]} />} />
+                <ProgramRow href="#c-programrow" name="Post-injury return · shoulder" sub="Rebuild A · Rebuild B" days={[2, 4]} used={0} weeks={6} goal="Rehab" edited="14 Aug" actions={<RowMenu label="Post-injury return · shoulder" items={[{ label: 'Duplicate', href: '#c-programrow' }, { separator: true }, { label: 'Delete…', href: '#c-programrow', danger: true }]} />} />
               </li>
             </ul>
           </div>
@@ -73,7 +73,7 @@ export function ProgramRowEntry() {
         lede={
           <>
             <code>.ptrow__k</code> holds the word each figure is <i>of</i> &mdash; <i>days a week</i>,{' '}
-            <i>clients on this</i> &mdash; and it is clipped rather than <code>display:none</code>. Two things
+            <i>times used</i> &mdash; and it is clipped rather than <code>display:none</code>. Two things
             follow, and both are the point of the technique. The header row is safe to mark{' '}
             <code>aria-hidden</code>, because a screen reader hears <i>4 days a week</i> off the row itself and
             never has to associate a figure with a header it met six rows ago. And the reflow below has the
@@ -177,7 +177,7 @@ export function ProgramRowEntry() {
         title="Zero is a dash and a sentence"
         lede={
           <>
-            <code>0 clients</code> in a column of figures reads as a measurement. <i>&mdash; nobody on this yet</i>{' '}
+            <code>0</code> in a column of figures reads as a measurement. <i>&mdash; not used yet</i>{' '}
             is what the trainer is actually scanning for: a program they can edit without reaching anybody. The
             dash is the column&rsquo;s answer and the sentence is the row&rsquo;s, so the dash is dropped in the
             reflowed state where the sentence is already there.
@@ -188,7 +188,7 @@ export function ProgramRowEntry() {
       <Blk title="Specifications" tag="design-specifications">
         <SpecTable
           rows={[
-            { property: 'Columns', value: '7', note: 'Program · shape · days · weeks · clients · goal · edited' },
+            { property: 'Columns', value: '7', note: 'Program · shape · days · weeks · used · goal · edited' },
             { property: 'Gutters', value: '38 + 40px', note: 'The checkbox and the row menu — laid over the row, not tracks of it' },
             { property: 'Second line', value: 'the day names', token: '--tx-ink-3', note: 'What the blueprint is made of — see below' },
             { property: 'Reflow', value: '900px', note: "The shell's breakpoint, not the content's — this list shares its width with nothing" },
@@ -222,7 +222,7 @@ export function ProgramRowEntry() {
                   <div className="drawn__c">
                     <span className="drawn__nm">Push Pull Legs</span>
                     <span className="drawn__m">
-                      <b>5</b> days a week · <b>11</b> clients on this · <b>12</b> weeks
+                      <b>5</b> days a week · <b>11</b> times used · <b>12</b> weeks
                       <br />
                       Strength · edited yesterday
                     </span>

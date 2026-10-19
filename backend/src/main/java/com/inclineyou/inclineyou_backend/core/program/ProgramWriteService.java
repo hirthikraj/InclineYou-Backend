@@ -5,6 +5,7 @@ import com.inclineyou.inclineyou_backend.core.client.ClientScheduleService;
 import com.inclineyou.inclineyou_backend.core.program.ProgramJdbcRepository.Locked;
 import com.inclineyou.inclineyou_backend.core.program.PlanRules.W;
 import com.inclineyou.inclineyou_backend.core.program.dto.PatchProgramRequest;
+import com.inclineyou.inclineyou_backend.core.program.dto.ProgramEdit;
 import com.inclineyou.inclineyou_backend.core.program.dto.ProgramItem;
 import com.inclineyou.inclineyou_backend.core.program.dto.ProgramRequest;
 import com.inclineyou.inclineyou_backend.core.program.dto.Resynced;
@@ -114,7 +115,7 @@ public class ProgramWriteService {
         requireExercises(trainerId, planned);
         try {
             Set<UUID> removed = trees.save(id, trainerId, planned);
-            repo.updateShape(id, body.name(), body.goal(), body.description(), body.weeks(), body.days());
+            repo.updateShape(trainerId, id, body.name(), body.goal(), body.description(), body.weeks(), body.days());
             relink(row, removed);
         } catch (DuplicateKeyException e) {
             throw ApiException.idConflict();
@@ -133,19 +134,18 @@ public class ProgramWriteService {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "PROGRAM_IS_TEMPLATE",
                     "A template has no status or dates. Only a client's plan does.");
         }
-        boolean datesTouched = req.startDate() != null || req.endDate() != null;
-        LocalDate start = null;
-        LocalDate end = null;
-        if (datesTouched) {
-            LocalDate[] current = repo.dates(id).orElseThrow();
-            start = req.startDate() != null ? req.startDate().value() : current[0];
-            end = req.endDate() != null ? req.endDate().value() : current[1];
+        ProgramEdit.Dates dates = null;
+        if (req.startDate() != null || req.endDate() != null) {
+            LocalDate[] current = repo.dates(trainerId, id).orElseThrow();
+            LocalDate start = req.startDate() != null ? req.startDate().value() : current[0];
+            LocalDate end = req.endDate() != null ? req.endDate().value() : current[1];
             if (start != null && end != null && end.isBefore(start)) throw ApiException.validation("endDate: before startDate");
+            dates = new ProgramEdit.Dates(start, end);
         }
-        repo.patchFields(id, req, datesTouched, start, end);
+        repo.patchFields(trainerId, id, new ProgramEdit(req.name(), req.goal(), req.description(), dates));
         if (req.status() != null && !req.status().value().equals(row.status())) {
             if ("active".equals(req.status().value())) repo.completeOthers(row.clientId(), id);
-            repo.setStatus(id, req.status().value());
+            repo.setStatus(trainerId, id, req.status().value());
         }
         return read.summary(trainerId, id);
     }
@@ -159,7 +159,7 @@ public class ProgramWriteService {
                     "A client's plan is ended, not deleted. Pause it or mark it completed.");
         }
         if (target.alreadyGone()) return;
-        repo.retire(id);
+        repo.retire(trainerId, id);
         log.info("template retired trainer={} program={}", trainerId, id);
     }
 

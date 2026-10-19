@@ -130,9 +130,8 @@ export interface PlanProgramWire {
   workouts?: PlanWorkoutWire[];
   workoutCount: number;
   exerciseCount: number;
+  /** A template's copies onto clients, lifetime; 0 on a plan and on a library program. */
   assignedCount: number;
-  activeAssignedCount: number;
-  assignedClients: { id: string; name: string }[];
   copiedFrom: { id: string; name: string; revisedAt: number } | null;
   behind: boolean;
   /** v1.1 (R48): each exercise's name once, so no follow-up `?ids=` read. Detail reads only. */

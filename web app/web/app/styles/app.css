@@ -12739,16 +12739,8 @@ a.setrow:hover{background:var(--tx-surface-2)}
 .cert__count{font-family:var(--tx-mono);font-size:10.5px;font-weight:500;
   letter-spacing:.08em;text-transform:uppercase;color:var(--tx-ink-3);
   margin:0;font-variant-numeric:tabular-nums}
-/* WHAT THE ORDER IS, in the line that already states the count.
-   `rank()` sorts the grid most-used-first and ties on the name, and nothing
-   on the screen said so — so a trainer reading five cards left to right had
-   no way to know the first one was first for a reason, and `Most used` on the
-   leading card would be an assertion with nothing behind it. It is a fact
-   about the list, printed where the list's other fact already is.
-
-   It stands down the moment a filter is on: `4 of 5 · 3 days a week` is the
-   sentence that matters then, the ordering is unchanged and no longer the
-   news, and the line is a live region — every word in it is re-read. */
+/* The line once also said *· most used first*; the grid is by name now
+   (18 Oct 2026) and the clause came off with the *Most used* badge. */
 /* NO SECOND COLOUR FOR THE CLAUSE, and the first attempt is why this comment
    exists. The ordering rode in a `<b>` set to `--tx-ink-off` so it would sit
    under the count — MEASURED at 3.79:1 on light and 3.33 on dark, which is the
@@ -13048,7 +13040,7 @@ a.setrow:hover{background:var(--tx-surface-2)}
      it**. Two doors to one place, and together they were 89px of an 844px
      screen. The button is the one that stays: it names the destination as the
      place the trainer came from rather than as a section, and `.ph__acts` is
-     already being paid for by *Use this*.
+     already being paid for by *Copy*.
 
      What the strip's other two tabs offered is not lost — `Back to certified`
      is one tap from the catalogue, which carries them both. The builder makes

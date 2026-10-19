@@ -10,6 +10,7 @@ import {
   updateWorkoutTemplate,
   WorkoutsApiError,
   type WorkoutTemplateInput,
+  type WorkoutTemplateSummaryWire,
   type WorkoutTemplateWire,
 } from './api';
 import { getExercise } from '@/lib/exercises/api';
@@ -164,7 +165,7 @@ export async function fetchWorkoutTemplate(id: string): Promise<
  * two that still work, and the pane says *nothing here* in the same place it
  * says it for a search that matched nothing.
  */
-export async function fetchWorkoutTemplates(): Promise<WorkoutTemplateWire[]> {
+export async function fetchWorkoutTemplates(): Promise<WorkoutTemplateSummaryWire[]> {
   try {
     return await getWorkoutTemplates();
   } catch {

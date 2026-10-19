@@ -47,7 +47,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * api-contract 1.2, tr-a11: telling a client their plan changed. Pins that it is the trainer's choice (no save ever does it),
  * that a template and a client who is not on the portal are refused with the codes the contract names, that the client's own
- * switch is respected, and that a stranger's program is a 404.
+ * switch is respected, that a stranger's program is a 404, and that a repeat inside the cooldown is the notice already written.
  */
 @SpringBootTest
 @Transactional
@@ -81,15 +81,38 @@ class ProgramNotifyApiTest {
     }
 
     @Test
-    @DisplayName("200 {sent: true}, and one `plan` notice naming the plan; each call is one notice")
+    @DisplayName("200 {sent: true}, and one `plan` notice naming the plan; a second press inside the cooldown is that same notice")
     void notifies() throws Exception {
         notify(plan).andExpect(status().isOk()).andExpect(jsonPath("$.sent").value(true));
         Map<String, Object> n = jdbc.queryForMap("SELECT kind, text, session_id FROM client_notification WHERE client_id = :c::uuid", Map.of("c", c.toString()));
         assertEquals("plan", n.get("kind"));
         assertEquals("Your plan, Strength Block, was updated.", n.get("text"));
         assertNull(n.get("session_id"));
+        notify(plan).andExpect(status().isOk()).andExpect(jsonPath("$.sent").value(true));
+        assertEquals(1, notices(c), "a double press is one notice");
+    }
+
+    @Test
+    @DisplayName("the cooldown: 120 presses in a row are one notice; after the window, a renamed plan, or a deleted notice, it is told again")
+    void cooldown() throws Exception {
+        for (int i = 0; i < 120; i++) notify(plan).andExpect(status().isOk()).andExpect(jsonPath("$.sent").value(true));
+        assertEquals(1, notices(c), "a script pressing it 120 times is still one notice");
+
+        // the window has passed: the same notice is a new one
+        jdbc.update("UPDATE client_notification SET at = now() - make_interval(secs => :s + 1) WHERE client_id = :c::uuid",
+                Map.of("c", c.toString(), "s", ProgramNotifyService.COOLDOWN_SECONDS));
+        notify(plan).andExpect(status().isOk()).andExpect(jsonPath("$.sent").value(true));
+        assertEquals(2, notices(c));
+
+        // inside the window, a plan with another name is a different notice
+        jdbc.update("UPDATE program SET name = 'Strength Block 2' WHERE id = :p::uuid", Map.of("p", plan.toString()));
         notify(plan).andExpect(status().isOk());
-        assertEquals(2, notices(c), "the trainer pressed it twice");
+        assertEquals(3, notices(c));
+
+        // a deleted notice is not one the client has, so it does not hold the next back
+        jdbc.update("UPDATE client_notification SET deleted_at = now() WHERE client_id = :c::uuid", Map.of("c", c.toString()));
+        notify(plan).andExpect(status().isOk()).andExpect(jsonPath("$.sent").value(true));
+        assertEquals(4, notices(c));
     }
 
     @Test

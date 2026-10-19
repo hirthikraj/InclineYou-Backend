@@ -161,7 +161,6 @@ export function Programs({
         {open ? (
           <Builder
             template={open.template}
-            assignments={open.assignments}
             clients={open.clients}
             names={open.names}
             switcher={switcher}
@@ -187,19 +186,11 @@ export function Programs({
               <div className="ph__row">
                 <div>
                   <h1 className="ph__t">Templates</h1>
-                  {/* THE SUBTITLE SAYS WHAT THE COUNT COULD NOT. *5 programs on
-                      the shelf* restated the five rows below it and the tab
-                      strip beside it — three copies of one number on one band.
-                      The two facts it says instead are the ones no column
-                      answers by being scanned: how many PEOPLE this shelf is
-                      currently carrying, which is the only figure on the screen
-                      that is about the practice rather than about the
-                      blueprints, and how many blueprints are reaching nobody,
-                      which is the one actionable state a shelf can be in.
-
-                      The second clause is dropped when it is zero. *0 reaching
-                      nobody* is a congratulation, and a header is not the place
-                      for one. */}
+                  {/* THE SUBTITLE SAYS WHAT THE COUNT COULD NOT: how many
+                      blueprints have never been used, which is the one
+                      actionable state a shelf can be in. Dropped when it is
+                      zero — *0 not used yet* is a congratulation, and a header
+                      is not the place for one. */}
                   <p className="ph__sub">{shelfLine(templates)}</p>
                 </div>
                 <div className="ph__acts">
@@ -273,15 +264,14 @@ export function Programs({
                 `c-subtabs` carries the rest of the argument, including why it
                 is pills rather than a second underline strip.
 
-                The count on the other shelf is the catalogue's, which is the
-                read this page already makes for `FirstRun`. Nothing counts THIS
-                shelf on the strip: the subtitle six lines up already says how
-                many templates are on it, and a figure drawn twice on one band
-                is what `programsTabs` drops it for. */}
+                No counts on the strip. The catalogue is read only for
+                `FirstRun`, so on a shelf with templates there is nothing to
+                count it from, and THIS shelf's figure is already in the
+                subtitle six lines up. */}
             <SubTabs
               label="Template shelves"
               current="mine"
-              tabs={templateTabs('mine', { certified: certifiedCount ?? null }).map((t) => ({
+              tabs={templateTabs('mine').map((t) => ({
                 ...t,
                 href: withClient(t.href, forClient),
               }))}
@@ -326,30 +316,21 @@ export function Programs({
 }
 
 /**
- * THE SUBTITLE'S SENTENCE, and the arithmetic is deliberately not a sum of the
- * Clients column.
- *
- * `activeAssignedCount` is per blueprint, and one client may be on one program
- * only — but the figure a trainer wants under the word *Programs* is how many
- * PEOPLE are training to something written here, so the clauses are counted
- * separately and neither is derived from the other: people first, then the
- * blueprints reaching none of them.
+ * THE SUBTITLE'S SENTENCE, on the same LIFETIME count as the Used column
+ * (`assignedCount`): a blueprint is *used* once it has been copied to a client,
+ * whether or not that client is still on the copy.
  *
  * It is a plain string rather than a node because `.ph__sub` is one line of
  * 12.5px prose and every attempt to mark a clause inside it reads as a control.
  */
 function shelfLine(templates: ShelfData['templates']): string {
-  const people = templates.reduce((n, t) => n + t.activeAssignedCount, 0);
-  const idle = templates.filter(t => t.activeAssignedCount === 0).length;
+  const idle = templates.filter(t => t.assignedCount === 0).length;
+  const first = `${templates.length} template${templates.length === 1 ? '' : 's'}`;
 
-  const first =
-    people === 0
-      ? `${templates.length} template${templates.length === 1 ? '' : 's'}, none assigned yet`
-      : `${templates.length} template${templates.length === 1 ? '' : 's'} · ${people} client${people === 1 ? '' : 's'} training on one`;
-
-  /* Zero is not said — see the call-site's note. And it is not said twice
-     either: with nobody on anything the first clause has already said it. */
-  return idle > 0 && people > 0 ? `${first} · ${idle} reaching nobody` : first;
+  /* Zero is not said — see the call-site's note. And with nothing used at all
+     the clause says so outright rather than counting every row. */
+  if (idle === 0) return first;
+  return idle === templates.length ? `${first}, none used yet` : `${first} · ${idle} not used yet`;
 }
 
 /**
@@ -465,11 +446,10 @@ function FirstRun({
  *   refusing — that the blueprint knows which weekday. A workout is a thing
  *   that happens; a slot is a position in a list.
  * · **How long it runs.** Weeks, because that is how a block is sold.
- * · **How often it has been used**, which is the fact this picker adds and the
- *   shelf row never carried. The two sources count different things and the
- *   wording says so: a trainer's own program has been copied onto CLIENTS, a
- *   certified one has been copied by TRAINERS. One number under one word would
- *   be a lie in one of the two groups, so there are two sentences.
+ * · **How often it has been used** — on the trainer's OWN programs only, the
+ *   lifetime copies onto clients that the shelf's Used column draws. An
+ *   InclineYou template says nothing about use (18 Oct 2026), the same as its
+ *   own shelf, so its line is the first two facts alone.
  *
  * `keywords` carries the goal and the description into the search: a trainer
  * hunting for *the fat loss one* should not have to remember that they called
@@ -479,18 +459,12 @@ function choiceOption(c: StartChoice) {
   const workouts = `${c.days} workout${c.days === 1 ? '' : 's'} a week`;
   const weeks = `${c.weeks} week${c.weeks === 1 ? '' : 's'}`;
   const used =
-    c.source === 'own'
-      ? c.used === 0
-        ? 'not used yet'
-        : `used ${c.used} time${c.used === 1 ? '' : 's'}`
-      : c.used === 0
-        ? 'nobody has used it yet'
-        : `${c.used} trainer${c.used === 1 ? '' : 's'} use it`;
+    c.source !== 'own' ? null : c.used === 0 ? 'not used yet' : `used ${c.used} time${c.used === 1 ? '' : 's'}`;
 
   return {
     value: `${c.source}:${c.id}`,
     label: c.name,
-    meta: `${workouts} · ${weeks} · ${used}`,
+    meta: used ? `${workouts} · ${weeks} · ${used}` : `${workouts} · ${weeks}`,
     keywords: `${c.goal ?? ''} ${c.description ?? ''}`,
   };
 }
@@ -593,10 +567,8 @@ function NewProgram({
     weeks: t.weeks ?? 1,
     days: t.trainingDays.length,
     exercises: t.exercises.length || t.exerciseCount,
-    /* LIFETIME, not `activeAssignedCount`. The shelf row draws the active
-       figure because it is deciding whether an edit is safe; this list is
-       deciding which blueprint to reach for, and a program four clients
-       finished last winter is one a trainer reaches for. */
+    /* LIFETIME — the shelf's Used column: a program four clients finished
+       last winter is one a trainer reaches for. */
     used: t.assignedCount,
   }));
 

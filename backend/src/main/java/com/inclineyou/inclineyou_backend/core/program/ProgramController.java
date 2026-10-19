@@ -1,7 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.program;
 
 import com.inclineyou.inclineyou_backend.core.program.dto.ApplyRequest;
-import com.inclineyou.inclineyou_backend.core.program.dto.Assignment;
 import com.inclineyou.inclineyou_backend.core.program.dto.PatchProgramRequest;
 import com.inclineyou.inclineyou_backend.core.program.dto.ProgramItem;
 import com.inclineyou.inclineyou_backend.core.program.dto.ProgramRequest;
@@ -62,11 +61,6 @@ public class ProgramController {
     public ResponseEntity<ProgramItem> get(@PathVariable UUID id) {
         ProgramItem item = read.get(trainerId(), id);
         return ResponseEntity.ok().eTag(item.version()).body(item);
-    }
-
-    @GetMapping("/{id}/assignments")
-    public Items<Assignment> assignments(@PathVariable UUID id) {
-        return Items.of(read.assignments(trainerId(), id));
     }
 
     /** A1 / A4 — from scratch, or {@code copyFrom}. 201, or 200 on a replayed id. */

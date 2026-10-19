@@ -3,8 +3,8 @@ package com.inclineyou.inclineyou_backend.core.program;
 import com.inclineyou.inclineyou_backend.core.program.PlanRules.E;
 import com.inclineyou.inclineyou_backend.core.program.PlanRules.S;
 import com.inclineyou.inclineyou_backend.core.program.PlanRules.W;
-import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.jdbc.core.namedparam.SqlParameterSource;
@@ -99,7 +99,8 @@ public class PlanTreeJdbcRepository {
                 + " WHERE program_id = :pid::uuid AND deleted_at IS NULL", p);
 
         // workouts: upsert. A row that exists under another program matches the conflict target but
-        // not the WHERE, so it updates nothing — and that zero is the ID_CONFLICT.
+        // not the WHERE, so it updates nothing — and that zero is a taken id, which the service answers
+        // as ID_CONFLICT. The message names no id and no owner: it is for the log, never the wire.
         int[] wrote = jdbc.batchUpdate("""
                 INSERT INTO workout (id, origin, trainer_id, program_id, week, day, position, name, notes)
                 VALUES (:id::uuid, 'trainer', :tid::uuid, :pid::uuid, :week, :day, :position, :name, :notes)
@@ -110,7 +111,7 @@ public class PlanTreeJdbcRepository {
                 .addValue("id", w.id().toString()).addValue("tid", trainerId.toString()).addValue("pid", pid)
                 .addValue("week", w.week()).addValue("day", w.day()).addValue("position", w.position())
                 .addValue("name", w.name()).addValue("notes", w.notes())).toArray(SqlParameterSource[]::new));
-        for (int n : wrote) if (n == 0) throw ApiException.idConflict();
+        requireAllWritten(wrote, "workout");
 
         // exercises
         var mains = new ArrayList<Object[]>(); // {workout, E}
@@ -147,7 +148,7 @@ public class PlanTreeJdbcRepository {
                     .addValue("position", e.position()).addValue("gid", str(e.groupId()))
                     .addValue("section", e.section()).addValue("notes", e.notes()).addValue("pid", pid);
         }).toArray(SqlParameterSource[]::new));
-        for (int n : mainsWrote) if (n == 0) throw ApiException.idConflict();
+        requireAllWritten(mainsWrote, "workout_exercise");
 
         if (!alts.isEmpty()) {
             jdbc.batchUpdate("""
@@ -315,6 +316,13 @@ public class PlanTreeJdbcRepository {
     public void markSynced(UUID plan, int weeks, int days) {
         jdbc.update("UPDATE program SET weeks = :weeks, days = :days, synced_at = now(), revised_at = now() WHERE id = :id::uuid",
                 Map.of("weeks", weeks, "days", days, "id", plan.toString()));
+    }
+
+    /** A zero in an upsert batch is an id that belongs to another program: the caller's transaction must roll back. */
+    private static void requireAllWritten(int[] counts, String table) {
+        for (int n : counts) {
+            if (n == 0) throw new DuplicateKeyException(table + " id already belongs to another program");
+        }
     }
 
     private static String str(UUID id) {

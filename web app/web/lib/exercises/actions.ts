@@ -14,6 +14,26 @@ import {
   type ExerciseSearchParams,
 } from './api';
 
+/**
+ * A picker's first look: one page of the library AND its facets, in ONE action.
+ *
+ * The three pickers called `searchExercises` and `fetchExerciseMeta` under a
+ * `Promise.all`, which reads as parallel and is not: Next runs a client's server
+ * actions one after another, so the facets waited behind the whole search
+ * (measured 18 Oct 2026: `/meta` started 11 s after the click). Inside one
+ * action the two reads really do overlap. Each half is `null` on its own
+ * failure, as the two actions were.
+ */
+export async function openExerciseLibrary(
+  params: ExerciseSearchParams,
+): Promise<{ page: { exercises: ExerciseWire[]; total: number } | null; meta: ExercisesMeta | null }> {
+  const [page, meta] = await Promise.all([
+    getExercises(params).catch(() => null),
+    getExercisesMeta().catch(() => null),
+  ]);
+  return { page, meta };
+}
+
 /** One exercise for the detail panel. `null` is "we could not get it", which
  *  the panel draws as a sentence rather than as an empty body. */
 export async function fetchExercise(id: string): Promise<ExerciseWire | null> {

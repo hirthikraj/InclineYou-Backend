@@ -137,58 +137,17 @@ export function applyFilter(rows: CertifiedRow[], f: CertifiedFilter): Certified
 }
 
 /**
- * Most-used first, and the tie-break is the name.
+ * By name, and the tie-break is the id.
  *
- * Ranked by `usedCount` rather than by recency: a catalogue reordered by
- * whichever program we last revised is one a trainer cannot learn, and the same
- * argument the booking form's roster makes for never ranking on recency. The
- * total sort is `ORDER BY t.updated_at DESC`'s lesson from the shelf — ties may
- * come back in any order they like, and a grid picked from by position cannot do
- * that between two page loads.
+ * Not by `usedCount` (18 Oct 2026): the shelf no longer says anything about use,
+ * and an order the screen does not state is one a trainer cannot learn. Not by
+ * recency either — a catalogue reordered by whichever program we last revised is
+ * the same problem. The total sort is the shelf's lesson: ties may come back in
+ * any order they like, and a grid picked from by position cannot do that between
+ * two page loads.
  */
 export function rank(rows: CertifiedRow[]): CertifiedRow[] {
-  return [...rows].sort((a, b) => {
-    const used = (b.row.certified?.usedCount ?? 0) - (a.row.certified?.usedCount ?? 0);
-    if (used !== 0) return used;
-    return a.row.name.localeCompare(b.row.name);
-  });
-}
-
-/**
- * WHICH ROW MAY WEAR *MOST USED*, AND `null` WHEN THE ANSWER IS ARGUABLE.
- *
- * `rank` already puts it first, so this looks like `rank(rows)[0].row.id` and
- * deliberately is not. `rank` breaks a tie on the NAME, because a grid picked
- * from by position cannot have two rows swap between page loads — that is a
- * rule about ORDER, and it is the right one. A BADGE is a claim, and
- * *Beginner Full Body is the most used* is false when Upper / Lower has been
- * copied exactly as often and only lost the alphabet. So a shared lead is
- * `null` and nothing is badged: the grid keeps its stable order and the screen
- * declines to assert something it cannot support.
- *
- * `null` at one row too. *Most used* over a catalogue of one is a superlative
- * with no comparison in it, and a zero count is a blueprint nobody has taken —
- * a leaderboard nobody is on has no leader.
- *
- * Computed over EVERY row and never over a filtered list. The claim is about
- * the catalogue, so a filter may hide the badge and must never move it.
- */
-export function topUsedId(rows: CertifiedRow[]): string | null {
-  if (rows.length < 2) return null;
-  let best: CertifiedRow | null = null;
-  let tied = false;
-  for (const r of rows) {
-    const n = r.row.certified?.usedCount ?? 0;
-    const top = best?.row.certified?.usedCount ?? -1;
-    if (n > top) {
-      best = r;
-      tied = false;
-    } else if (n === top) {
-      tied = true;
-    }
-  }
-  if (!best || tied) return null;
-  return (best.row.certified?.usedCount ?? 0) > 0 ? best.row.id : null;
+  return [...rows].sort((a, b) => a.row.name.localeCompare(b.row.name) || a.row.id.localeCompare(b.row.id));
 }
 
 /**

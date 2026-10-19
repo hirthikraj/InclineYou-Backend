@@ -175,7 +175,14 @@ FROM (VALUES
   ('pushup',   'push-up',                           'bodyweight',  NULL, 'reps',     12,  60),
   ('deadbug',  'dead-bug',                          'bodyweight',  NULL, 'reps',     10,  45),
   ('plank',    'plank',                             'bodyweight',  NULL, 'time',     40,  45),
-  ('bapu',     'band-assisted-pull-up',             'bodyweight',  NULL, 'reps',      6,  90)
+  ('bapu',     'band-assisted-pull-up',             'bodyweight',  NULL, 'reps',      6,  90),
+  -- The mobility flow's movements (section 6's two standalone workouts).
+  ('hip9090',  '90-90-hip-switch',                  'bodyweight',  NULL, 'reps',      8,  20),
+  ('catcow',   'cat-cow',                           'bodyweight',  NULL, 'reps',     10,  15),
+  ('wgs',      'worlds-greatest-stretch',           'bodyweight',  NULL, 'reps',      6,  20),
+  ('tspine',   'thoracic-extension-on-roller',      'bodyweight',  NULL, 'reps',      8,  20),
+  ('ankle',    'ankle-circles',                     'bodyweight',  NULL, 'reps',     10,  15),
+  ('sqhold',   'deep-squat-hold',                   'bodyweight',  NULL, 'time',     45,  30)
 ) v(key, sid, load_kind, base_load, effort_kind, base_effort, rest);
 
 -- Compatibility with the library, checked rather than assumed: the kinds this seed writes for a movement must be the
@@ -411,10 +418,26 @@ SELECT 'trainer', k.tid, a.id, w, d, 0,
                      ELSE ARRAY['Lower body', 'Upper body', 'Full body'] END)[d]
 FROM allp a, k, generate_series(1, a.weeks) w, generate_series(1, a.days) d;
 
-INSERT INTO workout (origin, trainer_id, name, notes)
-SELECT 'trainer', k.tid, v.name, v.notes
-FROM k, (VALUES ('Mobility flow · 15 min', 'Hips, thoracic spine, ankles. Slow, nasal breathing.'),
-                ('Finisher · 10 min', 'Kettlebell swings and farmer carries, 30 on / 30 off.')) v(name, notes);
+-- The two standalone workouts (the Workouts page's Templates tab). They had a name and notes and nothing in them —
+-- the movements below were only ever written for program days — so the builder opened both as *This workout is
+-- empty*. Ids are kept so their movements and sets can be written after the program days'.
+CREATE TEMP TABLE sw ON COMMIT DROP AS
+SELECT gen_random_uuid() AS id, v.*
+FROM (VALUES ('mobility', 'Mobility flow · 15 min', 'Hips, thoracic spine, ankles. Slow, nasal breathing.'),
+             ('finisher', 'Finisher · 10 min', 'Kettlebell swings and farmer carries, 30 on / 30 off.')) v(key, name, notes);
+
+INSERT INTO workout (id, origin, trainer_id, name, notes)
+SELECT sw.id, 'trainer', k.tid, sw.name, sw.notes FROM sw, k;
+
+-- What is in them: position, movement, section, sets, and the rest that overrides the movement's own (null keeps it).
+-- The finisher is 30 on / 30 off, so its rests are 30 s; its loads are the movement's base, unscaled.
+CREATE TEMP TABLE swx ON COMMIT DROP AS
+SELECT * FROM (VALUES
+  ('mobility', 0, 'catcow',  'Warm-up',  2, NULL::int), ('mobility', 1, 'hip9090', 'Mobility', 2, NULL),
+  ('mobility', 2, 'wgs',     'Mobility', 2, NULL),      ('mobility', 3, 'tspine',  'Mobility', 2, NULL),
+  ('mobility', 4, 'ankle',   'Mobility', 2, NULL),      ('mobility', 5, 'sqhold',  'Mobility', 2, NULL),
+  ('finisher', 0, 'kbswing', 'Finisher', 4, 30),        ('finisher', 1, 'farmer',  'Finisher', 4, 30)
+) v(wkey, pos, ex, section, sets, rest);
 
 INSERT INTO workout_exercise (workout_id, exercise_id, position, section)
 SELECT wk.id, ex.id, s.pos, s.section
@@ -437,6 +460,19 @@ JOIN allp a ON a.id = wk.program_id
 JOIN sty s ON s.style = a.style AND s.day = wk.day AND s.pos = we.position
 JOIN ex ON ex.key = s.ex
 CROSS JOIN generate_series(1, s.sets) p;
+
+INSERT INTO workout_exercise (workout_id, exercise_id, position, section)
+SELECT sw.id, ex.id, x.pos, x.section
+FROM swx x JOIN sw ON sw.key = x.wkey JOIN ex ON ex.key = x.ex;
+
+INSERT INTO workout_set (workout_exercise_id, position, load_kind, load_value, effort_kind, effort_value, rest_seconds)
+SELECT we.id, p, ex.load_kind, CASE WHEN ex.load_kind = 'weight' THEN ex.base_load END,
+       ex.effort_kind, ex.base_effort, coalesce(x.rest, ex.rest)
+FROM swx x
+JOIN sw ON sw.key = x.wkey
+JOIN workout_exercise we ON we.workout_id = sw.id AND we.position = x.pos
+JOIN ex ON ex.key = x.ex
+CROSS JOIN generate_series(1, x.sets) p;
 
 /* ── 7. the gym ──────────────────────────────────────────────────────────── */
 

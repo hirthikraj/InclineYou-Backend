@@ -23,7 +23,8 @@ public record ProgramItem(
         /* epoch ms; also the version If-Match carries */
         long revisedAt, String version,
         int workoutCount, int exerciseCount, CopiedFrom copiedFrom, boolean behind,
-        int assignedCount, int activeAssignedCount, List<ClientRef> assignedClients,
+        /* a template's copies onto clients, lifetime — 0 on a plan and on a library program */
+        int assignedCount,
         long createdAt, long updatedAt, Certified certified, Mine mine,
         @JsonInclude(JsonInclude.Include.NON_NULL) Progress progress,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<PlanWorkout> workouts,
@@ -42,45 +43,53 @@ public record ProgramItem(
 
     public record Progress(int sessionsDone, int sessionsPlanned, Integer currentWeek) {}
 
+    /**
+     * A program as one database row describes it. {@code clientId}, {@code copiedFromProgramId} and {@code version} are derived
+     * from what is passed, so they cannot disagree with it. What a row cannot say starts empty and is filled by the
+     * {@code with…} methods: the workout and exercise counts, the library copy, progress and the tree.
+     */
+    public static ProgramItem ofRow(String id, String origin, ClientRef client, String name, String goal, String description,
+                                    int weeks, int days, String status, String startDate, String endDate,
+                                    Long syncedAt, long revisedAt, CopiedFrom copiedFrom, boolean behind, int assignedCount,
+                                    long createdAt, long updatedAt, Certified certified) {
+        return new ProgramItem(id, origin, client == null ? null : client.id(), client, name, goal, description, weeks, days,
+                status, startDate, endDate, copiedFrom == null ? null : copiedFrom.id(), syncedAt, revisedAt,
+                String.valueOf(revisedAt), 0, 0, copiedFrom, behind, assignedCount, createdAt, updatedAt, certified,
+                null, null, null, null, null);
+    }
+
     public ProgramItem withTree(List<PlanWorkout> tree, Map<String, ExerciseRef> dictionary) {
         return new ProgramItem(id, origin, clientId, client, name, goal, description, weeks, days, status, startDate,
                 endDate, copiedFromProgramId, syncedAt, revisedAt, version, workoutCount, exerciseCount, copiedFrom,
-                behind, assignedCount, activeAssignedCount, assignedClients, createdAt, updatedAt, certified, mine,
+                behind, assignedCount, createdAt, updatedAt, certified, mine,
                 progress, tree, dictionary, linkedSessions);
     }
 
     public ProgramItem withCounts(int workouts, int exercises) {
         return new ProgramItem(id, origin, clientId, client, name, goal, description, weeks, days, status, startDate,
                 endDate, copiedFromProgramId, syncedAt, revisedAt, version, workouts, exercises, copiedFrom,
-                behind, assignedCount, activeAssignedCount, assignedClients, createdAt, updatedAt, certified, mine,
+                behind, assignedCount, createdAt, updatedAt, certified, mine,
                 progress, this.workouts, this.exercises, linkedSessions);
     }
 
     public ProgramItem withProgress(Progress p) {
         return new ProgramItem(id, origin, clientId, client, name, goal, description, weeks, days, status, startDate,
                 endDate, copiedFromProgramId, syncedAt, revisedAt, version, workoutCount, exerciseCount, copiedFrom,
-                behind, assignedCount, activeAssignedCount, assignedClients, createdAt, updatedAt, certified, mine,
+                behind, assignedCount, createdAt, updatedAt, certified, mine,
                 p, workouts, exercises, linkedSessions);
     }
 
     public ProgramItem withMine(Mine m) {
         return new ProgramItem(id, origin, clientId, client, name, goal, description, weeks, days, status, startDate,
                 endDate, copiedFromProgramId, syncedAt, revisedAt, version, workoutCount, exerciseCount, copiedFrom,
-                behind, assignedCount, activeAssignedCount, assignedClients, createdAt, updatedAt, certified, m,
+                behind, assignedCount, createdAt, updatedAt, certified, m,
                 progress, workouts, exercises, linkedSessions);
-    }
-
-    public ProgramItem withAssigned(int total, int active, List<ClientRef> sample) {
-        return new ProgramItem(id, origin, clientId, client, name, goal, description, weeks, days, status, startDate,
-                endDate, copiedFromProgramId, syncedAt, revisedAt, version, workoutCount, exerciseCount, copiedFrom,
-                behind, total, active, sample, createdAt, updatedAt, certified, mine, progress, workouts, exercises,
-                linkedSessions);
     }
 
     public ProgramItem withLinked(int linked) {
         return new ProgramItem(id, origin, clientId, client, name, goal, description, weeks, days, status, startDate,
                 endDate, copiedFromProgramId, syncedAt, revisedAt, version, workoutCount, exerciseCount, copiedFrom,
-                behind, assignedCount, activeAssignedCount, assignedClients, createdAt, updatedAt, certified, mine,
+                behind, assignedCount, createdAt, updatedAt, certified, mine,
                 progress, workouts, exercises, linked);
     }
 }

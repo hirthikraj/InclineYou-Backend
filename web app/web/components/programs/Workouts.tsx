@@ -1,16 +1,20 @@
 'use client';
 
-import { useEffect, useMemo, useState, useTransition } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { SessionsData, SessionRow } from '@/lib/sessions/api';
-import type { WorkoutTemplateWire } from '@/lib/workouts/api';
-import { fetchWorkoutTemplate, removeWorkoutTemplates } from '@/lib/workouts/actions';
+import type { WorkoutTemplateSummaryWire } from '@/lib/workouts/api';
+import { fetchWorkoutTemplate, fetchWorkoutTemplates, removeWorkoutTemplates } from '@/lib/workouts/actions';
 import { fromWire, type Draft } from '@/lib/workouts/draft';
-import { durationLabel, estimateMinutes } from '@/lib/workouts/estimate';
+import { durationLabel } from '@/lib/workouts/estimate';
 import { markDone, markNoShow } from '@/lib/schedule/actions';
 import { groupByDay } from '@/lib/sessions/group';
 import {
+  parseDays,
+  parseMode,
+  parsePage,
+  parseView,
   workoutsHref,
   workoutsTabs,
   WORKOUTS_PAGE_SIZE,
@@ -32,6 +36,7 @@ import { EmptyState } from '@/web-components/ui/EmptyState';
 import { PageHeader } from '@/web-components/ui/PageHeader';
 import { Pager } from '@/web-components/ui/Pager';
 import { SearchField } from '@/web-components/ui/SearchField';
+import { Skeleton, SkeletonLine, SkeletonRow } from '@/web-components/ui/Skeleton';
 import { WorkoutRow, WorkoutRowHead, type WorkoutStatus } from '@/web-components/ui/WorkoutRow';
 import { TemplateRow, TemplateRowHead } from '@/web-components/ui/TemplateRow';
 import { WorkoutBuilder } from './workout/WorkoutBuilder';
@@ -236,6 +241,7 @@ function WorkoutTable({
         href={p => workoutsHref(view, { ...query, page: p })}
         label="Workout list pages"
         noun="workouts"
+        shallow
       />
     </>
   );
@@ -282,7 +288,7 @@ function TemplateShelf({
   onNew,
   onClearSearch,
 }: {
-  rows: WorkoutTemplateWire[];
+  rows: WorkoutTemplateSummaryWire[];
   /** The shelf's size before the search, for the empty state's wording. */
   total: number;
   /** The row whose read is in flight. A click with no answer for a round trip
@@ -457,21 +463,20 @@ function TemplateShelf({
         )}
         <ul className="pgt__l" role="list">
           {rows.map(row => {
-            const minutes = estimateMinutes(
-              row.exercises.map(e => ({ sets: e.sets, groupId: e.groupId })),
-            );
             return (
               <li key={row.id}>
                 {/* THE NAME OPENS IT, and there is no second control on the
                     row: every verb a template has — rename, delete, save — is
                     in the builder the name opens, beside the Save each is the
-                    opposite of. The duration is the SAME estimate the builder
-                    prints; one module imported by both halves, which is the
-                    whole reason `estimate.ts` refuses `server-only`. */}
+                    opposite of. The duration is the server's
+                    `estimatedMinutes`: the shelf no longer carries the sets
+                    (a phone downloaded all of them to print this one number),
+                    so the backend's `WorkoutEstimate` — a copy of
+                    `estimate.ts`, kept in step with it — works it out. */}
                 <TemplateRow
                   name={row.name}
                   notes={row.notes}
-                  duration={durationLabel(minutes)}
+                  duration={durationLabel(row.estimatedMinutes)}
                   movements={row.exerciseCount}
                   sets={row.setCount}
                   created={dateStamp(row.createdAt)}
@@ -611,21 +616,59 @@ const EMPTY: Record<WorkoutsView, string> = {
  * or a back press dropped a trainer back on *Completed*. It is the tab itself
  * now, and all four views still come out of the one `requireSessions()` the
  * page already made.
+ *
+ * ── AND A CLICK ON ONE DOES NOT ASK THE SERVER (18 Oct 2026) ─────────────────
+ *
+ * Measured through a logging proxy: every tab or page press re-ran the route,
+ * which is four backend reads — sessions, the client summary, programs and the
+ * template shelf — to redraw rows this component already held. The strip and
+ * the pager are `shallow` now: the address moves through `history.pushState`
+ * and the tab and page are read back off `useSearchParams`, so a press costs
+ * nothing and Back, a reload and a shared link behave exactly as before. The
+ * shelf is the one view the page does not bring (it is read only when the
+ * address opens on it), so it is asked for once, here, the first time the tab
+ * is shown.
  */
 export function Workouts({
   data,
-  view,
-  query,
-  templates,
+  templates: served,
 }: {
   data: SessionsData;
-  /** Off the URL. The strip is links, so this is the tab and not a request. */
-  view: WorkoutsView;
-  /** The rest of the address — the page, and the filters that may join it. */
-  query: WorkoutsQuery;
-  /** The workout-template shelf, read beside the three session buckets. */
-  templates: WorkoutTemplateWire[];
+  /** The workout-template shelf when the address opened on its tab, else `null`
+   *  — the page reads it only for that tab. */
+  templates: WorkoutTemplateSummaryWire[] | null;
 }) {
+  /* THE TAB AND THE PAGE ARE READ OFF THE ADDRESS HERE, not handed down, because
+     a shallow press moves the address without a server render. */
+  const params = useSearchParams();
+  const view: WorkoutsView = parseView(params.get('view') ?? undefined);
+  const query: WorkoutsQuery = useMemo(() => ({
+    mode: parseMode(params.get('mode') ?? undefined),
+    days: parseDays(params.get('days') ?? undefined),
+    page: parsePage(params.get('page') ?? undefined),
+  }), [params]);
+
+  /* THE SHELF, WHEN THE PAGE DID NOT BRING IT. Fetched once, the first time the
+     tab is shown, and dropped whenever the server sends a fresh page (a save, a
+     delete, a mark) so the next visit to the tab reads it again rather than
+     drawing a list from before the write. The ref keeps a second effect run
+     (StrictMode, a quick re-render) from asking twice. */
+  const [fetched, setFetched] = useState<WorkoutTemplateSummaryWire[] | null>(null);
+  const [seenData, setSeenData] = useState(data);
+  if (data !== seenData) {
+    setSeenData(data);
+    setFetched(null);
+  }
+  const templates = served ?? fetched;
+  const asking = useRef(false);
+  useEffect(() => {
+    if (view !== 'templates' || templates !== null || asking.current) return;
+    asking.current = true;
+    void fetchWorkoutTemplates()
+      .then(setFetched)
+      .finally(() => { asking.current = false; });
+  }, [view, templates]);
+
   const [search, setSearch] = useState('');
   const router = useRouter();
   const { show } = useToast();
@@ -666,7 +709,9 @@ export function Workouts({
     completed: data.completed.length,
     scheduled: data.scheduled.length,
     missed: data.missed.length,
-    templates: templates.length,
+    /* Unknown until the shelf is read, and `workoutsTabs` draws no badge for
+       `null` rather than a zero that would be false. */
+    templates: templates?.length ?? null,
   };
 
   const bucket = useMemo(() => {
@@ -696,8 +741,8 @@ export function Workouts({
   const page = query.page ?? 0;
   useEffect(() => {
     if (!search.trim() || !page) return;
-    router.replace(workoutsHref(view, { ...query, page: 0 }), { scroll: false });
-  }, [search, page, query, view, router]);
+    window.history.replaceState(null, '', workoutsHref(view, { ...query, page: 0 }));
+  }, [search, page, query, view]);
 
   const pageRows = useMemo(
     () => bucket.slice(page * WORKOUTS_PAGE_SIZE, (page + 1) * WORKOUTS_PAGE_SIZE),
@@ -710,15 +755,16 @@ export function Workouts({
      where the trainer has thirty rows to get through. Name and note, because
      those are the two strings a template has. */
   const shelf = useMemo(() => {
+    const rows = templates ?? [];
     const q = search.trim().toLowerCase();
-    if (!q) return templates;
-    return templates.filter(t =>
+    if (!q) return rows;
+    return rows.filter(t =>
       t.name.toLowerCase().includes(q) ||
       (t.notes ?? '').toLowerCase().includes(q));
   }, [templates, search]);
 
   const shown = view === 'templates' ? shelf.length : bucket.length;
-  const searchTotal = counts[view];
+  const searchTotal = counts[view] ?? 0;
 
   /**
    * THE ROW'S VERBS, AND WHY *MISSED* GETS TWO MORE.
@@ -843,6 +889,7 @@ export function Workouts({
               label="Workouts view"
               current={view}
               tabs={workoutsTabs(view, counts)}
+              shallow
             />
             {/* `SearchField`, where this was a hand-written `<label class=
                 "search">` with its own icon and its own `aria-label` — a design
@@ -869,18 +916,30 @@ export function Workouts({
                 {openError}
               </p>
             )}
+            {templates === null ? (
+              <div className="pgt">
+                <Skeleton label="Loading your workout templates" className="pgt__body">
+                  {[0, 1, 2, 3].map(i => (
+                    <SkeletonRow key={i} height={56}>
+                      <SkeletonLine width="38%" />
+                    </SkeletonRow>
+                  ))}
+                </Skeleton>
+              </div>
+            ) : (
             <TemplateShelf
               /* Keyed on the tab for `WorkoutTable`'s reason — ticks that
                  outlive the list they were made on name rows nobody sees. */
               key={view}
               rows={shelf}
-              total={counts.templates}
+              total={templates.length}
               busyId={opening}
               filtered={search.trim().length > 0}
               onOpen={openSaved}
               onNew={() => setBuilder({})}
               onClearSearch={() => setSearch('')}
             />
+            )}
           </>
         ) : (
           <div className="pgt">

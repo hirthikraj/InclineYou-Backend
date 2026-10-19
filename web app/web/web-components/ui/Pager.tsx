@@ -71,6 +71,7 @@ export function Pager({
   noun,
   className,
   span = 7,
+  shallow = false,
 }: {
   /** Zero-based, as every API in this codebase counts. */
   page: number;
@@ -93,8 +94,20 @@ export function Pager({
   className?: string;
   /** How many number slots the run is allowed. Below this, every page is drawn. */
   span?: number;
+  /** The address moves and the server is not asked — for a list whose every
+   *  page is already in the browser. `PageTabs`' `shallow`, and the same caveat:
+   *  a client component only. */
+  shallow?: boolean;
 }) {
   const pages = Math.max(1, Math.ceil(total / Math.max(1, size)));
+  /* Still links, so a page opens in a new tab and stays in history; a plain
+     click just skips the server round trip. */
+  const go = (n: number) => shallow ? {
+    onNavigate: (e: { preventDefault(): void }) => {
+      e.preventDefault();
+      window.history.pushState(null, '', href(n));
+    },
+  } : {};
 
   /* ONE PAGE DRAWS NOTHING AT ALL, and that is the component's decision rather
      than each caller's. A pager under a list that fits on one page is chrome
@@ -121,7 +134,7 @@ export function Pager({
           control sideways on the first and last page; a link that goes nowhere
           is a promise the control cannot keep. */}
       {current > 0 ? (
-        <Link className="btn" href={href(current - 1)} scroll={false} rel="prev">
+        <Link className="btn" href={href(current - 1)} scroll={false} rel="prev" {...go(current - 1)}>
           Previous
         </Link>
       ) : (
@@ -144,7 +157,7 @@ export function Pager({
               {n + 1}
             </span>
           ) : (
-            <Link key={n} className="btn" href={href(n)} scroll={false} aria-label={`Page ${n + 1}`}>
+            <Link key={n} className="btn" href={href(n)} scroll={false} aria-label={`Page ${n + 1}`} {...go(n)}>
               {n + 1}
             </Link>
           ),
@@ -152,7 +165,7 @@ export function Pager({
       </span>
 
       {current < pages - 1 ? (
-        <Link className="btn" href={href(current + 1)} scroll={false} rel="next">
+        <Link className="btn" href={href(current + 1)} scroll={false} rel="next" {...go(current + 1)}>
           Next
         </Link>
       ) : (

@@ -2,6 +2,7 @@ package com.inclineyou.inclineyou_backend.core.workout;
 
 import com.inclineyou.inclineyou_backend.core.workout.dto.WorkoutTemplateItem;
 import com.inclineyou.inclineyou_backend.core.workout.dto.WorkoutTemplateRequest;
+import com.inclineyou.inclineyou_backend.core.workout.dto.WorkoutTemplateSummary;
 import com.inclineyou.inclineyou_backend.shared.wire.Items;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -20,8 +21,9 @@ public class WorkoutTemplateController {
 
     private final WorkoutTemplateService service;
 
+    /** Summaries only — a phone on mobile data should not download every set to print a row. The tree is {@code /{id}}. */
     @GetMapping
-    public Items<WorkoutTemplateItem> list() {
+    public Items<WorkoutTemplateSummary> list() {
         return Items.of(service.list(trainerId()));
     }
 

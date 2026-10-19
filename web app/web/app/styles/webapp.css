@@ -7447,7 +7447,7 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
    A clickable card wrapping two buttons is nested interactive content: it
    breaks tab order and it makes the destructive-ish action — copying somebody
    a program — reachable by a click that missed. So the card is a plain
-   container and *Preview* and *Use this* are the only things that respond.
+   container and *Preview* and *Copy* are the only things that respond.
 
    ── `--used` IS A COUNT, NEVER A RATING ────────────────────────────────────
 
@@ -7459,7 +7459,7 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
 
    MEASURED on `/programs/certified` at 1536: every card carried three SOLID
    `--tx-accent` blocks in a `.shape` strip, a lime-tinted *By InclineYou* tag
-   and a lime *Use this* button — three lime objects a card, five cards, over
+   and a lime *Copy* button — three lime objects a card, five cards, over
    a lime active tab and a lime avatar. An accent that appears on every element
    of every card is not an accent, it is the surface colour; and the one thing
    on the card the trainer is meant to press had nothing left to stand out with.

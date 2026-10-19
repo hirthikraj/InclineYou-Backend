@@ -54,12 +54,20 @@ export function PageTabs({
    *  the money book's six, where six history entries per visit is a back button
    *  that takes six presses to leave. `push` where the tab is a different fetch. */
   replace = false,
+  /** The address moves and the server is NOT asked: for a strip whose every view
+   *  is already in the browser (`Workouts`' three buckets). Next's router keeps
+   *  `useSearchParams` in sync with `history.pushState`, so the caller reads the
+   *  tab from there; Back, a reload and a shared link still land on it. A
+   *  modified click (new tab) is not a client navigation and is left alone.
+   *  Only from a client component — it hands `Link` a function. */
+  shallow = false,
 }: {
   tabs: PageTab[];
   current: string;
   /** What the strip is a set of tabs FOR. Read aloud before the first tab. */
   label: string;
   replace?: boolean;
+  shallow?: boolean;
 }) {
   return (
     <nav className="ph__tabs" aria-label={label}>
@@ -70,6 +78,10 @@ export function PageTabs({
           href={t.href}
           replace={replace}
           scroll={false}
+          onNavigate={shallow ? (e) => {
+            e.preventDefault();
+            window.history[replace ? 'replaceState' : 'pushState'](null, '', t.href);
+          } : undefined}
           {...(t.key === current ? { 'aria-current': 'page' as const } : {})}
         >
           {t.label}

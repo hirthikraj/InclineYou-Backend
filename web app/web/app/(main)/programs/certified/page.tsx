@@ -21,7 +21,7 @@ import { requireCertifiedShelf } from '@/lib/programs/guard';
  * `templates/:id`, or `certified` is read as a template id and answers 404.
  *
  * `force-dynamic` because the catalogue's *You have a copy* state is computed
- * against the caller's own shelf — a cached page would offer *Use this* on a
+ * against the caller's own shelf — a cached page would offer *Copy* on a
  * program they copied a minute ago, which is the one state this screen exists to
  * get right.
  */

@@ -1,8 +1,9 @@
 import 'server-only';
 
+import { cache } from 'react';
+
 import { api, ApiError } from '@/lib/http/client';
 
-import type { PlanDiff } from './diff';
 import {
   dayLabelsOf,
   equipmentOf,
@@ -137,30 +138,12 @@ export interface TemplateWire {
   weeks: number | null;
   /** The ordinal slots the trainer laid out. V24's column, same story. */
   trainingDays: number[];
-  /** Every copy ever made of this blueprint, and the ones still running. */
-  assignedCount: number;
-  activeAssignedCount: number;
   /**
-   * A SAMPLE OF WHO IS ON IT — enough to draw faces, never enough to count.
-   *
-   * The shelf draws an `AvatarStack` instead of the figure `13 clients on this`,
-   * and a cluster needs names. It does not need forty of them: the wire caps
-   * this (six, in the mock's `ASSIGNED_SAMPLE`) and `activeAssignedCount` stays
-   * the authority for the total, so the overflow disc reads `+38` off the count
-   * and never off this array's length. **Nothing may derive a client count from
-   * `assignedClients.length`** — on the shelf's busiest program the two numbers
-   * are six and forty-two.
-   *
-   * The ACTIVE assignments only, matching the count it is drawn beside, and
-   * total-ordered by name server-side: a sample taken off an unordered scan is
-   * a different six per request, and the faces would reshuffle between page
-   * loads under a figure that did not move.
-   *
-   * Optional, because a build that predates the field reads `undefined` and the
-   * row falls back to drawing nothing — which is the same thing it does for a
-   * program nobody is on, and the wrong-but-safe direction.
+   * Every copy ever made of this blueprint onto a client — the shelf's Used
+   * column. The active count and the six-name sample came off the wire on
+   * 18 Oct 2026; who is on a copy is `GET /v1/programs/{id}/assignments`.
    */
-  assignedClients?: { id: string; name: string }[];
+  assignedCount: number;
 
   /**
    * WHO OWNS THIS BLUEPRINT, and therefore who may edit it.
@@ -217,45 +200,6 @@ export interface CertifiedMetaWire {
   reviewedAt: number;
   /** How many trainers have copied it. A fact, in place of a rating. */
   usedCount: number;
-}
-
-export interface AssignmentWire {
-  programId: string;
-  clientId: string;
-  clientName: string;
-  programName: string;
-  startDate: string | null;
-  endDate: string | null;
-  status: string;
-  createdAt: number;
-  updatedAt: number;
-  /** The blueprint has moved since this copy last did. Not an error — see
-   *  `ProgramService.resync` for why nothing repairs it on its own. */
-  behindTemplate: boolean;
-  /** The copy's version, when the list sends it — else a push reads it fresh. */
-  version?: string;
-
-  /**
-   * WHAT THIS COPY SAYS THAT THE BLUEPRINT DOES NOT — and therefore what a
-   * push would delete.
-   *
-   * `behindTemplate` is a stamp comparison and answers a different question:
-   * *has the blueprint moved since this copy took it.* It cannot tell a copy
-   * nobody has touched from one a trainer rewrote for a shoulder injury three
-   * weeks ago, and a push replaces the whole prescription either way — so the
-   * panel that offers the push was, until this field, offering to destroy work
-   * it had no way to mention.
-   *
-   * **COMPUTED SERVER-SIDE, ON PURPOSE.** Thirteen assignments diffed in the
-   * browser is thirteen extra reads of a whole prescription to render one
-   * panel. `lib/programs/diff.ts` is import-free precisely so the same code can
-   * run on both ends; `BACKEND_GAPS.md` carries the projection the real
-   * `/v1/templates/{id}/assignments` owes.
-   *
-   * Null on a build that predates the field, which every reader treats as
-   * *unknown*, never as *no changes*.
-   */
-  divergence?: PlanDiff | null;
 }
 
 /**
@@ -355,40 +299,6 @@ async function clients(): Promise<ClientWire[]> {
   return (await items<ClientSummaryWire>('/v1/clients?view=summary')).map(clientOf);
 }
 
-/** `GET /v1/programs/{id}/assignments` items (Programs L5). */
-interface AssignmentItem {
-  programId: string;
-  clientId: string;
-  clientName: string;
-  status: string;
-  startDate: string | null;
-  syncedAt: number | null;
-  behind: boolean;
-  programName?: string;
-  endDate?: string | null;
-  createdAt?: number;
-  updatedAt?: number;
-  divergence?: PlanDiff | null;
-  version?: string;
-}
-
-function assignmentOf(a: AssignmentItem): AssignmentWire {
-  return {
-    programId: a.programId,
-    clientId: a.clientId,
-    clientName: a.clientName,
-    programName: a.programName ?? '',
-    startDate: a.startDate,
-    endDate: a.endDate ?? null,
-    status: a.status,
-    createdAt: a.createdAt ?? a.syncedAt ?? 0,
-    updatedAt: a.updatedAt ?? a.syncedAt ?? 0,
-    behindTemplate: a.behind,
-    version: a.version,
-    divergence: a.divergence ?? null,
-  };
-}
-
 /* ═══════════════════════════════════ the four-level wire, flattened ══
 
    The backend answers with the schema's tree (`wire.ts`); every screen here
@@ -412,8 +322,6 @@ function templateOf(p: PlanProgramWire): TemplateWire {
     weeks: p.weeks,
     trainingDays: trainingDaysOf(p.days),
     assignedCount: p.assignedCount,
-    activeAssignedCount: p.activeAssignedCount,
-    assignedClients: p.assignedClients,
     source: p.origin === 'inclineyou' ? 'certified' : 'own',
     /* The copy's `syncedAt` is the moment it took the source — which is what
        `copiedFrom.updatedAt` has always meant to the *revised since* notice. */
@@ -558,41 +466,46 @@ export interface ShelfData {
 }
 
 /**
+ * The trainer's template summaries — `GET /v1/programs?kind=template` (Programs L1), read ONCE per request.
+ *
+ * Two screens want this list: the shelf itself and the builder's switcher. It used to be four — the certified shelf and the
+ * certified preview read it too, for nothing but a count on a tab, and those reads were dropped on 18 Oct 2026 (each ran the
+ * backend's tree counts and assignments for a `.length`). `cache()` still dedupes per request, so a navigation reads fresh
+ * and a render reads once; nothing here is called from a server action, so no write can sit between two reads of it.
+ */
+const templateRows = cache(() => items<PlanProgramWire>('/v1/programs?kind=template'));
+
+/**
  * The shelf. One request: `GET /v1/programs?kind=template` (Programs L1) —
  * summaries with counts and who is on each, no trees, so no names to fetch.
  */
 export async function getShelf(): Promise<ShelfData> {
-  const templates = (await items<PlanProgramWire>('/v1/programs?kind=template')).map(templateOf);
+  const templates = (await templateRows()).map(templateOf);
   return { templates, names: {} };
 }
 
 export interface CertifiedShelfData {
   certified: CertifiedWire[];
-  /** How many of the trainer's OWN programs there are, for the tab strip's count. */
-  ownCount: number;
 }
 
+/**
+ * The library — `GET /v1/programs/certified` and nothing else. Its *You have a copy* flag (`mine`) is worked out by the
+ * backend against the trainer's own shelf, so this screen never needs that shelf's list.
+ */
 export async function getCertifiedShelf(): Promise<CertifiedShelfData> {
-  const [certified, own] = await Promise.all([
-    items<PlanProgramWire>('/v1/programs/certified'),
-    items<PlanProgramWire>('/v1/programs?kind=template'),
-  ]);
-  return { certified: certified.map(certifiedOf), ownCount: own.length };
+  const certified = await items<PlanProgramWire>('/v1/programs/certified');
+  return { certified: certified.map(certifiedOf) };
 }
 
 export interface CertifiedPreviewData {
   template: CertifiedWire;
   names: Record<string, ExerciseNameWire>;
-  ownCount: number;
 }
 
 /** One library program with its tree, for the read-only preview (Programs L2). */
 export async function getCertifiedPreview(id: string): Promise<CertifiedPreviewData> {
-  const [plan, own] = await Promise.all([
-    get<PlanProgramWire>(`/v1/programs/certified/${encodeURIComponent(id)}`),
-    items<PlanProgramWire>('/v1/programs?kind=template'),
-  ]);
-  return { template: certifiedOf(plan), names: namesOf(plan), ownCount: own.length };
+  const plan = await get<PlanProgramWire>(`/v1/programs/certified/${encodeURIComponent(id)}`);
+  return { template: certifiedOf(plan), names: namesOf(plan) };
 }
 
 /* ══════════════════════════════════════════ one client's own copy ══ */
@@ -652,7 +565,7 @@ export interface ClientPlanData {
   /**
    * The blueprint this was copied from, when it still exists and we could read
    * it. The rail draws *copied from …* off it and states whether it has moved
-   * since — the same fact `AssignedList` draws as *Behind*, from the other end.
+   * since.
    */
   origin: {
     id: string;
@@ -750,7 +663,6 @@ export async function getClientPlan(
 
 export interface BuilderData extends ShelfData {
   template: TemplateWire;
-  assignments: AssignmentWire[];
   clients: ClientWire[];
 }
 
@@ -759,7 +671,9 @@ export interface BuilderData extends ShelfData {
  *
  * The list pane is drawn beside the builder — the IA's own row, *"list and
  * builder are one screen"* — so the shelf comes down either way and the extra
- * cost of opening a template is the three requests below.
+ * cost of opening a template is the two requests below. (There was a third, who
+ * is on a copy of it, until 18 Oct 2026 — a template no longer lists its clients;
+ * each client's plan is on Programs.)
  *
  * `/v1/clients` is here rather than fetched when *Assign* opens, because the
  * assign panel is one click from every row on the shelf and a spinner inside a
@@ -767,17 +681,15 @@ export interface BuilderData extends ShelfData {
  * page. It is the same request `/schedule` and `/today` already make.
  */
 export async function getBuilder(templateId: string): Promise<BuilderData> {
-  const [templates, plan, assignments, roster] = await Promise.all([
-    items<PlanProgramWire>('/v1/programs?kind=template').then(rows => rows.map(templateOf)),
+  const [templates, plan, roster] = await Promise.all([
+    templateRows().then(rows => rows.map(templateOf)),
     get<PlanProgramWire>(`/v1/programs/${encodeURIComponent(templateId)}`),
-    items<AssignmentItem>(`/v1/programs/${encodeURIComponent(templateId)}/assignments`),
     clients(),
   ]);
 
   return {
     templates,
     template: templateOf(plan),
-    assignments: assignments.map(assignmentOf),
     clients: roster,
     names: namesOf(plan),
   };
@@ -835,7 +747,7 @@ export async function putTemplate(id: string, body: TemplatePatch, version: stri
   return templateOf(await savePlan(id, body, version));
 }
 
-/** Duplicate · Save as template · Use this — one route, `copyFrom` (Programs A4). */
+/** Duplicate · Save as template · Copy (certified) — one route, `copyFrom` (Programs A4). */
 export async function postCopy(sourceId: string, name?: string | null): Promise<TemplateWire> {
   const copy = await call<PlanProgramWire>('/v1/programs', {
     method: 'POST',
@@ -969,8 +881,8 @@ export interface ResyncResultWire {
 
 /** Take the template's latest (Programs A6). `version` is the plan's, as the banner drew it. */
 export async function postResync(programId: string, version?: string): Promise<ResyncResultWire> {
-  /* The assignments list does not carry each copy's version, so a push from the
-     template's side reads it now — the trainer has just confirmed the warning. */
+  /* A caller without the plan's version reads it now — the trainer has just
+     confirmed the warning. */
   version ??= (await get<PlanProgramWire>(`/v1/programs/${encodeURIComponent(programId)}`)).version;
   const done = await call<{ programId: string; sourceId: string; removed: number; added: number; version: string }>(
     `/v1/programs/${encodeURIComponent(programId)}/resync`,

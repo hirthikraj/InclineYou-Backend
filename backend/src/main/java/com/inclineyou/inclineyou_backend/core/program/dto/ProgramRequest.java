@@ -35,6 +35,10 @@ public record ProgramRequest(
         @Size(max = 2000, message = "at most 2000 characters") String description,
         @Range(min = 1, max = 52, message = "a whole number between {min} and {max}") Integer weeks,
         @Range(min = 1, max = 7, message = "a whole number between {min} and {max}") Integer days,
+        /* Bounded, because a save is one transaction: without a ceiling a single request could lay down any number of
+           rows (uq_workout_slot allows many workouts on one day) and hold the program's locks while it did. 400 is
+           ~a workout a day for a full year plus room; a standalone workout's 60 exercises is the same cap below. */
+        @Size(max = 400, message = "at most 400 workouts")
         List<@NotNull(message = "each an object") @Valid WorkoutIn> workouts,
         /* POST only: a template, a client's plan or a library program to copy. Excludes every content field. */
         UUID copyFrom
@@ -51,6 +55,7 @@ public record ProgramRequest(
             @NotNull(message = "required") @Range(min = 1, max = 52, message = "a whole number between {min} and {max}") Integer week,
             @NotNull(message = "required") @Range(min = 1, max = 7, message = "a whole number between {min} and {max}") Integer day,
             @Min(value = 0, message = "0 or more") Integer position,
+            @Size(max = 60, message = "at most 60 exercises")
             List<@NotNull(message = "each an object") @Valid ExerciseIn> exercises
     ) {
         public WorkoutIn {

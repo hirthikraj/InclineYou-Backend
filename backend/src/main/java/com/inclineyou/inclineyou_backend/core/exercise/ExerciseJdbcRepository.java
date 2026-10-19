@@ -139,6 +139,72 @@ public class ExerciseJdbcRepository {
         return n == null ? 0 : n;
     }
 
+    /* ───────────────────────────────────────────── for the catalogue cache ── */
+
+    private static final String CATALOGUE = "e.origin = 'inclineyou' AND e.deleted_at IS NULL";
+    private static final String CUSTOMS = "e.origin = 'trainer' AND e.trainer_id = :tid::uuid AND e.deleted_at IS NULL";
+
+    /** One catalogue row as the cache holds it: the list row, and the two facet inputs a list row does not carry. */
+    public record CatalogueRow(ExerciseItem item, String equipmentId, String category) {}
+
+    /**
+     * The global library in the list's own order. {@code name, id} sorts by the database's collation (en_US), which
+     * Java's {@code String} order does not reproduce — so the cache keeps THIS order rather than sorting itself.
+     */
+    public List<CatalogueRow> catalogue() {
+        return jdbc.query("SELECT " + COLUMNS + ", e.equipment_id::text AS equipment_id FROM exercise e WHERE " + CATALOGUE
+                        + " ORDER BY e.name, e.id",
+                Map.of(), (rs, i) -> {
+                    ExerciseItem full = ITEM.mapRow(rs, i);
+                    return new CatalogueRow(full.summary(), rs.getString("equipment_id"), full.category());
+                });
+    }
+
+    /**
+     * A trainer's live customs, in list order, each with {@code before}: how many catalogue rows sort ahead of it. That
+     * count is asked of the database so a custom lands among the cached rows exactly where {@code ORDER BY name, id}
+     * would put it, collation and all — the cache never compares two names itself.
+     */
+    public record CustomRow(ExerciseItem item, String equipmentId, String category, int before) {}
+
+    public List<CustomRow> customs(UUID trainerId) {
+        return jdbc.query("SELECT " + COLUMNS + ", e.equipment_id::text AS equipment_id,"
+                        + " (SELECT count(*) FROM exercise c WHERE c.origin = 'inclineyou' AND c.deleted_at IS NULL"
+                        + "  AND (c.name, c.id) < (e.name, e.id)) AS before"
+                        + " FROM exercise e WHERE " + CUSTOMS + " ORDER BY e.name, e.id",
+                Map.of("tid", trainerId.toString()), (rs, i) -> {
+                    ExerciseItem full = ITEM.mapRow(rs, i);
+                    return new CustomRow(full.summary(), rs.getString("equipment_id"), full.category(), rs.getInt("before"));
+                });
+    }
+
+    /** The distinct values of one facet over the catalogue, in the collation's order — the tie-break {@code facetOf} sorts by. */
+    public List<String> catalogueValues(String expr) {
+        return jdbc.queryForList("SELECT DISTINCT " + expr + " AS v FROM exercise e WHERE " + CATALOGUE
+                + " AND " + expr + " IS NOT NULL ORDER BY v", Map.of(), String.class);
+    }
+
+    /**
+     * These strings in the database's collation order — no table, just the sort — for a facet a custom has given a value
+     * the catalogue never uses, so its tie-break is still the one {@code ORDER BY n DESC, id} would make.
+     */
+    public List<String> collated(java.util.Collection<String> values) {
+        return jdbc.queryForList("SELECT v FROM unnest(ARRAY[:vals]::text[]) AS t(v) ORDER BY v",
+                Map.of("vals", List.copyOf(values)), String.class);
+    }
+
+    /** Every active piece of equipment in {@code equipmentGroups}' order, with the {@code value} it reports. */
+    public record EquipmentRow(String id, String category, String key, String name, String value) {}
+
+    public List<EquipmentRow> activeEquipment() {
+        return jdbc.query("SELECT q.id::text AS id, q.category, q.key, q.name,"
+                        + " COALESCE((SELECT a.legacy_value FROM equipment_alias a WHERE a.equipment_id = q.id AND lower(a.legacy_value) = lower(q.name) LIMIT 1),"
+                        + " (SELECT min(a.legacy_value) FROM equipment_alias a WHERE a.equipment_id = q.id), lower(q.name)) AS value"
+                        + " FROM equipment q WHERE q.is_active ORDER BY q.sort_order, q.key",
+                Map.of(), (rs, i) -> new EquipmentRow(rs.getString("id"), rs.getString("category"), rs.getString("key"),
+                        rs.getString("name"), rs.getString("value")));
+    }
+
     /* ────────────────────────────────────────────────────────────── writes ── */
 
     /** The trainer's custom exercise, locked; empty for a global one, somebody else's, or a retired one. */

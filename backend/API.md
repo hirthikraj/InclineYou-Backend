@@ -1107,6 +1107,12 @@ puts every row on both sides of the ledger for a plan nobody has touched.
 the same reason. Null for a plan written from scratch and for one applied before
 the column existed — neither has a blueprint to line up against.
 
+Ceilings on the v1 tree body of `POST` / `PUT /v1/programs` (19 Oct 2026), each a
+`400 VALIDATION` rather than a truncation: **400 workouts** a program and **60
+exercises** a workout, beside the 30 sets and 2 alternatives an exercise already
+had. A save is one transaction holding the program's locks, so the tree needs a
+ceiling; 60 is the standalone workout's own.
+
 ### `GET /v1/programs/{id}/exercises`
 **Purpose:** the program's exercise rows, in `orderIndex` order.
 
@@ -1220,6 +1226,17 @@ because they replace a movement rather than add to it.
 ### `GET /v1/workout-templates`
 **Purpose:** the caller's saved workouts, most recently touched first (then
 oldest, then id — a total order). An empty account answers `[]`.
+
+**Summaries, not trees (19 Oct 2026).** Each item is `id`, `name`, `notes`,
+`exerciseCount`, `setCount`, `estimatedMinutes`, `createdAt`, `updatedAt`,
+`version` — no `exercises`, no `dividers`. The list used to carry every set of
+every template, which a phone on mobile data downloaded to draw one row each
+(~35 KB gzip at 32 templates, ~114 KB at 100; now ~1.5 KB and ~4 KB).
+`estimatedMinutes` is `WorkoutEstimate`, a copy of the web's
+`lib/workouts/estimate.ts` — change both together. Alternatives are not counted.
+The tree is `GET /v1/workout-templates/{id}`. A field was removed, which the
+additive-only rule forbids; it was allowed because the web is the only caller
+and it changed in the same commit — the phone never called this route.
 
 ### `GET /v1/workout-templates/{id}`
 **Purpose:** one workout, whole — used when it is poured into a program day.

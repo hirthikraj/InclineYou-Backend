@@ -35,10 +35,10 @@ import { requireCertifiedShelf, requireShelf } from '@/lib/programs/guard';
  * ── THE CATALOGUE IS FETCHED ONLY WHEN THE SHELF IS EMPTY ────────────────────
  *
  * First run offers three certified programs instead of a blank page, and that is
- * the one branch of this route that needs them. A trainer with six programs gets
- * a count for the tab strip out of the same read — but the read is skipped
- * entirely on the first render for nobody, because the count IS the read. The
- * cheaper shape would be a dedicated count endpoint; five rows is not worth one.
+ * the one branch of this route that needs them. Until 18 Oct 2026 this note said
+ * so while the code read the catalogue on every visit, for a tab count; now a
+ * trainer with templates costs one request, `GET /v1/programs?kind=template`,
+ * and `/v1/programs/certified` is asked only when that list comes back empty.
  */
 export const metadata = { title: 'My templates · Fitness · InclineYou' };
 
@@ -59,29 +59,30 @@ export default async function Page({
     );
   }
 
-  /* A catalogue that will not load must not take the trainer's own shelf down
-     with it — their six programs are still there and still the point of this
-     screen. So the read is guarded and its failure is an absence: no tab count,
-     and first run falls back to the empty state it always had. */
-  const catalogue = await requireCertifiedShelf();
-  const certified = catalogue.ok ? catalogue.data.certified : [];
-
-  /* Who the trainer is choosing for, by first name — read only when they arrived from a client's file. A
-     failed read is an absence: the banner then says *a client*, as it did. */
-  const forClientName = forClient ? ((await getClientName(forClient))?.split(' ')[0] ?? null) : null;
+  /* THE CATALOGUE ONLY FOR FIRST RUN. Guarded, and its failure is an absence: first run falls back to the empty
+     state it always had, because a catalogue that will not load must not take the trainer's shelf down with it.
+     The client's name does not depend on either read, so it runs beside it rather than after. */
+  const [catalogue, forClientName] = await Promise.all([
+    result.data.templates.length === 0 ? requireCertifiedShelf() : null,
+    /* Who the trainer is choosing for, by first name — read only when they arrived from a client's file. A
+       failed read is an absence: the banner then says *a client*, as it did. */
+    forClient ? getClientName(forClient).then((n) => n?.split(' ')[0] ?? null) : null,
+  ]);
+  const certified = catalogue?.ok ? catalogue.data.certified : [];
 
   return (
     <Programs
       data={result.data}
       open={null}
       forClientName={forClientName}
-      /* Ranked by how many trainers have copied it, and nothing cleverer. Three,
-         because the row holds three at 1440 and a fourth is below the fold on
-         the screen whose whole job is the first impression. */
+      /* The first three by name — the same order as the InclineYou shelf, which
+         says nothing about use. Three, because the row holds three at 1440 and a
+         fourth is below the fold on the screen whose whole job is the first
+         impression. */
       recommended={[...certified]
-        .sort((a, b) => (b.certified?.usedCount ?? 0) - (a.certified?.usedCount ?? 0))
+        .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
         .slice(0, 3)}
-      certifiedCount={catalogue.ok ? certified.length : null}
+      certifiedCount={catalogue?.ok ? certified.length : null}
       /* THE GUARD'S CLOCK, read beside the rows it dates. `Guarded<T>` carries
          the argument for why it is not read here and not inside `Shelf`. */
       now={result.now}

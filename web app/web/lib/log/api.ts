@@ -46,8 +46,6 @@ export interface ConsoleData {
   library: { id: string; name: string; muscleGroup: string | null; isCustom: boolean }[];
   /** exerciseId → "last: 45 kg × 10 · 3 Aug", for the recents list. */
   recents: { exerciseId: string; name: string; meta: string; isCustom: boolean }[];
-  /** Frame 3b's third scope: how many clients are on this program's template. */
-  templateReach: number | null;
   /** Frame 3b's second scope: how much of the plan is left to change. */
   programWeeksLeft: number | null;
   /**

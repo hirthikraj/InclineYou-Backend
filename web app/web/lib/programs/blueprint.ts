@@ -1388,16 +1388,17 @@ export function overloadLine(entries: Entry[]): string | null {
  * fits to the pixel, so a trainer whose roster reaches three digits, or whose
  * block reaches ten weeks, breaks it again.
  */
-export function shapeParts(days: number, weeks: number, clients: number): string[] {
+/** `used` is `assignedCount` — every copy ever made onto a client, the shelf's Used column. */
+export function shapeParts(days: number, weeks: number, used: number): string[] {
   return [
     `${days} day${days === 1 ? '' : 's'} a week`,
     `${weeks} week${weeks === 1 ? '' : 's'}`,
-    clients === 0 ? 'not used yet' : `${clients} client${clients === 1 ? '' : 's'} on a copy`,
+    used === 0 ? 'not used yet' : `used ${used} time${used === 1 ? '' : 's'}`,
   ];
 }
 
-export function shapeLine(days: number, weeks: number, clients: number): string {
-  return shapeParts(days, weeks, clients).join(' · ');
+export function shapeLine(days: number, weeks: number, used: number): string {
+  return shapeParts(days, weeks, used).join(' · ');
 }
 
 export function relativeDay(ms: number, now = Date.now()): string {

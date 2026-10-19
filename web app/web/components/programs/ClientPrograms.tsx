@@ -66,13 +66,9 @@ import { DAY_MS, startOfDay } from '@/lib/today/time';
 export function ClientPrograms({
   data,
   now,
-  /** For the Templates tab's badge. `null` on a read that failed — `PageTabs`
-   *  omits it rather than drawing a zero. */
-  templateCount,
 }: {
   data: ClientProgramsData;
   now: number;
-  templateCount: number | null;
 }) {
   const [query, setQuery] = useState('');
   const [clientId, setClientId] = useState<string | null>(null);
@@ -155,14 +151,14 @@ export function ClientPrograms({
   /* WHO HAS NOTHING ASSIGNED: the header counts them, and now the page names them, each with the verb. The
      other half of the loop the Plan tab opened — it carries a client into the shelf with `?client=`. */
   const unassigned = useMemo(() => {
-    const live = new Set(rows.filter((r) => r.program.status === 'active').map((r) => r.program.clientId));
+    const live = new Set(rows.filter((r) => isCurrent(r.program)).map((r) => r.program.clientId));
     return data.clients
       .filter((c) => c.status !== 'archived' && !live.has(c.id))
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [rows, data.clients]);
   const [allUnassigned, setAllUnassigned] = useState(false);
   const showUnassigned =
-    unassigned.length > 0 && status !== 'ended' && clientId === null && query.trim() === '' && goal === null;
+    unassigned.length > 0 && (status === 'active' || status === 'all') && clientId === null && query.trim() === '' && goal === null;
 
   const narrowed = clientId !== null || status !== 'active' || goal !== null || query.trim() !== '';
 
@@ -212,7 +208,9 @@ export function ClientPrograms({
             <PageTabs
               label="Fitness"
               current="programs"
-              tabs={programsTabs('programs', { templates: templateCount })}
+              /* No badge on Templates: its only source was the whole template read (rows, tree counts, assignments)
+                 kept for its length. The Templates page already draws no count on Programs, so the strip is even. */
+              tabs={programsTabs('programs')}
             />
 
             <label className="search pgtabs__q">
@@ -267,7 +265,9 @@ export function ClientPrograms({
                   value: s.key,
                   label: s.label,
                   count: forStatus.filter(r => matchStatus(r.program, s.key)).length,
-                }))}
+                  /* Paused is drawn only when there is one, or while it is the filter — most books never hold a
+                     paused block, and an option that always answers 0 is noise, as with the goal chips. */
+                })).filter(o => o.value !== 'paused' || o.count > 0 || status === 'paused')}
               />
             </div>
 
@@ -398,7 +398,8 @@ interface Copy {
 function CopyRow({ row, now, className }: { row: Copy; now: number; className?: string }) {
   const { program, client } = row;
   const days = daysOfCopy(program);
-  const ended = program.status !== 'active';
+  const paused = program.status === 'paused';
+  const ended = !paused && program.status !== 'active';
   const progress = progressOf(program, now);
   /* The real weekdays, where the client's own week agrees with the plan's day count: *Day 1 · Day 2 · Day 3* is
      slot ordinals and says nothing a trainer can scan. */
@@ -423,9 +424,9 @@ function CopyRow({ row, now, className }: { row: Copy; now: number; className?: 
       href={planHref(program.clientId, program.id, 'programs')}
       sub={weekdays ?? dayNamesOf(program, days)}
       days={days}
-      /* Unused on this row: `client` takes the column. Passed as 1 because the
-         prop is the count of who is on the thing, and one person is. */
-      clients={1}
+      /* Unused on this row: `client` takes the column. Passed as 1 because a
+         copy is one use of the blueprint it came from. */
+      used={1}
       client={client ? { id: client.id, name: client.name } : undefined}
       weeks={program.weeks ?? 1}
       goal={program.goal}
@@ -443,7 +444,11 @@ function CopyRow({ row, now, className }: { row: Copy; now: number; className?: 
          where the plan came from. */
       tag={
         ended ? (
-          <Tag>{endedWord(program.status)}</Tag>
+          <Tag>Ended</Tag>
+        ) : paused ? (
+          /* Neutral like *Ended*, for the same reason: a client on holiday is not a warning. It is drawn because
+             a paused block is still the client's plan and would otherwise read as one that is running. */
+          <Tag>Paused</Tag>
         ) : progress.tag ? (
           <Tag tone="warn">{progress.tag}</Tag>
         ) : undefined
@@ -480,23 +485,36 @@ function CopyRow({ row, now, className }: { row: Copy; now: number; className?: 
 
 /* ═══════════════════════════════════════════════════════ the filters ══ */
 
-type StatusKey = 'all' | 'active' | 'ended';
+type StatusKey = 'all' | 'active' | 'paused' | 'ended';
 
 const STATUSES: { key: StatusKey; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'active', label: 'Active' },
-  /* ONE WORD FOR THREE COLUMN VALUES. `program.status` is free text on the wire
-     and the seed writes `completed` and `cancelled` beside `active`; the
-     difference between a block somebody finished and one that was called off
-     is a fact about that programme and belongs on its row, not on a filter. A
-     trainer narrowing a list is asking *is this still running*, which is one
-     axis with two values. The row's own tag says which. */
+  /* PAUSED IS NOT ENDED. The schema allows `active`, `paused` and `completed`
+     (`program_status`), and a paused block — a client on holiday — is still
+     that client's plan: it is not history, and folding it into *Ended* told the
+     trainer the client had finished and the header that they had nothing. */
+  { key: 'paused', label: 'Paused' },
+  /* `completed`, and anything else the wire might carry that is neither of the
+     two running states. */
   { key: 'ended', label: 'Ended' },
 ];
 
 function matchStatus(p: ProgramWire, key: StatusKey): boolean {
-  if (key === 'all') return true;
-  return key === 'active' ? p.status === 'active' : p.status !== 'active';
+  switch (key) {
+    case 'all':
+      return true;
+    case 'active':
+    case 'paused':
+      return p.status === key;
+    case 'ended':
+      return !isCurrent(p);
+  }
+}
+
+/** Still the client's plan: running, or paused. What *on a program* means to the header and the unassigned list. */
+function isCurrent(p: ProgramWire): boolean {
+  return p.status === 'active' || p.status === 'paused';
 }
 
 function matchClient(r: Copy, clientId: string | null): boolean {
@@ -560,7 +578,7 @@ function clientOptions(rows: Copy[], clients: ClientWire[]) {
  */
 function headerLine(rows: Copy[], clients: ClientWire[]): string {
   const live = new Set(
-    rows.filter(r => r.program.status === 'active').map(r => r.program.clientId),
+    rows.filter(r => isCurrent(r.program)).map(r => r.program.clientId),
   );
   const roster = clients.filter(c => c.status !== 'archived');
   const on = roster.filter(c => live.has(c.id)).length;
@@ -622,11 +640,4 @@ function daysOfCopy(p: ProgramWire): number[] {
   return keys.sort((a, b) => a - b);
 }
 
-/** `cancelled` is the one status worth naming apart: a block that was called
- *  off and one that ran its course are the same *ended* to a filter and two
- *  different things on a row. Anything else the wire invents reads as *Ended*,
- *  which is true of every non-active value by construction. */
-function endedWord(status: string): string {
-  return status === 'cancelled' ? 'Cancelled' : 'Ended';
-}
 

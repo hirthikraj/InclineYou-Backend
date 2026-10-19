@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react';
 
-import { fetchExerciseMeta, searchExercises } from '@/lib/exercises/actions';
+import { openExerciseLibrary, searchExercises } from '@/lib/exercises/actions';
 import type { ExerciseWire, ExercisesMeta } from '@/lib/exercises/api';
 import { prescribeFor, type Prescribed } from '@/lib/programs/prescribe';
 import { ExerciseInfoView, type ProgramContext } from './ExerciseInfo';
@@ -161,7 +161,7 @@ export function LibraryPanel({
   useEffect(() => {
     search.current?.focus();
     start(async () => {
-      const [page, m] = await Promise.all([searchExercises({ size: 60 }), fetchExerciseMeta()]);
+      const { page, meta: m } = await openExerciseLibrary({ size: 60 });
       if (page) {
         setRows(page.exercises);
         setTotal(page.total);

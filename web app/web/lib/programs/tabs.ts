@@ -75,7 +75,7 @@ export const PROGRAMS_TABS: { key: ProgramsTabKey; label: string; href: string }
  * The question is whether these two are one page seen twice or two places — and
  * they are one page. Both answer *which blueprint do I start from*: same row,
  * same shape strip, same week count, same goal. What differs is WHOSE shelf it
- * is and therefore the verb — *Open* on the trainer's own, *Use this* on one
+ * is and therefore the verb — *Open* on the trainer's own, *Copy* on one
  * they have to copy first. A strip that switches the source of a list and keeps
  * the question is the definition `nav.tsx`'s rule was written to protect, not
  * an exception to it.

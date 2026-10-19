@@ -17,7 +17,7 @@ import { ToastProvider, depthOf, useToastStore } from '@/lib/toast/store';
  * absent confirm is the claim that nothing happened, and the trainer's next
  * move is to press the button again.
  *
- * It also has to outlive a navigation. *Use this* copies a certified program
+ * It also has to outlive a navigation. *Copy* copies a certified program
  * and then pushes the trainer into the builder; a toast owned by the shelf
  * unmounts on the way and is never seen. This host is above the router's
  * children, so the card is still on screen when the new page paints — which is

@@ -19,6 +19,20 @@ spring:
     username: ${APP_DB_USERNAME:inclineyou_app}
     password: ${APP_DB_PASSWORD:inclineyou_app_dev}
     driver-class-name: org.postgresql.Driver
+    hikari:
+      data-source-properties:
+        # JIT OFF ON THE REQUEST PATH (18 Oct 2026). Every row-level-security
+        # policy is planned for every actor, because the planner cannot know
+        # `app.actor` — so a trainer's read of `exercise` (657 rows) was priced
+        # with the client policy's per-row lookups into `session_exercise` and
+        # `workout_exercise` at ~810k, past `jit_above_cost` (100k) and the
+        # inline/optimise thresholds (500k). Postgres then spent ~3.6 s
+        # compiling 127 functions for a query that ran in 50 ms, and the lookups
+        # were never executed. Measured: the list read 3,708 → 54 ms, its count
+        # 3,238 → 17 ms, one `/meta` facet 2,476 → 16 ms. JIT pays off on long
+        # analytic scans, which this pool never runs; Flyway has its own
+        # connection and is unaffected.
+        options: "-c jit=off"
 
   jpa:
     hibernate:

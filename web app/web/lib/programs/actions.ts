@@ -121,7 +121,7 @@ export async function duplicateTemplate(
 }
 
 /**
- * *Use this* — the certified shelf's only primary.
+ * *Copy* — the certified shelf's only primary (it read *Use this* until 18 Oct 2026).
  *
  * The rule the whole screen turns on: **handing a program over makes a copy.**
  * Assigning a template copies it onto the client; using a certified program
@@ -137,9 +137,8 @@ export async function duplicateTemplate(
  *
  * A `use` prefix is a React Hook by convention, and `rules-of-hooks` reads it as
  * one — so every call site inside a `startTransition` callback is a lint error.
- * The BUTTON still says *Use this*: what the trainer does and what the function
- * does are allowed to differ, and *copy* is the more honest name for the thing
- * that actually happens.
+ * The button now says *Copy* too: *Use this* read as putting the program on a
+ * client, and nothing reaches a client until it is assigned.
  */
 export async function copyCertified(id: string): Promise<Result<{ id: string; name: string }>> {
   try {
@@ -180,8 +179,8 @@ export interface StartChoice {
    * On a trainer's own program it is `assignedCount`: every copy ever made
    * onto a client, lifetime and not the active count, because the question the
    * picker answers is *is this one I actually reach for*. On a certified
-   * blueprint it is `certified.usedCount` — how many TRAINERS have copied it,
-   * which is the catalogue's own fact in place of a rating.
+   * blueprint it is `certified.usedCount` — how many TRAINERS have copied it —
+   * carried but not drawn: the picker says nothing about use on the catalogue.
    */
   used: number;
 }
@@ -371,42 +370,6 @@ export async function assignTemplate(
 }
 
 /**
- * Push the blueprint onto one client who is already on a copy of it.
- *
- * The brief's own words — *"let the trainer push an update to an assigned
- * instance explicitly if they want to"* — and the emphasis is on **explicitly**.
- * Nothing propagates on its own, one program at a time, and the confirmation
- * says what moved.
- *
- * It keeps the client's weekday and time: those were chosen once, for them, and
- * a blueprint edit is not a reason to move somebody's Tuesday.
- */
-export async function pushUpdate(
-  programId: string,
-  templateId: string,
-  /** Whose copy this is. Optional only because a caller that does not know it
-   *  should still be able to push — but every caller today does, and without it
-   *  the client's own plan screen goes on rendering the prescription the push
-   *  just replaced until something else happens to revalidate it. */
-  clientId?: string,
-  /** The plan's version as the panel drew it (`If-Match`); read fresh when the
-   *  caller does not have one. */
-  version?: string,
-): Promise<Result<{ removed: number; added: number; version: string }>> {
-  try {
-    const result = await postResync(programId, version);
-    revalidatePath(`/programs/${templateId}`);
-    if (clientId) {
-      revalidatePath(`/clients/${clientId}/program`);
-      revalidatePath(`/clients/${clientId}/program/${programId}`);
-    }
-    return { ok: true, value: { removed: result.removed, added: result.added, version: result.version } };
-  } catch (error) {
-    return refusal(error, 'Could not push the update.');
-  }
-}
-
-/**
  * THE CLIENT COPY'S SAVE.
  *
  * `saveTemplate`'s twin, pointed at the other table, and the two are kept as
@@ -456,15 +419,11 @@ export async function notifyPlanChange(programId: string): Promise<Result<{ sent
 }
 
 /**
- * *Reset to template* — the same write as `pushUpdate`, pressed from the other
- * end and by the person whose edits it discards.
- *
- * It is `POST /v1/programs/:id/resync` either way. What differs is who is
- * asking and what they can see: from the blueprint it is *push this to thirteen
- * people*, and from inside one client's plan it is *throw away what I changed
- * for this one person and take the blueprint again*. The second is destructive
- * in a way the first is not, so the panel that calls it confirms and names the
- * count.
+ * *Reset to template* — `POST /v1/programs/:id/resync`, from inside one
+ * client's plan: *throw away what I changed for this one person and take the
+ * blueprint again*. It is destructive, so the panel that calls it confirms and
+ * names the count. (The same write pressed from the template's side — push to
+ * one client's copy — went with the template's client list on 18 Oct 2026.)
  */
 export async function resetClientPlan(
   clientId: string,

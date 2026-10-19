@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, useTransition } from 'react';
 
-import { fetchExerciseMeta, searchExercises } from '@/lib/exercises/actions';
+import { openExerciseLibrary, searchExercises } from '@/lib/exercises/actions';
 import type { ExerciseWire, ExercisesMeta } from '@/lib/exercises/api';
 import { ordinalDayWord } from '@/lib/programs/blueprint';
 import { ExerciseInfoView, type ProgramContext } from '../ExerciseInfo';
@@ -86,7 +86,7 @@ export function LibraryDock({
   useEffect(() => {
     search.current?.focus();
     start(async () => {
-      const [page, m] = await Promise.all([searchExercises({ size: CAP }), fetchExerciseMeta()]);
+      const { page, meta: m } = await openExerciseLibrary({ size: CAP });
       if (page) {
         setRows(page.exercises);
         setTotal(page.total);

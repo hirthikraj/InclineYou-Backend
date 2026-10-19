@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, useTransition } from 'react';
 
 import type { ExerciseWire } from '@/lib/exercises/api';
-import type { WorkoutTemplateWire } from '@/lib/workouts/api';
+import type { WorkoutTemplateSummaryWire, WorkoutTemplateWire } from '@/lib/workouts/api';
 import {
   fetchWorkoutTemplate,
   removeWorkoutTemplate,
@@ -238,7 +238,7 @@ export function WorkoutBuilder({
   /* THE WHOLE SESSION a pointer is carrying out of *Workout Templates*. The
      shelf row, not its movements: those are fetched on the drop, by the read
      the click already makes. */
-  const [carriedTemplate, setCarriedTemplate] = useState<WorkoutTemplateWire | null>(null);
+  const [carriedTemplate, setCarriedTemplate] = useState<WorkoutTemplateSummaryWire | null>(null);
   const [drop, setDrop] = useState<DropTarget | null>(null);
 
   const [noteOpen, setNoteOpen] = useState(Boolean(initial?.notes));
@@ -500,7 +500,7 @@ export function WorkoutBuilder({
    * since the dialog was built. A drag passes `locateWorkoutDrop`'s answer, and
    * the session arrives whole at the slot the indicator drew.
    */
-  function pour(row: WorkoutTemplateWire, before: string | null = null, adopt?: string[]) {
+  function pour(row: WorkoutTemplateSummaryWire, before: string | null = null, adopt?: string[]) {
     setError(null);
     start(async () => {
       const result = await fetchWorkoutTemplate(row.id);

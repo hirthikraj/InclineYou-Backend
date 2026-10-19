@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { redirect } from 'next/navigation';
+import { cache } from 'react';
 
 import { getToken } from '@/lib/auth/session';
 import {
@@ -83,9 +84,17 @@ export function requireClientPrograms(): Promise<Guarded<ClientProgramsData>> {
   return guard(getClientPrograms);
 }
 
-export function requireBuilder(templateId: string): Promise<Guarded<BuilderData>> {
-  return guard(() => getBuilder(templateId));
-}
+/*
+ * THE THREE GUARDS BELOW TAKE AN ID, AND THEIR PAGES ASK TWICE.
+ *
+ * `generateMetadata` (the tab title) and the page both call them for the same id in the same render, so each of the
+ * builder, the certified preview and a client's plan was being fetched in full twice per navigation — the template list, the
+ * tree, the assignments and the roster, doubled. `cache()` makes the second call the first one's answer, per request: a
+ * navigation still reads fresh, and a refusal (the redirect `guard` throws) is shared too, so both callers redirect.
+ */
+export const requireBuilder = cache(
+  (templateId: string): Promise<Guarded<BuilderData>> => guard(() => getBuilder(templateId)),
+);
 
 /**
  * The certified catalogue, and one certified program.
@@ -99,9 +108,9 @@ export function requireCertifiedShelf(): Promise<Guarded<CertifiedShelfData>> {
   return guard(getCertifiedShelf);
 }
 
-export function requireCertifiedTemplate(id: string): Promise<Guarded<CertifiedPreviewData>> {
-  return guard(() => getCertifiedPreview(id));
-}
+export const requireCertifiedTemplate = cache(
+  (id: string): Promise<Guarded<CertifiedPreviewData>> => guard(() => getCertifiedPreview(id)),
+);
 
 /**
  * One client's own copy of a programme, for the builder at
@@ -112,9 +121,7 @@ export function requireCertifiedTemplate(id: string): Promise<Guarded<CertifiedP
  * `getClientPlan` refuses with a 404 of its own rather than drawing one
  * person's prescription under another person's name.
  */
-export function requireClientPlan(
-  clientId: string,
-  programId: string,
-): Promise<Guarded<ClientPlanData>> {
-  return guard(() => getClientPlan(clientId, programId));
-}
+export const requireClientPlan = cache(
+  (clientId: string, programId: string): Promise<Guarded<ClientPlanData>> =>
+    guard(() => getClientPlan(clientId, programId)),
+);

@@ -87,7 +87,7 @@ import { RowMenu } from '@/web-components/ui/RowMenu';
  * `.pk__tbl`'s pattern, whose note argues the mechanism at length.
  */
 /** How the list is ordered, and the control that sets it says which is on. */
-export type ShelfSort = 'edited' | 'name' | 'clients';
+export type ShelfSort = 'edited' | 'name' | 'used';
 
 const SORTS: { key: ShelfSort; label: string }[] = [
   /* `edited` FIRST AND DEFAULT, because it is what the server already does —
@@ -96,7 +96,7 @@ const SORTS: { key: ShelfSort; label: string }[] = [
      does not know cannot rely on it, and one who guesses cannot check. */
   { key: 'edited', label: 'Recently edited' },
   { key: 'name', label: 'Name' },
-  { key: 'clients', label: 'Most clients' },
+  { key: 'used', label: 'Most used' },
 ];
 
 export function Shelf({
@@ -229,8 +229,8 @@ export function Shelf({
       a.template.name.localeCompare(b.template.name) || a.template.id.localeCompare(b.template.id);
     return [...out].sort((a, b) => {
       if (sort === 'name') return byName(a, b);
-      if (sort === 'clients') {
-        return b.template.activeAssignedCount - a.template.activeAssignedCount || byName(a, b);
+      if (sort === 'used') {
+        return b.template.assignedCount - a.template.assignedCount || byName(a, b);
       }
       return b.template.updatedAt - a.template.updatedAt || byName(a, b);
     });
@@ -467,7 +467,7 @@ export function Shelf({
             is a switcher — you are choosing the program next to the one you
             have open, and *recently edited* is the right and only order for
             that. The table is a place a trainer BROWSES thirty programs, which
-            is where *who has the most clients* and *what is it called* become
+            is where *which one do I use most* and *what is it called* become
             real questions.
 
             CHIPS AND NOT A `<select>`, for the reason this section already
@@ -515,8 +515,8 @@ export function Shelf({
           <div className="pgt__sort">
             <span className="pgt__sortk">Sort</span>
             <div className="tools" role="group" aria-label="Sort the list">
-              {/* *Most clients* sorts nothing while every count is zero. */}
-              {SORTS.filter(o => o.key !== 'clients' || templates.some(t => t.assignedCount > 0)).map(o => (
+              {/* *Most used* sorts nothing while every count is zero. */}
+              {SORTS.filter(o => o.key !== 'used' || templates.some(t => t.assignedCount > 0)).map(o => (
                 <Chip
                   pressed={sort === o.key}
                   key={o.key}
@@ -767,12 +767,9 @@ function TableRow({
          cannot disagree about which slots this program trains. */
       sub={dayNamesOf(template, days)}
       days={days}
-      clients={template.activeAssignedCount}
-      /* The faces. A SAMPLE and not the roster — `activeAssignedCount` above
-         stays the count, and `TemplateWire.assignedClients` carries why. The
-         `?? []` is for a wire that predates the field: the row then draws the
-         figure it always drew. */
-      assigned={template.assignedClients ?? []}
+      /* LIFETIME, every copy ever made for a client — `ProgramRow`'s own
+         bullet on the used column. */
+      used={template.assignedCount}
       weeks={weeks}
       /* THE TABLE ROW KEEPS THE GOAL AND ONLY THE GOAL, and the sheet row two
          hundred lines down does not — the difference is the COLUMN. This row
@@ -852,7 +849,7 @@ function ShelfRow({
 }) {
   const forClient = useForClient();
   const active = new Set(days);
-  const clients = template.activeAssignedCount;
+  const used = template.assignedCount;
 
   return (
     <Link
@@ -869,15 +866,11 @@ function ShelfRow({
           {template.copiedFrom && <Tag tone="acc">From templates</Tag>}
         </span>
         <span className="lrow__s">
-          {/* The figure the brief calls "times assigned", and it is the ACTIVE
-              count rather than the lifetime one. A trainer reading this row is
-              deciding whether it is safe to edit, and a client who finished this
-              block in March is not somebody an edit can reach. The lifetime
-              figure is on the builder's header, where there is room to say which
-              is which. */}
-          {clients === 0
-            ? 'Nobody on this yet'
-            : `${clients} client${clients === 1 ? '' : 's'} on this`}
+          {/* The figure the brief calls "times assigned", LIFETIME — the same
+              reading as the table's used column. */}
+          {used === 0
+            ? 'Not used yet'
+            : `Used ${used} time${used === 1 ? '' : 's'}`}
           {' · '}
           {days.length} day{days.length === 1 ? '' : 's'} a week
           {/* THE GOAL, OR THE DESCRIPTION WHERE THERE IS NO GOAL. This is a

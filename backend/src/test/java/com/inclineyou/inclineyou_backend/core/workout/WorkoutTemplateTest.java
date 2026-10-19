@@ -133,6 +133,35 @@ class WorkoutTemplateTest {
     }
 
     @Test
+    @DisplayName("the list is summaries: counts and estimatedMinutes, no tree; alternatives are not counted, a superset rests once a round")
+    void listIsSummaries() throws Exception {
+        String id = create("""
+                {"name":"Circuit","exercises":[
+                   {"exerciseId":"%s","groupId":"%s","sets":[{"effortValue":10,"restSeconds":90}]},
+                   {"exerciseId":"%s","groupId":"%2$s","sets":[{"effortValue":10,"restSeconds":90}],
+                    "alternatives":[{"exerciseId":"%1$s","sets":[{"effortValue":10},{"effortValue":10}]}]},
+                   {"exerciseId":"%1$s","sets":[]}],
+                 "dividers":[{"position":0,"label":"Main"}]}
+                """.formatted(row, UUID.randomUUID(), bench));
+        // 45 + 30 (rest belongs to the round) · 45 + 30 + 90 · 45 (setup only) = 285 s → 5, as estimate.ts says
+        mvc.perform(get("/v1/workout-templates"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(id))
+                .andExpect(jsonPath("$.items[0].name").value("Circuit"))
+                .andExpect(jsonPath("$.items[0].exerciseCount").value(3))
+                .andExpect(jsonPath("$.items[0].setCount").value(2))
+                .andExpect(jsonPath("$.items[0].estimatedMinutes").value(5))
+                .andExpect(jsonPath("$.items[0].version").isString())
+                .andExpect(jsonPath("$.items[0].exercises").doesNotExist())
+                .andExpect(jsonPath("$.items[0].dividers").doesNotExist());
+        // the tree is still one GET away
+        mvc.perform(get("/v1/workout-templates/" + id))
+                .andExpect(jsonPath("$.exercises.length()").value(3))
+                .andExpect(jsonPath("$.dividers[0].label").value("Main"));
+    }
+
+    @Test
     @DisplayName("an unknown kind or a malformed set is a 400 and nothing is stored")
     void badSets() throws Exception {
         mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content("""

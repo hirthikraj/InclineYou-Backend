@@ -58,8 +58,8 @@ import { Crumbs } from '@/web-components/ui/Crumbs';
  *
  * ── WHAT IS *NOT* SHARED WITH THE BUILDER, AND WHY ─────────────────────────
  *
- * The HEADER. `Certified`, the summary sentence, *Reviewed Aug 2026*, *Used by
- * 214*, *Use this — copy to my programs*: every one of those is a fact about
+ * The HEADER. `Certified`, the summary sentence, *Reviewed Aug 2026*,
+ * *Copy to my templates*: every one of those is a fact about
  * the CATALOGUE and not about the blueprint, so there is nothing on the
  * builder's header for them to disagree with. The builder's own header says
  * what the draft is doing — the save state, who is on it, Assign — and none of
@@ -276,6 +276,9 @@ export function CertifiedPreview({ data }: { data: CertifiedPreviewData }) {
                   variant="primary"
                   size="sm"
                   disabled={busy}
+                  /* The whole sentence at every width: `.cert__long` is `display:none` on a phone, which takes it out
+                     of the accessible name too. */
+                  aria-label={busy ? undefined : 'Copy to my templates'}
                   onClick={use}
                 >
                   {busy ? (
@@ -283,11 +286,10 @@ export function CertifiedPreview({ data }: { data: CertifiedPreviewData }) {
                   ) : (
                     <>
                       <PlusIcon size={13} />
-                      Use this
-                      {/* dropped under 620px, where the pair would otherwise
-                          take a row each. The accessible name keeps both halves
-                          — the same trade `/schedule`'s secondary makes. */}
-                      <span className="cert__long">— copy to my programs</span>
+                      {/* *MY TEMPLATES*, NOT *MY PROGRAMS*: since 22 Sep 2026 *Programs* is the clients' copies, and
+                          the copy lands on the template shelf. *Copy*, not *Use this*: nothing reaches a client until
+                          it is assigned. The tail is dropped under 620px, where the pair would take a row each. */}
+                      Copy<span className="cert__long"> to my templates</span>
                     </>
                   )}
                 </Button>
@@ -312,11 +314,10 @@ export function CertifiedPreview({ data }: { data: CertifiedPreviewData }) {
               {template.exerciseCount} exercise{template.exerciseCount === 1 ? '' : 's'}
             </Tag>
             {meta && <Tag>Reviewed {monthYear(meta.reviewedAt)}</Tag>}
-            {meta && <Tag>Used by {meta.usedCount}</Tag>}
             {/* THE BANNER'S PROMISE, IN FOUR WORDS. It was a sentence on its own
                 line, and measuring said the line cost 20px at every width to
-                restate what the primary button one row up already says — *Use
-                this — copy to my programs*. Inside the row it is the last item,
+                restate what the primary button one row up already says — *Copy
+                to my templates*. Inside the row it is the last item,
                 which is where a fact about the SCREEN belongs among facts about
                 the program. */}
             <span className="cert__note">Read-only · copy it to edit</span>

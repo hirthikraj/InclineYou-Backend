@@ -1,9 +1,9 @@
 import { Workouts } from '@/components/programs/Workouts';
 import { Unavailable } from '@/components/today/Unavailable';
-import { parseDays, parseMode, parsePage, parseView } from '@/lib/sessions/tabs';
+import { parseView } from '@/lib/sessions/tabs';
 import { requireSessions } from '@/lib/sessions/guard';
 import { getWorkoutTemplates } from '@/lib/workouts/api';
-import type { WorkoutTemplateWire } from '@/lib/workouts/api';
+import type { WorkoutTemplateSummaryWire } from '@/lib/workouts/api';
 
 /**
  * `/programs/workouts` — **Fitness' second page**, and the screen that had no
@@ -29,28 +29,23 @@ export default async function Page(props: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const q = await props.searchParams;
-  /* `?view=` IS the tab now, not a one-shot that names the one to open on —
-     `lib/sessions/tabs.ts` carries the argument. All four views still come out
-     of this one read; the parameter only says which of them is drawn. */
+  /* `?view=` IS the tab — `lib/sessions/tabs.ts` carries the argument. The
+     server reads it for ONE decision: whether to fetch the template shelf. The
+     rest of the address (`page`, `mode`, `days`) and every later tab or page
+     switch are `Workouts`' own, read off `useSearchParams` and moved with
+     `history.pushState`, so they never come back here. */
   const view = parseView(q.view);
-  /* THE REST OF THE ADDRESS. `?page=` is the one that matters today — the three
-     session tabs are paged now, and a server that ignored the number would
-     serve page one to a shared link and then jump when the client caught up,
-     which is `/programs/exercises`' own note on the same parameter. `mode` and
-     `days` are parsed here because the address is defined in one place and read
-     in one place; nothing on the strip writes them yet. */
-  const query = {
-    mode: parseMode(q.mode),
-    days: parseDays(q.days),
-    page: parsePage(q.page),
-  };
-  /* TWO READS, IN PARALLEL, AND THE SECOND CANNOT FAIL THE PAGE. The three
-     session buckets are what this screen is; the workout-template shelf is one
-     of its four tabs. A shelf that could not be read is an empty shelf with a
-     way to write one — the Templates tab's own empty state — where an
+  /* THE SHELF IS READ ONLY FOR ITS OWN TAB. It used to be read beside the
+     sessions on every visit, for a tab most visits never open — one backend call
+     in four that drew nothing. On any other tab `Workouts` asks for it the first
+     time the trainer switches to it. It still cannot fail the page: a shelf that
+     could not be read is the Templates tab's empty state, where an
      `Unavailable` over the whole screen would take the other three tabs down
      with it. `requireSessions` keeps the guard it had. */
-  const [result, templates] = await Promise.all([requireSessions(), readTemplates()]);
+  const [result, templates] = await Promise.all([
+    requireSessions(),
+    view === 'templates' ? readTemplates() : null,
+  ]);
   if (!result.ok) {
     return (
       <Unavailable
@@ -59,13 +54,13 @@ export default async function Page(props: {
       />
     );
   }
-  return <Workouts data={result.data} view={view} query={query} templates={templates} />;
+  return <Workouts data={result.data} templates={templates} />;
 }
 
 /** `[]` on anything going wrong — see the note above. A refusal that matters
  *  (an expired token) is caught by `requireSessions` beside it, which
  *  redirects. */
-async function readTemplates(): Promise<WorkoutTemplateWire[]> {
+async function readTemplates(): Promise<WorkoutTemplateSummaryWire[]> {
   try {
     return await getWorkoutTemplates();
   } catch {

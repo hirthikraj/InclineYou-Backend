@@ -922,7 +922,6 @@ export function Console({ data }: { data: ConsoleDataX }) {
           hasProgram={data.programId !== null}
           hasTemplate={data.templateId !== null}
           programWeeksLeft={data.programWeeksLeft}
-          templateReach={data.templateReach}
           busy={swapping}
           message={errors.swap ?? null}
           onClose={() => { say('swap', null); go({ swap: null }); }}

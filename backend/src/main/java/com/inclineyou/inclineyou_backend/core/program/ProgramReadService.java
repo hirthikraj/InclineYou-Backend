@@ -1,10 +1,7 @@
 package com.inclineyou.inclineyou_backend.core.program;
 
-import com.inclineyou.inclineyou_backend.core.program.ProgramJdbcRepository.AssignedRow;
 import com.inclineyou.inclineyou_backend.core.program.ProgramJdbcRepository.LibraryCopy;
-import com.inclineyou.inclineyou_backend.core.program.dto.Assignment;
 import com.inclineyou.inclineyou_backend.core.program.dto.ProgramItem;
-import com.inclineyou.inclineyou_backend.core.program.dto.ProgramItem.ClientRef;
 import com.inclineyou.inclineyou_backend.core.program.dto.ProgramItem.Mine;
 import com.inclineyou.inclineyou_backend.core.program.dto.ProgramItem.Progress;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
@@ -18,21 +15,24 @@ import java.util.*;
 
 /**
  * Every Programs read (api-contract 1.1, Programs L1–L3): the shelf and plan
- * summaries, one program with its whole tree, the InclineYou library, and who is
- * on a template.
+ * summaries, one program with its whole tree, and the InclineYou library. Who is
+ * on a template's copies is not a read any more (18 Oct 2026): each client's plan
+ * is listed on its own.
  *
- * <p>A page of summaries is joined to its assignments, its library copies or its
- * progress in one grouped query each, never one per program — so the counts and
- * the client sample cost a page, not the book.
+ * <p>A page of summaries is joined to its library copies or its progress in one
+ * grouped query each, never one per program — so the counts cost a page, not the
+ * book. A template's use count rides the summary row itself.
  */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class ProgramReadService {
 
+    private static final Set<String> KINDS = Set.of("client", "template");
     private static final Set<String> STATUSES = Set.of("active", "paused", "completed");
-    /** Faces on a template's card: a sample, never a count — {@code activeAssignedCount} is the total. */
-    private static final int ASSIGNED_SAMPLE = 6;
+    private static final String[] ALL_STATUSES = {"active", "paused", "completed"};
+    /** What "my plans" means when no status is named: not the ones that are over. */
+    private static final String[] IN_PROGRESS = {"active", "paused"};
 
     private final ProgramJdbcRepository repo;
     private final WorkspaceClock clock;
@@ -40,28 +40,46 @@ public class ProgramReadService {
     /**
      * {@code GET /v1/programs} — the trainer's templates and client plans, no tree.
      *
-     * <p>Plans come back {@code active,paused} unless the caller names a status
-     * or a client (a client's file wants every plan it ever had, newest first).
-     * With a {@code clientId} each item also carries {@code progress}, which is
-     * how the client file's Program tab and the plan switcher share one route.
+     * <p>Which read answers is decided by what the caller named, and each is its own query
+     * ({@link ProgramJdbcRepository#templates}, {@link ProgramJdbcRepository#plansOf}, {@link ProgramJdbcRepository#plans},
+     * {@link ProgramJdbcRepository#shelf}):
+     * <ul>
+     *   <li>{@code kind=template} — the templates. A template has no client and no status, so naming either is a 400 rather than
+     *       an empty list or a filter that quietly does nothing.</li>
+     *   <li>a {@code clientId} — that client's plans, every status unless one is named (the client file wants all it ever had,
+     *       newest first), each with {@code progress}: how the file's Program tab and the plan switcher share one route.</li>
+     *   <li>{@code kind=client}, or any {@code status} — plans only, {@code active,paused} unless a status is named. A status
+     *       names a plan's state, so it never brings templates along.</li>
+     *   <li>nothing — the default shelf: templates plus the plans in progress.</li>
+     * </ul>
      */
     public List<ProgramItem> list(UUID trainerId, String kind, UUID clientId, String status) {
-        if (kind != null && !Set.of("client", "template").contains(kind)) {
+        if (kind != null && !KINDS.contains(kind)) {
             throw ApiException.validation("kind: client or template");
         }
+        String[] named = statuses(status);
+        boolean templates = "template".equals(kind);
+        if (templates && clientId != null) throw ApiException.validation("clientId: a template has no client");
+        if (templates && named != null) throw ApiException.validation("status: a template has no status");
         if (clientId != null && !repo.clientOnRoster(trainerId, clientId)) {
             throw ApiException.notFound("That client is not on your roster.");
         }
-        String[] statuses = status == null || status.isBlank()
-                ? (clientId != null ? null : new String[]{"active", "paused"})
-                : status.split("\\s*,\\s*");
-        if (statuses != null) {
-            for (String s : statuses) {
-                if (!STATUSES.contains(s)) throw ApiException.validation("status: active, paused or completed");
-            }
+        List<ProgramItem> rows;
+        if (templates) rows = repo.templates(trainerId);
+        else if (clientId != null) rows = repo.plansOf(trainerId, clientId, named != null ? named : ALL_STATUSES);
+        else if (named != null || "client".equals(kind)) rows = repo.plans(trainerId, named != null ? named : IN_PROGRESS);
+        else rows = repo.shelf(trainerId);
+        return clientId == null ? rows : withProgress(rows);
+    }
+
+    /** The statuses the caller named, validated; {@code null} when it named none. */
+    private static String[] statuses(String status) {
+        if (status == null || status.isBlank()) return null;
+        String[] named = status.split("\\s*,\\s*");
+        for (String s : named) {
+            if (!STATUSES.contains(s)) throw ApiException.validation("status: active, paused or completed");
         }
-        List<ProgramItem> items = withAssignments(repo.shelf(trainerId, kind, clientId, statuses), trainerId);
-        return clientId == null ? items : withProgress(items);
+        return named;
     }
 
     /** {@code GET /v1/programs/{id}} — the trainer's own program with its whole tree. 404 for a library id. */
@@ -73,8 +91,7 @@ public class ProgramReadService {
 
     /** The same program without its tree — a PATCH's answer. */
     public ProgramItem summary(UUID trainerId, UUID id) {
-        ProgramItem item = repo.mine(trainerId, id).orElseThrow(() -> ApiException.notFound("That program is not yours."));
-        return withAssignments(List.of(item), trainerId).getFirst();
+        return repo.mine(trainerId, id).orElseThrow(() -> ApiException.notFound("That program is not yours."));
     }
 
     /** {@code GET /v1/programs/certified} — the curated shelf, no trees, each flagged with the trainer's copy. */
@@ -86,32 +103,6 @@ public class ProgramReadService {
         ProgramItem item = repo.libraryOne(id).orElseThrow(() -> ApiException.notFound("That program is not in the library."));
         var tree = repo.tree(id);
         return withMine(List.of(item), trainerId).getFirst().withTree(tree.workouts(), tree.dictionary());
-    }
-
-    /** {@code GET /v1/programs/{id}/assignments} — the clients on a copy of this template. */
-    public List<Assignment> assignments(UUID trainerId, UUID templateId) {
-        if (!repo.templateIsMine(trainerId, templateId)) throw ApiException.notFound("That template is not yours.");
-        return repo.assignments(trainerId, templateId);
-    }
-
-    /** Templates learn who is on them: every copy counts, the active ones are sampled. */
-    private List<ProgramItem> withAssignments(List<ProgramItem> items, UUID trainerId) {
-        String[] ids = items.stream().filter(i -> i.clientId() == null).map(ProgramItem::id).toArray(String[]::new);
-        if (ids.length == 0) return items;
-        var total = new HashMap<String, Integer>();
-        var active = new HashMap<String, Integer>();
-        var sample = new HashMap<String, List<ClientRef>>();
-        for (AssignedRow row : repo.assignedTo(trainerId, ids)) {
-            total.merge(row.source(), 1, Integer::sum);
-            if ("active".equals(row.status())) {
-                active.merge(row.source(), 1, Integer::sum);
-                var faces = sample.computeIfAbsent(row.source(), k -> new ArrayList<>());
-                if (faces.size() < ASSIGNED_SAMPLE) faces.add(new ClientRef(row.clientId(), row.clientName()));
-            }
-        }
-        return items.stream().map(i -> total.containsKey(i.id())
-                ? i.withAssigned(total.get(i.id()), active.getOrDefault(i.id(), 0), sample.getOrDefault(i.id(), List.of()))
-                : i).toList();
     }
 
     /** Library items learn whether this trainer already copied them, and whether the original has moved on. */
@@ -132,8 +123,8 @@ public class ProgramReadService {
         var done = repo.doneSessions(items.stream().map(ProgramItem::id).toArray(String[]::new));
         LocalDate today = WorkspaceClock.today(clock.zone());
         return items.stream().map(i -> {
-            Integer week = i.startDate() == null ? null : (int) Math.min(i.weeks(), Math.max(1,
-                    (today.toEpochDay() - LocalDate.parse(i.startDate()).toEpochDay()) / 7 + 1));
+            Integer week = i.startDate() == null ? null : (int) Math.clamp(
+                    (today.toEpochDay() - LocalDate.parse(i.startDate()).toEpochDay()) / 7 + 1, 1, i.weeks());
             return i.withProgress(new Progress(done.getOrDefault(i.id(), 0), i.workoutCount(), week));
         }).toList();
     }

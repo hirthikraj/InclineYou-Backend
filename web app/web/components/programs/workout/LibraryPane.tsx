@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 
-import { fetchExerciseMeta, searchExercises } from '@/lib/exercises/actions';
+import { openExerciseLibrary, searchExercises } from '@/lib/exercises/actions';
 import type { ExerciseWire, ExercisesMeta } from '@/lib/exercises/api';
 import { fetchWorkoutTemplates } from '@/lib/workouts/actions';
 import { Skeleton } from '@/web-components/ui/Skeleton';
@@ -13,7 +13,7 @@ import { Skeleton } from '@/web-components/ui/Skeleton';
    flickers, and `Math.random()` in a render is refused by `react-hooks/purity`
    for the same family of reason `Date.now()` is. */
 const SKELETON_ROWS = ['62%', '78%', '54%', '70%', '58%', '84%', '66%', '74%', '60%'];
-import type { WorkoutTemplateWire } from '@/lib/workouts/api';
+import type { WorkoutTemplateSummaryWire } from '@/lib/workouts/api';
 import { DIVIDER_LABELS, metaOf } from '@/lib/workouts/draft';
 import { SearchIcon } from '../Icons';
 import { DIVIDER_MIME, EXERCISE_MIME, TEMPLATE_MIME } from './dnd';
@@ -38,7 +38,7 @@ const CAP = 500;
 type Source = 'exercises' | 'templates' | 'dividers';
 
 interface Filters {
-  /** Muscle groups. Within a group the chips are OR, across groups AND. */
+  /** Body parts. Within a group the chips are OR, across groups AND. */
   categories: string[];
   equipment: string[];
   /** `'inclineyou' | 'mine'` — whose library the movement came from. */
@@ -131,7 +131,7 @@ export function LibraryPane({
    * mean. Omitting both of these drops the select entirely rather than drawing
    * a picker with one option in it.
    */
-  onAddTemplate?: (template: WorkoutTemplateWire) => void;
+  onAddTemplate?: (template: WorkoutTemplateSummaryWire) => void;
   /**
    * The saved session a pointer has picked up, or null when it has let go — the
    * same arrangement `onCarry` and `onCarryDivider` use, and for the same
@@ -140,7 +140,7 @@ export function LibraryPane({
    * one*, and the rows then lose their grips rather than promising a gesture
    * that does nothing.
    */
-  onCarryTemplate?: (template: WorkoutTemplateWire | null) => void;
+  onCarryTemplate?: (template: WorkoutTemplateSummaryWire | null) => void;
   /** A labelled break, on the end of the workout. Omitted for the same reason. */
   onAddDivider?: (label: string) => void;
   /**
@@ -159,7 +159,7 @@ export function LibraryPane({
   const [meta, setMeta] = useState<ExercisesMeta | null>(null);
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [templates, setTemplates] = useState<WorkoutTemplateWire[] | null>(null);
+  const [templates, setTemplates] = useState<WorkoutTemplateSummaryWire[] | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [, start] = useTransition();
   const search = useRef<HTMLInputElement>(null);
@@ -169,7 +169,7 @@ export function LibraryPane({
 
   useEffect(() => {
     start(async () => {
-      const [page, m] = await Promise.all([searchExercises({ size: CAP }), fetchExerciseMeta()]);
+      const { page, meta: m } = await openExerciseLibrary({ size: CAP });
       if (page) {
         setRows(page.exercises);
         setTotal(page.total);
@@ -231,7 +231,10 @@ export function LibraryPane({
     const { categories, equipment, library } = filters;
     if (categories.length === 0 && equipment.length === 0 && library.length === 0) return rows;
     return rows.filter(row => {
-      if (categories.length > 0 && !(row.muscleGroup && categories.includes(row.muscleGroup))) {
+      /* The chips are `meta.muscleGroups`, which `lib/exercises/api.ts` fills
+         with the server's BODY PARTS; a row's `muscleGroup` is its target
+         muscle (`pectorals`, never `chest`), so it is matched on `bodyPart`. */
+      if (categories.length > 0 && !(row.bodyPart && categories.includes(row.bodyPart))) {
         return false;
       }
       if (equipment.length > 0 && !(row.equipment && equipment.includes(row.equipment))) {
@@ -698,9 +701,9 @@ function TemplateRow({
   onAdd,
   onCarry,
 }: {
-  row: WorkoutTemplateWire;
+  row: WorkoutTemplateSummaryWire;
   onAdd: () => void;
-  onCarry?: (template: WorkoutTemplateWire | null) => void;
+  onCarry?: (template: WorkoutTemplateSummaryWire | null) => void;
 }) {
   const [armed, setArmed] = useState(false);
 

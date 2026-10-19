@@ -109,6 +109,22 @@ export interface WorkoutTemplateWire {
   setCount: number;
 }
 
+/**
+ * ONE ROW OF THE SHELF — `GET /v1/workout-templates`, which stopped carrying
+ * the tree on 19 Oct 2026. A phone on mobile data was downloading every set of
+ * every template (~35 KB gzip at 32 templates, ~114 KB at 100) to print a name,
+ * two counts and a duration; now it is ~1.5 KB and ~4 KB. `estimatedMinutes`
+ * is that duration, worked out by the server from the sets it no longer sends
+ * — the backend's `WorkoutEstimate`, a copy of `estimate.ts`.
+ *
+ * Anything that needs the movements opens the template by id
+ * (`getWorkoutTemplate`), which is the whole `WorkoutTemplateWire`.
+ */
+export type WorkoutTemplateSummaryWire = Pick<
+  WorkoutTemplateWire,
+  'id' | 'name' | 'notes' | 'exerciseCount' | 'setCount' | 'createdAt' | 'updatedAt' | 'version'
+> & { estimatedMinutes: number };
+
 /** What the builder sends. No ids and no ordinals: the server re-derives
  *  `orderIndex` from the position, which is the one thing a reorder cannot get
  *  wrong when it is read rather than sent. */
@@ -244,8 +260,9 @@ function bodyOf(body: WorkoutTemplateInput, id?: string) {
   };
 }
 
-export async function getWorkoutTemplates(): Promise<WorkoutTemplateWire[]> {
-  return (await authed<{ items: ItemV11[] }>('/v1/workout-templates')).items.map(viewOf);
+/** The shelf, as summaries. It arrives in its final shape, so there is no `viewOf`. */
+export async function getWorkoutTemplates(): Promise<WorkoutTemplateSummaryWire[]> {
+  return (await authed<{ items: WorkoutTemplateSummaryWire[] }>('/v1/workout-templates')).items;
 }
 
 export async function getWorkoutTemplate(id: string): Promise<WorkoutTemplateWire> {

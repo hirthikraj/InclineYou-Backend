@@ -1,6 +1,6 @@
 import { ClientPrograms } from '@/components/programs/ClientPrograms';
 import { Unavailable } from '@/components/today/Unavailable';
-import { requireClientPrograms, requireShelf } from '@/lib/programs/guard';
+import { requireClientPrograms } from '@/lib/programs/guard';
 
 /**
  * `/programs` — **every client's copy**, and Fitness' first page.
@@ -22,20 +22,13 @@ import { requireClientPrograms, requireShelf } from '@/lib/programs/guard';
  * property makes it safe. The mock's router carries the same ordering one layer
  * down, where the check is manual rather than the framework's.
  *
- * ── TWO READS, AND THE SECOND IS A TAB'S BADGE ───────────────────────────────
+ * ── ONE READ ─────────────────────────────────────────────────────────────────
  *
- * `requireClientPrograms` is this screen. `requireShelf` is read only for the
- * integer on the *Templates* tab, and it is guarded rather than awaited with
- * the other: a shelf that will not load must not take the programme list down
- * with it — the copies are still there and still the point of this screen — so
- * its failure is an absence, which is the one thing `PageTabs` draws nothing
- * for.
- *
- * It is the fat read for that purpose and knowingly so: `getShelf` fetches a
- * name for every exercise on the shelf. `getCertifiedShelf` has the same
- * problem in reverse and solves it with a second bare `/v1/templates` call;
- * doing better here means a count endpoint, and the note that turned that down
- * on the old `/programs` still applies — five rows is not worth one.
+ * `requireClientPrograms` is this screen. It also read the template shelf, for
+ * nothing but the integer on the *Templates* tab — three backend queries (rows,
+ * tree counts, assignments) kept for a `.length`. That badge was dropped on 18
+ * Oct 2026 rather than given a count endpoint; the Templates page already draws
+ * no count on this tab, so the strip stays symmetrical.
  *
  * `force-dynamic` because every figure on the list is a statement about `now`:
  * the stamp on each row is relative, the guard reads a cookie, and a cached
@@ -46,7 +39,7 @@ export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Programs · Fitness · InclineYou' };
 
 export default async function Page() {
-  const [result, shelf] = await Promise.all([requireClientPrograms(), requireShelf()]);
+  const result = await requireClientPrograms();
 
   if (!result.ok) {
     return (
@@ -60,7 +53,6 @@ export default async function Page() {
   return (
     <ClientPrograms
       data={result.data}
-      templateCount={shelf.ok ? shelf.data.templates.length : null}
       /* THE GUARD'S CLOCK, read beside the rows it dates. `Guarded<T>` carries
          the argument for why it is not read here and not inside the list. */
       now={result.now}

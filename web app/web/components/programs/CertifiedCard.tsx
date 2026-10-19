@@ -36,15 +36,10 @@ import { TemplateCard } from '@/web-components/ui/TemplateCard';
  * certified trainers*. A badge on ~100% of rows carries no bits, and this one
  * cost the card's most valuable 90px to say what the `<h1>` had already said.
  *
- * What goes there instead is whatever varies:
- *
- *   `mine`     *You have a copy* — the state that changes both verbs below.
- *   `topUsed`  *Most used* — on the ONE card `rank()` put first.
- *   neither    nothing at all.
- *
- * `mine` wins when a card is both. A trainer who already holds this blueprint
- * is being told what to press, which is a fact about them; *most used* is a
- * fact about everybody else, and it is the one they need only while choosing.
+ * What goes there instead is the one thing that varies: *You have a copy*,
+ * the state that changes both verbs below — and nothing at all otherwise. (A
+ * *Most used* badge stood here too until 18 Oct 2026; the shelf no longer says
+ * anything about use.)
  *
  * ── AND *REVIEWED* IS ON THE CARD NOW, NOT ONLY ON THE PREVIEW ───────────────
  *
@@ -52,20 +47,19 @@ import { TemplateCard } from '@/web-components/ui/TemplateCard';
  * review date is an assertion; one with a date is a claim.* It was printed on
  * the preview header and nowhere on the card — so the claim was only available
  * to a trainer who had already decided to go and read one. It is in the footer,
- * beside the use count, because both are the same question: has anybody stood
- * behind this.
+ * because the question it answers is: has anybody stood behind this.
  *
  * ── READING COMES BEFORE COPYING ─────────────────────────────────────────────
  *
- * *Use this* was once the only weighted control on the card, which put the
+ * *Copy* (once *Use this*) was the only weighted control on the card, which put the
  * loudest thing on the screen on the act that writes twenty rows onto the
  * trainer's shelf and increments a public counter, while the reversible act —
- * go and read it — was a ghost. So *Preview* is a secondary and *Use this* stays
+ * go and read it — was a ghost. So *Preview* is a secondary and *Copy* stays
  * the primary. Both are still one click; what changed is which one looks like
  * the obvious next move.
  *
  * Each control names its program in its accessible name, because forty buttons
- * all reading "Use this" is forty identical stops in a screen reader's rotor.
+ * all reading "Copy" is forty identical stops in a screen reader's rotor.
  *
  * ── AND *YOU HAVE A COPY* DEMOTES THE PRIMARY ────────────────────────────────
  *
@@ -74,7 +68,7 @@ import { TemplateCard } from '@/web-components/ui/TemplateCard';
  * and the duplicate path stays available but quiet. It is the single state that
  * stops a shelf filling up with three near-identical PPLs.
  */
-export function CertifiedCard({ row, topUsed }: { row: CertifiedWire; topUsed?: boolean }) {
+export function CertifiedCard({ row }: { row: CertifiedWire }) {
   const router = useRouter();
   const [busy, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -135,12 +129,6 @@ export function CertifiedCard({ row, topUsed }: { row: CertifiedWire; topUsed?: 
             <CheckIcon size={11} />
             You have a copy
           </Tag>
-        ) : topUsed ? (
-          /* The tint `By InclineYou` used to wear, spent on the one card where
-             it is a fact rather than a letterhead. `.cert__count` states the
-             ordering this badge is the head of, so the claim is anchored to
-             something the trainer can read two lines above the grid. */
-          <Tag tone="acc">Most used</Tag>
         ) : undefined
       }
       summary={meta?.summary}
@@ -177,14 +165,7 @@ export function CertifiedCard({ row, topUsed }: { row: CertifiedWire; topUsed?: 
             {mine.stale ? ' · revised since' : ''}
           </>
         ) : (
-          <>
-            {meta?.usedCount ? (
-              <>
-                Used by <b>{meta.usedCount}</b> ·{' '}
-              </>
-            ) : null}
-            {meta ? <>Reviewed {monthOf(meta.reviewedAt)}</> : null}
-          </>
+          meta ? <>Reviewed {monthOf(meta.reviewedAt)}</> : null
         )
       }
       actions={
@@ -236,7 +217,7 @@ export function CertifiedCard({ row, topUsed }: { row: CertifiedWire; topUsed?: 
               variant="primary"
               size="sm"
               disabled={busy}
-              aria-label={`Use ${row.name} — copy it to my programs`}
+              aria-label={`Copy ${row.name} to my templates`}
               onClick={use}
             >
               {busy ? (
@@ -244,7 +225,7 @@ export function CertifiedCard({ row, topUsed }: { row: CertifiedWire; topUsed?: 
               ) : (
                 <>
                   <PlusIcon size={13} />
-                  Use this
+                  Copy
                 </>
               )}
             </Button>
