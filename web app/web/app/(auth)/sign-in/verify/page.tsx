@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { AuthShell } from '@/components/auth/AuthShell';
 import { VerifyForm } from '@/components/auth/VerifyForm';
 import { resendDelay } from '@/lib/auth/policy';
-import { getPendingPhone, getResendWait, getToken } from '@/lib/auth/session';
+import { getPendingPhone, getResendWait, getSignupsPaused, getToken } from '@/lib/auth/session';
 
 export const metadata = { title: 'Enter the code · InclineYou' };
 
@@ -35,7 +35,7 @@ export default async function VerifyPage() {
       lead="Six digits. That is it."
       quote="No password to remember and nothing to reset — the code lands in about ten seconds."
     >
-      <VerifyForm phone={phone} initialCooldown={cooldown} />
+      <VerifyForm phone={phone} initialCooldown={cooldown} signupsPaused={await getSignupsPaused()} />
     </AuthShell>
   );
 }

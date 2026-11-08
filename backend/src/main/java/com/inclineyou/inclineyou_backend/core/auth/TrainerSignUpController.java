@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.auth;
 
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenFilter;
 import com.inclineyou.inclineyou_backend.core.auth.dto.AuthResponse;
 import com.inclineyou.inclineyou_backend.core.auth.dto.ClaimTrainerRequest;
 import jakarta.servlet.http.HttpServletRequest;

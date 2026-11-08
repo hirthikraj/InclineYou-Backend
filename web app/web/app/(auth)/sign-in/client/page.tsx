@@ -1,22 +1,13 @@
-import { AuthShell } from '@/components/auth/AuthShell';
-import { ClientSignIn } from '@/components/auth/ClientSignIn';
-
-export const metadata = { title: 'Client sign-in opens soon · InclineYou' };
+import { redirect } from 'next/navigation';
 
 /**
- * `/sign-in/client` — where `verifyCode` sends a number that is only a client's.
- *
- * No guard: there is no credential behind this screen and nothing on it reads
- * one. Visiting it directly shows a sentence and a button back to the start.
+ * `/sign-in/client` was the "Client sign-in opens soon" wall, for a verify the
+ * backend answered `403 CLIENT_SIGN_IN_UNAVAILABLE`. The backend has not sent that
+ * since the client lens (V20): a client's number now signs straight into the
+ * portal or onto its own wall (`/sign-in/paused`, `/removed`, `/unattached`). So
+ * nothing reaches this route; an old link lands on the ordinary sign-in.
+ * Removed 6 Nov 2026 with `ClientSignIn.tsx` and `isClientSignInUnavailable`.
  */
 export default function Page() {
-  return (
-    <AuthShell
-      eyebrow="Clients"
-      lead="Your trainer opens the door."
-      quote="InclineYou works from a trainer’s roster. Client sign-in is not open yet — your trainer will share it."
-    >
-      <ClientSignIn />
-    </AuthShell>
-  );
+  redirect('/sign-in');
 }

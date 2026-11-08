@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useState, useTransition, type ReactNode } from 'react';
 
 import { removePushSubscription, savePrefs, savePushSubscription, type PrefsChange } from '@/lib/portal/settings-actions';
 import type { PrefsWire } from '@/lib/portal/settings-api';
@@ -38,7 +38,8 @@ function fromKey(key: string): Uint8Array<ArrayBuffer> {
  * screen is the server's answer rather than a guess — so a refusal puts the switch back where it was and says why. About one notice a day at most is
  * the product's promise, not a field. Turning WhatsApp on is consent to be messaged by the platform, and the line beside it says exactly that.
  */
-export function PrefsForm({ prefs: initial, trainerFirstName, vapidKey }: { prefs: PrefsWire; trainerFirstName: string; vapidKey: string | null }) {
+/** `after`: cards drawn at the end of the same column — the signed-in devices section (UC-CP-38), which is not a preference. */
+export function PrefsForm({ prefs: initial, trainerFirstName, vapidKey, after }: { prefs: PrefsWire; trainerFirstName: string; vapidKey: string | null; after?: ReactNode }) {
   const [prefs, setPrefs] = useState(initial);
   const [pending, start] = useTransition();
   const [failure, setFailure] = useState<string | null>(null);
@@ -136,6 +137,7 @@ export function PrefsForm({ prefs: initial, trainerFirstName, vapidKey }: { pref
           </div>
         </Card.Body>
       </Card>
+      {after}
     </div>
   );
 }

@@ -52,7 +52,7 @@ Enforced in `config/SecurityConfig.java`, in this order — first match wins:
 
 | Path | Requirement |
 | --- | --- |
-| `POST /v1/trainers` | any authenticated token — the `pending` token's one route |
+| `POST /v1/trainers` | any authenticated token at the filter; the service accepts only `pending` and `trainer` (anything else `403 PHONE_HAS_ACCOUNT`) — the `pending` token's one route |
 | `/v1/auth/**`, `/health` | public |
 | everything else | `ROLE_TRAINER` |
 
@@ -99,13 +99,15 @@ branches on (`exception/GlobalExceptionHandler.java`):
 | `OTP_REQUEST_NOT_FOUND` | 404 | The sign-in `requestId` is unknown, used, expired or superseded. |
 | `PHONE_INVALID` | 400 | Fails the phone format. |
 | `CONSENT_REQUIRED` | 400 | A missing or outdated privacy-policy version on `POST /v1/trainers`. |
+| `PHONE_HAS_ACCOUNT` | 403 | 8 Nov 2026 — `POST /v1/trainers` from a credential that is not a new number's: a client's session or step-up ticket, or a pending token whose number has since become a client's. One number, one role. |
+| `ACCOUNT_CLOSED` | 403 | 8 Nov 2026 — `POST /v1/trainers` for a number whose account was closed; a closed account keeps its number (V36). |
 | `CLIENT_SIGN_IN_UNAVAILABLE` | 403 | The number is only a client's, and client sign-in is not open. |
 | `SESSION_EXPIRED` | 401 | The session (or pending token) is past its expiry. |
 | `SESSION_REVOKED` | 401 | The session was signed out elsewhere or by an account change. |
 | `OTP_LOCKED` | 429 | Too many wrong codes — number locked, carries a countdown. |
 | `OTP_THROTTLED` | 429 | Codes requested too fast — carries the real wait. |
 | `SIGN_IN_BLOCKED` | 403 | `POST /v1/auth/otp/request` from an address that asked codes for more than 5 different numbers in an hour, or collected 5 refused sends. Blocked for 24 h, then clears itself; nothing is sent. Carries `retryAfterSeconds`. Never a phone number — that would let anyone lock a trainer out. |
-| `SIGNUPS_PAUSED` | 503 | The day's budget for numbers with no account (100, system-wide) is spent. Known numbers are unaffected. Carries `retryAfterSeconds`. |
+| `SIGNUPS_PAUSED` | 503 | The day's budget for numbers with no account (100, system-wide) is spent. Known numbers are unaffected. Carries `retryAfterSeconds`. **Since 8 Nov 2026 only from the invite's code route** (`POST /v1/invites/{token}/code`, whose number is fixed by the link); `otp/request` answers `200` with `signupsPaused: true` instead, so the refusal cannot say whether a number has an account. |
 | `OTP_DELIVERY_FAILED` | 502 | WhatsApp refused or did not answer; the request is marked `failed`. |
 | `PHONE_IS_TRAINER` | 409 | That's the caller's own number — trainer/client duality is allowed for everyone else's. |
 | `PHONE_ON_ANOTHER_ROSTER` | 409 | That number is another coach's client **in this workspace**. Narrowed by V38: it used to mean "anywhere in the product", which made it impossible for one person to be a client of a private trainer and, separately, a client at a gym. |
@@ -132,7 +134,7 @@ branches on (`exception/GlobalExceptionHandler.java`):
 | `TICKET_EXPIRED` | 401 | The step-up ticket was right but has aged out or been spent — start the step-up again. |
 | `PHONE_INVALID` | 400 | The new number is not an E.164 Indian mobile. |
 | `SESSION_CANCELLED` | 409 | **Portal 11b.** Starting a workout against a cancelled session. |
-| `PHONE_UNCHANGED` · `PHONE_TAKEN` · `PHONE_CHANGE_UNPROVEN` | 400 · 409 · 401 | Also returned by the **portal's** number change (11e), with the trainer's meanings. `PHONE_TAKEN` never says who holds the number. |
+| `PHONE_UNCHANGED` · `PHONE_TAKEN` · `PHONE_CHANGE_UNPROVEN` | 400 · 409 · 401 | Also returned by the **portal's** number change (11e), with the trainer's meanings. `PHONE_TAKEN` never says who holds the number, and on the trainer's change it is only answered at `confirm`, after the new number's code was right. |
 
 The rows from `VALIDATION` down were added on 23 Sep 2026: the six V8 codes are
 new, and the rest already existed in the code and in their own sections below
@@ -184,7 +186,7 @@ Anything else is `400 PHONE_INVALID`.
 Returns `200`:
 
 ```json
-{ "requestId": "0b6f…", "expiresAt": 1790300600000, "resendAfterSeconds": 30 }
+{ "requestId": "0b6f…", "expiresAt": 1790300600000, "resendAfterSeconds": 30, "signupsPaused": false }
 ```
 
 `requestId` is the `otp_request` row's id: random, carrying no phone number. The
@@ -193,6 +195,18 @@ verify and to the status read. A new request for the same number **supersedes** 
 previous one — only the latest id can be verified. `resendAfterSeconds` is the
 next rung of the resend ladder, for the countdown. The answer is the same
 whether or not the number has an account.
+
+**`signupsPaused` (8 Nov 2026, appended):** the day's budget of first codes for numbers with
+no account (100, system-wide) is spent. It is read before anything is spent, so it is the
+same for every number asked at the same moment. On such a day this route **no longer answers
+`SIGNUPS_PAUSED`**: that refusal went only to unknown numbers while known ones got `200`, which
+told anyone whether a number has an account. Now every well-formed number gets this `200`; a
+number with an account is sent its code, an unknown one the budget cannot admit is not — but
+its request row, stored code (which nobody sees), resend ladder and delivery status (`sent`)
+are exactly a real one's, so verify can only answer `OTP_WRONG`, as for anybody else's number
+(`OtpAbuseGuard.beforeSignIn`, `OtpService.send(…, deliver = false)`). The web tells everyone
+on a paused day: *if this number has an account your code is on its way; if it is new, try
+tomorrow.* Residual: a send that skips WhatsApp returns faster than one that calls it.
 
 Throttled per number by a resend ladder (30s / 60s / 120s inside a 60-minute
 window) with a ceiling of 10 sends per rolling 24 hours — `429 OTP_THROTTLED`
@@ -253,9 +267,24 @@ solo workspace, the practice row and the trial. Answers the verify shape with
 
 Idempotent by target state: the pending token replayed, or a call from a session
 that already belongs to a trainer, answers **`200`** with the account that exists
-(the latter with its own credential echoed — no second session is minted). A
-phone that is already somebody's client can claim too; the existing row becomes
-the trainer's.
+(the latter with its own credential echoed — no second session is minted).
+Two claims from one number at once are serialised on a per-number advisory lock,
+so the second waits for the first and answers `200` with its row (until 8 Nov
+2026 it collided on `app_user_phone_key` and was a 500).
+The pending token may ask again only for **2 minutes after the claim**
+(`AuthService.CLAIM_REPLAY_WINDOW`) — enough for a double tap or a retried
+request. After that it is `401 SESSION_EXPIRED`: the JWT cannot be revoked, and
+every replay mints a new trainer session, so for the rest of its fifteen minutes
+it would otherwise keep making sessions, even after the trainer signed out.
+
+**One number, one role (8 Nov 2026).** Only a `pending` token or a trainer's own
+credential may claim. A client's session or step-up ticket — or a pending token
+whose number became a client's while it was alive — is `403 PHONE_HAS_ACCOUNT`,
+and nothing changes; until 8 Nov the client's `app_user` was turned into a
+trainer's, after which sign-in sent them to an empty workspace and their portal
+was unreachable. A number whose account was **closed** is `403 ACCOUNT_CLOSED`:
+verify still answers it as new (it reads live rows only), but the closed row keeps
+the number.
 
 No live pending token or session is `401 SESSION_EXPIRED`.
 
@@ -280,6 +309,14 @@ below it can tell which answered.
 | Revocable | **no**; it expires on its own clock | **yes**, immediately |
 | Switching workspace | a new token, because the workspace is a signed claim | an `UPDATE`; the browser keeps the token it has |
 | Shape | three dot-separated segments | begins `xs_` |
+
+**The web's caller address (8 Nov 2026).** Every web request reaches the API from the Next server, so
+`getRemoteAddr()` is the same for every web user. The web sends the browser's address as
+`X-InclineYou-Forwarded-For` together with `X-InclineYou-Proxy-Key` (= `WEB_PROXY_SECRET`); with a matching
+key that address is the caller for the OTP abuse guard, the invite code sends, the `AUTH`/`STANDARD`
+rate-limit keys of unsigned requests and a session's recorded IP (`ClientAddress`). Without the key both
+headers are ignored. Unset in production, the sixth number to ask for a code within an hour blocks the
+web's address — everyone — for 24 hours.
 
 A session token may travel as `Authorization: Bearer xs_…` **or** in an
 `inclineyou_session` cookie — the cookie so that browser JavaScript never has to hold
@@ -489,7 +526,7 @@ Refusals, each with a `code` and a sentence in `detail`:
 | Code | Status | Means |
 | --- | --- | --- |
 | `PHONE_UNCHANGED` | 400 | the new number is the one they are already on |
-| `PHONE_TAKEN` | 409 | somebody already holds it — **it does not say who**, or this endpoint would answer *is this number on InclineYou* for any number in India |
+| `PHONE_TAKEN` | 409 | somebody already holds it — **it does not say who**, and since 8 Nov 2026 it is answered only by `confirm`, after the new number's code was right (`request` sends a code either way), or this endpoint would answer *is this number on InclineYou* for any number in India |
 | `OTP_WRONG` · `OTP_EXPIRED` · `OTP_LOCKED` · `OTP_THROTTLED` | as at sign-in | the same three, from the same service |
 
 Availability is checked at **step 3 and again at step 4**: once so that a number
@@ -2011,7 +2048,7 @@ New error codes: `PACK_NAME_TAKEN` · `PACK_SOLD` · `GYM_PACK_NEEDS_GYM` · `PA
 
 ## Settings v1.1 — account & sign-in (3 Oct 2026)
 
-Contract: `release/api-contract-v1.1.html`, Settings (A9–A10). `core/trainer/StepUp*`, `AccountController`, `AccountDeleteController`; `core/auth/Sessions*`. **TRAINER-only** except the sessions routes (any signed-in role). AUTH tier for `/v1/auth/**` and `/v1/trainers/me/phone/*` (each spends or settles an OTP); `DELETE /v1/trainers/me` is STANDARD.
+Contract: `release/api-contract-v1.1.html`, Settings (A9–A10). `core/trainer/StepUp*`, `AccountController`, `AccountDeleteController`; `core/auth/session/Sessions*`. **TRAINER-only** except the sessions routes (any signed-in role). AUTH tier for `/v1/auth/**` and `/v1/trainers/me/phone/*` (each spends or settles an OTP); `DELETE /v1/trainers/me` is STANDARD.
 
 ### Step-up — one proof for the two dangerous acts
 
@@ -2031,8 +2068,8 @@ Contract: `release/api-contract-v1.1.html`, Settings (A9–A10). `core/trainer/S
 
 | Route | What it does |
 | --- | --- |
-| `POST /v1/trainers/me/phone/request` `{ticket, phone}` → `204` | Ticket purpose `phone_change`. `400 PHONE_INVALID` (not an E.164 Indian mobile), `400 PHONE_UNCHANGED`, `409 PHONE_TAKEN` (never says whose; soft-deleted rows count as occupied) — all **before** a code is spent. Then a code to the new number. |
-| `POST /v1/trainers/me/phone/confirm` `{ticket, phone, otp}` → `{phone}` | The new number's code. `trainer`/`app_user` swap and **every other web session is ended** (`revoked_reason = 'phone_changed'`) in one transaction; the caller's own session survives, so **no token comes back** — keep the one you have. A trainer's session subject is the trainer id, so a JWT stays valid too (the phone is not signed out by this). |
+| `POST /v1/trainers/me/phone/request` `{ticket, phone}` → `204` | Ticket purpose `phone_change`. `400 PHONE_INVALID` (not an E.164 Indian mobile), `400 PHONE_UNCHANGED` — both **before** a code is spent. Then a code to the new number, **whether or not it is taken** (prove first, 8 Nov 2026 — `PHONE_TAKEN` moved to `confirm`, so this route answers a taken and a free number alike). **8 Nov 2026:** `429 OTP_THROTTLED` + `retryAfterSeconds` once the trainer has asked codes for **3 different new numbers in 24 h** (`app.otp.abuse.max-numbers-per-account`; a resend to one already asked is free), or when the shared new-number budget is spent — `OtpAbuseGuard.beforeAccountSend`, so the cap bounds the codes one account can send to strangers. Before this, one session could text thousands of strangers and spend Meta's daily recipient ceiling, after which no sign-in code went out. |
+| `POST /v1/trainers/me/phone/confirm` `{ticket, phone, otp}` → `{phone}` | The new number's code, **checked first**: a wrong one is `401 OTP_WRONG` whatever the number. Only after a right code, `409 PHONE_TAKEN` if somebody holds the number (soft-deleted rows count) — so "taken" is only ever told to whoever holds that phone (prove first, 8 Nov 2026). Then the `trainer`/`app_user` swap and **every other web session is ended** (`revoked_reason = 'phone_changed'`) in one transaction; the caller's own session survives, so **no token comes back** — keep the one you have. A trainer's session subject is the trainer id, so a JWT stays valid too (the phone is not signed out by this). |
 
 ### Signed-in browsers
 

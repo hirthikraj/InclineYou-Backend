@@ -79,6 +79,10 @@ spring:
 
   data:
     redis:
+      # No Spring Data Redis repositories exist (Redis holds counters and caches, written by hand), and the scan only
+      # puts five "could not safely identify store assignment" lines in every boot log.
+      repositories:
+        enabled: false
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
@@ -149,6 +153,9 @@ app:
   web:
     # The web app's public origin: the host in an invite link (/invite/{token}). WEB_BASE_URL, no trailing slash.
     base-url: ${WEB_BASE_URL:http://localhost:3000}
+    # Shared with the Next server (INCLINEYOU_PROXY_SECRET there). Every web request comes from Next's one address,
+    # so without this every web user shares one rate-limit bucket and one abuse-guard count. See ClientAddress.
+    proxy-secret: ${WEB_PROXY_SECRET:}
   push:
     # The public half of the VAPID key pair the client portal's browsers subscribe with. Empty = push is off (the switch is hidden).
     vapid-public-key: ${VAPID_PUBLIC_KEY:}
@@ -249,4 +256,5 @@ app:
       max-strikes-per-ip: 100000
       block-hours: 1
       new-numbers-per-day: 100000
+      max-numbers-per-account: 100000
     max-sends-per-day: 1000

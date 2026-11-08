@@ -1,6 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.invite;
 
-import com.inclineyou.inclineyou_backend.core.auth.ClientSignInLookup;
+import com.inclineyou.inclineyou_backend.core.auth.client.ClientSignInLookup;
 import com.inclineyou.inclineyou_backend.core.invite.dto.InviteCard;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import com.inclineyou.inclineyou_backend.shared.wire.Items;
@@ -9,9 +9,9 @@ import org.springframework.http.CacheControl;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
-import com.inclineyou.inclineyou_backend.core.auth.AuthTokenFilter;
-import com.inclineyou.inclineyou_backend.core.auth.AuthTokenService;
-import com.inclineyou.inclineyou_backend.core.auth.SessionTokenIssuer;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenFilter;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenService;
+import com.inclineyou.inclineyou_backend.core.auth.token.SessionTokenIssuer;
 import com.inclineyou.inclineyou_backend.core.invite.dto.AcceptedClient;
 import com.inclineyou.inclineyou_backend.core.invite.dto.MeAcceptRequest;
 import com.inclineyou.inclineyou_backend.shared.wire.EmptyBody;

@@ -3,6 +3,7 @@ import 'server-only';
 import { cache } from 'react';
 
 import { getToken } from '@/lib/auth/session';
+import { forwardedFor } from '@/lib/http/forwarded';
 
 /**
  * The one way a server component or server action talks to the backend.
@@ -84,6 +85,8 @@ export async function api<T>(path: string, options: ApiOptions = {}): Promise<T>
     ...extra,
     // Every web request says it is the web (api-contract *Conventions*).
     'x-inclineyou-client': 'web',
+    // The browser's address, or every signed-out web user shares one rate-limit bucket.
+    ...(await forwardedFor()),
   };
   if (auth) {
     const token = await getToken();

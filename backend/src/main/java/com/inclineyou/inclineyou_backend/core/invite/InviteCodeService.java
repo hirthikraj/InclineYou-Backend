@@ -1,7 +1,7 @@
 package com.inclineyou.inclineyou_backend.core.invite;
 
-import com.inclineyou.inclineyou_backend.core.auth.OtpRequest;
-import com.inclineyou.inclineyou_backend.core.auth.OtpService;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpRequest;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpService;
 import com.inclineyou.inclineyou_backend.core.auth.dto.OtpRequested;
 import com.inclineyou.inclineyou_backend.core.client.InviteToken;
 import com.inclineyou.inclineyou_backend.core.invite.dto.InviteCodeRequest;
@@ -60,7 +60,7 @@ public class InviteCodeService {
                     "This isn’t available for you. Please talk to your trainer.");
         }
         var issued = otp.send(target.phone(), OtpRequest.SIGN_IN);
-        return new OtpRequested(issued.requestId().toString(), issued.expiresAt().toEpochMilli(), issued.resendAfterSeconds());
+        return new OtpRequested(issued.requestId().toString(), issued.expiresAt().toEpochMilli(), issued.resendAfterSeconds(), false);
     }
 
     /** The number a code will go to — for the controller's per-number abuse guard, which keys on it. Empty for a dead link. */

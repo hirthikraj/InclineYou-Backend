@@ -1,5 +1,13 @@
 package com.inclineyou.inclineyou_backend.core.auth;
 
+import com.inclineyou.inclineyou_backend.core.auth.client.ClientSignInLookup;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpAbuseGuard;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpRequest;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpService;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthPrincipal;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenService;
+import com.inclineyou.inclineyou_backend.core.auth.token.IssuedToken;
+import com.inclineyou.inclineyou_backend.core.auth.token.JwtService;
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository.Identity;
 import com.inclineyou.inclineyou_backend.core.auth.dto.AuthResponse;
 import com.inclineyou.inclineyou_backend.core.auth.dto.ClaimTrainerRequest;
@@ -16,6 +24,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -30,9 +39,10 @@ import java.util.UUID;
  * answers a trainer's session, or a short-lived {@code pending} token for a new
  * number, which spends it on {@link #becomeTrainer}.
  *
- * <p>v1 is the trainer web app alone, so a number that is only a client's has
- * nowhere to go: {@link #verifyOtp} answers it 403 {@code CLIENT_SIGN_IN_UNAVAILABLE}
- * and opens no session (api-contract R60). A number that is both a trainer and
+ * <p>A number that is only a client's signs into the client portal through the
+ * client lens (V20, {@code ClientLensResolver}); the {@code CLIENT_SIGN_IN_UNAVAILABLE}
+ * refusal of the trainer-only build (api-contract R60) is no longer sent, and the
+ * web's wall for it was removed on 6 Nov 2026. A number that is both a trainer and
  * somebody's client signs in as the trainer.
  *
  * <p>{@link AppUserRepository#findIdentityByPhone} returns the role and the
@@ -64,14 +74,15 @@ public class AuthService {
      * The same answer whether or not the number has an account, so the endpoint
      * cannot be used to find out who has signed up.
      */
-    public OtpRequested requestOtp(SendOtpRequest req) {
+    public OtpRequested requestOtp(SendOtpRequest req, OtpAbuseGuard.SignInAdmission admission) {
         String phone = req == null ? null : req.phone();
         if (phone == null || !phone.matches(SendOtpRequest.PHONE_PATTERN)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "PHONE_INVALID", SendOtpRequest.PHONE_MESSAGE);
         }
-        var issued = otpService.send(phone, OtpRequest.SIGN_IN);
+        var a = admission == null ? OtpAbuseGuard.SignInAdmission.OPEN : admission;
+        var issued = otpService.send(phone, OtpRequest.SIGN_IN, a.deliver());
         return new OtpRequested(issued.requestId().toString(),
-                issued.expiresAt().toEpochMilli(), issued.resendAfterSeconds());
+                issued.expiresAt().toEpochMilli(), issued.resendAfterSeconds(), a.signupsPaused());
     }
 
     /** "Did the WhatsApp message arrive?" — keyed by the id the caller was given, never by a number. */
@@ -171,10 +182,17 @@ public class AuthService {
      * after a dropped response, or a call from a session that is already a
      * trainer's answers the account that exists (200) rather than failing.
      *
-     * <p>A phone that is already somebody's client can claim a trainer account
-     * too — claiming is what makes trainer the *home* role from here on: the
-     * existing {@code app_user} row is updated to {@code role = 'trainer'}
-     * rather than refused.
+     * <p><b>One number, one role (D-06, kept 8 Nov 2026).</b> Only two credentials
+     * may call this: the {@code pending} token of a number with no account, and a
+     * trainer's own (the repeat call). A client's session or a client's step-up
+     * ticket also carries a phone as its subject, and until 8 Nov this method took
+     * that as enough and turned the client's {@code app_user} into a trainer —
+     * after which sign-in routed them to an empty workspace and they could no
+     * longer reach their portal. Both are now {@code 403 PHONE_HAS_ACCOUNT}, as is a
+     * pending token whose number became a client while it was alive (a pending
+     * session may accept an invite, D-16). A number whose account was CLOSED keeps
+     * its number (V36), so it is {@code 403 ACCOUNT_CLOSED}, not a second
+     * {@code app_user} colliding on {@code app_user_phone_key}.
      *
      * @param subject  the caller's credential subject: a trainer UUID for a trainer, the phone for a {@code pending} token
      * @param role     the caller's role, {@code trainer} or {@code pending}
@@ -191,15 +209,20 @@ public class AuthService {
         if (JwtService.ROLE_TRAINER.equals(role)) {
             return new Claimed(alreadyTrainer(subject, rawToken), false);
         }
+        // Only the token of a number with no account may claim. A client's session and a client's step-up ticket carry a phone as
+        // their subject too, which is why the role is checked and not merely the subject's shape.
+        if (!JwtService.ROLE_PENDING.equals(role)) throw phoneHasAccount();
 
-        // A pending token carries the phone alone; anything else here is a credential that cannot claim.
         String phone = subject;
         if (phone == null || !phone.matches(SendOtpRequest.PHONE_PATTERN)) {
             throw new ApiException(HttpStatus.UNAUTHORIZED, "SESSION_EXPIRED",
                     "Sign in again to create your account.");
         }
 
-        Optional<AppUser> existing = appUserRepo.findByPhoneAndDeletedAtIsNull(phone);
+        // A double tap waits here for the first to commit, then finds its row (see lockClaim).
+        appUserRepo.lockClaim(phone);
+        // Live or closed: app_user_phone_key does not look at deleted_at, so a closed account still holds the number.
+        Optional<AppUser> existing = appUserRepo.findByPhone(phone);
 
         AppUser user;
         if (existing.isEmpty()) {
@@ -209,14 +232,14 @@ public class AuthService {
             user = appUserRepo.save(user);
         } else {
             user = existing.get();
-            if (!AppUser.ROLE_TRAINER.equals(user.getRole())) {
-                user.setRole(AppUser.ROLE_TRAINER);
+            if (user.getDeletedAt() != null) {
+                throw new ApiException(HttpStatus.FORBIDDEN, "ACCOUNT_CLOSED",
+                        "The account on this number was closed, so it can't be used to sign up again.");
             }
+            // The pending token outlived the moment its number became a client's (an invite accepted in the same sitting).
+            if (!AppUser.ROLE_TRAINER.equals(user.getRole())) throw phoneHasAccount();
         }
-        // Both together, always — `app_user_privacy_pair` refuses one without the
-        // other, because a row that has accepted "something" with no version on it
-        // is not a consent the product can point to. Stamped once: a second
-        // acceptance does not move the date of the first.
+        // Consent pair: both together (app_user_privacy_pair), stamped once.
         if (user.getPrivacyAcceptedAt() == null) {
             user.setPrivacyAcceptedAt(Instant.now());
             user.setPrivacyPolicyVersion(version);
@@ -226,23 +249,17 @@ public class AuthService {
         UUID appUserId = user.getId();
         Optional<Trainer> found = trainerRepo.findByAppUserIdAndDeletedAtIsNull(appUserId);
         boolean created = found.isEmpty();
+        // Account already made = a replay of this pending token. Allowed briefly for a double tap; af  ter that it would keep
+        // minting sessions from an unrevocable JWT.
+        if (!created && claimedTooLongAgo(found.get())) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "SESSION_EXPIRED", "Your account is ready. Sign in to open it.");
+        }
         Trainer trainer = found.orElseGet(() -> {
             Trainer t = new Trainer();
             t.setAppUserId(appUserId);
-            // Same placeholder as the old phone-on-trainer shape: not a real
-            // name until setup replaces it — displayName() below is what keeps
-            // it off screen until then.
-            t.setName(phone);
-            // home_tenant_id is left null on purpose. `ensure_home_tenant`
-            // (BEFORE INSERT, SECURITY DEFINER) fills it, and the three
-            // AFTER INSERT triggers behind it — ensure_home_membership,
-            // ensure_trainer_business, ensure_subscription — provision the
-            // owner membership, the practice row and the trial in the
-            // same INSERT. Doing any of that here, as the request-scoped
-            // `inclineyou_app` role, would hit `tenant`'s row-level
-            // security head-on: there is no INSERT policy for it at all,
-            // by design, because nothing outside these triggers is
-            // supposed to create a workspace.
+            t.setName(phone); // placeholder until setup; displayName() hides it
+            // home_tenant_id stays null: the insert triggers create the workspace, membership, practice row and trial
+            // (inclineyou_app has no INSERT policy on tenant, by design).
             return trainerRepo.save(t);
         });
 
@@ -267,6 +284,20 @@ public class AuthService {
         return response(token, VIEW_TRAINER, false, trainer.getId(),
                 displayName(trainer.getName(), user.getPhone()), trainer.getSetupCompletedAt(),
                 user.getPrivacyPolicyVersion());
+    }
+
+    /** How long after the claim its pending token may still ask again (a double tap, a retried request). */
+    static final Duration CLAIM_REPLAY_WINDOW = Duration.ofMinutes(2);
+
+    private static boolean claimedTooLongAgo(Trainer trainer) {
+        Instant at = trainer.getCreatedAt();
+        return at == null || at.plus(CLAIM_REPLAY_WINDOW).isBefore(Instant.now());
+    }
+
+    /** One number, one role: a number that is already a client's cannot also become a trainer's. */
+    private static ApiException phoneHasAccount() {
+        return new ApiException(HttpStatus.FORBIDDEN, "PHONE_HAS_ACCOUNT",
+                "This number already has an account. Sign in with it instead.");
     }
 
     /** The placeholder name trainer setup has not replaced yet is not a name. */

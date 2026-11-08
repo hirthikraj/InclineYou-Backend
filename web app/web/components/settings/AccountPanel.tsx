@@ -7,6 +7,7 @@ import { AccountAside } from '@/components/settings/AccountAside';
 import { DeleteAccount } from '@/components/settings/DeleteAccount';
 import { SaveRow } from '@/components/settings/IdentityForm';
 import { PhoneChange } from '@/components/settings/PhoneChange';
+import { SignedInDevices } from '@/components/devices/SignedInDevices';
 import type { Message } from '@/lib/auth/copy';
 import {
   cancelPhoneChange,
@@ -17,8 +18,10 @@ import {
   verifyCurrentNumber,
 } from '@/lib/account/actions';
 import type { Account } from '@/lib/account/api';
+import type { Device } from '@/lib/devices/api';
 import { MAX_EMAIL, MAX_NAME, looksLikeEmail } from '@/lib/account/rules';
 import { Card } from '@/web-components/ui/Card';
+import { isUpiFormat } from '@/lib/setup/upi';
 import { Tag } from '@/web-components/ui/Tag';
 import { Field, TextField } from '@/web-components/ui/Field';
 
@@ -60,14 +63,18 @@ import { Field, TextField } from '@/web-components/ui/Field';
 export function AccountPanel({
   initial,
   clientCount,
+  devices,
 }: {
   initial: Account;
   /** For the delete confirmation, which names what is going. Null if unknown. */
   clientCount: number | null;
+  /** Signed-in browsers. Null if the list could not be read. */
+  devices: Device[] | null;
 }) {
   const [saved, setSaved] = useState(initial);
   const [name, setName] = useState(initial.name);
   const [email, setEmail] = useState(initial.email);
+  const [upi, setUpi] = useState(initial.upiVpa);
   // Only checked once the field has been left, so a half-typed address is never
   // called wrong while it is still being typed. The same `onBlur` gate the map
   // link and the two social fields use.
@@ -77,12 +84,14 @@ export function AccountPanel({
 
   const trimmed = email.trim();
   const emailBroken = touched && trimmed.length > 0 && !looksLikeEmail(trimmed);
-  const dirty = name !== saved.name || email !== saved.email;
+  const upiTrimmed = upi.trim();
+  const upiBroken = touched && upiTrimmed.length > 0 && !isUpiFormat(upiTrimmed);
+  const dirty = name !== saved.name || email !== saved.email || upi !== saved.upiVpa;
 
   function submit() {
     setMessage(null);
     start(async () => {
-      const result = await saveAccount({ name, email });
+      const result = await saveAccount({ name, email, upiVpa: upi });
       if (!result.ok) {
         setMessage({ tone: 'err', icon: 'warn', lead: result.message });
         return;
@@ -90,6 +99,7 @@ export function AccountPanel({
       setSaved(result.account);
       setName(result.account.name);
       setEmail(result.account.email);
+      setUpi(result.account.upiVpa);
       setTouched(false);
       setMessage({
         tone: 'ok',
@@ -119,7 +129,11 @@ export function AccountPanel({
       The rung is a CONTAINER query on `.acxw`, not a viewport one: the rail
       expands and collapses, so the same window hands this page two widths (the
       same reason `ui/Sidecar.tsx` gives). One column below it, in the order
-      you, this account, signing in, delete.
+      you, this account, signing in, signed-in devices, delete.
+
+      8 Nov 2026: *Signed-in devices* sits beside *Signing in* (both are about
+      how this account is reached), so *Delete* now takes the full width of a
+      third row.
     */
     <div className="acxw">
     <div className="acx">
@@ -219,6 +233,42 @@ export function AccountPanel({
             (`message` is non-null on success, which is why it is in the test).
             Nothing on screen moves that was not already moving.
           */}
+          {/*
+            THE UPI ID, editable after setup (6 Nov 2026). It used to be written by
+            setup's last step and nowhere else, so a trainer who changed bank could
+            not change it — and it now reaches clients: the Payment reminder's
+            `{pay_by_upi}` and the portal's *Pay with UPI* both use it. Checked for
+            shape only, and the hint says so: nothing here confirms the account.
+          */}
+          <Field
+            id="ac-upi"
+            className="mt3"
+            label={<>UPI ID <Optional /></>}
+            error={upiBroken ? 'That doesn’t look like a UPI ID — it should look like name@bank.' : undefined}
+            hint="Clients see it on what they owe and in your payment reminders. Check it letter by letter — we can’t confirm the account is yours."
+          >
+            {(props) => (
+              <input
+                {...props}
+                className="ctl"
+                type="text"
+                value={upi}
+                maxLength={100}
+                autoComplete="off"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                placeholder="98xxxxxx10@okaxis"
+                disabled={pending}
+                onBlur={() => setTouched(true)}
+                onChange={(e) => {
+                  setUpi(e.target.value);
+                  if (message) setMessage(null);
+                }}
+              />
+            )}
+          </Field>
+
           {dirty || pending || message ? <MessageSlot message={message} /> : null}
 
           {/*
@@ -231,7 +281,7 @@ export function AccountPanel({
           <SaveRow
             pending={pending}
             dirty={dirty}
-            note="Your email is never shown to a client."
+            note="Your email is never shown to a client. Your UPI ID is, so they can pay you."
           />
         </form>
       </Card>
@@ -262,8 +312,14 @@ export function AccountPanel({
         />
       </Card>
 
-      {/* ── 3 · leaving ───────────────────────────────────────────────────── */}
+      {/* ── beside it: where this account is signed in, and the way to end any of it (UC-AUTH-10) ── */}
+      <Card title="Signed-in devices">
+        <SignedInDevices initial={devices} />
+      </Card>
+
+      {/* ── 3 · leaving — the full width under the two rows ─────────────────── */}
       <Card
+        className="acx__wide"
         title="Delete your account"
         aside={<><Tag tone="danger">Permanent</Tag></>}
       >

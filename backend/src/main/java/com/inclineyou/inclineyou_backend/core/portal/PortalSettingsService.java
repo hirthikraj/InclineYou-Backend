@@ -2,7 +2,7 @@ package com.inclineyou.inclineyou_backend.core.portal;
 
 import com.inclineyou.inclineyou_backend.core.assessment.AssessmentCatalogue;
 import com.inclineyou.inclineyou_backend.core.portal.dto.PortalSettings;
-import com.inclineyou.inclineyou_backend.core.auth.SessionStore;
+import com.inclineyou.inclineyou_backend.core.auth.session.SessionStore;
 import com.inclineyou.inclineyou_backend.core.trainer.StepUpService;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import com.inclineyou.inclineyou_backend.shared.wire.IfMatch;

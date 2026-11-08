@@ -1,6 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.invite;
 
-import com.inclineyou.inclineyou_backend.core.auth.OtpSender;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpSender;
 
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;

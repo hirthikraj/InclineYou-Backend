@@ -1,6 +1,6 @@
 package com.inclineyou.inclineyou_backend.infrastructure.config;
 
-import com.inclineyou.inclineyou_backend.core.auth.AuthTokenFilter;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenFilter;
 import com.inclineyou.inclineyou_backend.infrastructure.ratelimit.RateLimitFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;

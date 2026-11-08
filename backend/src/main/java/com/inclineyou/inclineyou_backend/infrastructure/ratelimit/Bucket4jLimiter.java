@@ -79,6 +79,30 @@ public class Bucket4jLimiter {
     }
 
     /**
+     * Whether {@link #tryConsume} would allow one right now — a read, nothing taken. For a state that must be
+     * reported identically to every caller (the sign-in budget's "paused" flag), which a consume cannot give: it
+     * would charge the caller who asks.
+     */
+    public boolean hasToken(String key, long capacity, Duration period) {
+        if (capacity <= 0) return true;
+        ProxyManager<String> manager = proxyManager.get();
+        if (manager != null) {
+            try {
+                return manager.builder()
+                        .build(key, () -> configuration(capacity, period))
+                        .getAvailableTokens() >= 1;
+            } catch (RuntimeException e) {
+                proxyManager.invalidate();
+                complain(e);
+            }
+        }
+        var tier = new com.inclineyou.inclineyou_backend.infrastructure.config.AppProperties.Tier();
+        tier.setLimit((int) Math.min(Integer.MAX_VALUE, capacity));
+        tier.setWindowSeconds((int) Math.max(1, period.toSeconds()));
+        return fallback.hasToken(key, tier);
+    }
+
+    /**
      * Greedy refill: tokens return continuously rather than all at once.
      *
      * The alternative, `refillIntervally`, hands back the whole capacity on a

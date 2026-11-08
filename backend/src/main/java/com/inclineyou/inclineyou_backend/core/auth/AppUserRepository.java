@@ -1,6 +1,5 @@
 package com.inclineyou.inclineyou_backend.core.auth;
 
-import com.inclineyou.inclineyou_backend.core.auth.AppUser;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -25,6 +24,15 @@ public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
      * account keeps its number, which is what the delete confirmation promises.
      */
     Optional<AppUser> findByPhone(String phone);
+
+    /**
+     * Serialises the claims of one number for the rest of the transaction ({@code POST /v1/trainers}). Without it a double tap
+     * that lands twice before either commits has both find no {@code app_user} and both insert, and the loser is a unique
+     * violation — a 500 where the contract promises "a double tap can't fail". With it the second waits, then finds the row the
+     * first made and answers it. An advisory lock rather than {@code SELECT … FOR UPDATE} because there is no row to lock yet.
+     */
+    @Query(value = "SELECT 1 FROM (SELECT pg_advisory_xact_lock(hashtext('claim:' || :phone))) AS locked", nativeQuery = true)
+    Integer lockClaim(@Param("phone") String phone);
 
 
     /**

@@ -4,6 +4,8 @@ import {
   LOCK_SECONDS,
   RESEND_LADDER,
 } from './policy';
+import { forwardedFor } from '@/lib/http/forwarded';
+
 import { getToken } from './session';
 import type { AuthResponse, DeliveryStatus, OtpFailure, OtpRequested, SendFailure } from './types';
 
@@ -75,6 +77,8 @@ async function fetchJson<T>(path: string, init: RequestInit): Promise<T> {
          * (api-contract *Sign in*).
          */
         'x-inclineyou-client': 'web',
+        // The browser's address, or every web user is one caller to the abuse guard.
+        ...(await forwardedFor()),
         ...(init.headers as Record<string, string> | undefined),
       },
       // Auth is the one thing that must never be served from a cache.
@@ -262,14 +266,6 @@ export function refusalCode(err: unknown): string | null {
   return err instanceof ApiRefusal ? (err.refusal.body.code?.toUpperCase() ?? null) : null;
 }
 
-/**
- * True for the 403 a verify answers for a number that is only somebody's client.
- * Client sign-in is not open in v1, and nothing was minted — the screen for it
- * is `/sign-in/client`.
- */
-export function isClientSignInUnavailable(err: unknown): boolean {
-  return refusalCode(err) === 'CLIENT_SIGN_IN_UNAVAILABLE';
-}
 
 /**
  * True for anything this module raises: a refusal from the server, or no answer

@@ -184,26 +184,39 @@ export interface Account {
   phone: string;
   /** A contact address, and NOT a login. `''` for never answered. V36. */
   email: string;
+  /**
+   * The UPI ID clients pay on — `trainer_business.upi_vpa`. `''` for never set.
+   * Set in setup's last step and, since 6 Nov 2026, editable here: it feeds the
+   * Payment reminder's `{pay_by_upi}` and the portal's *Pay with UPI*, so a
+   * trainer who changes bank must be able to change it.
+   */
+  upiVpa: string;
 }
 
 interface TrainerWire {
   name: string;
   phone: string | null;
   email?: string | null;
+  upiVpa?: string | null;
+}
+
+function accountOf(t: TrainerWire): Account {
+  return {
+    name: t.name === t.phone ? '' : t.name,
+    phone: t.phone ?? '',
+    email: t.email ?? '',
+    upiVpa: t.upiVpa ?? '',
+  };
 }
 
 export async function getAccount(): Promise<Account> {
   const t = await request<TrainerWire>('/v1/trainers/me');
-  return {
-    // At first verify the backend writes the PHONE NUMBER into `trainer.name`
-    // as a placeholder, so a name equal to its phone is an absence rather than
-    // an answer. The same guard `lib/profile/api.ts` and the phone's
-    // `profileSync.ts` both apply — and it matters more here than there,
-    // because this screen draws the name and the number one above the other.
-    name: t.name === t.phone ? '' : t.name,
-    phone: t.phone ?? '',
-    email: t.email ?? '',
-  };
+  // At first verify the backend writes the PHONE NUMBER into `trainer.name`
+  // as a placeholder, so a name equal to its phone is an absence rather than
+  // an answer (`accountOf`). The same guard `lib/profile/api.ts` and the phone's
+  // `profileSync.ts` both apply — and it matters more here than there,
+  // because this screen draws the name and the number one above the other.
+  return accountOf(t);
 }
 
 /**
@@ -214,12 +227,12 @@ export async function getAccount(): Promise<Account> {
  * a working week it never drew. The profile's own tabs make the same argument at
  * length in `lib/profile/actions.ts`; this is that rule reaching one level up.
  */
-export async function patchAccount(patch: { name?: string; email?: string }): Promise<Account> {
+export async function patchAccount(patch: { name?: string; email?: string; upiVpa?: string }): Promise<Account> {
   const t = await request<TrainerWire>('/v1/trainers/me', {
     method: 'PATCH',
     body: JSON.stringify(patch),
   });
-  return { name: t.name === t.phone ? '' : t.name, phone: t.phone ?? '', email: t.email ?? '' };
+  return accountOf(t);
 }
 
 /* ──────────────────────────────────────────────────── changing the number ── */

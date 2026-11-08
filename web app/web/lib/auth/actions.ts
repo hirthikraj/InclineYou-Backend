@@ -8,7 +8,6 @@ import {
   claimTrainerAccount,
   endSession,
   getDelivery,
-  isClientSignInUnavailable,
   readSendFailure,
   readVerifyFailure,
   refusalCode,
@@ -33,6 +32,7 @@ import {
   setPolicyVersion,
   setRequestId,
   setResendAt,
+  setSignupsPaused,
   setToken,
 } from './session';
 import type {
@@ -78,7 +78,9 @@ export async function sendCode(phoneInput: string): Promise<RequestResult> {
   await setRequestId(issued.requestId);
   await setResendAt(Date.now() + issued.resendAfterSeconds * 1000);
   await setPendingPhone(phone);
-  return { ok: true, resendAfterSeconds: issued.resendAfterSeconds };
+  const signupsPaused = issued.signupsPaused === true;
+  await setSignupsPaused(signupsPaused);
+  return { ok: true, resendAfterSeconds: issued.resendAfterSeconds, signupsPaused };
 }
 
 /**
@@ -118,13 +120,6 @@ export async function verifyCode(otp: string): Promise<VerifyResult> {
   try {
     session = await verifyOtp(requestId, code);
   } catch (err) {
-    if (isClientSignInUnavailable(err)) {
-      // The code was right and the number is only somebody's client. Nothing was
-      // minted; this is a wall, not a failure, and it spends nothing now either.
-      await clearRequestId();
-      await clearPendingPhone();
-      return { ok: true, next: '/sign-in/client', role: 'client', trainerName: null };
-    }
     return { ok: false, failure: readVerifyFailure(err) };
   }
 
@@ -200,6 +195,14 @@ export async function claimTrainer(): Promise<ClaimResult> {
     // The pending token is good for fifteen minutes. Past that, or once the
     // notice has moved on, nothing was created and starting again is the fix.
     if (code === 'SESSION_EXPIRED' || code === 'CONSENT_REQUIRED') return { ok: false, message: LAPSED };
+    // One number, one role (8 Nov 2026). Neither created anything, so neither may
+    // say "try again": pressing the button again gets the same answer.
+    if (code === 'ACCOUNT_CLOSED') {
+      return { ok: false, message: 'The account on this number was closed, so it can’t be opened again. Use a different number.' };
+    }
+    if (code === 'PHONE_HAS_ACCOUNT') {
+      return { ok: false, message: 'This number already has an account. Sign in again to open it.' };
+    }
     // Deliberately one sentence and not a taxonomy. The failure modes here are a
     // dropped connection and a 500, both of which mean "try again" — and the one
     // thing worth promising is what did NOT happen, because the button creates an

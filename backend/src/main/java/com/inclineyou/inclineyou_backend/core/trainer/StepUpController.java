@@ -1,6 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.trainer;
 
-import com.inclineyou.inclineyou_backend.core.auth.AuthTokenFilter;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenFilter;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.StepUpRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.StepUpTicketResponse;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.StepUpVerifyRequest;

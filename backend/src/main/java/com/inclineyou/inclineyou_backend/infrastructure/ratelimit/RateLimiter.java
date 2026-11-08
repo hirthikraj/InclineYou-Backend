@@ -71,6 +71,17 @@ public class RateLimiter {
         }
     }
 
+    /** Whether {@link #take} would allow one right now, without taking it. */
+    public boolean hasToken(String key, AppProperties.Tier tier) {
+        if (tier.getLimit() <= 0) return true;
+        Bucket bucket = buckets.get(key);
+        if (bucket == null) return true;
+        synchronized (bucket) {
+            bucket.refill(tier.ratePerSecond(), tier.getLimit(), System.nanoTime());
+            return bucket.tokens >= 1d;
+        }
+    }
+
     /** For tests and for anything that needs a clean slate. */
     public void reset() {
         buckets.clear();

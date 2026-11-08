@@ -1,5 +1,9 @@
 package com.inclineyou.inclineyou_backend.core.auth;
 
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpSender;
+import com.inclineyou.inclineyou_backend.core.auth.otp.RedisOtpStore;
+import com.inclineyou.inclineyou_backend.core.auth.session.SessionStore;
+import com.inclineyou.inclineyou_backend.core.auth.token.SessionTokenIssuer;
 import com.jayway.jsonpath.JsonPath;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -57,6 +61,7 @@ class SignInFlowTest {
     @Autowired NamedParameterJdbcTemplate jdbc;
     @Autowired CapturingSender sender;
     @Autowired SessionStore sessions;
+    @jakarta.persistence.PersistenceContext jakarta.persistence.EntityManager em;
     @Autowired org.springframework.beans.factory.ObjectProvider<RedisOtpStore> redis;
 
     private MockMvc mvc;
@@ -261,6 +266,60 @@ class SignInFlowTest {
 
         assertThat(jdbc.queryForObject("SELECT count(*) FROM trainer t JOIN app_user u ON u.id = t.app_user_id WHERE u.phone = :p",
                 Map.of("p", phone), Integer.class)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("finding 5: past the replay window the used pending token is SESSION_EXPIRED and mints no session")
+    void pendingTokenStopsAfterTheClaim() throws Exception {
+        String pending = pendingToken();
+        signUp(pending, "{\"privacyPolicyVersion\":\"2026-09\"}").andExpect(status().isCreated());
+        // Make the claim older than the window instead of waiting two minutes.
+        jdbc.update("UPDATE trainer SET created_at = now() - interval '3 minutes' FROM app_user u WHERE u.id = trainer.app_user_id AND u.phone = :p",
+                Map.of("p", phone));
+        // The test is one transaction, so JPA would answer the trainer it cached at the claim; a real request reads afresh.
+        em.clear();
+        Integer before = jdbc.queryForObject("SELECT count(*) FROM web_session s JOIN app_user u ON u.id = s.app_user_id WHERE u.phone = :p",
+                Map.of("p", phone), Integer.class);
+        assertThat(before).isEqualTo(1);
+
+        signUp(pending, "{\"privacyPolicyVersion\":\"2026-09\"}")
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("SESSION_EXPIRED"));
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM web_session s JOIN app_user u ON u.id = s.app_user_id WHERE u.phone = :p",
+                Map.of("p", phone), Integer.class)).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("one number, one role: a client's own session cannot turn their account into a trainer's (403 PHONE_HAS_ACCOUNT)")
+    void clientCannotBecomeTrainer() throws Exception {
+        jdbc.update("INSERT INTO app_user (phone, role) VALUES (:p, 'client')", Map.of("p", phone));
+        String body = verify(requestCode(), sender.codeFor(phone)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value("client"))
+                .andReturn().getResponse().getContentAsString();
+        String clientSession = JsonPath.read(body, "$.token");
+
+        signUp(clientSession, "{\"privacyPolicyVersion\":\"2026-09\"}")
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("PHONE_HAS_ACCOUNT"));
+
+        assertThat(jdbc.queryForObject("SELECT role FROM app_user WHERE phone = :p", Map.of("p", phone), String.class))
+                .isEqualTo("client");
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM trainer t JOIN app_user u ON u.id = t.app_user_id WHERE u.phone = :p",
+                Map.of("p", phone), Integer.class)).isZero();
+    }
+
+    @Test
+    @DisplayName("a closed account's number signs in as new, but the claim is 403 ACCOUNT_CLOSED rather than a 500 on the phone key")
+    void closedAccountCannotClaim() throws Exception {
+        jdbc.update("INSERT INTO app_user (phone, role, deleted_at) VALUES (:p, 'trainer', now())", Map.of("p", phone));
+
+        signUp(pendingToken(), "{\"privacyPolicyVersion\":\"2026-09\"}")
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCOUNT_CLOSED"));
+
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM app_user WHERE phone = :p", Map.of("p", phone), Integer.class))
+                .isEqualTo(1);
     }
 
     @Test

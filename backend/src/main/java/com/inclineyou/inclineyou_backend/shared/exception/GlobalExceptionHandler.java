@@ -1,9 +1,9 @@
 package com.inclineyou.inclineyou_backend.shared.exception;
 
-import com.inclineyou.inclineyou_backend.core.auth.InvalidOtpException;
-import com.inclineyou.inclineyou_backend.core.auth.OtpExpiredException;
-import com.inclineyou.inclineyou_backend.core.auth.OtpLockedException;
-import com.inclineyou.inclineyou_backend.core.auth.OtpThrottledException;
+import com.inclineyou.inclineyou_backend.core.auth.otp.InvalidOtpException;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpExpiredException;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpLockedException;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpThrottledException;
 import com.inclineyou.inclineyou_backend.core.auth.SignInBlockedException;
 import com.inclineyou.inclineyou_backend.core.client.ClientRuleException;
 import com.inclineyou.inclineyou_backend.core.client.PhoneUnavailableException;

@@ -2,9 +2,9 @@ package com.inclineyou.inclineyou_backend.core.invite;
 
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
 import com.inclineyou.inclineyou_backend.core.auth.dto.AuthResponse;
-import com.inclineyou.inclineyou_backend.core.auth.AuthPrincipal;
-import com.inclineyou.inclineyou_backend.core.auth.AuthTokenService;
-import com.inclineyou.inclineyou_backend.core.auth.OtpService;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthPrincipal;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenService;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpService;
 import com.inclineyou.inclineyou_backend.core.client.InviteToken;
 import com.inclineyou.inclineyou_backend.core.invite.dto.AcceptRequest;
 import com.inclineyou.inclineyou_backend.core.invite.dto.AcceptedClient;

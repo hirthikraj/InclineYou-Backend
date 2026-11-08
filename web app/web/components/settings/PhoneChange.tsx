@@ -97,7 +97,7 @@ export interface PhoneChangeWire {
   confirmNew: (
     phone: string,
     otp: string,
-  ) => Promise<{ ok: true; phone: string } | { ok: false; message: string; restart?: boolean }>;
+  ) => Promise<{ ok: true; phone: string } | { ok: false; message: string; restart?: boolean; retype?: boolean }>;
   /** Abandoning it. Nothing is written until step 4, so this only drops the ticket. */
   cancel: () => Promise<void>;
 }
@@ -146,8 +146,15 @@ export function PhoneChange({
   const [message, setMessage] = useState<Message | null>(null);
   const [pending, start] = useTransition();
 
-  function fail(text: string, restart?: boolean) {
+  function fail(text: string, restart?: boolean, retype?: boolean) {
     setMessage({ tone: 'err', icon: 'warn', lead: text });
+    // `retype` is the new number turning out to be taken. The server says so only AFTER its code was
+    // right (prove first, 8 Nov 2026), so it arrives on the code step — and the code step cannot fix it.
+    // Back to the number, with the proof of the old number still good.
+    if (retype) {
+      setStep({ at: 'number', phone: '' });
+      setCode('');
+    }
     // `restart` is the ticket having expired — see `lib/account/actions.ts`.
     // Sending them back to the row rather than leaving them on a step whose
     // proof is gone: every subsequent press would fail the same way, and a
@@ -219,7 +226,7 @@ export function PhoneChange({
     setMessage(null);
     start(async () => {
       const res = await wire.confirmNew(next, code);
-      if (!res.ok) return fail(res.message, res.restart);
+      if (!res.ok) return fail(res.message, res.restart, res.retype);
       setCode('');
       setStep({ at: 'done', phone: res.phone });
       setMessage(null);

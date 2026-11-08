@@ -1,5 +1,6 @@
 'use server';
 
+import { isUpiFormat } from '@/lib/setup/upi';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 
@@ -81,7 +82,7 @@ export type StepResult = { ok: true } | { ok: false; message: string; restart?: 
  * same rule and it matters more here, because Settings and the profile are two
  * screens a trainer can genuinely have open at once.
  */
-export async function saveAccount(input: { name: string; email: string }): Promise<AccountResult> {
+export async function saveAccount(input: { name: string; email: string; upiVpa: string }): Promise<AccountResult> {
   const name = input.name.trim().slice(0, MAX_NAME);
   // The server IGNORES a blank name rather than clearing it — `trainer.name` is
   // NOT NULL — so an empty value would report a successful save and change
@@ -100,11 +101,19 @@ export async function saveAccount(input: { name: string; email: string }): Promi
     return { ok: false, message: 'That doesn’t look like an email address.' };
   }
 
+  // The UPI ID is checked for SHAPE only — setup's own rule (`isUpiFormat`), the
+  // phone's pattern character for character. Nothing confirms the account exists,
+  // so the screen says so; one wrong letter sends a client's money to a stranger.
+  const upiVpa = input.upiVpa.trim();
+  if (upiVpa.length > 0 && !isUpiFormat(upiVpa)) {
+    return { ok: false, message: 'That doesn’t look like a UPI ID — it should look like name@bank.' };
+  }
+
   try {
     // `''` CLEARS the column, which is the correct meaning of emptying a field
     // and pressing Save — the same rule every profile tab follows. Omitting it
     // would make this screen able to add an address and never remove one.
-    const account = await patchAccount({ name, email });
+    const account = await patchAccount({ name, email, upiVpa });
     // The account menu, the rail's foot and every screen that greets the trainer
     // by name read `/v1/trainers/me`. Without this a renamed trainer keeps the
     // old name in the shell until a hard reload.
@@ -144,7 +153,11 @@ export async function verifyCurrentNumber(otp: string): Promise<StepResult> {
   }
 }
 
-/** 3 · the new number. Refused here if it is taken, before an SMS is spent on it. */
+/**
+ * 3 · the new number, and a code to it. A taken number is NOT refused here: the server answers every valid
+ * new number alike and says "taken" only at step 4, once the code proves the person holds that phone
+ * (prove first, 8 Nov 2026) — otherwise this step tells any trainer whether a number is on InclineYou.
+ */
 export async function requestNewNumber(phone: string): Promise<StepResult> {
   const digits = phone.replace(/\D/g, '').slice(-10);
   // The same pattern `AuthController` enforces and `lib/auth/policy.ts` mirrors:
@@ -176,7 +189,7 @@ export async function requestNewNumber(phone: string): Promise<StepResult> {
 export async function confirmPhoneChange(
   phone: string,
   otp: string,
-): Promise<{ ok: true; phone: string } | { ok: false; message: string; restart?: boolean }> {
+): Promise<{ ok: true; phone: string } | { ok: false; message: string; restart?: boolean; retype?: boolean }> {
   const digits = phone.replace(/\D/g, '').slice(-10);
   const ticket = await readTicket();
   if (!ticket) return { ok: false, message: EXPIRED_PROOF, restart: true };
@@ -189,7 +202,8 @@ export async function confirmPhoneChange(
     revalidatePath('/', 'layout');
     return { ok: true, phone: changed.phone };
   } catch (error) {
-    return { ok: false, message: messageFor(error), restart: isUnproven(error) };
+    const taken = error instanceof AccountApiError && error.failure.kind === 'taken';
+    return { ok: false, message: messageFor(error), restart: isUnproven(error), retype: taken };
   }
 }
 
@@ -297,7 +311,8 @@ function sentenceFor(f: AccountFailure): string {
     case 'unproven':
       return EXPIRED_PROOF;
     case 'taken':
-      return 'That number already belongs to an InclineYou account. If it is yours, sign in with it — an account can’t be moved onto another one.';
+      // Only ever shown after this person proved they hold the number, so naming it is no disclosure.
+      return 'This number already has an InclineYou account. Sign in with it instead — an account can’t be moved onto another one. Or use a different number.';
     case 'refused':
       return f.detail;
     default:

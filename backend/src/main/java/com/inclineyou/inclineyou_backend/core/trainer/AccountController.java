@@ -1,6 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.trainer;
 
-import com.inclineyou.inclineyou_backend.core.auth.AuthTokenFilter;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenFilter;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.ConfirmNewPhoneRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.NewPhoneRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.PhoneChangedResponse;

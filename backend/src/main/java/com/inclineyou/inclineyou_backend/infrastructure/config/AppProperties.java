@@ -137,6 +137,8 @@ public class AppProperties {
     public static class Web {
         /** No trailing slash. {@code WEB_BASE_URL}; production must set it or invite links point at localhost. */
         private String baseUrl = "http://localhost:3000";
+        /** {@code WEB_PROXY_SECRET}: what lets the web vouch for a browser's address. See {@link ClientAddress}. */
+        private String proxySecret = "";
     }
 
     /** Browser push for the client portal (api-contract 1.2). Nothing is sent until a key pair exists; the portal hides the switch until then. */
@@ -206,6 +208,12 @@ public class AppProperties {
              * ceiling stays free for trainers who already exist.
              */
             private int newNumbersPerDay = 100;
+            /**
+             * Different numbers one signed-in account may have codes sent to per rolling day, beyond its own
+             * ({@link com.inclineyou.inclineyou_backend.core.auth.otp.OtpAbuseGuard#beforeAccountSend}): a trainer changing
+             * number needs one, three covers a typo or two.
+             */
+            private int maxNumbersPerAccount = 3;
         }
 
         /** Meta WhatsApp Cloud API. Every field is a deployment secret or an id; none has a usable default. */

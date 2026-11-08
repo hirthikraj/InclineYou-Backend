@@ -176,27 +176,37 @@ export function SignInForm({ notice = null }: { notice?: Message | null }) {
         </Button>
       </form>
 
-      <p className="authwrap__or">or</p>
+      {/* NOT DRAWN WHILE GOOGLE SIGN-IN IS OFF (6 Nov 2026). It used to be drawn
+          and answer every press with "not switched on yet" — a primary-sized
+          control on the first screen of the product whose only behaviour is a
+          refusal reads as broken. Google sign-in is a PRD W3 extension waiting on
+          the fallback decision; flipping `GOOGLE_SIGN_IN_ENABLED` brings this
+          back, wired to whatever the flow becomes. */}
+      {GOOGLE_SIGN_IN_ENABLED && (
+        <>
+        <p className="authwrap__or">or</p>
 
-      <Button
-        variant="secondary"
-        size="lg"
-        wide
-        icon={<IconGoogle size={17} />}
-        aria-describedby={GOOGLE_SIGN_IN_ENABLED ? undefined : 'ph-msg'}
-        onClick={() => {
-          if (GOOGLE_SIGN_IN_ENABLED) return;
-          setAbout('google');
-          setMessage({
-            tone: 'warn',
-            icon: 'warn',
-            lead: 'Google sign-in is not switched on yet.',
-            rest: 'Your account is your mobile number — use the field above and we will send a code.',
-          });
-        }}
-      >
-        Continue with Google
-      </Button>
+        <Button
+          variant="secondary"
+          size="lg"
+          wide
+          icon={<IconGoogle size={17} />}
+          aria-describedby={GOOGLE_SIGN_IN_ENABLED ? undefined : 'ph-msg'}
+          onClick={() => {
+            if (GOOGLE_SIGN_IN_ENABLED) return;
+            setAbout('google');
+            setMessage({
+              tone: 'warn',
+              icon: 'warn',
+              lead: 'Google sign-in is not switched on yet.',
+              rest: 'Your account is your mobile number — use the field above and we will send a code.',
+            });
+          }}
+        >
+          Continue with Google
+        </Button>
+        </>
+      )}
 
       <TrustLine>
         We send a 6-digit code on <b>WhatsApp</b>. It is the only thing we will ever send this number

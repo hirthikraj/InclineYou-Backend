@@ -99,6 +99,12 @@ export interface OtpRequested {
   expiresAt: number;
   /** The next rung of the resend ladder, as the server computes it. */
   resendAfterSeconds: number;
+  /**
+   * The day's first codes for numbers with no account are used up (8 Nov 2026). The same for every number, so
+   * it says nothing about this one: a number with an account still gets its code; a new number gets none.
+   * Absent from a backend that predates it.
+   */
+  signupsPaused?: boolean;
 }
 
 /**
@@ -118,7 +124,7 @@ export type VerifyResult =
   | { ok: false; failure: OtpFailure };
 
 export type RequestResult =
-  | { ok: true; resendAfterSeconds: number }
+  | { ok: true; resendAfterSeconds: number; signupsPaused: boolean }
   | { ok: false; failure: SendFailure };
 
 /**

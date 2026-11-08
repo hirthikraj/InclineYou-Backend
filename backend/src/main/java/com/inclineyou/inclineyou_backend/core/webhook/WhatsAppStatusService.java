@@ -1,6 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.webhook;
 
-import com.inclineyou.inclineyou_backend.core.auth.OtpRequestLedger;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpRequestLedger;
 import com.inclineyou.inclineyou_backend.core.tenant.TenantContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;

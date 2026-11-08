@@ -24649,6 +24649,14 @@ button.pchk__r:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2
   .acx .btn{min-height:44px}
 }
 
+/* signed-in devices (settings account, portal settings) — one row per browser, its button on the right */
+.devs{list-style:none;margin:0;padding:0}
+.devs__row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-bottom:1px solid var(--tx-line)}
+.devs__row:first-child{padding-top:0}
+.devs__what{min-width:0;display:flex;flex-direction:column;gap:2px}
+.devs__what b{font-size:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.acx__wide{grid-column:1 / -1}
+
 /* nudge messages */
 .ndgt__tk,.ndgt .fold__s .ndgt__tk{font-family:var(--tx-mono);font-size:.9em;padding:0 4px;border-radius:4px;background:var(--tx-surface-3);color:var(--tx-ink-2)}
 .ndgt .fold__s{max-width:100ch}

@@ -1,6 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.trainer;
 
-import com.inclineyou.inclineyou_backend.core.auth.AuthTokenFilter;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;

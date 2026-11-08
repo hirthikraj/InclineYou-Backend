@@ -1,17 +1,18 @@
 package com.inclineyou.inclineyou_backend.core.invite;
 
-import com.inclineyou.inclineyou_backend.core.auth.OtpAbuseGuard;
-import com.inclineyou.inclineyou_backend.core.auth.OtpThrottledException;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpAbuseGuard;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpThrottledException;
 import com.inclineyou.inclineyou_backend.core.auth.dto.OtpRequested;
 import com.inclineyou.inclineyou_backend.core.invite.dto.InviteCard;
 import com.inclineyou.inclineyou_backend.core.invite.dto.InviteCodeRequest;
-import com.inclineyou.inclineyou_backend.core.auth.AuthTokenService;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenService;
 import com.inclineyou.inclineyou_backend.core.invite.dto.AcceptRequest;
 import com.inclineyou.inclineyou_backend.core.invite.dto.AcceptedClient;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.RequestHeader;
 import com.inclineyou.inclineyou_backend.shared.wire.EmptyBody;
+import com.inclineyou.inclineyou_backend.infrastructure.config.ClientAddress;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -37,6 +38,7 @@ public class InviteController {
     private final InviteCodeService codes;
     private final InviteAcceptService accepts;
     private final OtpAbuseGuard abuse;
+    private final ClientAddress clientAddress;
 
     /**
      * Send the code to the number on the invite. The abuse guard is the one sign-in's request route uses — same address, same
@@ -44,7 +46,7 @@ public class InviteController {
      */
     @PostMapping("/{token}/code")
     public OtpRequested sendCode(@PathVariable String token, @Valid @RequestBody InviteCodeRequest body, HttpServletRequest http) {
-        String ip = http.getRemoteAddr() == null ? "unknown" : http.getRemoteAddr();
+        String ip = clientAddress.of(http);
         codes.phoneOf(token).ifPresent(phone -> abuse.beforeSend(ip, phone));
         try {
             return codes.sendCode(token, body);

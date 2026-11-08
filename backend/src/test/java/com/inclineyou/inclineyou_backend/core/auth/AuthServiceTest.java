@@ -1,5 +1,13 @@
 package com.inclineyou.inclineyou_backend.core.auth;
 
+import com.inclineyou.inclineyou_backend.core.auth.client.ClientSignInLookup;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpAbuseGuard;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpRequest;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpService;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthPrincipal;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenService;
+import com.inclineyou.inclineyou_backend.core.auth.token.IssuedToken;
+import com.inclineyou.inclineyou_backend.core.auth.token.JwtService;
 import com.inclineyou.inclineyou_backend.core.auth.dto.ClaimTrainerRequest;
 import com.inclineyou.inclineyou_backend.core.auth.dto.SendOtpRequest;
 import com.inclineyou.inclineyou_backend.core.auth.dto.VerifyOtpRequest;
@@ -66,24 +74,39 @@ class AuthServiceTest {
     @Test
     @DisplayName("a request answers its id, expiry in epoch ms and the next resend wait")
     void requestAnswers() {
-        when(otpService.send(PHONE, OtpRequest.SIGN_IN)).thenReturn(new OtpService.Issued(REQUEST, EXPIRES, 30));
+        when(otpService.send(PHONE, OtpRequest.SIGN_IN, true)).thenReturn(new OtpService.Issued(REQUEST, EXPIRES, 30));
 
-        var res = auth.requestOtp(new SendOtpRequest(PHONE));
+        var res = auth.requestOtp(new SendOtpRequest(PHONE), OtpAbuseGuard.SignInAdmission.OPEN);
 
         assertThat(res.requestId()).isEqualTo(REQUEST.toString());
         assertThat(res.expiresAt()).isEqualTo(EXPIRES.toEpochMilli());
         assertThat(res.resendAfterSeconds()).isEqualTo(30);
+        assertThat(res.signupsPaused()).isFalse();
+    }
+
+    @Test
+    @DisplayName("on a paused day an unknown number is answered exactly like a known one, and no message goes out")
+    void pausedDayAnswersAlike() {
+        when(otpService.send(PHONE, OtpRequest.SIGN_IN, false)).thenReturn(new OtpService.Issued(REQUEST, EXPIRES, 30));
+        when(otpService.send(PHONE, OtpRequest.SIGN_IN, true)).thenReturn(new OtpService.Issued(REQUEST, EXPIRES, 30));
+
+        var unknown = auth.requestOtp(new SendOtpRequest(PHONE), new OtpAbuseGuard.SignInAdmission(false, true));
+        var known = auth.requestOtp(new SendOtpRequest(PHONE), new OtpAbuseGuard.SignInAdmission(true, true));
+
+        assertThat(unknown).isEqualTo(known);
+        assertThat(unknown.signupsPaused()).isTrue();
+        verify(otpService).send(PHONE, OtpRequest.SIGN_IN, false);
     }
 
     @Test
     @DisplayName("a number that fails the format is PHONE_INVALID before anything is sent")
     void badPhone() {
-        assertThatThrownBy(() -> auth.requestOtp(new SendOtpRequest("9876543210")))
+        assertThatThrownBy(() -> auth.requestOtp(new SendOtpRequest("9876543210"), null))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
                     assertThat(e.getStatus()).isEqualTo(HttpStatus.BAD_REQUEST);
                     assertThat(e.getCode()).isEqualTo("PHONE_INVALID");
                 });
-        verify(otpService, never()).send(anyString(), anyString());
+        verify(otpService, never()).send(anyString(), anyString(), org.mockito.ArgumentMatchers.anyBoolean());
     }
 
     /* -------------------------------------------------------------- verify */
@@ -156,32 +179,68 @@ class AuthServiceTest {
     /* ---------------------------------------------------- become a trainer */
 
     @Test
-    @DisplayName("a phone that is already somebody's client can still claim a trainer account")
-    void clientCanClaimTrainer() {
+    @DisplayName("one number, one role: a client's session, a client's step-up ticket, or a pending token whose number is now a client's cannot claim")
+    void clientCannotClaimTrainer() {
+        var client = new AppUser();
+        client.setId(UUID.randomUUID());
+        client.setPhone(PHONE);
+        client.setRole(AppUser.ROLE_CLIENT);
+        when(appUserRepo.findByPhone(PHONE)).thenReturn(Optional.of(client));
+
+        for (String role : new String[]{AppUser.ROLE_CLIENT, JwtService.ROLE_STEP_UP, JwtService.ROLE_PENDING}) {
+            assertThatThrownBy(() -> auth.becomeTrainer(PHONE, role, "raw", new ClaimTrainerRequest("2026-09")))
+                    .as(role)
+                    .isInstanceOfSatisfying(ApiException.class, e -> {
+                        assertThat(e.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
+                        assertThat(e.getCode()).isEqualTo("PHONE_HAS_ACCOUNT");
+                    });
+        }
+        assertThat(client.getRole()).isEqualTo(AppUser.ROLE_CLIENT);
+        verify(appUserRepo, never()).save(any());
+        verify(trainerRepo, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a closed account's number is ACCOUNT_CLOSED, not a second app_user colliding on the phone key")
+    void closedAccountCannotClaim() {
+        var closed = new AppUser();
+        closed.setId(UUID.randomUUID());
+        closed.setPhone(PHONE);
+        closed.setRole(AppUser.ROLE_TRAINER);
+        closed.setDeletedAt(Instant.now());
+        when(appUserRepo.findByPhone(PHONE)).thenReturn(Optional.of(closed));
+
+        assertThatThrownBy(() -> auth.becomeTrainer(PHONE, JwtService.ROLE_PENDING, "raw", new ClaimTrainerRequest("2026-09")))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.FORBIDDEN);
+                    assertThat(e.getCode()).isEqualTo("ACCOUNT_CLOSED");
+                });
+        verify(appUserRepo, never()).save(any());
+        verify(trainerRepo, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("a claim takes the number's lock before it looks for the account, so a double tap finds the first one's row")
+    void claimLocksTheNumberFirst() {
         stubTokens();
-        var existing = new AppUser();
-        existing.setId(UUID.randomUUID());
-        existing.setPhone(PHONE);
-        existing.setRole(AppUser.ROLE_CLIENT);
-        when(appUserRepo.findByPhoneAndDeletedAtIsNull(PHONE)).thenReturn(Optional.of(existing));
-        when(appUserRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
-        when(trainerRepo.findByAppUserIdAndDeletedAtIsNull(existing.getId())).thenReturn(Optional.empty());
+        when(appUserRepo.findByPhone(PHONE)).thenReturn(Optional.empty());
+        when(appUserRepo.save(any())).thenAnswer(inv -> {
+            var u = (AppUser) inv.getArgument(0);
+            if (u.getId() == null) u.setId(UUID.randomUUID());
+            return u;
+        });
+        when(trainerRepo.findByAppUserIdAndDeletedAtIsNull(any())).thenReturn(Optional.empty());
         when(trainerRepo.save(any())).thenAnswer(inv -> {
             var t = (Trainer) inv.getArgument(0);
             t.setId(UUID.randomUUID());
             return t;
         });
 
-        var claimed = auth.becomeTrainer(PHONE, JwtService.ROLE_PENDING, "raw", new ClaimTrainerRequest("2026-09"));
+        auth.becomeTrainer(PHONE, JwtService.ROLE_PENDING, "raw", new ClaimTrainerRequest("2026-09"));
 
-        assertThat(claimed.created()).isTrue();
-        assertThat(claimed.body().role()).isEqualTo(AuthService.VIEW_TRAINER);
-        assertThat(claimed.body().token()).isEqualTo("trainer-token");
-        // Claiming is what makes trainer the home role — the existing row is
-        // updated, not refused — and it stamps the consent the screen carried.
-        assertThat(existing.getRole()).isEqualTo(AppUser.ROLE_TRAINER);
-        assertThat(existing.getPrivacyPolicyVersion()).isEqualTo("2026-09");
-        assertThat(existing.getPrivacyAcceptedAt()).isNotNull();
+        var order = org.mockito.Mockito.inOrder(appUserRepo);
+        order.verify(appUserRepo).lockClaim(PHONE);
+        order.verify(appUserRepo).findByPhone(PHONE);
     }
 
     @Test
@@ -198,7 +257,8 @@ class AuthServiceTest {
         trainer.setId(UUID.randomUUID());
         trainer.setAppUserId(user.getId());
         trainer.setName(PHONE);
-        when(appUserRepo.findByPhoneAndDeletedAtIsNull(PHONE)).thenReturn(Optional.of(user));
+        trainer.setCreatedAt(Instant.now());
+        when(appUserRepo.findByPhone(PHONE)).thenReturn(Optional.of(user));
         when(appUserRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
         when(trainerRepo.findByAppUserIdAndDeletedAtIsNull(user.getId())).thenReturn(Optional.of(trainer));
 
@@ -206,6 +266,32 @@ class AuthServiceTest {
 
         assertThat(claimed.created()).isFalse();
         verify(trainerRepo, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("finding 5: the pending token that made the account cannot keep minting trainer sessions past the replay window")
+    void pendingReplayIsBounded() {
+        stubTokens();
+        var user = new AppUser();
+        user.setId(UUID.randomUUID());
+        user.setPhone(PHONE);
+        user.setRole(AppUser.ROLE_TRAINER);
+        user.setPrivacyAcceptedAt(Instant.now());
+        user.setPrivacyPolicyVersion("2026-09");
+        var trainer = new Trainer();
+        trainer.setId(UUID.randomUUID());
+        trainer.setAppUserId(user.getId());
+        trainer.setCreatedAt(Instant.now().minus(AuthService.CLAIM_REPLAY_WINDOW).minusSeconds(1));
+        when(appUserRepo.findByPhone(PHONE)).thenReturn(Optional.of(user));
+        when(appUserRepo.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(trainerRepo.findByAppUserIdAndDeletedAtIsNull(user.getId())).thenReturn(Optional.of(trainer));
+
+        assertThatThrownBy(() -> auth.becomeTrainer(PHONE, JwtService.ROLE_PENDING, "raw", new ClaimTrainerRequest("2026-09")))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.UNAUTHORIZED);
+                    assertThat(e.getCode()).isEqualTo("SESSION_EXPIRED");
+                });
+        verify(tokens, never()).issueForCurrentRequest(any());
     }
 
     @Test

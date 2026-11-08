@@ -1,6 +1,7 @@
 package com.inclineyou.inclineyou_backend.infrastructure.ratelimit;
 
 import com.inclineyou.inclineyou_backend.infrastructure.config.AppProperties;
+import com.inclineyou.inclineyou_backend.infrastructure.config.ClientAddress;
 import jakarta.annotation.PostConstruct;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -57,6 +58,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     private final Bucket4jLimiter limiter;
     private final AppProperties props;
+    private final ClientAddress clientAddress;
 
     /**
      * Say it out loud at boot. An absent ceiling looks exactly like a ceiling
@@ -203,8 +205,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         if (auth != null && auth.getName() != null && !auth.getName().isBlank()) {
             return auth.getName();
         }
-        String ip = request.getRemoteAddr();
-        return "ip:" + (ip == null ? "unknown" : ip);
+        return "ip:" + clientAddress.of(request);
     }
 
     /** A trainer id or a phone number is not something to write to a log in full. */

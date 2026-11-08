@@ -1,6 +1,7 @@
 import { AccountPanel } from '@/components/settings/AccountPanel';
 import { getAccount } from '@/lib/account/api';
 import { countClients } from '@/lib/account/clients';
+import { listDevices } from '@/lib/devices/api';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,11 +30,12 @@ export const metadata = { title: 'Account · InclineYou' };
  * the confirmation has a sentence for the unknown case.
  */
 export default async function Page() {
-  const [account, clientCount] = await Promise.all([getAccount(), countClients()]);
+  // The device list may fail on its own, like the roster count: the section says so, the page still loads.
+  const [account, clientCount, devices] = await Promise.all([getAccount(), countClients(), listDevices()]);
 
   return (
     <div className="body">
-      <AccountPanel initial={account} clientCount={clientCount} />
+      <AccountPanel initial={account} clientCount={clientCount} devices={devices} />
     </div>
   );
 }

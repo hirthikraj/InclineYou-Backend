@@ -1,6 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.portal;
 
-import com.inclineyou.inclineyou_backend.core.auth.AuthTokenFilter;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenFilter;
 import com.inclineyou.inclineyou_backend.core.portal.dto.PortalSettings;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;

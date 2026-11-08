@@ -1,6 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.portal;
 
-import com.inclineyou.inclineyou_backend.core.auth.ClientSignInLookup;
+import com.inclineyou.inclineyou_backend.core.auth.client.ClientSignInLookup;
 import com.inclineyou.inclineyou_backend.core.tenant.TenantContext;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import lombok.RequiredArgsConstructor;

@@ -2,10 +2,10 @@ package com.inclineyou.inclineyou_backend.core.trainer;
 
 import com.inclineyou.inclineyou_backend.core.auth.AppUser;
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
-import com.inclineyou.inclineyou_backend.core.auth.JwtService;
-import com.inclineyou.inclineyou_backend.core.auth.OtpRequest;
-import com.inclineyou.inclineyou_backend.core.auth.OtpService;
-import com.inclineyou.inclineyou_backend.core.auth.SessionTokenIssuer;
+import com.inclineyou.inclineyou_backend.core.auth.token.JwtService;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpRequest;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpService;
+import com.inclineyou.inclineyou_backend.core.auth.token.SessionTokenIssuer;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.StepUpTicketResponse;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import io.jsonwebtoken.Claims;

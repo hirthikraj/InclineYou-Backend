@@ -2,10 +2,11 @@ package com.inclineyou.inclineyou_backend.core.trainer;
 
 import com.inclineyou.inclineyou_backend.core.auth.AppUser;
 import com.inclineyou.inclineyou_backend.core.auth.AppUserRepository;
-import com.inclineyou.inclineyou_backend.core.auth.OtpRequest;
-import com.inclineyou.inclineyou_backend.core.auth.OtpService;
-import com.inclineyou.inclineyou_backend.core.auth.SessionStore;
-import com.inclineyou.inclineyou_backend.core.auth.SessionTokenIssuer;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpAbuseGuard;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpRequest;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpService;
+import com.inclineyou.inclineyou_backend.core.auth.session.SessionStore;
+import com.inclineyou.inclineyou_backend.core.auth.token.SessionTokenIssuer;
 import com.inclineyou.inclineyou_backend.core.auth.dto.SendOtpRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.ConfirmNewPhoneRequest;
 import com.inclineyou.inclineyou_backend.core.trainer.dto.NewPhoneRequest;
@@ -84,24 +85,31 @@ public class AccountService {
     private final TrainerRepository trainerRepo;
     private final AppUserRepository appUserRepo;
     private final OtpService otpService;
+    private final OtpAbuseGuard abuse;
     private final StepUpService stepUp;
     private final SessionStore sessions;
 
     /* ─────────────────────────────────────────────────── changing a number ── */
 
     /**
-     * The new number, and a code to it.
+     * The new number, and a code to it — whether or not the number is free.
      *
-     * <p>The availability check runs HERE rather than only at the confirm, so a
-     * number that can never work is refused before a message is spent on it and
-     * before the trainer waits for a code that would have been rejected anyway. It
-     * runs again at the confirm, because two minutes is long enough for somebody
-     * else to sign up in between.
+     * <p><b>Prove first, then say "taken"</b> (8 Nov 2026, owner's review). This used to
+     * refuse a taken number here with {@code 409 PHONE_TAKEN}, before any code was sent,
+     * which told any signed-in trainer whether a number they typed is on InclineYou. Now
+     * every valid new number gets the same {@code 204} and a code, and "taken" is only
+     * answered at {@link #confirmNewPhone}, after the code is right — that is, only to the
+     * person holding that phone, who knows the number is theirs anyway. The cost is a
+     * code to the owner of a taken number, the same thing typing their number on the
+     * sign-in page already does; it spends no new-number budget (the number is known)
+     * and counts toward the trainer's 3 a day. Only the trainer's OWN number is still
+     * refused here ({@code PHONE_UNCHANGED}), which says nothing about anybody else.
      */
     public void requestNewPhone(UUID trainerId, NewPhoneRequest req, String rawToken) {
         stepUp.require(req.ticket(), StepUpService.PHONE_CHANGE, trainerId, rawToken);
         String newPhone = requireValidPhone(req.phone());
-        requireAvailable(phoneOf(load(trainerId)), newPhone);
+        if (newPhone.equals(phoneOf(load(trainerId)))) throw AccountRuleException.samePhone();
+        abuse.beforeAccountSend("trainer:" + trainerId, newPhone);
         otpService.send(newPhone, OtpRequest.CHANGE_PHONE_NEW);
     }
 
@@ -123,8 +131,13 @@ public class AccountService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
         String previous = user.getPhone();
 
-        requireAvailable(previous, newPhone);
+        if (newPhone.equals(previous)) throw AccountRuleException.samePhone();
+        // The code FIRST: "taken" is told only to whoever holds the new number. A wrong code is OTP_WRONG
+        // whether the number is free or not, so the answer before the proof never depends on who has it.
         otpService.verify(newPhone, req.otp());
+        // Checked here and only here — after the proof, and late enough to catch a sign-up on the same
+        // number in the minutes since the code was sent.
+        requireAvailable(previous, newPhone);
 
         user.setPhone(newPhone);
         appUserRepo.save(user);
@@ -201,8 +214,9 @@ public class AccountService {
      * rows still hold their number, which is what makes a deleted account's phone
      * unavailable — the same rule stated from the other side in {@link
      * #deleteAccount}, and why the query does not filter on {@code deleted_at}.
-     * The refusal does not say who has it: this endpoint must not become <i>is this
-     * number on InclineYou</i> for any number in India, one request at a time.
+     * The refusal does not say who has it, and it is only ever given after the new
+     * number's code was right (see {@link #requestNewPhone}): this endpoint must not
+     * become <i>is this number on InclineYou</i> for any number in India.
      */
     private void requireAvailable(String currentPhone, String newPhone) {
         if (newPhone.equals(currentPhone)) throw AccountRuleException.samePhone();

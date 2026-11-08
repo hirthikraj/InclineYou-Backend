@@ -32,10 +32,13 @@ import { Tag } from '@/web-components/ui/Tag';
 export function VerifyForm({
   phone,
   initialCooldown,
+  signupsPaused: pausedOnArrival = false,
 }: {
   phone: string;
   /** Seconds until resend is allowed on arrival — the server's wait for this request. */
   initialCooldown: number;
+  /** The day's first codes for new numbers are used up — the server's `signupsPaused`, the same for every number. */
+  signupsPaused?: boolean;
 }) {
   const router = useRouter();
 
@@ -50,6 +53,8 @@ export function VerifyForm({
   const [resends, setResends] = useState(0);
   /** Seconds until resend is allowed again. The first wait starts on arrival. */
   const [cooldown, setCooldown] = useState(initialCooldown);
+  /** Refreshed by every resend: the pause can start or end while this screen is up. */
+  const [signupsPaused, setSignupsPaused] = useState(pausedOnArrival);
   /**
    * Seconds left on a lock, or 0. Held apart from `message` because it counts
    * down on screen: the sentence has to quote the wait as it is now.
@@ -165,6 +170,7 @@ export function VerifyForm({
         // The server's own next rung, not the local mirror's guess.
         setCooldown(result.resendAfterSeconds > 0 ? result.resendAfterSeconds : resendDelay(spent));
         setDelivery(null);
+        setSignupsPaused(result.signupsPaused);
         return;
       }
 
@@ -213,6 +219,14 @@ export function VerifyForm({
           change number
         </a>
       </p>
+      {signupsPaused ? (
+        // Said to everybody on a paused day, account or not — the server answers both alike so that this
+        // screen cannot be used to learn whether a number is on InclineYou. Worded for both readers.
+        <p className="stp__sub" role="status" style={{ marginTop: 8 }}>
+          New sign-ups are paused for today. If this number already has an InclineYou account, your code is on its
+          way; if it is new, no code will come today — please try again tomorrow.
+        </p>
+      ) : null}
 
       <div style={{ marginTop: 24 }}>
         <OtpInput

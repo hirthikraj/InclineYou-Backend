@@ -155,6 +155,27 @@ export async function getRequestId(): Promise<string | null> {
 export async function clearRequestId(): Promise<void> {
   (await cookies()).delete(REQUEST_COOKIE);
   (await cookies()).delete(RESEND_COOKIE);
+  (await cookies()).delete(PAUSED_COOKIE);
+}
+
+/**
+ * The request's `signupsPaused`, carried to the verify screen like the resend wait. Not a fact about the
+ * number — the server answers it alike for every number — so it can sit in a cookie without saying more
+ * than the response did.
+ */
+const PAUSED_COOKIE = 'inclineyou_signups_paused';
+
+export async function setSignupsPaused(paused: boolean): Promise<void> {
+  const jar = await cookies();
+  if (!paused) {
+    jar.delete(PAUSED_COOKIE);
+    return;
+  }
+  jar.set(PAUSED_COOKIE, '1', { httpOnly: true, secure: SECURE, sameSite: 'lax', path: '/', maxAge: PENDING_MAX_AGE });
+}
+
+export async function getSignupsPaused(): Promise<boolean> {
+  return (await cookies()).get(PAUSED_COOKIE)?.value === '1';
 }
 
 /**

@@ -1,8 +1,8 @@
 package com.inclineyou.inclineyou_backend.core.trainer;
 
-import com.inclineyou.inclineyou_backend.core.auth.AuthTokenFilter;
-import com.inclineyou.inclineyou_backend.core.auth.OtpSender;
-import com.inclineyou.inclineyou_backend.core.auth.SessionTokenIssuer;
+import com.inclineyou.inclineyou_backend.core.auth.token.AuthTokenFilter;
+import com.inclineyou.inclineyou_backend.core.auth.otp.OtpSender;
+import com.inclineyou.inclineyou_backend.core.auth.token.SessionTokenIssuer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -316,24 +316,34 @@ class TrainerAccountTest {
     }
 
     @Test
-    @DisplayName("a number somebody already holds is refused, and the refusal does not say who")
+    @DisplayName("a taken number is answered like a free one until its code is proved; only then PHONE_TAKEN")
     void takenNumber() throws Exception {
         trainer(THEIRS);
         String ticket = proveCurrent();
 
-        mvc.perform(post("/v1/trainers/me/phone/request")
+        // Prove first (8 Nov 2026): the request cannot tell a taken number from a free one,
+        // or this endpoint answers "is this number on InclineYou" for any number in India.
+        request(ticket, THEIRS);
+        assertThat(sender.sent).containsKey(THEIRS);
+
+        // A wrong code is the ordinary OTP_WRONG — still nothing about the number.
+        mvc.perform(post("/v1/trainers/me/phone/confirm")
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(Map.of("ticket", ticket, "phone", THEIRS))))
+                        .content(body(Map.of("ticket", ticket, "phone", THEIRS, "otp", wrongCodeFor(THEIRS)))))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("OTP_WRONG"));
+
+        // The right code — only the holder of that phone has it — is where "taken" is said,
+        // and still not whose.
+        String code = sender.codeFor(THEIRS);
+        mvc.perform(post("/v1/trainers/me/phone/confirm")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body(Map.of("ticket", ticket, "phone", THEIRS, "otp", code))))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PHONE_TAKEN"))
-                // Nothing about whose it is, or even whether it is a trainer's:
-                // otherwise this endpoint answers "is this number on InclineYou" for
-                // any number in India, one request at a time.
                 .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.not(
                         org.hamcrest.Matchers.containsString(THEIRS))));
-
-        // And no code was spent on a number that could never have worked.
-        assertThat(sender.sent).doesNotContainKey(THEIRS);
+        assertThat(phoneOfTrainer(me)).isEqualTo(MINE);
     }
 
     @Test
@@ -413,9 +423,11 @@ class TrainerAccountTest {
         UUID other = trainer(THEIRS);
         signedInAs(other);
         String phoneTicket = proveCurrentFor(THEIRS);
-        mvc.perform(post("/v1/trainers/me/phone/request")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body(Map.of("ticket", phoneTicket, "phone", MINE))))
+        // MINE was sent the deletion code a moment ago; clear its send history so the resend
+        // ladder does not answer 429 before the rule under test is reached.
+        jdbc.update("DELETE FROM otp_request WHERE phone = :p", Map.of("p", MINE));
+        request(phoneTicket, MINE);
+        confirm(phoneTicket, MINE)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PHONE_TAKEN"));
     }
@@ -498,6 +510,11 @@ class TrainerAccountTest {
                 .andExpect(jsonPath("$.expiresAt").isNumber())
                 .andReturn().getResponse().getContentAsString();
         return json.replaceAll(".*\"ticket\"\\s*:\\s*\"([^\"]+)\".*", "$1");
+    }
+
+    /** Any six digits that are not the code just sent. */
+    private String wrongCodeFor(String phone) {
+        return sender.codeFor(phone).equals("000000") ? "000001" : "000000";
     }
 
     private void request(String ticket, String phone) throws Exception {

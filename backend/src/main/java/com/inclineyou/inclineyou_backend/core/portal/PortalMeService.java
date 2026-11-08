@@ -1,6 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.portal;
 
-import com.inclineyou.inclineyou_backend.core.auth.ClientSignInLookup;
+import com.inclineyou.inclineyou_backend.core.auth.client.ClientSignInLookup;
 import com.inclineyou.inclineyou_backend.core.portal.dto.PortalMe;
 import com.inclineyou.inclineyou_backend.core.trainer.SocialLink;
 import com.inclineyou.inclineyou_backend.core.trainer.YouTubeLink;

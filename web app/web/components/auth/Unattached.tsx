@@ -133,9 +133,8 @@ export function Unattached({
       </Button>
 
       <TrustLine>
-        There is no <b>I’m a trainer</b> on this screen, and that is deliberate: this number’s
-        role is already client. Offering to open a coaching account would quietly convert somebody
-        who declined one invite into a trainer with an empty roster.
+        This number is set up as a client. To train with someone, ask your trainer to send you a
+        new invite.
       </TrustLine>
     </>
   );

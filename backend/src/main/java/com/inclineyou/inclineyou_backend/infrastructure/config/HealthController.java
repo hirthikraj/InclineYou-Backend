@@ -1,6 +1,6 @@
 package com.inclineyou.inclineyou_backend.infrastructure.config;
 
-import com.inclineyou.inclineyou_backend.core.auth.RedisOtpStore;
+import com.inclineyou.inclineyou_backend.core.auth.otp.RedisOtpStore;
 import com.inclineyou.inclineyou_backend.infrastructure.ratelimit.Bucket4jLimiter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.ObjectProvider;
