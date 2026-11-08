@@ -30,7 +30,20 @@ public record AssessmentDetail(
     public record TemplateRef(String id, String name, String description, boolean deleted) {}
 
     /** What this assessment asks — from its own copy of the form, not the template as it now stands. */
-    public record Asked(List<FormMeasurement> measurements, List<AssessmentCatalogue.Question> questions) {}
+    public record Asked(List<AskedMeasurement> measurements, List<AssessmentCatalogue.Question> questions) {}
+
+    /**
+     * A form's measurement as the take screen needs it: the stored copy plus the lowest value it accepts, from the catalogue
+     * at read time (so an old form gets it too). {@code minInclusive} false means "above {@code min}"; every reading is below
+     * 100,000.
+     */
+    public record AskedMeasurement(String key, String label, String group, String unit,
+                                   java.math.BigDecimal min, boolean minInclusive) {
+        public static AskedMeasurement of(FormMeasurement m) {
+            var b = AssessmentCatalogue.boundOf(m.key());
+            return new AskedMeasurement(m.key(), m.label(), m.group(), m.unit(), b.min(), b.minInclusive());
+        }
+    }
 
     /** A measurement as copied into a form: the catalogue's label and unit, so the copy reads on its own. */
     public record FormMeasurement(String key, String label, String group, String unit) {}

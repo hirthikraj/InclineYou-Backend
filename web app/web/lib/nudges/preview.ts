@@ -31,6 +31,10 @@ const SAMPLE: Record<string, string> = {
   '{amount}': '₹6,000',
   '{package}': '12-session pack',
   '{days}': '11',
+  /* The server renders this as a whole sentence, or nothing when no UPI ID is set
+     (NudgeDraftService, NudgeText.tidy). The sample shows the sentence. */
+  '{pay_by_upi}': 'Pay by UPI to anbu@okaxis.',
+  '{upi}': 'anbu@okaxis',
 };
 
 export function previewOf(body: string): string {

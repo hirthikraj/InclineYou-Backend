@@ -14,6 +14,7 @@ import {
 } from '@/lib/assessments/address';
 import {
   STATUS_FILTERS,
+  assessmentTag,
   blockCount,
   type AssessmentStatus,
   type StatusFilter,
@@ -283,8 +284,8 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                           className: 'asm-c-status',
                           label: 'Status',
                           content: (
-                            <Tag tone={r.state === 'done' ? 'ok' : 'neutral'}>
-                              {r.sentAt != null && r.state !== 'done' ? 'With client' : STATE_LABEL[r.state]}
+                            <Tag tone={assessmentTag(r.state, r.sentAt).tone}>
+                              {assessmentTag(r.state, r.sentAt).label}
                             </Tag>
                           ),
                         },
@@ -360,10 +361,9 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
 
 /* ─────────────────────────────────────────────────────────────── the cells ── */
 
-/** The words of the client file's Assessments tab: this trainer takes the assessment, so a gone-by one is
- *  *Not taken* in neutral ink, never an amber *Missed*. (`vocab.ts` still argues *Missed, not Overdue* for the
- *  check-in's own screen; reconciling the two is open.) */
-const STATE_LABEL: Record<AssessmentStatus, string> = { booked: 'Booked', missed: 'Not taken', done: 'Done' };
+/* The status words are `assessmentTag` in lib/assessments/vocab.ts, shared with the client file: a gone-by
+   assessment the trainer takes is *Not taken* in neutral ink; one SENT and not back by its date is
+   *Late · with client* in amber, the one state that asks the trainer to chase somebody. */
 
 /** *Today*, *5 days ago* — against the server's instant, never `Date.now()` in a render. */
 function relative(dueOn: string, now: number): string {

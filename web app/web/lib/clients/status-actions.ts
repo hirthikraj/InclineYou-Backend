@@ -36,9 +36,10 @@ function fail(error: unknown, subject: string): StatusWriteResult {
   return { ok: false, message: `${subject} did not save. Nothing changed.` };
 }
 
-/** The roster, the client's file (its header is in the layout) and Today all draw the status. */
+/** The roster, the client's file (its header is in the layout), Today and Programs (its Archived list) all draw the status. */
 function refresh(clientId: string): void {
   revalidatePath('/clients');
+  revalidatePath('/programs');
   revalidatePath(`/clients/${clientId}`, 'layout');
   revalidatePath('/today');
 }

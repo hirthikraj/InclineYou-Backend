@@ -121,7 +121,7 @@ export function PickSession({ data }: { data: PickView }) {
       <main className="main" id="main-content">
         <PageHeader
           title="Who is this for?"
-          sub="One question, and it decides everything else"
+          sub="Pick the client. The workout, plan and booking follow from them."
           crumbs={<nav className="crumbs" aria-label="Breadcrumb">
               <Link href="/programs/workouts">Workouts</Link>
               <i aria-hidden="true">/</i>
@@ -132,11 +132,6 @@ export function PickSession({ data }: { data: PickView }) {
         <div className="body">
           <div className="wk2 wk2--pick" style={{ maxWidth: 1060 }}>
             <div>
-              <p className="note" style={{ marginTop: 0 }}>
-                Not what kind of workout, not which program, not when — all three are answerable from{' '}
-                <b>who</b>, and asking is how a two-tap action becomes a five-tap one.
-              </p>
-
               {group('Still open', 'logs on the go', data.open, 'open')}
               {group('Booked today', 'opens against the booking', data.booked, 'start')}
               {group('Everybody else', 'no booking needed', data.everybody, 'start')}
@@ -161,14 +156,10 @@ export function PickSession({ data }: { data: PickView }) {
             </div>
 
             <div>
-              <Why heading="The third group is the finding">
+              <Why heading="Log anyone, booked or not">
                 <p>
-                  Every logger in the teardown assumes a workout belongs to a booking or a saved
-                  routine. <b>ABC Trainerize is the only one that lets a trainer log on the web at
-                  all, and it requires the session to be on the client&rsquo;s calendar first.</b>{' '}
-                  In a gym where the trainer is on the floor, a client turning up on a day they do
-                  not normally train is a Tuesday — and logging is allowed to happen before
-                  programming exists. Before booking, too.
+                  A client who turns up on a day they don&rsquo;t usually train can be logged from{' '}
+                  <b>Everybody else</b> — no booking and no plan needed first.
                 </p>
               </Why>
 
@@ -177,13 +168,8 @@ export function PickSession({ data }: { data: PickView }) {
                 style={{ marginTop: 12 }}
               >
                 <p className="small">
-                  A trainer who logs four clients a morning has logs on the go, and coming back to
-                  one is the commonest reason to press this at all. Nothing is started from that
-                  group — it goes straight back in, at the set it was left on.
-                </p>
-                <p className="small" style={{ marginTop: 9 }}>
-                  Two logs open at once is a supported state, not a warning. One phone, one desk,
-                  four clients between six and nine.
+                  A log you left open goes straight back in, at the set you were on. You can have
+                  several open at once.
                 </p>
               </Card>
 

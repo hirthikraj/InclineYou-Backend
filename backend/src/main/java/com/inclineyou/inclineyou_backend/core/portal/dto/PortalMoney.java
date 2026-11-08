@@ -7,7 +7,9 @@ import java.util.List;
 /**
  * The client's package and money wire (api-contract 1.2, pm-l1 and pm-l2). Quiet and factual: sessions and dates are the client's own and are
  * never behind the money switch; a price, a payment and the ledger are, and appear only when the trainer lets this client see money. Nothing here
- * can pay, nudge or shame — UPI stays between the two of them.
+ * can nudge or shame. Since 6 Nov 2026 it can carry ONE way to pay: {@code payTo}, the trainer's UPI ID, present only when
+ * something is owed and the trainer has set one (V31's client_pay_to). The portal turns it into a upi:// link; no money
+ * moves through InclineYou, and the trainer still marks the payment received.
  */
 public final class PortalMoney {
 
@@ -34,5 +36,5 @@ public final class PortalMoney {
 
     /** {@code {visible: false}} and nothing else when the trainer has switched it off — a state the screen hides a tab for, not an error. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record Money(boolean visible, String currency, String amountDue, Payments payments) {}
+    public record Money(boolean visible, String currency, String amountDue, Payments payments, String payTo) {}
 }

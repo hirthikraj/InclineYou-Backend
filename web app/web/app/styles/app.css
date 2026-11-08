@@ -25053,3 +25053,59 @@ a.ivn__nm:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px;bor
 .inb__sum{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;list-style:none}
 .inb__sum::-webkit-details-marker{display:none}
 .pl__q{margin:10px 0 6px;font-size:14.5px;line-height:1.55;color:var(--tx-ink)}
+
+/* ── Today's queue, one row per CLIENT (6 Nov 2026) ──────────────────────────
+   The queue counted issues and said "36 clients need you" over 13 clients, with
+   one person on three rows. A client's other jobs now ride behind their lead row
+   (`groupAttention` in lib/today/deck.ts) and open in place as `.q__cont` rows.
+   The continuation row's name cell is empty to the eye (the name is clipped in
+   for a reader) and carries a thin rule down from the avatar, so the indent
+   reads as "same person" rather than as a missing name. The toggle is a quiet
+   link in the reason line, like *Send progress report*, and its kinds are in its
+   label so the trainer can tell whether it is worth opening. */
+.atn tbody tr.q__cont td{border-top:0;background-color:var(--tx-surface-2)}
+.atn .q__who--cont{position:relative}
+.atn .q__who--cont::before{
+  content:"";position:absolute;left:28px;top:0;bottom:0;
+  border-left:1px solid var(--tx-line-strong);pointer-events:none;
+}
+.atn .q__also-b{
+  display:inline;padding:0;background:none;border:0;cursor:pointer;
+  font:inherit;font-weight:650;color:var(--tx-ink);
+  text-decoration:underline dotted;text-underline-offset:3px;
+}
+.atn .q__also-b:hover{text-decoration-style:solid}
+.atn .q__also-b:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px;border-radius:var(--tx-r1)}
+/* inline-block, or the button's dotted underline runs on under the kinds */
+.atn .q__also-k{display:inline-block;margin-left:6px;font-weight:500;color:var(--tx-ink-3);text-decoration:none}
+
+/* ── Today's *Close out the last week* card (6 Nov 2026) ─────────────────────
+   Past sessions nobody marked, one row each with two answers. It reuses the
+   queue's `atn` table so the two lists read as one family; the only new thing is
+   the action column, which holds TWO buttons (Done · No-show −1) where the
+   queue's holds one, so it is wider than `.atn__c-act`'s 112px — sized to the two
+   buttons at `.btn--sm` plus their 6px gap. Below 620px `.tbl--stack` reflows
+   the row and the pair wraps under the reason like the queue's verb does. */
+@media (min-width:621px){
+  .atn .cls__c-act{width:196px}
+}
+/* the pair sits in a wrapper: `display:flex` on the <td> itself would take it out of the table. */
+.atn .cls__act{padding-right:8px}
+.cls__btns{display:inline-flex;justify-content:flex-end;gap:6px}
+.cls__lead{margin:0 0 10px;font-size:var(--tx-meta);line-height:var(--tx-meta-lh);color:var(--tx-ink-2);max-width:68ch}
+
+/* ── *The rest of today*'s empty line: "Show the 3 done" (6 Nov 2026) ──────
+   A quiet inline verb inside a sentence, the queue's `.q__also-b` shape. */
+.tdl__show{
+  display:inline;padding:0;background:none;border:0;cursor:pointer;
+  font:inherit;font-weight:650;color:var(--tx-ink);
+  text-decoration:underline dotted;text-underline-offset:3px;
+}
+.tdl__show:hover{text-decoration-style:solid}
+.tdl__show:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px;border-radius:var(--tx-r1)}
+
+/* ── the Sessions tab's List · Month toggle (6 Nov 2026) ─────────────────────
+   The Calendar tab became the Sessions tab's Month view. `c-subtabs` is the
+   second-level strip of links this codebase already uses for exactly that
+   (Programs' shelves); it only needs its own space above the tab's content. */
+.cfviews{margin:0 0 14px}

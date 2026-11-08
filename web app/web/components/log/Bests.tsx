@@ -211,24 +211,14 @@ export function Bests({ data }: { data: ConsoleDataX }) {
             <div>
               <Why heading="And then the plate" tone="warn">
                 <p>
-                  A fourth test, and it decides whether the client’s phone buzzes rather than whether the
-                  record is real: a jump smaller than the <b>smallest plate in the room</b> is not a
-                  session&rsquo;s worth of progress, it is a typo or a half plate.{' '}
-                  <code>plateStepKg</code> is {trim1(PLATE_STEP_KG)} kg here and{' '}
-                  <b>1.25 in some gyms</b>, so it is per-gym — the one number on this screen that
-                  changes when the trainer changes building.
+                  A jump smaller than <b>{trim1(PLATE_STEP_KG)} kg</b> — the smallest plate — still
+                  counts as a record, but isn&rsquo;t worth sending to the client. It is usually a
+                  typo or a half plate.
                 </p>
               </Why>
               <p className="small" style={{ marginTop: 12 }}>
-                A trainer who forwards five records a week has taught a client that records mean
-                nothing. Of {cells.length} candidate{cells.length === 1 ? '' : 's'} today,{' '}
-                <b>{loud}</b> {loud === 1 ? 'is' : 'are'} worth saying out loud — and the threshold
-                is stated on the screen rather than hidden in a help page, because a threshold
-                nobody can see is a threshold nobody trusts.
-              </p>
-              <p className="small" style={{ marginTop: 10 }}>
-                No screen lets a trainer say which gym they are in yet, so this is the default and it
-                is written down rather than assumed.
+                Of {cells.length} record{cells.length === 1 ? '' : 's'} today, <b>{loud}</b>{' '}
+                {loud === 1 ? 'is' : 'are'} worth sharing.
               </p>
             </div>
           </div>

@@ -156,6 +156,15 @@ public class AssessmentJdbcRepository {
                 java.util.Map.of("id", id.toString()));
     }
 
+    /**
+     * Every assessment of a deleted client, open or done. A soft delete, like everything else: the readings stay in
+     * the row, but no list, history or Today band reads a deleted assessment, and the client's lens is empty by now.
+     */
+    public int softDeleteAllForClient(UUID clientId) {
+        return jdbc.update("UPDATE assessment SET deleted_at = now() WHERE client_id = :cid::uuid AND deleted_at IS NULL",
+                java.util.Map.of("cid", clientId.toString()));
+    }
+
     /** A cycle's open assessment follows the cycle's date. */
     public void moveOpenDue(UUID scheduleId, LocalDate dueOn) {
         jdbc.update("""

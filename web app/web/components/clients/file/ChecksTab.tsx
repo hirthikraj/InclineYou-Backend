@@ -9,6 +9,7 @@ import { ScheduleSheet } from '@/components/clients/assessments/ScheduleSheet';
 import { endCycle, updateCycle } from '@/lib/assessments/actions';
 import { assessmentHref } from '@/lib/assessments/address';
 import {
+  assessmentTag,
   blockCount,
   type AssessmentStatus,
   type AssessmentWire,
@@ -63,16 +64,7 @@ import { longDateStr } from './shared';
  * debt to nobody, and an amber tag beside a client on the screen said otherwise. The one verb
  * that matters in the room is *Take it*, and it is on the row.
  */
-const STATE_LABEL: Record<AssessmentStatus, string> = {
-  booked: 'Booked',
-  missed: 'Not taken',
-  done: 'Done',
-};
-const STATE_TONE: Record<AssessmentStatus, 'neutral' | 'ok'> = {
-  booked: 'neutral',
-  missed: 'neutral',
-  done: 'ok',
-};
+/* The labels and tones live in `assessmentTag` (lib/assessments/vocab.ts) now, shared with the list. */
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
@@ -307,7 +299,7 @@ function Section({
                   className: 'cfchk__c-st',
                   /* *With client* is a check-in that has been sent and not come back: the one state that is somebody else's move. */
                   content: (
-                    <Tag tone={STATE_TONE[r.state]}>{r.sentAt != null && r.state !== 'done' ? 'With client' : STATE_LABEL[r.state]}</Tag>
+                    <Tag tone={assessmentTag(r.state, r.sentAt).tone}>{assessmentTag(r.state, r.sentAt).label}</Tag>
                   ),
                 },
                 {

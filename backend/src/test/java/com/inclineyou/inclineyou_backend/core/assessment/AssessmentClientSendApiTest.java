@@ -168,6 +168,20 @@ class AssessmentClientSendApiTest {
     }
 
     @Test
+    @DisplayName("the weekly check-in is still made when both of its names are taken by the trainer's own forms: 201, never a 500")
+    void weeklyBothNamesTaken() throws Exception {
+        template(FORM.replace("Monthly check", "Weekly check-in"));
+        template(FORM.replace("Monthly check", "Weekly check-in (default)"));
+        String id = JsonPath.read(mvc.perform(post("/v1/assessment-templates").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"systemKey\":\"weekly_check_in\"}"))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.name").value("Weekly check-in (default 2)"))
+                .andReturn().getResponse().getContentAsString(), "$.id");
+        // and the transaction is still usable afterwards: asking again finds it
+        mvc.perform(post("/v1/assessment-templates").contentType(MediaType.APPLICATION_JSON).content("{\"systemKey\":\"weekly_check_in\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id));
+    }
+
+    @Test
     @DisplayName("the weekly check-in's name is told apart when a form of the trainer's already has it, rather than refused")
     void weeklyNameTaken() throws Exception {
         template(FORM.replace("Monthly check", "Weekly check-in"));

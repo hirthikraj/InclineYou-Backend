@@ -61,6 +61,11 @@ public class PortalMoneyJdbcRepository {
                         rs.getInt("sessions") == 0 ? null : rs.getInt("sessions"), rs.getInt("days") == 0 ? null : rs.getInt("days")));
     }
 
+    /** The trainer's UPI ID for this client's *Pay with UPI*, or null — V31 says when it is null. */
+    public String payTo(UUID client) {
+        return jdbc.queryForObject("SELECT client_pay_to(:c::uuid)", p(client), String.class);
+    }
+
     public String currency(UUID client) {
         var c = jdbc.queryForList("SELECT currency FROM package WHERE client_id = :c::uuid AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1", p(client), String.class);
         return c.isEmpty() ? "INR" : c.getFirst();

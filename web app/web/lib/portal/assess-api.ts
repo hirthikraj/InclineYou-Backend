@@ -47,7 +47,8 @@ export interface AssessDetailWire {
   late: boolean;
   completedAt: number | null;
   version: string;
-  asked: { measurements: { key: string; label: string; group: string; unit: string; optional: boolean }[]; questions: QuestionWire[] };
+  /** `min` / `minInclusive`: the lowest reading each accepts (from V28; absent from an older backend, which means above 0). */
+  asked: { measurements: { key: string; label: string; group: string; unit: string; optional: boolean; min?: number; minInclusive?: boolean }[]; questions: QuestionWire[] };
   entry: { readings: Record<string, number>; answers: Record<string, AnswerWire> };
   weightHidden: boolean;
   healthNotice: string | null;

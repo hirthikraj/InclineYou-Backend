@@ -1,5 +1,6 @@
 'use client';
 
+import { SESSION_REMINDERS_SENDING } from '@/lib/launch';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 
@@ -880,6 +881,9 @@ function AccessCard({ client, now }: { client: ClientDetailWire; now: number }) 
             {portal.lastSelfRunAt && (
               <FactList.Row k="Last workout on their own">{relativePast(portal.lastSelfRunAt, now)}</FactList.Row>
             )}
+            {/* Hidden while nothing sends reminders (lib/launch.ts): a per-client
+                switch for a message that never goes is a promise about this client. */}
+            {SESSION_REMINDERS_SENDING && (
             <FactList.Row k="Session reminders" note={reminderNote(portal.recentReminders?.[0], now)}>
               <Switch
                 label="Send this client session reminders on WhatsApp"
@@ -890,6 +894,7 @@ function AccessCard({ client, now }: { client: ClientDetailWire; now: number }) 
                 }
               />
             </FactList.Row>
+            )}
             <FactList.Row k="Shows what they owe">
               <Select
                 label="Whether this client sees what they owe"
@@ -1164,10 +1169,16 @@ function DeleteCard({ client }: { client: ClientDetailWire }) {
   return (
     <Card as="section" tone="danger" title={`Delete ${first}`} className="cfdz">
       <p className="small cfdz__note">
-        Everything about {first} is permanently deleted — their number, birth day,
-        goal, activity level, height and every note. Payments and packages stay, so
-        the money book still shows what was collected and what is still owed. This
-        cannot be undone.
+        {/* SAYS WHAT THE SERVER DOES, field by field (`ClientJdbcRepository.delete`):
+            the number and the four profile fields are wiped from the row; notes and
+            assessments are taken off every screen; the name stays on the payments
+            and packages it is part of. "Everything is permanently deleted" promised
+            more than that, on the one screen where a promise about data is read as
+            a legal one. */}
+        {first}&rsquo;s number, birth day, goal, activity level and height are wiped, and
+        their notes and assessments are removed from every screen. Their name stays on
+        payments and packages, so the money book still shows what was collected and what
+        is still owed. This cannot be undone.
       </p>
       <div className="cfdz__a" role="group" aria-label={confirming ? `Confirm deleting ${client.name}` : undefined}>
         {confirming ? (

@@ -1,5 +1,7 @@
 package com.inclineyou.inclineyou_backend.core.client;
 
+import com.inclineyou.inclineyou_backend.core.assessment.AssessmentJdbcRepository;
+import com.inclineyou.inclineyou_backend.core.assessment.AssessmentScheduleJdbcRepository;
 import com.inclineyou.inclineyou_backend.core.client.dto.ArchiveRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.DeleteClientRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.PauseRequest;
@@ -45,6 +47,8 @@ public class ClientStateService {
     private final ClientInviteJdbcRepository invites;
     private final ClientScheduleJdbcRepository sessions;
     private final ClientNoteJdbcRepository clientNotes;
+    private final AssessmentScheduleJdbcRepository assessmentSchedules;
+    private final AssessmentJdbcRepository assessments;
     private final WorkspaceClock clock;
     private final ClientSummaryService summaries;
     private final ClientScheduleService schedules;
@@ -180,11 +184,16 @@ public class ClientStateService {
         effects.put("packagesClosed", close.size());
         effects.put("packagesOwing", stillOwed);
         effects.put("notesDeleted", clientNotes.softDeleteAllForClient(clientId));
+        // A deleted client's assessments go with them, done ones too, and their cycles first (the cycle is always locked
+        // before its assessment). Logged rather than added to effects: that map is the contract's four keys.
+        int cyclesDeleted = assessmentSchedules.softDeleteAllForClient(clientId);
+        int assessmentsDeleted = assessments.softDeleteAllForClient(clientId);
 
         clients.delete(clientId);
         // Same reason as archive, and stronger: nobody should be able to open a link to a client who no longer exists.
         invites.revokePending(clientId, "trainer");
-        log.info("client deleted trainer={} client={} effects={}", trainerId, clientId, effects);
+        log.info("client deleted trainer={} client={} effects={} assessmentsDeleted={} cyclesDeleted={}",
+                trainerId, clientId, effects, assessmentsDeleted, cyclesDeleted);
         return new StateResult(summary, effects);
     }
 

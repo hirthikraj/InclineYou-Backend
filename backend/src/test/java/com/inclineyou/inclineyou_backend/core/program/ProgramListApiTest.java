@@ -218,6 +218,114 @@ class ProgramListApiTest {
         mvc.perform(get("/v1/programs/" + id)).andExpect(status().isNotFound());
     }
 
+    @Test
+    @DisplayName("one program's tree: workouts in week/day order without a deleted one, mains in position order with their sets, an alternative nested under its main (and never listed as a main), a names dictionary that keeps a retired exercise, and the version as the ETag")
+    void programTree() throws Exception {
+        List<String> two = jdbc.queryForList("SELECT id::text FROM exercise WHERE deleted_at IS NULL ORDER BY id LIMIT 3", Map.of(), String.class);
+        UUID squat = UUID.fromString(two.get(0)), press = UUID.fromString(two.get(1)), swap = UUID.fromString(two.get(2));
+        UUID week2 = workout(tplA, 2, "Week two", false);     // inserted first, read second
+        UUID week1 = workout(tplA, 1, "Week one", false);
+        workout(tplA, 3, "Removed day", true);
+        UUID second = exercise(week1, press, 1, null);         // inserted first, read second
+        UUID first = exercise(week1, squat, 0, null);
+        UUID alt = exercise(week1, swap, 1, first);
+        set(first, 2, "weight", 60, "reps", 8);
+        set(first, 1, "weight", 50, "reps", 10);
+        set(alt, 1, "bodyweight", null, "max_reps", null);
+        exercise(week2, squat, 0, null);
+        // the press is retired after the plan prescribed it: the plan still reads its name (R83)
+        jdbc.update("UPDATE exercise SET deleted_at = now() WHERE id = :e::uuid", Map.of("e", press.toString()));
+
+        var res = mvc.perform(get("/v1/programs/" + tplA)).andExpect(status().isOk()).andReturn().getResponse();
+        String body = res.getContentAsString();
+        assertEquals(List.of(week1.toString(), week2.toString()), JsonPath.<List<String>>read(body, "$.workouts[*].id"));
+        assertEquals(List.of(first.toString(), second.toString()), JsonPath.<List<String>>read(body, "$.workouts[0].exercises[*].id"),
+                "mains only, by position — the alternative is not one of them");
+        assertEquals(List.of(1, 2), JsonPath.<List<Integer>>read(body, "$.workouts[0].exercises[0].sets[*].position"));
+        assertEquals(List.of(50.0, 60.0), JsonPath.<List<Double>>read(body, "$.workouts[0].exercises[0].sets[*].loadValue"));
+        assertEquals(List.of(alt.toString()), JsonPath.<List<String>>read(body, "$.workouts[0].exercises[0].alternatives[*].id"));
+        assertEquals(swap.toString(), JsonPath.read(body, "$.workouts[0].exercises[0].alternatives[0].exerciseId"));
+        assertEquals("bodyweight", JsonPath.read(body, "$.workouts[0].exercises[0].alternatives[0].sets[0].loadKind"));
+        assertEquals(List.of(), JsonPath.<List<Object>>read(body, "$.workouts[0].exercises[0].alternatives[?(@.alternatives)]"),
+                "an alternative carries no alternatives key at all");
+        assertEquals(List.of(), JsonPath.<List<Object>>read(body, "$.workouts[0].exercises[1].alternatives[*]"));
+        for (UUID e : List.of(squat, press, swap)) {
+            assertEquals(jdbc.queryForObject("SELECT name FROM exercise WHERE id = :e::uuid", Map.of("e", e.toString()), String.class),
+                    JsonPath.read(body, "$.exercises['" + e + "'].name"));
+        }
+        assertEquals(3, JsonPath.<Map<String, Object>>read(body, "$.exercises").size(), "each exercise named once");
+        String version = JsonPath.read(body, "$.version");
+        assertEquals("\"" + version + "\"", res.getHeader("ETag"));
+    }
+
+    @Test
+    @DisplayName("one library program: an unknown id, a trainer's own program and a retired library program are all 404 on /certified/{id}")
+    void libraryOneNotFound() throws Exception {
+        mvc.perform(get("/v1/programs/certified/" + UUID.randomUUID())).andExpect(status().isNotFound());
+        // a trainer's program never answers on the library's route — the mirror of library()'s last line
+        mvc.perform(get("/v1/programs/certified/" + tplA)).andExpect(status().isNotFound());
+        mvc.perform(get("/v1/programs/certified/" + active)).andExpect(status().isNotFound());
+
+        String list = mvc.perform(get("/v1/programs/certified")).andReturn().getResponse().getContentAsString();
+        UUID lib = UUID.fromString(JsonPath.read(list, "$.items[0].id"));
+        mvc.perform(get("/v1/programs/certified/" + lib)).andExpect(status().isOk());
+        jdbc.update("UPDATE program SET deleted_at = now() WHERE id = :s::uuid", Map.of("s", lib.toString()));   // the seeder retiring it
+        mvc.perform(get("/v1/programs/certified/" + lib)).andExpect(status().isNotFound());
+        list = mvc.perform(get("/v1/programs/certified")).andReturn().getResponse().getContentAsString();
+        assertEquals(List.of(), JsonPath.<List<String>>read(list, "$.items[?(@.id=='" + lib + "')].id"), "and it leaves the shelf");
+    }
+
+    @Test
+    @DisplayName("the library's mine: this trainer's newest live template copy — not a deleted one, not another trainer's, not a plan — and stale once the library moves on")
+    void libraryMine() throws Exception {
+        String list = mvc.perform(get("/v1/programs/certified")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        UUID lib = UUID.fromString(JsonPath.read(list, "$.items[0].id"));
+        UUID untouched = UUID.fromString(JsonPath.read(list, "$.items[1].id"));
+        assertEquals(java.util.Collections.singletonList(null), mineOf(list, lib), "no copy yet");
+
+        libraryCopy(me, tenant, lib, 3, false);                       // older
+        UUID newest = libraryCopy(me, tenant, lib, 2, false);         // the one mine names
+        libraryCopy(me, tenant, lib, 1, true);                        // newer, but deleted
+        libraryCopy(other, tenantOf(other), lib, 0, false);           // newer, but not mine
+        UUID plan = plan(client("On The Library", "+919841090030"), "Plan from the library", "active");
+        jdbc.update("UPDATE program SET copied_from_program_id = :s::uuid, synced_at = now() WHERE id = :p::uuid",
+                Map.of("s", lib.toString(), "p", plan.toString()));    // a plan, not a template: never mine
+
+        list = mvc.perform(get("/v1/programs/certified")).andReturn().getResponse().getContentAsString();
+        assertEquals(List.of(newest.toString()), JsonPath.<List<String>>read(list, "$.items[?(@.id=='" + lib + "')].mine.id"));
+        assertEquals(List.of(createdAt(newest)), JsonPath.<List<Long>>read(list, "$.items[?(@.id=='" + lib + "')].mine.copiedAt"));
+        assertEquals(List.of(false), JsonPath.<List<Boolean>>read(list, "$.items[?(@.id=='" + lib + "')].mine.stale"));
+        assertEquals(java.util.Collections.singletonList(null), mineOf(list, untouched), "a copy of one program says nothing about another");
+        mvc.perform(get("/v1/programs/certified/" + lib))
+                .andExpect(jsonPath("$.mine.id").value(newest.toString())).andExpect(jsonPath("$.mine.stale").value(false));
+
+        // the library is revised after the copy was made: shown as stale, and the copy itself is untouched
+        jdbc.update("UPDATE program SET revised_at = now() + interval '1 minute' WHERE id = :s::uuid", Map.of("s", lib.toString()));
+        list = mvc.perform(get("/v1/programs/certified")).andReturn().getResponse().getContentAsString();
+        assertEquals(List.of(true), JsonPath.<List<Boolean>>read(list, "$.items[?(@.id=='" + lib + "')].mine.stale"));
+        assertEquals(List.of(newest.toString()), JsonPath.<List<String>>read(list, "$.items[?(@.id=='" + lib + "')].mine.id"));
+        mvc.perform(get("/v1/programs/certified/" + lib)).andExpect(jsonPath("$.mine.stale").value(true));
+    }
+
+    @Test
+    @DisplayName("the library answers a repeat with 304, and a new copy changes the ETag — the 304 can never hide a new mine")
+    void libraryNotModified() throws Exception {
+        var first = mvc.perform(get("/v1/programs/certified")).andExpect(status().isOk()).andReturn().getResponse();
+        String etag = first.getHeader("ETag");
+        org.junit.jupiter.api.Assertions.assertNotNull(etag);
+        String lib = JsonPath.read(first.getContentAsString(), "$.items[0].id");
+
+        var repeat = mvc.perform(get("/v1/programs/certified").header("If-None-Match", etag))
+                .andExpect(status().isNotModified()).andReturn().getResponse();
+        assertEquals("", repeat.getContentAsString());
+
+        libraryCopy(me, tenant, UUID.fromString(lib), 0, false);
+        var after = mvc.perform(get("/v1/programs/certified").header("If-None-Match", etag))
+                .andExpect(status().isOk()).andReturn().getResponse();
+        org.junit.jupiter.api.Assertions.assertNotEquals(etag, after.getHeader("ETag"));
+        assertEquals(List.of(false), JsonPath.<List<Boolean>>read(after.getContentAsString(), "$.items[?(@.id=='" + lib + "')].mine.stale"));
+    }
+
     /* ─────────────────────────────────────────────────────────────── fixtures ── */
 
     private List<String> idsOf(String url) throws Exception {
@@ -246,6 +354,32 @@ class ProgramListApiTest {
         jdbc.update("INSERT INTO workout_exercise (id, tenant_id, workout_id, exercise_id, position, alternative_of) "
                 + "VALUES (:id::uuid, :ten::uuid, :w::uuid, :e::uuid, :pos, CAST(:alt AS uuid))", p);
         return id;
+    }
+
+    private void set(UUID workoutExercise, int position, String loadKind, Integer load, String effortKind, Integer effort) {
+        var p = new HashMap<String, Object>();
+        p.put("we", workoutExercise.toString()); p.put("pos", position); p.put("lk", loadKind); p.put("lv", load);
+        p.put("ek", effortKind); p.put("ev", effort); p.put("ten", tenant.toString());
+        jdbc.update("INSERT INTO workout_set (tenant_id, workout_exercise_id, position, load_kind, load_value, effort_kind, effort_value) "
+                + "VALUES (:ten::uuid, :we::uuid, :pos, :lk, :lv, :ek, :ev)", p);
+    }
+
+    private static List<Object> mineOf(String list, UUID libraryId) {
+        return JsonPath.read(list, "$.items[?(@.id=='" + libraryId + "')].mine");
+    }
+
+    /** A template copied from a library program {@code daysAgo} days ago, the way {@code POST /v1/programs {copyFrom}} writes it. */
+    private UUID libraryCopy(UUID trainerId, UUID tenantId, UUID libraryId, int daysAgo, boolean deleted) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO program (id, origin, trainer_id, tenant_id, name, weeks, copied_from_program_id, synced_at, created_at, deleted_at) "
+                        + "VALUES (:id::uuid, 'trainer', :t::uuid, :ten::uuid, 'Library copy', 4, :s::uuid, now(), now() - make_interval(days => :d), "
+                        + (deleted ? "now()" : "NULL") + ")",
+                Map.of("id", id.toString(), "t", trainerId.toString(), "ten", tenantId.toString(), "s", libraryId.toString(), "d", daysAgo));
+        return id;
+    }
+
+    private long createdAt(UUID program) {
+        return jdbc.queryForObject("SELECT created_at FROM program WHERE id = :p::uuid", Map.of("p", program.toString()), java.sql.Timestamp.class).getTime();
     }
 
     private UUID clientOf(UUID program) {

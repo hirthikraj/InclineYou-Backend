@@ -39,7 +39,6 @@ import {
   PACK_ENDING,
   PACK_EXPIRING_DAYS,
   QUIET_DAYS,
-  OVERDUE_DAYS,
   attentionSeverity,
   attentionWeight,
   missedLine,
@@ -47,8 +46,10 @@ import {
   moneyLine,
   moneyMagnitude,
   packBand,
+  packEndedLine,
   packExpiryLine,
   packLine,
+  packStanding,
   quietLine,
   type AttentionBand,
 } from '@/lib/today/deck';
@@ -152,6 +153,21 @@ export interface RosterRow {
   setupStep?: 'schedule' | 'plan';
   pack?: { remaining: number; total?: number };
   owed: number;
+  /**
+   * Money owed past `OVERDUE_DAYS` — the same `moneyBand` split Today uses.
+   * False on a paused client, who raises no money row anywhere.
+   */
+  owedLate: boolean;
+  /**
+   * EVERY band this client raised, not only the one that won `attention`.
+   *
+   * The strip used to count `attention.kind`, which is the single TOP band, so a
+   * client whose pack was ending AND who owed ₹9,000 for fifteen days was counted
+   * as *pack ending* and the overdue tile read ₹0 while Today and Business both
+   * said ₹12,000. The tiles answer *how many clients have this problem*, which is
+   * every band raised; the row's line still shows the most urgent one.
+   */
+  raised: AttentionKind[];
   quietDays: number | null;
   lastLoggedAt: number | null;
   /**
@@ -250,17 +266,17 @@ export function filterCount(f: Filters): number {
 export function matchesFocus(r: RosterRow, focus: Focus): boolean {
   switch (focus) {
     case 'overdue':
-      return r.attention?.kind === 'overdue' && r.severity === 'critical';
+      return r.raised.includes('overdue') && r.owedLate;
     case 'due':
-      return r.attention?.kind === 'overdue' && r.severity !== 'critical';
+      return r.raised.includes('overdue') && !r.owedLate;
     case 'quiet':
-      return r.attention?.kind === 'quiet';
+      return r.raised.includes('quiet');
     case 'ending':
-      return r.attention?.kind === 'pack';
+      return r.raised.includes('pack');
     case 'missed':
-      return r.attention?.kind === 'missed';
+      return r.raised.includes('missed');
     case 'setup':
-      return r.attention?.kind === 'setup';
+      return r.raised.includes('setup');
   }
 }
 
@@ -431,25 +447,22 @@ export function buildRoster(input: RosterInput, now: number): Roster {
     paused: rows.filter((r) => r.tag === 'paused').length,
   };
 
-  // Tally: split money into overdue (≥ OVERDUE_DAYS) vs due-soon (< OVERDUE_DAYS)
+  /* The tally is `matchesFocus` counted, so a tile's figure and the rows it
+     selects cannot drift — and both read every band raised, not the top one. */
   const attentionRows = rows.filter((r) => r.attention);
-  const overdueRows = attentionRows.filter((r) => r.attention?.kind === 'overdue');
-
-  // We need to re-check which overdue rows are "late" vs "soon". Use attention weight
-  // to distinguish: overdue-late band vs due-soon band.
-  // A simpler proxy: rows whose severity is 'critical' with kind 'overdue' are overdue-late.
-  const overdueLateRows = overdueRows.filter((r) => r.severity === 'critical');
-  const dueSoonRows = overdueRows.filter((r) => r.severity !== 'critical');
+  const where = (focus: Focus) => rows.filter((r) => matchesFocus(r, focus));
+  const overdueLateRows = where('overdue');
+  const dueSoonRows = where('due');
 
   const tally: Tally = {
     overdueAmt: overdueLateRows.reduce((s, r) => s + r.owed, 0),
     overdueCount: overdueLateRows.length,
     dueAmt: dueSoonRows.reduce((s, r) => s + r.owed, 0),
     dueCount: dueSoonRows.length,
-    quiet: attentionRows.filter((r) => r.attention?.kind === 'quiet').length,
-    ending: attentionRows.filter((r) => r.attention?.kind === 'pack').length,
-    missed: attentionRows.filter((r) => r.attention?.kind === 'missed').length,
-    setup: attentionRows.filter((r) => r.attention?.kind === 'setup').length,
+    quiet: where('quiet').length,
+    ending: where('ending').length,
+    missed: where('missed').length,
+    setup: where('setup').length,
   };
 
   return {
@@ -500,17 +513,33 @@ export function buildRow(
    * December and a full one that expires on Friday, and "fewest sessions" picks
    * the wrong one. The `Sessions left` COLUMN still shows the leanest.
    */
-  let worstPack: { band: AttentionBand; remaining: number; daysLeft: number | null; id: string } | null = null;
-  for (const p of livePacks) {
+  let worstPack: {
+    band: AttentionBand; remaining: number; daysLeft: number | null; id: string;
+    /** Set when the pack has already run past its end date — `deck.ts`'s rule. */
+    endedAt?: number;
+  } | null = null;
+  /* A pack running now (by `deck.ts`'s reading), which is what renews a closed one. */
+  const hasRunning = packs.some((p) =>
+    !p.pausedAt && packStanding({ ...p, updatedAt: p.createdAt }, now)?.kind === 'live');
+  for (const p of packs) {
     /* A paused pack raises no band: its date is frozen and today is not. */
     if (p.pausedAt) continue;
     if (typeof p.sessionsRemaining !== 'number') continue;
+    /* `updatedAt` is not on this wire, so a pack USED UP is not raised here —
+       only one run past its date, which the date alone can tell. */
+    const standing = packStanding({ ...p, updatedAt: p.createdAt }, now);
+    if (standing === null || standing.kind === 'used') continue;
+    if (standing.kind === 'ended' && hasRunning) continue;
     const endsAt = parseDay(p.endDate);
     const daysLeft = endsAt === null ? null : Math.max(0, daysBetween(now, endsAt));
-    const band = packBand(p.sessionsRemaining, daysLeft);
+    const band = standing.kind === 'ended' ? 'pack-expiring' : packBand(p.sessionsRemaining, daysLeft);
     if (band === null) continue;
     if (worstPack === null || attentionWeight(band) > attentionWeight(worstPack.band)) {
-      worstPack = { band, remaining: p.sessionsRemaining, daysLeft, id: p.id };
+      worstPack = {
+        band, remaining: p.sessionsRemaining,
+        daysLeft: standing.kind === 'ended' ? 0 : daysLeft, id: p.id,
+        endedAt: standing.kind === 'ended' ? standing.endedAt : undefined,
+      };
     }
   }
 
@@ -640,9 +669,11 @@ export function buildRow(
         magnitude: byDate ? PACK_EXPIRING_DAYS - daysLeft! : PACK_ENDING - left,
         /* The sentence follows the BAND, not the data: a pack in `pack-expiring`
          * landed there because of its date, so it says the date. */
-        line: byDate
-          ? packExpiryLine(daysLeft!, WEEKDAYS_LONG[isoWeekday(now + daysLeft! * DAY_MS)])
-          : packLine(left),
+        line: worstPack.endedAt !== undefined
+          ? packEndedLine(worstPack.endedAt, left)
+          : byDate
+            ? packExpiryLine(daysLeft!, WEEKDAYS_LONG[isoWeekday(now + daysLeft! * DAY_MS)])
+            : packLine(left),
       });
     }
     /*
@@ -702,7 +733,17 @@ export function buildRow(
     line = top.line;
   } else if (status === 'paused') {
     const back = parseDay(client.pausedUntil);
-    const tail = back !== null ? `back ${shortDate(back)}` : sessionsLeft === null ? 'no pack' : `${sessionsLeft} sessions left`;
+    /* A return date that has PASSED is the news, not the pause. "back 28 Oct"
+       read on 6 Nov says the client is coming back when they were due nine days
+       ago; nothing resumes a client on its own (resuming rebooks their week and
+       restarts their packs, which is the trainer's call), so the line says the
+       date was missed and the row's menu carries Resume. */
+    const overdueBy = back !== null ? daysBetween(back, now) : 0;
+    const tail = back !== null
+      ? overdueBy > 0
+        ? `was due back ${shortDate(back)} · ${overdueBy} day${overdueBy === 1 ? '' : 's'} ago`
+        : `back ${shortDate(back)}`
+      : sessionsLeft === null ? 'no pack' : `${sessionsLeft} sessions left`;
     line = `Paused ${shortDate(client.pausedAt ?? now)} · ${tail}`;
   } else if (status === 'invited') {
     line = `Invited ${inviteDays === 0 ? 'today' : `${inviteDays} days ago`}`;
@@ -752,6 +793,8 @@ export function buildRow(
         }
       : undefined,
     owed,
+    owedLate: status !== 'paused' && owed > 0 && moneyBand(owedDays, false) === 'overdue-late',
+    raised: candidates.map((c) => c.kind),
     quietDays,
     lastLoggedAt,
     lastAttendedAt,
@@ -919,7 +962,7 @@ export function filterRows(rows: RosterRow[], filters: Filters, segment: Segment
     result = result.filter((r) => {
       if (filters.money.includes('owes') && r.owed > 0) return true;
       if (filters.money.includes('paid') && r.owed === 0) return true;
-      if (filters.money.includes('ending') && r.attention?.kind === 'pack') return true;
+      if (filters.money.includes('ending') && r.raised.includes('pack')) return true;
       return false;
     });
   }

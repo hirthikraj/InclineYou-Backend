@@ -1,8 +1,11 @@
-import { ClientFilePage } from '@/components/clients/file/ClientFilePage';
+import { redirect } from 'next/navigation';
 
-/** The month shown is a place — `?month=yyyy-MM` — so stepping it reads only that month (Client file · Calendar). */
-export const dynamic = 'force-dynamic';
-
+/**
+ * The Calendar tab became the Sessions tab's *Month* view on 6 Nov 2026. A
+ * bookmark or an open second window lands on the same month there. `redirect`
+ * rather than `permanentRedirect`: a 308 is cached by the browser, and the
+ * shape of this file is young enough that a later pass may want this URL back.
+ */
 export default async function Page({
   params,
   searchParams,
@@ -12,6 +15,6 @@ export default async function Page({
 }) {
   const { clientId } = await params;
   const q = await searchParams;
-  const month = typeof q.month === 'string' ? q.month : undefined;
-  return <ClientFilePage clientId={clientId} tab="calendar" options={{ month }} />;
+  const month = typeof q.month === 'string' && /^\d{4}-\d{2}$/.test(q.month) ? `&month=${q.month}` : '';
+  redirect(`/clients/${clientId}/sessions?view=month${month}`);
 }

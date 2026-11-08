@@ -9,6 +9,7 @@ import { Card } from '@/web-components/ui/Card';
 import { TextField } from '@/web-components/ui/Field';
 import { Message } from '@/web-components/ui/Message';
 import { SwitchRow } from '@/web-components/ui/Switch';
+import { PUSH_SENDING, SESSION_REMINDERS_SENDING } from '@/lib/launch';
 
 const NOTICES: { key: keyof PrefsWire['notify']; title: string; example: string }[] = [
   { key: 'sessionReminder', title: 'Session reminders', example: 'The evening before, so a booked session never catches you out' },
@@ -117,9 +118,21 @@ export function PrefsForm({ prefs: initial, trainerFirstName, vapidKey, after }:
       <Card>
         <Card.Head title="Where we can reach you" level={3} />
         <Card.Body>
-          <SwitchRow checked={prefs.channels.whatsapp} disabled={pending} title="WhatsApp" example={prefs.whatsapp.reminderOffered ? `Lets InclineYou message you on WhatsApp — for session reminders ${trainerFirstName} has switched on` : 'Lets InclineYou message you on WhatsApp'} onChange={(v) => change({ channels: { whatsapp: v } })} />
-          {prefs.whatsapp.optedIn && !prefs.channels.whatsapp && <p className="pl__s">You said yes before, so turning it back on isn’t a new agreement.</p>}
-          {vapidKey && <SwitchRow checked={prefs.channels.push} disabled={pending} title="Notifications on this device" example="A short notice on this phone or computer, even when the site isn’t open" onChange={(v) => void setPush(v)} />}
+          {/* Both channels are OFF for launch (lib/launch.ts): nothing sends a WhatsApp reminder and
+              nothing sends a push. Asking a client to agree to messages that never come is a consent
+              collected under a false description. The in-portal notices above are real and stay. */}
+          {SESSION_REMINDERS_SENDING ? (
+            <>
+              <SwitchRow checked={prefs.channels.whatsapp} disabled={pending} title="WhatsApp" example={prefs.whatsapp.reminderOffered ? `Lets InclineYou message you on WhatsApp — for session reminders ${trainerFirstName} has switched on` : 'Lets InclineYou message you on WhatsApp'} onChange={(v) => change({ channels: { whatsapp: v } })} />
+              {prefs.whatsapp.optedIn && !prefs.channels.whatsapp && <p className="pl__s">You said yes before, so turning it back on isn’t a new agreement.</p>}
+            </>
+          ) : null}
+          {PUSH_SENDING && vapidKey && <SwitchRow checked={prefs.channels.push} disabled={pending} title="Notifications on this device" example="A short notice on this phone or computer, even when the site isn’t open" onChange={(v) => void setPush(v)} />}
+          {!SESSION_REMINDERS_SENDING && !PUSH_SENDING && (
+            <p className="pl__s">
+              Everything shows here, in your portal. {trainerFirstName} messages you on WhatsApp from their own number.
+            </p>
+          )}
         </Card.Body>
       </Card>
 

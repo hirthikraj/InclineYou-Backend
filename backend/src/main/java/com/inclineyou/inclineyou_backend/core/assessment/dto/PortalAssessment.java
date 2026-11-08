@@ -29,7 +29,9 @@ public final class PortalAssessment {
     public record Page(List<Item> items, @JsonInclude(JsonInclude.Include.NON_NULL) Counts counts, boolean canStart, String nextCursor) {}
 
     /** {@code optional} is always true: every measurement may be skipped. */
-    public record Measurement(String key, String label, String group, String unit, boolean optional) {}
+    /** {@code min} / {@code minInclusive}: the lowest reading it accepts, from the catalogue; every reading is below 100,000. */
+    public record Measurement(String key, String label, String group, String unit, boolean optional,
+                              java.math.BigDecimal min, boolean minInclusive) {}
 
     public record Asked(List<Measurement> measurements, List<AssessmentCatalogue.Question> questions) {}
 

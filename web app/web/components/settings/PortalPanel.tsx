@@ -8,6 +8,8 @@ import { Card } from '@/web-components/ui/Card';
 import { Message } from '@/web-components/ui/Message';
 import { Select } from '@/web-components/ui/Select';
 import { SwitchRow } from '@/web-components/ui/Switch';
+import { Tag } from '@/web-components/ui/Tag';
+import { SESSION_REMINDERS_SENDING } from '@/lib/launch';
 
 /**
  * CLIENT PORTAL — the trainer's two decisions about it (api-contract 1.2, tr-a10).
@@ -49,14 +51,29 @@ export function PortalPanel({ initial }: { initial: PortalSettings }) {
   return (
     <div className="acxw">
       <div className="acx">
-        <Card title="Session reminders">
+        <Card
+          title="Session reminders"
+          aside={SESSION_REMINDERS_SENDING ? undefined : <Tag>Coming soon</Tag>}
+        >
+          {/* OFF FOR LAUNCH (lib/launch.ts). The switch is drawn off and inert, and
+              the card says so, because nothing sends a reminder yet and a switch
+              that saves "on" would have a trainer believe their clients are being
+              reminded. The stored value is left alone. */}
           <SwitchRow
             title="Remind clients before a session"
             example="A WhatsApp message from InclineYou’s number, for sessions you booked."
-            checked={settings.sessionReminders}
-            disabled={pending}
+            checked={SESSION_REMINDERS_SENDING && settings.sessionReminders}
+            disabled={pending || !SESSION_REMINDERS_SENDING}
             onChange={(next) => save({ sessionReminders: next })}
           />
+          {!SESSION_REMINDERS_SENDING && (
+            <p className="small">
+              <b className="ink">Not sending yet.</b> Reminders from InclineYou’s WhatsApp number arrive in an
+              update after launch. Until then, send the <i>Session reminder</i> message from your own WhatsApp — it
+              is in <b className="ink">Nudge messages</b>.
+            </p>
+          )}
+          {SESSION_REMINDERS_SENDING && (<>
 
           <div className="ptl__row">
             <Select
@@ -83,6 +100,7 @@ export function PortalPanel({ initial }: { initial: PortalSettings }) {
           <p className="small ink3">
             Turning this on doesn’t sign anyone up. Each client agrees to WhatsApp messages themselves, in their own portal.
           </p>
+          </>)}
         </Card>
 
         <Card title="What clients see">

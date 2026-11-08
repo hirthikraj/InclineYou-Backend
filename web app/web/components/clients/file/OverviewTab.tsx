@@ -576,7 +576,7 @@ export function OverviewTab({
             </Card.Body>
             <Card.Body divided className="cfov__money">
               <KeyValueRow
-                k="Collected"
+                k="Paid on this pack"
                 valueClassName={owed > 0 ? (overdue ? 'cfov__late' : 'cfov__owed') : undefined}
               >
                 {rupees(paid)}

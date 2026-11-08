@@ -110,6 +110,9 @@ export interface MeasurementWire {
   unit: string;
   /** Whether the client file draws a series for it (the six V5 ids). */
   charted: boolean;
+  /** The lowest reading it accepts (V28); absent from an older backend, which means above 0. */
+  min?: number;
+  minInclusive?: boolean;
 }
 
 export interface CatalogWire {
@@ -352,4 +355,48 @@ export function moved<T>(rows: T[], from: number, to: number): T[] {
   const [row] = next.splice(from, 1);
   next.splice(to, 0, row);
   return next;
+}
+
+/**
+ * THE STATUS TAG ON AN ASSESSMENT ROW — one rule, read by the list and the client file.
+ *
+ * Both screens used to say *With client* for anything sent and not done, so a
+ * check-in sent on 1 Nov and still unanswered on 6 Nov read exactly like one
+ * sent this morning: the server's `missed` was on the wire and the label threw
+ * it away. A sent check-in past its date is the one state here that asks the
+ * trainer to do something (chase the client), so it gets a word and a tone.
+ *
+ * Everything else is unchanged on purpose: an UNSENT one that went by is still
+ * *Not taken* in neutral ink — a trainer's own omission is a debt to nobody
+ * (the client file's rule) — and a sent one not yet due is still *With client*.
+ */
+export function assessmentTag(
+  state: AssessmentStatus,
+  sentAt: number | null | undefined,
+): { label: string; tone: 'neutral' | 'ok' | 'warn' } {
+  if (state === 'done') return { label: 'Done', tone: 'ok' };
+  if (sentAt != null) {
+    return state === 'missed'
+      ? { label: 'Late · with client', tone: 'warn' }
+      : { label: 'With client', tone: 'neutral' };
+  }
+  return state === 'missed' ? { label: 'Not taken', tone: 'neutral' } : { label: 'Booked', tone: 'neutral' };
+}
+
+/**
+ * The catalogue's HEALTH items, by key — a copy of `AssessmentCatalogue.HEALTH_MEASUREMENTS`
+ * and `HEALTH_QUESTIONS` on the backend, which is the only enforced list. Change both.
+ *
+ * Read by the trainer's *Take* screen to say, before a reading is typed, that this
+ * one is health data. The client's portal already says so (`healthNotice`); the
+ * trainer's side did not, and the trainer is the one holding the cuff — often for
+ * a client who has never signed in and so never seen the privacy notice that names
+ * these items.
+ */
+export const HEALTH_MEASUREMENT_KEYS = new Set(['visceral', 'resting_hr', 'bp']);
+export const HEALTH_QUESTION_IDS = new Set(['q_pain']);
+
+export function asksHealth(asked: { measurements: { key: string }[]; questions: { id: string }[] }): boolean {
+  return asked.measurements.some((m) => HEALTH_MEASUREMENT_KEYS.has(m.key))
+    || asked.questions.some((q) => HEALTH_QUESTION_IDS.has(q.id));
 }

@@ -4,8 +4,9 @@ import { useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { saveEntry } from '@/lib/assessments/actions';
+import { readingAllowed, readingInputMode, readingRule } from '@/lib/assessments/bounds';
 import type { AnswerEntry, AssessmentDetailWire } from '@/lib/assessments/detail';
-import type { QuestionWire } from '@/lib/assessments/vocab';
+import { asksHealth, type QuestionWire } from '@/lib/assessments/vocab';
 import { TopBar } from '@/components/shell/TopBar';
 import { AffixField } from '@/web-components/ui/AffixField';
 import { Button } from '@/web-components/ui/Button';
@@ -92,8 +93,8 @@ export function Take({ data, from = null }: { data: AssessmentDetailWire; from?:
       const raw = (readings[m.key] ?? '').trim();
       if (raw === '') continue;
       const n = Number(raw);
-      if (!Number.isFinite(n) || n <= 0 || n >= 100_000) {
-        setError({ message: `${m.label}: enter a number above 0 and below 100,000.`, stale: false });
+      if (!readingAllowed(m, n)) {
+        setError({ message: `${m.label}: enter ${readingRule(m)}.`, stale: false });
         return;
       }
       body[m.key] = n;
@@ -182,6 +183,18 @@ export function Take({ data, from = null }: { data: AssessmentDetailWire; from?:
             </Message>
           )}
 
+          {/* HEALTH DATA, SAID BEFORE IT IS TYPED. Blood pressure, resting heart rate,
+              visceral fat and the *did anything hurt* question are health data under the
+              DPDP Act, in the catalogue by the product owner's decision. The client's
+              portal says so; this is the trainer's half of the same sentence. */}
+          {asksHealth(data.asked) && (
+            <Message>
+              This form includes health readings. Ask {client ? client.name.split(' ')[0] : 'your client'}{' '}
+              before you take them — they are stored with this assessment, and you can leave any of
+              them blank.
+            </Message>
+          )}
+
           <div className="asmv__cols">
             {data.asked.measurements.length > 0 && (
               <Card className="asmv__card">
@@ -196,7 +209,7 @@ export function Take({ data, from = null }: { data: AssessmentDetailWire; from?:
                         affix={m.unit || '·'}
                         side="trailing"
                         id={`take-${m.key}`}
-                        inputMode="decimal"
+                        inputMode={readingInputMode(m)}
                         disabled={busy}
                         value={readings[m.key] ?? ''}
                         onChange={(e) => setReadings({ ...readings, [m.key]: e.target.value })}

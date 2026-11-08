@@ -1,5 +1,7 @@
 # Identity — who a person is, and how they prove it
 
+> **8 Nov 2026:** superseded docs were moved to `/home/incline-you/InclineYou/_archive/` (same layout) — among them `backend/SCHEMA.md` (use `backend/schema.html`, generated from the live database), `backend/agent/`, `backend/db-archive/`, the 1.0/1.1 API contracts and trackers, `proposed-schema.html` and the web's `BACKEND_GAPS.md` / `backendGaps-latest.md` / `AGENTS-ARCHIVE.md`. Where this file names one, it is in the archive.
+
 **Status: PLANNED. Nothing below is built.** Companion to `TENANCY.md`, and the
 same shape of argument one axis over: that file separated *who coaches* from
 *whose books*, this one separates **who a person is** from **how they proved

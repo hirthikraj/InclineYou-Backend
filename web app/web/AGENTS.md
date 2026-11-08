@@ -1,3 +1,5 @@
+> **8 Nov 2026:** superseded docs were moved to `/home/incline-you/InclineYou/_archive/` (same layout) — among them `backend/SCHEMA.md` (use `backend/schema.html`, generated from the live database), `backend/agent/`, `backend/db-archive/`, the 1.0/1.1 API contracts and trackers, `proposed-schema.html` and the web's `BACKEND_GAPS.md` / `backendGaps-latest.md` / `AGENTS-ARCHIVE.md`. Where this file names one, it is in the archive.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
@@ -445,7 +447,7 @@ from the server's instant and then ticks off the browser's.
 | --- | --- |
 | **Auth** | `/sign-in`, `/verify`, `/new` (3a — and **the only place a trainer account is created**), `/role` (2a), `/unattached` (7e) |
 | **Setup** | `/setup` + eight steps + `/setup/done` |
-| **Trainer** | `/today` · `/schedule` · `/clients` (+ the file's eight tabs, `/new`, `/report`, a client's plan, **and the console at `/clients/:id/sessions/:sid{,/log,/finish,/bests}`**) · **Fitness**, whose three pane pages are `/programs` (+ the **Templates** tab at `/programs/certified`, the builder, and a client's copy) · `/programs/workouts` · `/programs/exercises` · `/sessions/new` (the picker; `/sessions` redirects to `/programs/workouts` and every other `/sessions/*` is a lookup redirect) · **Business**, whose six pane pages are `/business` (the Overview) · `/business/transactions` · `/business/packages` · `/business/gym` · `/business/gst` · `/business/reports` · `/team` · `/settings` (three tabs) + `/settings/profile` (seven tabs) |
+| **Trainer** | `/today` · `/schedule` · `/clients` (+ the file's seven tabs, `/new`, `/report`, a client's plan, **and the console at `/clients/:id/sessions/:sid{,/log,/finish,/bests}`**) · **Fitness**, whose three pane pages are `/programs` (+ the **Templates** tab at `/programs/certified`, the builder, and a client's copy) · `/programs/workouts` · `/programs/exercises` · `/sessions/new` (the picker; `/sessions` redirects to `/programs/workouts` and every other `/sessions/*` is a lookup redirect) · **Business**, whose six pane pages are `/business` (the Overview) · `/business/transactions` · `/business/packages` · `/business/gym` · `/business/gst` · `/business/reports` · `/team` · `/settings` (three tabs) + `/settings/profile` (seven tabs) |
 | **Portal** | `/me/today` · `/me/progress` (**four** tabs) · `/me/plan` (three tabs) · `/me/account` (three tabs) · `/me/workout/:id` · `/me/checkin/:id` |
 | **Library** | `/library`, `/library/[id]` |
 
@@ -497,7 +499,7 @@ subtree out, and five of those are live shell screens.
 - **Which optional steps were skipped has no column** — it lives in a 24-hour
   cookie, because "I passed on that in this sitting" is a fact about a sitting.
   Cost: skip a step here and the phone will ask once more.
-- **Steps 6 and 7 (`working_hours`, `packs`) go through `/v1/sync/push`**, the
+- **The `hours` and `packs` steps (`working_hours`, `packs`) go through `/v1/sync/push`**, the
   only path that has ever written those tables. `packs` has REST now
   (`GET`/`POST`/`PATCH /v1/packs`) and this flow deliberately still does not use
   it — it already reads hours from the same single pull. **A new screen uses
@@ -513,6 +515,12 @@ subtree out, and five of those are live shell screens.
   from inside setup — clearing is Settings' job.
 - **A chip click selects; Continue advances.** No auto-advance: a trainer who
   mis-clicked has no way to see it before the page has gone.
+- **The order is money first, profile last (6 Nov 2026):** name · what you sell ·
+  getting paid · when you work · experience · specialities · certifications ·
+  languages (`SETUP_STEPS`). Whichever step is last ENDS the flow: every step's
+  action goes through `onward` in `lib/setup/actions.ts`, which stamps setup
+  complete when nothing is owed after it — it used to be the UPI step alone, when
+  that step was always eighth. `StepFoot` labels the last step *Finish* by itself.
 - **Eight steps, and it stays eight.** The pre-flight screen exists because the
   most-named onboarding complaint is *surprise*, not length. A 200-word bio inside
   a flow that promises about a minute is exactly that surprise — so the headline
@@ -762,10 +770,19 @@ Four steps: phone check → sell a pack → **pick the days** → **pick a plan*
 
 ### The client file
 
-Eight tabs, each a real route: **Overview · Calendar · Progress · Assessments ·
-Sessions · Plan · Payments · Personal information**. `/package` and `/programs`
-redirect, and the `notes` key still spells the last one's route — a trainer with
-`/clients/abc/notes` bookmarked should not meet a 404 over a rename.
+Seven tabs, each a real route: **Overview · Progress · Assessments · Sessions ·
+Plan · Payments · Profile**. `/package` and `/programs` redirect, and the `notes`
+key still spells the last one's route — a trainer with `/clients/abc/notes`
+bookmarked should not meet a 404 over a rename.
+
+- **The Calendar tab is the Sessions tab's *Month* view since 6 Nov 2026**
+  (`/sessions?view=month&month=yyyy-MM`, a `c-subtabs` *List · Month* toggle).
+  It was the same rows as a grid, so a client's sessions had two homes one tab
+  apart. `/calendar` redirects (a 307, not a 308, so the URL can be reclaimed).
+  `calendar` is still a `Tab` value and a `getClientFilePayload` case — it is a
+  distinct VIEW with its own month-window read, just not a strip entry — and the
+  strip lights *Sessions* on it (`stripTab`). **Personal information became
+  *Profile*** the same day; the route is still `/information`.
 
 - **Assessments (`/clients/:id/assessments`) sits beside Progress, and the pair
   is the point.** They are the same subject read two ways: Progress is what the

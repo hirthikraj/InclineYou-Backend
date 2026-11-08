@@ -113,7 +113,7 @@ export async function saveName(
       headline: headline.trim().slice(0, 80),
     });
     await answered('name');
-    return { ok: true, next: destinationAfter('name', await getSetupState()) };
+    return await onward('name');
   } catch (error) {
     return failure(error);
   }
@@ -124,7 +124,7 @@ export async function saveExperience(band: string): Promise<StepResult> {
   try {
     await patchProfile({ experienceBand: band });
     await answered('experience');
-    return { ok: true, next: destinationAfter('experience', await getSetupState()) };
+    return await onward('experience');
   } catch (error) {
     return failure(error);
   }
@@ -152,7 +152,7 @@ export async function saveList(
   try {
     await patchProfile({ [step]: clean });
     if (clean.length > 0) await answered(step);
-    return { ok: true, next: destinationAfter(step, await getSetupState()) };
+    return await onward(step);
   } catch (error) {
     return failure(error);
   }
@@ -190,7 +190,7 @@ export async function saveHours(days: number[], windows: HourWindow[]): Promise<
     }
     await patchWorkingHours(changes);
     await answered('hours');
-    return { ok: true, next: destinationAfter('hours', await getSetupState()) };
+    return await onward('hours');
   } catch (error) {
     return failure(error);
   }
@@ -279,7 +279,7 @@ export async function removePack(packId: string): Promise<StepResult> {
 /** Step 7 · Continue. Nothing to write that the two actions above have not. */
 export async function leavePacks(): Promise<StepResult> {
   try {
-    return { ok: true, next: destinationAfter('packs', await getSetupState()) };
+    return await onward('packs');
   } catch (error) {
     return failure(error);
   }
@@ -297,10 +297,10 @@ export async function leavePacks(): Promise<StepResult> {
 export async function finishWithUpi(upiId: string): Promise<StepResult> {
   try {
     await patchProfile({ upiVpa: upiId.trim() });
-    await completeSetup();
     await answered('payment');
-    await dropSkipped();
-    return { ok: true, next: '/setup/done' };
+    // No longer the last step (6 Nov 2026), so it no longer stamps the flow by
+    // itself — `onward` does, if nothing is owed after it.
+    return await onward('payment');
   } catch (error) {
     return failure(error);
   }
@@ -323,11 +323,11 @@ export async function skipStep(step: SetupStep): Promise<StepResult> {
   try {
     await markSkipped(step);
     const state = await getSetupState();
-    // The last optional step is `payment`, so skipping it ends the flow — and
-    // ending the flow means stamping it complete, exactly as the phone's
-    // `onSkip` calls `finish()` before navigating to Done.
-    if (step === 'payment') return finishSetup('/setup/done');
-    return { ok: true, next: destinationAfter(step, state) };
+    // Skipping the last step owed ends the flow, and ending the flow means
+    // stamping it complete — `onward`'s rule, which no longer assumes the last
+    // step is `payment`.
+    const next = destinationAfter(step, state);
+    return next === '/setup/done' ? await finishSetup(next) : { ok: true, next };
   } catch (error) {
     return failure(error);
   }
@@ -342,6 +342,21 @@ export async function skipStep(step: SetupStep): Promise<StepResult> {
  * every fresh sign-in, which is the one thing the flow must not do to somebody
  * who has already given it their name.
  */
+/**
+ * Where a saved step goes next — and, when nothing is owed after it, the END of the
+ * flow, which means stamping it complete.
+ *
+ * Until 6 Nov 2026 only the UPI step stamped the flow, because it was always the
+ * last of the eight. The money steps now come straight after the name, and the four
+ * profile questions last, so whichever step a trainer finishes on has to be able to
+ * end it. Without the stamp `/setup/done` would be reached and the server would ask
+ * for setup again on the next sign-in.
+ */
+async function onward(step: SetupStep): Promise<StepResult> {
+  const next = destinationAfter(step, await getSetupState());
+  return next === '/setup/done' ? finishSetup(next) : { ok: true, next };
+}
+
 export async function finishSetup(next = '/setup/done'): Promise<StepResult> {
   try {
     await completeSetup();

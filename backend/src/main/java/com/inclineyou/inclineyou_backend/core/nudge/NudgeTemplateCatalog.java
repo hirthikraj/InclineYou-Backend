@@ -87,6 +87,15 @@ public final class NudgeTemplateCatalog {
             new Variable("{amount}", "what they still owe you, as ₹");
     private static final Variable PACKAGE =
             new Variable("{package}", "the pack they are on");
+    /**
+     * A whole sentence — "Pay by UPI to you@okaxis." — or nothing at all when no UPI
+     * ID is set (Settings → Account), so the default wording never ships "UPI: ." to a
+     * client. {@code {upi}} is the bare ID, for a trainer who wants their own sentence.
+     */
+    private static final Variable PAY_BY_UPI =
+            new Variable("{pay_by_upi}", "\"Pay by UPI to <your UPI ID>.\" — or nothing, if you have not set one");
+    private static final Variable UPI =
+            new Variable("{upi}", "your UPI ID on its own");
 
     private static Variable count(String meaning) {
         return new Variable("{count}", meaning);
@@ -130,8 +139,8 @@ public final class NudgeTemplateCatalog {
                 "payment_reminder",
                 "Payment",
                 "Money is owed. The hardest message a trainer sends, so the default is gentle on purpose.",
-                "Hi {name}, gentle reminder on the pending {amount} for your {package}. Thanks!",
-                List.of(NAME, AMOUNT, PACKAGE, days("days it has been outstanding"), TRAINER)));
+                "Hi {name}, gentle reminder on the pending {amount} for your {package}. {pay_by_upi} Thanks!",
+                List.of(NAME, AMOUNT, PACKAGE, PAY_BY_UPI, UPI, days("days it has been outstanding"), TRAINER)));
 
         add(new Template(
                 "missed_session",

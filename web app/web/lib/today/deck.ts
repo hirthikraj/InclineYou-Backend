@@ -425,6 +425,61 @@ export function moneyLine(total: number, days: number, late: boolean): string {
   return `${rupees(total)} ${late ? 'overdue' : 'due'} · ${days} day${days === 1 ? '' : 's'}`;
 }
 
+/**
+ * How long a pack that has CLOSED — run past its end date, or used up — keeps
+ * asking to be renewed.
+ *
+ * The renewal row used to vanish at exactly the moment it mattered most: a pack
+ * that ran out of sessions closes on the charge, and one past its `endDate`
+ * was either left `active` (no sweep existed, so the queue said *Pack expires
+ * today* for weeks) or, once swept, became dead and raised nothing at all. A
+ * month is long enough that a trainer who was away still sees it, and short
+ * enough that a client who left in the spring is not a renewal prompt in June.
+ */
+export const PACK_CLOSED_SHOWN_DAYS = 30;
+
+/** `Pack ended 24 Oct · 5 sessions unused` — said in the past tense, because it is. */
+export function packEndedLine(endedAt: number, remaining: number): string {
+  const d = new Date(endedAt);
+  const day = `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
+  return remaining > 0
+    ? `Pack ended ${day} · ${remaining} session${remaining === 1 ? '' : 's'} unused`
+    : `Pack ended ${day}`;
+}
+
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Whether a pack is a renewal prompt, and in which voice.
+ *
+ * `live` — still running; the date and session bands apply as they always did.
+ * `ended` — past its end date (whether or not the nightly sweep has closed it
+ * yet), within `PACK_CLOSED_SHOWN_DAYS`: raised at the top of the date band.
+ * `used` — closed because its sessions ran out, within the same window: raised
+ * as an empty pack.
+ * `null` — nothing to say: dead for another reason, or closed too long ago.
+ */
+export function packStanding(
+  pkg: { status: string; endDate?: string | null; updatedAt: number },
+  now: number,
+): { kind: 'live' } | { kind: 'ended'; endedAt: number } | { kind: 'used' } | null {
+  const status = lower(pkg.status);
+  const endsAt = parseDay(pkg.endDate ?? undefined);
+  const today = startOfDay(now);
+  const fresh = (at: number) => daysBetween(at, now) <= PACK_CLOSED_SHOWN_DAYS;
+  if (status === 'active') {
+    return endsAt !== null && endsAt < today
+      ? fresh(endsAt) ? { kind: 'ended', endedAt: endsAt } : null
+      : { kind: 'live' };
+  }
+  if (status === 'expired') {
+    const at = endsAt ?? pkg.updatedAt;
+    return fresh(at) ? { kind: 'ended', endedAt: at } : null;
+  }
+  if (status === 'completed') return fresh(pkg.updatedAt) ? { kind: 'used' } : null;
+  return null;
+}
+
 export function packLine(remaining: number): string {
   return remaining <= 0
     ? 'Pack is empty'
@@ -459,7 +514,9 @@ export function logLine(count: number, days: number): string {
 export function packExpiryLine(days: number, weekday: string): string {
   if (days <= 0) return 'Pack expires today';
   if (days === 1) return 'Pack expires tomorrow';
-  return `Pack expires ${weekday} · ${days} days`;
+  // Seven days out is today's own weekday: "expires Friday", read on a Friday,
+  // says today. The next one is the one meant.
+  return `Pack expires ${days >= 7 ? 'next ' : ''}${weekday} · ${days} days`;
 }
 
 /**
@@ -1022,8 +1079,29 @@ export interface DeckWeek {
   percent: number;
 }
 
+/**
+ * One past session nobody has marked — a line on Today's *Close out* card.
+ *
+ * The queue's `unmarked` row bundled a client's whole week into one *Mark* that
+ * marked every one of them DONE, sat near the bottom of the ladder, and on a
+ * real Friday was folded behind *Show 30 more* — so Monday's six sessions were
+ * never closed, every pack on the screen was one session wrong, and *Training
+ * this month* read 0. Closing out is per SESSION and has two answers (they came,
+ * they didn't), so it is its own card above the queue, oldest first.
+ */
+export interface CloseOutSession {
+  id: string;
+  clientId: string;
+  clientName: string;
+  at: number;
+  /** The plan day it was booked as ("Lower body"), when there is one. */
+  dayLabel?: string;
+}
+
 export interface Deck {
   clientCount: number;
+  /** Past sessions inside the unmarked window, oldest first. See `CloseOutSession`. */
+  closeOut: CloseOutSession[];
   /** The whole day, in order, including what is already done. */
   today: DeckSession[];
   todayDone: number;
@@ -1326,19 +1404,28 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
    * one that expires on Friday, and "fewest sessions" picks the wrong one. */
   const worst = new Map<
     string,
-    { band: AttentionBand; remaining: number; daysLeft: number | null; at: number; packageId: string }
+    {
+      band: AttentionBand; remaining: number; daysLeft: number | null;
+      /** Set when the pack has already run past its end date. */
+      endedAt?: number;
+      at: number; packageId: string;
+    }
   >();
   for (const pkg of input.packages) {
-    if (DEAD_PACKAGE.has(lower(pkg.status))) continue;
+    const standing = packStanding(pkg, now);
+    if (standing === null) continue;
     /*
      * v1 · a pack that has ALREADY BEEN RENEWED raises nothing: the client holds
      * a newer running pack of the same service. Without this, Meera's old pack
      * keeps saying "ends in 2 sessions" the moment after she paid for the next
-     * twelve, and the row invites a second sale.
+     * twelve, and the row invites a second sale. A CLOSED pack is renewed by any
+     * live pack of the same service — its own `updatedAt` moves when it closes,
+     * so "newer" is the wrong test for it.
      */
     if (pkg.service && input.packages.some((o) =>
       o.id !== pkg.id && o.clientId === pkg.clientId && o.service === pkg.service
-      && !DEAD_PACKAGE.has(lower(o.status)) && !o.pausedAt && o.updatedAt > pkg.updatedAt)) continue;
+      && packStanding(o, now)?.kind === 'live' && !o.pausedAt
+      && (standing.kind !== 'live' || o.updatedAt > pkg.updatedAt))) continue;
     /*
      * V30 · a PAUSED pack raises nothing.
      *
@@ -1357,23 +1444,27 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
     if (pkg.pausedAt) continue;
     if (typeof pkg.sessionsRemaining !== 'number') continue;
     const endsAt = parseDay(pkg.endDate ?? undefined);
-    // Floor at 0, so an already-lapsed date reads as "today" rather than as a
-    // negative number that would sort below a pack expiring next week.
     const daysLeft = endsAt === null ? null : Math.max(0, daysBetween(now, endsAt));
-    const band = packBand(pkg.sessionsRemaining, daysLeft);
+    /* A closed pack takes the band its closing earned: run past its date is the
+       top of the date band (0 days left), used up is an empty pack. */
+    const band =
+      standing.kind === 'ended' ? 'pack-expiring'
+        : standing.kind === 'used' ? 'pack-empty'
+          : packBand(pkg.sessionsRemaining, daysLeft);
     if (!band) continue;
     const seen = worst.get(pkg.clientId);
     if (seen === undefined || BAND_VALUE[band] > BAND_VALUE[seen.band]) {
       worst.set(pkg.clientId, {
         band,
         remaining: pkg.sessionsRemaining,
-        daysLeft,
+        daysLeft: standing.kind === 'ended' ? 0 : daysLeft,
+        endedAt: standing.kind === 'ended' ? standing.endedAt : undefined,
         at: pkg.updatedAt,
         packageId: pkg.id,
       });
     }
   }
-  for (const [clientId, { band, remaining, daysLeft, at, packageId }] of worst) {
+  for (const [clientId, { band, remaining, daysLeft, endedAt, at, packageId }] of worst) {
     const client = byId.get(clientId);
     if (!client) continue;
     /*
@@ -1384,9 +1475,11 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
      * the trainer to work out which one put it in front of them.
      */
     const line =
-      band === 'pack-expiring' && daysLeft !== null
-        ? packExpiryLine(daysLeft, WEEKDAYS_LONG[isoWeekday(now + daysLeft * DAY_MS)])
-        : packLine(remaining);
+      endedAt !== undefined
+        ? packEndedLine(endedAt, remaining)
+        : band === 'pack-expiring' && daysLeft !== null
+          ? packExpiryLine(daysLeft, WEEKDAYS_LONG[isoWeekday(now + daysLeft * DAY_MS)])
+          : packLine(remaining);
     items.push({
       key: `pack:${clientId}`,
       kind: 'pack',
@@ -2146,6 +2239,41 @@ function buildWeek(sessions: DeckScheduled[], now: number): DeckWeek {
  * pack that goes from `pack-ending` to `pack-expiring` — sideways, not worse —
  * stays silent.
  */
+/**
+ * The queue's rows, gathered into one group per CLIENT.
+ *
+ * The header used to count rows and say "36 clients need you" over a roster of
+ * 13 — one person whose pack is ending, who owes ₹3,000 and who missed three
+ * sessions was three "clients". The queue is about people, so it is drawn one
+ * person at a time: the group's `lead` is that client's most urgent row (the
+ * input is already sorted by weight, so it is simply their first), and `rest`
+ * are the other jobs about the same person, in the same order.
+ *
+ * Groups keep the order of their lead rows, so the ranking the deck computed
+ * is unchanged — only the duplicates folded under the person they are about.
+ */
+export interface AttentionGroup {
+  clientId: string;
+  lead: AttentionItem;
+  rest: AttentionItem[];
+}
+
+export function groupAttention(items: AttentionItem[]): AttentionGroup[] {
+  const groups: AttentionGroup[] = [];
+  const byClient = new Map<string, AttentionGroup>();
+  for (const item of items) {
+    const group = byClient.get(item.clientId);
+    if (group) {
+      group.rest.push(item);
+    } else {
+      const fresh = { clientId: item.clientId, lead: item, rest: [] };
+      byClient.set(item.clientId, fresh);
+      groups.push(fresh);
+    }
+  }
+  return groups;
+}
+
 export function isSilenced(
   item: AttentionItem,
   dismissals: Map<string, DeckDismissal>,
@@ -2258,8 +2386,27 @@ export function buildDeck(input: DeckInput, now: number): Deck {
     ? today.filter((s) => !s.done && s.at > running.scheduledAt).slice(0, 3)
     : today.filter((s) => !s.done && s.at + NEXT_GRACE_MS >= now).slice(0, 3);
 
+  const closeOutFrom = dayStart - 7 * DAY_MS;
+  const closeOut: CloseOutSession[] = input.sessions
+    .filter((s) => s.scheduledAt < dayStart && s.scheduledAt >= closeOutFrom)
+    .filter((s) => !DONE_SESSION.has(lower(s.status)) && !DEAD_SESSION.has(lower(s.status)))
+    .flatMap((s) => {
+      const client = clientsById.get(s.clientId);
+      return client
+        ? [{
+          id: s.id,
+          clientId: s.clientId,
+          clientName: client.name?.trim() || 'Client',
+          at: s.scheduledAt,
+          dayLabel: s.dayLabel,
+        }]
+        : [];
+    })
+    .sort((a, b) => a.at - b.at);
+
   return {
     clientCount: input.clients.length,
+    closeOut,
     today,
     todayDone: today.filter((s) => s.done).length,
     next,

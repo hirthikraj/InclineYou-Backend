@@ -76,11 +76,13 @@ public class NudgeLogJdbcRepository {
     /** The client's name and number and the trainer's name; empty when the client is not this trainer's or is deleted. */
     public Optional<DraftClient> draftClient(UUID trainerId, UUID clientId) {
         return jdbc.query("""
-                SELECT c.name, c.phone, t.name AS trainer_name
+                SELECT c.name, c.phone, t.name AS trainer_name, b.upi_vpa
                 FROM client c JOIN trainer t ON t.id = :tid::uuid
+                LEFT JOIN trainer_business b ON b.trainer_id = t.id
                 WHERE c.id = :cid::uuid AND c.trainer_id = :tid::uuid AND c.deleted_at IS NULL
                 """, Map.of("tid", trainerId.toString(), "cid", clientId.toString()),
-                (rs, i) -> new DraftClient(rs.getString("name"), rs.getString("phone"), rs.getString("trainer_name")))
+                (rs, i) -> new DraftClient(rs.getString("name"), rs.getString("phone"), rs.getString("trainer_name"),
+                        rs.getString("upi_vpa")))
                 .stream().findFirst();
     }
 

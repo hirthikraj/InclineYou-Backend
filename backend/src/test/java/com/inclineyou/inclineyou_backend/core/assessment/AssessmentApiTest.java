@@ -386,6 +386,83 @@ class AssessmentApiTest {
 
     /* ── helpers ─────────────────────────────────────────────────────────── */
 
+    @Test
+    @DisplayName("deleting a client deletes their assessments, done ones too, and their cycles: nothing is left in the list")
+    void clientDeleteTakesAssessments() throws Exception {
+        String tpl = template().read("$.id");
+        String done = give(tpl, today.toString()).read("$.id");
+        saveEntry(done, "{\"readings\":{\"weight\":78.4},\"answers\":{},\"complete\":true}", null);
+        String open = give(tpl, today.minusDays(2).toString()).read("$.id");
+        cycle(tpl, 28, today.plusDays(3).toString());
+
+        mvc.perform(post("/v1/clients/" + meera + "/delete").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmName\":\"Meera Iyer\"}")).andExpect(status().isOk());
+
+        assertEquals(0, count("SELECT count(*) FROM assessment WHERE client_id = :id::uuid AND deleted_at IS NULL", meera.toString()));
+        assertEquals(0, count("SELECT count(*) FROM assessment_schedule WHERE client_id = :id::uuid AND deleted_at IS NULL", meera.toString()));
+        mvc.perform(get("/v1/assessments").param("includeTotal", "true")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isEmpty()).andExpect(jsonPath("$.grandTotal").value(0));
+        mvc.perform(get("/v1/assessments/" + done)).andExpect(status().isNotFound());
+        mvc.perform(get("/v1/assessments/" + open)).andExpect(status().isNotFound());
+        // the client is gone, so their cycles are not there to read at all
+        mvc.perform(get("/v1/assessment-schedules").param("clientId", meera.toString())).andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("a reading's floor is the measurement's: 0 push-ups and a negative sit-and-reach are results, a 0 kg weight is not")
+    void readingBounds() throws Exception {
+        String tpl = JsonPath.read(mvc.perform(post("/v1/assessment-templates").contentType(MediaType.APPLICATION_JSON).content("""
+                        {"name":"Fitness test","description":null,
+                         "measurements":{"on":true,"keys":["weight","pushups","plank","ohs","sit_reach"]},
+                         "questions":{"on":false,"items":[]}}"""))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString(), "$.id");
+        String id = give(tpl, today.toString()).read("$.id");
+
+        // the take screen is told each floor, so it need not know the rule itself
+        mvc.perform(get("/v1/assessments/" + id))
+                .andExpect(jsonPath("$.asked.measurements[?(@.key=='weight')].minInclusive").value(org.hamcrest.Matchers.contains(false)))
+                .andExpect(jsonPath("$.asked.measurements[?(@.key=='pushups')].minInclusive").value(org.hamcrest.Matchers.contains(true)))
+                .andExpect(jsonPath("$.asked.measurements[?(@.key=='sit_reach')].min").value(org.hamcrest.Matchers.contains(-100000)));
+        mvc.perform(get("/v1/assessment-catalog"))
+                .andExpect(jsonPath("$.measurements[?(@.key=='ohs')].min").value(org.hamcrest.Matchers.contains(0)))
+                .andExpect(jsonPath("$.measurements[?(@.key=='ohs')].minInclusive").value(org.hamcrest.Matchers.contains(true)));
+
+        entry(id, version(id), "{\"readings\":{\"weight\":0},\"answers\":{},\"complete\":false}")
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.detail").value("readings.weight: must be above 0 and below 100,000"));
+        entry(id, version(id), "{\"readings\":{\"pushups\":-1},\"answers\":{},\"complete\":false}")
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.detail").value("readings.pushups: must be 0 or more and below 100,000"));
+        entry(id, version(id), "{\"readings\":{\"sit_reach\":-100000},\"answers\":{},\"complete\":false}")
+                .andExpect(status().isBadRequest());
+
+        // and past the service, the database's own check (V28) takes them too
+        entry(id, version(id), "{\"readings\":{\"weight\":71.5,\"pushups\":0,\"plank\":0,\"ohs\":0,\"sit_reach\":-4.5},\"answers\":{},\"complete\":true}")
+                .andExpect(status().isOk()).andExpect(jsonPath("$.state").value("done"))
+                .andExpect(jsonPath("$.entry.readings.pushups").value(0))
+                .andExpect(jsonPath("$.entry.readings.sit_reach").value(-4.5));
+        assertEquals(-4.5, jdbc.queryForObject("SELECT (readings->>'sit_reach')::numeric FROM assessment WHERE id = :id::uuid",
+                Map.of("id", id), Double.class));
+    }
+
+    @Test
+    @DisplayName("completedAt may be back-dated up to a year, never to 1970 and never so far back the database cannot hold it")
+    void backDateFloor() throws Exception {
+        String tpl = template().read("$.id");
+        String body = "{\"readings\":{\"weight\":70},\"answers\":{},\"complete\":true,\"completedAt\":%d}";
+        for (long at : new long[]{0L, -99999999999999999L,
+                java.time.Instant.now().minus(java.time.Duration.ofDays(400)).toEpochMilli()}) {
+            String id = give(tpl, today.toString()).read("$.id");
+            entry(id, version(id), body.formatted(at)).andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.detail").value("completedAt: at most a year back"));
+        }
+        String id = give(tpl, today.toString()).read("$.id");
+        long monthAgo = java.time.Instant.now().minus(java.time.Duration.ofDays(30)).toEpochMilli();
+        entry(id, version(id), body.formatted(monthAgo)).andExpect(status().isOk()).andExpect(jsonPath("$.completedAt").value(monthAgo));
+    }
+
+    private String version(String assessmentId) throws Exception {
+        return JsonPath.read(mvc.perform(get("/v1/assessments/" + assessmentId)).andReturn().getResponse().getContentAsString(), "$.version");
+    }
+
     private void bad(String body, String field) throws Exception {
         mvc.perform(post("/v1/assessment-templates").contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION"))

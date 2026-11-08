@@ -141,7 +141,9 @@ export interface TemplateWire {
   /**
    * Every copy ever made of this blueprint onto a client — the shelf's Used
    * column. The active count and the six-name sample came off the wire on
-   * 18 Oct 2026; who is on a copy is `GET /v1/programs/{id}/assignments`.
+   * 18 Oct 2026, and so did `GET /v1/programs/{id}/assignments`: who is on a
+   * copy is each client's own plan in `GET /v1/programs?kind=client`, which
+   * names its source in `copiedFromProgramId`.
    */
   assignedCount: number;
 
@@ -252,6 +254,8 @@ export interface ClientWire {
    * `portal.state` on the summary (api-contract 1.2, tr-a5); false against a backend from before it.
    */
   onPortal: boolean;
+  /** When they were archived (epoch ms), null while they are on the roster. Only `/programs` reads it, for its Archived list. */
+  archivedAt: number | null;
 }
 
 /** `GET /v1/clients?view=summary` (Clients L3), the fields this screen reads. */
@@ -267,6 +271,7 @@ interface ClientSummaryWire {
   } | null;
   slots: { weekday: number; start: string; programDay: number | null }[] | null;
   portal?: { state: string } | null;
+  archivedAt?: number | null;
 }
 
 function clientOf(c: ClientSummaryWire): ClientWire {
@@ -283,6 +288,7 @@ function clientOf(c: ClientSummaryWire): ClientWire {
       : null,
     scheduleVersion: c.schedule?.version ?? null,
     onPortal: c.portal?.state === 'accepted' || c.portal?.state === 'paused',
+    archivedAt: c.archivedAt ?? null,
   };
 }
 
@@ -295,8 +301,8 @@ export async function getClientName(id: string): Promise<string | null> {
   }
 }
 
-async function clients(): Promise<ClientWire[]> {
-  return (await items<ClientSummaryWire>('/v1/clients?view=summary')).map(clientOf);
+async function clients(status?: 'all'): Promise<ClientWire[]> {
+  return (await items<ClientSummaryWire>(`/v1/clients?view=summary${status ? `&status=${status}` : ''}`)).map(clientOf);
 }
 
 /* ═══════════════════════════════════ the four-level wire, flattened ══
@@ -965,7 +971,9 @@ export interface ClientProgramsData {
 export async function getClientPrograms(): Promise<ClientProgramsData> {
   const [programs, roster] = await Promise.all([
     items<PlanProgramWire>('/v1/programs?kind=client&status=active,paused,completed'),
-    clients(),
+    /* `status=all`: the plans of an archived client are still on the book, and without them in the roster their rows drew
+       with no name. The page lists them apart, under the rest, the way Clients lists its archived. */
+    clients('all'),
   ]);
   return { programs: programs.map(programOf), clients: roster };
 }

@@ -81,7 +81,8 @@ export interface AssessmentDetailWire extends AssessmentWire {
   entry: { readings: Record<string, number>; answers: Record<string, AnswerEntry> };
   /** What the template asks for — the whole content of a check-in not back yet. */
   asked: {
-    measurements: { key: string; label: string; group: string; unit: string }[];
+    /** `min` / `minInclusive`: the lowest reading each accepts (from V28; absent from an older backend, which means above 0). */
+    measurements: { key: string; label: string; group: string; unit: string; min?: number; minInclusive?: boolean }[];
     questions: QuestionWire[];
   };
   readings: ReadingWire[];

@@ -18,6 +18,7 @@ import { ProgramTab } from './ProgramTab';
 import { PaymentsTab } from './PaymentsTab';
 import { PersonalTab } from './PersonalTab';
 import { TABS, tabHref, type Tab } from './shared';
+import { SubTabs } from '@/web-components/ui/SubTabs';
 
 /**
  * THE CLIENT FILE.
@@ -119,6 +120,14 @@ export function ClientFile({
      note about the session, one tab away. It was ~40px of the 766px window above the month. */
   const pinStrip = tab !== 'information' && tab !== 'calendar';
 
+  /* The month view is the Sessions tab's second view, so the strip lights
+     *Sessions* on it — see `TABS`. */
+  const stripTab: Tab = tab === 'calendar' ? 'sessions' : tab;
+  const sessionViews = [
+    { key: 'list', label: 'List', href: `/clients/${payload.client.id}/sessions` },
+    { key: 'month', label: 'Month', href: `/clients/${payload.client.id}/sessions?view=month` },
+  ];
+
   const { client, packages } = payload;
 
   /* The strip draws the header's pinned notes: every tab has them without
@@ -190,9 +199,9 @@ export function ClientFile({
                 key={t.key}
                 className="tab"
                 href={tabHref(client.id, t.key)}
-                aria-current={tab === t.key ? 'page' : undefined}
+                aria-current={stripTab === t.key ? 'page' : undefined}
                 style={
-                  tab === t.key
+                  stripTab === t.key
                     ? { color: 'var(--tx-ink)', borderBottomColor: 'var(--tx-accent)' }
                     : undefined
                 }
@@ -215,6 +224,14 @@ export function ClientFile({
           </div>
 
           {tab === 'overview' && <OverviewTab payload={payload} now={now} progress={progress} />}
+          {(tab === 'sessions' || tab === 'calendar') && (
+            <SubTabs
+              className="cfviews"
+              tabs={sessionViews}
+              current={tab === 'calendar' ? 'month' : 'list'}
+              label="Show sessions as"
+            />
+          )}
           {tab === 'calendar' && (
             <CalendarTab clientId={client.id} sessions={payload.sessions} month={options.month ?? null} now={now} />
           )}

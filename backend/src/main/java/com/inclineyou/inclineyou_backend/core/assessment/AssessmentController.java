@@ -39,7 +39,7 @@ import java.util.UUID;
 public class AssessmentController {
 
     /** Bump when {@link AssessmentCatalogue} changes: the catalogue changes only on a deploy. */
-    static final String CATALOG_ETAG = "catalog-2026-09-30";
+    static final String CATALOG_ETAG = "catalog-2026-11-04";
 
     private final AssessmentService assessments;
     private final AssessmentEntryService entries;

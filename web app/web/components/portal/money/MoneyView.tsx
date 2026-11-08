@@ -3,6 +3,8 @@ import { Card } from '@/web-components/ui/Card';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 import { Tag } from '@/web-components/ui/Tag';
 
+import { upiPayLink } from '@/lib/money/upi';
+
 import { day } from '../plan/format';
 
 export interface MoneyWire {
@@ -10,6 +12,8 @@ export interface MoneyWire {
   currency?: string;
   amountDue?: string;
   payments?: { items: { id: string; paidOn: string; amount: string; method: string | null; reference: string | null; packageName: string; status: string }[]; nextCursor: string | null };
+  /** The trainer's UPI ID, present only when something is owed and they have set one (V31). */
+  payTo?: string;
 }
 
 const METHOD: Record<string, string> = { upi: 'UPI', cash: 'Cash', bank_transfer: 'Bank transfer' };
@@ -20,8 +24,10 @@ function rupees(amount: string, currency: string): string {
 }
 
 /**
- * What is owed and what has been paid. Read-only and neutral: a plain figure — never red, never a nudge, never a button to pay — because the
- * money stays between the two of them. A balance of nothing says so warmly; a balance says what it is and who to ask.
+ * What is owed and what has been paid. Neutral: a plain figure — never red, never a nudge. Since 6 Nov 2026 it carries ONE way to pay,
+ * when the trainer has set a UPI ID: *Pay with UPI* opens the client's own UPI app with the trainer, the amount and a note filled in
+ * (`upiPayLink`). Nothing moves through InclineYou and nothing here says the money arrived — the trainer marks it, as for cash. Without a
+ * UPI ID the card says what it always said: settle it with the trainer directly.
  */
 export function MoneyView({ money, trainerFirstName }: { money: MoneyWire; trainerFirstName: string }) {
   const cur = money.currency ?? 'INR';
@@ -35,7 +41,30 @@ export function MoneyView({ money, trainerFirstName }: { money: MoneyWire; train
           {due > 0 ? (
             <>
               <h1 className="pl__h">{rupees(money.amountDue!, cur)} to pay</h1>
-              <p className="pl__s">That’s what’s left on your package. Settle it with {trainerFirstName} directly — there’s nothing to pay here.</p>
+              {money.payTo ? (
+                <>
+                  <p className="pl__s">
+                    That’s what’s left on your package. Pay {trainerFirstName} by UPI at <b>{money.payTo}</b> — the
+                    button opens your UPI app with the amount filled in. {trainerFirstName} marks it paid once it arrives.
+                  </p>
+                  <p style={{ marginTop: 12 }}>
+                    <Button
+                      variant="primary"
+                      href={upiPayLink({
+                        vpa: money.payTo,
+                        payeeName: trainerFirstName,
+                        amount: due,
+                        currency: cur,
+                        note: 'Training package',
+                      })}
+                    >
+                      Pay {rupees(money.amountDue!, cur)} with UPI
+                    </Button>
+                  </p>
+                </>
+              ) : (
+                <p className="pl__s">That’s what’s left on your package. Settle it with {trainerFirstName} directly — there’s nothing to pay here.</p>
+              )}
             </>
           ) : (
             <>

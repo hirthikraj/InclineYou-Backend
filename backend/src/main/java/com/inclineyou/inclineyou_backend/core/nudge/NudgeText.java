@@ -31,6 +31,16 @@ final class NudgeText {
         return out;
     }
 
+    /**
+     * Close the gap a variable that rendered as NOTHING leaves behind — {@code {pay_by_upi}}
+     * for a trainer with no UPI ID turns "…for your pack. {pay_by_upi} Thanks!" into
+     * "…for your pack.  Thanks!". Runs of spaces become one and spaces before a line
+     * break go; line breaks themselves are the trainer's and are kept.
+     */
+    static String tidy(String message) {
+        return message.replaceAll("[ \\t]{2,}", " ").replaceAll("[ \\t]+(\\r?\\n)", "$1").strip();
+    }
+
     static String firstName(String full, String fallback) {
         if (full == null || full.isBlank()) return fallback;
         return full.trim().split("\\s+")[0];

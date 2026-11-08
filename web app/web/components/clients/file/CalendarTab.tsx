@@ -57,7 +57,7 @@ export function CalendarTab({
 
   const total = month.sessions === 1 ? '1 session' : `${month.sessions} sessions`;
   const go = (delta: number) =>
-    router.push(`/clients/${clientId}/calendar?month=${monthParam(shiftMonth(anchor, delta))}`);
+    router.push(`/clients/${clientId}/sessions?view=month&month=${monthParam(shiftMonth(anchor, delta))}`);
 
   return (
     <SessionCalendar

@@ -610,7 +610,7 @@ export function PaymentsTab({
           tone={nextDue && nextDue.tone !== 'neutral' ? nextDue.tone : undefined}
         />
         <Stat
-          label="Collected"
+          label="Collected, all time"
           value={rupees(collected)}
           detail={<>{collectedCount} payment{collectedCount === 1 ? '' : 's'}</>}
         />

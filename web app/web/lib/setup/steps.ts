@@ -30,17 +30,26 @@ import type { Gender, WorkMode } from './options';
 /** Flow order. The rail, `nextStep` and every step page read this one array. */
 export const SETUP_STEPS = [
   'name',
+  /*
+   * THE MONEY FIRST, THE PROFILE LAST (reordered 6 Nov 2026).
+   *
+   * A trainer's first real use of the product is *add a client and record what
+   * they paid*, and that needs a price list and a way to be paid — so those come
+   * straight after the name, while attention is highest. The four profile
+   * questions (experience, specialities, certifications, languages) are what a
+   * CLIENT reads on an invite; they are one tap each and easy to finish later
+   * from Settings, so they go last, where a trainer who stops early loses the
+   * least. What you sell still comes before how you get paid: the price before
+   * the pipe.
+   */
+  'packs',
+  'payment',
+  // When you work — the diary's week, and the slots a new client is offered.
+  'hours',
   'experience',
   'specialities',
   'certifications',
   'languages',
-  // When you work, before what you sell — the physical facts of the week come
-  // before the commercial ones, and adding a client later offers their slots
-  // from these hours.
-  'hours',
-  // What you sell, before how you get paid — the price comes before the pipe.
-  'packs',
-  'payment',
 ] as const;
 
 export type SetupStep = (typeof SETUP_STEPS)[number];

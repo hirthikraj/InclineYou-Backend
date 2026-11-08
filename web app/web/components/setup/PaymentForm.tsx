@@ -278,7 +278,6 @@ export function PaymentForm({ state }: { state: SetupState }) {
       <StepFoot
         step="payment"
         pending={pending}
-        continueLabel="Finish"
         onContinue={submit}
         onSkip={() => run(() => skipStep('payment'))}
         onSkipHome={skipHomeAction(state, run)}

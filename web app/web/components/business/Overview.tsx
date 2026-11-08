@@ -664,6 +664,17 @@ function OverTime({
   trend: ReturnType<typeof trendBars>;
   peak: ReturnType<typeof computePeakMonth>;
 }) {
+  /*
+   * "% above your average" is measured against the average DRAWN BESIDE IT.
+   * `computePeakMonth` divided by a twelve-month average that counts the months
+   * before the trainer earned anything, so a ₹77,100 month read "245% above"
+   * next to a *Monthly average* tile of ₹49,220 — which is 57%. A comparison
+   * that disagrees with the number one inch away is worse than none.
+   */
+  const aboveShown =
+    peak && trend.averagePerMonth > 0
+      ? Math.round(((peak.amount - trend.averagePerMonth) / trend.averagePerMonth) * 100)
+      : null;
   return (
     <Slab
       title="Over time · last 6 months"
@@ -694,8 +705,8 @@ function OverTime({
                   {peak.label}
                   {peak.isCurrent
                     ? ' — and it is the one you are in'
-                    : peak.aboveAverage !== null
-                      ? ` · ${peak.aboveAverage}% above your average`
+                    : aboveShown !== null && aboveShown > 0
+                      ? ` · ${aboveShown}% above your average`
                       : ''}
                 </>
               : 'Nothing collected in the last twelve months'}

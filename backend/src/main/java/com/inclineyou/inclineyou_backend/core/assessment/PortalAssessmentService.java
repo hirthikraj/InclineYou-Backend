@@ -92,7 +92,8 @@ public class PortalAssessmentService {
         LocalDate today = LocalDate.now(ZoneId.of(repo.zoneOf(client)));
         boolean done = row.done();
 
-        var asked = new PortalAssessment.Asked(measurements.stream().map(m -> new PortalAssessment.Measurement(m.key(), m.label(), m.group(), m.unit(), true)).toList(),
+        var asked = new PortalAssessment.Asked(measurements.stream().map(m -> new PortalAssessment.Measurement(m.key(), m.label(), m.group(), m.unit(), true,
+                AssessmentCatalogue.boundOf(m.key()).min(), AssessmentCatalogue.boundOf(m.key()).minInclusive())).toList(),
                 form.questions());
         var rawReadings = new HashMap<>(AssessmentJson.plainMap(row.readings()));
         if (hideWeight) rawReadings.remove("weight");

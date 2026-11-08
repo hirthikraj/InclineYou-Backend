@@ -19,7 +19,10 @@ export const WORKOUTS_TABS: { key: WorkoutsView; label: string }[] = [
   { key: 'completed', label: 'Completed' },
   { key: 'scheduled', label: 'Scheduled' },
   { key: 'missed', label: 'Missed' },
-  { key: 'templates', label: 'Templates' },
+  /* *Templates* until 6 Nov 2026 — and Programs, one row up in the same Fitness
+     pane, has a *Templates* tab of its own that means whole programs. Two tabs
+     with one name in one section is one name too few. The key and `?view=` stay. */
+  { key: 'templates', label: 'Workout templates' },
 ];
 
 const BASE = '/programs/workouts';

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 
 import type { AttentionItem } from '@/lib/today/deck';
-import { QUEUE_CAP, SNOOZE_DAYS } from '@/lib/today/deck';
+import { QUEUE_CAP, SNOOZE_DAYS, groupAttention } from '@/lib/today/deck';
 import type { RenewTerms } from '@/lib/today/api';
 import {
   checkIn, closeLogs, dismissRow, markAttended, remind, renew, restoreRow, wish,
@@ -93,6 +93,21 @@ interface Pending {
   ticker: ReturnType<typeof setInterval>;
 }
 
+/**
+ * What a row needs to know about the client GROUP it sits in.
+ *
+ * `continuation` — this row is another job about the client named on the row
+ * above it, so the name cell stays quiet (the name is still there for a screen
+ * reader, which cannot see the indent).
+ *
+ * `also` — set on a client's lead row when the client has other rows behind it:
+ * how many, what kinds, and the toggle that opens them in place.
+ */
+interface RowExtras {
+  continuation: boolean;
+  also?: { count: number; summary: string; open: boolean; onToggle: () => void };
+}
+
 export function AttentionQueue({
   items,
   silenced,
@@ -115,6 +130,8 @@ export function AttentionQueue({
   const [states, setStates] = useState<Record<string, RowState>>({});
   const [expanded, setExpanded] = useState(false);
   const [showSilenced, setShowSilenced] = useState(false);
+  /** clientId → that client's other rows are open under their lead row. */
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const pending = useRef<Map<string, Pending>>(new Map());
   /*
    * row key → the id this row's current attempt is written under (1.1: every
@@ -305,13 +322,36 @@ export function AttentionQueue({
     );
   }
 
-  const visible = expanded ? items : items.slice(0, QUEUE_CAP);
-  const folded = items.length - visible.length;
+  /*
+   * ONE ROW PER PERSON. The cap, the count and the fold are all about clients
+   * now — see `groupAttention`. A client's other jobs ride under their lead row
+   * and open in place, so every verb is still one click from the queue.
+   */
+  const groups = groupAttention(items);
+  const visible = expanded ? groups : groups.slice(0, QUEUE_CAP);
+  const folded = groups.length - visible.length;
+
+  const rowFor = (item: AttentionItem, extra: Partial<RowExtras> = {}) => (
+    <Row
+      key={item.key}
+      item={item}
+      state={states[item.key] ?? { kind: 'rest' }}
+      onAct={() => act(item)}
+      onUndo={() => undo(item)}
+      onChoose={() => setState(item.key, { kind: 'choosing' })}
+      onCancel={() => setState(item.key, { kind: 'rest' })}
+      onSilence={(permanent) => void silence(item, permanent)}
+      onUnsilence={(id) => void unsilence(item, id)}
+      renewable={item.action !== 'Renew' || (renewTerms[item.clientId]?.amount ?? 0) > 0}
+      now={now}
+      {...extra}
+    />
+  );
 
   return (
-    <Slab title="Needs you today" count={items.length}>
+    <Slab title="Needs you today" count={groups.length}>
       <span className="vh">
-        {clientsNeedYou(items.length)}
+        {clientsNeedYou(groups.length)}
       </span>
       <div className="q__scroll">
         {/*
@@ -379,21 +419,23 @@ export function AttentionQueue({
             <col className="atn__c-x" />
           </colgroup>
           <tbody>
-            {visible.map((item) => (
-              <Row
-                key={item.key}
-                item={item}
-                state={states[item.key] ?? { kind: 'rest' }}
-                onAct={() => act(item)}
-                onUndo={() => undo(item)}
-                onChoose={() => setState(item.key, { kind: 'choosing' })}
-                onCancel={() => setState(item.key, { kind: 'rest' })}
-                onSilence={(permanent) => void silence(item, permanent)}
-                onUnsilence={(id) => void unsilence(item, id)}
-                renewable={item.action !== 'Renew' || (renewTerms[item.clientId]?.amount ?? 0) > 0}
-                now={now}
-              />
-            ))}
+            {visible.flatMap((group) => {
+              const open = openGroups[group.clientId] === true;
+              const lead = rowFor(group.lead, {
+                also: group.rest.length > 0
+                  ? {
+                    count: group.rest.length,
+                    summary: foldedSummary(group.rest.map((i) => i.kind)),
+                    open,
+                    onToggle: () =>
+                      setOpenGroups((prev) => ({ ...prev, [group.clientId]: !open })),
+                  }
+                  : undefined,
+              });
+              return open
+                ? [lead, ...group.rest.map((item) => rowFor(item, { continuation: true }))]
+                : [lead];
+            })}
           </tbody>
         </table>
 
@@ -407,13 +449,15 @@ export function AttentionQueue({
         */}
         {folded > 0 && (
           <button className="atn__more" type="button" onClick={() => setExpanded(true)}>
-            Show {folded} more {folded === 1 ? 'row' : 'rows'}
+            Show {folded} more {folded === 1 ? 'client' : 'clients'}
             <span className="atn__more-k">
-              {foldedSummary(items.slice(QUEUE_CAP).map((i) => i.kind))}
+              {foldedSummary(
+                groups.slice(QUEUE_CAP).flatMap((g) => [g.lead, ...g.rest].map((i) => i.kind)),
+              )}
             </span>
           </button>
         )}
-        {expanded && items.length > QUEUE_CAP && (
+        {expanded && groups.length > QUEUE_CAP && (
           <button className="atn__more" type="button" onClick={() => setExpanded(false)}>
             Show the top {QUEUE_CAP} only
           </button>
@@ -547,7 +591,9 @@ function Row({
   onUnsilence,
   renewable,
   now,
-}: {
+  continuation = false,
+  also,
+}: Partial<RowExtras> & {
   item: AttentionItem;
   state: RowState;
   onAct: () => void;
@@ -573,11 +619,16 @@ function Row({
   const rowClass = [
     item.severity === 'critical' ? 'crit' : '',
     state.kind === 'held' ? 'held' : '',
+    continuation ? 'q__cont' : '',
   ]
     .filter(Boolean)
     .join(' ');
 
-  const who = (
+  const who = continuation ? (
+    <td className="q__who q__who--cont">
+      <span className="vh">{item.clientName}</span>
+    </td>
+  ) : (
     <td className="q__who">
       <Link className="who" href={`/clients/${item.clientId}`}>
         <Avatar name={item.clientName} id={item.clientId} size="sm" />
@@ -806,6 +857,25 @@ function Row({
           <span className="q__seen">
             <span className="q__dot" aria-hidden="true">{' · '}</span>
             messaged {contactedLabel(item.contactedAt, now)}
+          </span>
+        )}
+        {/*
+          THE CLIENT'S OTHER JOBS, NAMED, ONE CLICK FROM THEIR VERBS.
+          The kinds are in the label so the trainer can tell whether it is worth
+          opening ("+2 · 1 money · 1 attendance") without opening it.
+        */}
+        {also && (
+          <span className="q__also">
+            <span className="q__dot" aria-hidden="true">{' · '}</span>
+            <button
+              type="button"
+              className="q__also-b"
+              aria-expanded={also.open}
+              onClick={also.onToggle}
+            >
+              {also.open ? 'Hide' : `+${also.count} more`}
+              <span className="q__also-k">{also.summary}</span>
+            </button>
           </span>
         )}
       </td>

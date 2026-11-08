@@ -62,7 +62,7 @@ const one = (y: number) => `0 ${y} 100 100`;
 const pair = (y: number) => `14 ${y} 72 100`;
 
 const PLANS: Record<Exclude<BodyPartId, 'cardio'>, Plan> = {
-  chest: { front: { lit: ['chest'], crop: one(6) } },
+  chest: { front: { lit: ['chest', 'serratus'], crop: one(6) } },
   back: { back: { lit: ['trapezius', 'upper-back', 'lower-back'], crop: one(22) } },
   shoulders: {
     front: { lit: ['front-deltoids'], crop: pair(8) },
@@ -81,20 +81,21 @@ const PLANS: Record<Exclude<BodyPartId, 'cardio'>, Plan> = {
     front: { lit: ['calves'], crop: pair(100) },
     back: { lit: ['calves', 'left-soleus', 'right-soleus'], crop: pair(100) },
   },
-  waist: { front: { lit: ['abs', 'obliques'], crop: one(40) } },
+  waist: { front: { lit: ['abs', 'obliques', 'serratus'], crop: one(40) } },
   neck: { front: { lit: ['neck'], crop: one(0) } },
 };
 
 /* ── ONE MUSCLE, LIT ALONE ───────────────────────────────────────────────────
    The level below a body part: *Upper legs* opens onto Quads, Hamstrings, Glutes, Adductors,
    Abductors, each drawn with only that muscle filled and on the side of the body it is seen
-   from. The map has no region for every muscle the library names (the serratus anterior sits
-   on the ribs where the map has none), so a body part with ANY muscle undrawn opens as text
+   from. The map has no region for every muscle the library names (the serratus anterior had
+   none until it was carved out of the obliques), so a body part with ANY muscle undrawn opens as text
    tiles throughout rather than drawing one tile in a style its neighbours lack. Where the map
    cannot separate two muscles (lats and the rest of the upper back share one region) the
    second lights its neighbour too, so no two tiles are the same picture. */
 const MUSCLE_PLANS: Record<string, { view: 'front' | 'back'; lit: string[]; y: number }> = {
   pectorals: { view: 'front', lit: ['chest'], y: 6 },
+  'serratus anterior': { view: 'front', lit: ['serratus'], y: 20 },
   lats: { view: 'back', lit: ['upper-back'], y: 22 },
   spine: { view: 'back', lit: ['lower-back'], y: 40 },
   traps: { view: 'back', lit: ['trapezius'], y: 8 },

@@ -1,5 +1,7 @@
 # InclineYou Backend — API Reference
 
+> **8 Nov 2026:** superseded docs were moved to `/home/incline-you/InclineYou/_archive/` (same layout) — among them `backend/SCHEMA.md` (use `backend/schema.html`, generated from the live database), `backend/agent/`, `backend/db-archive/`, the 1.0/1.1 API contracts and trackers, `proposed-schema.html` and the web's `BACKEND_GAPS.md` / `backendGaps-latest.md` / `AGENTS-ARCHIVE.md`. Where this file names one, it is in the archive.
+
 Every HTTP endpoint the Spring Boot backend exposes, what it is for, and what it
 expects. Generated from the controllers under
 `backend/src/main/java/com/inclineyou/inclineyou_backend/`.
@@ -1857,7 +1859,7 @@ VALIDATION` for an unknown template or a malformed id. The once-per-client-per-7
 | Template | What it is for | `{count}` means |
 | --- | --- | --- |
 | `renewal` | the pack is nearly done | sessions left |
-| `payment_reminder` | money is owed. `{amount}` is the package's `amountDue` (or everything the client owes) | days outstanding |
+| `payment_reminder` | money is owed. `{amount}` is the package's `amountDue` (or everything the client owes). `{pay_by_upi}` is *"Pay by UPI to <upiVpa>."* — or empty when the trainer has no `upiVpa`; `{upi}` is the bare ID. The built-in wording uses `{pay_by_upi}` (6 Nov 2026) | days outstanding |
 | `missed_session` | they missed sessions they were booked into | no-shows in 30 days |
 | `check_in` | nothing is wrong; how is the week going | — (`{days}` since the last delivered session) |
 | `re_engagement` | they stopped weeks ago. Names the gap and offers a slot | — |
@@ -1867,8 +1869,10 @@ VALIDATION` for an unknown template or a malformed id. The once-per-client-per-7
 
 `{count}` means a different number in each of them **on purpose**: there is exactly one count per template, so a
 trainer editing one can never be looking at two. The other tokens are `{name}` (first name), `{trainer}`, `{amount}`,
-`{package}`, `{days}` and `{nth}`. An unknown `{token}` is left exactly as typed, so a typo arrives in the trainer's own
-WhatsApp composer, in front of them, before they press send.
+`{package}`, `{days}` and `{nth}`, plus `{pay_by_upi}` / `{upi}` on `payment_reminder`. An unknown `{token}` is left exactly
+as typed, so a typo arrives in the trainer's own WhatsApp composer, in front of them, before they press send. After
+interpolation the message is tidied: runs of spaces become one and trailing spaces before a line break go, so a variable
+that rendered empty (`{pay_by_upi}` with no UPI ID) leaves no gap.
 
 **There is no `DELETE`.** The product cannot know whether the trainer pressed send in WhatsApp, so it cannot honestly
 offer to un-send — and deleting the row would reopen the cooldown, which is the one thing the record exists to hold
@@ -2125,3 +2129,12 @@ Additive: a `400 VALIDATION` body gains `"errors": [{ "field", "code", "message"
 - **Offline-first is the real path.** The app writes locally and reconciles
   through `/v1/sync`; treat the REST endpoints as the online complement, not the
   primary write path.
+
+## Client portal · money — `GET /v1/portal/money` (additive, 6 Nov 2026)
+
+Documented in full in the api-contract (pm-l2); recorded here because one field was added. The response gains
+**`payTo`**: the trainer's UPI ID (`trainer_business.upi_vpa`), present only when `visible` is true, `amountDue > 0`
+and the trainer has set one — otherwise the key is absent. It is read through V31's `client_pay_to(client)`, which
+answers only a CLIENT session about one of its own client ids while that client may see money. The portal turns it
+into a `upi://pay` link; nothing moves through InclineYou and the trainer still records the payment. The UPI ID itself
+is written with `PATCH /v1/trainers/me {upiVpa}` (`''` clears it), now from Settings → Account as well as setup.

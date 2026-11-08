@@ -1,4 +1,4 @@
--- Three months of one trainer's working life, on the v1 schema (V1–V26), with the client portal behind it.
+-- Three months of one trainer's working life, on the v1 schema (V1–V29), with the client portal behind it.
 -- Run through seed-three-months.sh <trainer-phone>.
 --
 -- WHAT IT DOES TO THE TRAINER YOU NAME
@@ -19,6 +19,9 @@
 --   (every package is charged by package_adjustment, every payment is capped by the
 --   package) including a pause, an extension, a bonus, a moved due date, a write-off and a
 --   refund; a gym arrangement with payouts; assessments; nudges; notes.
+--   Rohan's pack ended three days ago with nine sessions unused: still 'active' inside V29's
+--   seven-day grace, so Today says "Pack ended …" and close_lapsed_packages() will close it
+--   when the grace runs out. Sneha's first block review has 0 push-ups, which V28 allows.
 --
 -- THE CLIENT PORTAL (V11–V25) — every portal state a trainer can meet is on the roster:
 --   9 clients who accepted their invite and have a client sign-in (app_user role 'client',
@@ -725,6 +728,12 @@ FROM pm;
 -- Suresh's pack was extended by two weeks; the end it was first sold with is therefore two weeks earlier.
 UPDATE pk SET end_date = (SELECT today FROM k) - 9 WHERE key = 'suresh' AND seq = 2;
 
+-- Rohan went quiet with his pack running: it was sold to end three days ago and he never came back to use it. It stays
+-- active through the sweeper's seven-day grace (V29), so Today raises "Pack ended … · 9 sessions unused" — and the money
+-- he still owes on it is chased either way.
+UPDATE pk SET end_date = (SELECT today FROM k) - 3
+WHERE key = 'rohan' AND seq = (SELECT max(seq) FROM pk p2 WHERE p2.key = 'rohan');
+
 INSERT INTO package (id, trainer_id, client_id, pack_id, name, service, basis, sessions_total, sessions_remaining,
                      amount, currency, start_date, end_date, due_date, trainer_share_percent, created_at)
 SELECT pk.id, k.tid, pk.client_id, pk.pack_id, pk.name, pk.service, pk.basis, pk.total, pk.total,
@@ -903,7 +912,10 @@ FROM r, k, assessment_template t,
        ('priya',  31, '{"weight": 72.9, "waist": 87.0, "pushups": 9, "plank": 40}',
                      '{"q_progress": {"rating": 9}, "q_consistency": {"optionIds": ["a"]}, "q_blockers": {"optionIds": ["e"]}, "q_strongest": {"text": "Goblet squat"}}'),
        ('kavya',  36, '{"weight": 66.0, "waist": 80.0, "pushups": 12, "plank": 50}',
-                     '{"q_progress": {"rating": 6}, "q_consistency": {"optionIds": ["b"]}, "q_blockers": {"optionIds": ["a"]}, "q_strongest": {"text": "Leg press — no, the lunges"}}')
+                     '{"q_progress": {"rating": 6}, "q_consistency": {"optionIds": ["b"]}, "q_blockers": {"optionIds": ["a"]}, "q_strongest": {"text": "Leg press — no, the lunges"}}'),
+       -- A beginner's honest 0: no full push-up yet. V1 refused a reading of 0; V28 allows it for counts and holds.
+       ('sneha',  20, '{"weight": 75.6, "waist": 91.0, "pushups": 0, "plank": 25}',
+                     '{"q_progress": {"rating": 7}, "q_consistency": {"optionIds": ["b"]}, "q_blockers": {"optionIds": ["a"]}, "q_strongest": {"text": "Goblet squat"}}')
      ) v(key, ago, readings, answers)
 WHERE r.key = v.key AND t.name = 'Block review' AND t.tenant_id = k.ten;
 
@@ -1279,10 +1291,12 @@ BEGIN
                       AND (s.ends_at AT TIME ZONE 'Asia/Kolkata')::time <= w.end_time);
   IF bad IS NOT NULL THEN RAISE EXCEPTION 'sessions outside working hours: %', bad; END IF;
 
-  -- A running package is not past its end.
+  -- A running package is not past its end by more than the sweeper's grace — close_lapsed_packages(7) (V29) would
+  -- already have closed it. Inside the grace it legitimately stays active (Rohan's).
   SELECT string_agg(p.name, ', ') INTO bad FROM package p
-  WHERE p.tenant_id = (SELECT ten FROM k) AND p.status = 'active' AND p.end_date < (SELECT today FROM k);
-  IF bad IS NOT NULL THEN RAISE EXCEPTION 'active package already past its end: %', bad; END IF;
+  WHERE p.tenant_id = (SELECT ten FROM k) AND p.status = 'active' AND p.paused_at IS NULL
+    AND p.end_date < (SELECT today FROM k) - 7;
+  IF bad IS NOT NULL THEN RAISE EXCEPTION 'active package past its end beyond the 7-day grace: %', bad; END IF;
 
   -- Every done session was charged to a package, or belongs to a client on a monthly one.
   SELECT string_agg(DISTINCT r.name, ', ') INTO bad

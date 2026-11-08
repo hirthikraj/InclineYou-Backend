@@ -11,6 +11,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.HashSet;
@@ -49,8 +50,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class AssessmentEntryService {
 
-    private static final BigDecimal LOWER = BigDecimal.ZERO;
-    private static final BigDecimal UPPER = BigDecimal.valueOf(100_000);
+    /** How far back a completion may be dated: a paper sheet from last season, not a typo that lands in 1970. */
+    private static final Duration BACK_DATE_LIMIT = Duration.ofDays(366);
     private static final int MAX_ANSWER_TEXT = 2000;
     private static final int MAX_CUSTOM_TEXT = 500;
 
@@ -75,6 +76,9 @@ public class AssessmentEntryService {
         Instant now = Instant.now();
         Instant backDated = req.completedAt() == null ? null : Instant.ofEpochMilli(req.completedAt());
         if (backDated != null && backDated.isAfter(now)) throw ApiException.validation("completedAt: cannot be in the future");
+        if (backDated != null && backDated.isBefore(now.minus(BACK_DATE_LIMIT))) {
+            throw ApiException.validation("completedAt: at most a year back");
+        }
 
         boolean first = !row.done() && req.complete();
         boolean finished = first || row.done();
@@ -110,9 +114,8 @@ public class AssessmentEntryService {
             String at = "readings." + e.getKey();
             if (!asked.contains(e.getKey())) throw ApiException.validation(at + ": this assessment does not ask for it");
             BigDecimal v = e.getValue();
-            if (v == null || v.compareTo(LOWER) <= 0 || v.compareTo(UPPER) >= 0) {
-                throw ApiException.validation(at + ": must be above 0 and below 100,000");
-            }
+            var bound = AssessmentCatalogue.boundOf(e.getKey());
+            if (!bound.allows(v)) throw ApiException.validation(at + ": " + bound.rule());
             out.put(e.getKey(), v.scale() < 0 ? v.setScale(0) : v);
         }
         return out;

@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 
+import { readingAllowed, readingInputMode, readingRule } from '@/lib/assessments/bounds';
 import { saveEntry } from '@/lib/portal/assess-actions';
 import type { AnswerWire, AssessDetailWire, QuestionWire } from '@/lib/portal/assess-api';
 import { Button } from '@/web-components/ui/Button';
@@ -14,11 +15,11 @@ import { Textarea } from '@/web-components/ui/Textarea';
 
 import { day } from '../plan/format';
 
-function num(text: string): number | null | 'bad' {
+function num(text: string, m: { min?: number; minInclusive?: boolean } | undefined): number | null | 'bad' {
   const t = text.trim();
   if (!t) return null;
   const n = Number(t);
-  return Number.isFinite(n) && n > 0 ? n : 'bad';
+  return readingAllowed(m ?? {}, n) ? n : 'bad';
 }
 
 /**
@@ -38,9 +39,10 @@ export function Take({ a, trainerFirstName }: { a: AssessDetailWire; trainerFirs
   function build(): { readings: Record<string, number>; answers: Record<string, AnswerWire> } | null {
     const r: Record<string, number> = {};
     for (const [k, v] of Object.entries(readings)) {
-      const n = num(v);
+      const m = a.asked.measurements.find((x) => x.key === k);
+      const n = num(v, m);
       if (n === 'bad') {
-        setFailure('Measurements are numbers above zero — leave a box empty to skip it.');
+        setFailure(`${m?.label ?? 'A measurement'}: enter ${readingRule(m ?? {})} — or leave the box empty to skip it.`);
         return null;
       }
       if (n !== null) r[k] = n;
@@ -105,7 +107,7 @@ export function Take({ a, trainerFirstName }: { a: AssessDetailWire; trainerFirs
                 <p className="pl__k">{g}</p>
                 <div className="as__grid">
                   {a.asked.measurements.filter((m) => m.group === g).map((m) => (
-                    <TextField key={m.key} label={m.label} hint={m.unit || undefined} inputMode="decimal" numeric value={readings[m.key] ?? ''}
+                    <TextField key={m.key} label={m.label} hint={m.unit || undefined} inputMode={readingInputMode(m)} numeric value={readings[m.key] ?? ''}
                       onChange={(e) => { setSaved(false); setReadings((x) => ({ ...x, [m.key]: e.target.value })); }} />
                   ))}
                 </div>

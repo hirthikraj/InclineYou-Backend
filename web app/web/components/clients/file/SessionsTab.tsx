@@ -672,11 +672,14 @@ function MonthRows({
      was kept. Filtered, that figure describes rows that are not on the screen,
      so the band says how much of the month IS on the screen instead. Both
      denominators are the month's own. */
+  const open = record && record.unmarked > 0 ? ` · ${record.unmarked} not marked` : '';
   const trailing = filtered
     ? `${month.rows.length} ${filterLabel.toLowerCase()} of ${record?.total ?? month.rows.length}`
     : record && record.spent > 0
-      ? `${record.kept} of ${record.spent} kept`
-      : `${month.rows.length} sessions`;
+      ? `${record.kept} of ${record.spent} kept${open}`
+      : record && record.unmarked > 0
+        ? `${record.unmarked} not marked`
+        : `${month.rows.length} sessions`;
   return (
     <>
       <GroupRow span={columns.length}>

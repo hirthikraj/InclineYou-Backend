@@ -33,13 +33,12 @@ export type Tab =
 
 export const TABS: { key: Tab; label: string }[] = [
   { key: 'overview', label: 'Overview' },
-  /* SEVENTH, AND IT SITS SECOND. Asked for on 14 Sep 2026 and placed beside
-     Overview rather than beside Sessions, which is where the same rows already
-     live: the two are ordered by what a trainer opens the file TO DO. Overview
-     is *how is this going*, the calendar is *when are they in*, and the history
-     — with what each session did to the pack — is the one you go to when a
-     figure on one of the first two needs explaining. */
-  { key: 'calendar', label: 'Calendar' },
+  /* NO CALENDAR TAB SINCE 6 NOV 2026. It was the Sessions tab's rows drawn as a
+     month grid, so "where are their sessions" had two answers one tab apart.
+     It is now the *Month* view of Sessions (`?view=month`), and `/calendar`
+     redirects there. `calendar` stays a `Tab` value because it is still a
+     distinct VIEW with its own read (`getClientFilePayload`'s month window) —
+     just not a tab on the strip. */
   { key: 'progress', label: 'Progress' },
   /* EIGHTH, AND IT SITS BESIDE PROGRESS because the two are the same subject
      read two ways: Progress is what the TRAINER recorded — their own tape,
@@ -68,7 +67,10 @@ export const TABS: { key: Tab; label: string }[] = [
      /page.tsx` is a `permanentRedirect` to `/information`, the same shape
      `(portal)/me/progress/measurements/page.tsx` uses for its own renamed
      route. */
-  { key: 'information', label: 'Personal information' },
+  /* *Personal information* until 6 Nov 2026: the longest label on the strip,
+     for a tab holding contact details, the record and notes. *Profile* says the
+     same in one word. The route stays `/information`. */
+  { key: 'information', label: 'Profile' },
 ];
 
 /** Every tab is a real route, so the strip works with the back button. */

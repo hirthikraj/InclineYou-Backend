@@ -337,14 +337,23 @@ export function TodayList({ deck, heroIds }: { deck: Deck; heroIds: string[] }) 
     [deck.today, heroIds],
   );
 
+  /* The counts are about the DAY, as the note above says they are — including
+     the session the hero is drawing. Counted over `rest` they read *In Person 0*
+     on a day with a 6:15 PM floor session still to come, which is a chip saying
+     the day is over when it is not. */
   const counts = useMemo(() => {
-    const live = rest.filter((s) => !s.done);
+    const live = deck.today.filter((s) => !s.done);
     return {
       floor: live.filter((s) => s.mode === 'floor').length,
       remote: live.filter((s) => s.mode === 'remote').length,
-      done: rest.length - live.length,
+      done: deck.today.length - live.length,
     };
-  }, [rest]);
+  }, [deck.today]);
+
+  /* The hero's own session, so an empty list can say where the day went. */
+  const lead = deck.today.find((s) => s.id === heroIds[0]) ?? null;
+  const restLive = rest.filter((s) => !s.done).length;
+  const restDone = rest.length - restLive;
 
   const visible = rest.filter((s) =>
     s.done ? filters.done : filters[s.mode as keyof Filters],
@@ -395,9 +404,37 @@ export function TodayList({ deck, heroIds }: { deck: Deck; heroIds: string[] }) 
       }
     >
       {visible.length === 0 ? (
+        /*
+          WHY THE LIST IS EMPTY, SAID AS A FACT ABOUT THE DAY.
+
+          The commonest way to land here is not a filter somebody set: it is an
+          evening where the one session still to come is the hero's card above
+          (left out of this list on purpose) and everything else is done (hidden
+          by default). "Nothing in this filter" read as *you have nothing left
+          today* to a trainer looking at a 6:15 PM booking. So when nothing live
+          is left below the hero, the line names the hero's session, and the done
+          ones are one press away.
+        */
         <p className="small" style={{ paddingTop: 4 }}>
-          <b className="ink">Nothing in this filter.</b> Turn a chip back on to see the rest of
-          the day.
+          {restLive === 0 && lead && !lead.done ? (
+            <>
+              <b className="ink">
+                {lead.clientName} at {lead.time} {lead.meridiem} is your last session today
+              </b>{' '}
+              — it is the card above.{' '}
+            </>
+          ) : (
+            <>
+              <b className="ink">Nothing in this filter.</b>{' '}
+            </>
+          )}
+          {restDone > 0 && !filters.done ? (
+            <button type="button" className="tdl__show" onClick={() => toggle('done')}>
+              Show the {restDone} done
+            </button>
+          ) : restLive === 0 && lead && !lead.done ? null : (
+            'Turn a chip back on to see the rest of the day.'
+          )}
         </p>
       ) : (
         <Agenda>

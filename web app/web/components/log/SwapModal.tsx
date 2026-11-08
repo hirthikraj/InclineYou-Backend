@@ -190,8 +190,7 @@ export function SwapModal({
           </button>
 
           <p className="small" style={{ marginTop: 12 }}>
-            Three different decisions, and every competitor in the teardown collapses them into one.
-            Each states its own blast radius <b>before</b> the tap.
+            Each option says what it changes <b>before</b> you tap it.
           </p>
 
           {message ? <p className="msg msg--err" role="alert">{message}</p> : null}

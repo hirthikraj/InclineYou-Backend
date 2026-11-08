@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 
 import type { ClientProgramsData, ClientWire, ProgramWire } from '@/lib/programs/api';
 import { GOALS, dayNamesOf, goalKeyOf, type GoalKey } from '@/lib/programs/blueprint';
@@ -19,6 +19,7 @@ import { Button } from '@/web-components/ui/Button';
 import { Tag } from '@/web-components/ui/Tag';
 import { Avatar } from '@/web-components/ui/Avatar';
 import { DAY_MS, startOfDay } from '@/lib/today/time';
+import { unarchiveClient } from '@/lib/clients/status-actions';
 
 /**
  * `/programs` — **who is training on what**, which is the question the word
@@ -85,7 +86,7 @@ export function ClientPrograms({
     return m;
   }, [data.clients]);
 
-  const rows = useMemo(
+  const allRows = useMemo(
     () =>
       data.programs
         .map(p => ({ program: p, client: byId.get(p.clientId) ?? null }))
@@ -102,6 +103,18 @@ export function ClientPrograms({
         ),
     [data.programs, byId],
   );
+
+  /* AN ARCHIVED CLIENT'S PLAN IS STILL ON THE BOOK, AND IT GOES TO THE BOTTOM. Archiving keeps the program (slots and the
+     plan are kept), so the read still answers it, often as `active`. Listed with the rest it read as somebody training
+     today; with no name in the roster it read as a plan assigned to nobody. It is split off here, before any facet, and
+     drawn under the list, collapsed, the way Clients draws its archived: every count and filter below is about the live
+     book, and the archived list follows only what narrows by person — the search and the Client facet. */
+  const [rows, archivedRows] = useMemo(() => {
+    const on: Copy[] = [];
+    const off: Copy[] = [];
+    for (const r of allRows) (r.client?.status === 'archived' ? off : on).push(r);
+    return [on, off];
+  }, [allRows]);
 
   /* THE COUNTS ARE OFF THE OTHER AXES, NOT OFF WHAT IS ON SCREEN. A facet whose
      figures counted the rows the facets had already left would answer *Ended 0*
@@ -131,6 +144,11 @@ export function ClientPrograms({
           matchText(r, query),
       ),
     [rows, clientId, status, goal, query],
+  );
+
+  const archived = useMemo(
+    () => archivedRows.filter(r => matchClient(r, clientId) && matchText(r, query)),
+    [archivedRows, clientId, query],
   );
 
   const goalCounts = useMemo(() => {
@@ -360,6 +378,8 @@ export function ClientPrograms({
                 )}
               </section>
             )}
+
+            {archived.length > 0 && <ArchivedPlans rows={archived} />}
           </div>
         </div>
       </main>
@@ -480,6 +500,53 @@ function CopyRow({ row, now, className }: { row: Copy; now: number; className?: 
         )
       }
     />
+  );
+}
+
+/**
+ * The Archived list — the plans of archived clients, from the same reads, under the list. `Clients`' `ArchivedList` in
+ * shape and in class (`.rst__archived`): who, which plan, when they were archived, and Unarchive, which brings the client
+ * back and with them their plan into the list above. The name opens the plan, the way a row does.
+ */
+function ArchivedPlans({ rows }: { rows: Copy[] }) {
+  const [pending, startTransition] = useTransition();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  return (
+    <details className="rst__archived">
+      <summary>{rows.length} archived</summary>
+      <ul>
+        {rows.map(({ program, client }) => (
+          <li key={program.id}>
+            <a href={planHref(program.clientId, program.id, 'programs')}>{client?.name ?? 'Client'}</a>
+            <span className="ink3">
+              {' · '}{program.name}
+              {program.status === 'paused' ? ' · Paused' : isCurrent(program) ? '' : ' · Ended'}
+              {client?.archivedAt
+                ? ` · Archived ${new Date(client.archivedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}`
+                : ''}
+            </span>{' '}
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={pending}
+              onClick={() => {
+                setBusy(program.id);
+                setMessage(null);
+                startTransition(async () => {
+                  const result = await unarchiveClient(program.clientId);
+                  if (!result.ok) setMessage(result.message ?? 'That did not save.');
+                  setBusy(null);
+                });
+              }}
+            >
+              {pending && busy === program.id ? 'Bringing back…' : 'Unarchive'}
+            </Button>
+          </li>
+        ))}
+      </ul>
+      {message && <p className="fail" role="alert">{message}</p>}
+    </details>
   );
 }
 

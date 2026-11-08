@@ -107,22 +107,35 @@ public class AssessmentTemplateService {
         if (existing.isPresent()) return new TemplateCreated(item(existing.get(), templates.liveCycles(trainerId, existing.get().id())), false);
 
         UUID id = req.id() == null ? UUID.randomUUID() : req.id();
-        String name = templates.nameTaken(trainerId, WEEKLY_NAME, null) ? WEEKLY_NAME + " (default)" : WEEKLY_NAME;
+        String name = weeklyName(trainerId);
         var measurements = new TemplateItem.Measurements(true, List.of("weight"));
         var questions = new TemplateItem.Questions(true, List.of(
                 new AssessmentCatalogue.Question("wk_energy", "Energy this week", "rating", 5, List.of(), false, false),
                 new AssessmentCatalogue.Question("wk_note", "Anything you want your trainer to know?", "text", null, List.of(), false, false)));
-        try {
-            if (!templates.insert(id, trainerId, name, null, AssessmentJson.write(measurements), AssessmentJson.write(questions),
-                    req.systemKey(), true)) {
-                throw ApiException.idConflict();
-            }
-        } catch (DuplicateKeyException e) {
+        // ON CONFLICT DO NOTHING, never a caught DuplicateKeyException: a unique violation aborts the Postgres transaction,
+        // so any read after catching one fails with 25P02 and the caller gets a 500.
+        if (!templates.insertIfFree(id, trainerId, name, null, AssessmentJson.write(measurements), AssessmentJson.write(questions),
+                req.systemKey(), true)) {
             // Two asks racing: the other one made it, and that is the answer.
-            var raced = templates.findSystem(trainerId, req.systemKey()).orElseThrow(() -> duplicate(e));
-            return new TemplateCreated(item(raced, templates.liveCycles(trainerId, raced.id())), false);
+            var raced = templates.findSystem(trainerId, req.systemKey());
+            if (raced.isPresent()) return new TemplateCreated(item(raced.get(), templates.liveCycles(trainerId, raced.get().id())), false);
+            if (templates.isMine(id, trainerId).isPresent()) throw ApiException.idConflict();
+            throw nameTaken();   // a form of the trainer's took the free name between the check and the insert
         }
         return new TemplateCreated(one(trainerId, id), true);
+    }
+
+    /**
+     * "Weekly check-in", else "Weekly check-in (default)", else "(default 2)" and on: the trainer's own forms keep their
+     * names, and asking for the product's one never fails because of them. Bounded, since a shelf is a handful of forms.
+     */
+    private String weeklyName(UUID trainerId) {
+        if (!templates.nameTaken(trainerId, WEEKLY_NAME, null)) return WEEKLY_NAME;
+        for (int n = 1; n <= 50; n++) {
+            String candidate = WEEKLY_NAME + (n == 1 ? " (default)" : " (default " + n + ")");
+            if (!templates.nameTaken(trainerId, candidate, null)) return candidate;
+        }
+        throw nameTaken();
     }
 
     /** Whole-form replace. Every open assessment nobody has started picks the new form up. */

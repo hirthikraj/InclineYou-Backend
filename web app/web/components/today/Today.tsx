@@ -13,6 +13,7 @@ import { BookPanel } from '@/components/schedule/BookPanel';
 import { TopBar } from '@/components/shell/TopBar';
 import { Calendar, Plus } from '@/components/shell/Icons';
 import { AttentionQueue } from './AttentionQueue';
+import { CloseOut } from './CloseOut';
 import { useHeartbeat, useNow } from './Clock';
 import { FirstRun } from './FirstRun';
 import { Hero } from './Hero';
@@ -292,8 +293,15 @@ export function Today({ data }: { data: TodayData }) {
                 and the four columns have room to spare at every width above the
                 620px reflow.
               */}
+              {/* Past sessions nobody marked — above the queue, because every
+                  pack figure in the queue below is wrong until they are answered.
+                  See `CloseOut`. */}
+              <CloseOut sessions={deck.closeOut} />
+
               <AttentionQueue
-                  items={deck.attention}
+                  /* `unmarked` rows are the Close out card's now, one line per
+                     session rather than one *Mark all done* per client. */
+                  items={deck.attention.filter((i) => i.kind !== 'unmarked')}
                   silenced={deck.silenced}
                   renewTerms={renewTerms}
                   openLogs={openLogs}

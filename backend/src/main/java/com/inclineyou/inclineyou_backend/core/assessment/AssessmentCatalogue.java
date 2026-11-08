@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.assessment;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -119,6 +120,42 @@ public final class AssessmentCatalogue {
      * accepts. Withdrawing the rest of the health items would be one more entry here.
      */
     public static final Set<String> HELD_BACK = Set.of("resting_hr", "bp");
+
+    /**
+     * The lower bound a reading may take — a typo guard, like {@link MetricCatalogue}'s ranges, not a judgement. Most of the
+     * catalogue is a size or a mass, which is never 0. The counts and scores are honestly 0 for somebody (no push-up yet, a
+     * plank not held, an overhead squat that scores nothing), and a sit-and-reach that stops short of the toes is negative.
+     * Every reading stays below {@link #READING_BELOW}. {@code assessment_readings_valid} (V28) holds the same three rules.
+     */
+    public record Bound(BigDecimal min, boolean minInclusive) {
+        public boolean allows(BigDecimal v) {
+            if (v == null || v.compareTo(READING_BELOW) >= 0) return false;
+            int c = v.compareTo(min);
+            return minInclusive ? c >= 0 : c > 0;
+        }
+
+        public String rule() {
+            String low = min.signum() == 0 ? "0" : String.format("%,d", min.longValue());
+            return (minInclusive ? "must be " + low + " or more" : "must be above " + low) + " and below 100,000";
+        }
+    }
+
+    public static final BigDecimal READING_BELOW = BigDecimal.valueOf(100_000);
+    private static final Bound POSITIVE = new Bound(BigDecimal.ZERO, false);
+    private static final Bound ZERO_OR_MORE = new Bound(BigDecimal.ZERO, true);
+    private static final Bound SIGNED = new Bound(READING_BELOW.negate(), false);
+
+    /** Counts and scores, where 0 is a result. */
+    public static final Set<String> ZERO_ALLOWED = Set.of("pushups", "plank", "ohs");
+    /** Measured from a mark, so short of it is negative. */
+    public static final Set<String> NEGATIVE_ALLOWED = Set.of("sit_reach");
+
+    /** A key the catalogue no longer knows (an old form) keeps the strict rule it was taken under. */
+    public static Bound boundOf(String key) {
+        if (NEGATIVE_ALLOWED.contains(key)) return SIGNED;
+        if (ZERO_ALLOWED.contains(key)) return ZERO_OR_MORE;
+        return POSITIVE;
+    }
 
     /** What a template may ask in v1, in catalogue order. */
     public static final List<Measurement> OFFERED =

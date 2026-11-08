@@ -401,6 +401,13 @@ export interface MonthRecord {
   spent: number;
   /** Done. */
   kept: number;
+  /**
+   * Past sessions nobody marked — in neither half, like a cancellation, but
+   * unlike one they are a question still open. Counted so the band can say so:
+   * *9 of 9 kept* over a month with six unmarked sessions read as a perfect
+   * month when a third of it had not been answered.
+   */
+  unmarked: number;
 }
 
 /**
@@ -419,10 +426,11 @@ export interface MonthRecord {
 export function monthRecords(rows: SessionTableRow[]): Map<number, MonthRecord> {
   const out = new Map<number, MonthRecord>();
   for (const r of rows) {
-    const rec = out.get(r.month) ?? { total: 0, spent: 0, kept: 0 };
+    const rec = out.get(r.month) ?? { total: 0, spent: 0, kept: 0, unmarked: 0 };
     rec.total += 1;
     if (r.cls === 'done' || r.cls === 'no_show') rec.spent += 1;
     if (r.cls === 'done') rec.kept += 1;
+    if (r.cls === 'not_marked') rec.unmarked += 1;
     out.set(r.month, rec);
   }
   return out;

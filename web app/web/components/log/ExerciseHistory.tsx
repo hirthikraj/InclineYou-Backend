@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { HistoryView } from '@/lib/log/log';
-import { PLATE_STEP_KG, trim1, walkForward } from '@/lib/log/log';
+import { PLATE_STEP_KG, walkForward } from '@/lib/log/log';
 import { updateSet } from '@/lib/sessionlog/actions';
 import { TopBar } from '@/components/shell/TopBar';
 import { Back, Chart, Note, Tick, Warn } from './Icons';
@@ -422,11 +422,9 @@ export function ExerciseHistory({ data }: { data: HistoryView }) {
                   <>
                     <Why heading="Change it, and every session after it fixes itself">
                       <p>
-                        There is <b>no stored record anywhere in this codebase</b>. A record is
-                        computed on read, every read — so correcting this one set removes the gold
-                        from {editing.session.label.replace('Today · ', '')} <i>and</i> re-judges
-                        every session after it in the same frame. A stored PR would be a second copy
-                        of the truth, and second copies drift.
+                        Records are worked out from the sets themselves, so correcting this one
+                        re-checks {editing.session.label.replace('Today · ', '')} <i>and</i> every
+                        session after it. Below is exactly what will change.
                       </p>
                     </Why>
 
@@ -485,8 +483,7 @@ export function ExerciseHistory({ data }: { data: HistoryView }) {
                       </Card>
                     ) : (
                       <p className="small ink3">
-                        Nothing changes until the number does. The list here is computed by the same
-                        function that will judge it after the save, not a description of one.
+                        Nothing changes until the number does.
                       </p>
                     )}
 
@@ -496,13 +493,11 @@ export function ExerciseHistory({ data }: { data: HistoryView }) {
                   </>
                 ) : (
                   <>
-                    <Why heading="Judged at the time, not tagged">
+                    <Why heading="Each session is judged against the ones before it">
                       <p>
-                        The history is walked <b>forward</b> and each session judged against
-                        everything before it, by the same function the floor screen uses.{' '}
                         {data.sessions.filter((s) => s.verdict !== 'none').length} of{' '}
-                        {data.sessions.length} carry a tag and the oldest does not, because there
-                        was nothing before it. <b>There is no stored flag to disagree with.</b>
+                        {data.sessions.length} sessions carry a tag. The first one never does —
+                        there was nothing before it to beat.
                       </p>
                     </Why>
 
@@ -522,33 +517,12 @@ export function ExerciseHistory({ data }: { data: HistoryView }) {
                         ))}{' '}
                         {data.logType === 'reps' ? 'reps' : 'kg'}
                       </p>
-                      <p className="small" style={{ marginTop: 10 }}>
-                        Written out, never charted. From a zero baseline a{' '}
-                        {trim1(PLATE_STEP_KG)} kg week is two pixels; from a 50 kg baseline it is
-                        everything. This is also what a coach says out loud.
-                      </p>
-                    </Card>
-
-                    <Card
-                      title="Two things this layout keeps"
-                      style={{ marginTop: 12 }}
-                    >
-                      <p className="small">
-                        <b className="ink">The same five columns as the log.</b> A trainer should
-                        never have to learn a second layout for their own data, so the Previous
-                        column is simply repurposed — here it carries the RPE, which is the one
-                        thing worth keeping from a set that already happened.
-                      </p>
-                      <p className="small" style={{ marginTop: 9 }}>
-                        <b className="ink">Sets stay in the order they happened.</b> Sessions run
-                        newest first, but set 3 only means something after set 2 — and the tag is
-                        on the set, not on the day.
-                      </p>
                     </Card>
 
                     <p className="small" style={{ marginTop: 12 }}>
-                      A number typed wrong is two clicks from here. On a phone you would never find
-                      it — which is the third thing this console is for.
+                      The columns match the log; here <b className="ink">Previous</b> shows the RPE.
+                      Sessions run newest first, sets in the order they were done. Typed a number
+                      wrong? Press <b className="ink">Correct</b> on that set.
                     </p>
                   </>
                 )}

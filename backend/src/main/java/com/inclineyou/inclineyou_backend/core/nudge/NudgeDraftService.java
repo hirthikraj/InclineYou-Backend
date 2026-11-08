@@ -144,8 +144,8 @@ public class NudgeDraftService {
         // server's or the database's clock: "due 1 day ago" at 02:00 in Chennai
         // must not say 0 because the JVM runs in UTC.
         LocalDate today = WorkspaceClock.today(clock.zone());
-        String message = NudgeText.interpolate(bodyFor(trainerId, template),
-                variables(trainerId, clientId, template, packageId, today, client));
+        String message = NudgeText.tidy(NudgeText.interpolate(bodyFor(trainerId, template),
+                variables(trainerId, clientId, template, packageId, today, client)));
         if (message.length() > MAX_MESSAGE) message = message.substring(0, MAX_MESSAGE);
 
         UUID rowId = id == null ? UUID.randomUUID() : id;
@@ -189,6 +189,11 @@ public class NudgeDraftService {
                 vars.put("{package}", owed.packageName());
                 vars.put("{days}", String.valueOf(owed.days()));
                 vars.put("{count}", String.valueOf(owed.days()));
+                // A whole sentence or nothing: a trainer with no UPI ID set must not send "UPI: ." —
+                // the empty case is closed up by `NudgeText.tidy`.
+                String upi = client.upiVpa() == null ? "" : client.upiVpa().strip();
+                vars.put("{upi}", upi);
+                vars.put("{pay_by_upi}", upi.isEmpty() ? "" : "Pay by UPI to " + upi + ".");
             }
             case "missed_session" -> {
                 int n = logs.noShowsInLast30Days(clientId);

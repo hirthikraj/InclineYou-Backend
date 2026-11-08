@@ -126,6 +126,27 @@ public class AssessmentTemplateJdbcRepository {
                 ON CONFLICT (id) DO NOTHING""", p) > 0;
     }
 
+    /**
+     * The same insert, but a clash on ANY unique index (id, name, system key) is no row rather than an exception, so the
+     * caller's transaction stays usable and it can read what it clashed with. False when nothing was written.
+     */
+    public boolean insertIfFree(UUID id, UUID trainerId, String name, String description, String measurementsJson,
+                                String questionsJson, String systemKey, boolean clientCanStart) {
+        var p = new HashMap<String, Object>();
+        p.put("id", id.toString());
+        p.put("tid", trainerId.toString());
+        p.put("name", name);
+        p.put("description", description);
+        p.put("m", measurementsJson);
+        p.put("q", questionsJson);
+        p.put("key", systemKey);
+        p.put("offer", clientCanStart);
+        return jdbc.update("""
+                INSERT INTO assessment_template (id, trainer_id, name, description, measurements, questions, system_key, client_can_start)
+                VALUES (:id::uuid, :tid::uuid, :name, :description, CAST(:m AS jsonb), CAST(:q AS jsonb), :key, :offer)
+                ON CONFLICT DO NOTHING""", p) > 0;
+    }
+
     /** {@code clientCanStart} null leaves the offer as it was: a whole-form PUT from before 1.2 must not switch it off. */
     public void update(UUID id, String name, String description, String measurementsJson, String questionsJson, Boolean clientCanStart) {
         var p = new HashMap<String, Object>();

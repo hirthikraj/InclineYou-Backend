@@ -51,7 +51,11 @@ public class AssessmentService {
     public Catalog catalog() {
         return new Catalog(AssessmentCatalogue.OFFERED_GROUPS,
                 AssessmentCatalogue.OFFERED.stream()
-                        .map(m -> new Catalog.CatalogMeasurement(m.key(), m.label(), m.group(), m.unit(), m.metric() != null))
+                        .map(m -> {
+                            var b = AssessmentCatalogue.boundOf(m.key());
+                            return new Catalog.CatalogMeasurement(m.key(), m.label(), m.group(), m.unit(), m.metric() != null,
+                                    b.min(), b.minInclusive());
+                        })
                         .toList(),
                 AssessmentCatalogue.QUESTIONS);
     }
@@ -75,7 +79,7 @@ public class AssessmentService {
         var answers = answers(form, rawAnswers);
 
         return new AssessmentDetail(item, client, template, schedule,
-                new AssessmentDetail.Asked(form.measurements(), form.questions()),
+                new AssessmentDetail.Asked(form.measurements().stream().map(AssessmentDetail.AskedMeasurement::of).toList(), form.questions()),
                 new AssessmentDetail.Entry(rawReadings, rawAnswers), readings, answers,
                 history(row.clientId(), form), assessments.returned(row.clientId()));
     }

@@ -2,7 +2,7 @@
 
 
 import { skipToHome, type StepResult } from '@/lib/setup/actions';
-import { isAnswered, stepBefore, stepHref, type SetupState, type SetupStep } from '@/lib/setup/steps';
+import { SETUP_STEPS, isAnswered, stepBefore, stepHref, type SetupState, type SetupStep } from '@/lib/setup/steps';
 import { Button } from '@/web-components/ui/Button';
 
 /**
@@ -83,7 +83,7 @@ export function StepFoot({
   onContinue,
   onSkip,
   onSkipHome,
-  continueLabel = 'Continue',
+  continueLabel,
   continueDisabled = false,
   pending = false,
   extra,
@@ -134,7 +134,7 @@ export function StepFoot({
         disabled={pending || continueDisabled}
         onClick={onContinue}
       >
-        {pending ? 'Saving…' : continueLabel}
+        {pending ? 'Saving…' : continueLabel ?? (step === SETUP_STEPS.at(-1) ? 'Finish' : 'Continue')}
       </Button>
     </div>
   );

@@ -251,15 +251,6 @@ export function Console({ data }: { data: ConsoleDataX }) {
      page and ask the server as the trainer types. */
   const [library, setLibrary] = useState(data.library);
   const [libraryComplete, setLibraryComplete] = useState(false);
-  useEffect(() => {
-    let off = false;
-    void exerciseLibrary().then((res) => {
-      if (off || !res.ok || res.data.length === 0) return;
-      setLibrary(res.data);
-      setLibraryComplete(true);
-    });
-    return () => { off = true; };
-  }, []);
   const searchLibrary = useCallback(async (q: string) => {
     const res = await exerciseSearch(q);
     return res.ok ? res.data : [];
@@ -611,6 +602,40 @@ export function Console({ data }: { data: ConsoleDataX }) {
   const addOpen = params.get('add') === '1';
   const swapFor = params.get('swap');
   const swapView = exercises.find((e) => e.exerciseId === swapFor) ?? null;
+  /*
+   * NOT ON MOUNT ANY MORE (6 Nov 2026): only once a panel that needs it opens.
+   *
+   * Next runs a page's server actions one at a time, and the full library is
+   * several sequential pages of `/v1/exercises`. Fetched on mount, it sat in
+   * front of the first set the trainer saved on every console open — the one
+   * write this screen exists to make fast. Most sessions never open Add or
+   * Swap, so most never pay for it now; the ones that do get the first page
+   * and live search until it lands, exactly as before.
+   */
+  const libraryAsked = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    // Set on every mount: React's development double-mount runs the cleanup once
+    // and mounts again, and a flag only cleared would stay false for good.
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const libraryWanted = addOpen || swapView !== null;
+  useEffect(() => {
+    if (!libraryWanted || libraryAsked.current) return;
+    libraryAsked.current = true;
+    /* Not cancelled when the panel closes — only when the console goes. A panel
+       shut while the pages arrive still gets the whole library on its next open. */
+    void exerciseLibrary().then((res) => {
+      if (!mounted.current) return;
+      if (!res.ok || res.data.length === 0) {
+        libraryAsked.current = false; // let the next open try again
+        return;
+      }
+      setLibrary(res.data);
+      setLibraryComplete(true);
+    });
+  }, [libraryWanted]);
 
   /* `?hist=` is the exercise whose history is open as a sheet. In the URL for
      the same reason `?set=`, `?add=` and `?swap=` are: it is one of this
@@ -1065,27 +1090,20 @@ function EmptyPlan({
           <div className="msg msg--warn" style={{ marginTop: 14 }}>
             <Warn />
             <span>
-              <b>{view.quiet}</b> Stated, not editorialised — the app does not know why, and a
-              screen that guesses is a screen a trainer argues with.
+              <b>{view.quiet}</b>
             </span>
           </div>
         ) : null}
       </div>
 
       <div>
-        <Why heading="The last whole session, as something to repeat">
+        <Why heading="Repeat last time">
           <p>
-            Not a template and not a suggestion: the actual session they did, offered whole. The
-            commonest thing a trainer wants on a day with no plan is <b>last time again</b>, and
-            every logger in the teardown makes them build it from a routine instead.
+            On a day with no plan, <b>last time again</b> brings back the exercises from their last
+            session. It doesn&rsquo;t fill in any weights: last time&rsquo;s numbers show in the{' '}
+            <b>Previous</b> column for you to beat.
           </p>
         </Why>
-        <p className="small" style={{ marginTop: 12 }}>
-          And nothing here auto-progresses it. §09:{' '}
-          <b className="ink">the app never puts a number in a row that nobody lifted</b>. Repeating
-          the session brings the exercises and the slots; the loads arrive in the Previous column,
-          where they belong.
-        </p>
       </div>
     </div>
   );

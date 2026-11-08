@@ -139,6 +139,17 @@ public class AssessmentScheduleJdbcRepository {
                 Map.of("id", id.toString()));
     }
 
+    /**
+     * A deleted client's cycles, live and ended: nothing may book for a client who is gone. Run before
+     * {@link AssessmentJdbcRepository#softDeleteAllForClient}, so the cycle row is locked before the assessment
+     * here as on every other route, and an entry finishing meanwhile has booked its next one before that
+     * statement takes its snapshot.
+     */
+    public int softDeleteAllForClient(UUID clientId) {
+        return jdbc.update("UPDATE assessment_schedule SET deleted_at = now() WHERE client_id = :cid::uuid AND deleted_at IS NULL",
+                Map.of("cid", clientId.toString()));
+    }
+
     /** A template's delete ends every live cycle on it. */
     public void endLiveOnTemplate(UUID trainerId, UUID templateId) {
         jdbc.update("""

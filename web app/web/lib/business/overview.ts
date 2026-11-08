@@ -261,31 +261,40 @@ export function trendBars(year: MoneySummary, bars = 6): {
     return { year: y, month: mo, label: MONTHS_SHORT[mo - 1], amount: m.takeHome, isCurrent: i === last.length - 1 };
   });
   const total = out.reduce((s, b) => s + b.amount, 0);
+  /* Whole months only: the current one is a fraction of a month, and averaging it
+     in drags the line down every time a trainer opens this on the 2nd.
+
+     And only from the FIRST month money came in. A trainer three months into the
+     product has six bars and two empty ones before their first payment; counted,
+     those two dragged the average from ₹81k to ₹48k, and the *% above your
+     average* beside it from 9% to 83%. A month before you started is not a month
+     you earned nothing in. A quiet month AFTER the first payment still counts. */
+  const whole = out.slice(0, -1);
+  const first = whole.findIndex((b) => b.amount > 0);
+  const earning = first === -1 ? [] : whole.slice(first);
   return {
     bars: out,
     best: out.reduce((m, b) => Math.max(m, b.amount), 0),
     total,
-    /* Whole months only: the current one is a fraction of a month, and averaging it
-       in drags the line down every time a trainer opens this on the 2nd. */
-    averagePerMonth: out.length > 1 ? Math.round((total - out[out.length - 1].amount) / (out.length - 1)) : total,
+    averagePerMonth: earning.length > 0
+      ? Math.round(earning.reduce((s, b) => s + b.amount, 0) / earning.length)
+      : out.length === 1 ? total : 0,
   };
 }
 
-export interface PeakMonth { label: string; amount: number; isCurrent: boolean; aboveAverage: number | null }
+/** The best month of the last twelve. How far above average it is, is the Overview's to say — against the average it draws (`OverTime`). */
+export interface PeakMonth { label: string; amount: number; isCurrent: boolean }
 
 export function computePeakMonth(year: MoneySummary): PeakMonth | null {
   const ms = year.months;
   if (ms.length === 0) return null;
   const peak = ms.reduce((m, b) => (b.takeHome > m.takeHome ? b : m), ms[0]);
   if (peak.takeHome <= 0) return null;
-  const whole = ms.slice(0, -1);
-  const average = whole.length > 0 ? whole.reduce((s, b) => s + b.takeHome, 0) / whole.length : 0;
   const [y, mo] = peak.month.split('-').map(Number);
   return {
     label: `${MONTHS_SHORT[mo - 1]} ${y}`,
     amount: peak.takeHome,
     isCurrent: peak === ms[ms.length - 1],
-    aboveAverage: average > 0 ? Math.round(((peak.takeHome - average) / average) * 100) : null,
   };
 }
 
