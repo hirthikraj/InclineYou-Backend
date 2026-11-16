@@ -21,6 +21,7 @@ import org.springframework.web.context.WebApplicationContext;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
@@ -153,6 +154,49 @@ class SessionDiaryTest {
                 .andExpect(status().isBadRequest());
     }
 
+    @Test
+    @DisplayName("?clientId= is 404 for a client not on your roster; a client's history keeps sessions an earlier coach logged")
+    void clientHistoryScope() throws Exception {
+        UUID theirs = client(other, "Theirs", "active");
+        mvc.perform(get("/v1/sessions").param("from", "2026-10-01").param("to", "2026-10-31").param("clientId", theirs.toString()))
+                .andExpect(status().isNotFound());
+        mvc.perform(get("/v1/sessions").param("from", "2026-10-01").param("to", "2026-10-31").param("clientId", UUID.randomUUID().toString()))
+                .andExpect(status().isNotFound());
+
+        // My client, one session I ran and one an earlier coach logged before the client came to me.
+        UUID mine = session("2026-10-12T09:00:00+05:30", null, "done");
+        jdbc.update("""
+                INSERT INTO scheduled_session (id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at, status)
+                VALUES (gen_random_uuid(), :t::uuid, :c::uuid, '2026-10-05T03:30:00Z', 60, '2026-10-05T04:30:00Z', 'done')""",
+                Map.of("t", other.toString(), "c", client.toString()));
+
+        mvc.perform(get("/v1/sessions").param("from", "2026-10-01").param("to", "2026-10-31").param("clientId", client.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(2));
+        // The diary is still the trainer's own time: the earlier coach's session is not in it.
+        mvc.perform(get("/v1/sessions").param("from", "2026-10-01").param("to", "2026-10-31"))
+                .andExpect(jsonPath("$.items.length()").value(1))
+                .andExpect(jsonPath("$.items[0].id").value(mine.toString()));
+    }
+
+    @Test
+    @DisplayName("a cursor resumes only the query that made it: another order, window or filter is a 400")
+    void cursorIsBoundToItsQuery() throws Exception {
+        for (int d = 10; d <= 12; d++) session("2026-10-" + d + "T09:00:00+05:30", null, "scheduled");
+        String json = mvc.perform(get("/v1/sessions").param("from", "2026-10-01").param("to", "2026-10-31").param("limit", "1"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        String cursor = com.jayway.jsonpath.JsonPath.read(json, "$.nextCursor");
+
+        mvc.perform(get("/v1/sessions").param("from", "2026-10-01").param("to", "2026-10-31").param("limit", "1").param("cursor", cursor))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(1));
+        mvc.perform(get("/v1/sessions").param("from", "2026-10-01").param("to", "2026-10-31").param("order", "desc").param("cursor", cursor))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/v1/sessions").param("from", "2026-10-02").param("to", "2026-10-31").param("cursor", cursor))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/v1/sessions").param("from", "2026-10-01").param("to", "2026-10-31").param("status", "done").param("cursor", cursor))
+                .andExpect(status().isBadRequest());
+    }
+
     /* ─────────────────────────────────────────────────────────── the booking ── */
 
     @Test
@@ -174,6 +218,49 @@ class SessionDiaryTest {
         // The next booking, later in time, takes the next workout; and after the last one there is none, not a restart.
         book(future(2)).andExpect(jsonPath("$.workout.name").value("Day B"));
         book(future(3)).andExpect(jsonPath("$.workout").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("book: a whole minute within a year back and two years ahead; one client cannot overlap themselves, two clients can")
+    void bookTimeRules() throws Exception {
+        long at = future(1);   // 08:00
+        book(at + 30_000).andExpect(status().isBadRequest());                                        // 08:00:30
+        book(Instant.now().plus(800, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES).toEpochMilli()).andExpect(status().isBadRequest());
+        book(Instant.now().minus(400, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES).toEpochMilli()).andExpect(status().isBadRequest());
+
+        book(at).andExpect(status().isCreated());                                                    // 08:00–09:00
+        book(at).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("SESSION_CLIENT_TIME_TAKEN"));
+        book(at + 30 * 60_000).andExpect(status().isConflict())                                      // 08:30: inside it
+                .andExpect(jsonPath("$.code").value("SESSION_CLIENT_OVERLAP"));
+        book(at - 30 * 60_000).andExpect(status().isConflict())                                      // 07:30–08:30: runs into it
+                .andExpect(jsonPath("$.code").value("SESSION_CLIENT_OVERLAP"));
+        book(at + 60 * 60_000).andExpect(status().isCreated());                                      // 09:00: touches, does not overlap
+
+        // Another client at the same hour is allowed: semi-private training, two on the floor at once.
+        UUID second = client(me, "Second", "active");
+        mvc.perform(post("/v1/sessions").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientId\":\"" + second + "\",\"scheduledAt\":" + (at + 30 * 60_000) + "}"))
+                .andExpect(status().isCreated());
+
+        // A cancelled session no longer holds its time.
+        long later = future(4);
+        String sid = com.jayway.jsonpath.JsonPath.read(book(later).andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(), "$.id");
+        jdbc.update("UPDATE scheduled_session SET status = 'cancelled', cancel_reason = 'trainer' WHERE id = :id::uuid", Map.of("id", sid));
+        book(later + 15 * 60_000).andExpect(status().isCreated());
+    }
+
+    @Test
+    @DisplayName("book: a retried id answers 200 even after the client was paused in between (the replay is checked before bookable)")
+    void replayAfterPause() throws Exception {
+        UUID id = UUID.randomUUID();
+        String body = "{\"id\":\"" + id + "\",\"clientId\":\"" + client + "\",\"scheduledAt\":" + future(1) + "}";
+        mvc.perform(post("/v1/sessions").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated());
+        jdbc.update("UPDATE client SET status = 'paused', paused_at = now() WHERE id = :id::uuid", Map.of("id", client.toString()));
+        mvc.perform(post("/v1/sessions").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id.toString()));
+        // A NEW booking for the paused client is still refused.
+        book(future(2)).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CLIENT_NOT_BOOKABLE"));
     }
 
     @Test
@@ -225,6 +312,51 @@ class SessionDiaryTest {
     }
 
     /* ───────────────────────────────────────────────────────── batch end · patch ── */
+
+    @Test
+    @org.junit.jupiter.api.DisplayName("a forgotten log is closed at its last set, else its planned length — never at the moment Close or Mark done is pressed")
+    void aForgottenLogEndsAtItsLastSet() throws Exception {
+        UUID withSets = session("2026-09-20T09:00:00+05:30", null, "scheduled");
+        UUID noSets = session("2026-09-21T09:00:00+05:30", null, "scheduled");
+        UUID marked = session("2026-09-22T09:00:00+05:30", null, "scheduled");
+        jdbc.update("UPDATE scheduled_session SET started_at = scheduled_at WHERE id IN (:a::uuid, :b::uuid, :c::uuid)",
+                Map.of("a", withSets.toString(), "b", noSets.toString(), "c", marked.toString()));
+        doneSet(withSets, "2026-09-20T09:47:00+05:30");
+        doneSet(marked, "2026-09-22T09:31:00+05:30");
+
+        mvc.perform(post("/v1/sessions/end").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"sessionIds\":[\"" + withSets + "\",\"" + noSets + "\"]}"))
+                .andExpect(status().isOk());
+        mvc.perform(post("/v1/sessions/{id}/done", marked)).andExpect(status().isOk());
+
+        org.junit.jupiter.api.Assertions.assertEquals(java.time.OffsetDateTime.parse("2026-09-20T09:47:00+05:30").toInstant(), endedAt(withSets),
+                "closed at the last set, not today");
+        int minutes = jdbc.queryForObject("SELECT duration_minutes FROM scheduled_session WHERE id = :s::uuid",
+                Map.of("s", noSets.toString()), Integer.class);
+        org.junit.jupiter.api.Assertions.assertEquals(java.time.OffsetDateTime.parse("2026-09-21T09:00:00+05:30").toInstant()
+                .plusSeconds(minutes * 60L), endedAt(noSets), "no set done: the planned length");
+        org.junit.jupiter.api.Assertions.assertEquals(java.time.OffsetDateTime.parse("2026-09-22T09:31:00+05:30").toInstant(), endedAt(marked),
+                "Mark done closes it the same way");
+    }
+
+    private java.time.Instant endedAt(UUID sessionId) {
+        return jdbc.queryForObject("SELECT ended_at FROM scheduled_session WHERE id = :s::uuid",
+                Map.of("s", sessionId.toString()), java.sql.Timestamp.class).toInstant();
+    }
+
+    /** One done set on the session, at {@code at}. */
+    private void doneSet(UUID sessionId, String at) {
+        String exercise = jdbc.queryForObject("SELECT id::text FROM exercise WHERE deleted_at IS NULL ORDER BY id LIMIT 1", Map.of(), String.class);
+        UUID sx = UUID.randomUUID();
+        String client = jdbc.queryForObject("SELECT client_id::text FROM scheduled_session WHERE id = :s::uuid",
+                Map.of("s", sessionId.toString()), String.class);
+        jdbc.update("INSERT INTO session_exercise (id, session_id, client_id, exercise_id, position) VALUES (:x::uuid, :s::uuid, :c::uuid, :e::uuid, 0)",
+                Map.of("x", sx.toString(), "s", sessionId.toString(), "c", client, "e", exercise));
+        jdbc.update("""
+                INSERT INTO set_log (session_exercise_id, position, planned, load_kind, effort_kind, load_value, effort_value, done_at)
+                VALUES (:x::uuid, 1, false, 'weight', 'reps', 40, 10, :at)""",
+                Map.of("x", sx.toString(), "at", java.sql.Timestamp.from(java.time.OffsetDateTime.parse(at).toInstant())));
+    }
 
     @Test
     @DisplayName("POST /end closes open logs once, says why for the rest, and never reveals somebody else's session")

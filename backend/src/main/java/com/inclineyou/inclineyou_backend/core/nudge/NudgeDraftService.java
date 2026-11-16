@@ -11,7 +11,7 @@ import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DuplicateKeyException;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -86,6 +86,11 @@ public class NudgeDraftService {
             "re_engagement", "session_reminder", "session_summary", "well_done", "check_in");
     private static final Set<String> TAKES_PACKAGE = Set.of("payment_reminder", "renewal");
     private static final Set<String> TAKES_SESSION = Set.of("missed_session", "session_reminder", "session_summary");
+    /** The status a named session must have for each template that takes one. */
+    private static final Map<String, String> SESSION_STATE = Map.of(
+            "missed_session", "no_show",
+            "session_reminder", "scheduled",
+            "session_summary", "done");
     /** {@code nudge_log.message} is varchar(1000). */
     private static final int MAX_MESSAGE = 1000;
 
@@ -118,15 +123,8 @@ public class NudgeDraftService {
         // A replay is answered from the row it wrote — the stored message rebuilds
         // the same link, and no second row skews the cooldown.
         if (id != null) {
-            var existing = logs.byId(id);
-            if (existing.isPresent()) {
-                var e = existing.get();
-                if (!trainerId.toString().equals(e.trainerId()) || !clientId.toString().equals(e.clientId())) {
-                    throw ApiException.idConflict();
-                }
-                return new Drafted(new Draft(id.toString(), e.message(), link(phone, client.name(), e.message()),
-                        e.sentAt()), false);
-            }
+            var replay = replay(trainerId, clientId, id, phone, client.name());
+            if (replay != null) return replay;
         }
         if (phone == null) {
             // 409, not 422 (1.1): adding a number makes the same request work.
@@ -136,8 +134,17 @@ public class NudgeDraftService {
         if (packageId != null && !logs.packageOfClient(trainerId, clientId, packageId)) {
             throw ApiException.validation("packageId: not a package of this client");
         }
-        if (sessionId != null && !logs.sessionOfClient(trainerId, clientId, sessionId)) {
-            throw ApiException.validation("sessionId: not a session of this client");
+        if (sessionId != null) {
+            String status = logs.sessionStatus(trainerId, clientId, sessionId)
+                    .orElseThrow(() -> ApiException.validation("sessionId: not a session of this client"));
+            // The session a message names must be in the state the message speaks of (9 Nov 2026): the log row
+            // records it as the message's subject, so "you missed" must point at a no-show and "see you" at a
+            // session still booked. Only the named subject is checked; whether to send is the trainer's call.
+            String wants = SESSION_STATE.get(template);
+            if (!wants.equals(status)) {
+                throw ApiException.validation("sessionId: that session is " + status.replace('_', '-')
+                        + ", and " + template + " is about one that is " + wants.replace('_', '-'));
+            }
         }
 
         // Day counts in the message are read on the workspace's calendar, not the
@@ -146,17 +153,41 @@ public class NudgeDraftService {
         LocalDate today = WorkspaceClock.today(clock.zone());
         String message = NudgeText.tidy(NudgeText.interpolate(bodyFor(trainerId, template),
                 variables(trainerId, clientId, template, packageId, today, client)));
-        if (message.length() > MAX_MESSAGE) message = message.substring(0, MAX_MESSAGE);
+        if (message.length() > MAX_MESSAGE) {
+            // Refused, never cut (9 Nov 2026): a cut message lost its end, which is where the UPI line and the
+            // sign-off go, and could split an emoji in half. The editor stops wording at 750 so filling has room;
+            // this is for a wording saved before that, or with a blank used many times.
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "NUDGE_TOO_LONG",
+                    "This message is too long once it is filled in (" + message.length() + " of " + MAX_MESSAGE
+                            + " characters). Shorten the wording in Settings → Nudge messages.");
+        }
 
         UUID rowId = id == null ? UUID.randomUUID() : id;
-        long sentAt;
-        try {
-            sentAt = logs.append(new NewNudgeLog(rowId, trainerId, clientId, reason, template, packageId, sessionId, message));
-        } catch (DuplicateKeyException e) {
-            throw ApiException.idConflict();   // an id taken by a row this trainer cannot see
+        var sentAt = logs.append(new NewNudgeLog(rowId, trainerId, clientId, reason, template, packageId, sessionId, message));
+        if (sentAt.isEmpty()) {
+            // The id was written between the lookup above and this insert — a double tap, whose first request has
+            // now committed — so it is a replay after all. Still nothing to answer: an id taken by a row this
+            // trainer cannot see.
+            var replay = replay(trainerId, clientId, rowId, phone, client.name());
+            if (replay == null) throw ApiException.idConflict();
+            return replay;
         }
         log.info("nudge drafted trainer={} client={} template={}", trainerId, clientId, template);
-        return new Drafted(new Draft(rowId.toString(), message, link(phone, client.name(), message), sentAt), true);
+        return new Drafted(new Draft(rowId.toString(), message, link(phone, client.name(), message), sentAt.get()), true);
+    }
+
+    /**
+     * The row already written under {@code id}, answered as a 200; null when there is none this caller can see.
+     * Another trainer's or another client's row under the same id is {@code 409 ID_CONFLICT}.
+     */
+    private Drafted replay(UUID trainerId, UUID clientId, UUID id, String phone, String clientName) {
+        var existing = logs.byId(id);
+        if (existing.isEmpty()) return null;
+        var e = existing.get();
+        if (!trainerId.toString().equals(e.trainerId()) || !clientId.toString().equals(e.clientId())) {
+            throw ApiException.idConflict();
+        }
+        return new Drafted(new Draft(id.toString(), e.message(), link(phone, clientName, e.message()), e.sentAt()), false);
     }
 
     /** The trainer's own wording if they have one, else the built-in (nudge_template is an override). */
@@ -185,6 +216,15 @@ public class NudgeDraftService {
                 // The named package's amountDue, else everything the client owes —
                 // the same ledger L5 and the money card read.
                 var owed = owing(trainerId, clientId, packageId, today);
+                // Nothing owed, nothing to remind about (9 Nov 2026): the message used to read "the pending ₹0 for
+                // your pack", and its log row then quieted this client's reminders for a week. A stale screen is the
+                // usual way here — the money came in after the button was drawn. A replay is answered before this,
+                // so a retried reminder that was right when it was drafted still answers 200.
+                if (owed.amount().signum() <= 0) {
+                    throw ApiException.conflict("NOTHING_OWED", NudgeText.firstName(client.name(), "This client")
+                            + (packageId != null ? " owes nothing on that pack" : " owes nothing right now")
+                            + ", so there is nothing to remind about.");
+                }
                 vars.put("{amount}", NudgeText.rupees(owed.amount()));
                 vars.put("{package}", owed.packageName());
                 vars.put("{days}", String.valueOf(owed.days()));
@@ -220,7 +260,7 @@ public class NudgeDraftService {
     /** The named package, else the client's first active one. */
     private CurrentPackage pack(UUID trainerId, UUID clientId, UUID packageId) {
         if (packageId != null) return packages.one(trainerId, packageId).orElse(null);
-        return packages.list(trainerId, true, clientId).stream()
+        return packages.currentOfClient(trainerId, clientId).stream()
                 .filter(k -> "active".equals(k.status()))
                 .findFirst().orElse(null);
     }
@@ -230,7 +270,7 @@ public class NudgeDraftService {
     private Owed owing(UUID trainerId, UUID clientId, UUID packageId, LocalDate today) {
         List<CurrentPackage> owing = packageId != null
                 ? packages.one(trainerId, packageId).stream().toList()
-                : packages.list(trainerId, true, clientId).stream()
+                : packages.currentOfClient(trainerId, clientId).stream()
                         .filter(k -> new BigDecimal(k.amountDue()).signum() > 0).toList();
         BigDecimal total = owing.stream().map(k -> new BigDecimal(k.amountDue())).reduce(BigDecimal.ZERO, BigDecimal::add);
         String name = owing.size() == 1 ? owing.getFirst().name() : "pack";

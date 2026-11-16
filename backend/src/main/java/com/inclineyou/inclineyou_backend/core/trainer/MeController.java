@@ -15,12 +15,12 @@ import java.util.UUID;
  * on purpose: the contract names it {@code /v1/me} because it is the shell's
  * read, shared by every screen's session check, not a trainer sub-resource.
  *
- * <p>The client portal (module 11) used to answer this same path for
- * {@code ROLE_CLIENT} — its own, differently-shaped "my profile" read. The
- * portal is out of v1 scope (`WEB_LAUNCH.md` §3), so that controller was
- * removed rather than kept around to branch on role for a caller that cannot
- * reach it yet; {@code SecurityConfig}'s catch-all now covers this path like
- * any other trainer route.
+ * <p>The pre-v1 client portal (module 11) used to answer this same path for
+ * {@code ROLE_CLIENT} with its own, differently-shaped "my profile" read. The
+ * rebuilt portal (in scope since 10 Oct 2026) reads {@code /v1/portal/me}
+ * instead ({@code PortalMeController}), so this path is a trainer's alone and
+ * {@code SecurityConfig}'s catch-all covers it like any other trainer route —
+ * a client or pending session is 403.
  */
 @RestController
 @RequiredArgsConstructor

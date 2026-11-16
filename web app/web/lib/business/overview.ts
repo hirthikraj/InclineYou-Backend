@@ -1,3 +1,4 @@
+import { DELETED_CLIENT } from '@/lib/clients/deleted';
 import type { TrendBar } from '@/lib/money/compute';
 import type {
   MoneySummary,
@@ -51,6 +52,8 @@ export interface ActionItem {
   kind: ActionKind;
   clientId: string;
   clientName: string;
+  /** Only an overdue row can be a deleted client's: the money is still owed, but there is no file and no number. */
+  clientDeleted: boolean;
   detail: string;
   /** The amount owed, on an overdue row. */
   amount: number | null;
@@ -78,7 +81,10 @@ export function computeActions(
   today: string,
   now: number,
 ): ActionsSummary {
-  const nameOf = (id: string) => names[id] ?? 'Unknown';
+  // The roster read (`status=all`) has every client but the deleted ones, so an id it does not know is a client who
+  // was deleted, and so erased: their money is still owed and is shown, under the label.
+  const nameOf = (id: string) => names[id] ?? DELETED_CLIENT;
+  const deleted = (id: string) => !(id in names);
   const items: ActionItem[] = [];
 
   const byClient = new Map<string, OverviewPackage[]>();
@@ -89,12 +95,14 @@ export function computeActions(
     const late = daysBetween(p.dueDate, today);
     if (late <= OVERDUE_GRACE_DAYS) continue;
     items.push({
-      id: p.id, kind: 'overdue', clientId: p.clientId, clientName: nameOf(p.clientId),
+      id: p.id, kind: 'overdue', clientId: p.clientId, clientName: nameOf(p.clientId), clientDeleted: deleted(p.clientId),
       detail: `${late} days past the due date`, amount: p.amountDue, severity: 'alert', weight: late,
     });
   }
 
   for (const [clientId, list] of byClient) {
+    // A lapsed or finished pack asks the trainer to renew: nothing to ask about a client who was deleted.
+    if (deleted(clientId)) continue;
     const live = list.filter((p) => p.status === 'active');
 
     /* A pack the CLOCK ended while sessions were still on it: the one nothing else
@@ -104,7 +112,7 @@ export function computeActions(
       const days = daysBetween(p.endDate, today);
       const left = p.sessionsRemaining ?? 0;
       items.push({
-        id: `${p.id}:lapsed`, kind: 'lapsed', clientId, clientName: nameOf(clientId),
+        id: `${p.id}:lapsed`, kind: 'lapsed', clientId, clientName: nameOf(clientId), clientDeleted: false,
         detail: left > 0
           ? `Ended ${days} day${days === 1 ? '' : 's'} ago with ${left} session${left === 1 ? '' : 's'} unused`
           : `Ended ${days} day${days === 1 ? '' : 's'} ago`,
@@ -122,13 +130,13 @@ export function computeActions(
     const days = Math.max(0, Math.round((now - newest.closedAt) / DAY));
     if (newest.status === 'completed' && (newest.sessionsTotal ?? 0) > 0) {
       items.push({
-        id: `${newest.id}:done`, kind: 'exhausted', clientId, clientName: nameOf(clientId),
+        id: `${newest.id}:done`, kind: 'exhausted', clientId, clientName: nameOf(clientId), clientDeleted: false,
         detail: `All ${newest.sessionsTotal} sessions delivered · not renewed`,
         amount: null, severity: 'warn', weight: days,
       });
     } else if (newest.status === 'expired') {
       items.push({
-        id: `${newest.id}:expired`, kind: 'lapsed', clientId, clientName: nameOf(clientId),
+        id: `${newest.id}:expired`, kind: 'lapsed', clientId, clientName: nameOf(clientId), clientDeleted: false,
         detail: `Expired ${days} day${days === 1 ? '' : 's'} ago · not renewed`,
         amount: null, severity: 'warn', weight: days,
       });
@@ -150,6 +158,7 @@ export interface ActivityLine {
   kind: OverviewActivity['kind'];
   clientId: string;
   clientName: string;
+  clientDeleted: boolean;
   at: number;
   text: string;
   amount: number | null;
@@ -161,7 +170,7 @@ export interface ActivityLine {
  */
 export function activityLines(items: OverviewActivity[]): ActivityLine[] {
   return items.map((a) => ({
-    id: a.id, kind: a.kind, clientId: a.clientId, clientName: a.clientName, at: a.at,
+    id: a.id, kind: a.kind, clientId: a.clientId, clientName: a.clientName, clientDeleted: a.clientDeleted, at: a.at,
     text: a.kind === 'paid' ? 'paid'
       : a.kind === 'sold' ? `started ${a.packageName}`
       : a.kind === 'write_off' ? 'had an amount written off'
@@ -203,6 +212,9 @@ export function computeRenewals(
   const live = packages.filter((p) => p.status === 'active');
 
   for (const p of live) {
+    // Renewing is offered to a client on the roster; a pack still open on a deleted client's account is money
+    // owed (the overdue row), not a renewal.
+    if (!(p.clientId in names)) continue;
     const total = p.sessionsTotal ?? 0;
     const left = p.sessionsRemaining ?? 0;
     if (total > 0 && left <= 0) continue;
@@ -214,7 +226,7 @@ export function computeRenewals(
     if (!byDate && !byCount) continue;
 
     items.push({
-      id: p.id, clientId: p.clientId, clientName: names[p.clientId] ?? 'Unknown', packName: p.name,
+      id: p.id, clientId: p.clientId, clientName: names[p.clientId], packName: p.name,
       amount: p.amount, reason: byDate ? 'ending' : 'running-out',
       daysLeft: byDate ? daysLeft : null, sessionsLeft: total > 0 ? left : null,
       paused: p.pausedAt !== null, weight: byDate ? (daysLeft as number) : RENEWAL_WINDOW_DAYS + left,

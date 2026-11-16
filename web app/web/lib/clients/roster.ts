@@ -520,8 +520,11 @@ export function buildRow(
   } | null = null;
   /* A pack running now (by `deck.ts`'s reading), which is what renews a closed one. */
   const hasRunning = packs.some((p) =>
-    !p.pausedAt && packStanding({ ...p, updatedAt: p.createdAt }, now)?.kind === 'live');
+    // A paused pack is still the client's running one (9 Nov 2026), so it renews a closed one as well.
+    !p.sessionId && packStanding({ ...p, updatedAt: p.createdAt }, now)?.kind === 'live');
   for (const p of packs) {
+    /* V32 · a single session's own sale is not a pack: no band, no Renew (its money is still counted above). */
+    if (p.sessionId) continue;
     /* A paused pack raises no band: its date is frozen and today is not. */
     if (p.pausedAt) continue;
     if (typeof p.sessionsRemaining !== 'number') continue;

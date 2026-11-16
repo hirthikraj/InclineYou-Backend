@@ -790,6 +790,7 @@ export function OverviewTab({
         clientName={client.name}
         entries={payload.nudges}
         now={now}
+        owes={owed > 0}
       />
     </div>
   );

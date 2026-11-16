@@ -33,7 +33,7 @@ export default async function PortalLayout({ children }: { children: React.React
 
   if (!result.ok) {
     /* No shell. There is nothing to navigate to — every `/me/*` route reads the
-       same `/v1/me`, so a rail whose four destinations all fail is four ways to
+       same `/v1/portal/me`, so a rail whose four destinations all fail is four ways to
        meet this screen again. `.app--noshell` is the same frame `Unavailable`
        uses on the trainer's half. */
     return (

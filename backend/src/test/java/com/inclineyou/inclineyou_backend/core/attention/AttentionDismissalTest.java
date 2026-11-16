@@ -83,6 +83,42 @@ class AttentionDismissalTest {
     }
 
     @Test
+    @DisplayName("a snooze must end within 90 days and after now; an unknown kind's sentence names the kind")
+    void snoozeAndKindRules() throws Exception {
+        long now = System.currentTimeMillis();
+        for (long bad : new long[]{now - 60_000L, now + 91L * 86_400_000L, 32_503_680_000_000L}) {
+            mvc.perform(put("/v1/attention/dismissals/{c}/{k}", client, "quiet").contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"band\":\"quiet\",\"snoozedUntil\":" + bad + "}"))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("VALIDATION"));
+        }
+        mvc.perform(put("/v1/attention/dismissals/{c}/{k}", client, "quiet").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"band\":\"quiet\",\"snoozedUntil\":" + (now + 7L * 86_400_000L) + "}"))
+                .andExpect(status().isOk());
+        mvc.perform(put("/v1/attention/dismissals/{c}/{k}", client, "nonsense").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"band\":\"quiet\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("BAND_KIND_MISMATCH"))
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.startsWith("\"nonsense\" is not a kind of row: one of ")));
+    }
+
+    @Test
+    @DisplayName("subjectAt — when the silenced situation started — is kept, replaced by the next dismissal, and optional")
+    void subjectAt() throws Exception {
+        long march = 1_772_400_000_000L;   // 2026-03-02
+        mvc.perform(put("/v1/attention/dismissals/{c}/{k}", client, "pack").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"band\":\"pack-ending\",\"subjectAt\":" + march + "}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.subjectAt").value(march));
+        long august = 1_785_600_000_000L;  // 2026-08-01: her next pack — silenced again, about this one
+        mvc.perform(put("/v1/attention/dismissals/{c}/{k}", client, "pack").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"band\":\"pack-ending\",\"subjectAt\":" + august + "}"))
+                .andExpect(jsonPath("$.subjectAt").value(august));
+        mvc.perform(get("/v1/attention/dismissals")).andExpect(jsonPath("$.items[0].subjectAt").value(august));
+        // Optional: a caller that does not send it keeps the old reading.
+        mvc.perform(put("/v1/attention/dismissals/{c}/{k}", client, "quiet").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"band\":\"quiet\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.subjectAt").doesNotExist());
+    }
+
+    @Test
     @DisplayName("a band outside its kind is a 400 BAND_KIND_MISMATCH, a blank band a 400 VALIDATION, someone else's client a 404")
     void refusals() throws Exception {
         mvc.perform(put("/v1/attention/dismissals/{c}/{k}", client, "pack").contentType(MediaType.APPLICATION_JSON).content("{\"band\":\"missed\"}"))

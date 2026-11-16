@@ -260,10 +260,18 @@ export function LedgerTab({
                         <tr key={row.id}>
                           <td className="mono" data-cell="meta">{fmtDate(row.bookAt)}</td>
                           <td data-cell="who">
-                            <Link className="who" href={`/clients/${row.clientId}`}>
-                              <span className="av av--sm" style={{ background: avatarToken(row.clientId) }}>{initials(row.clientName)}</span>
-                              <b>{row.clientName}</b>
-                            </Link>
+                            {row.clientDeleted ? (
+                              /* Erased: the money row stays, the person does not — no file to open. */
+                              <span className="who">
+                                <span className="av av--sm" style={{ background: avatarToken(row.clientId) }}>{initials(row.clientName)}</span>
+                                <b>{row.clientName}</b>
+                              </span>
+                            ) : (
+                              <Link className="who" href={`/clients/${row.clientId}`}>
+                                <span className="av av--sm" style={{ background: avatarToken(row.clientId) }}>{initials(row.clientName)}</span>
+                                <b>{row.clientName}</b>
+                              </Link>
+                            )}
                           </td>
                           <td data-cell="meta">
                             {howLabel(row)}
@@ -289,6 +297,7 @@ export function LedgerTab({
                               paymentId={row.id}
                               clientId={row.clientId}
                               clientName={row.clientName}
+                              clientDeleted={row.clientDeleted}
                               amount={row.amount}
                               status={row.status}
                               collectedBy={row.collectedBy}

@@ -148,11 +148,19 @@ public class ClientScheduleJdbcRepository {
      * has no slot_id, so it is left where the trainer put it.
      */
     public int cancelSessionsOfSlots(List<String> slotIds) {
-        return jdbc.update("""
+        return jdbc.queryForObject("""
+                WITH gone AS (
                 UPDATE scheduled_session SET status = 'cancelled', cancel_reason = 'schedule_changed'
                 WHERE slot_id = ANY(CAST(:removed AS uuid[])) AND status = 'scheduled'
                   AND started_at IS NULL AND scheduled_at > now() AND deleted_at IS NULL
-                """, Map.of("removed", slotIds.toArray(String[]::new)));
+                RETURNING id
+                ), sales AS (   -- 10 Nov 2026: a single session's sale is closed with it — nothing owed, kept
+                    UPDATE package SET status = 'cancelled', closed_at = now()
+                    WHERE session_id IN (SELECT id FROM gone) AND status = 'active' AND deleted_at IS NULL
+                    RETURNING 1
+                )
+                SELECT count(*)::int FROM gone
+                """, Map.of("removed", slotIds.toArray(String[]::new)), Integer.class);
     }
 
     /** A changed length, mode or program day moves the slots' future bookings with them. Returns the moved ids. */
@@ -292,13 +300,21 @@ public class ClientScheduleJdbcRepository {
      * exactly these (R70).
      */
     public int cancelUpcoming(UUID clientId, String reason, LocalDate until, ZoneId zone) {
-        return jdbc.update("""
+        return jdbc.queryForObject("""
+                WITH gone AS (
                 UPDATE scheduled_session SET status = 'cancelled', cancel_reason = :reason
                 WHERE client_id = :cid::uuid AND status = 'scheduled' AND started_at IS NULL AND deleted_at IS NULL
                   AND logged_by = 'trainer'   -- R107: a client's own workout can never be cancelled (scheduled_session_client_logged)
                   AND scheduled_at > now()
                   AND (CAST(:until AS date) IS NULL OR scheduled_at < (CAST(:until AS date)::timestamp AT TIME ZONE :tz))
-                """, window(clientId, reason, until, zone));
+                RETURNING id
+                ), sales AS (   -- 10 Nov 2026: a single session's sale is closed with it — nothing owed, kept
+                    UPDATE package SET status = 'cancelled', closed_at = now()
+                    WHERE session_id IN (SELECT id FROM gone) AND status = 'active' AND deleted_at IS NULL
+                    RETURNING 1
+                )
+                SELECT count(*)::int FROM gone
+                """, window(clientId, reason, until, zone), Integer.class);
     }
 
     /**
@@ -308,7 +324,8 @@ public class ClientScheduleJdbcRepository {
      * rather than double-booking the client.
      */
     public int restoreUpcoming(UUID clientId, String reason, LocalDate from, ZoneId zone) {
-        return jdbc.update("""
+        return jdbc.queryForObject("""
+                WITH back AS (
                 UPDATE scheduled_session s SET status = 'scheduled', cancel_reason = NULL
                 WHERE s.client_id = :cid::uuid AND s.status = 'cancelled' AND s.cancel_reason = :reason
                   AND s.deleted_at IS NULL AND s.scheduled_at > now()
@@ -316,7 +333,14 @@ public class ClientScheduleJdbcRepository {
                   AND NOT EXISTS (SELECT 1 FROM scheduled_session o
                                   WHERE o.client_id = s.client_id AND o.scheduled_at = s.scheduled_at
                                     AND o.id <> s.id AND o.deleted_at IS NULL AND o.status <> 'cancelled')
-                """, window(clientId, reason, from, zone));
+                RETURNING s.id
+                ), sales AS (   -- 10 Nov 2026: a booking brought back makes its single session's sale owed again
+                    UPDATE package SET status = 'active', closed_at = NULL
+                    WHERE session_id IN (SELECT id FROM back) AND status = 'cancelled' AND deleted_at IS NULL
+                    RETURNING 1
+                )
+                SELECT count(*)::int FROM back
+                """, window(clientId, reason, from, zone), Integer.class);
     }
 
     // ── helpers ────────────────────────────────────────────────────────────────

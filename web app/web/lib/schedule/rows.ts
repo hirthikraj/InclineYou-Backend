@@ -1,3 +1,4 @@
+import type { Billing } from './billing';
 import { clockParts } from '@/lib/today/time';
 import { readMode } from '@/lib/today/mode';
 import { DEAD_SESSION, sessionMinutes } from './roster';
@@ -15,6 +16,18 @@ import type { ScheduleSession } from './session';
  * One mapper, so a session drawn after a switch is drawn exactly as on load.
  */
 
+/** 10 Nov 2026 — a single session's own sale, made when it was booked. */
+export interface SessionSaleWire {
+  packageId: string;
+  amount: string;
+  /** Collected on it, less refunds. */
+  paid: string;
+  /** The session's day: nothing is owed before it. */
+  dueDate: string;
+  /** `active` · `completed` · `cancelled` (closed, nothing owed) · `refunded`. */
+  status: string;
+}
+
 /** L4 · `SessionReadService.SessionRow`, the fields the schedule reads. */
 export interface SessionWire {
   id: string;
@@ -28,6 +41,12 @@ export interface SessionWire {
   startedAt: number | null;
   endedAt: number | null;
   charge: { packageId: string } | null;
+  /** V32 — `pack` · `trial` · `complimentary` · `single`; absent from a server older than V32. */
+  billing?: Billing;
+  /** A single session's price, a decimal string. */
+  price?: string | null;
+  /** 10 Nov 2026 — a single session's sale; null for every other billing. */
+  sale?: SessionSaleWire | null;
   version: string;
 }
 
@@ -81,6 +100,9 @@ export function toSession(s: SessionWire, client: ClientBrief | undefined, now: 
     status,
     noShow: status === 'no_show',
     charged: s.charge !== null,
+    billing: s.billing ?? 'pack',
+    price: s.price ?? null,
+    sale: s.sale ?? null,
     startedAt: s.startedAt,
     version: s.version,
     notes: s.notes ?? null,

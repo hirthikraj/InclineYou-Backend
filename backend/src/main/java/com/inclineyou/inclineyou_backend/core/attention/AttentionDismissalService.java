@@ -33,6 +33,9 @@ public class AttentionDismissalService {
 
     private final AttentionDismissalJdbcRepository repo;
 
+    /** The longest "not now" (16 Nov 2026). The web's is 7 days; anything longer is "not again". */
+    static final int MAX_SNOOZE_DAYS = 90;
+
     /** Which bands each kind may be dismissed at — {@code attention_dismissal_band}, word for word. */
     private static final Map<String, Set<String>> BANDS = Map.of(
             "pack", Set.of("pack-empty", "pack-ending", "pack-expiring"),
@@ -66,13 +69,23 @@ public class AttentionDismissalService {
     @Transactional
     public DismissalResponse dismiss(UUID trainerId, UUID clientId, String kind, DismissRequest req) {
         var bands = BANDS.get(kind);
-        if (bands == null || !bands.contains(req.band())) {
-            throw AttentionRuleException.bandKindMismatch(kind, req.band());
+        // An unknown kind names the kind (16 Nov 2026): it used to answer "x is not a band of y", about the band. Same
+        // code as before (BAND_KIND_MISMATCH), so nothing that branches on it changes; only the sentence is right now.
+        if (bands == null) throw AttentionRuleException.unknownKind(kind, BANDS.keySet().stream().sorted().toList());
+        if (!bands.contains(req.band())) throw AttentionRuleException.bandKindMismatch(kind, req.band());
+        // A snooze is a time still to come, and a short one (16 Nov 2026): a time already past did nothing, and the
+        // year 3000 was a permanent silence the list still called a snooze. "Not again" is a null snoozedUntil.
+        if (req.snoozedUntil() != null) {
+            long now = System.currentTimeMillis();
+            if (req.snoozedUntil() <= now || req.snoozedUntil() > now + MAX_SNOOZE_DAYS * 86_400_000L) {
+                throw ApiException.validation("snoozedUntil: a time in the next " + MAX_SNOOZE_DAYS
+                        + " days, or leave it out for \"not again\"");
+            }
         }
         // 404, not 403, for a client that is not this trainer's — ownership is a query filter.
         if (!repo.clientOnRoster(trainerId, clientId)) throw ApiException.notFound("That client is not on your roster.");
 
-        var saved = repo.upsert(trainerId, clientId, kind, req.band(), req.snoozedUntil());
+        var saved = repo.upsert(trainerId, clientId, kind, req.band(), req.snoozedUntil(), req.subjectAt());
         log.info("attention dismissed trainer={} client={} kind={} band={} until={}",
                 trainerId, clientId, kind, req.band(), req.snoozedUntil());
         return saved;

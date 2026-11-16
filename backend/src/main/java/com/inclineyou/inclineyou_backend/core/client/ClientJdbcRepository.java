@@ -196,10 +196,11 @@ public class ClientJdbcRepository {
      * that point at it — survive for the money book and for GST records.
      * {@code uq_client_phone_live} already excludes {@code deleted_at IS NOT
      * NULL}, so the number needs no separate release. What IS cleared is the
-     * contact surface nothing reads historically: {@code name} stays,
-     * because {@code PAYMENT_SELECT} reads it straight off this row for every
-     * past payment, and blanking it would blank the trainer's own ledger, not
-     * just this client's file. {@code status} and its pause/archive columns
+     * contact surface nothing reads historically. {@code name} stays HERE
+     * because {@link #erase}, which the delete runs straight after in the same
+     * transaction, is what blanks it (since 9 Nov 2026): past payments then
+     * read a null {@code clientName}, which the web draws as "Deleted client".
+     * {@code status} and its pause/archive columns
      * are left exactly as they were — {@code client_status_dates} ties them
      * together, and touching one without the other would fail that check.
      */
@@ -210,6 +211,15 @@ public class ClientJdbcRepository {
                        membership_status = 'removed', removed_at = now(), removed_by = 'trainer'
                 WHERE id = :cid::uuid
                 """, Map.of("cid", clientId.toString()));
+    }
+
+    /**
+     * {@code erase_client()} (V1): the trainer's door into {@code erase_clients()}, which checks the client is one the
+     * caller coaches in a workspace they are in, then hard-deletes everything personal and wipes the free text on what
+     * the money book keeps. {@code SECURITY DEFINER}, so it reaches rows the trainer's policies could not.
+     */
+    public void erase(UUID clientId) {
+        jdbc.queryForObject("SELECT erase_client(:cid::uuid)::text", Map.of("cid", clientId.toString()), String.class);
     }
 
     /** Throws DuplicateKeyException when uq_client_phone_live says the number was taken meanwhile. */
@@ -237,7 +247,8 @@ public class ClientJdbcRepository {
 
     /**
      * Every client with their schedule, recurring slots, the one active program and
-     * four session aggregates, in three queries whatever the roster size.
+     * four session aggregates, in four queries whatever the roster size (slots, stats,
+     * self-runs, then the rows). The caller holds them in one transaction.
      *
      * @param clientId null for the roster; one id folds into every predicate, so one
      *                 client costs one client's rows

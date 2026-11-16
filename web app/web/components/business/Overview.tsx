@@ -303,7 +303,7 @@ function ActionRow({ item, now }: { item: ActionItem; now: number }) {
               is a message; an empty or lapsed pack is a conversation on the
               client's own file, where the *Renew* control already lives — a
               second renew button here would be a second door to one write. */}
-          {item.kind === 'overdue' ? (
+          {item.clientDeleted ? null : item.kind === 'overdue' ? (
             /* No `className`: the button's own default IS
                `btn btn--sm btn--secondary`, and restating it at a call-site is
                the hand-written `.btn` the component exists to remove. */
@@ -384,7 +384,8 @@ function WhatHappened({ items: all, now }: { items: ActivityLine[]; now: number 
                  across a minute boundary. */
               mark={relativePast(it.at, now)}
               at={new Date(it.at).toISOString()}
-              href={`/clients/${it.clientId}`}
+              /* A deleted client has no file to open: the line is a record, not a door. */
+              href={it.clientDeleted ? undefined : `/clients/${it.clientId}`}
               title={<>{it.clientName} {it.text}{it.paid !== undefined && <> · paid {rupees(it.paid)}</>}</>}
               /* Quiet ink for a write-off: it records an absence, which is
                  exactly what `dim` is for. */
@@ -608,10 +609,17 @@ function WhereFrom({
               <div key={c.clientId}>
                 <KeyValueRow
                   k={
-                    <Link className="who" href={`/clients/${c.clientId}`}>
-                      <Avatar name={c.name} id={c.clientId} size="sm" />
-                      <b>{c.name}</b>
-                    </Link>
+                    c.deleted ? (
+                      <span className="who">
+                        <Avatar name={c.name} id={c.clientId} size="sm" />
+                        <b>{c.name}</b>
+                      </span>
+                    ) : (
+                      <Link className="who" href={`/clients/${c.clientId}`}>
+                        <Avatar name={c.name} id={c.clientId} size="sm" />
+                        <b>{c.name}</b>
+                      </Link>
+                    )
                   }
                   style={{ border: 0, marginBottom: 5 }}
                 >

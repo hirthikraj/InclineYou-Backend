@@ -85,6 +85,8 @@ export interface PackageWire {
   pausedAt: number | null;
   amountDue: string;
   createdAt: number;
+  /** V32 — set on a single session's own one-session sale (the session it was sold for); null on a real pack. Never a pack: no pack band, no Renew. */
+  sessionId?: string | null;
 }
 
 /* ----------------------------------------------------------- output ── */

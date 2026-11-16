@@ -49,14 +49,27 @@ public class AssessmentListJdbcRepository {
             where.add("a.client_id = :cid::uuid");
         }
         if (f.q() != null) {
-            p.put("q", f.q());
-            where.add("(a.name ILIKE '%' || :q || '%' OR c.name ILIKE '%' || :q || '%')");
+            // Matched as typed: a % or _ in the search is the character itself, not a wildcard.
+            p.put("q", likeLiteral(f.q()));
+            where.add("(a.name ILIKE '%' || :q || '%' ESCAPE '\\' OR c.name ILIKE '%' || :q || '%' ESCAPE '\\')");
         }
         if (f.dueBy() != null) {
             p.put("dueBy", Date.valueOf(f.dueBy()));
             where.add("a.due_on <= :dueBy");
         }
         return new Where(where, p);
+    }
+
+    /** {@code s} with LIKE's three special characters escaped by a backslash, so it matches only itself. */
+    static String likeLiteral(String s) {
+        return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+    }
+
+    /** Is this client on this trainer's roster (not deleted)? {@code ?clientId=} answers 404 otherwise. */
+    public boolean clientIsMine(java.util.UUID trainerId, java.util.UUID clientId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM client WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)
+                """, Map.of("cid", clientId.toString(), "tid", trainerId.toString()), Boolean.class));
     }
 
     /** One page, {@code fetch} rows (one past the page, so the caller can tell whether there is a next one). */

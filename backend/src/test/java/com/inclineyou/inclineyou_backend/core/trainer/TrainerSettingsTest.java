@@ -205,6 +205,32 @@ class TrainerSettingsTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(2));
     }
 
+    @Test
+    @DisplayName("GET /working-hours (today-l2): [] for a week never set, then every window as {id, weekday, start, end}, by weekday then start")
+    void workingHoursRead() throws Exception {
+        // Never answered the hours step: an empty list, not an invented default week.
+        mvc.perform(get("/v1/working-hours")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(0));
+
+        // Saturday listed before Monday, and Monday's evening before its morning: the read must re-sort both.
+        week("{\"days\":[{\"weekday\":6,\"windows\":[{\"start\":\"07:00\",\"end\":\"10:00\"}]},"
+                + "{\"weekday\":1,\"windows\":[{\"start\":\"17:00\",\"end\":\"21:00\"},{\"start\":\"06:00\",\"end\":\"11:00\"}]}]}")
+                .andExpect(status().isOk());
+
+        mvc.perform(get("/v1/working-hours")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(3))
+                .andExpect(jsonPath("$.items[0].id").isNotEmpty())
+                .andExpect(jsonPath("$.items[0].weekday").value(1))
+                .andExpect(jsonPath("$.items[0].start").value("06:00"))
+                .andExpect(jsonPath("$.items[0].end").value("11:00"))
+                .andExpect(jsonPath("$.items[1].weekday").value(1))
+                .andExpect(jsonPath("$.items[1].start").value("17:00"))
+                .andExpect(jsonPath("$.items[1].end").value("21:00"))
+                .andExpect(jsonPath("$.items[2].weekday").value(6))
+                .andExpect(jsonPath("$.items[2].start").value("07:00"))
+                .andExpect(jsonPath("$.items[2].end").value("10:00"));
+    }
+
     /* ── helpers ──────────────────────────────────────────────────────────── */
 
     private ResultActions patchMe(String body) throws Exception {

@@ -4,6 +4,8 @@ import { revalidatePath } from 'next/cache';
 
 import {
   cancelPackage,
+  clientPackages,
+  deletePackage,
   ClientDetailApiError,
   deletePayment,
   extendPackage,
@@ -13,8 +15,10 @@ import {
   renewPackage,
   resumePackage,
   sellPackage,
+  unchargedSessionsOf,
   writeOffPackage,
   type SaleInput,
+  type UnchargedSessionWire,
 } from './client-api';
 
 /**
@@ -52,6 +56,8 @@ import {
 export interface PackageResult {
   ok: boolean;
   message?: string;
+  /** The package a sale or renew made — what its receipt's Undo takes back. */
+  packageId?: string;
 }
 
 function fail(error: unknown, subject: string): PackageResult {
@@ -113,9 +119,9 @@ export async function assignPackage(clientId: string, input: SaleInput): Promise
     return { ok: false, message: 'A pack needs a price.' };
   }
   try {
-    await sellPackage(clientId, input);
+    const made = await sellPackage(clientId, input);
     refresh(clientId);
-    return { ok: true };
+    return { ok: true, packageId: made?.id };
   } catch (error) {
     return fail(error, 'That pack');
   }
@@ -129,12 +135,12 @@ export async function assignPackage(clientId: string, input: SaleInput): Promise
 export async function renewPack(
   clientId: string,
   packageId: string,
-  input: { id: string; startDate?: string | null },
+  input: { id: string; startDate?: string | null; chargeSessionIds?: string[] },
 ): Promise<PackageResult> {
   try {
-    await renewPackage(packageId, input);
+    const made = await renewPackage(packageId, input);
     refresh(clientId);
-    return { ok: true };
+    return { ok: true, packageId: made?.id };
   } catch (error) {
     return fail(error, 'The renewal');
   }
@@ -302,4 +308,69 @@ function dayStart(date?: string): number | null {
   const t = new Date();
   if (d.getFullYear() === t.getFullYear() && d.getMonth() === t.getMonth() && d.getDate() === t.getDate()) return null;
   return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
+/**
+ * OPTION B (V32, 9 Nov 2026) — the sessions this client was given with no pack to
+ * pay for them, which the Sell / Renew sheet offers to take from the new pack.
+ * Only the ones the trainer leaves ticked are sent; nothing is back-charged on
+ * its own. An empty list when the read fails: the sheet still sells.
+ */
+export async function unchargedSessions(clientId: string): Promise<UnchargedSessionWire[]> {
+  const day = (offset: number) => {
+    const d = new Date(Date.now() + offset * 86_400_000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  try {
+    return (await unchargedSessionsOf(clientId, day(-365), day(2))).items ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * OPTION B on a one-tap Renew (the roster's action column, V32): what to ask
+ * before renewing — the delivered sessions with no pack that the new one could
+ * take, of the renewed pack's service, oldest first, and how many it holds.
+ * Empty when there is nothing to ask (or the read failed): the renew just goes.
+ */
+export async function renewOffer(
+  clientId: string,
+  packageId: string,
+): Promise<{ sessions: { id: string; at: number }[]; take: number }> {
+  try {
+    const [packs, owed] = await Promise.all([clientPackages(clientId), unchargedSessions(clientId)]);
+    const pack = packs.find((p) => p.id === packageId);
+    if (!pack || pack.basis !== 'sessions' || owed.length === 0) return { sessions: [], take: 0 };
+    const sessions = owed
+      .filter((s) => (s.deliveryMode ?? pack.service) === pack.service)
+      .sort((a, b) => a.scheduledAt - b.scheduledAt)
+      .map((s) => ({ id: s.id, at: s.scheduledAt }));
+    return { sessions, take: Math.min(sessions.length, pack.sessionsTotal ?? sessions.length) };
+  } catch {
+    return { sessions: [], take: 0 };
+  }
+}
+
+/**
+ * UNDO A SALE OR RENEW — `DELETE /v1/packages/{id}` (9 Nov 2026), the receipt's
+ * Undo on Today, the roster and the client file. A mis-tapped renew is a mistake,
+ * not a sale, so it leaves no trace; the sessions it took wait for a pack again.
+ * The server allows it for ten minutes and only while nothing was recorded on the
+ * pack — after that the way back is *End this pack*, which keeps the record.
+ */
+export async function undoPackage(clientId: string | null, packageId: string): Promise<PackageResult> {
+  try {
+    await deletePackage(packageId);
+    if (clientId) refresh(clientId);
+    else {
+      revalidatePath('/today');
+      revalidatePath('/clients');
+      revalidatePath('/business', 'layout');
+      revalidatePath('/schedule');
+    }
+    return { ok: true };
+  } catch (error) {
+    return fail(error, 'The undo');
+  }
 }

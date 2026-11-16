@@ -70,11 +70,14 @@ export function FollowUps({
   clientName,
   entries,
   now,
+  owes,
 }: {
   clientId: string;
   clientName: string;
   entries: NudgeLogEntry[];
   now: number;
+  /** Whether anything is owed now. A payment reminder for nothing is refused (`409 NOTHING_OWED`), so it is not offered. */
+  owes: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const last = entries[0] ?? null;
@@ -101,14 +104,21 @@ export function FollowUps({
                 <b>{row.label}</b>
                 <span className="small">{row.hint}</span>
               </span>
-              <NudgeButton
-                clientId={clientId}
-                clientName={clientName}
-                template={row.template}
-                label="Draft"
-                className="btn btn--sm btn--secondary"
-                showContactedNote={false}
-              />
+              {row.template === 'payment_reminder' && !owes ? (
+                /* 9 Nov 2026: nothing owed, nothing to remind about — the server refuses it too. */
+                <Button variant="secondary" size="sm" disabled title={`${clientName.split(' ')[0]} owes nothing right now`}>
+                  Nothing owed
+                </Button>
+              ) : (
+                <NudgeButton
+                  clientId={clientId}
+                  clientName={clientName}
+                  template={row.template}
+                  label="Draft"
+                  className="btn btn--sm btn--secondary"
+                  showContactedNote={false}
+                />
+              )}
             </div>
           ))}
           <p className="small" style={{ marginTop: 10, color: 'var(--tx-ink-3)' }}>

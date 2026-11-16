@@ -142,6 +142,7 @@ class TenantIsolationTest {
         // Children before parents. Each table is keyed by whichever of
         // tenant_id / trainer_id it carries.
         for (String table : List.of(
+                "erasure_log",   // before client and tenant: it points at both
                 "client_message", "client_notification", "workout_feedback", "milestone", "client_prefs", "client_invite",
                 "set_log", "session_exercise", "workout_set", "workout_exercise", "package_adjustment",
                 "scheduled_session", "payment", "package", "pack", "assessment", "assessment_schedule",
@@ -529,6 +530,32 @@ class TenantIsolationTest {
                     VALUES ('%s', '%s', 'trainer', 'Planted')
                     """.formatted(trainerArun, tenantA))).hasMessageContaining("row-level security");
         }
+    }
+
+    @Test
+    @DisplayName("a client delete's erase runs as the request role: a client you coach, yes; a teammate's or another workspace's, no")
+    void eraseRunsBehindTheWall() throws SQLException {
+        // Arun owns Iron House, where Priya coaches Meera gym. Owning the workspace is not coaching the client.
+        try (Connection c = asAppRole()) {
+            staff(c, tenantB, List.of(tenantB), trainerArun);
+            assertThatThrownBy(() -> exec(c, "SELECT erase_client('" + meeraGym + "')"))
+                    .isInstanceOf(SQLException.class).hasMessageContaining("is not one you coach");
+        }
+        // Priya, standing in her private workspace only, cannot reach the Meera she coaches at the gym.
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            assertThatThrownBy(() -> exec(c, "SELECT erase_client('" + meeraGym + "')"))
+                    .isInstanceOf(SQLException.class).hasMessageContaining("is not one you coach");
+        }
+        // Her own private client: erased through the one door, behind the policies — the money stays, nameless.
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA), trainerPriya);
+            exec(c, "SELECT erase_client('" + meeraPrivate + "')");
+        }
+        assertThat(jdbc.queryForObject("SELECT name FROM client WHERE id = :id::uuid", Map.of("id", meeraPrivate.toString()), String.class)).isNull();
+        assertThat(jdbc.queryForObject("SELECT erased_at IS NOT NULL FROM client WHERE id = :id::uuid", Map.of("id", meeraPrivate.toString()), Boolean.class)).isTrue();
+        assertThat(jdbc.queryForObject("SELECT amount::text FROM payment WHERE client_id = :id::uuid", Map.of("id", meeraPrivate.toString()), String.class)).isEqualTo("3000.00");
+        assertThat(jdbc.queryForObject("SELECT name FROM client WHERE id = :id::uuid", Map.of("id", meeraGym.toString()), String.class)).isEqualTo("Meera gym");
     }
 
     @Test

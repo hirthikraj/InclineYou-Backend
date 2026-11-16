@@ -195,7 +195,8 @@ function packLabel(pkg: ClientPackageWire): string {
 }
 
 function livePackageId(packages: ClientPackageWire[]): string | null {
-  return (packages.find((p) => p.status === 'active') ?? packages[0])?.id ?? null;
+  const packs = packages.filter((p) => !p.sessionId);
+  return (packs.find((p) => p.status === 'active') ?? packs[0])?.id ?? null;
 }
 
 /**
@@ -264,7 +265,7 @@ export function PaymentsTab({
   const current = live[0] ?? null;
   const queued = live.slice(1);
   const past = packages
-    .filter((p) => p.status !== 'active')
+    .filter((p) => p.status !== 'active' && !p.sessionId)
     .sort((a, b) => b.createdAt - a.createdAt);
 
   const gym = viaGym(client);
@@ -418,7 +419,8 @@ export function PaymentsTab({
         <DeletePaymentSheet clientId={clientId} payment={deleting} onClose={() => setDeleting(null)} />
       )}
       {/* R27: unreachable while INVOICES_ENABLED is off — nothing sets `invoicing`.
-          The trainer's From block (name, UPI, headline) comes from /v1/me when it returns. */}
+          The trainer's From block: name from /v1/me; UPI and headline are not on /v1/me —
+          they are /v1/trainers/me's (trainer_business), so read them there when it returns. */}
       {INVOICES_ENABLED && invoicing && (
         <InvoiceSheet
           payment={invoicing}
@@ -546,7 +548,8 @@ export function PaymentsTab({
             )}
             {/* A queued pack gets no Renew — renewing the one behind the one in
                 play would sell a third. See the header. */}
-            {!isQueued && (
+            {/* V32 · nor does a single session's own sale: there is no pack to repeat. */}
+            {!isQueued && !pkg.sessionId && (
               <Button variant="secondary" size="sm" onClick={() => setPanel(pkg)}>
                 Renew
               </Button>

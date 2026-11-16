@@ -39,9 +39,9 @@ public class SessionWriteService {
     static final int MAX_BATCH = 50;
 
     /**
-     * {@code POST /v1/sessions/end} — close logs left open on sessions that are over.
+     * {@code POST /v1/sessions/end} — close logs left open; the end time is the last set done, else the planned length (16 Nov 2026).
      *
-     * <p>One UPDATE, conditional on the log being open, so a log someone else already closed keeps its time and a
+     * <p>One UPDATE, conditional on the log being open (any open log — a running one simply ends), so a log someone else already closed keeps its time and a
      * double click closes nothing twice. It does not change the session's status: closing a log is not marking the
      * session delivered, and it does not charge the pack.
      *
@@ -89,10 +89,27 @@ public class SessionWriteService {
         // Charged in the order they happened, ANSWERED in the order asked: one result per id sent, at the same
         // position, so a caller can zip them.
         var byId = new HashMap<UUID, MarkResult>();
-        for (UUID id : sorted) byId.put(id, tx.execute(status -> markOne(trainerId, id)));
+        for (UUID id : sorted) byId.put(id, markInItsOwnTransaction(trainerId, id));
         var results = ids.stream().map(byId::get).toList();
         log.info("sessions marked trainer={} results={}", trainerId, results.stream().map(MarkResult::outcome).toList());
         return new MarkResults(results);
+    }
+
+    /**
+     * One session in a transaction of its own. A refusal the database raises while marking it — a pack paused or
+     * closed by another device in the same instant, a charge the triggers will not take — rolls back THIS session
+     * only and answers {@code failed} (13 Nov 2026). It used to escape the loop and answer the whole request 500,
+     * although the sessions before it had been marked and committed, so the screen said "did not go through" about
+     * work that had gone through. Marking again is safe: a marked one answers {@code already_done}.
+     */
+    private MarkResult markInItsOwnTransaction(UUID trainerId, UUID sessionId) {
+        try {
+            return tx.execute(status -> markOne(trainerId, sessionId));
+        } catch (org.springframework.dao.DataAccessException e) {
+            log.warn("session mark refused trainer={} session={}: {}", trainerId, sessionId,
+                    e.getMostSpecificCause().getMessage());
+            return new MarkResult(sessionId.toString(), "failed", null, null, "MARK_FAILED");
+        }
     }
 
     /**
@@ -107,8 +124,8 @@ public class SessionWriteService {
         UUID clientId = UUID.fromString(target.clientId());
 
         // The charge this session already carries, if any — a no-show that cost a session has one, and one session
-        // gets one charge.
-        var charge = repo.liveCharge(sessionId);
+        // gets one charge. Read in the lock's own statement.
+        var charge = java.util.Optional.ofNullable(target.liveCharge());
 
         switch (target.status()) {
             case "done" -> {
@@ -132,7 +149,7 @@ public class SessionWriteService {
             return new MarkResult(sid, "done", charge.get().packageId(), charge.get().sessionsRemaining(), null);
         }
 
-        var c = charges.charge(trainerId, clientId, sessionId, target.service());
+        var c = charges.charge(trainerId, clientId, sessionId, target.service(), target.billing());
         return new MarkResult(sid, c.charged() ? "done" : "not_charged", c.packageId(), c.sessionsRemaining(), c.reason());
     }
 

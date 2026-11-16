@@ -19,6 +19,12 @@ public class AttentionRuleException extends RuntimeException {
         this.code = code;
     }
 
+    /** A kind the queue does not have — the same code as a mismatch, with a sentence about the kind. */
+    public static AttentionRuleException unknownKind(String kind, java.util.List<String> kinds) {
+        return new AttentionRuleException(HttpStatus.BAD_REQUEST, "BAND_KIND_MISMATCH",
+                "\"%s\" is not a kind of row: one of %s.".formatted(kind, String.join(", ", kinds)));
+    }
+
     /** Mirrors {@code attention_dismissal_band}: a band only exists inside its own kind. */
     public static AttentionRuleException bandKindMismatch(String kind, String band) {
         return new AttentionRuleException(HttpStatus.BAD_REQUEST, "BAND_KIND_MISMATCH",

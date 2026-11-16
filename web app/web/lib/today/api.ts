@@ -1,3 +1,4 @@
+import { billingByClient } from '@/lib/schedule/billing';
 import 'server-only';
 
 import { cache } from 'react';
@@ -153,6 +154,8 @@ interface SessionWire {
   /** `volumeKg` is a JSON number since 1.1 (only money is a string). */
   log: { exercises: number; setsDone: number; volumeKg: number; lastSetAt: number | null } | null;
   charge: { packageId: string } | null;
+  /** V32 — `pack` · `trial` · `complimentary` · `single`. */
+  billing?: string;
   updatedAt: number;
   version: string;
 }
@@ -178,6 +181,10 @@ interface PackageWire {
   amountRefunded: string;
   amountDue: string;
   createdAt: number;
+  /** V32 — pack-billed sessions still to be marked for this client and service. */
+  sessionsBookedAhead?: number | null;
+  /** V32 — set on a single session's own one-session sale (the session it was sold for); null on a real pack. Never a pack: no pack band, no Renew. */
+  sessionId?: string | null;
 }
 
 /**
@@ -224,11 +231,15 @@ interface DismissalWire {
   kind: string;
   band: string;
   snoozedUntil: number | null;
+  /** 16 Nov 2026 — when the silenced situation started; null on rows from before. */
+  subjectAt?: number | null;
 }
 
 /** L10 · one `AssessmentListService.Item`, the fields Today reads. */
 interface AssessmentWire {
   id: string; clientId: string; name: string; dueOn: string; state: string;
+  /** Set once it was sent for the client to take in the portal; the trainer can still take it. */
+  sentAt?: number | null;
 }
 
 /** Money arrives as a decimal string; a figure that became NaN would print as ₹NaN. */
@@ -263,6 +274,13 @@ export interface RenewTerms {
   type: string;
   amount: number;
   sessionsTotal: number | null;
+  /**
+   * Option B (V32): sessions in Today's window (30 days back) this client was
+   * given with no pack to pay for them, of the pack's service, oldest first.
+   * Renew offers to take them; nothing is taken unless the trainer says so.
+   * Older ones are offered on the client file's Renew sheet, which reads a year.
+   */
+  uncharged: { id: string; at: number }[];
 }
 
 /** The earliest assessment a client owes today or earlier (L10). */
@@ -272,6 +290,8 @@ export interface OwedAssessment {
   name: string;
   dueOn: string;
   missed: boolean;
+  /** When it was sent to the client, or null. Either of them can take it; the queue says it was sent. */
+  sentAt: number | null;
 }
 
 export interface TodayData {
@@ -440,6 +460,7 @@ export const getToday = cache(async (): Promise<TodayData> => {
       amountDue: num(p.amountDue),
       dueDate: p.dueDate,
       service: p.service,
+      single: p.sessionId != null,
     })),
     payments: (payments?.items ?? []).map((p) => ({
       id: p.id,
@@ -458,6 +479,7 @@ export const getToday = cache(async (): Promise<TodayData> => {
       kind: d.kind,
       band: d.band,
       snoozedUntil: d.snoozedUntil,
+      subjectAt: d.subjectAt ?? null,
     })),
     nudges: (nudges ?? []).map((n) => ({ clientId: n.clientId, sentAt: n.sentAt })),
     // The deck reads newest month first; 1.1 sends oldest first. Pending and
@@ -481,6 +503,7 @@ export const getToday = cache(async (): Promise<TodayData> => {
     if (!seen || a.dueOn < seen.dueOn) {
       owed[a.clientId] = {
         id: a.id, clientId: a.clientId, name: a.name, dueOn: a.dueOn, missed: a.state === 'missed',
+        sentAt: a.sentAt ?? null,
       };
     }
   }
@@ -515,7 +538,15 @@ export const getToday = cache(async (): Promise<TodayData> => {
       perSession.set(clientId, Math.round(rate));
     }
     if (amount > 0) {
-      renewTerms[clientId] = { packageId: p.id, type: p.basis, amount, sessionsTotal: p.sessionsTotal };
+      // Delivered, billed to a pack, and no pack took it. A session with no mode
+      // of its own is charged as the client's usual service, almost always this
+      // pack's; the server checks it again and refuses the whole renew if not.
+      const uncharged = p.basis !== 'sessions' ? [] : sessionRows
+        .filter((s) => s.clientId === clientId && s.status === 'done' && s.charge === null
+          && (s.billing ?? 'pack') === 'pack' && (s.deliveryMode ?? p.service) === p.service)
+        .sort((a, b) => a.scheduledAt - b.scheduledAt)
+        .map((s) => ({ id: s.id, at: s.scheduledAt }));
+      renewTerms[clientId] = { packageId: p.id, type: p.basis, amount, sessionsTotal: p.sessionsTotal, uncharged };
     }
   }
 
@@ -550,7 +581,9 @@ export const getToday = cache(async (): Promise<TodayData> => {
   );
   const clientById = new Map(clientRows.map((c) => [c.id, c]));
   const book = {
-    clients: bookableClients(rosterRows, rosterPrograms, rosterPacks),
+    clients: bookableClients(rosterRows, rosterPrograms, rosterPacks, billingByClient(packageRows, clientRows.map((c) => ({
+      id: c.id, clientType: c.clientType, deliveryMode: c.schedule?.deliveryMode ?? null,
+    })))),
     sessions: sessionRows.map((s): BookSession => ({
       id: s.id,
       clientId: s.clientId,

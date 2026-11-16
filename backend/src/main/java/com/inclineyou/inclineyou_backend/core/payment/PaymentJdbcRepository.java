@@ -40,28 +40,48 @@ public class PaymentJdbcRepository {
     /** The instant a payment row counts on — a generated column since V7 (R85), so one index serves the page. */
     private static final String BOOK_AT = "y.book_at";
 
-    /** The ledger row's SELECT, over one WHERE; ordered for the page. */
+    /**
+     * The ledger row's SELECT, over one WHERE; ordered for the page.
+     *
+     * <p>The page is taken FIRST ({@code page}, on idx_payment_ledger, exactly the rows the caller gets),
+     * and only then are names and the split joined to it. The split comes from {@code payment_trainer_share},
+     * a view whose share is a running total per package ({@code sum() OVER (PARTITION BY package_id …)}).
+     * Postgres cannot push a join condition through that window, so joining the view on {@code payment_id}
+     * alone made it total every gym-desk payment in the workspace before the join (seen in EXPLAIN). A
+     * restriction on the partition column IS pushed below the window, so the view is asked for the page's
+     * own packages, as a value list: {@code package_id = ANY(ARRAY(SELECT package_id FROM page))}. A
+     * package's share still sees every one of ITS payments, so the running total is unchanged; it simply
+     * stops reading anybody else's.
+     */
     private static final String PAYMENT_SELECT = """
+            WITH page AS MATERIALIZED (
+                SELECT y.*
+                FROM payment y
+                JOIN client c ON c.id = y.client_id
+                WHERE %s
+                ORDER BY y.book_at DESC, y.id DESC
+                LIMIT :limit
+            )
             SELECT y.id::text AS id, y.client_id::text AS client_id, y.package_id::text AS package_id,
                    c.name AS client_name, k.name AS package_name,
                    y.amount, y.currency, y.collected_by, y.method, y.status, y.reference, y.note,
                    y.paid_at, y.written_off_at, y.refunded_at, y.created_at, y.updated_at,
-                   """ + BOOK_AT + """
-             AS book_at, sh.share
-            FROM payment y
+                   y.book_at, sh.share
+            FROM page y
             JOIN client c ON c.id = y.client_id
             JOIN package k ON k.id = y.package_id
-            LEFT JOIN payment_trainer_share sh ON sh.payment_id = y.id
-            WHERE %s
-            ORDER BY book_at DESC, y.id DESC
-            LIMIT :limit
+            LEFT JOIN payment_trainer_share sh
+                   ON sh.payment_id = y.id
+                  AND sh.package_id = ANY (ARRAY(SELECT package_id FROM page))
+            ORDER BY y.book_at DESC, y.id DESC
             """;
 
     // ── the ledger ──────────────────────────────────────────────────────
 
     /**
      * One keyset page, bookAt descending, {@code limit + 1} rows so the caller can tell there is
-     * more. Names and the split are joined for the page only, so the join costs a page, not the book.
+     * more. Names and the split are joined to the page only (see {@link #PAYMENT_SELECT}), so the
+     * join costs a page, not the book.
      */
     public List<PaymentRow> page(UUID trainerId, LedgerFilter f) {
         var p = new HashMap<String, Object>();

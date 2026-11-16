@@ -43,11 +43,12 @@ public class ScheduledSessionController {
             @RequestParam(required = false) String from,
             @RequestParam(required = false) String to,
             @RequestParam(required = false) String status,
+            @RequestParam(required = false) Boolean uncharged,
             @RequestParam(required = false) Integer limit,
             @RequestParam(required = false) String cursor,
             @RequestParam(required = false) String order
     ) {
-        return reads.list(trainerId(auth), from, to, clientId, status, limit, cursor, order);
+        return reads.list(trainerId(auth), from, to, clientId, status, uncharged, limit, cursor, order);
     }
 
     /** api-contract Today — close logs left open on sessions that are over. */
@@ -128,6 +129,16 @@ public class ScheduledSessionController {
             @RequestBody(required = false) Map<String, Object> body
     ) {
         return states.cancel(trainerId(auth), id, body);
+    }
+
+    /** api-contract Schedule — how a session is paid for: pack, trial, complimentary or single (V32). */
+    @PostMapping("/{id}/billing")
+    public com.inclineyou.inclineyou_backend.core.session.dto.BillingResult billing(
+            Authentication auth,
+            @PathVariable UUID id,
+            @RequestBody(required = false) Map<String, Object> body
+    ) {
+        return states.billing(trainerId(auth), id, body);
     }
 
     /** api-contract Schedule — undo a done, no-show or cancel, reversing its charge. */

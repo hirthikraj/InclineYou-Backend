@@ -26,6 +26,15 @@ public record SessionRow(
         Long endedAt,
         SessionLogTotals log,
         SessionCharge charge,
+        /**
+         * How the session is paid for (V32): {@code pack} (Mark done charges the live pack) · {@code trial} ·
+         * {@code complimentary} (never charged) · {@code single} (Mark done sells it on its own at {@code price}).
+         */
+        String billing,
+        /** A single session's price, a decimal string; null for every other billing. */
+        String price,
+        /** A single session's own sale, made at booking (10 Nov 2026); null for every other billing. */
+        SessionSale sale,
         /** How the client said the workout felt, or null (api-contract 1.2). */
         SessionFeedback feedback,
         /** The trainer's recap line for this session, or null; {@code readAt} says whether the client opened it. */

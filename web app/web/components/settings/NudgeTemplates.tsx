@@ -89,6 +89,14 @@ function TokenLine({ text }: { text: string }) {
   );
 }
 
+/**
+ * How long a wording may be in this editor (9 Nov 2026). The server keeps 1000 on save, which is also the most a
+ * logged message can hold — but filling the blanks in makes a message longer ({pay_by_upi} alone can add about a
+ * hundred characters), so the editor stops at 750 and leaves the rest for the figures. A message that still comes
+ * out over 1000 is refused when it is drafted (`422 NUDGE_TOO_LONG`), never cut.
+ */
+const MAX_WORDING = 750;
+
 function NudgeCard({ initial }: { initial: NudgeTemplate }) {
   const [template, setTemplate] = useState(initial);
   const [body, setBody] = useState(initial.body);
@@ -105,6 +113,7 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
 
   const dirty = body.trim() !== template.body.trim();
   const strays = unknownTokens(body, template.variables.map((v) => v.token));
+  const tooLong = body.trim().length > MAX_WORDING;
 
   /**
    * Insert at the caret, not at the end.
@@ -229,7 +238,16 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
               setBody(e.target.value);
               setSaved(false);
             }}
+            aria-describedby={`${boxId}-count`}
           />
+          {/* A counter rather than `maxLength`: maxLength cuts a paste without saying so, and a wording saved before
+              the 750 limit must stay visible in full so it can be shortened. */}
+          <p id={`${boxId}-count`} className={tooLong ? 'msg msg--warn mt2' : 'fld__h'} aria-live="polite">
+            <span>
+              {body.trim().length} / {MAX_WORDING}
+              {tooLong && ' — shorten it to save. The names and amounts need room once they are filled in.'}
+            </span>
+          </p>
 
           <div className="ndgt__vars">
             {template.variables.map((v) => (
@@ -264,7 +282,7 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
               point, `Fold`'s head is the fold, and a button inside it is
               interactive content inside interactive content. */}
           <div className="ndgt__acts">
-            <Button variant="primary" size="sm" onClick={save} disabled={pending || !dirty}>
+            <Button variant="primary" size="sm" onClick={save} disabled={pending || !dirty || tooLong}>
               {pending ? 'Saving…' : !dirty && saved ? 'Saved' : 'Save'}
             </Button>
             {!template.isDefault && (

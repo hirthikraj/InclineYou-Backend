@@ -412,6 +412,66 @@ class SignInFlowTest {
                 .andExpect(jsonPath("$.code").value("SESSION_REVOKED"));
     }
 
+    /* ------------------------------------------------------------------ /v1/me */
+
+    @Test
+    @DisplayName("GET /v1/me answers the contract's shape (today-l1): epoch-ms setup, the gym, the active workspace")
+    void meShape() throws Exception {
+        String first = signUp(pendingToken(), "{\"privacyPolicyVersion\":\"2026-09\"}")
+                .andReturn().getResponse().getContentAsString();
+        String session = JsonPath.read(first, "$.token");
+        String trainerId = JsonPath.read(first, "$.trainerId");
+
+        // Fresh trainer: setup not done, no gym, no place.
+        mvc.perform(get("/v1/me").header("Authorization", "Bearer " + session).header(WEB, "web"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(trainerId))
+                .andExpect(jsonPath("$.phone").value(phone))
+                .andExpect(jsonPath("$.setupCompletedAt").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.gymName").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.gymPlace").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.workspace.id").isNotEmpty())
+                .andExpect(jsonPath("$.workspace.currency").isNotEmpty())
+                .andExpect(jsonPath("$.workspace.timezone").isNotEmpty());
+
+        Instant done = Instant.parse("2026-09-01T06:30:00Z");
+        jdbc.update("UPDATE trainer SET name = 'Arjun Mehta', setup_completed_at = :at WHERE id = :id::uuid",
+                Map.of("at", java.sql.Timestamp.from(done), "id", trainerId));
+        // A gym name needs the gym-floor mode (trainer_business_gym_needs_floor).
+        jdbc.update("""
+                INSERT INTO trainer_business (trainer_id, gym_name, training_modes)
+                VALUES (:id::uuid, 'Cult Indiranagar', '["gym_floor"]'::jsonb)
+                ON CONFLICT (trainer_id) DO UPDATE SET gym_name = EXCLUDED.gym_name, training_modes = EXCLUDED.training_modes
+                """, Map.of("id", trainerId));
+        String homeTenant = jdbc.queryForObject("SELECT home_tenant_id::text FROM trainer WHERE id = :id::uuid",
+                Map.of("id", trainerId), String.class);
+
+        mvc.perform(get("/v1/me").header("Authorization", "Bearer " + session).header(WEB, "web"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Arjun Mehta"))
+                .andExpect(jsonPath("$.setupCompletedAt").value(done.toEpochMilli()))
+                .andExpect(jsonPath("$.gymName").value("Cult Indiranagar"))
+                .andExpect(jsonPath("$.gymPlace").value(org.hamcrest.Matchers.nullValue()))
+                .andExpect(jsonPath("$.workspace.id").value(homeTenant));
+    }
+
+    @Test
+    @DisplayName("GET /v1/me for a closed account whose phone JWT still verifies is 401 SESSION_REVOKED, not a code-less 404")
+    void meClosedAccount() throws Exception {
+        String pending = pendingToken();
+        // The phone: no client header, so the claim answers a self-contained JWT that keeps verifying after a close.
+        String first = mvc.perform(post("/v1/trainers").header("Authorization", "Bearer " + pending)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"privacyPolicyVersion\":\"2026-09\"}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String jwt = JsonPath.read(first, "$.token");
+        String trainerId = JsonPath.read(first, "$.trainerId");
+
+        jdbc.update("UPDATE trainer SET deleted_at = now() WHERE id = :id::uuid", Map.of("id", trainerId));
+        mvc.perform(get("/v1/me").header("Authorization", "Bearer " + jwt))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.code").value("SESSION_REVOKED"));
+    }
+
     /* --------------------------------------------------------------- helpers */
 
     /** Ask for a code for {@link #phone}; returns the request id. */

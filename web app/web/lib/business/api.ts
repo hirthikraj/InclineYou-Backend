@@ -1,3 +1,4 @@
+import { clientLabel } from '@/lib/clients/deleted';
 import 'server-only';
 
 import { api, ApiError, listAll, type ListEnvelope } from '@/lib/http/client';
@@ -105,7 +106,8 @@ interface SummaryWire {
 }
 
 interface LedgerRowWire {
-  id: string; clientId: string; packageId: string; clientName: string; packageName: string;
+  /** Null for a client who was deleted (erased) since: the row stays, the name does not. */
+  id: string; clientId: string; packageId: string; clientName: string | null; packageName: string;
   amount: string; collectedBy: 'trainer' | 'gym'; method: LedgerRow['method']; status: LedgerRow['status'];
   reference: string | null; note: string | null; bookAt: number;
   paidAt?: number | null; version?: string;
@@ -116,7 +118,7 @@ interface LedgerWire { items: LedgerRowWire[]; nextCursor: string | null; total?
 
 interface ActivityWire {
   kind: 'paid' | 'sold' | 'write_off' | 'refund';
-  at: number; clientId: string; clientName: string; amount: string;
+  at: number; clientId: string; clientName: string | null; amount: string;
   method?: string | null; packageId: string; packageName: string;
 }
 
@@ -133,7 +135,7 @@ interface ClientWire { id: string; name: string | null; status: string; clientTy
 interface PracticeWire {
   months: { month: string; takeHome: string }[];
   headline: { takeHome: string };
-  topClients: { clientId: string; clientName: string; sessions: number; collected: string; yours: string }[];
+  topClients: { clientId: string; clientName: string | null; sessions: number; collected: string; yours: string }[];
 }
 
 /* ----------------------------------------------------------------- parsing ── */
@@ -175,7 +177,8 @@ function summary(w: SummaryWire): MoneySummary {
 
 function ledgerRow(r: LedgerRowWire): LedgerRow {
   return {
-    id: r.id, clientId: r.clientId, clientName: r.clientName, packageId: r.packageId, packageName: r.packageName,
+    id: r.id, clientId: r.clientId, clientName: clientLabel(r.clientName), clientDeleted: r.clientName == null,
+    packageId: r.packageId, packageName: r.packageName,
     amount: n(r.amount), collectedBy: r.collectedBy, method: r.method, status: r.status,
     reference: r.reference, note: r.note, bookAt: r.bookAt, paidAt: r.paidAt ?? null, version: String(r.version ?? ''),
     split: r.split ? { gym: n(r.split.gym), trainer: n(r.split.trainer) } : null,
@@ -281,7 +284,7 @@ export async function getOverview(): Promise<{ data: OverviewData; setupComplete
       year,
       activity: (activity.items ?? []).map((a, i) => ({
         id: `${a.kind}:${a.packageId}:${a.at}:${i}`,
-        kind: a.kind, at: a.at, clientId: a.clientId, clientName: a.clientName,
+        kind: a.kind, at: a.at, clientId: a.clientId, clientName: clientLabel(a.clientName), clientDeleted: a.clientName == null,
         amount: n(a.amount), packageName: a.packageName,
       })),
       packages: packages.map((p) => ({
@@ -294,7 +297,8 @@ export async function getOverview(): Promise<{ data: OverviewData; setupComplete
       topClients: practice
         ? {
             rows: practice.topClients.map((t) => ({
-              clientId: t.clientId, name: t.clientName, yours: n(t.yours), sessions: t.sessions,
+              clientId: t.clientId, name: clientLabel(t.clientName), deleted: t.clientName == null,
+              yours: n(t.yours), sessions: t.sessions,
             })),
             totalYours: n(practice.headline.takeHome),
           }
@@ -449,7 +453,7 @@ interface PracticeFullWire {
     delivered: number; retentionPercent: number | null; busiestMonth: string | null;
     averageSessionsPerClientPerWeek: number | null; takeHome: string;
   };
-  topClients: { clientId: string; clientName: string; sessions: number; collected: string; yours: string }[];
+  topClients: { clientId: string; clientName: string | null; sessions: number; collected: string; yours: string }[];
 }
 
 export async function getPractice(months = 12): Promise<Practice> {
@@ -469,7 +473,7 @@ export async function getPractice(months = 12): Promise<Practice> {
       takeHome: n(w.headline.takeHome),
     },
     topClients: w.topClients.map((t) => ({
-      clientId: t.clientId, name: t.clientName, sessions: t.sessions,
+      clientId: t.clientId, name: clientLabel(t.clientName), deleted: t.clientName == null, sessions: t.sessions,
       collected: n(t.collected), yours: n(t.yours),
     })),
   };

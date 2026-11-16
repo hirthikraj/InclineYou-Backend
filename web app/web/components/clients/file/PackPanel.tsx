@@ -2,10 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 
-import { rupees } from '@/lib/today/time';
+import { dayLong, formatMinute, minuteOfDay, rupees } from '@/lib/today/time';
 import type { ClientPackageWire, PriceListPackWire } from '@/lib/clients/client-api';
 import { packName, packTerms } from '@/lib/clients/billing';
-import { assignPackage, renewPack } from '@/lib/clients/package-actions';
+import { assignPackage, renewPack, unchargedSessions } from '@/lib/clients/package-actions';
+import { packReceipt } from '@/lib/clients/pack-receipt';
+import { useToast } from '@/lib/toast/store';
+import type { UnchargedSessionWire } from '@/lib/clients/client-api';
 
 import { num } from './shared';
 import { useDismiss } from '@/lib/ui/dismiss';
@@ -106,6 +109,13 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
   /* Minted when the sheet opens and kept across retries: a double tap or a
      retried timeout answers the package the first attempt made. */
   const [saleId] = useState(() => crypto.randomUUID());
+  const { show } = useToast();
+  const receipt = (title: string, packageId?: string) => packReceipt(show, {
+    title,
+    body: `${clientName}’s pack is on the books${ticked.length ? `, and it took ${ticked.length} session${ticked.length === 1 ? '' : 's'} delivered without a pack` : ''}.`,
+    clientId,
+    packageId,
+  });
 
   const [packId, setPackId] = useState<string>(gym ? (priceList[0]?.id ?? '') : '');
   const [name, setName] = useState('');
@@ -118,6 +128,15 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
     return first ? String(num(first.amount)) : '';
   });
   const [startDate, setStartDate] = useState('');
+  /* 9 Nov 2026: a pack starts within three months of today, either way — the server refuses the rest
+     (`PackageStartDate`). The picker says so up front; the browser's calendar stands in for the workspace's. */
+  const [minStart, maxStart] = useMemo(() => {
+    const iso = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const back = new Date(); back.setMonth(back.getMonth() - 3);
+    const ahead = new Date(); ahead.setMonth(ahead.getMonth() + 3);
+    return [iso(back), iso(ahead)];
+  }, []);
   const [dueDate, setDueDate] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -130,6 +149,36 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
   const discount = chosen && listPrice > amountNum && amountNum > 0 ? listPrice - amountNum : 0;
   const count = chosen ? chosen.sessions : basis === 'sessions' ? Number(sessions) || null : null;
 
+  /*
+   * OPTION B (V32, decided 9 Nov 2026). Sessions this client was given with no
+   * pack to pay for them are offered to the new one — ticked, and visible, so the
+   * trainer takes them on purpose or unticks the ones they meant as free. Nothing
+   * is taken that is not sent. Only a session pack of the same service can take
+   * one (the server's rule too); a session with no mode of its own is charged as
+   * the client's usual service, which is almost always this pack's.
+   */
+  const [owed, setOwed] = useState<UnchargedSessionWire[]>([]);
+  const [untaken, setUntaken] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    let live = true;
+    void unchargedSessions(clientId).then((rows) => { if (live) setOwed(rows); });
+    return () => { live = false; };
+  }, [clientId]);
+  const packService = isRenewal && renewing ? renewing.service : chosen ? chosen.service : service;
+  const packBasis = isRenewal && renewing ? renewing.basis : chosen ? chosen.basis : basis;
+  const packSessions = isRenewal && renewing ? renewing.sessionsTotal ?? null : count;
+  const eligible = packBasis === 'sessions' && packService !== 'programming'
+    ? owed.filter((s) => (s.deliveryMode ?? packService) === packService)
+    : [];
+  const ticked = eligible.filter((s) => !untaken.has(s.id));
+  const overPack = packSessions !== null && ticked.length > packSessions;
+  const toggle = (id: string) => setUntaken((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+
   function choosePack(id: string): void {
     setPackId(id);
     const pack = priceList.find((p) => p.id === id);
@@ -138,10 +187,20 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
 
   function submit(): void {
     setError(null);
+    if (overPack) {
+      setError(`This pack has ${packSessions} sessions — untick ${ticked.length - (packSessions ?? 0)} of the delivered ones.`);
+      return;
+    }
+    const chargeSessionIds = ticked.length > 0 ? ticked.map((s) => s.id) : undefined;
     if (isRenewal && renewing) {
       startTransition(async () => {
-        const result = await renewPack(clientId, renewing.id, { id: saleId, startDate: startDate || null });
-        if (result.ok) dismissThen(onClose);
+        const result = await renewPack(clientId, renewing.id, {
+          id: saleId, startDate: startDate || null, chargeSessionIds,
+        });
+        if (result.ok) {
+          receipt('Renewed', result.packageId);
+          dismissThen(onClose);
+        }
         else setError(result.message ?? 'Something went wrong.');
       });
       return;
@@ -174,6 +233,7 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
         chosen
           ? {
               id: saleId,
+              chargeSessionIds,
               packId: chosen.id,
               startDate: startDate || null,
               dueDate: dueDate || null,
@@ -181,6 +241,7 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
             }
           : {
               id: saleId,
+              chargeSessionIds,
               name: name.trim(),
               service,
               basis: service === 'programming' ? 'period' : basis,
@@ -193,7 +254,10 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
       );
       /* `dismissThen`, not `onClose`: a sold pack is the panel's success exit and
          it should leave the way Cancel does rather than blinking out. */
-      if (result.ok) dismissThen(onClose);
+      if (result.ok) {
+        receipt('Pack sold', result.packageId);
+        dismissThen(onClose);
+      }
       else setError(result.message ?? 'Something went wrong.');
     });
   }
@@ -251,7 +315,7 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
             )}
             <div className="fld mt3">
               <label className="fld__l" htmlFor="pp-start">Starts</label>
-              <input className="ctl" id="pp-start" type="date" value={startDate}
+              <input className="ctl" id="pp-start" type="date" value={startDate} min={minStart} max={maxStart}
                 onChange={(e) => setStartDate(e.target.value)} />
               <p className="small" style={{ marginTop: 6, color: 'var(--tx-ink-3)' }}>
                 Leave it blank for today.
@@ -348,7 +412,7 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
             {/* ── When it starts ────────────────────────────────────────── */}
             <div className="fld mt3">
               <label className="fld__l" htmlFor="pp-start">Starts</label>
-              <input className="ctl" id="pp-start" type="date" value={startDate}
+              <input className="ctl" id="pp-start" type="date" value={startDate} min={minStart} max={maxStart}
                 onChange={(e) => setStartDate(e.target.value)} />
               <p className="small" style={{ marginTop: 6, color: 'var(--tx-ink-3)' }}>
                 {chosen?.validityDays
@@ -370,6 +434,31 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
               </p>
             </div>
           </>
+        )}
+
+        {eligible.length > 0 && (
+          <div className="fld mt3">
+            <span className="fld__l">Delivered without a pack</span>
+            <p className="small" style={{ margin: '4px 0 8px', color: 'var(--tx-ink-3)' }}>
+              {clientName} trained {eligible.length === 1 ? 'once' : `${eligible.length} times`} with nothing to
+              pay for it. Ticked sessions come off this pack when it is sold — untick any you meant as free.
+            </p>
+            <div className="col gap2">
+              {eligible.map((s) => (
+                <label key={s.id} className="small" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input type="checkbox" checked={!untaken.has(s.id)} onChange={() => toggle(s.id)} />
+                  {dayLong(s.scheduledAt)} &middot; {formatMinute(minuteOfDay(s.scheduledAt))}
+                </label>
+              ))}
+            </div>
+            {ticked.length > 0 && packSessions !== null && (
+              <p className={overPack ? 'msg msg--warn mt3' : 'small mt3'} style={overPack ? undefined : { color: 'var(--tx-ink-3)' }}>
+                {overPack
+                  ? `More than the pack holds: it has ${packSessions} sessions.`
+                  : `It opens with ${packSessions - ticked.length} of ${packSessions} left.`}
+              </p>
+            )}
+          </div>
         )}
 
         {error && (

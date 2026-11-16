@@ -191,6 +191,8 @@ export interface ClientPackageWire {
   closedAt: number | null;
   createdAt: number;
   version: string;
+  /** V32 — set on a single session's own one-session sale (the session it was sold for); null on a real pack. Never a pack: no pack band, no Renew. */
+  sessionId?: string | null;
 }
 
 /** L7 — one ledger row. `collectedBy` is stamped by the database from the client's type. */
@@ -401,7 +403,9 @@ export async function clientNudges(clientId: string, days = 365): Promise<NudgeL
 
 /** The pack Payments shows the life of: the running one, else the newest. */
 export function livePackage(packages: ClientPackageWire[]): ClientPackageWire | null {
-  return packages.find((p) => p.status === 'active') ?? packages[0] ?? null;
+  // V32 · a real pack first: a single session's one-session sale is never the pack Payments follows.
+  const packs = packages.filter((p) => !p.sessionId);
+  return packs.find((p) => p.status === 'active') ?? packs[0] ?? null;
 }
 
 /** The newest twenty, a tab's secondary read: an empty list rather than a file that will not open. */
@@ -558,6 +562,8 @@ export const patchClient = (
 
 export interface SaleInput {
   id: string;
+  /** V32, option B — delivered sessions no pack paid for, that this sale takes. */
+  chargeSessionIds?: string[];
   packId?: string;
   name?: string;
   service?: string;
@@ -571,12 +577,25 @@ export interface SaleInput {
   trainerSharePercent?: number | null;
 }
 
+/** One delivered session no pack paid for — `GET /v1/sessions?uncharged=true` (V32). */
+export interface UnchargedSessionWire {
+  id: string;
+  scheduledAt: number;
+  deliveryMode: string | null;
+}
+
+/** A year back to the day after tomorrow, newest first: what a new pack may take (option B). */
+export const unchargedSessionsOf = (clientId: string, from: string, to: string) =>
+  call<{ items: UnchargedSessionWire[] }>(
+    `/v1/sessions?clientId=${cid(clientId)}&uncharged=true&from=${from}&to=${to}&order=desc&limit=100`,
+  );
+
 /** Clients A7 — off the price list (the pack's terms win) or custom. */
 export const sellPackage = (clientId: string, input: SaleInput) =>
   call<ClientPackageWire>(`/v1/clients/${cid(clientId)}/packages`, { method: 'POST', body: input });
 
 /** Today A3 — the same pack again, its terms copied on the server. */
-export const renewPackage = (packageId: string, input: { id: string; startDate?: string | null }) =>
+export const renewPackage = (packageId: string, input: { id: string; startDate?: string | null; chargeSessionIds?: string[] }) =>
   call<ClientPackageWire>(`/v1/packages/${cid(packageId)}/renew`, { method: 'POST', body: input });
 
 export const pausePackage = (packageId: string, input: { reason?: string | null; effectiveAt?: number | null } = {}) =>
@@ -587,6 +606,10 @@ export const resumePackage = (packageId: string, input: { effectiveAt?: number |
 
 export const extendPackage = (packageId: string, days: number, reason?: string | null) =>
   call<ClientPackageWire>(`/v1/packages/${cid(packageId)}/extend`, { method: 'POST', body: { days, reason: reason ?? null } });
+
+/** The Undo on a sale or renew just made (9 Nov 2026): within ten minutes, while nothing is recorded on it. */
+export const deletePackage = (packageId: string) =>
+  call<null>(`/v1/packages/${cid(packageId)}`, { method: 'DELETE' });
 
 /** R74 — end one deal early, once nothing is owed. */
 export const cancelPackage = (packageId: string) =>

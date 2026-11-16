@@ -11,6 +11,7 @@ import com.inclineyou.inclineyou_backend.shared.wire.Cursor;
 import com.inclineyou.inclineyou_backend.shared.wire.Page;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.LocalDate;
@@ -53,11 +54,36 @@ public class PackageReadService {
      * way — {@code scope} picks rows, never the shape.
      *
      * <p>Status is kept current by writes, not by this read: the charge that empties a pack closes it,
-     * and the nightly job closes the expired ones. Reads never write. Bounded, so no cursor; newest
+     * and the hourly {@code PackageExpirySweeper} (V29, {@code close_lapsed_packages}) closes the ones
+     * more than 7 days past their end date. Reads never write.
+     *
+     * <p>{@code clientId} that is not on this trainer's roster is a 404, as every route answers for an
+     * id that is not yours — an empty list would read as "no packs". Bounded, so no cursor; newest
      * first, then id.
      */
+    @Transactional(readOnly = true)
     public List<CurrentPackage> list(UUID trainerId, boolean current, UUID clientId) {
-        return packages.list(trainerId, current, clientId);
+        if (clientId != null && !packages.clientIsMine(trainerId, clientId)) {
+            throw ApiException.notFound("That client is not on your roster.");
+        }
+        var rows = packages.list(trainerId, current, clientId, WorkspaceClock.today(clock.zone()));
+        if (!current) return rows;
+        // V32: what is already booked against these packs, so the booking panel can say whether one more is covered.
+        var ahead = packages.bookedAhead(trainerId, clientId);
+        return rows.stream()
+                .map(r -> "sessions".equals(r.basis())
+                        ? r.withBookedAhead(ahead.getOrDefault(r.clientId() + "|" + r.service(), 0)) : r)
+                .toList();
+    }
+
+    /**
+     * One client's {@code scope=current} packs and what each owes — the rows alone, for a caller that has already
+     * checked the client is this trainer's (a drafted message, {@code NudgeDraftService}). Unlike {@link #list} it
+     * does not check the client again and does not count the sessions booked ahead, which only the booking panel
+     * reads; {@code sessionsBookedAhead} is left null.
+     */
+    public List<CurrentPackage> currentOfClient(UUID trainerId, UUID clientId) {
+        return packages.list(trainerId, true, clientId, WorkspaceClock.today(clock.zone()));
     }
 
     /** One package in the L5 shape — what a write that creates one answers with. Empty if not this trainer's. */
@@ -75,6 +101,7 @@ public class PackageReadService {
      * there is more. V7's {@code payment.book_at} and {@code idx_payment_ledger} serve every page,
      * filtered or not, in order.
      */
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public Ledger payments(UUID trainerId, LedgerQuery q) {
         var statuses = inList(q.status(), "status", PAYMENT_STATUSES);
         var methods = inList(q.method(), "method", METHODS);
@@ -92,11 +119,23 @@ public class PackageReadService {
         }
 
         int n = Cursor.limit(q.limit(), 50, 200);
-        Cursor after = Cursor.decode(q.cursor());
+        // The cursor names the filters it came from: sent back with others it is a 400, not a page that
+        // starts somewhere arbitrary. Lists are sorted, so the same filter in another order is the same query.
+        String query = Cursor.mark(sorted(statuses), sorted(methods), sorted(collectors), sorted(clientTypes),
+                clientId, packageId, fromDate, toDate);
+        Cursor after = Cursor.within(q.cursor(), query);
+
+        // An id that is not yours is a 404, as every route answers — an empty ledger would read as "no payments".
+        if (clientId != null && !packages.clientIsMine(trainerId, clientId)) {
+            throw ApiException.notFound("That client is not on your roster.");
+        }
+        if (packageId != null && !packages.packageIsMine(trainerId, packageId)) {
+            throw ApiException.notFound("That package is not in your books.");
+        }
         var filter = new LedgerFilter(statuses, methods, collectors, clientTypes, clientId, packageId, from, to, after, n);
 
         var rows = payments.page(trainerId, filter);
-        var out = Page.of(rows, n, r -> Cursor.encode(r.cursorKey(), r.id()));
+        var out = Page.of(rows, n, r -> Cursor.encodeFor(query, r.cursorKey(), r.id()));
         Integer total = q.includeTotal() ? payments.count(trainerId, filter) : null;
         return new Ledger(clock.currency(), out.items(), out.nextCursor(), total);
     }
@@ -104,6 +143,10 @@ public class PackageReadService {
     /** One payment in the ledger's shape — what every money write answers with. Empty if not this trainer's. */
     public Optional<PaymentRow> payment(UUID trainerId, UUID paymentId) {
         return payments.find(trainerId, paymentId);
+    }
+
+    private static String sorted(List<String> values) {
+        return values == null ? null : String.join(",", new java.util.TreeSet<>(values));
     }
 
     /** A comma list checked against the allowed values; null when the parameter was not sent. */

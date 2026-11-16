@@ -1,6 +1,5 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
-import com.inclineyou.inclineyou_backend.core.payment.MoneyReportJdbcRepository.PaymentKind;
 import com.inclineyou.inclineyou_backend.core.payment.dto.MoneySummary;
 import com.inclineyou.inclineyou_backend.core.payment.dto.SummaryMonth;
 import com.inclineyou.inclineyou_backend.core.payment.dto.SummaryNow;
@@ -10,6 +9,7 @@ import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import com.inclineyou.inclineyou_backend.shared.util.Money;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -36,9 +36,15 @@ import java.util.UUID;
  * to no month, which is why 1.1 moved them out of every month row. Gym
  * arrangement base fees are settlement, not billing, and are left out.
  *
- * <p>Cost: one grouped query per source (packages by start_date, paid payments
- * on idx_payment_book, refunds on idx_payment_refunds, write-offs) and one pass
- * over the L5 ledger for {@code now} — never a loop per month or per client.
+ * <p>Cost, whatever the number of clients or months: the workspace's timezone and
+ * currency, packages by start_date (over the span AND the span before, for the
+ * trend), one pass over payments on idx_payment_ledger by {@code book_at} (over
+ * the span only — the span before contributes nothing but billed), and one pass
+ * over the L5 ledger for {@code now}. Five statements in one read-only
+ * transaction, so one connection. It was seven statements on seven connections.
+ *
+ * <p>{@code takeHome} is collected less the gym's part of gym-desk payments
+ * ({@code payment_trainer_share}); without a gym it equals {@code collected}.
  */
 @Service
 @RequiredArgsConstructor
@@ -64,6 +70,7 @@ public class MoneySummaryService {
      * @param from   {@code yyyy-MM}, inclusive, with
      * @param to     {@code yyyy-MM}, inclusive
      */
+    @Transactional(readOnly = true)
     public MoneySummary summary(UUID trainerId, Integer months, String from, String to) {
         var zone = clock.zone();
         YearMonth thisMonth = YearMonth.now(zone);
@@ -84,9 +91,10 @@ public class MoneySummaryService {
         int span = (int) (first.until(last, java.time.temporal.ChronoUnit.MONTHS) + 1);
         if (span > MAX_MONTHS) throw ApiException.rangeTooLarge("at most " + MAX_MONTHS + " months in one request");
 
-        // The span before, for the trend, is read in the same queries.
+        // The span before is needed for one figure — its billed, for the trend — so only the
+        // packages query reaches back to it; payments are read for the span itself.
         YearMonth readFrom = first.minusMonths(span);
-        var fromAt = WorkspaceClock.startOf(readFrom, zone);
+        var fromAt = WorkspaceClock.startOf(first, zone);
         var toAt = WorkspaceClock.startOf(last.plusMonths(1), zone);
         var uid = trainerId;
 
@@ -97,15 +105,13 @@ public class MoneySummaryService {
             a.billed = m.billed();
             a.gymCut = m.gymCut();
         }
-        // One pass per status column, each on its own partial index.
-        for (var kind : PaymentKind.values()) {
-            for (var m : reports.paymentsByMonth(uid, zone, kind, fromAt, toAt)) {
-                var a = acc.computeIfAbsent(m.month(), k -> new Acc());
-                switch (kind) {
-                    case PAID -> { a.collected = m.total(); a.payments = m.count(); a.takeHome = m.takeHome(); }
-                    case REFUND -> a.refunded = m.total();
-                    default -> a.writtenOff = m.total();
-                }
+        // One pass over payments, every status at the instant it counts on (book_at).
+        for (var m : reports.paymentsByMonth(uid, zone, fromAt, toAt)) {
+            var a = acc.computeIfAbsent(m.month(), k -> new Acc());
+            switch (m.status()) {
+                case "paid" -> { a.collected = m.total(); a.payments = m.count(); a.takeHome = m.takeHome(); }
+                case "refund" -> a.refunded = m.total();
+                default -> a.writtenOff = m.total();
             }
         }
 
@@ -140,7 +146,7 @@ public class MoneySummaryService {
 
         // Now — on the same ledger L5 uses, so "owed" on a pack and "pending"
         // here cannot disagree.
-        var now = packages.dues(trainerId, WorkspaceClock.today(zone).minusDays(OVERDUE_GRACE_DAYS));
+        var now = packages.dues(trainerId, WorkspaceClock.today(zone).minusDays(OVERDUE_GRACE_DAYS), WorkspaceClock.today(zone));
 
         return new MoneySummary(clock.currency(), out, total, new SummaryNow(
                 money(now.pending()), money(now.overdue()), now.clientsOwing(), now.clientsOverdue()));

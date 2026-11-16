@@ -1182,6 +1182,12 @@
         <column name="cancel_reason" type="varchar(16)" nullable="true" />
         <column name="logged_by" type="varchar(8)" nullable="false" default="'trainer'" />
         <column name="paused_seconds" type="integer" nullable="false" default="0" />
+        <column name="billing" type="varchar(16)" nullable="false" default="'pack'">
+          <description>How the session is paid for: pack (Mark done charges the live pack), trial, complimentary (never charged), single (Mark done sells a one-session package at price).</description>
+        </column>
+        <column name="price" type="numeric(10,2)" nullable="true">
+          <description>The price of a single session; set only when billing = single.</description>
+        </column>
       </columns>
       <primaryKey name="scheduled_session_pkey" columns="id" />
       <foreignKeys>
@@ -1192,7 +1198,8 @@
         <foreignKey name="scheduled_session_workout_id_fkey" column="workout_id" referencesTable="workout" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
         <foreignKey name="scheduled_session_slot_same_client" column="slot_id, client_id" referencesTable="client_schedule_slot" referencesColumn="id, client_id" onUpdate="NO ACTION" onDelete="NO ACTION" />
       </foreignKeys>
-      <referencedBy count="7">
+      <referencedBy count="8">
+        <reference table="package" column="session_id" constraint="package_session_id_fkey" />
         <reference table="package_adjustment" column="session_id" constraint="package_adjustment_session_owner" />
         <reference table="client_message" column="session_id" constraint="client_message_session_owner" />
         <reference table="workout_feedback" column="session_id" constraint="workout_feedback_session_id_fkey" />
@@ -1202,15 +1209,18 @@
         <reference table="session_exercise" column="session_id" constraint="session_exercise_session_owner" />
       </referencedBy>
       <checks>
+        <check name="scheduled_session_billing">((billing)::text = ANY ((ARRAY['pack'::character varying, 'trial'::character varying, 'complimentary'::character varying, 'single'::character varying])::text[]))</check>
         <check name="scheduled_session_cancel_reason">((cancel_reason IS NULL) OR ((cancel_reason)::text = ANY ((ARRAY['trainer'::character varying, 'client'::character varying, 'client_paused'::character varying, 'client_archived'::character varying, 'client_deleted'::character varying, 'schedule_changed'::character varying])::text[])))</check>
         <check name="scheduled_session_cancelled_has_reason">(((status)::text = 'cancelled'::text) = (cancel_reason IS NOT NULL))</check>
         <check name="scheduled_session_client_logged">(((logged_by)::text = 'trainer'::text) OR (((status)::text = ANY ((ARRAY['scheduled'::character varying, 'done'::character varying])::text[])) AND (slot_id IS NULL) AND (delivery_mode IS NULL)))</check>
+        <check name="scheduled_session_client_logged_billing">(((logged_by)::text = 'trainer'::text) OR ((billing)::text = 'pack'::text))</check>
         <check name="scheduled_session_delivery_mode">((delivery_mode IS NULL) OR ((delivery_mode)::text = ANY ((ARRAY['floor'::character varying, 'home_visit'::character varying, 'remote'::character varying])::text[])))</check>
         <check name="scheduled_session_duration">((duration_minutes &gt;= 1) AND (duration_minutes &lt;= 480))</check>
         <check name="scheduled_session_ends">(ends_at &gt; scheduled_at)</check>
         <check name="scheduled_session_log">(((started_at IS NULL) OR ((status)::text = ANY ((ARRAY['scheduled'::character varying, 'done'::character varying])::text[]))) AND ((ended_at IS NULL) OR ((started_at IS NOT NULL) AND (ended_at &gt;= started_at))))</check>
         <check name="scheduled_session_logged_by">((logged_by)::text = ANY ((ARRAY['trainer'::character varying, 'client'::character varying])::text[]))</check>
         <check name="scheduled_session_paused">(paused_seconds &gt;= 0)</check>
+        <check name="scheduled_session_price">((((billing)::text = 'single'::text) = (price IS NOT NULL)) AND ((price IS NULL) OR (price &gt; (0)::numeric)))</check>
         <check name="scheduled_session_status">((status)::text = ANY ((ARRAY['scheduled'::character varying, 'done'::character varying, 'no_show'::character varying, 'cancelled'::character varying])::text[]))</check>
       </checks>
       <indexes>
@@ -1238,7 +1248,7 @@
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="trainer_id" type="uuid" nullable="false" foreignKey="true" />
         <column name="weekday" type="smallint" nullable="false">
-          <description>0 = Monday … 6 = Sunday, ISO order to match the day strip. Note this differs from `program_exercise.day_of_week`, which is 1–7.</description>
+          <description>1 = Monday … 7 = Sunday (ISO), the same numbering on the wire (`GET` / `PATCH /v1/working-hours`) and enforced by `working_hours_weekday`. (This said 0–6 until 9 Nov 2026, which neither the check nor the code ever used.)</description>
         </column>
         <column name="start_time" type="time" nullable="false" />
         <column name="end_time" type="time" nullable="false" />
@@ -1264,7 +1274,7 @@
       </triggers>
     </table>
 
-    <table name="workout_exercise" group="Logging" scope="v1" rowLevelSecurity="enabled">
+    <table name="workout_exercise" group="Planning" scope="v1" rowLevelSecurity="enabled">
       <description>What is in today's log, in today's order: exercises added before their first set, planned ones swapped out, and the order they were dragged into — facts about today, not edits to the program.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
@@ -1500,6 +1510,12 @@
         <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
           <description>The workspace this row belongs to.</description>
         </column>
+        <column name="session_id" type="uuid" nullable="true" foreignKey="true">
+          <description>Set on the one-session package a single-billed session sold at Mark done; NULL otherwise.</description>
+        </column>
+        <column name="activated_client" type="boolean" nullable="false" default="false">
+          <description>True on the sale that moved its client from prospect to active (11 Nov 2026), so an Undo of that sale can move them back.</description>
+        </column>
       </columns>
       <primaryKey name="package_pkey" columns="id" />
       <foreignKeys>
@@ -1509,6 +1525,7 @@
         <foreignKey name="package_pack_id_fkey" column="pack_id" referencesTable="pack" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
         <foreignKey name="package_tenant_currency_fkey" column="tenant_id, currency" referencesTable="tenant" referencesColumn="id, currency" onUpdate="NO ACTION" onDelete="NO ACTION" />
         <foreignKey name="package_tenant_id_fkey" column="tenant_id" referencesTable="tenant" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
+        <foreignKey name="package_session_id_fkey" column="session_id" referencesTable="scheduled_session" referencesColumn="id" onUpdate="NO ACTION" onDelete="SET NULL" />
       </foreignKeys>
       <referencedBy count="3">
         <reference table="package_adjustment" column="package_id" constraint="package_adjustment_package_owner" />
@@ -1536,6 +1553,7 @@
         <index name="idx_package_tenant_trainer" columns="tenant_id, trainer_id" unique="false" />
         <index name="idx_package_trainer_id" columns="trainer_id" unique="false" />
         <index name="uq_package_owner" columns="id, client_id, tenant_id" unique="true" />
+        <index name="uq_package_single_session" columns="session_id" unique="true" where="(session_id IS NOT NULL) AND (deleted_at IS NULL) AND ((status)::text &lt;&gt; 'refunded'::text)" />
       </indexes>
       <triggers>
         <trigger name="trg_package_client_type" timing="BEFORE" event="INSERT OR UPDATE OF client_id, pack_id, trainer_share_percent, trainer_share_amount" function="check_package_client_type()" />
@@ -1607,6 +1625,7 @@
       <triggers>
         <trigger name="trg_package_adjustment_append_only" timing="BEFORE" event="UPDATE" function="package_adjustment_append_only()" />
         <trigger name="trg_package_adjustment_apply" timing="BEFORE" event="INSERT OR UPDATE OF reversed_at" function="apply_package_adjustment()" />
+        <trigger name="trg_package_adjustment_billing" timing="BEFORE" event="INSERT" function="check_session_billing_charge()" />
         <trigger name="trg_package_adjustment_freeze_tenant" timing="BEFORE" event="UPDATE" function="freeze_tenant_id()" />
         <trigger name="trg_package_adjustment_no_client_charge" timing="BEFORE" event="INSERT" function="refuse_client_logged_charge()" />
         <trigger name="trg_package_adjustment_stamp_tenant" timing="BEFORE" event="INSERT" function="stamp_tenant_id()" />
@@ -2072,6 +2091,9 @@
         </column>
         <column name="created_at" type="timestamptz" nullable="false" default="now()" />
         <column name="updated_at" type="timestamptz" nullable="false" default="now()" />
+        <column name="subject_at" type="timestamptz" nullable="true">
+          <description>When the silenced situation started, as the queue dated it; a later one is a new situation and is shown again. NULL on rows written before 16 Nov 2026.</description>
+        </column>
       </columns>
       <primaryKey name="attention_dismissal_pkey" columns="trainer_id, client_id, kind" />
       <foreignKeys>
@@ -2125,8 +2147,8 @@
       </triggers>
     </table>
 
-    <table name="assessment_schedule" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="assessment_schedule" group="Roster" rowLevelSecurity="enabled">
+      <description>An assessment cycle for one client: which template, every how many days, when the next one is due, and whether it is sent to the client to take themselves. Ended, never deleted, when the cycle stops.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
@@ -2177,8 +2199,8 @@
       </triggers>
     </table>
 
-    <table name="billing_event" group="Ungrouped">
-      <description />
+    <table name="billing_event" group="Identity &amp; auth">
+      <description>A payment-gateway webhook for InclineYou's own subscription billing (Razorpay, Cashfree, or manual), stored as received, with what processing it did (applied, duplicate, stale, ignored, unmatched, failed). Billing is post-launch: nothing writes it yet.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="provider" type="varchar(16)" nullable="false" />
@@ -2212,8 +2234,8 @@
       <triggers />
     </table>
 
-    <table name="certified_program" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="certified_program" group="Exercise library" rowLevelSecurity="enabled">
+      <description>The shelf entry for an InclineYou starter program: summary, level, equipment, whether it is a sample, when a person reviewed it, how often it has been used, and the content hash the seeder compares to know when it changed. One row per program.</description>
       <columns>
         <column name="program_id" type="uuid" nullable="false" primaryKey="true" foreignKey="true" />
         <column name="origin" type="varchar(12)" nullable="false" default="'inclineyou'" />
@@ -2248,8 +2270,8 @@
       </triggers>
     </table>
 
-    <table name="client_invite" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="client_invite" group="Roster" rowLevelSecurity="enabled">
+      <description>The invite a trainer sends so a client can open the portal; the only way a client gets an account. Only the token's SHA-256 is stored. Pending until accepted, declined, revoked or lapsed.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
@@ -2301,8 +2323,8 @@
       </triggers>
     </table>
 
-    <table name="client_schedule" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="client_schedule" group="Roster" rowLevelSecurity="enabled">
+      <description>A client's standing plan: sessions per week, session length and delivery mode. One row per client, created by trigger, so a schedule never set reads as all nulls.</description>
       <columns>
         <column name="client_id" type="uuid" nullable="false" primaryKey="true" foreignKey="true" />
         <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
@@ -2339,8 +2361,8 @@
       </triggers>
     </table>
 
-    <table name="client_schedule_slot" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="client_schedule_slot" group="Roster" rowLevelSecurity="enabled">
+      <description>One recurring weekly slot of a client: weekday and start time, with an optional length, delivery mode and program day. The slot top-up books sessions 28 days ahead from these.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
@@ -2384,8 +2406,8 @@
       </triggers>
     </table>
 
-    <table name="equipment" group="Ungrouped">
-      <description />
+    <table name="equipment" group="Exercise library">
+      <description>The equipment catalogue: a key, a name and a category, in a fixed order. exercise.equipment_id points here.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="key" type="varchar(40)" nullable="false" />
@@ -2417,8 +2439,8 @@
       </triggers>
     </table>
 
-    <table name="equipment_alias" group="Ungrouped">
-      <description />
+    <table name="equipment_alias" group="Exercise library">
+      <description>Maps each raw equipment string in the exercise data to an equipment row; a trigger fills exercise.equipment_id from it. A new string needs one row here and nothing else.</description>
       <columns>
         <column name="legacy_value" type="varchar(50)" nullable="false" primaryKey="true" />
         <column name="equipment_id" type="uuid" nullable="false" foreignKey="true" />
@@ -2439,8 +2461,8 @@
       <triggers />
     </table>
 
-    <table name="erasure_log" group="Ungrouped">
-      <description />
+    <table name="erasure_log" group="Identity &amp; auth">
+      <description>The audit record of a DPDP erasure: a client deleted (and so erased) by their trainer, or a whole account. Who asked, when it finished and how many rows each table lost. The one trace of the person that is kept.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="kind" type="varchar(12)" nullable="false" />
@@ -2479,8 +2501,8 @@
       <triggers />
     </table>
 
-    <table name="gym_arrangement" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="gym_arrangement" group="Money book" rowLevelSecurity="enabled">
+      <description>The terms a trainer works under at a gym they manage themselves: an optional monthly base fee (minimum or basic) from a start month to an end month, with a note.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
@@ -2527,8 +2549,8 @@
       </triggers>
     </table>
 
-    <table name="gym_place" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="gym_place" group="Money book" rowLevelSecurity="enabled">
+      <description>The shared directory of gym locations (Google place id, name, address, city, coordinates, map link) that a trainer's gym can point at. No tenant_id: one gym is shared by trainers in many workspaces, so access is narrowed to the place the trainer's own profile points at, and upsert_gym_place() is the only way in.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="place_id" type="text" nullable="false" />
@@ -2562,8 +2584,8 @@
       </triggers>
     </table>
 
-    <table name="plan_price" group="Ungrouped">
-      <description />
+    <table name="plan_price" group="Identity &amp; auth">
+      <description>The price of an InclineYou plan (pro, team) in a region and currency, from a date. Billing is post-launch: nothing reads it yet.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="plan" type="varchar(12)" nullable="false" />
@@ -2593,8 +2615,8 @@
       <triggers />
     </table>
 
-    <table name="push_subscription" group="Ungrouped">
-      <description />
+    <table name="push_subscription" group="Identity &amp; auth">
+      <description>A browser's permission to receive web push, per person. Revoked, never deleted.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="app_user_id" type="uuid" nullable="false" foreignKey="true" />
@@ -2626,8 +2648,8 @@
       </triggers>
     </table>
 
-    <table name="session_exercise" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="session_exercise" group="Logging" rowLevelSecurity="enabled">
+      <description>One exercise as done in a session: whether it came from the plan or was added, a swap and its reason, removal, and notes. Its sets are set_log rows.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
@@ -2678,8 +2700,8 @@
       </triggers>
     </table>
 
-    <table name="tenant_invite" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="tenant_invite" group="Tenancy" rowLevelSecurity="enabled">
+      <description>An invitation for a phone number to join a workspace (a team or a gym) in a role. Pending until it is accepted, declined or revoked, or until it lapses at expires_at. Team and gym workspaces are not in the first release.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
@@ -2723,8 +2745,8 @@
       </triggers>
     </table>
 
-    <table name="tenant_role" group="Ungrouped">
-      <description />
+    <table name="tenant_role" group="Tenancy">
+      <description>The roles each kind of workspace (solo, team, gym) allows: the lookup that tenant_member and tenant_invite roles are checked against.</description>
       <columns>
         <column name="tenant_type" type="varchar(20)" nullable="false" primaryKey="true" />
         <column name="role" type="varchar(20)" nullable="false" primaryKey="true" />
@@ -2745,8 +2767,8 @@
       <triggers />
     </table>
 
-    <table name="trainer_business" group="Ungrouped">
-      <description />
+    <table name="trainer_business" group="Identity &amp; auth">
+      <description>The trainer's profile and business facts, one row per trainer: headline, bio, intro video, Instagram and YouTube links, certifications, experience, specialities, languages, training modes, service areas and map link, gym (name, or a gym_place) and UPI ID. Created by trigger with the trainer.</description>
       <columns>
         <column name="trainer_id" type="uuid" nullable="false" primaryKey="true" foreignKey="true" />
         <column name="training_modes" type="jsonb" nullable="false" default="'[]'" />
@@ -2789,8 +2811,8 @@
       </triggers>
     </table>
 
-    <table name="trainer_exercise" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="trainer_exercise" group="Exercise library" rowLevelSecurity="enabled">
+      <description>A trainer's own mark on a library exercise: whether it is one of their favourites.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="trainer_id" type="uuid" nullable="false" foreignKey="true" />
@@ -2822,8 +2844,8 @@
       </triggers>
     </table>
 
-    <table name="trainer_payout" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="trainer_payout" group="Money book" rowLevelSecurity="enabled">
+      <description>Money a gym paid the trainer (amount, method, reference, when it was received), as their share of what the gym collected.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
@@ -2868,8 +2890,8 @@
       </triggers>
     </table>
 
-    <table name="workout" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="workout" group="Planning" rowLevelSecurity="enabled">
+      <description>One training day of a program: its week, day, position, name and notes. A copy of a workout remembers the one it came from.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="origin" type="varchar(12)" nullable="false" />
@@ -2923,8 +2945,8 @@
       </triggers>
     </table>
 
-    <table name="workout_set" group="Ungrouped" rowLevelSecurity="enabled">
-      <description />
+    <table name="workout_set" group="Planning" rowLevelSecurity="enabled">
+      <description>One prescribed set of a workout's exercise: load and effort, each as a kind and a value, with rest, tempo and notes.</description>
       <columns>
         <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
         <column name="tenant_id" type="uuid" nullable="true" foreignKey="true">

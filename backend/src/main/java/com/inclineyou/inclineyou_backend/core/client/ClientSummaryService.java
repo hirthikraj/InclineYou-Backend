@@ -3,6 +3,7 @@ package com.inclineyou.inclineyou_backend.core.client;
 import com.inclineyou.inclineyou_backend.core.client.dto.ClientSummary;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -16,7 +17,10 @@ import java.util.UUID;
  * is {@code view=legacy} until the screens still reading it move over.
  *
  * <p>Every client with their schedule, recurring slots, the one active program and
- * four session aggregates, in three queries whatever the roster size. It replaces
+ * four session aggregates, in four queries whatever the roster size — run in one
+ * read-only transaction, so they share one connection (one round of the RLS
+ * {@code set_config}s, not four) and one snapshot (a client added mid-read cannot
+ * arrive with empty slots or stats). It replaces
  * the old screen's {@code GET /v1/programs} and, more importantly, the unbounded
  * {@code GET /v1/workouts}: <i>gone quiet</i> and <i>100th session</i> need only
  * the last delivered session and the count, so the server sends those two numbers
@@ -37,11 +41,16 @@ public class ClientSummaryService {
      *               are ignored; a list of only unknown names falls back to the
      *               default rather than answering an empty roster for a typo.
      */
+    @Transactional(readOnly = true)
     public List<ClientSummary> list(UUID trainerId, String status) {
         return repo.summaries(trainerId, statuses(status), null);
     }
 
-    /** One client in the L3 shape, whatever their status — what every Clients write answers with. */
+    /**
+     * One client in the L3 shape, whatever their status — what every Clients write answers with. Called inside
+     * a write's transaction it joins that one (its read-only flag is ignored there), so it reads the write.
+     */
+    @Transactional(readOnly = true)
     public Optional<ClientSummary> one(UUID trainerId, UUID clientId) {
         return repo.summaries(trainerId, List.copyOf(STATUSES), clientId).stream().findFirst();
     }

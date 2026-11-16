@@ -1,5 +1,6 @@
 'use server';
 
+import { isFree, notChargedLine } from '@/lib/schedule/billing';
 import { revalidatePath } from 'next/cache';
 
 import { api, ApiError } from '@/lib/http/client';
@@ -76,6 +77,15 @@ function readFailure(error: unknown, verb: string): ActionResult {
   // `ApiError` is the common client's (`lib/http/client.ts`); a null status is
   // "nothing answered", which reads as unreachable below.
   if (error instanceof ApiError && error.status !== null) {
+    // 422 NUDGE_TOO_LONG (9 Nov 2026): the trainer's own wording comes out over 1000 characters once filled in.
+    // The server's sentence says how long it came out and where to shorten it.
+    // 409 NOTHING_OWED (9 Nov 2026): the money came in after this row was drawn; the server's sentence says so.
+    if (error.problem.code === 'NOTHING_OWED') {
+      return { ok: false, message: error.problem.detail ?? 'They owe nothing right now, so there is nothing to remind about.' };
+    }
+    if (error.problem.code === 'NUDGE_TOO_LONG') {
+      return { ok: false, message: error.problem.detail ?? 'This message is too long once it is filled in. Shorten it in Settings → Nudge messages.' };
+    }
     if (error.status === 429) {
       return { ok: false, message: 'Too many messages in a minute. Wait a moment and try again.' };
     }
@@ -246,7 +256,19 @@ export async function markAttended(sessionIds: string[]): Promise<ActionResult> 
     revalidatePath('/schedule');
 
     const marked = results.filter((r) => MARKED.has(r.outcome)).length;
-    if (marked === results.length) return { ok: true };
+    /* V32: marked is not the same as paid for. A session no pack took is money
+       nobody has asked for yet, so the receipt names it rather than reading as
+       settled; a trial or a free session was free on purpose and says nothing. */
+    const unpaid = results.filter((r) => r.outcome === 'not_charged' && !isFree(r.reason));
+    if (marked === results.length) {
+      if (unpaid.length === 0) return { ok: true };
+      const why = notChargedLine(unpaid[0].reason) ?? 'Not charged.';
+      return {
+        ok: true,
+        message: unpaid.length === 1 && results.length === 1 ? why
+          : `${unpaid.length} of ${results.length} not charged — ${why.replace(/^Not charged — /, '')}`,
+      };
+    }
     const why = results.find((r) => !MARKED.has(r.outcome));
     return {
       ok: false,
@@ -260,7 +282,8 @@ export async function markAttended(sessionIds: string[]): Promise<ActionResult> 
 /** One outcome of `POST /v1/sessions/done` — `SessionWriteService.MarkResult`. */
 interface MarkResult {
   sessionId: string;
-  outcome: 'done' | 'already_done' | 'not_charged' | 'skipped' | 'not_found';
+  /** `failed` (13 Nov 2026): the database refused it in the moment; nothing about it changed. */
+  outcome: 'done' | 'already_done' | 'not_charged' | 'skipped' | 'not_found' | 'failed';
   packageId?: string;
   sessionsRemaining?: number;
   reason?: string;
@@ -275,6 +298,8 @@ const NOT_MARKED: Record<string, string> = {
   // is skipped instead is a session whose start time hasn't come.
   SESSION_NOT_STARTED: "One hasn't started yet, so it was left alone.",
   not_found: 'One is no longer in your diary.',
+  // 13 Nov 2026: one refused in the moment (its pack changed elsewhere); the others stand, and pressing again retries it.
+  MARK_FAILED: 'One could not be marked just now — press Mark again to retry it.',
 };
 
 /* ──────────────────────────────────────────────── silencing a row ────────── */
@@ -307,11 +332,13 @@ export async function dismissRow(
   kind: string,
   band: string,
   snoozeUntil: number | null,
+  /** 16 Nov 2026 — the row's `at`: when the situation being silenced started, so a later one comes back. */
+  subjectAt?: number,
 ): Promise<ActionResult & { dismissalId?: string }> {
   try {
     await api(`/v1/attention/dismissals/${encodeURIComponent(clientId)}/${encodeURIComponent(kind)}`, {
       method: 'PUT',
-      body: { band, snoozedUntil: snoozeUntil },
+      body: { band, snoozedUntil: snoozeUntil, subjectAt: subjectAt ?? null },
     });
     /*
      * THE ONE WRITE ON THIS SCREEN THAT DELIBERATELY DOES NOT REVALIDATE.
@@ -366,7 +393,8 @@ export async function restoreRow(dismissalId: string): Promise<ActionResult> {
  * are session ids, and the server closes every open one in a single UPDATE. A
  * log someone else already closed keeps its time and comes back `skipped`
  * (`ALREADY_CLOSED`) in `results[]`, which is still success: the state the
- * trainer asked for is true. Closing a
+ * trainer asked for is true. A log never opened, or a session gone, is not —
+ * that is read and said (16 Nov 2026). Closing a
  * log does not mark the session delivered or charge the pack.
  *
  * Not held: nothing leaves for the client.
@@ -376,12 +404,23 @@ export async function closeLogs(sessionIds: string[]): Promise<ActionResult> {
     return { ok: false, message: 'There is no open log left to close.' };
   }
   try {
-    await api<{ results: { sessionId: string; outcome: string; reason?: string }[] }>('/v1/sessions/end', {
+    const { results } = await api<{ results: { sessionId: string; outcome: string; reason?: string }[] }>('/v1/sessions/end', {
       method: 'POST',
       body: { sessionIds },
     });
     revalidatePath('/today');
     revalidatePath('/schedule');
+    /* 16 Nov 2026: read the answer. Closed here, or closed already elsewhere, is
+       the state the trainer asked for. Anything else (never opened, no longer in
+       the diary) means the row was drawn from an out-of-date screen — saying
+       "closed" about it was a success that did not happen. */
+    const settled = (results ?? []).filter((r) => r.outcome === 'closed' || r.reason === 'ALREADY_CLOSED').length;
+    if (settled === 0) {
+      return { ok: false, message: 'That log isn’t open any more — the screen was out of date. It has been refreshed.' };
+    }
+    if (settled < (results ?? []).length) {
+      return { ok: true, message: `${settled} of ${results.length} closed — the rest weren’t open any more.` };
+    }
     return { ok: true };
   } catch (error) {
     return readFailure(error, 'Closing the log');
@@ -402,7 +441,12 @@ export async function closeLogs(sessionIds: string[]): Promise<ActionResult> {
  *
  * Instant, not held: nothing leaves for the client.
  */
-export async function renew(packageId: string | undefined, requestId?: string): Promise<ActionResult> {
+export async function renew(
+  packageId: string | undefined,
+  requestId?: string,
+  /** Option B (V32): delivered sessions with no pack that the new one takes — only what the trainer agreed to. */
+  chargeSessionIds?: string[],
+): Promise<ActionResult> {
   if (!packageId) {
     return {
       ok: false,
@@ -410,16 +454,30 @@ export async function renew(packageId: string | undefined, requestId?: string): 
     };
   }
   try {
-    await api(`/v1/packages/${encodeURIComponent(packageId)}/renew`, {
+    const made = await api<{ id: string }>(`/v1/packages/${encodeURIComponent(packageId)}/renew`, {
       method: 'POST',
       // The browser's attempt id (see `draft`): a retry of a renew that landed
       // answers 200 with the same package instead of 409 already-renewed.
-      body: { id: requestId ?? crypto.randomUUID() },
+      body: chargeSessionIds && chargeSessionIds.length > 0
+        ? { id: requestId ?? crypto.randomUUID(), chargeSessionIds }
+        : { id: requestId ?? crypto.randomUUID() },
     });
     revalidatePath('/today');
     revalidatePath('/clients');   // the roster's action column renews too
-    return { ok: true };
+    return { ok: true, packageId: made?.id };
   } catch (error) {
+    if (error instanceof ApiError && error.problem.code === 'SESSION_NOT_UNCHARGED') {
+      return { ok: false, message: 'One of those sessions was charged or changed since. Refresh and renew again.' };
+    }
+    if (error instanceof ApiError && error.problem.code === 'CLIENT_ARCHIVED') {
+      return { ok: false, message: 'This client was archived. Unarchive them first, then renew.' };
+    }
+    if (error instanceof ApiError && error.problem.code === 'PACKAGE_UNDONE') {
+      return { ok: false, message: 'That renewal was undone. Press Renew again to sell a new pack.' };
+    }
+    if (error instanceof ApiError && error.problem.code === 'PACKAGE_SINGLE_SESSION') {
+      return { ok: false, message: error.problem.detail ?? 'That was one session sold on its own — there is no pack to renew.' };
+    }
     if (error instanceof ApiError && error.problem.code === 'PACKAGE_ALREADY_RENEWED') {
       return { ok: false, message: 'Already renewed — there is a newer pack running for this client.' };
     }

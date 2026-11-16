@@ -17,6 +17,10 @@ import { Button } from '@/web-components/ui/Button';
 import { Tag } from '@/web-components/ui/Tag';
 import { Chip } from '@/web-components/ui/Chip';
 import { KeyValueRow } from '@/web-components/ui/KeyValue';
+import { TextField } from '@/web-components/ui/Field';
+import {
+  BILLING_CHOICES, coverage, coverageLine, readPrice, serviceOf, type Billing,
+} from '@/lib/schedule/billing';
 import { Avatar } from '@/web-components/ui/Avatar';
 
 /**
@@ -94,6 +98,10 @@ export function BookPanel({
   const [clientId, setClientId] = useState<string | null>(asked);
   const [minutes, setMinutes] = useState<number | null>(null);
   const [mode, setMode] = useState<'floor' | 'remote' | null>(null);
+  // V32: how this booking is paid for. A pack unless the trainer says otherwise;
+  // the price is only asked for, and only sent, for a single session.
+  const [billingPicked, setBilling] = useState<Billing>('pack');
+  const [priceText, setPriceText] = useState<string | null>(null);
   const [startMinute, setStartMinute] = useState(minute);
 
   const returnTo = useRef<Element | null>(null);
@@ -177,13 +185,24 @@ export function BookPanel({
   const rate = client ? rates.perSession.get(client.id) ?? null : null;
 
   /*
-   * The last-session warning. `packLeft` is what the newest package has left, so
-   * booking one more when it reads 1 is the session that empties it — and a
-   * trainer who knows that before booking is a trainer who has the renewal
-   * conversation at the right moment rather than after the fact.
+   * THE MONEY LINE (V32). It used to read the newest package's count alone, so
+   * "6 of 12 left" said nothing about the six sessions already booked against
+   * it, a floor pack answered for an online booking, and a paused pack looked
+   * live. `coverage` asks the server's question instead — which live, unpaused
+   * pack of THIS service will pay when it is marked done — and subtracts what is
+   * already booked. It never blocks: a booking the pack does not cover is still
+   * a booking, and the sentence says what will happen when it is delivered.
    */
-  const emptiesPack = client?.packLeft === 1;
-  const packEmpty = client?.packLeft === 0;
+  const gymClient = client?.billing?.gymClient ?? false;
+  // Picking a gym client after choosing Single falls back to the pack: Single is not theirs to have.
+  const billing: Billing = gymClient && billingPicked === 'single' ? 'pack' : billingPicked;
+  const service = serviceOf(mode, client?.billing ?? null);
+  const covered = client ? coverage(client.billing, service) : null;
+  const moneyLine = client && covered && billing === 'pack' ? coverageLine(covered, client.name, service) : null;
+  // A single session is priced at the client's per-session rate until the trainer types another.
+  const priceShown = priceText ?? (rate ? String(rate) : '');
+  const price = billing === 'single' ? readPrice(priceShown) : null;
+  const priceMissing = billing === 'single' && price === null;
 
   /*
    * One id per booking attempt (1.1 Conventions · Ids & retries). Pressing
@@ -201,7 +220,11 @@ export function BookPanel({
   const book = () => {
     if (!clientId) return;
     setError(null);
-    const requestId = attemptFor(`${clientId}|${at}|${length}|${mode ?? ''}`);
+    if (priceMissing) {
+      setError('A single session needs a price.');
+      return;
+    }
+    const requestId = attemptFor(`${clientId}|${at}|${length}|${mode ?? ''}|${billing}|${price ?? ''}`);
     start(async () => {
       const res = await bookSession({
         requestId,
@@ -213,6 +236,8 @@ export function BookPanel({
         // client usually does" — freezing today's default onto the row would keep
         // drawing them on the floor forever after they switch to remote.
         deliveryMode: mode,
+        billing,
+        price,
       });
       if (!res.ok) {
         setError(res.message ?? 'The booking did not go through.');
@@ -238,9 +263,19 @@ export function BookPanel({
         body: (
           <>
             {client?.name ?? 'Session'} &middot; {dayLong(dayAt)} at {formatMinute(startMinute)}
+            {/* 10 Nov 2026: a single session is sold when it is booked — owed, due on its day. */}
+            {billing === 'single' && price ? <> &mdash; {client?.name.split(' ')[0] ?? 'They'} owes {rupees(Number(price))}, due that day.</> : null}
           </>
         ),
-        action: id ? { label: 'Undo', onClick: () => void undoBooking(id) } : undefined,
+        /* A single session's sale goes with the booking, so its receipt stays up as
+           long as a sold pack's (10 s); the server allows the Undo for 10 minutes. */
+        ...(billing === 'single' ? { duration: 10_000 } : {}),
+        action: id ? {
+          label: 'Undo',
+          onClick: () => void undoBooking(id).then((back) => {
+            if (!back.ok) show({ tone: 'danger', title: <>Could not undo</>, body: back.message });
+          }),
+        } : undefined,
       });
       /* A booking that lands leaves the same way a cancelled one does. `onBooked`
          unmounts this panel AND refreshes the grid behind it, so calling it
@@ -412,6 +447,41 @@ export function BookPanel({
                 </KeyValueRow>
                 <KeyValueRow k="Worth">{rate ? rupees(rate) : 'No per-session rate'}</KeyValueRow>
               </div>
+
+              {/* PAID BY (V32). Four answers to one question, and the default is
+                  today's: the pack pays when it is marked done. Trial and Free are
+                  free on purpose, so they never turn up later as money to chase;
+                  Single is sold on its own when it is delivered. A gym client buys
+                  only the gym's packs, so Single is not offered to one. */}
+              <div className="sect fld">
+                <span className="fld__l">Paid by</span>
+                <div className="row gap2 sch__wrap">
+                  {BILLING_CHOICES.filter((b) => b.id !== 'single' || !gymClient).map((b) => (
+                    <Chip key={b.id} pressed={billing === b.id} onClick={() => setBilling(b.id)}>
+                      {b.label}
+                    </Chip>
+                  ))}
+                </div>
+                {billing === 'single' && (
+                  <div style={{ marginTop: 8 }}>
+                    <TextField
+                      label="Price (₹)"
+                      numeric
+                      inputMode="decimal"
+                      width={140}
+                      value={priceShown}
+                      onChange={(e) => setPriceText(e.target.value)}
+                      error={priceMissing && priceShown !== '' ? 'A price above 0, like 800' : undefined}
+                    />
+                  </div>
+                )}
+                <p className="fld__h">
+                  {billing === 'pack' && 'Taken off their pack when you mark it done.'}
+                  {billing === 'trial' && 'A trial before they buy — delivered free, never charged.'}
+                  {billing === 'complimentary' && 'On the house — delivered free, never charged.'}
+                  {billing === 'single' && 'Sold on its own when you book it: owed from the session’s day until it’s paid. Their pack is not touched.'}
+                </p>
+              </div>
             </>
           )}
 
@@ -449,16 +519,10 @@ export function BookPanel({
                 </span>
               </p>
             )}
-            {packEmpty && (
-              <p className="sch__note sch__note--warn">
-                <WarnTriangle size={14} />
-                <span>{client?.name}’s package is already empty.</span>
-              </p>
-            )}
-            {emptiesPack && (
-              <p className="sch__note sch__note--warn">
-                <WarnTriangle size={14} />
-                <span>This is the last session on {client?.name}’s package.</span>
+            {moneyLine && (
+              <p className={moneyLine.warn ? 'sch__note sch__note--warn' : 'sch__note'}>
+                {moneyLine.warn ? <WarnTriangle size={14} /> : <Check size={14} />}
+                <span>{moneyLine.text}</span>
               </p>
             )}
             {error && (

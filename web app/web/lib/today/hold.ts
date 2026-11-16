@@ -45,4 +45,6 @@ export interface ActionResult {
    * "sending a WhatsApp" that cannot happen on a server.
    */
   whatsappUrl?: string;
+  /** Renew: the package it made, for the receipt's Undo. */
+  packageId?: string;
 }

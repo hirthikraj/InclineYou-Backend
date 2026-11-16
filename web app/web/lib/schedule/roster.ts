@@ -1,3 +1,4 @@
+import type { ClientBilling } from './billing';
 import { readMode } from '@/lib/today/mode';
 import type { ScheduleClient } from './session';
 
@@ -102,6 +103,7 @@ export function bookableClients(
   clients: RosterClientRow[],
   programs: RosterProgramRow[],
   newestPack: Map<string, RosterPackRow>,
+  billing?: Map<string, ClientBilling>,
 ): ScheduleClient[] {
   const live = programs.filter((p) => !DEAD_PROGRAM.has((p.status ?? '').toLowerCase()));
 
@@ -123,6 +125,7 @@ export function bookableClients(
         programName: plan?.name ?? null,
         packLeft: pack?.sessionsRemaining ?? null,
         packTotal: pack?.sessionsTotal ?? null,
+        billing: billing?.get(c.id) ?? null,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));

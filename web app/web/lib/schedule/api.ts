@@ -1,3 +1,4 @@
+import { billingByClient } from './billing';
 import 'server-only';
 
 import { cache } from 'react';
@@ -94,6 +95,7 @@ interface ClientWire {
   name: string | null;
   status: string;
   membershipStatus: string;
+  clientType: string;
   schedule: { sessionsPerWeek: number | null; sessionDurationMinutes: number | null; deliveryMode: string | null } | null;
   program: { id: string; name: string; weeks: number } | null;
 }
@@ -101,6 +103,13 @@ interface ClientWire {
 /** L5 · `PackageReadService.CurrentPackage`. Money is a decimal string. */
 interface PackageWire {
   clientId: string;
+  service: string;
+  status: string;
+  pausedAt: number | null;
+  /** V32 — pack-billed sessions still to be marked for this client and service. */
+  sessionsBookedAhead?: number | null;
+  /** 10 Nov 2026 — set on a single session's own sale; never a pack that covers a booking. */
+  sessionId?: string | null;
   basis: 'sessions' | 'period';
   sessionsTotal: number | null;
   sessionsRemaining: number | null;
@@ -248,7 +257,9 @@ export const getSchedule = cache(
       to,
       sessions: diary.rows.map((s) => toSession(s, people[s.clientId], now)),
       people,
-      clients: bookableClients(roster, programs, packs),
+      clients: bookableClients(roster, programs, packs, billingByClient(packages, clients.map((c) => ({
+        id: c.id, clientType: c.clientType, deliveryMode: c.schedule?.deliveryMode ?? null,
+      })))),
       // The wire's weekday is 1 = Monday; `WorkWindow` is 0 = Monday.
       hours: hours.map((h) => ({
         weekday: h.weekday - 1,

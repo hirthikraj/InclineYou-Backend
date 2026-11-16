@@ -66,7 +66,7 @@ public class PaymentExportService {
                 w.write(String.join(",",
                         String.valueOf(r.bookAt()),
                         day.format(Instant.ofEpochMilli(r.bookAt())),
-                        cell(r.clientName()), cell(r.packageName()), cell(r.status()), cell(r.collectedBy()),
+                        cell(r.clientName() == null ? DELETED_CLIENT : r.clientName()), cell(r.packageName()), cell(r.status()), cell(r.collectedBy()),
                         cell(r.method()), cell(r.reference()), r.amount(),
                         r.split() == null ? "" : r.split().gym(),
                         r.split() == null ? "" : r.split().trainer(),
@@ -87,6 +87,12 @@ public class PaymentExportService {
     }
 
     /** RFC 4180 quoting plus the spreadsheet-formula guard. */
+    /**
+     * The name column for a client who was deleted (and so erased) since: the row's amount and date are the
+     * trainer's books and stay, the name does not. The web draws the same words.
+     */
+    static final String DELETED_CLIENT = "Deleted client";
+
     static String cell(String v) {
         if (v == null || v.isEmpty()) return "";
         if ("=+-@".indexOf(v.charAt(0)) >= 0) v = "'" + v;

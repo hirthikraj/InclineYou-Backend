@@ -45,15 +45,22 @@ public class SessionJdbcRepository {
      * (trainer_id, scheduled_at), with one idx_scheduled_session_client. {@code fetch} is one past the page so the
      * caller knows whether there is another — nothing is cut off silently.
      *
-     * <p>The log aggregate is a LATERAL join gated on started_at, so a session that was never opened costs nothing —
-     * and those are most of the window. A removed exercise (session_exercise.removed_at) takes its sets with it: the
-     * trainer took it out of the session, and the hero's "14 sets" must not count work they deleted.
+     * <p>Without a client it is the trainer's diary: {@code s.trainer_id}. With one it is that CLIENT's history, so it is
+     * scoped by the client being this trainer's, not by who ran each session — the same rule as the roster's
+     * {@code stats} (a reassigned client keeps the sessions an earlier coach logged). The caller has already answered 404
+     * for a client that is not this trainer's; the sub-select here is the backstop.
+     *
+     * <p>The log aggregate is a LATERAL join gated on started_at: it runs once per OPENED session (a never-opened
+     * future booking costs nothing, but in Today's 30-days-back window most rows were opened), as two index lookups —
+     * uq_session_exercise_order (session_id, …) and uq_set_log_order (session_exercise_id, …). A removed exercise
+     * (session_exercise.removed_at) takes its sets with it: the trainer took it out of the session, and the hero's
+     * "14 sets" must not count work they deleted.
      *
      * <p>The charge is read through RLS, which scopes package_adjustment to the ACTIVE workspace — so a session booked
      * in another workspace shows no charge here. That is the money wall working, not a missing join.
      */
     public List<SessionRow> page(UUID trainerId, Instant from, Instant to, UUID clientId, List<String> statuses,
-                                 Cursor after, boolean desc, int fetch) {
+                                 boolean uncharged, Cursor after, boolean desc, int fetch) {
         var p = new HashMap<String, Object>();
         p.put("tid", trainerId.toString());
         p.put("from", Timestamp.from(from));
@@ -62,11 +69,21 @@ public class SessionJdbcRepository {
         var where = new StringBuilder();
         if (clientId != null) {
             p.put("cid", clientId.toString());
-            where.append(" AND s.client_id = :cid::uuid");
+            where.append(" AND s.client_id = :cid::uuid AND s.client_id IN"
+                    + " (SELECT c.id FROM client c WHERE c.id = :cid::uuid AND c.trainer_id = :tid::uuid AND c.deleted_at IS NULL)");
+        } else {
+            where.append(" AND s.trainer_id = :tid::uuid");
         }
         if (statuses != null && !statuses.isEmpty()) {
             p.put("statuses", statuses);
             where.append(" AND s.status IN (:statuses)");
+        }
+        if (uncharged) {
+            // Delivered, billed to a pack, and no pack took it: the money nobody has asked for yet. Trial and
+            // complimentary sessions are free on purpose and never appear; a no-show is the trainer's own call.
+            where.append(" AND s.status = 'done' AND s.billing = 'pack' AND s.logged_by = 'trainer' AND NOT EXISTS"
+                    + " (SELECT 1 FROM package_adjustment ua WHERE ua.session_id = s.id AND ua.kind = 'session'"
+                    + " AND ua.reversed_at IS NULL)");
         }
         if (after != null) {
             p.put("afterAt", after.keyAsTimestamp());
@@ -80,13 +97,20 @@ public class SessionJdbcRepository {
         where.append(clientId == null ? " AND s.logged_by = 'trainer'" : " AND " + HAS_WORK);
         String dir = desc ? "DESC" : "ASC";
         return jdbc.query(SELECT + """
-                WHERE s.trainer_id = :tid::uuid AND s.deleted_at IS NULL
+                WHERE s.deleted_at IS NULL
                   AND s.scheduled_at >= :from AND s.scheduled_at < :to
                 """ + where + """
 
                 ORDER BY s.scheduled_at %s, s.id %s
                 LIMIT :limit
                 """.formatted(dir, dir), p, SessionJdbcRepository::row);
+    }
+
+    /** Is this client on this trainer's roster (not deleted)? The diary's {@code ?clientId=} answers 404 otherwise. */
+    public boolean clientIsMine(UUID trainerId, UUID clientId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM client WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)
+                """, Map.of("cid", clientId.toString(), "tid", trainerId.toString()), Boolean.class));
     }
 
     /** One session in the L4 shape — what a write that creates or changes one answers with. */
@@ -110,9 +134,11 @@ public class SessionJdbcRepository {
                    w.id::text AS workout_id, w.name AS workout_name, w.program_id::text AS program_id,
                    w.week, w.day,
                    lg.exercises, lg.sets_done, lg.volume, lg.last_set_at,
-                   ch.package_id::text AS charge_package_id,
+                   ch.package_id::text AS charge_package_id, s.billing, s.price,
                    wf.effort AS fb_effort, wf.note AS fb_note, wf.at AS fb_at,
-                   rc.id::text AS recap_id, rc.read_at AS recap_read_at
+                   rc.id::text AS recap_id, rc.read_at AS recap_read_at,
+                   sa.id::text AS sale_id, sa.amount AS sale_amount, sa.paid AS sale_paid,
+                   sa.due_date::text AS sale_due, sa.status AS sale_status
             FROM scheduled_session s
             LEFT JOIN workout w ON w.id = s.workout_id
             LEFT JOIN LATERAL (
@@ -130,6 +156,17 @@ public class SessionJdbcRepository {
                    ON ch.session_id = s.id AND ch.kind = 'session' AND ch.reversed_at IS NULL
             LEFT JOIN workout_feedback wf ON wf.session_id = s.id AND wf.deleted_at IS NULL
             LEFT JOIN client_message rc ON rc.session_id = s.id AND rc.kind = 'recap' AND rc.deleted_at IS NULL
+            -- A single session's own sale (V32/V33): on uq_package_single_session, so one index probe per single row,
+            -- and gated on the billing so no other session pays for it. The newest, so a refunded one sold again shows
+            -- the live sale.
+            LEFT JOIN LATERAL (
+                SELECT k.id, k.amount, k.due_date, k.status,
+                       coalesce((SELECT sum(CASE y.status WHEN 'paid' THEN y.amount WHEN 'refund' THEN -y.amount END)
+                                 FROM payment y WHERE y.package_id = k.id AND y.deleted_at IS NULL), 0) AS paid
+                FROM package k
+                WHERE k.session_id = s.id AND k.deleted_at IS NULL
+                ORDER BY k.created_at DESC LIMIT 1
+            ) sa ON s.billing = 'single'
             """;
 
     private static SessionRow row(ResultSet rs, int i) throws SQLException {
@@ -158,6 +195,13 @@ public class SessionJdbcRepository {
                         volume(rs.getBigDecimal("volume")),
                         epochOrNull(rs.getTimestamp("last_set_at"))),
                 chargedTo == null ? null : new SessionCharge(chargedTo),
+                rs.getString("billing"),
+                com.inclineyou.inclineyou_backend.shared.util.Money.format(rs.getBigDecimal("price")),
+                rs.getString("sale_id") == null ? null : new com.inclineyou.inclineyou_backend.core.session.dto.SessionSale(
+                        rs.getString("sale_id"),
+                        com.inclineyou.inclineyou_backend.shared.util.Money.format(rs.getBigDecimal("sale_amount")),
+                        com.inclineyou.inclineyou_backend.shared.util.Money.format(rs.getBigDecimal("sale_paid")),
+                        rs.getString("sale_due"), rs.getString("sale_status")),
                 rs.getTimestamp("fb_at") == null ? null
                         : new SessionFeedback(rs.getString("fb_effort"), rs.getString("fb_note"), rs.getTimestamp("fb_at").getTime()),
                 rs.getString("recap_id") == null ? null
@@ -196,13 +240,13 @@ public class SessionJdbcRepository {
      */
     public Optional<ClientStanding> lockClient(UUID trainerId, UUID clientId) {
         return jdbc.query("""
-                SELECT c.status, c.membership_status, cs.session_duration_minutes
+                SELECT c.status, c.membership_status, cs.session_duration_minutes, c.client_type
                 FROM client c LEFT JOIN client_schedule cs ON cs.client_id = c.id
                 WHERE c.id = :cid::uuid AND c.trainer_id = :tid::uuid AND c.deleted_at IS NULL
                 FOR UPDATE OF c
                 """, Map.of("cid", clientId.toString(), "tid", trainerId.toString()),
                 (rs, i) -> new ClientStanding(rs.getString("status"), rs.getString("membership_status"),
-                        (Integer) rs.getObject("session_duration_minutes"))).stream().findFirst();
+                        (Integer) rs.getObject("session_duration_minutes"), rs.getString("client_type"))).stream().findFirst();
     }
 
     /**
@@ -246,6 +290,34 @@ public class SessionJdbcRepository {
                 .stream().findFirst().map(UUID::fromString);
     }
 
+    /**
+     * The start of one of this client's sessions that the new one would overlap, or empty. Every status but cancelled
+     * counts, a self-run day included: one person cannot be in two sessions. Ranged on idx_scheduled_session_client
+     * (client_id, scheduled_at) — a session longer than 480 minutes cannot exist, so nothing starting earlier than
+     * that can reach this one.
+     */
+    public Optional<Instant> clientClash(UUID clientId, Instant at, int minutes) {
+        return clientClash(clientId, at, minutes, null);
+    }
+
+    /** The same, leaving {@code exceptSession} out — a move must not clash with the session it moves (16 Nov 2026). */
+    public Optional<Instant> clientClash(UUID clientId, Instant at, int minutes, UUID exceptSession) {
+        var p = new HashMap<String, Object>();
+        p.put("cid", clientId.toString());
+        p.put("except", exceptSession == null ? null : exceptSession.toString());
+        p.put("at", Timestamp.from(at));
+        p.put("end", Timestamp.from(at.plusSeconds(minutes * 60L)));
+        p.put("earliest", Timestamp.from(at.minusSeconds(480 * 60L)));
+        return jdbc.query("""
+                SELECT scheduled_at FROM scheduled_session
+                WHERE client_id = :cid::uuid AND deleted_at IS NULL AND status <> 'cancelled'
+                  AND (CAST(:except AS uuid) IS NULL OR id <> CAST(:except AS uuid))
+                  AND scheduled_at >= :earliest AND scheduled_at < :end AND ends_at > :at
+                ORDER BY scheduled_at = :at DESC, scheduled_at
+                LIMIT 1
+                """, p, (rs, i) -> rs.getTimestamp("scheduled_at").toInstant()).stream().findFirst();
+    }
+
     /** ends_at is set_session_ends_at's, tenant_id is stamp_tenant_id's. */
     public void insert(NewSession s) {
         var p = new HashMap<String, Object>();
@@ -257,11 +329,13 @@ public class SessionJdbcRepository {
         p.put("workout", s.workoutId() == null ? null : s.workoutId().toString());
         p.put("mode", s.deliveryMode());
         p.put("notes", s.notes());
+        p.put("billing", s.billing());
+        p.put("price", s.price());
         jdbc.update("""
                 INSERT INTO scheduled_session (id, trainer_id, client_id, workout_id, scheduled_at,
-                                               duration_minutes, ends_at, delivery_mode, notes)
+                                               duration_minutes, ends_at, delivery_mode, notes, billing, price)
                 VALUES (:id::uuid, :tid::uuid, :cid::uuid, :workout::uuid, :at,
-                        :minutes, :at, :mode, :notes)
+                        :minutes, :at, :mode, :notes, :billing, :price)
                 """, p);
     }
 }

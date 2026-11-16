@@ -129,6 +129,36 @@ class AssessmentListTest {
                 .andExpect(jsonPath("$.total").value(1)).andExpect(jsonPath("$.grandTotal").value(4));
     }
 
+    @Test
+    @DisplayName("q is matched as typed: % and _ are characters, not wildcards; over 100 characters is a 400")
+    void searchIsLiteral() throws Exception {
+        assessment(me, meera, "Body fat 20% check", TODAY, false, "{}");
+        mvc.perform(get("/v1/assessments").param("q", "%")).andExpect(jsonPath("$.items.length()").value(1));
+        mvc.perform(get("/v1/assessments").param("q", "20%")).andExpect(jsonPath("$.items.length()").value(1));
+        // "_" used to match any one character, so "Month_y" found "Monthly check".
+        mvc.perform(get("/v1/assessments").param("q", "Month_y")).andExpect(jsonPath("$.items.length()").value(0));
+        mvc.perform(get("/v1/assessments").param("q", "x".repeat(101))).andExpect(status().isBadRequest());
+        mvc.perform(get("/v1/assessments").param("q", "x".repeat(100))).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("a client not on your roster is a 404; a cursor resumes only the filters that made it")
+    void clientAndCursorRules() throws Exception {
+        mvc.perform(get("/v1/assessments").param("clientId", UUID.randomUUID().toString())).andExpect(status().isNotFound());
+        UUID theirs = jdbc.queryForObject("SELECT id FROM client WHERE trainer_id = :t::uuid LIMIT 1",
+                Map.of("t", other.toString()), UUID.class);
+        mvc.perform(get("/v1/assessments").param("clientId", theirs.toString())).andExpect(status().isNotFound());
+
+        String first = com.jayway.jsonpath.JsonPath.read(mvc.perform(get("/v1/assessments").param("limit", "1"))
+                .andReturn().getResponse().getContentAsString(), "$.nextCursor");
+        mvc.perform(get("/v1/assessments").param("limit", "1").param("cursor", first)).andExpect(status().isOk());
+        mvc.perform(get("/v1/assessments").param("state", "missed").param("cursor", first)).andExpect(status().isBadRequest());
+        mvc.perform(get("/v1/assessments").param("dueBy", TODAY.toString()).param("cursor", first)).andExpect(status().isBadRequest());
+        // includeTotal adds counts, not rows: the same cursor is fine with it.
+        mvc.perform(get("/v1/assessments").param("limit", "1").param("includeTotal", "true").param("cursor", first))
+                .andExpect(status().isOk());
+    }
+
     /* ------------------------------------------------------------- fixtures */
 
     private UUID assessment(UUID trainerId, UUID clientId, String name, LocalDate due, boolean completed, String readings) {

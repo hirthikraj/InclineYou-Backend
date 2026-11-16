@@ -6,8 +6,10 @@ import { dayLong, formatMinute, formatMinuteRange, formatSpan, minuteOfDay, rupe
 import type { ScheduleClient, ScheduleSession } from '@/lib/schedule/api';
 import { lengthChoices } from '@/lib/schedule/result';
 import {
-  cancelSession, markDone, markNoShow, reopenSession, updateSession,
+  cancelSession, markDone, markNoShow, reopenSession, setBilling, updateSession,
 } from '@/lib/schedule/actions';
+import { BILLING_CHOICES, type Billing } from '@/lib/schedule/billing';
+import { refundPack } from '@/lib/clients/package-actions';
 import type { WriteResult } from '@/lib/schedule/result';
 import { Calendar, Check, Chevron } from '@/components/shell/Icons';
 import { Cross, Remote, WarnTriangle } from './Icons';
@@ -113,6 +115,13 @@ export function SessionPanel({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
+  /* 10 Nov 2026 · a single session's sale. Cancel asks whether to charge it
+     (default no — most cancels are early, and a trainer's own change is theirs);
+     a no-show's charge is the button pressed (default yes). Not charged with money
+     already paid, it asks whether to refund. `noShowFree` is the no-show's confirm. */
+  const [chargeIt, setChargeIt] = useState(false);
+  const [refund, setRefund] = useState<'keep' | 'cash' | 'upi'>('keep');
+  const [noShowFree, setNoShowFree] = useState(false);
 
   /* Staged, not written. See the note on this file about why all three moved off
      the chip press and onto one Save. */
@@ -207,9 +216,33 @@ export function SessionPanel({
      §01.7 finding. Before the start, Move and Cancel are the verbs. */
   const begun = now >= session.at;
   const first = session.clientName.split(' ')[0] || session.clientName;
+  const sale = session.billing === 'single' ? session.sale : null;
+  const salePaid = sale ? Number(sale.paid) : 0;
+  const saleAmount = sale ? rupees(Number(sale.amount)) : '';
+
+  /** After a settle that left nothing owed: give back what was paid, when the trainer chose to. */
+  const refundAfter = async (res: WriteResult): Promise<WriteResult> => {
+    if (!res.ok || !sale || refund === 'keep' || salePaid <= 0) return res;
+    const back = await refundPack(session.clientId, sale.packageId, {
+      id: crypto.randomUUID(), amount: sale.paid, method: refund,
+    });
+    return back.ok
+      ? { ...res, message: `${rupees(salePaid)} refunded by ${refund === 'cash' ? 'cash' : 'UPI'}.` }
+      : { ...res, message: `The refund did not go through: ${back.message ?? 'try it from Payments.'}` };
+  };
+
+  /** The refund question, for a settle that leaves a paid sale owing nothing. */
+  const refundChoice = salePaid > 0 ? (
+    <div className="sch__confirm" role="group" aria-label="Refund">
+      <span className="small">{rupees(salePaid)} was paid for it. Refund it?</span>{' '}
+      <Chip pressed={refund === 'keep'} onClick={() => setRefund('keep')}>Keep it</Chip>{' '}
+      <Chip pressed={refund === 'cash'} onClick={() => setRefund('cash')}>Refund · cash</Chip>{' '}
+      <Chip pressed={refund === 'upi'} onClick={() => setRefund('upi')}>Refund · UPI</Chip>
+    </div>
+  ) : null;
 
   /**
-   * Every settle — done, no-show, cancel — gets a receipt whose Undo reopens the
+   * Every settle — done, no-show, cancel — gets a receipt whose Reopen puts back the
    * session (R69), which reverses any pack charge on the server. The panel
    * closes, because the block it was about has changed state under it.
    */
@@ -226,10 +259,12 @@ export function SessionPanel({
           variant: 'receipt',
           title: <>{title}</>,
           body: body(res),
+          /* "Reopen", not "Undo" (10 Nov 2026): Undo means taking back a sale just
+             made. This puts the session back to booked and reverses its charge. */
           action: {
-            label: 'Undo',
+            label: 'Reopen',
             onClick: () => void reopenSession(session.id).then((back) => {
-              if (!back.ok) show({ tone: 'danger', title: <>Could not undo</>, body: back.message });
+              if (!back.ok) show({ tone: 'danger', title: <>Could not reopen</>, body: back.message });
               else onChanged?.();
             }),
           },
@@ -315,7 +350,19 @@ export function SessionPanel({
             <p className={`sch__state sch__state--${session.done ? 'ok' : 'danger'}`}>
               {session.done ? <Check size={14} /> : <Cross size={14} />}
               {session.done
-                ? 'Delivered'
+                ? /* V32: what it was paid by is part of "delivered" too. A pack
+                     session nothing paid for is money nobody has asked for yet,
+                     and saying so here is the difference between chasing it and
+                     losing it. */
+                  session.charged
+                  ? session.billing === 'single'
+                    ? `Delivered · sold on its own${session.price ? ` · ${rupees(Number(session.price))}` : ''}`
+                    : 'Delivered · pack −1'
+                  : session.billing === 'trial'
+                    ? 'Delivered · trial, free'
+                    : session.billing === 'complimentary'
+                      ? 'Delivered · free'
+                      : 'Delivered · not charged'
                 : session.noShow
                   ? /* The charge is part of the state, not a detail of it. A
                        no-show that cost a session and one that did not are the
@@ -364,6 +411,77 @@ export function SessionPanel({
               <Chevron size={14} />
             </Button>
           </div>
+
+          {/* PAID BY (V32). Before delivery it is a choice; after, a session the
+              pack never paid for can still be settled here — made free on
+              purpose, or sold on its own at the client's rate. The third way,
+              taking it from the next pack, is on the renew sheet. A charged
+              session changes only through Reopen, which gives the charge back
+              in the open. */}
+          {session.done && !session.charged && session.billing === 'pack' ? (
+            <div className="sect col gap2">
+              <p className="sch__note sch__note--warn">
+                <WarnTriangle size={14} />
+                <span>
+                  Nobody has paid for this session yet. Make it free, sell it on its own, or take it
+                  from {first}&rsquo;s next pack when you renew.
+                </span>
+              </p>
+              <div className="row gap2 sch__wrap">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={pending}
+                  onClick={() => run(() => setBilling({ id: session.id, billing: 'complimentary' }))}
+                >
+                  Make it free
+                </Button>
+                {rate ? (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={pending}
+                    onClick={() => run(() => setBilling({ id: session.id, billing: 'single', price: String(rate) }))}
+                  >
+                    Sell on its own &middot; {rupees(rate)}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          ) : !settled && !session.charged ? (
+            <div className="sect fld">
+              <span className="fld__l">Paid by</span>
+              <div className="row gap2 sch__wrap">
+                {BILLING_CHOICES.filter((b) => b.id !== 'single' || session.price || rate || session.billing === 'single')
+                  .filter((b) => b.id !== 'single' || !client?.billing?.gymClient)
+                  .map((b) => (
+                    <Chip
+                      key={b.id}
+                      pressed={session.billing === b.id}
+                      disabled={pending}
+                      onClick={() => {
+                        if (b.id === session.billing) return;
+                        const id: Billing = b.id;
+                        run(() => setBilling({
+                          id: session.id,
+                          billing: id,
+                          price: id === 'single' ? session.price ?? (rate ? String(rate) : null) : null,
+                        }));
+                      }}
+                    >
+                      {b.label}
+                    </Chip>
+                  ))}
+              </div>
+              <p className="fld__h">
+                {session.billing === 'single'
+                  ? `Sold on its own${session.price ? ` at ${rupees(Number(session.price))}` : ''} when you mark it done.`
+                  : session.billing === 'pack'
+                    ? 'Taken off their pack when you mark it done.'
+                    : 'Delivered free, never charged.'}
+              </p>
+            </div>
+          ) : null}
 
           <div className="sect">
             <KeyValueRow k="Plan">{session.detail}</KeyValueRow>
@@ -516,7 +634,7 @@ export function SessionPanel({
 
         {/*
           THE FOOT, AND THE ONE VERB BEHIND A CONFIRM.
-          Cancel keeps the row in the diary (R12) and its receipt's Undo reopens
+          Cancel keeps the row in the diary (R12) and its receipt's Reopen restores
           it, but it is still the verb a trainer usually presses after a phone
           call, so it asks once. The confirm replaces the foot's contents in the
           same box rather than opening a second surface: a panel foot cannot hold
@@ -529,6 +647,14 @@ export function SessionPanel({
                 Cancel this session? {first} is not told automatically. It stays in
                 the diary, and you can reopen it.
               </p>
+              {sale && (
+                <div className="sch__confirm" role="group" aria-label="Charge for it">
+                  <span className="small">Charge {first} {saleAmount} for it?</span>{' '}
+                  <Chip pressed={!chargeIt} onClick={() => setChargeIt(false)}>No, nothing owed</Chip>{' '}
+                  <Chip pressed={chargeIt} onClick={() => setChargeIt(true)}>Yes, still owed</Chip>
+                </div>
+              )}
+              {sale && !chargeIt && refundChoice}
               <Button variant="ghost" onClick={() => setConfirming(false)}>
                 Keep it
               </Button>
@@ -536,17 +662,42 @@ export function SessionPanel({
                 variant="danger"
                 disabled={pending}
                 onClick={() => settle(
-                  () => cancelSession(session.id),
+                  async () => {
+                    const res = await cancelSession(session.id, 'trainer', Boolean(sale) && chargeIt);
+                    return chargeIt ? res : refundAfter(res);
+                  },
                   'Session cancelled',
                   () => (
                     <>
                       {session.clientName} &middot; {dayLong(session.at)} at{' '}
                       {formatMinute(startMinute)} &mdash; they are not told automatically.
+                      {sale ? (chargeIt ? <> {saleAmount} is still owed.</> : <> Nothing is owed for it.</>) : null}
                     </>
                   ),
                 )}
               >
                 Cancel session
+              </Button>
+            </>
+          ) : noShowFree ? (
+            <>
+              <p className="small sch__confirm">
+                Record a no-show with nothing owed? {first} paid for this session.
+              </p>
+              {refundChoice}
+              <Button variant="ghost" onClick={() => setNoShowFree(false)}>
+                Back
+              </Button>
+              <Button
+                variant="danger"
+                disabled={pending}
+                onClick={() => settle(
+                  async () => refundAfter(await markNoShow({ id: session.id, costsASession: false })),
+                  'No-show recorded',
+                  (res) => <>{session.clientName} &mdash; nothing owed for it.{res.message ? <> {res.message}</> : null}</>,
+                )}
+              >
+                No-show &middot; free
               </Button>
             </>
           ) : settled ? (
@@ -591,22 +742,42 @@ export function SessionPanel({
                   the phone's `markNotTrained` has always done. The considered
                   version of this decision lives on the finish screen, which
                   offers the checkbox; the diary is the fast surface. Safe to
-                  press: the receipt's Undo reopens it and gives the session back.
+                  press: the receipt's Reopen restores it and gives the session back.
                   Not on a started session: somebody trained. */}
+              {/* A single session (10 Nov 2026): charging the no-show is the default
+                  and its own button; "free" closes the sale — and, when it was
+                  paid, asks whether to refund. */}
+              {begun && !started && sale && (
+                <Button
+                  variant="ghost"
+                  disabled={pending}
+                  onClick={() => salePaid > 0
+                    ? setNoShowFree(true)
+                    : settle(
+                      () => markNoShow({ id: session.id, costsASession: false }),
+                      'No-show recorded',
+                      () => <>{session.clientName} &mdash; nothing owed for it.</>,
+                    )}
+                >
+                  No-show &middot; free
+                </Button>
+              )}
               {begun && !started && (
                 <Button
                   variant="secondary"
                   disabled={pending}
-                  title="Records a no-show and takes one off the client’s pack. Undo gives it back."
+                  title="Records a no-show and takes one off the client’s pack. Reopen gives it back."
                   onClick={() => settle(
                     () => markNoShow({ id: session.id, costsASession: true }),
                     'No-show recorded',
                     (res) => res.message
                       ? <>{session.clientName} &mdash; {res.message}</>
-                      : <>{session.clientName} &mdash; one session off their pack.</>,
+                      : sale
+                        ? <>{session.clientName} &mdash; {saleAmount} is owed for the missed session.</>
+                        : <>{session.clientName} &mdash; one session off their pack.</>,
                   )}
                 >
-                  No-show &middot; &minus;1
+                  {sale ? <>No-show &middot; charge {saleAmount}</> : <>No-show &middot; &minus;1</>}
                 </Button>
               )}
               {/* `POST /v1/sessions/{id}/done`, never a status flip: the endpoint
@@ -622,7 +793,9 @@ export function SessionPanel({
                     'Marked done',
                     (res) => res.message
                       ? <>{session.clientName} &mdash; {res.message}</>
-                      : <>{session.clientName}&rsquo;s session is done, and one is off their pack.</>,
+                      : session.billing === 'single'
+                        ? <>{session.clientName}&rsquo;s session is done{sale && salePaid >= Number(sale.amount) ? <> and paid for.</> : <> &mdash; {saleAmount} is owed until paid.</>}</>
+                        : <>{session.clientName}&rsquo;s session is done, and one is off their pack.</>,
                   )}
                 >
                   <Check size={15} />

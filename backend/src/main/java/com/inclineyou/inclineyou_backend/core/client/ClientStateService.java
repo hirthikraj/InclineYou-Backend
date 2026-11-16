@@ -152,18 +152,23 @@ public class ClientStateService {
     // ── POST /v1/clients/{id}/delete ───────────────────────────────────────────
 
     /**
-     * Irreversible from every trainer screen, and not the true hard delete its
-     * own button copy might suggest to a trainer reading it: {@code deleted_at}
-     * is the tombstone (CLAUDE.md, "soft deletes everywhere — nothing is
-     * hard-deleted"), so payments and packages survive for the money book and
-     * for GST records, and a pack still owed is left open exactly as
-     * {@link #archive} leaves it. Confirmation is server-checked — the typed
-     * name is the only proof of which client is going, the same shape as
-     * closing the trainer's own account.
+     * Erase an ARCHIVED client — the second of two steps (decided 9 Nov 2026). Archive is the reversible one: sessions
+     * cancelled, packs with nothing owed closed, access ended, all of it undone by Unarchive. Delete is the erase, and
+     * nothing can undo it, support included, so it is refused ({@code CLIENT_NOT_ARCHIVED}) for a client who is not
+     * archived, and still needs their name typed.
+     *
+     * <p>What goes and what stays is {@code erase_clients()}'s (V1, V11), run through {@code erase_client()}, the one door
+     * a trainer's connection may call: everything personal is hard-deleted (programs and workouts, assessments, notes,
+     * messages, feedback, milestones, schedule, invites, reminders, the nudge log, attention dismissals) and the free
+     * text on what stays is wiped. What stays is the money book — packages, payments and delivered sessions, as amounts
+     * and dates — because tax law requires it (GST records, 72 months; DPDP s. 8(7) defers to it), and the client row,
+     * nameless, so those rows still resolve. Until 9 Nov 2026 this route was a soft delete that kept the name and most
+     * of the client's data; the erase function existed and nothing called it.
      */
     @Transactional
     public StateResult delete(UUID trainerId, UUID clientId, DeleteClientRequest req) {
-        schedules.lockClient(trainerId, clientId);
+        var locked = schedules.lockClient(trainerId, clientId);
+        if (!locked.archived()) throw ClientRuleException.notArchived();
         var summary = summaries.one(trainerId, clientId)
                 .orElseThrow(() -> ApiException.notFound("That client is not on your roster."));
         String typed = req.confirmName() == null ? "" : req.confirmName().trim();
@@ -171,6 +176,8 @@ public class ClientStateService {
             throw ClientRuleException.deleteNotConfirmed();
         }
 
+        // Archive did these already; they are run again so the four effect keys stay honest if anything was booked
+        // or sold in between (both are refused for an archived client, so they normally answer 0).
         var effects = effects("sessionsCancelled", "packagesClosed", "packagesOwing", "notesDeleted");
         effects.put("sessionsCancelled", sessions.cancelUpcoming(clientId, "client_deleted", null, clock.zone()));
         // Same rule as archive: a pack with nothing owed closes, one still owed stays open for Business.
@@ -192,7 +199,9 @@ public class ClientStateService {
         clients.delete(clientId);
         // Same reason as archive, and stronger: nobody should be able to open a link to a client who no longer exists.
         invites.revokePending(clientId, "trainer");
-        log.info("client deleted trainer={} client={} effects={} assessmentsDeleted={} cyclesDeleted={}",
+        // The erase, in the same transaction: a refusal anywhere above leaves the client exactly as they were.
+        clients.erase(clientId);
+        log.info("client deleted and erased trainer={} client={} effects={} assessmentsDeleted={} cyclesDeleted={}",
                 trainerId, clientId, effects, assessmentsDeleted, cyclesDeleted);
         return new StateResult(summary, effects);
     }

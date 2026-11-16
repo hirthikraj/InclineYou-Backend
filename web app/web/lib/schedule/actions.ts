@@ -1,5 +1,6 @@
 'use server';
 
+import { notChargedLine as chargeLine, type Billing } from './billing';
 import { revalidatePath } from 'next/cache';
 
 import { api, ApiError } from '@/lib/http/client';
@@ -61,10 +62,23 @@ function readFailure(error: unknown, subject: string): WriteResult {
     switch (error.problem.code) {
       case 'SESSION_CLIENT_TIME_TAKEN':
         return { ok: false, message: `${subject} was refused — this client already has a session at that time.` };
+      case 'SESSION_CLIENT_OVERLAP':
+        /* 9 Nov 2026: one client cannot be in two sessions. Another client at the same hour is still fine. */
+        return { ok: false, message: `${subject} was refused — this client already has a session that overlaps that time.` };
+      case 'SESSION_CHARGED':
+        /* V32: a charged session's billing changes only after a reopen reverses the charge. */
+        return { ok: false, message: 'This session is already charged. Reopen it first to change how it’s paid for.' };
+      case 'SESSION_SINGLE_GYM_CLIENT':
+        return { ok: false, message: 'A gym client pays the gym, so a session can’t be sold to them on its own.' };
       case 'CLIENT_NOT_BOOKABLE':
         return { ok: false, message: `${subject} was refused — ${error.problem.detail ?? 'this client can’t be booked right now.'}` };
       case 'SESSION_NOT_STARTED':
         return { ok: false, message: 'This session hasn’t started yet. Mark it once its start time has passed.' };
+      case 'SESSION_UNDO_EXPIRED':
+        /* 10 Nov 2026: a single session's booking can be undone for ten minutes, then it is cancelled. */
+        return { ok: false, message: 'It’s been more than 10 minutes since this was booked, so it can’t be undone. Cancel it instead.' };
+      case 'SESSION_SALE_PAID':
+        return { ok: false, message: error.problem.detail ?? 'Money was recorded on this session. Refund it first.' };
       case 'SESSION_SETTLED':
       case 'SESSION_DONE':
       case 'SESSION_CANCELLED':
@@ -118,6 +132,9 @@ export async function bookSession(input: {
   programId?: string | null;
   deliveryMode?: 'floor' | 'remote' | null;
   notes?: string | null;
+  /** V32 — how it is paid for; null is a pack. `price` only, and always, for single. */
+  billing?: Billing | null;
+  price?: string | null;
 }): Promise<WriteResult> {
   try {
     // `workoutId: null` lets the server pick the next workout in the client's
@@ -132,6 +149,8 @@ export async function bookSession(input: {
         workoutId: null,
         deliveryMode: input.deliveryMode ?? null,
         notes: input.notes ?? null,
+        billing: input.billing ?? null,
+        price: input.billing === 'single' ? input.price ?? null : null,
       },
     });
     refresh();
@@ -197,7 +216,7 @@ interface MarkWire {
   outcome: 'done' | 'already_done' | 'not_charged';
   packageId?: string;
   sessionsRemaining?: number;
-  reason?: 'NO_PACKAGE' | 'PACKAGE_PAUSED' | 'PACKAGE_EMPTY';
+  reason?: string;
 }
 
 /**
@@ -223,9 +242,35 @@ export async function markDone(id: string): Promise<WriteResult> {
 }
 
 function notChargedLine(reason: MarkWire['reason']): string {
-  return reason === 'PACKAGE_PAUSED' ? 'No session was taken — their pack is paused.'
-    : reason === 'PACKAGE_EMPTY' ? 'No session was taken — their pack has none left.'
-    : 'No session was taken — there is no running pack for it.';
+  return chargeLine(reason) ?? 'Not charged — there is no running pack for it.';
+}
+
+/**
+ * How a session is paid for, changed — `POST /v1/sessions/{id}/billing` (V32).
+ * Before delivery it records the choice; on a delivered session nobody paid
+ * for, it settles it (a single sale, the pack sold since, or free on purpose).
+ */
+export async function setBilling(input: {
+  id: string;
+  billing: Billing;
+  price?: string | null;
+}): Promise<WriteResult> {
+  try {
+    const res = await api<{ charged: boolean; reason?: string; sessionsRemaining?: number }>(
+      `/v1/sessions/${input.id}/billing`,
+      { method: 'POST', body: input.billing === 'single' ? { billing: 'single', price: input.price ?? null } : { billing: input.billing } },
+    );
+    refresh();
+    return {
+      ok: true,
+      sessionId: input.id,
+      charged: res?.charged ?? false,
+      message: res && !res.charged ? chargeLine(res.reason) ?? undefined : undefined,
+      sessionsRemaining: res?.sessionsRemaining ?? null,
+    };
+  } catch (error) {
+    return readFailure(error, 'Changing how it’s paid for');
+  }
 }
 
 /**
@@ -264,9 +309,14 @@ export async function markNoShow(input: {
  * diary as cancelled, the client's start time is freed, and nobody is told.
  * `reason` is `trainer` (the default) or `client`. Undo is `reopenSession`.
  */
-export async function cancelSession(id: string, reason: 'trainer' | 'client' = 'trainer'): Promise<WriteResult> {
+export async function cancelSession(
+  id: string,
+  reason: 'trainer' | 'client' = 'trainer',
+  /** 10 Nov 2026: charge the cancelled session (a late cancel) — a pack session costs one, a single one stays owed. */
+  charge = false,
+): Promise<WriteResult> {
   try {
-    await api(`/v1/sessions/${id}/cancel`, { method: 'POST', body: { reason } });
+    await api(`/v1/sessions/${id}/cancel`, { method: 'POST', body: charge ? { reason, charge } : { reason } });
     refresh();
     return { ok: true, sessionId: id };
   } catch (error) {
@@ -319,6 +369,9 @@ export async function messageAboutSession(
   } catch (error) {
     if (error instanceof ApiError && error.problem.code === 'CLIENT_NO_PHONE') {
       return { ok: false, message: 'This client has no phone number on file. Add one in their file first.' };
+    }
+    if (error instanceof ApiError && error.problem.code === 'NUDGE_TOO_LONG') {
+      return { ok: false, message: error.problem.detail ?? 'This message is too long once it is filled in. Shorten it in Settings → Nudge messages.' };
     }
     if (error instanceof ApiError && error.status === 429) {
       return { ok: false, message: 'Too many messages in a minute. Wait a moment and try again.' };

@@ -1,3 +1,4 @@
+import type { Billing, ClientBilling } from './billing';
 import type { DeckSession } from '@/lib/today/deck';
 
 /**
@@ -42,6 +43,12 @@ export interface ScheduleSession extends DeckSession {
    * leaving the trainer to open the money book to find out.
    */
   charged: boolean;
+  /** How it is paid for (V32) — a delivered `pack` session with no charge is money nobody has asked for yet. */
+  billing: Billing;
+  /** A single session's price, a decimal string, else null. */
+  price: string | null;
+  /** 10 Nov 2026 — a single session's own sale (made at booking); null otherwise. */
+  sale: import('./rows').SessionSaleWire | null;
   /** When the log was opened, or null. A started session can't be moved, cancelled or no-showed. */
   startedAt: number | null;
   /** The row's version — sent as If-Match on the panel's Save (R69). */
@@ -96,4 +103,6 @@ export interface ScheduleClient {
   /** Sessions left on the newest pack, for the panel and the booking warning. */
   packLeft: number | null;
   packTotal: number | null;
+  /** What the client's packs can pay for (V32) — the booking panel's coverage line. Null when not loaded. */
+  billing: ClientBilling | null;
 }

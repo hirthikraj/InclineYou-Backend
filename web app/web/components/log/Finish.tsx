@@ -75,6 +75,9 @@ export function Finish({ data }: { data: FinishDataX }) {
   const [notTrained, setNotTrained] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  /* V32: what the mark charged, when it charged nothing — the one moment the
+     trainer is looking at this session, so the one moment to say it. */
+  const [chargeNote, setChargeNote] = useState<string | null>(null);
 
   const close = (run: () => Promise<{ ok: boolean; message?: string }>) => {
     setBusy(true);
@@ -87,6 +90,7 @@ export function Finish({ data }: { data: FinishDataX }) {
         return;
       }
       setNotTrained(false);
+      setChargeNote(result.message ?? null);
       router.refresh();
     });
   };
@@ -170,6 +174,16 @@ export function Finish({ data }: { data: FinishDataX }) {
                     The money side of this session is settled; the log stays editable.
                   </span>
                 </div>
+              ) : null}
+              {finish.closed ? (
+                chargeNote ? (
+                  <p className={/delivered free/.test(chargeNote) ? 'msg' : 'msg msg--warn'} role="status" style={{ marginTop: 8 }}>
+                    {chargeNote}
+                    {/delivered free/.test(chargeNote)
+                      ? null
+                      : ' Settle it from the session in the Schedule, or take it from the next pack when you renew.'}
+                  </p>
+                ) : null
               ) : session ? (
                 <>
                   <div className="row" style={{ marginTop: 16, gap: 9, flexWrap: 'wrap' }}>

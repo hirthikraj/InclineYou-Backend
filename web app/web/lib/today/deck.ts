@@ -532,10 +532,16 @@ export function missedLine(count: number): string {
 }
 
 /** `Training with no program assigned`. One fact, no number to state. */
-/** `Monthly check due today` · `Monthly check due 2 days ago`. */
-export function assessmentLine(name: string, daysLate: number): string {
-  if (daysLate <= 0) return `${name} due today`;
-  return `${name} due ${daysLate} day${daysLate === 1 ? '' : 's'} ago`;
+/**
+ * `Monthly check due today` · `Monthly check due 2 days ago` · `… · sent to Meera`.
+ *
+ * `sentTo` is the client's first name when the assessment was sent for them to take in the portal. It is
+ * still the trainer's to take too (decided 9 Nov 2026), so the row keeps its Take; the words only say the
+ * client may already be filling it in.
+ */
+export function assessmentLine(name: string, daysLate: number, sentTo?: string): string {
+  const due = daysLate <= 0 ? `${name} due today` : `${name} due ${daysLate} day${daysLate === 1 ? '' : 's'} ago`;
+  return sentTo ? `${due} · sent to ${sentTo}` : due;
 }
 
 export function noProgramLine(): string {
@@ -713,6 +719,8 @@ export interface DeckPackage {
   endDate?: string | null;
   /** V30 · set while the clock is stopped. See the skip in `buildAttention`. */
   pausedAt?: number | null;
+  /** V32 · a single session's own one-session sale: money owed, never a pack — it raises no pack band. */
+  single?: boolean;
   /**
    * v1 · what is still owed on this pack, computed by the server, and when it
    * was due. In v1 a due date lives on the package, not on a payment, so the
@@ -749,6 +757,13 @@ export interface DeckDismissal {
   band: string;
   /** Epoch ms, or null for "do not raise this again". */
   snoozedUntil: number | null;
+  /**
+   * 16 Nov 2026 — the `at` of the row when it was silenced: when that situation
+   * started. A row whose `at` is later is a NEW situation (her next pack, a new
+   * late payment) and comes back. Null on rows written before: those keep the
+   * old reading. See `isSilenced`.
+   */
+  subjectAt?: number | null;
 }
 
 /**
@@ -812,6 +827,8 @@ export interface DeckAssessment {
   clientId: string;
   name: string;
   dueOn: string;
+  /** Sent for the client to take in the portal. The trainer can still take it (on the floor, after a session). */
+  sentAt?: number | null;
 }
 
 /** One month of `GET /v1/money/summary`, numbers already parsed. */
@@ -1412,6 +1429,9 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
     }
   >();
   for (const pkg of input.packages) {
+    /* V32 · a single session's own sale is used up the moment it is charged, and is not a pack to renew. Its
+       money still raises the money rows below, which read every package. */
+    if (pkg.single) continue;
     const standing = packStanding(pkg, now);
     if (standing === null) continue;
     /*
@@ -1424,7 +1444,8 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
      */
     if (pkg.service && input.packages.some((o) =>
       o.id !== pkg.id && o.clientId === pkg.clientId && o.service === pkg.service
-      && packStanding(o, now)?.kind === 'live' && !o.pausedAt
+      // A paused newer pack still counts (9 Nov 2026): the server refuses a second renew over it too.
+      && !o.single && packStanding(o, now)?.kind === 'live'
       && (standing.kind !== 'live' || o.updatedAt > pkg.updatedAt))) continue;
     /*
      * V30 · a PAUSED pack raises nothing.
@@ -1647,7 +1668,7 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
       band: 'assessment-due',
       clientId: a.clientId,
       clientName: client.name?.trim() || 'Client',
-      line: assessmentLine(a.name, daysLate),
+      line: assessmentLine(a.name, daysLate, a.sentAt ? (client.name?.trim().split(' ')[0] || undefined) : undefined),
       severity: attentionSeverity('assessment-due'),
       action: 'Take',
       href: `/clients/assessments/${a.id}/take?from=${encodeURIComponent(a.clientId)}`,
@@ -1703,9 +1724,10 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
       line: unmarkedLine(list.length, label),
       severity: attentionSeverity('unmarked'),
       action: 'Mark',
-      // Newest first inside the day, because `POST /v1/sessions/{id}/done`
-      // decrements the pack once per call and the order it is called in is the
-      // order the pack was consumed in.
+      // Oldest first (the sort above). One `POST /v1/sessions/done` call marks
+      // them all, and the server charges them in the order they HAPPENED
+      // whatever order they are sent in, so the pack is consumed oldest first
+      // either way; the results come back in the order sent.
       sessionIds: list.map((s) => s.id),
       // Age, not count. Two from this morning are less wrong than one from last
       // Tuesday — the same magnitude `log-open` uses, for the same reason.
@@ -2282,6 +2304,13 @@ export function isSilenced(
   const d = dismissals.get(`${item.clientId}:${item.kind}`);
   if (!d) return false;
   if (d.snoozedUntil !== null && d.snoozedUntil <= now) return false;
+  /* 16 Nov 2026 · a dismissal covers the situation it was pressed on, not the
+     client forever. "Not again" on Meera's pack running low in March must not
+     hide her next pack running low in August, nor one late payment every later
+     one. `no-program` is the exception: its `at` moves with the diary window
+     (the earliest booking in it, else now), and "not again" there means "this
+     client does not need a plan", which is about the client. */
+  if (d.subjectAt != null && item.kind !== 'no-program' && item.at > d.subjectAt) return false;
   const wasAt = BAND_VALUE[d.band as AttentionBand];
   // An unrecognised band means a row silenced by a build that knew a band this
   // one does not. Left silent rather than resurfaced: the trainer said not now,

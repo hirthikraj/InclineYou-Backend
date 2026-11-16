@@ -61,6 +61,9 @@ import {
 } from '@/lib/clients/status-actions';
 import { Button } from '@/web-components/ui/Button';
 import { renew } from '@/lib/today/actions';
+import { renewOffer } from '@/lib/clients/package-actions';
+import { packReceipt } from '@/lib/clients/pack-receipt';
+import { useToast } from '@/lib/toast/store';
 import { Tag } from '@/web-components/ui/Tag';
 import { Chip } from '@/web-components/ui/Chip';
 import { Avatar } from '@/web-components/ui/Avatar';
@@ -609,10 +612,62 @@ function ArchivedList({ rows }: { rows: Roster['archivedRows'] }) {
  * on the server. The id is minted once per button, so a retried click answers
  * 200 with the same package instead of selling two.
  */
-function RenewButton({ packageId, label }: { packageId: string; label: string }) {
+function RenewButton({ clientId, name, packageId, label }: {
+  clientId: string; name: string; packageId: string; label: string;
+}) {
   const [attempt] = useState(() => crypto.randomUUID());
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
+  /* OPTION B (V32), the same question Today's Renew asks: sessions this client
+     was given with no pack to pay for them are offered to the new pack, never
+     taken on their own. The roster holds no sessions, so the click asks first. */
+  const [offer, setOffer] = useState<{ sessions: { id: string; at: number }[]; take: number } | null>(null);
+  const first = name.split(' ')[0] || name;
+  const { show } = useToast();
+
+  const done = (result: Awaited<ReturnType<typeof renew>>, taken: number) => {
+    setMessage(result.ok ? null : result.message ?? 'That did not renew.');
+    if (result.ok) {
+      packReceipt(show, {
+        title: 'Renewed',
+        body: `${name}’s pack is sold again${taken ? `, and it took ${taken} session${taken === 1 ? '' : 's'} delivered without a pack` : ''}.`,
+        clientId,
+        packageId: result.packageId,
+      });
+    }
+  };
+
+  const go = (ids: string[]) => startTransition(async () => {
+    const result = await renew(packageId, attempt, ids);
+    setOffer(null);
+    done(result, ids.length);
+  });
+
+  if (offer) {
+    const n = offer.sessions.length;
+    const days = offer.sessions.slice(0, 3)
+      .map((s) => new Date(s.at).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' }))
+      .join(', ') + (n > 3 ? ` and ${n - 3} more` : '');
+    return (
+      <span className="row gap2 sch__wrap" role="group" aria-label={`Renew ${name}’s pack`}>
+        <span className="small">
+          {first} trained {n === 1 ? 'once' : `${n} times`} with no pack ({days}).
+          {offer.take < n ? ` The pack holds ${offer.take}; it takes the oldest.` : ''}
+        </span>
+        <Button variant="secondary" size="sm" disabled={pending}
+          onClick={() => go(offer.sessions.slice(0, offer.take).map((s) => s.id))}>
+          {pending ? 'Renewing…' : `Renew · take ${offer.take}`}
+        </Button>
+        <Button variant="secondary" size="sm" disabled={pending} onClick={() => go([])}>
+          Renew only
+        </Button>
+        <Button variant="ghost" size="sm" disabled={pending} onClick={() => setOffer(null)}>
+          Not now
+        </Button>
+      </span>
+    );
+  }
+
   return (
     <>
       <Button
@@ -620,8 +675,14 @@ function RenewButton({ packageId, label }: { packageId: string; label: string })
         size="sm"
         disabled={pending}
         onClick={() => startTransition(async () => {
+          setMessage(null);
+          const asked = await renewOffer(clientId, packageId);
+          if (asked.sessions.length > 0) {
+            setOffer(asked);
+            return;
+          }
           const result = await renew(packageId, attempt);
-          setMessage(result.ok ? null : result.message ?? 'That did not renew.');
+          done(result, 0);
         })}
       >
         {pending ? 'Renewing…' : label}
@@ -920,7 +981,7 @@ function RowMenu({
 function RowVerb({ row }: { row: RosterRow }) {
   const a = row.attention;
   if (!a) return null;
-  if (a.kind === 'pack' && a.packageId) return <RenewButton packageId={a.packageId} label={a.action} />;
+  if (a.kind === 'pack' && a.packageId) return <RenewButton clientId={row.id} name={row.name} packageId={a.packageId} label={a.action} />;
   const template = templateForKind(a.kind);
   if (template) {
     return (

@@ -16,6 +16,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 
@@ -43,6 +44,7 @@ class NudgeDraftTest {
 
     @Autowired WebApplicationContext context;
     @Autowired NamedParameterJdbcTemplate jdbc;
+    @MockitoSpyBean NudgeLogJdbcRepository logs;
 
     private MockMvc mvc;
     private UUID owner, other, tenant, client;
@@ -138,6 +140,62 @@ class NudgeDraftTest {
     }
 
     @Test
+    @DisplayName("a payment reminder when nothing is owed is refused and logs nothing; a replay of one drafted while it was owed still answers 200")
+    void nothingOwed() throws Exception {
+        // No pack at all.
+        draft(client, "{\"template\":\"payment_reminder\"}")
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("NOTHING_OWED"));
+        // A pack paid in full, named and not named.
+        UUID pkg = packageFor(client, "5000");
+        UUID id = UUID.randomUUID();
+        String body = "{\"id\":\"" + id + "\",\"template\":\"payment_reminder\",\"packageId\":\"" + pkg + "\"}";
+        draft(client, body).andExpect(status().isCreated());
+        payment(pkg, "5000", "paid");
+        draft(client, "{\"template\":\"payment_reminder\",\"packageId\":\"" + pkg + "\"}")
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("NOTHING_OWED"))
+                .andExpect(jsonPath("$.detail").value(containsString("owes nothing on that pack")));
+        draft(client, "{\"template\":\"payment_reminder\"}")
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("NOTHING_OWED"));
+        // The reminder drafted while ₹5,000 was owed is still answered as a replay.
+        draft(client, body).andExpect(status().isOk()).andExpect(jsonPath("$.message").value(containsString("₹5,000")));
+        assertRows(1, "true");
+    }
+
+    @Test
+    @DisplayName("a wording that comes out over 1000 characters once filled in is refused, never cut, and logs nothing")
+    void tooLongOnceFilled() throws Exception {
+        // 970 characters as saved (under the 1000 the backend allows), 1020 once {name} becomes "Rajalakshmi" ten times.
+        String body = "Hello ".repeat(150) + " {name}".repeat(10);
+        mvc.perform(put("/v1/nudge-templates/check_in").header("If-Match", "*").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"body\":\"" + body + "\"}"))
+                .andExpect(status().isOk());
+        draft(client, "{\"template\":\"check_in\"}")
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("NUDGE_TOO_LONG"));
+        assertRows(0, "true");
+    }
+
+    @Test
+    @DisplayName("a double tap: the second request misses the first's row at lookup, meets it at the insert, and still answers 200")
+    void doubleTap() throws Exception {
+        UUID id = UUID.randomUUID();
+        String body = "{\"id\":\"" + id + "\",\"template\":\"check_in\"}";
+        String first = draft(client, body).andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        // The race, without threads: the lookup before the insert does not see the row (the first request had not
+        // committed yet); the insert then finds it on the primary key.
+        org.mockito.Mockito.doReturn(java.util.Optional.empty()).doCallRealMethod().when(logs).byId(id);
+        draft(client, body).andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id.toString()))
+                .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.is(jsonField(first, "message"))));
+        assertRows(1, "true");
+
+        // The same race on another client's row is still a conflict.
+        UUID second = client(owner, tenant, "Irfan Ali", "+919812345678");
+        org.mockito.Mockito.doReturn(java.util.Optional.empty()).doCallRealMethod().when(logs).byId(id);
+        draft(second, body).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ID_CONFLICT"));
+    }
+
+    @Test
     @DisplayName("another trainer cannot read this trainer's follow-up history, even for a client handed over to them")
     void historyIsPerTrainer() throws Exception {
         draft(client, "{\"template\":\"check_in\"}").andExpect(status().isCreated());
@@ -147,6 +205,73 @@ class NudgeDraftTest {
         signedInAs(other);
         mvc.perform(get("/v1/nudges").param("clientId", client.toString()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.items.length()").value(0));
+    }
+
+    @Test
+    @DisplayName("the window: left out, it starts at midnight (workspace time) seven days ago; from widens it; paging walks it once")
+    void historyWindowAndPaging() throws Exception {
+        jdbc.update("UPDATE tenant SET timezone = 'Asia/Kolkata' WHERE id = :id::uuid", Map.of("id", tenant.toString()));
+        var ist = java.time.ZoneId.of("Asia/Kolkata");
+        var weekAgo = java.time.LocalDate.now(ist).minusDays(7).atStartOfDay(ist).toInstant();
+        UUID justIn = logged(weekAgo.plusSeconds(60));             // a minute after the window opens
+        logged(weekAgo.minusSeconds(60));                          // a minute before it: out
+        UUID recent = logged(java.time.Instant.now().minusSeconds(3600));
+        UUID old = logged(java.time.Instant.now().minus(java.time.Duration.ofDays(20)));
+
+        mvc.perform(get("/v1/nudges"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items.length()").value(2))
+                .andExpect(jsonPath("$.items[0].id").value(recent.toString()))
+                .andExpect(jsonPath("$.items[1].id").value(justIn.toString()));
+
+        String from = java.time.LocalDate.now(ist).minusDays(30).toString();
+        var seen = new java.util.ArrayList<String>();
+        String cursor = null;
+        for (int i = 0; i < 10; i++) {
+            var req = get("/v1/nudges").param("from", from).param("limit", "1");
+            if (cursor != null) req = req.param("cursor", cursor);
+            String json = mvc.perform(req).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+            seen.addAll(com.jayway.jsonpath.JsonPath.read(json, "$.items[*].id"));
+            cursor = com.jayway.jsonpath.JsonPath.read(json, "$.nextCursor");
+            if (cursor == null) break;
+        }
+        org.junit.jupiter.api.Assertions.assertEquals(4, seen.size());
+        org.junit.jupiter.api.Assertions.assertEquals(recent.toString(), seen.get(0));
+        org.junit.jupiter.api.Assertions.assertEquals(old.toString(), seen.get(3));
+
+        // A cursor resumes only its own window and client; include adds a field, not rows, so it may differ.
+        String first = com.jayway.jsonpath.JsonPath.read(mvc.perform(get("/v1/nudges").param("from", from).param("limit", "1"))
+                .andReturn().getResponse().getContentAsString(), "$.nextCursor");
+        mvc.perform(get("/v1/nudges").param("from", from).param("limit", "1").param("include", "message").param("cursor", first))
+                .andExpect(status().isOk());
+        mvc.perform(get("/v1/nudges").param("cursor", first)).andExpect(status().isBadRequest());
+        mvc.perform(get("/v1/nudges").param("from", from).param("clientId", client.toString()).param("cursor", first))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("include is only message; a bad clientId, from or limit is 400; a client not on your roster is 404")
+    void historyRefusals() throws Exception {
+        for (var q : List.of(Map.of("include", "text"), Map.of("clientId", "nope"), Map.of("from", "last week"),
+                Map.of("limit", "0"), Map.of("limit", "1001"), Map.of("cursor", "bm9wZQ"))) {
+            var req = get("/v1/nudges");
+            for (var e : q.entrySet()) req = req.param(e.getKey(), e.getValue());
+            mvc.perform(req).andExpect(status().isBadRequest());
+        }
+        mvc.perform(get("/v1/nudges").param("clientId", UUID.randomUUID().toString())).andExpect(status().isNotFound());
+        UUID theirs = client(other, tenantOf(other), "Not mine", "+919876500001");
+        mvc.perform(get("/v1/nudges").param("clientId", theirs.toString())).andExpect(status().isNotFound());
+    }
+
+    /** A nudge_log row for {@link #client} at a given instant, as the draft route writes one. */
+    private UUID logged(java.time.Instant at) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO nudge_log (id, tenant_id, trainer_id, client_id, reason, template, message, sent_at)
+                VALUES (:id::uuid, :ten::uuid, :t::uuid, :c::uuid, 'manual', 'check_in', 'Hi', :at)""",
+                Map.of("id", id.toString(), "ten", tenant.toString(), "t", owner.toString(), "c", client.toString(),
+                        "at", java.sql.Timestamp.from(at)));
+        return id;
     }
 
     @Test
@@ -184,6 +309,27 @@ class NudgeDraftTest {
         draft(client, "{\"template\":\"renewal\",\"packageId\":\"" + theirs + "\"}").andExpect(status().isBadRequest());
         draft(client, "{\"template\":\"renewal\",\"packageId\":\"" + pkg + "\"}").andExpect(status().isCreated());
         assertRows(1, "package_id = '" + pkg + "'");
+    }
+
+    @Test
+    @DisplayName("a named session must be the trainer's and in the state the message speaks of")
+    void sessionSubject() throws Exception {
+        UUID noShow = sessionId("no_show", 2, "trainer");
+        UUID done = sessionId("done", 1, "trainer");
+        UUID booked = sessionId("scheduled", -1, "trainer");
+        UUID alone = sessionId("done", 3, "client");
+
+        draft(client, "{\"template\":\"missed_session\",\"sessionId\":\"" + noShow + "\"}").andExpect(status().isCreated());
+        draft(client, "{\"template\":\"missed_session\",\"sessionId\":\"" + done + "\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(containsString("that session is done")));
+        draft(client, "{\"template\":\"session_reminder\",\"sessionId\":\"" + booked + "\"}").andExpect(status().isCreated());
+        draft(client, "{\"template\":\"session_reminder\",\"sessionId\":\"" + noShow + "\"}").andExpect(status().isBadRequest());
+        // A workout the client ran alone is not a session of the trainer's to message about (R107).
+        draft(client, "{\"template\":\"missed_session\",\"sessionId\":\"" + alone + "\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(containsString("not a session of this client")));
+        assertRows(2, "session_id IS NOT NULL");
     }
 
     @Test
@@ -255,6 +401,17 @@ class NudgeDraftTest {
                 INSERT INTO scheduled_session (id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at, status, cancel_reason)
                 VALUES (gen_random_uuid(), :t::uuid, :c::uuid, now() - make_interval(days => :d), 60, now() - make_interval(days => :d), :s, NULL)""",
                 Map.of("t", owner.toString(), "c", client.toString(), "d", daysAgo, "s", status));
+    }
+
+    private UUID sessionId(String status, int daysAgo, String loggedBy) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO scheduled_session (id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at, status, logged_by)
+                VALUES (:id::uuid, :t::uuid, :c::uuid, now() - make_interval(days => :d), 60,
+                        now() - make_interval(days => :d) + interval '60 minutes', :s, :by)""",
+                Map.of("id", id.toString(), "t", owner.toString(), "c", client.toString(), "d", daysAgo, "s", status,
+                        "by", loggedBy));
+        return id;
     }
 
     private UUID client(UUID trainerId, UUID tenantId, String name, String phone) {

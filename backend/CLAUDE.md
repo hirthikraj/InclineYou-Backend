@@ -308,6 +308,28 @@ production, there was no row anywhere to lose. Readings live on
 history endpoint (`GET /v1/clients/{id}/readings` and `MetricReadings` were removed 10 Oct 2026): a body is measured
 in an assessment and nowhere else.** Don't treat V22 as a precedent.
 
+### How a session is paid for (V32, 9 Nov 2026)
+
+`scheduled_session.billing` is `pack` (the default: Mark done charges the live pack, as always) · `trial` ·
+`complimentary` (never charged; `not_charged` with reason `TRIAL` / `COMPLIMENTARY`, and never "money to chase") ·
+`single` (Mark done sells a one-session `package` with `session_id` set, at `scheduled_session.price`, and charges it).
+**Booking never charges and never refuses for want of a pack** — the charge stays at delivery. A reopened single
+session retires its sale while nothing was collected against it. `POST /v1/sessions/{id}/billing` changes it, and
+settles a delivered pack session nobody paid for. Option B: a sale or renew takes exactly the delivered, uncharged
+sessions named in `chargeSessionIds` (`GET /v1/sessions?uncharged=true`) — never automatically.
+`trg_package_adjustment_billing` is the backstop. `SessionBillingTest` pins it.
+
+**Changed 10 Nov 2026 — a single session is sold when it is booked** (`V33__single_sale_at_booking.sql` lets a
+refunded sale give up the session's one place, so a reopened session can be sold again). The sale is made at
+booking, due on the session's day, and is not owed before it: an unpaid sale for a day still to come is left out of
+`scope=current` and the money summary (`PackageJdbcRepository.NOT_YET_OWED`). It lives with its session
+(`SessionChargeService`): a move moves its due date, Undo of the booking (`DELETE /v1/sessions/{id}`) drops it within
+10 minutes and before money moved, a cancel (`charge`, default false) or a no-show the trainer does not charge closes
+it (status `cancelled`: kept, nothing owed), a reopen revives it, Mark done charges it, and a reopen after done keeps
+it owed. Pause, archive and slot changes close future sales in the same statement that cancels the bookings; a resume
+revives them. `DELETE /v1/packages/{id}` never undoes a single sale (`PACKAGE_SINGLE_SESSION`). The L4 row carries
+`sale`. Keep-as-credit for a paid, cancelled session is post-launch. `V34__package_activated_client.sql` (11 Nov 2026) adds `package.activated_client`, true on the sale that turned a prospect into a client, so its Undo puts them back to prospect. **A single session's sale pays for its own session and no other** (13 Nov 2026): `payingPack` and renew's `renewedSince` skip packages with `session_id` set, and `V35__single_sale_pays_its_own_session.sql` makes `check_session_billing_charge()` refuse any other session's charge to one — since sales are made at booking, next week's ₹800 had been paying for a pack session marked done with no pack. `V36__attention_dismissal_subject.sql` (16 Nov 2026) adds `attention_dismissal.subject_at`: "Not again" on Today's queue covers the situation it was pressed on, and a row whose situation started later (her next pack, a new late payment) comes back (`isSilenced` in `lib/today/deck.ts`; `no-program` keeps the old, per-client reading). The next free migration is `V37`.
+
 ### Ownership is a query filter
 
 Trainer-scoped endpoints read the trainer UUID from the JWT subject and filter
@@ -394,6 +416,17 @@ list and the five invariants its author must not break.
 
 `DELETE` sets `deleted_at`; nothing is hard-deleted, because sync has to
 propagate the tombstone to every device. Every read filters `deleted_at IS NULL`.
+
+**One exception: deleting a client is an erasure (9 Nov 2026).** Archive first, then delete:
+`POST /v1/clients/{id}/delete` is refused (`409 CLIENT_NOT_ARCHIVED`) unless the client is
+archived, and then runs `erase_client()` → `erase_clients()` in the same transaction. Everything
+personal is hard-deleted (programs, assessments, notes, messages, schedule, invites, reminders,
+nudge log, attention dismissals) and the free text on what stays is wiped. The money book (packages,
+payments, delivered sessions) stays as amounts and dates for tax law (GST, 72 months), with the client
+row as a nameless tombstone (`deleted_at` + `erased_at`), so every money read must expect
+`client.name IS NULL`; the web draws it as "Deleted client" (`lib/clients/deleted.ts`). Tests that
+delete a client must label their connection (`app.trainer_id`, `app.tenant_ids`) because
+`erase_client()` checks the caller coaches that client; `TenantIsolationTest` pins it as the request role.
 
 ### The web writes straight to the server
 

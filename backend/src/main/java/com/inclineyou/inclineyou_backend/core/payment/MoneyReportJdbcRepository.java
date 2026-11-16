@@ -32,19 +32,6 @@ public class MoneyReportJdbcRepository {
 
     private final NamedParameterJdbcTemplate jdbc;
 
-    /** Which payment rows a month's total is taken from, and the instant that counts them. */
-    public enum PaymentKind {
-        PAID("paid", "paid_at"), REFUND("refund", "refunded_at"), WRITE_OFF("write_off", "written_off_at");
-
-        final String status;
-        final String column;
-
-        PaymentKind(String status, String column) {
-            this.status = status;
-            this.column = column;
-        }
-    }
-
     // ── summary ─────────────────────────────────────────────────────────
 
     /**
@@ -70,25 +57,42 @@ public class MoneyReportJdbcRepository {
     }
 
     /**
-     * One status's payment rows per month, each on its own partial index. {@code takeHome} is what
-     * was collected less the gym's part of it: the share view only has rows for gym-desk payments,
-     * so a payment without one is entirely the trainer's.
+     * Every paid, refund and write-off row per month and status, in ONE pass over
+     * {@code idx_payment_ledger (trainer_id, book_at DESC, id DESC)}. {@code book_at} (V7) is
+     * {@code coalesce(paid_at, written_off_at, refunded_at, created_at)}, and {@code payment_state_shape}
+     * makes exactly one of the three stamps non-null per status, so it IS the instant each kind is
+     * counted at — paid by {@code paid_at}, a refund by {@code refunded_at}, a write-off by
+     * {@code written_off_at}. It used to be three passes, one per status, and the write-off one had no
+     * index of its own.
+     *
+     * <p>{@code takeHome} (paid rows only) is what was collected less the gym's part of it: the share
+     * view only has rows for gym-desk payments, so a payment without one is entirely the trainer's.
      */
-    public List<PaymentsMonth> paymentsByMonth(UUID trainerId, ZoneId zone, PaymentKind kind, Instant from, Instant to) {
+    public List<PaymentsMonth> paymentsByMonth(UUID trainerId, ZoneId zone, Instant from, Instant to) {
         var p = new HashMap<String, Object>();
         p.put("tid", trainerId.toString());
         p.put("tz", zone.getId());
         p.put("fromAt", Timestamp.from(from));
         p.put("toAt", Timestamp.from(to));
+        // The span's rows first; the share view is then asked for the packages of the span's paid
+        // rows only (a value list on its partition column, which Postgres pushes below the view's
+        // running total — a join on payment_id alone made it total the whole workspace's gym book).
         return jdbc.query("""
-                SELECT to_char(y.%1$s AT TIME ZONE :tz, 'YYYY-MM') AS m, count(*) AS n, sum(y.amount) AS total,
-                       sum(coalesce(sh.share, y.amount)) AS take_home
-                FROM payment y
-                LEFT JOIN payment_trainer_share sh ON sh.payment_id = y.id AND y.status = 'paid'
-                WHERE y.trainer_id = :tid::uuid AND y.deleted_at IS NULL AND y.status = '%2$s'
-                  AND y.%1$s >= :fromAt AND y.%1$s < :toAt
-                GROUP BY 1
-                """.formatted(kind.column, kind.status), p, (rs, i) -> new PaymentsMonth(rs.getString("m"),
+                WITH span AS MATERIALIZED (
+                    SELECT y.id, y.package_id, y.status, y.amount, y.book_at
+                    FROM payment y
+                    WHERE y.trainer_id = :tid::uuid AND y.deleted_at IS NULL
+                      AND y.status IN ('paid', 'refund', 'write_off')
+                      AND y.book_at >= :fromAt AND y.book_at < :toAt
+                )
+                SELECT to_char(y.book_at AT TIME ZONE :tz, 'YYYY-MM') AS m, y.status, count(*) AS n, sum(y.amount) AS total,
+                       sum(coalesce(sh.share, y.amount)) FILTER (WHERE y.status = 'paid') AS take_home
+                FROM span y
+                LEFT JOIN payment_trainer_share sh
+                       ON sh.payment_id = y.id AND y.status = 'paid'
+                      AND sh.package_id = ANY (ARRAY(SELECT package_id FROM span WHERE status = 'paid'))
+                GROUP BY 1, 2
+                """, p, (rs, i) -> new PaymentsMonth(rs.getString("m"), rs.getString("status"),
                 rs.getInt("n"), rs.getBigDecimal("total"), rs.getBigDecimal("take_home")));
     }
 

@@ -314,7 +314,7 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
                 <tbody>
                   {report.topClients.map((c) => (
                     <tr key={c.clientId}>
-                      <td data-l=""><Link className="who" href={`/clients/${c.clientId}`}><b>{c.name}</b></Link></td>
+                      <td data-l="">{c.deleted ? <span className="who"><b>{c.name}</b></span> : <Link className="who" href={`/clients/${c.clientId}`}><b>{c.name}</b></Link>}</td>
                       <td className="num" data-l="Sessions">{c.sessions}</td>
                       <td className="num" data-l="Paid">{rupees(c.collected)}</td>
                       {report.hasGym && <td className="num" data-l="Yours">{rupees(c.yours)}</td>}

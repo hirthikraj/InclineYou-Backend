@@ -6,4 +6,6 @@ package com.inclineyou.inclineyou_backend.core.attention.dto;
  *
  * @param snoozedUntil null for a permanent dismissal
  */
-public record DismissalResponse(String clientId, String kind, String band, Long snoozedUntil, long createdAt) {}
+public record DismissalResponse(String clientId, String kind, String band, Long snoozedUntil, long createdAt,
+                                /** 16 Nov 2026: when the silenced situation started (epoch ms), or null. */
+                                Long subjectAt) {}

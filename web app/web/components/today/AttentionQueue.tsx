@@ -13,6 +13,13 @@ import { HELD_VERBS, HOLD_SECONDS } from '@/lib/today/hold';
 import { contactedLabel } from '@/lib/nudges/cooldown';
 import { KIND_LEAD, clientsNeedYou, foldedSummary, sessionsToday } from '@/lib/today/copy';
 import { DAY_MS } from '@/lib/today/time';
+import { useToast } from '@/lib/toast/store';
+import { packReceipt } from '@/lib/clients/pack-receipt';
+
+/** "Mon 3 Nov" — the days a renew offer names. */
+function shortDay(at: number): string {
+  return new Date(at).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' });
+}
 import { BellOff, Check, Ellipsis } from '@/components/shell/Icons';
 import { Button } from '@/web-components/ui/Button';
 import { Tag } from '@/web-components/ui/Tag';
@@ -82,9 +89,11 @@ import { Slab } from '@/web-components/ui/Slab';
 type RowState =
   | { kind: 'rest' }
   | { kind: 'choosing' }
+  /** Option B (V32): Renew asks whether the new pack takes the sessions delivered without one. */
+  | { kind: 'offer'; sessions: { id: string; at: number }[]; take: number }
   | { kind: 'held'; secondsLeft: number }
   | { kind: 'working' }
-  | { kind: 'sent'; whatsappUrl?: string }
+  | { kind: 'sent'; whatsappUrl?: string; note?: string }
   | { kind: 'silenced'; dismissalId?: string; permanent: boolean }
   | { kind: 'failed'; message: string };
 
@@ -128,6 +137,7 @@ export function AttentionQueue({
   now: number;
 }) {
   const [states, setStates] = useState<Record<string, RowState>>({});
+  const { show } = useToast();
   const [expanded, setExpanded] = useState(false);
   const [showSilenced, setShowSilenced] = useState(false);
   /** clientId → that client's other rows are open under their lead row. */
@@ -169,11 +179,11 @@ export function AttentionQueue({
   );
 
   const commit = useCallback(
-    async (item: AttentionItem) => {
+    async (item: AttentionItem, chargeSessionIds?: string[]) => {
       setState(item.key, { kind: 'working' });
       const attemptId = attempts.current.get(item.key) ?? crypto.randomUUID();
       attempts.current.set(item.key, attemptId);
-      const result = await runVerb(item, renewTerms, openLogs, attemptId);
+      const result = await runVerb(item, renewTerms, openLogs, attemptId, chargeSessionIds);
 
       if (!result.ok) {
         setState(item.key, { kind: 'failed', message: result.message ?? 'That did not go through.' });
@@ -205,16 +215,46 @@ export function AttentionQueue({
        * without it can reach back through `window.opener`.
        */
       attempts.current.delete(item.key);
+      /* A renew's receipt carries the Undo: the row itself goes when the page
+         refreshes (the pack is no longer ending), so the toast is what stays. */
+      if (item.action === 'Renew') {
+        const taken = chargeSessionIds?.length ?? 0;
+        packReceipt(show, {
+          title: 'Renewed',
+          body: `${item.clientName}’s pack is sold again${taken ? `, and it took ${taken} session${taken === 1 ? '' : 's'} delivered without a pack` : ''}.`,
+          clientId: null,
+          packageId: result.packageId,
+        });
+      }
       if (result.whatsappUrl) {
         window.open(result.whatsappUrl, '_blank', 'noopener,noreferrer');
       }
-      setState(item.key, { kind: 'sent', whatsappUrl: result.whatsappUrl });
+      setState(item.key, { kind: 'sent', whatsappUrl: result.whatsappUrl, note: result.ok ? result.message : undefined });
     },
-    [openLogs, renewTerms, setState],
+    [openLogs, renewTerms, setState, show],
   );
 
   const act = useCallback(
     (item: AttentionItem) => {
+      /*
+       * OPTION B (V32, 9 Nov 2026). A client who trained with no pack to pay for
+       * it gets asked about before the renew goes: take those sessions from the
+       * new pack, or renew only (the trainer may have given them free). Never
+       * automatic — the same rule as the client file's Renew sheet. Only as many
+       * as the pack holds, oldest first.
+       */
+      if (item.action === 'Renew' && states[item.key]?.kind !== 'offer') {
+        const terms = renewTerms[item.clientId];
+        const owed = terms?.uncharged ?? [];
+        if (owed.length > 0) {
+          setState(item.key, {
+            kind: 'offer',
+            sessions: owed,
+            take: Math.min(owed.length, terms?.sessionsTotal ?? owed.length),
+          });
+          return;
+        }
+      }
       // Instant verbs go straight through. `Renew` is a local write against a
       // package and tells nobody, so ten seconds of countdown would be theatre.
       if (!HELD_VERBS.has(item.action)) {
@@ -237,7 +277,7 @@ export function AttentionQueue({
 
       pending.current.set(item.key, { timer, ticker });
     },
-    [clearPending, commit, setState],
+    [clearPending, commit, renewTerms, setState, states],
   );
 
   const undo = useCallback(
@@ -261,7 +301,7 @@ export function AttentionQueue({
     async (item: AttentionItem, permanent: boolean) => {
       setState(item.key, { kind: 'working' });
       const until = permanent ? null : now + SNOOZE_DAYS * DAY_MS;
-      const result = await dismissRow(item.clientId, item.kind, item.band, until);
+      const result = await dismissRow(item.clientId, item.kind, item.band, until, item.at);
       if (!result.ok) {
         setState(item.key, { kind: 'failed', message: result.message ?? 'That did not go through.' });
         return;
@@ -337,6 +377,7 @@ export function AttentionQueue({
       item={item}
       state={states[item.key] ?? { kind: 'rest' }}
       onAct={() => act(item)}
+      onRenewTaking={(ids) => void commit(item, ids)}
       onUndo={() => undo(item)}
       onChoose={() => setState(item.key, { kind: 'choosing' })}
       onCancel={() => setState(item.key, { kind: 'rest' })}
@@ -490,6 +531,7 @@ async function runVerb(
   renewTerms: Record<string, RenewTerms>,
   openLogs: Record<string, string[]>,
   attemptId: string,
+  chargeSessionIds?: string[],
 ) {
   switch (item.action) {
     case 'Remind':
@@ -506,7 +548,7 @@ async function runVerb(
       return closeLogs(openLogs[item.clientId] ?? []);
     case 'Renew':
       // The pack the row is about; the newest pack only as a fallback.
-      return renew(item.packageId ?? renewTerms[item.clientId]?.packageId, attemptId);
+      return renew(item.packageId ?? renewTerms[item.clientId]?.packageId, attemptId, chargeSessionIds);
     default:
       return { ok: false, message: `${item.action} is not wired up on this screen yet.` };
   }
@@ -584,6 +626,7 @@ function Row({
   item,
   state,
   onAct,
+  onRenewTaking,
   onUndo,
   onChoose,
   onCancel,
@@ -597,6 +640,8 @@ function Row({
   item: AttentionItem;
   state: RowState;
   onAct: () => void;
+  /** Renew, with the delivered sessions the new pack takes (none = renew only). */
+  onRenewTaking: (sessionIds: string[]) => void;
   onUndo: () => void;
   onChoose: () => void;
   onCancel: () => void;
@@ -697,6 +742,35 @@ function Row({
    * cell answering a question the trainer has no basis to answer precisely; a week
    * is the shortest useful snooze, and *Dismiss* is the other end.
    */
+  if (state.kind === 'offer') {
+    const n = state.sessions.length;
+    const days = state.sessions.slice(0, 3).map((s) => shortDay(s.at)).join(', ') + (n > 3 ? ` and ${n - 3} more` : '');
+    const taken = state.sessions.slice(0, state.take).map((s) => s.id);
+    return (
+      <tr className={rowClass}>
+        {who}
+        <td className="q__why" colSpan={3}>
+          <div className="q__ask">
+            <span>
+              {first} trained {n === 1 ? 'once' : `${n} times`} with no pack to pay for it ({days}).
+              {state.take < n ? ` The new pack holds ${state.take}, so it takes the oldest ${state.take}.` : ''}
+              {' '}Take {state.take === 1 ? 'it' : 'them'} from the new pack?
+            </span>
+            <Button size="sm" onClick={() => onRenewTaking(taken)}>
+              Renew &middot; take {state.take}
+            </Button>
+            <Button size="sm" onClick={() => onRenewTaking([])}>
+              Renew only
+            </Button>
+            <Button size="sm" variant="ghost" onClick={onCancel}>
+              Not now
+            </Button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
   if (state.kind === 'choosing') {
     return (
       <tr className={rowClass}>
@@ -774,6 +848,8 @@ function Row({
           ) : (
             <>
               <span className="ok">{DONE_WORDS[item.action] ?? 'Done'}</span>: {item.line}
+              {/* V32: a mark that went through but charged nothing says so in the row it closed. */}
+              {state.note ? <> &middot; <span className="q__why--bad">{state.note}</span></> : null}
             </>
           )}
         </td>

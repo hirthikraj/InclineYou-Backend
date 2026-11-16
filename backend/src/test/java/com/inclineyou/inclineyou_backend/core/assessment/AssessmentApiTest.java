@@ -70,6 +70,9 @@ class AssessmentApiTest {
         UUID tenant = UUID.fromString(jdbc.queryForObject("SELECT home_tenant_id::text FROM trainer WHERE id = :id::uuid",
                 Map.of("id", me.toString()), String.class));
         CurrentScope.set(new TenantScope.Scope(null, me, tenant, List.of(), false));
+        // The labels AuthTokenFilter puts on a request's connection; erase_client() (a client delete) checks them.
+        jdbc.queryForObject("SELECT set_config('app.trainer_id', :t, true) || set_config('app.tenant_ids', :ids, true)",
+                Map.of("t", me.toString(), "ids", "{" + tenant + "}"), String.class);
         signedInAs(me);
     }
 
@@ -395,6 +398,9 @@ class AssessmentApiTest {
         String open = give(tpl, today.minusDays(2).toString()).read("$.id");
         cycle(tpl, 28, today.plusDays(3).toString());
 
+        // Archive first: delete is only offered for an archived client (CLIENT_NOT_ARCHIVED otherwise).
+        mvc.perform(post("/v1/clients/" + meera + "/archive").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"moved_away\"}")).andExpect(status().isOk());
         mvc.perform(post("/v1/clients/" + meera + "/delete").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"confirmName\":\"Meera Iyer\"}")).andExpect(status().isOk());
 

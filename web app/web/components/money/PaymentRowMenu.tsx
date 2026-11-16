@@ -108,6 +108,8 @@ export interface PaymentRowMenuProps {
   paymentId: string;
   clientId: string;
   clientName: string;
+  /** A client who was deleted (erased): the payment can still be settled or corrected, but there is no file to open. */
+  clientDeleted?: boolean;
   amount: number;
   /** The row's own status. Only a pending row can be settled or let go. */
   status: string;
@@ -126,7 +128,7 @@ export interface PaymentRowMenuProps {
 }
 
 export function PaymentRowMenu({
-  paymentId, clientId, clientName, amount, status, collectedBy = 'trainer', reference: upiReference = null,
+  paymentId, clientId, clientName, clientDeleted = false, amount, status, collectedBy = 'trainer', reference: upiReference = null,
   method = null, note = null, paidAt = null, version = '',
   onNotice, onError,
 }: PaymentRowMenuProps) {
@@ -155,7 +157,8 @@ export function PaymentRowMenu({
   const panel = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
-  const first = clientName.split(' ')[0];
+  // "Deleted's payment" would read as a person called Deleted: a deleted client is "this client" in every sentence.
+  const first = clientDeleted ? 'this client' : clientName.split(' ')[0];
 
   const close = useCallback((restoreFocus = true) => {
     setOpen(false);
@@ -420,15 +423,19 @@ export function PaymentRowMenu({
               <button className="menu__i menu__i--danger" type="button" role="menuitem" onClick={() => setView('delete')}>
                 Delete…
               </button>
-              <div className="menu__sep" />
-              <button
-                className="menu__i"
-                type="button"
-                role="menuitem"
-                onClick={() => go(`/clients/${clientId}`)}
-              >
-                Open {first}&apos;s file
-              </button>
+              {!clientDeleted && (
+                <>
+                  <div className="menu__sep" />
+                  <button
+                    className="menu__i"
+                    type="button"
+                    role="menuitem"
+                    onClick={() => go(`/clients/${clientId}`)}
+                  >
+                    Open {first}&apos;s file
+                  </button>
+                </>
+              )}
               {upiReference && (
                 <button
                   className="menu__i"

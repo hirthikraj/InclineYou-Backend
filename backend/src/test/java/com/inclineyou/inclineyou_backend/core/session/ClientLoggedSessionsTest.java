@@ -248,7 +248,7 @@ class ClientLoggedSessionsTest {
     void planDayCounting() throws Exception {
         selfRun(twoDaysAgo, w1, true);                 // Day A done alone
         mvc.perform(post("/v1/sessions").contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"clientId\":\"" + client + "\",\"scheduledAt\":" + Instant.now().plus(2, ChronoUnit.DAYS).toEpochMilli() + "}"))
+                        .content("{\"clientId\":\"" + client + "\",\"scheduledAt\":" + Instant.now().plus(2, ChronoUnit.DAYS).truncatedTo(ChronoUnit.MINUTES).toEpochMilli() + "}"))   // a whole minute, as the web sends
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.workout.name").value("Day B"));
     }

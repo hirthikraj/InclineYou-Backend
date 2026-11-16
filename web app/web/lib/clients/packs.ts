@@ -25,7 +25,8 @@ export const isLive = (p: ClientPackageWire): boolean => !DEAD.has(p.status);
 
 /** The pack the next session comes off, or null when the client has none live. */
 export function currentPack(packages: ClientPackageWire[]): ClientPackageWire | null {
-  const live = packages.filter(isLive).sort((a, b) => a.createdAt - b.createdAt);
+  // V32 · a single session's own sale is never "the pack", even in the moment it is live.
+  const live = packages.filter((p) => isLive(p) && !p.sessionId).sort((a, b) => a.createdAt - b.createdAt);
   if (live.length === 0) return null;
   return (
     live.find((p) => !p.pausedAt && (p.sessionsRemaining === null || p.sessionsRemaining > 0)) ??

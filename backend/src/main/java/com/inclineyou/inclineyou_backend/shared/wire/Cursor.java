@@ -58,6 +58,41 @@ public record Cursor(String key, UUID id) {
         return ts.toInstant().toString();
     }
 
+    // ── a cursor tied to the query that made it ─────────────────────────────
+
+    private static final String MARK_END = "~";
+
+    /**
+     * A short, stable mark of a query's order and filters ({@code String.hashCode} is fixed by the JLS),
+     * for {@link #encodeFor} and {@link #within}. Pass every parameter that changes which rows come back
+     * or in what order, in a fixed position; a null part is written as "null".
+     */
+    public static String mark(Object... parts) {
+        var sb = new StringBuilder();
+        for (Object part : parts) sb.append(part).append('|');
+        return Integer.toHexString(sb.toString().hashCode());
+    }
+
+    /** A cursor that only {@link #within} with the same mark will resume. */
+    public static String encodeFor(String mark, Object key, String id) {
+        return encode(mark + MARK_END + key, id);
+    }
+
+    /**
+     * The keyset position inside a cursor made by {@link #encodeFor} with this mark; null for no cursor.
+     * A cursor made for another order, window or filter — or by a list that does not mark its cursors — is
+     * a 400, rather than a page that starts somewhere arbitrary.
+     */
+    public static Cursor within(String raw, String mark) {
+        Cursor c = decode(raw);
+        if (c == null) return null;
+        int end = c.key().indexOf(MARK_END);
+        if (end < 0 || !c.key().substring(0, end).equals(mark)) {
+            throw ApiException.validation("cursor: made for a different order, window or filter — start again without it");
+        }
+        return new Cursor(c.key().substring(end + 1), c.id());
+    }
+
     /** {@code limit} within [1, max], defaulting when absent. */
     public static int limit(Integer requested, int dflt, int max) {
         if (requested == null) return dflt;

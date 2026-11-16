@@ -33,10 +33,12 @@ import java.util.UUID;
 public class PackageSaleService {
 
     private final PackageJdbcRepository packages;
+    private final PackageBackChargeService backCharge;
     private final WorkspaceClock clock;
 
     private static final Set<String> KEYS = Set.of("id", "packId", "name", "service", "basis", "sessionsTotal",
-            "amount", "validityDays", "trainerSharePercent", "trainerShareAmount", "startDate", "dueDate", "discountAmount");
+            "amount", "validityDays", "trainerSharePercent", "trainerShareAmount", "startDate", "dueDate", "discountAmount",
+            "chargeSessionIds");
     private static final Set<String> SERVICES = Set.of("floor", "home_visit", "remote", "programming");
 
     @Transactional
@@ -47,11 +49,13 @@ public class PackageSaleService {
         }
         UUID id = uuid(body.get("id"), "id");
         UUID packId = uuid(body.get("packId"), "packId");
-        LocalDate start = date(body.get("startDate"), "startDate");
+        LocalDate start = PackageStartDate.check(date(body.get("startDate"), "startDate"), WorkspaceClock.today(clock.zone()));
         LocalDate due = date(body.get("dueDate"), "dueDate");
         BigDecimal discount = money(body.get("discountAmount"), "discountAmount");
         BigDecimal sharePercent = number(body.get("trainerSharePercent"), "trainerSharePercent");
         BigDecimal shareAmount = money(body.get("trainerShareAmount"), "trainerShareAmount");
+        // V32, option B: delivered sessions with no pack that this sale takes — only those the trainer named.
+        var takeSessions = PackageBackChargeService.read(body.get("chargeSessionIds"));
 
         var client = packages.lockClient(trainerId, clientId)
                 .orElseThrow(() -> ApiException.notFound("That client is not on your roster."));
@@ -146,11 +150,12 @@ public class PackageSaleService {
                 due != null ? due : from, sharePercent, shareAmount));
         // Nothing inserted: the id belongs to a row this trainer cannot see.
         if (inserted == 0) throw ApiException.idConflict();
+        backCharge.take(trainerId, clientId, made, service, basis, sessions, takeSessions);
 
         // A prospect who is sold a pack has, by that act, become an active
         // client — the same rule ClientScheduleService applies when they are
         // given a real weekly plan instead.
-        if ("prospect".equals(client.status())) packages.activateProspect(clientId);
+        if ("prospect".equals(client.status())) packages.activateProspect(clientId, made);
 
         log.info("package sold trainer={} client={} package={} fromPack={}", trainerId, clientId, made, packId != null);
         return new PackageWrite(packages.one(trainerId, made).orElseThrow(), true);

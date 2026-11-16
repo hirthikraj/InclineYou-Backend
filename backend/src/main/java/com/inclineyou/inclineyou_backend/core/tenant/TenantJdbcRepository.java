@@ -1,6 +1,5 @@
 package com.inclineyou.inclineyou_backend.core.tenant;
 
-import com.inclineyou.inclineyou_backend.core.tenant.dto.Workspace;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -32,16 +31,6 @@ public class TenantJdbcRepository {
     public String currency(UUID tenantId) {
         return jdbc.queryForObject("SELECT currency FROM tenant WHERE id = :id::uuid",
                 Map.of("id", tenantId.toString()), String.class);
-    }
-
-    /** The workspace banner {@code /v1/me} draws. */
-    public Optional<Workspace> workspace(UUID tenantId) {
-        return jdbc.query("""
-                SELECT id::text AS id, name, currency, country, timezone
-                FROM tenant WHERE id = :id::uuid
-                """, Map.of("id", tenantId.toString()), (rs, i) -> new Workspace(
-                rs.getString("id"), rs.getString("name"), rs.getString("currency"),
-                rs.getString("country"), rs.getString("timezone"))).stream().findFirst();
     }
 
     // ── scope resolution (every request) ───────────────────────────────────────

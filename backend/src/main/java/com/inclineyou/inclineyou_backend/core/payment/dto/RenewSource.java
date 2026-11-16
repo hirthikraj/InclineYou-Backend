@@ -10,4 +10,6 @@ public record RenewSource(String clientId, String packId, String name, String se
                           BigDecimal sharePercent, BigDecimal shareAmount, Timestamp createdAt,
                           boolean packLive, String packName, String packService, String packBasis, Integer packSessions,
                           BigDecimal packAmount, String packCurrency, Integer packValidity,
-                          BigDecimal packSharePercent, BigDecimal packShareAmount) {}
+                          BigDecimal packSharePercent, BigDecimal packShareAmount,
+                          /** V32: the one-session sale a single session made — never renewed. */
+                          boolean singleSale) {}

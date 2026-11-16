@@ -34,6 +34,16 @@ public class ClientRuleException extends RuntimeException {
         return new ClientRuleException(HttpStatus.BAD_REQUEST, "VALIDATION", message);
     }
 
+    /**
+     * {@code POST /v1/clients/{id}/delete} on a client who is not archived. Delete erases everything personal and cannot
+     * be undone, so it is the second of two deliberate steps: archive (reversible — sessions cancelled, packs closed,
+     * access ended) and then, from the archived client, delete.
+     */
+    public static ClientRuleException notArchived() {
+        return new ClientRuleException(HttpStatus.CONFLICT, "CLIENT_NOT_ARCHIVED",
+                "Archive this client first. Deleting erases their data for good, so it is only offered once they are archived.");
+    }
+
     /** {@code POST /v1/clients/{id}/delete}: the typed name doesn't match — the mis-tap guard. */
     public static ClientRuleException deleteNotConfirmed() {
         return new ClientRuleException(HttpStatus.BAD_REQUEST, "CLIENT_DELETE_NOT_CONFIRMED",

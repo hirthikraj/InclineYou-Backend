@@ -64,7 +64,8 @@ class ClientPortalApiTest {
         var auth = new UsernamePasswordAuthenticationToken(me.toString(), null, AuthorityUtils.createAuthorityList("ROLE_TRAINER"));
         mvc = MockMvcBuilders.webAppContextSetup(context).defaultRequest(get("/").principal(auth)).build();
         tenant = tenantOf(me);
-        jdbc.queryForObject("SELECT set_config('app.trainer_id', :t, true)", Map.of("t", me.toString()), String.class);
+        jdbc.queryForObject("SELECT set_config('app.trainer_id', :t, true) || set_config('app.tenant_ids', :ids, true)",
+                Map.of("t", me.toString(), "ids", "{" + tenant + "}"), String.class);   // erase_client() checks both
         SecurityContextHolder.getContext().setAuthentication(auth);
         CurrentScope.set(new TenantScope.Scope(null, me, tenant, List.of(), false));
     }
@@ -244,13 +245,19 @@ class ClientPortalApiTest {
     }
 
     @Test
-    @DisplayName("delete withdraws the pending invitation too: nobody can open a link to a client who is gone")
+    @DisplayName("archive withdraws the pending invitation, and delete then erases it: nobody can open a link to a client who is gone")
     void deleteWithdraws() throws Exception {
         UUID c = client(me, "Gone", "+919841026070");
         invited(c);
         UUID inv = invite(c, "+919841026070", "pending", 1, -13);
-        mvc.perform(post("/v1/clients/" + c + "/delete").contentType("application/json").content("{\"confirmName\":\"Gone\"}")).andExpect(status().isOk());
+        // Delete is refused until the client is archived.
+        mvc.perform(post("/v1/clients/" + c + "/delete").contentType("application/json").content("{\"confirmName\":\"Gone\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CLIENT_NOT_ARCHIVED"));
+        mvc.perform(post("/v1/clients/" + c + "/archive").contentType("application/json").content("{\"reason\":\"other\"}")).andExpect(status().isOk());
         assertEquals("revoked/trainer", jdbc.queryForObject("SELECT status || '/' || revoked_reason FROM client_invite WHERE id = :i::uuid", Map.of("i", inv.toString()), String.class));
+        mvc.perform(post("/v1/clients/" + c + "/delete").contentType("application/json").content("{\"confirmName\":\"Gone\"}")).andExpect(status().isOk());
+        // The erase takes the invitation row itself: it carried the client's number.
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM client_invite WHERE id = :i::uuid", Map.of("i", inv.toString()), Integer.class));
     }
 
     /* ─────────────────────────────────────────────────────────────── fixtures ── */

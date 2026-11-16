@@ -58,7 +58,7 @@ public class SessionStartService {
         if (req == null) throw ApiException.validation("body: required");
         long minute = Instant.now().truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
         var booked = bookings.book(trainerId, new BookRequest(req.id(), req.clientId(), minute,
-                req.durationMinutes(), req.workoutId(), null, null));
+                req.durationMinutes(), req.workoutId(), null, null, null, null));
         UUID sid = UUID.fromString(booked.session().id());
         startLocked(trainerId, sid, Instant.now());
         return new Created<>(reads.log(trainerId, sid), booked.created());

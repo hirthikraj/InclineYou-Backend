@@ -71,6 +71,13 @@ public class NudgeLogJdbcRepository {
                         Cursor.key(rs.getTimestamp("sent_at"))));
     }
 
+    /** Is this client on this trainer's roster (not deleted)? {@code GET /v1/nudges?clientId=} answers 404 otherwise. */
+    public boolean clientIsMine(UUID trainerId, UUID clientId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM client WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)
+                """, Map.of("cid", clientId.toString(), "tid", trainerId.toString()), Boolean.class));
+    }
+
     /* ──────────────────────────────────────────────────────────── the draft ── */
 
     /** The client's name and number and the trainer's name; empty when the client is not this trainer's or is deleted. */
@@ -102,18 +109,24 @@ public class NudgeLogJdbcRepository {
                 Map.of("pid", packageId.toString(), "cid", clientId.toString(), "tid", trainerId.toString())).isEmpty();
     }
 
-    public boolean sessionOfClient(UUID trainerId, UUID clientId, UUID sessionId) {
-        return !jdbc.queryForList("SELECT 1 FROM scheduled_session WHERE id = :sid::uuid AND client_id = :cid::uuid "
-                        + "AND trainer_id = :tid::uuid AND deleted_at IS NULL",
-                Map.of("sid", sessionId.toString(), "cid", clientId.toString(), "tid", trainerId.toString())).isEmpty();
+    /**
+     * The status of this client's session, or empty when it is not theirs, is deleted, or is a workout the client
+     * ran alone ({@code logged_by = 'client'}, R107: not the trainer's time, so no trainer message is about it).
+     */
+    public Optional<String> sessionStatus(UUID trainerId, UUID clientId, UUID sessionId) {
+        return jdbc.queryForList("SELECT status FROM scheduled_session WHERE id = :sid::uuid AND client_id = :cid::uuid "
+                        + "AND trainer_id = :tid::uuid AND deleted_at IS NULL AND logged_by = 'trainer'",
+                Map.of("sid", sessionId.toString(), "cid", clientId.toString(), "tid", trainerId.toString()),
+                String.class).stream().findFirst();
     }
 
     /**
-     * Appends the row and answers the {@code sent_at} the database gave it, as epoch ms. tenant_id is stamped by
-     * the trigger. A duplicate id surfaces as a {@code DuplicateKeyException} for the service to turn into the
-     * wire's id conflict.
+     * Appends the row and answers the {@code sent_at} the database gave it, as epoch ms; empty when a row with this
+     * id already exists. tenant_id is stamped by the trigger. {@code ON CONFLICT DO NOTHING} rather than letting the
+     * primary key throw: a second request with the same id (a double tap) waits here for the first to commit, and
+     * must then answer that row as a replay, which a failed INSERT could not, because it aborts the transaction.
      */
-    public long append(NewNudgeLog log) {
+    public Optional<Long> append(NewNudgeLog log) {
         var p = new HashMap<String, Object>();
         p.put("id", log.id().toString());
         p.put("tid", log.trainerId().toString());
@@ -123,14 +136,14 @@ public class NudgeLogJdbcRepository {
         p.put("pid", log.packageId() == null ? null : log.packageId().toString());
         p.put("sid", log.sessionId() == null ? null : log.sessionId().toString());
         p.put("message", log.message());
-        Long sentAt = jdbc.queryForObject("""
+        return jdbc.query("""
                 INSERT INTO nudge_log (id, trainer_id, client_id, reason, template, channel,
                                        package_id, session_id, message)
                 VALUES (:id::uuid, :tid::uuid, :cid::uuid, :reason, :template, 'whatsapp_manual',
                         :pid::uuid, :sid::uuid, :message)
+                ON CONFLICT (id) DO NOTHING
                 RETURNING (extract(epoch FROM sent_at) * 1000)::bigint
-                """, p, Long.class);
-        return sentAt == null ? System.currentTimeMillis() : sentAt;
+                """, p, (rs, i) -> rs.getLong(1)).stream().findFirst();
     }
 
     /* ─────────────────────────────────────────── the figures a message quotes ── */

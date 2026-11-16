@@ -26,11 +26,13 @@ public class AttentionDismissalJdbcRepository {
 
     private static final RowMapper<DismissalResponse> ROW = (rs, i) -> {
         Timestamp until = rs.getTimestamp("snoozed_until");
+        Timestamp subject = rs.getTimestamp("subject_at");
         return new DismissalResponse(rs.getString("client_id"), rs.getString("kind"), rs.getString("band"),
-                until == null ? null : until.getTime(), rs.getTimestamp("created_at").getTime());
+                until == null ? null : until.getTime(), rs.getTimestamp("created_at").getTime(),
+                subject == null ? null : subject.getTime());
     };
 
-    private static final String COLUMNS = "client_id::text AS client_id, kind, band, snoozed_until, created_at";
+    private static final String COLUMNS = "client_id::text AS client_id, kind, band, snoozed_until, created_at, subject_at";
 
     /** Every silence this trainer has, oldest first. Lapsed snoozes are included on purpose (see the service). */
     public List<DismissalResponse> list(UUID trainerId) {
@@ -49,18 +51,21 @@ public class AttentionDismissalJdbcRepository {
      * Upsert on the key (trainer_id, client_id, kind), answering the row as it now is. {@code created_at} is not
      * reassigned on conflict: it dates the first "not now". tenant_id is stamped by trg_attention_dismissal_stamp_tenant.
      */
-    public DismissalResponse upsert(UUID trainerId, UUID clientId, String kind, String band, Long snoozedUntil) {
+    public DismissalResponse upsert(UUID trainerId, UUID clientId, String kind, String band, Long snoozedUntil,
+                                    Long subjectAt) {
         var p = new MapSqlParameterSource("tid", trainerId.toString())
                 .addValue("cid", clientId.toString())
                 .addValue("kind", kind)
                 .addValue("band", band)
-                .addValue("until", snoozedUntil == null ? null : Timestamp.from(Instant.ofEpochMilli(snoozedUntil)));
+                .addValue("until", snoozedUntil == null ? null : Timestamp.from(Instant.ofEpochMilli(snoozedUntil)))
+                .addValue("subject", subjectAt == null ? null : Timestamp.from(Instant.ofEpochMilli(subjectAt)));
         return jdbc.queryForObject("""
-                INSERT INTO attention_dismissal (trainer_id, client_id, kind, band, snoozed_until)
-                VALUES (:tid::uuid, :cid::uuid, :kind, :band, :until)
+                INSERT INTO attention_dismissal (trainer_id, client_id, kind, band, snoozed_until, subject_at)
+                VALUES (:tid::uuid, :cid::uuid, :kind, :band, :until, :subject)
                 ON CONFLICT (trainer_id, client_id, kind) DO UPDATE SET
                     band          = EXCLUDED.band,
                     snoozed_until = EXCLUDED.snoozed_until,
+                    subject_at    = EXCLUDED.subject_at,
                     updated_at    = now()
                 RETURNING """ + " " + COLUMNS, p, ROW);
     }

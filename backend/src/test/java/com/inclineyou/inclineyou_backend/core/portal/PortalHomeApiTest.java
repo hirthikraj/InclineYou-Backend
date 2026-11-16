@@ -87,6 +87,13 @@ class PortalHomeApiTest {
     @Test
     @DisplayName("a session today that has not ended is the hero, with its place and a WhatsApp draft naming it — and never a Start; one that has ended is not")
     void sessionHero() throws Exception {
+        // "Today" must have room on both sides: a minute out and 200 s out are tomorrow just before midnight, and a
+        // session that has already ended today needs two minutes after it.
+        int minuteOfDay = jdbc.queryForObject("""
+                SELECT (extract(hour FROM now() AT TIME ZONE t.timezone) * 60 + extract(minute FROM now() AT TIME ZONE t.timezone))::int
+                FROM trainer t WHERE t.id = :t::uuid""", Map.of("t", arun.toString()), Integer.class);
+        org.junit.jupiter.api.Assumptions.assumeTrue(minuteOfDay >= 2 && minuteOfDay < 24 * 60 - 5,
+                "too close to midnight for a test about today");
         UUID c = live();
         jdbc.update("UPDATE trainer_business SET gym_name = 'Cult Koramangala', training_modes = '[\"gym_floor\"]'::jsonb WHERE trainer_id = :t::uuid", Map.of("t", arun.toString()));
         UUID w = workout(program(c), 1, 1, "Lower body A");
@@ -108,7 +115,17 @@ class PortalHomeApiTest {
         assertFalse(body.contains("start"), "a booked session is never started by the client");
 
         jdbc.update("DELETE FROM scheduled_session WHERE id = :s::uuid", Map.of("s", later.toString()));
-        jdbc.update("UPDATE scheduled_session SET scheduled_at = now() - interval '3 hours', ends_at = now() - interval '2 hours' WHERE id = :s::uuid", Map.of("s", s.toString()));
+        // A session that ENDED earlier TODAY, in the trainer's zone (11 Nov 2026): "3 hours ago" was yesterday whenever
+        // the suite ran before 03:00, and the hero then fell through to a self-run day. Start of today, or three hours
+        // back if later; one minute long, so it has ended by any run after 00:02.
+        jdbc.update("""
+                UPDATE scheduled_session s
+                SET scheduled_at = greatest(date_trunc('day', now() AT TIME ZONE t.timezone) AT TIME ZONE t.timezone,
+                                            now() - interval '3 hours'),
+                    duration_minutes = 1,
+                    ends_at = greatest(date_trunc('day', now() AT TIME ZONE t.timezone) AT TIME ZONE t.timezone,
+                                       now() - interval '3 hours') + interval '1 minute'
+                FROM trainer t WHERE t.id = s.trainer_id AND s.id = :s::uuid""", Map.of("s", s.toString()));
         mvc.perform(get("/v1/portal/home").header("Authorization", "Bearer " + token())).andExpect(jsonPath("$.hero.kind").value("rest"))
                 .andExpect(jsonPath("$.hero.nextSession.id").isString());
     }

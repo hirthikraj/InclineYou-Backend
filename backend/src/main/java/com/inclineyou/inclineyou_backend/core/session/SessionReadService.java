@@ -7,6 +7,7 @@ import com.inclineyou.inclineyou_backend.shared.wire.Cursor;
 import com.inclineyou.inclineyou_backend.shared.wire.Page;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
@@ -47,9 +48,15 @@ public class SessionReadService {
      *               after tomorrow
      * @param status optional comma list of {@link #STATUSES}
      * @param order  {@code asc} (default) or {@code desc} — the client file's Sessions tab
+     * @param uncharged true = only sessions delivered on a pack billing that no pack paid for (V32) — what a new or
+     *               renewed pack may take, and what Today raises as money to chase
+     *
+     * <p>One read-only transaction: the workspace's timezone and the page share one connection (one round of the RLS
+     * {@code set_config}s, not two).
      */
+    @Transactional(readOnly = true)
     public Page<SessionRow> list(UUID trainerId, String from, String to, String clientId, String status,
-                                 Integer limit, String cursor, String order) {
+                                 Boolean uncharged, Integer limit, String cursor, String order) {
         LocalDate fromDate = WorkspaceClock.parseDate(from, "from");
         LocalDate toDate = WorkspaceClock.parseDate(to, "to");
         if (fromDate == null || toDate == null) {
@@ -66,7 +73,6 @@ public class SessionReadService {
         else if ("desc".equals(order.strip())) desc = true;
         else throw ApiException.validation("order: asc or desc");
         int n = Cursor.limit(limit, DEFAULT_LIMIT, MAX_LIMIT);
-        Cursor after = Cursor.decode(cursor);
 
         UUID client = null;
         if (clientId != null && !clientId.isBlank()) {
@@ -84,13 +90,27 @@ public class SessionReadService {
             }
         }
 
+        // The cursor names the query it came from, so one sent back with another order, window or filter is refused
+        // rather than answering a page that starts somewhere arbitrary.
+        boolean onlyUncharged = Boolean.TRUE.equals(uncharged);
+        String query = Cursor.mark(desc ? "desc" : "asc", fromDate, toDate, client,
+                String.join(",", new java.util.TreeSet<>(wanted)), onlyUncharged);
+        Cursor after = Cursor.within(cursor, query);
+
+        // A client that is not on this trainer's roster is a 404, as every other route answers for an id that is not
+        // yours — an empty list would read as "no sessions yet".
+        if (client != null && !repo.clientIsMine(trainerId, client)) {
+            throw ApiException.notFound("That client is not on your roster.");
+        }
+
         var zone = clock.zone();
         var rows = repo.page(trainerId, WorkspaceClock.startOf(fromDate, zone), WorkspaceClock.startOf(toDate, zone),
-                client, java.util.List.copyOf(wanted), after, desc, n + 1);
-        return Page.of(rows, n, r -> Cursor.encode(r.cursorKey(), r.id()));
+                client, java.util.List.copyOf(wanted), onlyUncharged, after, desc, n + 1);
+        return Page.of(rows, n, r -> Cursor.encodeFor(query, r.cursorKey(), r.id()));
     }
 
     /** One session in the L4 shape — what a write that creates or changes one answers with. */
+    @Transactional(readOnly = true)
     public Optional<SessionRow> one(UUID trainerId, UUID sessionId) {
         return repo.one(trainerId, sessionId);
     }

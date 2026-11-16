@@ -112,6 +112,21 @@ branches on (`exception/GlobalExceptionHandler.java`):
 | `SIGNUPS_PAUSED` | 503 | The day's budget for numbers with no account (100, system-wide) is spent. Known numbers are unaffected. Carries `retryAfterSeconds`. **Since 8 Nov 2026 only from the invite's code route** (`POST /v1/invites/{token}/code`, whose number is fixed by the link); `otp/request` answers `200` with `signupsPaused: true` instead, so the refusal cannot say whether a number has an account. |
 | `OTP_DELIVERY_FAILED` | 502 | WhatsApp refused or did not answer; the request is marked `failed`. |
 | `PHONE_IS_TRAINER` | 409 | That's the caller's own number — trainer/client duality is allowed for everyone else's. |
+| `SESSION_CLIENT_OVERLAP` | 409 | 9 Nov 2026 — `POST /v1/sessions` into a time that overlaps one of the same client's sessions (any status but cancelled). Another client at that time is allowed, deliberately. |
+| `PACKAGE_IN_USE` | 409 | 9 Nov 2026 — `DELETE /v1/packages/{id}` (the receipt's Undo) on a pack with a payment row, a pack event or a session charged after the sale. End it instead. |
+| `PACKAGE_UNDO_EXPIRED` | 409 | 9 Nov 2026 — `DELETE /v1/packages/{id}` more than 10 minutes after the sale. End it instead. |
+| `NUDGE_TOO_LONG` | 422 | 9 Nov 2026 — `POST /v1/clients/{id}/nudges`: the trainer's wording comes out over 1000 characters once its blanks are filled in. Refused, never cut; nothing is logged. Shorten the wording. |
+| `NOTHING_OWED` | 409 | 9 Nov 2026 — `POST /v1/clients/{id}/nudges` with `payment_reminder` when nothing is owed (on the named pack, or on any). The message used to say "₹0". Nothing is logged; a replay of one drafted while money was owed still answers 200. |
+| `SESSION_CHARGED` | 409 | 9 Nov 2026 (V32) — `POST /v1/sessions/{id}/billing` on a session that already carries a charge. Reopen it first. |
+| `SESSION_NOT_UNCHARGED` | 409 | 9 Nov 2026 (V32) — a sale or renew's `chargeSessionIds` names a session that is no longer delivered-and-uncharged for this client and service. Refused whole. |
+| `PACKAGE_SINGLE_SESSION` | 422 | 9 Nov 2026 (V32) — `POST /v1/packages/{id}/renew` on a single session's own one-session sale (`sessionId` set on the package). Not a pack; nothing to repeat. |
+| `PACKAGE_UNDONE` | 409 | 9 Nov 2026 — `POST /v1/packages/{id}/renew` resent with the `id` of a renew that was undone since. Nothing is sold; a new press carries a new id. |
+| `MARK_FAILED` | — | 13 Nov 2026 — a `reason` inside `POST /v1/sessions/done`'s results (outcome `failed`), not an error status: the database refused that one session in the moment; the rest of the batch stands. Mark again to retry. |
+| `SESSION_UNDO_EXPIRED` | 409 | 10 Nov 2026 — `DELETE /v1/sessions/{id}` more than 10 minutes after the session was booked (16 Nov 2026: every billing, not single alone). Cancel it instead. |
+| `SESSION_SALE_PAID` | 409 | 10 Nov 2026 — undoing a single session, or changing its billing, after money was recorded on its sale. Refund first, or cancel. |
+| `SESSION_SINGLE_GYM_CLIENT` | 422 | 9 Nov 2026 (V32) — `billing: single` for a gym client, who buys only the gym's packs. |
+| `CLIENT_NOT_ARCHIVED` | 409 | 9 Nov 2026 — `POST /v1/clients/{id}/delete` on a client who is active or paused. Archive first, then delete: delete is the DPDP erasure (`erase_client()`) and cannot be undone, so it is the second of two steps. |
+| `CLIENT_DELETE_NOT_CONFIRMED` | 400 | `POST /v1/clients/{id}/delete` with a typed name that is not the client's (case and whitespace ignored). |
 | `PHONE_ON_ANOTHER_ROSTER` | 409 | That number is another coach's client **in this workspace**. Narrowed by V38: it used to mean "anywhere in the product", which made it impossible for one person to be a client of a private trainer and, separately, a client at a gym. |
 | `RATE_LIMITED` | 429 | Tier budget exhausted. |
 | `TEAM_READ_ONLY` | — | Sync-push rejection reason, not an HTTP status. |
@@ -1853,6 +1868,11 @@ ledger the money card reads (`amountDue`, `dueDate`), day counts on the workspac
 makes the same request work, and a `wa.me` link built from a malformed number opens WhatsApp on an error page; `400
 VALIDATION` for an unknown template or a malformed id. The once-per-client-per-7-days cooldown is **not** a refusal
 (see below).
+`422 NUDGE_TOO_LONG` (9 Nov 2026) when the filled-in message is over 1000 characters (`nudge_log.message`): it used to
+be cut there silently, losing its end. The web editor stops a wording at 750 so the figures have room.
+`409 NOTHING_OWED` (9 Nov 2026) for a `payment_reminder` when nothing is owed — a stale screen, usually.
+A named `sessionId` (9 Nov 2026) must be the trainer's own booking (`logged_by = 'trainer'`) and in the state the
+template speaks of — `missed_session` a no-show, `session_reminder` scheduled, `session_summary` done — else `400 VALIDATION`.
 
 **The eight templates** — `NudgeTemplateCatalog`, which is the whitelist and the default wording in one place:
 

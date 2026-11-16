@@ -47,6 +47,8 @@ export interface LedgerRow {
   id: string;
   clientId: string;
   clientName: string;
+  /** The client was deleted (erased): `clientName` is the label, and there is no file to open or number to message. */
+  clientDeleted: boolean;
   packageId: string;
   packageName: string;
   amount: number;
@@ -122,6 +124,8 @@ export interface OverviewActivity {
   at: number;
   clientId: string;
   clientName: string;
+  /** See `LedgerRow.clientDeleted`. */
+  clientDeleted: boolean;
   amount: number;
   packageName: string;
 }
@@ -129,6 +133,8 @@ export interface OverviewActivity {
 export interface TopClient {
   clientId: string;
   name: string;
+  /** See `LedgerRow.clientDeleted`: their income still counts, under the label. */
+  deleted: boolean;
   /** The trainer's own part of what the client paid over the window — the gym's cut already off. */
   yours: number;
   sessions: number;
@@ -320,6 +326,8 @@ export interface PracticeMonth {
 export interface PracticeTopClient {
   clientId: string;
   name: string;
+  /** See `LedgerRow.clientDeleted`. */
+  deleted: boolean;
   sessions: number;
   collected: number;
   yours: number;

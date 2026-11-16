@@ -117,13 +117,9 @@ public class SecurityConfig {
                         .requestMatchers("/v1/invites/**").permitAll()
                         // The provider's status callbacks: no session, authenticated by the HMAC the controller checks over the raw body.
                         .requestMatchers("/v1/webhooks/**").permitAll()
-                        // The client portal (module 11, /v1/me/* and /v1/client/**)
-                        // is out of v1 scope (WEB_LAUNCH.md §3) and its controllers
-                        // were removed rather than kept unreachable — so GET /v1/me
-                        // now has exactly one meaning: the trainer shell's own
-                        // session read (api-contract.html §Today, L1), and no path
-                        // needs a ROLE_CLIENT carve-out from the trainer catch-all
-                        // below.
+                        // Everything else is a trainer's — GET /v1/me included: it has exactly one meaning, the trainer
+                        // shell's own session read (api-contract-v1.2.html#today-l1). The client portal, back in scope since
+                        // 10 Oct 2026, has its own "me" at /v1/portal/me above, so no path needs a ROLE_CLIENT carve-out here.
                         .anyRequest().hasRole("TRAINER")
                 )
                 .exceptionHandling(ex -> ex

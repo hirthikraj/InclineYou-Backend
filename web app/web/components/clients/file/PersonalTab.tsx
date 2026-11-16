@@ -1127,15 +1127,19 @@ function ManageCard({ client }: { client: ClientDetailWire }) {
  * DELETE — the one irreversible verb on this tab, and the danger card's new
  * occupant now that Archive has moved to `ManageCard` above.
  *
- * `deleted_at` is the same tombstone every soft delete in this schema uses
- * (backend/CLAUDE.md: "soft deletes everywhere — nothing is hard-deleted"), so
- * payments and packages survive — for the money book and for GST records — and
- * a pack still owed is left open exactly as Archive leaves it. What IS gone
- * from every screen: the phone number, birth day, goal, activity level, height
- * and every note. There is no Undelete anywhere, unlike the other four verbs,
- * which is why the confirm asks for more than a click: the trainer types
- * {first}'s name back, checked against the server's own copy, the same shape
- * closing the trainer's own account uses. The button stays off until it matches.
+ * Archive first, then delete (decided 9 Nov 2026). Delete is the erasure
+ * (backend `erase_client()`): everything personal is deleted for good — the
+ * profile and name, programs, assessments, notes, messages, the schedule — and
+ * the money book keeps only amounts and dates, which tax law requires, shown
+ * from then on as "Deleted client". Nothing can undo that, support included, so
+ * it is the second of two deliberate steps: on a client who is not archived
+ * this card only says how to get here, and the server refuses the call anyway
+ * (`409 CLIENT_NOT_ARCHIVED`). On an archived client the confirm still asks for
+ * more than a click: the trainer types {first}'s name back, checked against the
+ * server's own copy. The button stays off until it matches.
+ *
+ * (Before 9 Nov 2026 this was a soft delete that kept the name and most of the
+ * client's data; the copy below said so field by field.)
  */
 function DeleteCard({ client }: { client: ClientDetailWire }) {
   const [confirming, setConfirming] = useState(false);
@@ -1145,6 +1149,7 @@ function DeleteCard({ client }: { client: ClientDetailWire }) {
   const router = useRouter();
   const first = client.name.split(' ')[0];
   const matches = typed.trim().toLowerCase() === client.name.trim().toLowerCase();
+  const archived = client.status === 'archived';
 
   function submit() {
     if (!matches || pending) return;
@@ -1169,18 +1174,24 @@ function DeleteCard({ client }: { client: ClientDetailWire }) {
   return (
     <Card as="section" tone="danger" title={`Delete ${first}`} className="cfdz">
       <p className="small cfdz__note">
-        {/* SAYS WHAT THE SERVER DOES, field by field (`ClientJdbcRepository.delete`):
-            the number and the four profile fields are wiped from the row; notes and
-            assessments are taken off every screen; the name stays on the payments
-            and packages it is part of. "Everything is permanently deleted" promised
-            more than that, on the one screen where a promise about data is read as
-            a legal one. */}
-        {first}&rsquo;s number, birth day, goal, activity level and height are wiped, and
-        their notes and assessments are removed from every screen. Their name stays on
-        payments and packages, so the money book still shows what was collected and what
-        is still owed. This cannot be undone.
+        {/* SAYS WHAT THE SERVER DOES (`erase_clients()`), on the one screen where a
+            promise about data is read as a legal one: the person goes, the money
+            stays as amounts and dates — no more, no less. */}
+        {archived ? (
+          <>
+            Everything about {first} is erased for good: their details and name, programs,
+            assessments, notes, messages and schedule. Their payments and packages stay in
+            your books as amounts and dates only, shown as &ldquo;Deleted client&rdquo;, because
+            tax records have to be kept. This cannot be undone.
+          </>
+        ) : (
+          <>
+            To delete {first}, archive them first. Archiving can be undone; deleting erases
+            everything about them for good, so it is offered only once they are archived.
+          </>
+        )}
       </p>
-      <div className="cfdz__a" role="group" aria-label={confirming ? `Confirm deleting ${client.name}` : undefined}>
+      {archived && <div className="cfdz__a" role="group" aria-label={confirming ? `Confirm deleting ${client.name}` : undefined}>
         {confirming ? (
           <>
             <TextField
@@ -1217,7 +1228,7 @@ function DeleteCard({ client }: { client: ClientDetailWire }) {
             Delete
           </Button>
         )}
-      </div>
+      </div>}
       {error && (
         <Message tone="err" alert style={{ marginTop: 11 }}>
           {error}

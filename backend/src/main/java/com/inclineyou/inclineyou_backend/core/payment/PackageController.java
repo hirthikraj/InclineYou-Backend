@@ -25,6 +25,7 @@ public class PackageController {
     private final PackageReadService reads;
     private final PackageRenewService renewals;
     private final PackageSaleService sales;
+    private final PackageUndoService undos;
 
     // ── Packages ──────────────────────────────────────────────────────────────
 
@@ -89,6 +90,16 @@ public class PackageController {
         // 201 the first time; a replayed id answers 200 with the same package.
         var renewed = renewals.renew(trainerId(), packageId, req);
         return ResponseEntity.status(renewed.created() ? HttpStatus.CREATED : HttpStatus.OK).body(renewed.pkg());
+    }
+
+    /**
+     * The Undo on a sale or renew just made (9 Nov 2026): gone without a trace, within ten minutes and while nothing
+     * was recorded on it. A replay answers 204 again.
+     */
+    @DeleteMapping("/v1/packages/{packageId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void undoPackage(@PathVariable UUID packageId) {
+        undos.undo(trainerId(), packageId);
     }
 
     // ── The pack's life · api-contract 1.1 Client file A1, A11 ─────────────────
