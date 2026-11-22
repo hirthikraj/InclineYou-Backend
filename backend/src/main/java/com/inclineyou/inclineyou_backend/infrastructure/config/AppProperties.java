@@ -183,7 +183,55 @@ public class AppProperties {
 
         private WhatsApp whatsapp = new WhatsApp();
 
+        private PingToChat pingtochat = new PingToChat();
+
         private Abuse abuse = new Abuse();
+
+        private EazyOtp eazyotp = new EazyOtp();
+
+        /**
+         * PingToChat's Eazy OTP ({@code delivery: eazyotp}): WhatsApp codes from PingToChat's own approved template
+         * and sender, so no WhatsApp Business number of ours is needed. It generates the code itself and answers it.
+         */
+        @Getter
+        @Setter
+        public static class EazyOtp {
+            private String baseUrl = "https://app.pingtochat.com";
+            /** API credentials → key. A URL segment, so it is a secret even though it is not a header. */
+            private String apiKey;
+            /** API credentials → auth token. Sent as {@code Authorization: Bearer}. */
+            private String token;
+            /** An approved Eazy OTP template's platform id; blank uses the account's default template. */
+            private Integer templateId;
+            private int timeoutSeconds = 5;
+        }
+
+        /**
+         * PingToChat, an Indian WhatsApp Business Solution Provider ({@code delivery: pingtochat}). It fronts Meta's
+         * Cloud API with the same message body, but the sender's ids ride in the URL and the host is the panel domain
+         * the account signs in on — the docs give no fixed one. Every field but the language is per-account.
+         */
+        @Getter
+        @Setter
+        public static class PingToChat {
+            /** The panel domain, with scheme and no trailing slash, e.g. {@code https://app.pingtochat.com}. */
+            private String baseUrl;
+            /** Settings → API → the sender's Phone Number Id. A URL segment. */
+            private String phoneNumberId;
+            /** Settings → API → Key. A URL segment, so it is a secret even though it is not a header. */
+            private String apiKey;
+            /** Settings → API → Generate Token. Sent as {@code Authorization: Bearer}. */
+            private String token;
+            /** An approved Authentication-category template. */
+            private String templateName;
+            private String templateLanguage = "en";
+            /**
+             * Send the code a second time as the copy-code button's parameter. Meta refuses a copy-code template
+             * without it; turn it off only for a template that has no button.
+             */
+            private boolean copyCodeButton = true;
+            private int timeoutSeconds = 5;
+        }
 
         /**
          * Guards on {@code POST /v1/auth/otp/request} that sit above the per-number

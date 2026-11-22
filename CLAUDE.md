@@ -36,9 +36,13 @@ must-do items standing between the current tree and a production
 deployment, an
 India-first hosting analysis for all three layers with alternates, and the
 security checklist to sign off before release. **Read it before any deployment
-or infrastructure work.** One of its blockers is worth knowing even if you
-never deploy: no OTP delivery is wired, so nothing can sign in off a development
-machine. (The other — the web never sending `X-InclineYou-Client: web`, and so
+or infrastructure work.** One of its blockers was worth knowing even if you
+never deploy: no OTP delivery was wired. **Since 22 Nov 2026 it is** — `OTP_DELIVERY=eazyotp`
+sends the code on WhatsApp through PingToChat's Eazy OTP, from PingToChat's shared sender
+(no WhatsApp Business number of ours); Eazy OTP generates the code and `OtpService` stores
+the hash of what it answers. `pingtochat` (our own number via PingToChat) and `whatsapp`
+(Meta direct) are the other senders; `log` stays the development default. What is left is
+in `WEB_LAUNCH.md` MUST-1. (The other — the web never sending `X-InclineYou-Client: web`, and so
 holding an unrevocable JWT — was fixed on 27 Sep 2026: `lib/auth/api.ts` sends it,
 and a not-yet-claimed number gets a 15-minute JWT that can only claim, because
 `web_session` needs an `app_user` row.) **OTP goes over

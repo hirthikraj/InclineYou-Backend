@@ -110,7 +110,18 @@ public class OtpService {
         }
         Optional<String> providerId;
         try {
-            providerId = sender.sendTracked(phone, otp);
+            if (sender.generatesCode()) {
+                // The provider makes up the code (Eazy OTP). The row and the store already hold the hash of `otp`,
+                // which nobody is ever sent, so until the real hash lands a verify can only be OTP_WRONG; then
+                // both are overwritten with the hash of the code that actually went out.
+                OtpSender.Generated generated = sender.sendGenerated(phone);
+                String sentHash = bcrypt.encode(generated.code());
+                ledger.codeIssued(request.getId(), sentHash);
+                store.saveCode(phone, sentHash, expiresAt);
+                providerId = generated.providerId();
+            } else {
+                providerId = sender.sendTracked(phone, otp);
+            }
         } catch (RuntimeException e) {
             // The request exists and nothing will ever arrive for it: say so on the row, so the screen polling it can offer the second path, then let the failure through as it always did.
             ledger.failed(request.getId(), "provider_error");

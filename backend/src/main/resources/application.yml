@@ -164,7 +164,7 @@ app:
     policy-version: ${PRIVACY_POLICY_VERSION:2026-09}
   otp:
     expiry-minutes: 10
-    # log | whatsapp. `log` is development only; see dev-codes-in-log below.
+    # log | whatsapp | pingtochat | eazyotp. `log` is development only; see dev-codes-in-log below.
     delivery: ${OTP_DELIVERY:log}
     whatsapp:
       api-version: ${WHATSAPP_API_VERSION:v21.0}
@@ -175,6 +175,21 @@ app:
       # The status webhook (POST/GET /v1/webhooks/whatsapp). Blank app-secret refuses every POST; blank verify-token every GET.
       app-secret: ${WHATSAPP_APP_SECRET:}
       verify-token: ${WHATSAPP_VERIFY_TOKEN:}
+    # PingToChat's Eazy OTP, for delivery: eazyotp. PingToChat's own sender and template; it generates the code.
+    eazyotp:
+      base-url: ${PINGTOCHAT_EAZYOTP_BASE_URL:https://app.pingtochat.com}
+      api-key: ${PINGTOCHAT_EAZYOTP_API_KEY:}
+      token: ${PINGTOCHAT_EAZYOTP_TOKEN:}
+      template-id: ${PINGTOCHAT_EAZYOTP_TEMPLATE_ID:}
+    # PingToChat (a WhatsApp BSP), for delivery: pingtochat. Ids and token from the panel's Settings → API.
+    pingtochat:
+      base-url: ${PINGTOCHAT_BASE_URL:}
+      phone-number-id: ${PINGTOCHAT_PHONE_NUMBER_ID:}
+      api-key: ${PINGTOCHAT_API_KEY:}
+      token: ${PINGTOCHAT_TOKEN:}
+      template-name: ${PINGTOCHAT_OTP_TEMPLATE:}
+      template-language: ${PINGTOCHAT_OTP_TEMPLATE_LANGUAGE:en}
+      copy-code-button: ${PINGTOCHAT_COPY_CODE_BUTTON:true}
     # Print the code to the log. A separate decision from not sending it, because
     # a log is storage: shipped to an aggregator, retained, and read by more
     # people than the database. TransportSecurityCheck refuses to start when this

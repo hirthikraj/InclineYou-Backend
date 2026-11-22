@@ -30,6 +30,23 @@ public interface OtpSender {
     }
 
     /**
+     * True for a provider that makes up the code itself and answers it (PingToChat's Eazy OTP has no field for
+     * ours). {@link OtpService} then calls {@link #sendGenerated} and stores the hash of what came back, instead
+     * of generating a code and calling {@link #sendTracked}.
+     */
+    default boolean generatesCode() {
+        return false;
+    }
+
+    /** A code the provider generated and sent, and its id for the message when it gives one. */
+    record Generated(String code, Optional<String> providerId) {}
+
+    /** Send a code the provider generates. Only for a sender whose {@link #generatesCode} is true. */
+    default Generated sendGenerated(String phone) {
+        throw new UnsupportedOperationException(getClass().getSimpleName() + " does not generate codes");
+    }
+
+    /**
      * The one that exists today: the code goes to the application log.
      *
      * This is also SEC-OTP-13. It is only reachable while `delivery` is `log`,

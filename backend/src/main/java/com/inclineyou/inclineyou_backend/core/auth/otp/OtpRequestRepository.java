@@ -102,6 +102,14 @@ public interface OtpRequestRepository extends JpaRepository<OtpRequest, UUID> {
             """, nativeQuery = true)
     int applyDelivery(@Param("providerId") String providerId, @Param("status") String status, @Param("error") String error);
 
+    /**
+     * The code a provider generated ({@link OtpSender#generatesCode}), hashed. Until this runs the row holds the hash of
+     * a code nobody was ever sent, so a verify that arrives first can only answer {@code OTP_WRONG}.
+     */
+    @Modifying(clearAutomatically = true)
+    @Query("UPDATE OtpRequest o SET o.otpHash = :hash WHERE o.id = :id")
+    int setHash(@Param("id") UUID id, @Param("hash") String hash);
+
     /** The sender refused the code. The schema ties {@code delivery_error} to {@code failed}. */
     @Modifying(clearAutomatically = true)
     @Query("UPDATE OtpRequest o SET o.deliveryStatus = 'failed', o.deliveryError = :error WHERE o.id = :id")

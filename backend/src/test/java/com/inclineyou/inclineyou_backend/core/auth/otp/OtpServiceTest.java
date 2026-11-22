@@ -83,6 +83,33 @@ class OtpServiceTest {
     class Send {
 
         @Test
+        @DisplayName("a provider that makes up the code: the hash of ITS code is what gets stored, on the row and in the store")
+        void providerGeneratedCode() {
+            when(sender.generatesCode()).thenReturn(true);
+            when(sender.sendGenerated(PHONE)).thenReturn(new OtpSender.Generated("424242", Optional.of("track-1")));
+            when(bcrypt.encode("424242")).thenReturn("$2a$10$sent");
+
+            otp.send(PHONE, OtpRequest.SIGN_IN);
+
+            verify(sender, never()).sendTracked(anyString(), anyString());
+            verify(ledger).codeIssued(any(UUID.class), eq("$2a$10$sent"));
+            verify(store).saveCode(eq(PHONE), eq("$2a$10$sent"), any(Instant.class));
+            verify(ledger).sent(any(UUID.class), eq("track-1"));
+        }
+
+        @Test
+        @DisplayName("a provider that makes up the code and then fails: the row is failed and no real hash is ever stored")
+        void providerGeneratedCodeFails() {
+            when(sender.generatesCode()).thenReturn(true);
+            when(sender.sendGenerated(PHONE)).thenThrow(new IllegalStateException("down"));
+
+            assertThatThrownBy(() -> otp.send(PHONE, OtpRequest.SIGN_IN)).isInstanceOf(IllegalStateException.class);
+
+            verify(ledger, never()).codeIssued(any(UUID.class), anyString());
+            verify(ledger).failed(any(UUID.class), eq("provider_error"));
+        }
+
+        @Test
         @DisplayName("the code is stored hashed and never in the clear")
         void storedHashed() {
             otp.send(PHONE, OtpRequest.SIGN_IN);

@@ -62,6 +62,12 @@ public class OtpRequestLedger {
         return requests.applyDelivery(providerMessageId, status, error);
     }
 
+    /** The provider generated the code; this is its hash, replacing the placeholder {@link #open} wrote. */
+    @Transactional
+    public void codeIssued(UUID id, String hash) {
+        requests.setHash(id, hash);
+    }
+
     @Transactional
     public void failed(UUID id, String error) {
         requests.markFailed(id, error.length() <= 64 ? error : error.substring(0, 64));
