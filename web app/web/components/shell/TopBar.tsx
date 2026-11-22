@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 import { PortalBell } from '@/components/portal/PortalBell';
+import { WORKSPACE_SWITCHING } from '@/lib/launch';
 import { BellMenu } from './BellMenu';
 import { ChevronLeft, Search } from './Icons';
 import { useWorkspace } from './WorkspaceHost';
@@ -152,7 +153,8 @@ export function TopBar({
         it replaced rather than to a gap. `WorkspaceMenu` returns null on an
         empty list for the same reason.
       */}
-      {workspace ? (
+      {/* One workspace per trainer at launch (lib/launch.ts): the crumb, not the switcher. */}
+      {workspace && WORKSPACE_SWITCHING ? (
         <WorkspaceMenu />
       ) : (
         <nav className="crumbs" aria-label="Breadcrumb">

@@ -1,5 +1,6 @@
 
-import { Chevron } from '@/components/shell/Icons';
+import { hasConsent } from '@/lib/clients/setup';
+import { Chevron, Lock } from '@/components/shell/Icons';
 import { avatarToken, initials, rupees } from '@/lib/today/time';
 import type { ClientDetailWire, ClientPackageWire } from '@/lib/clients/client-api';
 import { packBalance } from '@/lib/clients/packs';
@@ -208,11 +209,21 @@ export function HeaderDetail({
         {/* The client's own card, from the client's own file — the place a
             trainer is standing when they think *send her the progress*. It was
             one tab deep, on Progress, and at the foot of Business → Reports. */}
-        <Button href={`/clients/${client.id}/report`} variant="secondary">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
-            <path d="M12 15V4" /><path d="M8 8l4-4 4 4" />
-          </svg>
+        {/* Before consent the card is locked (22 Nov 2026): the lock says so before the press, and the page it
+            opens explains and carries the invite rather than being a dead end. */}
+        <Button
+          href={`/clients/${client.id}/report`}
+          variant="secondary"
+          title={hasConsent(client.membershipStatus) ? undefined : 'Opens once they accept their invite'}
+        >
+          {hasConsent(client.membershipStatus) ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
+              <path d="M12 15V4" /><path d="M8 8l4-4 4 4" />
+            </svg>
+          ) : (
+            <Lock size={14} />
+          )}
           Report
         </Button>
       </div>

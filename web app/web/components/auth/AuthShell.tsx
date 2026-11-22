@@ -45,8 +45,8 @@ export function AuthShell({
   eyebrow?: string;
   /** Two to five words, set in caps. Not a sentence. */
   lead?: string;
-  /** The sentence under the card. */
-  quote?: string;
+  /** The sentence under the card. `null` draws none — `/setup/done`, where it repeated the card (22 Nov 2026). */
+  quote?: string | null;
   children: React.ReactNode;
 }) {
   return (
@@ -64,7 +64,7 @@ export function AuthShell({
           </div>
           <div className="authwrap__card">{children}</div>
           <div className="authwrap__foot">
-            <p className="authwrap__quote">{quote}</p>
+            {quote ? <p className="authwrap__quote">{quote}</p> : null}
             <p className="authwrap__by">
               The app for personal trainers <b>and the people they coach</b>
             </p>

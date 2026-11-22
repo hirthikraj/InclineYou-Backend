@@ -50,8 +50,11 @@ export default async function Page({ params }: { params: Promise<{ workoutId: st
     <>
       <TopBar crumb="Workout" title={preview.workout.name} />
       <main className="main" id="main-content">
+        {/* In the portal's centred column (22 Nov 2026) — it sat flush left on a desk. */}
         <div className="body">
-          <WorkoutPreview preview={preview} trainerFirstName={first} />
+          <div className="portal">
+            <WorkoutPreview preview={preview} trainerFirstName={first} />
+          </div>
         </div>
       </main>
     </>

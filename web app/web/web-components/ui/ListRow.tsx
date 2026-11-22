@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import type { CSSProperties, ReactNode } from 'react';
 
+import { Chevron } from '@/components/shell/Icons';
+
 /**
  * List row — the left pane of a split. For finding, not comparing.
  *
@@ -58,6 +60,7 @@ export function ListRow({
   sub,
   right,
   rightInline,
+  chevron,
   className,
   style,
 }: {
@@ -90,6 +93,13 @@ export function ListRow({
    * `.rst .act .ndg` already use for the same button in the same situation.
    */
   rightInline?: boolean;
+  /**
+   * A trailing `›` that says *this row goes somewhere* (22 Nov 2026). For a list of DESTINATIONS — the portal's
+   * account menu — where nothing else on the row (no figure, no tag) shows it is pressable; on a phone there is no
+   * hover to find out. Not for a list of records, where the whole pane is known to be rows to open. Decorative:
+   * the row is already a link, so the glyph is `aria-hidden`.
+   */
+  chevron?: boolean;
   className?: string;
   style?: CSSProperties;
 }) {
@@ -103,6 +113,11 @@ export function ListRow({
       </span>
       {right ? (
         <span className={rightInline ? 'lrow__r lrow__r--inline' : 'lrow__r'}>{right}</span>
+      ) : null}
+      {chevron ? (
+        <span className="lrow__chev" aria-hidden="true">
+          <Chevron size={16} />
+        </span>
       ) : null}
     </>
   );

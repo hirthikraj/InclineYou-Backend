@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 
-import type { NewClientData, WorkingHourWire, ClientScheduleWire, UpcomingSessionWire } from '@/lib/clients/new-api';
+import type { NewClientData, WorkingHourWire, UpcomingSessionWire } from '@/lib/clients/new-api';
 import {
   checkPhone,
   createClient,
@@ -17,7 +17,7 @@ import { adultCutoff, checkBirthDate } from '@/lib/clients/adult';
 import { DateField } from '@/web-components/ui/DateField';
 import { bookSession } from '@/lib/schedule/actions';
 import { Glyph } from '@/components/shell/Icons';
-import { avatarToken, initials, rupees, isoWeekday, startOfDay, dayStamp, DAY_MS } from '@/lib/today/time';
+import { avatarToken, initials, rupees, isoWeekday, startOfDay, dayStamp, DAY_MS, formatMinute } from '@/lib/today/time';
 import { packSubtitle, type Pack } from '@/lib/setup/money';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
@@ -26,6 +26,11 @@ import { Chip } from '@/web-components/ui/Chip';
 import { KeyValueRow } from '@/web-components/ui/KeyValue';
 import { ListRow, ListRowNumber } from '@/web-components/ui/ListRow';
 import { EmptyState } from '@/web-components/ui/EmptyState';
+import {
+  DaysPerWeekField, Sec, SlotGroups, WEEKDAYS, WeekFields, halfHours, hhmm,
+} from './WeekFields';
+import { InviteButton } from './InviteButton';
+import { GENDERS, asGender, type Gender } from '@/lib/clients/gender';
 
 /* ─────────────────────────────────────────────────── icons ── */
 
@@ -117,48 +122,12 @@ const STEP_DEFS_ACTIVE: StepDef[] = [
   { n: 1, label: 'Who', optional: false },
   { n: 2, label: 'Type', optional: false },
   { n: 3, label: 'Money', optional: false },
-  { n: 4, label: 'Week', optional: true },
+  /* Not optional since 22 Nov 2026: *how many days a week* is the answer a plan
+     is chosen against. Which days and what time are still optional inside it. */
+  { n: 4, label: 'Week', optional: false },
   { n: 5, label: 'Plan', optional: true },
 ];
 
-/* ─────────────────────────────────────────────────── slot helpers ── */
-
-/**
- * THE ONE PLACE THIS SCREEN CROSSES THE TWO WEEKDAY CONVENTIONS.
- *
- * The chips, and everything this step SAVES, are standing slots — 1 = Monday …
- * 7 = Sunday, which is what `client.weekly_schedule` and `program.schedule` both
- * hold and what `TemplateService.validateSchedule` enforces.
- * `working_hours.weekday` is the other one: 0 = Monday … 6 = Sunday, stated on
- * `WorkingHoursService`'s parameter and read that way by `lib/today/time.ts` and
- * `lib/schedule/grid.ts`.
- *
- * This function was handed the first and looked up the second, so pressing *Mon*
- * offered **Tuesday's** working hours, and *Sun* (7) matched no row at all and
- * could never be picked — a whole weekday the trainer could not schedule
- * anybody on. `lib/clients/booking.ts` states both conventions in one place now;
- * the `- 1` is the translation and it belongs here, at the crossing.
- */
-function slotsForDay(weekday: number, hours: WorkingHourWire[]) {
-  const hw = hours.find(h => h.weekday === weekday - 1);
-  if (!hw) return [];
-  const slots: Array<{ minute: number; time: string }> = [];
-  for (let m = hw.startMinute; m < hw.endMinute; m += 30) {
-    const h = Math.floor(m / 60).toString().padStart(2, '0');
-    const min = (m % 60).toString().padStart(2, '0');
-    slots.push({ minute: m, time: `${h}:${min}` });
-  }
-  return slots;
-}
-
-function heldBy(weekday: number, time: string, clients: ClientScheduleWire[]): string | null {
-  const live = new Set(['active', 'invited']);
-  for (const c of clients) {
-    if (!live.has((c.status ?? '').toLowerCase())) continue;
-    if ((c.weeklySchedule ?? []).some(s => s.weekday === weekday && s.time === time)) return c.name;
-  }
-  return null;
-}
 
 /* ──────────────────────────────────────── the demo step's slot grid ──
 
@@ -191,15 +160,8 @@ function instantAt(dayAt: number, minute: number): number {
 }
 
 function demoSlotsForDate(dateAt: number, hours: WorkingHourWire[]) {
-  const hw = hours.find(h => h.weekday === isoWeekday(dateAt));
-  if (!hw) return [];
-  const slots: Array<{ time: string; at: number }> = [];
-  for (let m = hw.startMinute; m + DEMO_DURATION_MINUTES <= hw.endMinute; m += 30) {
-    const h = Math.floor(m / 60).toString().padStart(2, '0');
-    const min = (m % 60).toString().padStart(2, '0');
-    slots.push({ time: `${h}:${min}`, at: instantAt(dateAt, m) });
-  }
-  return slots;
+  return halfHours(hours, isoWeekday(dateAt), DEMO_DURATION_MINUTES)
+    .map(m => ({ minute: m, time: hhmm(m), label: formatMinute(m), at: instantAt(dateAt, m) }));
 }
 
 /** The database's own clash rule (`scheduled_session`'s review note):
@@ -297,6 +259,8 @@ interface Draft {
   name: string;
   phone: string;
   dob: string;
+  /** V43. Absent in a draft written before gender was asked. */
+  gender?: Gender | null;
   /** Only the active path ever detours to Business, so a restored draft is
    *  always active — kept anyway so a stale draft written before this shape
    *  changed still parses (see `parseDraft`). */
@@ -390,6 +354,7 @@ function parseDraft(raw: string): Draft | null {
       phone: d.phone,
       /* A draft written before the date of birth was asked has none. */
       dob: typeof d.dob === 'string' ? d.dob : '',
+      gender: asGender(d.gender),
       /* Always active in practice (only that path detours to Business), but a
          draft written before this field existed has none — read as active
          rather than refused, since that is the only path it could have been. */
@@ -490,25 +455,23 @@ function PriceList({
   );
 }
 
-const WEEKDAYS = [
-  { n: 1, label: 'Mon' },
-  { n: 2, label: 'Tue' },
-  { n: 3, label: 'Wed' },
-  { n: 4, label: 'Thu' },
-  { n: 5, label: 'Fri' },
-  { n: 6, label: 'Sat' },
-  { n: 7, label: 'Sun' },
-];
-
-/* ───────────────────────────────────────── small presentational bits ── */
-
-/** A mono kicker with a rule running to the right edge, and an optional count. */
-function Sec({ k, n }: { k: string; n?: string }) {
+/**
+ * THE INVITE, ON THE LAST STEP (22 Nov 2026).
+ *
+ * Consent is the client accepting this invite, and until they do a trainer may run two sessions and record no
+ * health details, profile or notes. So the flow ends by offering it: WhatsApp from the trainer's own number, or a
+ * QR code if the client is standing there. Optional here — the setup checklist and Today keep asking until it is done.
+ */
+function InviteNow({ clientId, name, phone }: { clientId: string; name: string; phone: string }) {
+  const first = name.split(' ')[0] || 'them';
   return (
-    <div className="adsec">
-      <span className="adsec__k">{k}</span>
-      <span className="adsec__r" />
-      {n && <span className="adsec__n">{n}</span>}
+    <div style={{ ['--i' as string]: 9 }}>
+      <Sec k="Consent" n="before the 3rd session" />
+      <p className="small" style={{ color: 'var(--tx-ink-3)', margin: '0 0 10px' }}>
+        Send {first} their invite now. They accept it on their phone, and that is their consent to train. Until then you
+        can run 2 sessions and record no health details or notes.
+      </p>
+      <InviteButton clientId={clientId} clientName={name} phone={phone} label="Send invite on WhatsApp" variant="secondary" />
     </div>
   );
 }
@@ -572,6 +535,9 @@ export function AddClientFlow({
   const [dob, setDob] = useState('');
   const [dobError, setDobError] = useState<string | null>(null);
   const [dobAge, setDobAge] = useState<number | null>(null);
+  /* V43 (22 Nov 2026): asked with the date of birth, required, never guessed from the name. */
+  const [gender, setGender] = useState<Gender | null>(null);
+  const [genderError, setGenderError] = useState<string | null>(null);
   const dobRef = useRef<HTMLInputElement>(null);
   /* Where the calendar opens while the field is empty: the day somebody turns 18, so
      the first view is the youngest valid month and not today. */
@@ -610,6 +576,20 @@ export function AddClientFlow({
     plan: crypto.randomUUID(),
     demo: crypto.randomUUID(),
   }));
+  /* One plan id per program picked (18 Nov 2026): a retried Apply of the same
+     program replays its id, and picking another program after an answer was
+     lost is a new plan (which replaces the first, R50) rather than the first
+     plan's id sent with a different program — which the server refuses, 409
+     ID_CONFLICT. */
+  const planIds = useRef(new Map<string, string>());
+  const planIdFor = (templateId: string) => {
+    let id = planIds.current.get(templateId);
+    if (!id) {
+      id = planIds.current.size === 0 ? ids.plan : crypto.randomUUID();
+      planIds.current.set(templateId, id);
+    }
+    return id;
+  };
   /** `schedule.version` from the create, then from each save — step 3's If-Match. */
   const [scheduleVersion, setScheduleVersion] = useState<string | null>(null);
   /**
@@ -627,12 +607,16 @@ export function AddClientFlow({
     name: string;
     phone: string;
     dob: string;
+    gender: Gender;
     deliveryMode: 'floor' | 'remote';
     clientType: 'independent' | 'gym';
     packId: string | null;
   } | null>(null);
   /** The furthest rung reached. Rungs and Back walk anywhere at or below it. */
   const [maxStep, setMaxStep] = useState<Step>(1);
+  /* Days a week — the Week step's one required answer (22 Nov 2026). Saved on
+     its own as `sessionsPerWeek`, never derived from the slots picked. */
+  const [perWeek, setPerWeek] = useState<number | null>(null);
   const [weekdays, setWeekdays] = useState<Set<number>>(new Set());
   const [selectedSlots, setSelectedSlots] = useState<Record<number, string>>({});
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
@@ -675,6 +659,7 @@ export function AddClientFlow({
       setName(draft.name);
       setPhone(draft.phone);
       setDob(draft.dob);
+      setGender(draft.gender ?? null);
       /* Only the active path ever detours to Business (Money is the one step
          with a "set up your packs" empty state), so this is always active in
          practice — `parseDraft` already reads a missing/legacy value that way. */
@@ -838,20 +823,21 @@ export function AddClientFlow({
    * away and named.
    */
   const goDefinePacks = useCallback(() => {
-    writeDraft({ name, phone, dob, status, deliveryMode, trainerSplit, clientType, packId });
+    writeDraft({ name, phone, dob, gender, status, deliveryMode, trainerSplit, clientType, packId });
     /* The drawer has to close before the route under it changes, or the dialog
        is left open over the screen it navigated to. */
     onClose?.();
     router.push(`/business/packages?from=${PACKS_DETOUR}`);
-  }, [name, phone, dob, status, deliveryMode, trainerSplit, clientType, packId, onClose, router]);
+  }, [name, phone, dob, gender, status, deliveryMode, trainerSplit, clientType, packId, onClose, router]);
 
-  /* Plans are filtered by the days that were SAVED — a day with an hour — never by
-     the days that were merely ticked: a plan's day count has to equal the booked
-     rhythm or the apply is refused. */
-  const bookedDays = Object.keys(selectedSlots).length;
+  /* Plans are filtered by DAYS A WEEK (22 Nov 2026) — the programming answer —
+     and not by how many weekdays got an hour, which is the calendar's. Apply
+     takes no schedule any more, and a slot with no program day takes the next
+     day in sequence, so a 3-day plan on a 3-a-week client with no slots yet is
+     a plan the server takes. */
   const eligibleTemplates =
-    bookedDays > 0
-      ? data.templates.filter(t => (t.dayLabels?.length ?? 0) === bookedDays)
+    perWeek !== null
+      ? data.templates.filter(t => (t.dayLabels?.length ?? 0) === perWeek)
       : data.templates;
 
   /* The demo picker's 14 real dates, snapshotted once at mount — not
@@ -978,6 +964,7 @@ export function AddClientFlow({
     }
     setError(null);
     if (!validateDob(dob)) { dobRef.current?.focus(); return; }
+    if (!gender) { setGenderError('Pick one. "Prefer not to say" is fine.'); return; }
 
     /* Nothing committed yet: the row is created at the end of step 2, so step 1
        is still only a form and Continue is still only a navigation. */
@@ -986,13 +973,13 @@ export function AddClientFlow({
     /* A no-op save is a no-op — `/settings/profile/work` states the rule and it
        matters more here, because Back-then-Continue is how a trainer CHECKS
        what they typed, and checking should not cost a write. */
-    if (trimmed === committed.name && digits === committed.phone && dob === committed.dob) { goTo(2); return; }
+    if (trimmed === committed.name && digits === committed.phone && dob === committed.dob && gender === committed.gender) { goTo(2); return; }
 
     if (submitting) return;
     setSubmitting(true);
     try {
-      await updateClientDetails(createdClientId, { name: trimmed, phone: digits, dateOfBirth: dob });
-      setCommitted({ ...committed, name: trimmed, phone: digits, dob });
+      await updateClientDetails(createdClientId, { name: trimmed, phone: digits, dateOfBirth: dob, gender });
+      setCommitted({ ...committed, name: trimmed, phone: digits, dob, gender });
       goTo(2);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That did not save. Nothing changed.');
@@ -1024,13 +1011,14 @@ export function AddClientFlow({
           name: name.trim(),
           phone: digits,
           dateOfBirth: dob,
+          gender: gender!,
           clientType,
           status,
           deliveryMode,
         });
         setCreatedClientId(created.id);
         setScheduleVersion(created.scheduleVersion);
-        setCommitted({ name: trimmed, phone: digits, dob, deliveryMode, clientType, packId: null });
+        setCommitted({ name: trimmed, phone: digits, dob, gender: gender!, deliveryMode, clientType, packId: null });
         goTo(3);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Something went wrong.');
@@ -1104,6 +1092,10 @@ export function AddClientFlow({
         clientId: createdClientId,
         scheduledAt: demoAt,
         durationMinutes: DEMO_DURATION_MINUTES,
+        // A demo is a trial: delivered free, never charged, and drawn as one on
+        // the schedule. Booked as the default `pack`, a prospect with no pack got
+        // a session nothing would pay for and Mark done called it unpaid.
+        billing: 'trial',
       });
       if (!result.ok) { setError(result.message ?? 'The booking did not go through. Nothing changed.'); return; }
       goToClient();
@@ -1117,6 +1109,11 @@ export function AddClientFlow({
   /* step 4, active path only (Week) */
   const handleWeekContinue = async () => {
     if (!createdClientId || !scheduleVersion || submitting) return;
+    if (perWeek === null) { setError('How many days a week will they train? Pick a number.'); return; }
+    if (weekdays.size > perWeek) {
+      setError(`${weekdays.size} days are ticked for ${perWeek} a week. Untick ${weekdays.size - perWeek}, or change the number.`);
+      return;
+    }
     /* A DAY WITH NO HOUR IS REFUSED, NOT DROPPED. `weekdays` is the days the trainer
        ticked and `selectedSlots` the hours they gave, and this only read the second —
        so a ticked Friday with no time saved a two-day week in silence, and step 5
@@ -1137,12 +1134,12 @@ export function AddClientFlow({
       .sort(([a], [b]) => Number(a) - Number(b))
       .map(([wd, time], idx) => ({ weekday: Number(wd), start: time, programDay: idx + 1 })) satisfies WeeklySlot[];
 
-    const modeChanged = committed !== null && deliveryMode !== committed.deliveryMode;
-    if (slots.length === 0 && !modeChanged) { goTo(5); return; }
+    /* Always saved now: days a week is required, so there is always something
+       this step owes the server — even a week with no slots in it. */
     setSubmitting(true);
     setError(null);
     try {
-      const saved = await saveSchedule(createdClientId, scheduleVersion, { deliveryMode, slots });
+      const saved = await saveSchedule(createdClientId, scheduleVersion, { deliveryMode, sessionsPerWeek: perWeek, slots });
       setScheduleVersion(saved.version);
       setCommitted(prev => (prev ? { ...prev, deliveryMode } : prev));
       goTo(5);
@@ -1159,7 +1156,7 @@ export function AddClientFlow({
     setSubmitting(true);
     setError(null);
     try {
-      await applyTemplate(selectedTemplateId, { id: ids.plan, clientId: createdClientId });
+      await applyTemplate(selectedTemplateId, { id: planIdFor(selectedTemplateId), clientId: createdClientId });
       onClose?.();
       router.push(`/clients/${createdClientId}`);
     } catch (err) {
@@ -1478,6 +1475,26 @@ export function AddClientFlow({
                   </div>
                 </div>
 
+                {/* GENDER (V43, 22 Nov 2026) — asked, never inferred from a name; "Prefer not to say" is an answer. */}
+                <div style={{ ['--i' as string]: 4 }}>
+                  <Sec k="Gender" n={gender ? GENDERS.find(g => g.value === gender)?.label : 'pick one'} />
+                  <div className="wk" role="group" aria-label="Gender" aria-describedby={genderError ? 'nc-gender-e' : undefined}>
+                    {GENDERS.map(g => (
+                      <Chip
+                        key={g.value}
+                        pressed={gender === g.value}
+                        onClick={() => { setGender(g.value); setGenderError(null); }}
+                        style={gender === g.value
+                          ? { background: 'var(--tx-accent-soft)', borderColor: 'var(--tx-accent-line)', color: 'var(--tx-accent-text)' }
+                          : undefined}
+                      >
+                        {g.label}
+                      </Chip>
+                    ))}
+                  </div>
+                  {genderError && <p id="nc-gender-e" className="fld__e" role="alert">{genderError}</p>}
+                </div>
+
               </>
             )}
 
@@ -1588,14 +1605,15 @@ export function AddClientFlow({
                   return (
                     <div key={dateAt} style={{ ['--i' as string]: i + 1 }}>
                       <Sec k={dayStamp(dateAt)} n={demoAt !== null && slots.some(s => s.at === demoAt) ? 'picked' : undefined} />
-                      <div className="slots">
-                        {slots.map(slot => {
+                      <SlotGroups
+                        slots={slots}
+                        render={slot => {
                           const taken = demoSlotTaken(slot.at, DEMO_DURATION_MINUTES, data.sessions);
                           const isPicked = demoAt === slot.at;
                           if (taken) {
                             return (
                               <span key={slot.time} className="slot slot--held" aria-disabled="true">
-                                {slot.time}
+                                {slot.label}
                                 <small>booked</small>
                               </span>
                             );
@@ -1605,17 +1623,21 @@ export function AddClientFlow({
                               key={slot.time}
                               className={`slot${isPicked ? ' slot--on' : ''}`}
                               type="button"
+                              aria-pressed={isPicked}
                               onClick={() => setDemoAt(isPicked ? null : slot.at)}
                             >
-                              {slot.time}
+                              {slot.label}
                               <small>{isPicked ? 'picked' : 'free'}</small>
                             </button>
                           );
-                        })}
-                      </div>
+                        }}
+                      />
                     </div>
                   );
                 })}
+                {createdClientId && (
+                  <InviteNow clientId={createdClientId} name={trimmed} phone={`+91${digits}`} />
+                )}
               </>
             )}
 
@@ -1802,98 +1824,22 @@ export function AddClientFlow({
               </>
             )}
 
-            {/* STEP 4 — WEEK */}
+            {/* STEP 4 — WEEK: days a week (required), then which days and when (optional) */}
             {step === 4 && (
               <>
                 <div style={{ ['--i' as string]: 0 }}>
-                  <Sec k="Which days" n={weekdays.size ? `${weekdays.size} picked` : 'none yet'} />
-                  <div className="wk">
-                    {WEEKDAYS.map(wd => {
-                      const active = weekdays.has(wd.n);
-                      return (
-                        <Chip
-                          pressed={active}
-                          key={wd.n}
-                          onClick={() => {
-                            const next = new Set(weekdays);
-                            if (active) {
-                              next.delete(wd.n);
-                              const slots = { ...selectedSlots };
-                              delete slots[wd.n];
-                              setSelectedSlots(slots);
-                            } else {
-                              next.add(wd.n);
-                            }
-                            setWeekdays(next);
-                          }}
-                          style={
-                            active
-                              ? { background: 'var(--tx-accent-soft)', borderColor: 'var(--tx-accent-line)', color: 'var(--tx-accent-text)' }
-                              : undefined
-                          }
-                        >
-                          {wd.label}
-                        </Chip>
-                      );
-                    })}
-                  </div>
+                  <DaysPerWeekField value={perWeek} onChange={setPerWeek} />
                 </div>
-
-                {Array.from(weekdays)
-                  .sort((a, b) => a - b)
-                  .map((wd, i) => {
-                    const wdLabel = WEEKDAYS.find(w => w.n === wd)?.label ?? '';
-                    const slots = slotsForDay(wd, data.workingHours);
-                    const pickedTime = selectedSlots[wd];
-
-                    if (slots.length === 0) {
-                      return (
-                        <div key={wd} style={{ ['--i' as string]: i + 1 }}>
-                          <Sec k={wdLabel} n="no working hours set for this day" />
-                        </div>
-                      );
-                    }
-
-                    return (
-                      <div key={wd} style={{ ['--i' as string]: i + 1 }}>
-                        <Sec k={`${wdLabel} · your hours, minus the hours others hold`} n={pickedTime ?? '—'} />
-                        <div className="slots">
-                          {slots.map(slot => {
-                            const holder = heldBy(wd, slot.time, data.clients);
-                            const isPicked = pickedTime === slot.time;
-                            if (holder) {
-                              return (
-                                <span key={slot.time} className="slot slot--held" aria-disabled="true">
-                                  {slot.time}
-                                  <small>{holder.split(' ')[0]} has it</small>
-                                </span>
-                              );
-                            }
-                            return (
-                              <button
-                                key={slot.time}
-                                className={`slot${isPicked ? ' slot--on' : ''}`}
-                                type="button"
-                                onClick={() =>
-                                  setSelectedSlots(prev => {
-                                    if (isPicked) {
-                                      const copy = { ...prev };
-                                      delete copy[wd];
-                                      return copy;
-                                    }
-                                    return { ...prev, [wd]: slot.time };
-                                  })
-                                }
-                              >
-                                {slot.time}
-                                <small>{isPicked ? 'picked' : 'free'}</small>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
+                <WeekFields
+                  hours={data.workingHours}
+                  clients={data.clients}
+                  except={createdClientId}
+                  max={perWeek}
+                  weekdays={weekdays}
+                  onWeekdays={setWeekdays}
+                  slots={selectedSlots}
+                  onSlots={setSelectedSlots}
+                />
               </>
             )}
 
@@ -1904,8 +1850,8 @@ export function AddClientFlow({
                   <EmptyState
                     icon={<><PackIcon size={22} /></>}
                     title="No programs yet"
-                    body={weekdays.size > 0
-                      ? `No plans with ${weekdays.size} day${weekdays.size > 1 ? 's' : ''} match. You can assign one later from their file.`
+                    body={perWeek !== null
+                      ? `No plans with ${perWeek} day${perWeek > 1 ? 's' : ''} match. Assign one later from their file, or pick exercises as you go when you log a session.`
                       : 'Build a template and apply it here. You can also assign one later.'}
                     action={<><Button href="/programs/templates" variant="secondary" onClick={onClose}>
                       Go to programs
@@ -1917,8 +1863,8 @@ export function AddClientFlow({
                     <Sec
                       k="Choose a plan"
                       n={
-                        weekdays.size > 0
-                          ? `${weekdays.size} training day${weekdays.size > 1 ? 's' : ''} · the schedule you just set`
+                        perWeek !== null
+                          ? `${perWeek} day${perWeek > 1 ? 's' : ''} a week · plans that fit`
                           : `${eligibleTemplates.length} available`
                       }
                     />
@@ -1946,6 +1892,9 @@ export function AddClientFlow({
                       })}
                     </div>
                   </div>
+                )}
+                {createdClientId && (
+                  <InviteNow clientId={createdClientId} name={trimmed} phone={`+91${digits}`} />
                 )}
               </>
             )}
@@ -2041,13 +1990,6 @@ export function AddClientFlow({
               </Button>
               <Button variant="ghost" disabled={submitting} onClick={() => goStep(3)}>
                 Back
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={submitting}
-                onClick={() => goTo(5)}
-              >
-                Skip for now
               </Button>
             </>
           )}

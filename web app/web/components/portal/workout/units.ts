@@ -48,3 +48,22 @@ export function clock(totalSeconds: number): string {
   const sec = s % 60;
   return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
 }
+
+/** A finished workout's length as a reader says it — `54 min`, `1 h 5 min`. `clock` is for a running timer; `54:00` read back is a clock time. */
+export function minutes(totalSeconds: number): string {
+  const m = Math.max(1, Math.round(totalSeconds / 60));
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  const r = m % 60;
+  return r ? `${h} h ${r} min` : `${h} h`;
+}
+
+/** A weight total with Indian digit grouping and no stray decimals — `4,522.5`, not `4522.5`. */
+export function kg(n: number): string {
+  return n.toLocaleString('en-IN', { maximumFractionDigits: 1 });
+}
+
+/** A session's total lifted, the way Progress prints it: kilograms under a tonne, tonnes above (`850 kg`, `4.6 t`). Fits a three-up tile at 320. */
+export function volume(totalKg: number): string {
+  return totalKg < 1000 ? `${kg(totalKg)} kg` : `${(totalKg / 1000).toLocaleString('en-IN', { maximumFractionDigits: 1 })} t`;
+}

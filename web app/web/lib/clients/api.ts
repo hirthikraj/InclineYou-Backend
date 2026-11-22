@@ -70,6 +70,8 @@ export interface ClientWire {
   version: string;
   /** v1.2: where they stand on the portal (the roster's half of it). */
   portal: { state: string; invitedAt: number | null; acceptedAt: number | null; lastSeenAt: number | null; lastSelfRunAt: number | null };
+  /** V43 (22 Nov 2026): female · male · other · prefer_not_to_say; null or absent when not given. */
+  gender?: string | null;
 }
 
 /** L5 · `PackageReadService.CurrentPackage`, the fields the roster reads. Money is a decimal string. */

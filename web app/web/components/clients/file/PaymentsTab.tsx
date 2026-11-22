@@ -259,11 +259,18 @@ export function PaymentsTab({
   /* ── the standings ──────────────────────────────────────────────────────── */
 
   /* Ascending, which is the order the server spends them in. See the header. */
+  /* The pack in play is a real pack (18 Nov 2026). A single session's own sale
+     is never it: it was the oldest active row often enough to sit under
+     Pause · Extend · End, and the server now refuses those on a single sale
+     (422 PACKAGE_SINGLE_SESSION). Live single sales still show, after the packs. */
   const live = packages
-    .filter((p) => p.status === 'active')
+    .filter((p) => p.status === 'active' && !p.sessionId)
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const liveSingles = packages
+    .filter((p) => p.status === 'active' && !!p.sessionId)
     .sort((a, b) => a.createdAt - b.createdAt);
   const current = live[0] ?? null;
-  const queued = live.slice(1);
+  const queued = [...live.slice(1), ...liveSingles];
   const past = packages
     .filter((p) => p.status !== 'active' && !p.sessionId)
     .sort((a, b) => b.createdAt - a.createdAt);
@@ -638,6 +645,11 @@ export function PaymentsTab({
           {queued.map((pkg) => packBar(pkg, true))}
         </div>
       ) : (
+        <>
+        {/* Only single sessions and no pack: their sales still show, then the gap. */}
+        {liveSingles.length > 0 ? (
+          <div className="cfpay__bars">{liveSingles.map((pkg) => packBar(pkg, true))}</div>
+        ) : null}
         <Card className="cfpay__gap">
           <p className="small" style={{ color: 'var(--tx-ink-3)' }}>
             No pack running. Sessions logged from here are not counted against anything.
@@ -654,6 +666,7 @@ export function PaymentsTab({
             )}
           </div>
         </Card>
+        </>
       )}
 
       {/* ── the ledger ───────────────────────────────────────────────────── */}

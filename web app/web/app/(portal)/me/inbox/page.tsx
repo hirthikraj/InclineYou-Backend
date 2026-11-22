@@ -34,10 +34,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
 
   return (
     <>
-      <TopBar crumb="From your trainer" title="From your trainer" />
+      <TopBar crumb="From your trainer" title="Me" titleHref="/me/account" />
       <main className="main" id="main-content">
         <PageHeader className="ph--portal" title={`From ${first}`} />
         <div className="body">
+          {/* In the portal's centred column (22 Nov 2026): without `.portal` this screen sat flush left on a desk while its title, which reads the column, sat centred — measured at 1568px, the content began 238px left of the heading. */}
+          <div className="portal">
           {!messages || !notes ? (
             <Message tone="warn">We couldn’t load this just now. Reload in a moment — nothing has been lost.</Message>
           ) : (
@@ -76,6 +78,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
               )}
             </div>
           )}
+          </div>
         </div>
       </main>
     </>

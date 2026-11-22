@@ -82,7 +82,10 @@ export function ProfileAside() {
 
   return (
     <>
+      {/* Folds below the name when the layout stacks on a phone (22 Nov 2026) — the card leads there now, and whole it
+          was ~500px above the first field. `.pfx .pfc--fold` in app.css decides the width. */}
       <ProfileCard
+        collapsible
         name={d.name}
         tintKey={d.phone}
         headline={d.headline}

@@ -8,7 +8,7 @@ import { lengthChoices } from '@/lib/schedule/result';
 import {
   cancelSession, markDone, markNoShow, reopenSession, setBilling, updateSession,
 } from '@/lib/schedule/actions';
-import { BILLING_CHOICES, type Billing } from '@/lib/schedule/billing';
+import { BILLING_CHOICES, freeTag, isProspect, type Billing } from '@/lib/schedule/billing';
 import { refundPack } from '@/lib/clients/package-actions';
 import type { WriteResult } from '@/lib/schedule/result';
 import { Calendar, Check, Chevron } from '@/components/shell/Icons';
@@ -20,6 +20,7 @@ import { Chip } from '@/web-components/ui/Chip';
 import { Field } from '@/web-components/ui/Field';
 import { KeyValueRow } from '@/web-components/ui/KeyValue';
 import { Avatar } from '@/web-components/ui/Avatar';
+import { Tag } from '@/web-components/ui/Tag';
 
 /**
  * ONE SESSION — AND ITS LENGTH.
@@ -217,6 +218,14 @@ export function SessionPanel({
   const begun = now >= session.at;
   const first = session.clientName.split(' ')[0] || session.clientName;
   const sale = session.billing === 'single' ? session.sale : null;
+  /** A trial or a complimentary session: never charged, so a no-show takes nothing either. */
+  const free = session.billing === 'trial' || session.billing === 'complimentary';
+  const tag = freeTag(session.billing);
+  /* A prospect's session still on Pack — every demo booked before 22 Nov 2026,
+     when Add client sent no billing. They have no pack, so delivered as it is it
+     would read as unpaid; offer the one tap that says what it really was. */
+  const prospectOnPack = !settled && !session.charged && session.billing === 'pack'
+    && isProspect(client) && (client?.billing?.packs.length ?? 0) === 0;
   const salePaid = sale ? Number(sale.paid) : 0;
   const saleAmount = sale ? rupees(Number(sale.amount)) : '';
 
@@ -322,9 +331,16 @@ export function SessionPanel({
       >
         <div className="panel__hd">
           <Avatar name={session.clientName} id={session.clientId} />
-          <div style={{ minWidth: 0 }}>
-            <p className="panel__t">{session.clientName}</p>
-            <p className="small">
+          {/* The name and the trial tag share the title line, and the when
+              stays on one line under it: the header is one fixed band, and a
+              tag tacked onto the date wrapped it to three lines and pushed the
+              name out of the top (22 Nov 2026). */}
+          <div className="sch__hd">
+            <p className="panel__t sch__hd__t">
+              <span>{session.clientName}</span>
+              {tag && <Tag tone="acc">{tag}</Tag>}
+            </p>
+            <p className="small sch__hd__w">
               {dayLong(session.at)} · {formatMinuteRange(startMinute, endMinute)}
             </p>
           </div>
@@ -405,9 +421,16 @@ export function SessionPanel({
             beside a week and all of it is what the trainer wants the night before.
             A past block goes straight there and never opens this panel at all.
           */}
-          <div className="sect">
+          {/* Both ways out, together: the session's own page and the client's
+              file. The client link used to sit alone at the foot of the body,
+              a ghost button indented off the left edge everything else holds. */}
+          <div className="sect row gap2 sch__wrap">
             <Button href={`/sessions/${session.id}`} variant="secondary" size="sm">
               Open the session
+              <Chevron size={14} />
+            </Button>
+            <Button href={`/clients/${session.clientId}`} variant="ghost" size="sm">
+              {first}&rsquo;s file
               <Chevron size={14} />
             </Button>
           </div>
@@ -450,6 +473,23 @@ export function SessionPanel({
             </div>
           ) : !settled && !session.charged ? (
             <div className="sect fld">
+              {prospectOnPack && (
+                <div className="sch__note sch__note--warn" style={{ marginBottom: 8 }}>
+                  <WarnTriangle size={14} />
+                  <span>
+                    {first} is a prospect with no pack, so nothing will pay for this one.
+                    If it&rsquo;s a demo, book it as a trial.{' '}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={pending}
+                      onClick={() => run(() => setBilling({ id: session.id, billing: 'trial' }))}
+                    >
+                      Make it a trial
+                    </Button>
+                  </span>
+                </div>
+              )}
               <span className="fld__l">Paid by</span>
               <div className="row gap2 sch__wrap">
                 {BILLING_CHOICES.filter((b) => b.id !== 'single' || session.price || rate || session.billing === 'single')
@@ -483,20 +523,30 @@ export function SessionPanel({
             </div>
           ) : null}
 
+          {/* THE FACTS. A session with no workout and no live plan used to say
+              "Plan · Session", the row's own fallback word. A free session drops
+              Package and the rate: Paid by above already says it is never
+              charged, so those two rows only repeated it as a dash and a "Free". */}
           <div className="sect">
-            <KeyValueRow k="Plan">{session.detail}</KeyValueRow>
-            <KeyValueRow k="Package">
-              {client?.packLeft != null && client.packTotal != null
-                ? `${client.packLeft} of ${client.packTotal} left`
-                : '—'}
+            <KeyValueRow k="Plan">
+              {session.programId || session.programName ? session.detail : 'No live plan'}
             </KeyValueRow>
-            <div className="kv">
-              <span className="kv__k">This session</span>
-              {/* A rate, or the honest absence of one. `perSession` yields nothing
-                  for a client on a monthly fee — a month is not attributable to
-                  one hour of it — and "₹0" would be a claim rather than a blank. */}
-              <span className="kv__v">{rate ? rupees(rate) : 'No per-session rate'}</span>
-            </div>
+            {!free && (
+              <>
+                <KeyValueRow k="Package">
+                  {client?.packLeft != null && client.packTotal != null
+                    ? `${client.packLeft} of ${client.packTotal} left`
+                    : 'None'}
+                </KeyValueRow>
+                <div className="kv">
+                  <span className="kv__k">This session</span>
+                  {/* A rate, or the honest absence of one. `perSession` yields nothing
+                      for a client on a monthly fee — a month is not attributable to
+                      one hour of it — and "₹0" would be a claim rather than a blank. */}
+                  <span className="kv__v">{rate ? rupees(rate) : 'No per-session rate'}</span>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="sect col gap3">
@@ -514,11 +564,13 @@ export function SessionPanel({
                   </Chip>
                 ))}
               </div>
-              <p className="fld__h">
-                {client
-                  ? `${client.name} usually trains for ${client.minutes} minutes.`
-                  : 'Changing this moves the block’s bottom edge, not its start.'}
-              </p>
+              {/* The client's usual length, said only when this one differs and
+                  only for someone who has trained: a prospect has no "usually". */}
+              {client && !isProspect(client) && client.minutes !== minutes ? (
+                <p className="fld__h">{first} usually trains for {client.minutes} minutes.</p>
+              ) : !client ? (
+                <p className="fld__h">Changing this moves the block&rsquo;s bottom edge, not its start.</p>
+              ) : null}
             </div>
 
             <div className="fld">
@@ -611,18 +663,11 @@ export function SessionPanel({
                 Move this session
               </Button>
               <p className="fld__h mt2">
-                Then pick the new slot on the grid. It saves ten seconds after you
-                place it, with an Undo. {first} is not told automatically.
+                Pick the new slot on the grid next. It saves ten seconds after you
+                place it, with an Undo. {first} isn&rsquo;t told automatically.
               </p>
             </div>
           )}
-
-          <div className="sect">
-            <Button href={`/clients/${session.clientId}`} variant="ghost" size="sm">
-              Open {session.clientName}
-              <Chevron size={14} />
-            </Button>
-          </div>
 
           {error && (
             <p className="sch__err" role="alert">
@@ -766,7 +811,9 @@ export function SessionPanel({
                 <Button
                   variant="secondary"
                   disabled={pending}
-                  title="Records a no-show and takes one off the client’s pack. Reopen gives it back."
+                  title={free
+                    ? 'Records a no-show. Nothing is charged for a trial or a free session.'
+                    : 'Records a no-show and takes one off the client’s pack. Reopen gives it back.'}
                   onClick={() => settle(
                     () => markNoShow({ id: session.id, costsASession: true }),
                     'No-show recorded',
@@ -777,7 +824,8 @@ export function SessionPanel({
                         : <>{session.clientName} &mdash; one session off their pack.</>,
                   )}
                 >
-                  {sale ? <>No-show &middot; charge {saleAmount}</> : <>No-show &middot; &minus;1</>}
+                  {/* 16 Nov 2026: a trial or free session takes nothing, so its button promises nothing. */}
+                  {sale ? <>No-show &middot; charge {saleAmount}</> : free ? <>No-show</> : <>No-show &middot; &minus;1</>}
                 </Button>
               )}
               {/* `POST /v1/sessions/{id}/done`, never a status flip: the endpoint

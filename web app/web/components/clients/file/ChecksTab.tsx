@@ -21,6 +21,7 @@ import { Card } from '@/web-components/ui/Card';
 import { CountBadge } from '@/web-components/ui/CountBadge';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 import { Message } from '@/web-components/ui/Message';
+import { SwitchRow } from '@/web-components/ui/Switch';
 import { Row, Table, type Column } from '@/web-components/ui/Table';
 import { Tag } from '@/web-components/ui/Tag';
 
@@ -333,6 +334,14 @@ function Section({
   );
 }
 
+/** *Every week*, *Every 2 weeks*, *Every day*, *Every 10 days* — the cadence said the way a trainer says it. */
+function everyPhrase(days: number): string {
+  if (days === 1) return 'Every day';
+  if (days === 7) return 'Every week';
+  if (days % 7 === 0) return `Every ${days / 7} weeks`;
+  return `Every ${days} days`;
+}
+
 /** The day it counts for, as ms: when it was done, else when it is due. */
 function whenOf(r: AssessmentWire): number {
   return r.completedAt ?? Date.parse(`${r.dueOn}T00:00:00`);
@@ -357,6 +366,8 @@ function Cycles({
   const router = useRouter();
   const [busy, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  /* Which cycle is asking *End it?* — one at a time. */
+  const [ending, setEnding] = useState<string | null>(null);
   const live = rows.filter((c) => c.endedAt === null);
   if (live.length === 0) return null;
 
@@ -364,6 +375,7 @@ function Cycles({
     setError(null);
     start(async () => {
       const res = await endCycle(id, clientId);
+      setEnding(null);
       if (!res.ok) setError(res.message ?? 'That did not save.');
       else router.refresh();
     });
@@ -386,29 +398,62 @@ function Cycles({
       </Card.Head>
       <Card.Body>
         {error && <Message tone="err">{error}</Message>}
+        {/*
+          ONE CYCLE, THREE PARTS (21 Nov 2026, from a phone screenshot). It was a run-on sentence and
+          three loose buttons that wrapped under it in whatever order fitted, and each was a problem:
+          · *Take it* opened the cycle's open assessment, which is always the row in *To take* just
+            below (that list is every state that is not `done`). Two doors to one form, one card
+            apart, so this one went.
+          · *Take in person* / *Send when due* was a SETTING drawn as a verb: "Take in person" read as
+            "take it in person now". It is a `SwitchRow` now, which says what it is, which way it is
+            set and what each way means, and its whole row is the target.
+          · *End cycle* stopped the cycle in one tap, at the same weight as *Take it* and beside it.
+            It is a quiet verb at the end of the name's line, and it asks first.
+        */}
         <ul className="cfchk__cycles">
           {live.map((c) => (
             <li key={c.id} className="cfchk__cycle">
-              <span>
-                <b>{c.templateName}</b> · every {c.intervalDays} days · next{' '}
-                {longDateStr(Date.parse(`${c.nextDueOn}T00:00:00`))}
-                {onPortal && c.sendToClient !== undefined && (
-                  <span className="ink3"> · {c.sendToClient ? 'sent when due' : 'taken in person'}</span>
+              <div className="cfchk__cyc-hd">
+                <span className="cfchk__cyc-id">
+                  <b>{c.templateName}</b>
+                  <span className="cfchk__cyc-meta">
+                    {everyPhrase(c.intervalDays)} · next{' '}
+                    {longDateStr(Date.parse(`${c.nextDueOn}T00:00:00`))}
+                  </span>
+                </span>
+                {ending !== c.id && (
+                  <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEnding(c.id)}>
+                    End cycle
+                  </Button>
                 )}
-              </span>
+              </div>
+              {ending === c.id && (
+                <div className="cfchk__cyc-end" role="group" aria-label={`End the ${c.templateName} cycle?`}>
+                  <span>No more {c.templateName} assessments will be booked.</span>
+                  <span className="cfchk__cyc-end-b">
+                    <Button variant="ghost" size="sm" disabled={busy} onClick={() => setEnding(null)} autoFocus>
+                      Keep it
+                    </Button>
+                    <Button variant="danger" size="sm" disabled={busy} onClick={() => end(c.id)}>
+                      End cycle
+                    </Button>
+                  </span>
+                </div>
+              )}
               {onPortal && c.sendToClient !== undefined && (
-                <Button variant="ghost" size="sm" disabled={busy} onClick={() => toggleSend(c)}>
-                  {c.sendToClient ? 'Take in person' : 'Send when due'}
-                </Button>
+                <SwitchRow
+                  className="cfchk__cyc-send"
+                  checked={c.sendToClient}
+                  disabled={busy}
+                  onChange={() => toggleSend(c)}
+                  title="Send to the client when due"
+                  example={
+                    c.sendToClient
+                      ? 'They answer it on their portal.'
+                      : 'Off: you take it with them in person.'
+                  }
+                />
               )}
-              {c.openAssessmentId && (
-                <Button variant="secondary" size="sm" href={`/clients/assessments/${c.openAssessmentId}/take`}>
-                  Take it
-                </Button>
-              )}
-              <Button variant="ghost" size="sm" disabled={busy} onClick={() => end(c.id)}>
-                End cycle
-              </Button>
             </li>
           ))}
         </ul>

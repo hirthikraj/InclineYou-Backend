@@ -98,6 +98,10 @@ export function VolumeBars({
      median week: the axis describes the BOX, not the data in it, and a
      half-way rule that does not sit at half the peak makes every bar above it
      lie about its own height. `.trend`'s axis makes the same call. */
+  /* A small count keeps its half (22 Nov 2026): a peak of 3 sessions put "2" on the half-way rule — 1.5 rounded —
+     so the 2-session bars stood visibly ABOVE the line labelled 2. Whole numbers stay whole; under 10 the half
+     keeps one decimal; at 10 and over the rounding is under a twentieth of the box and not worth a decimal. */
+  const tickValue = (v: number) => (Number.isInteger(v) || v >= 10 ? Math.round(v) : Math.round(v * 10) / 10);
   const ticks = [
     { at: 0, v: peak },
     { at: 50, v: peak / 2 },
@@ -131,7 +135,7 @@ export function VolumeBars({
         <div className="vb__y" aria-hidden="true">
           {ticks.map((t) => (
             <span key={t.at} style={{ top: `${t.at}%` }}>
-              {format(Math.round(t.v))}
+              {format(tickValue(t.v))}
             </span>
           ))}
         </div>
@@ -162,7 +166,10 @@ export function VolumeBars({
                   ]
                     .filter(Boolean)
                     .join(' ')}
-                  key={w.label}
+                  /* BY POSITION (22 Nov 2026): a caller may blank a label to thin the captions — Progress names
+                     only the first week of each month on a long range — so labels repeat (`''`) and keyed on
+                     them React saw duplicate keys. A week's place in the series is its identity here. */
+                  key={i}
                   /* `Math.max(1, …)` and not `0`: an empty week's bar is a 2px
                      tick on the baseline, which is what "it kept its bar"
                      means. A zero-height element is a week that vanished. */
@@ -178,7 +185,7 @@ export function VolumeBars({
           </div>
           <div className="vb__x">
             {weeks.map((w, i) => (
-              <span key={w.label}>{(weeks.length - 1 - i) % step === 0 ? w.label : ''}</span>
+              <span key={i}>{(weeks.length - 1 - i) % step === 0 ? w.label : ''}</span>
             ))}
           </div>
         </div>
@@ -194,11 +201,10 @@ export function VolumeBars({
           </tr>
         </thead>
         <tbody>
-          {weeks.map((w) => (
-            <tr key={w.label}>
+          {weeks.map((w, i) => (
+            <tr key={i}>
               <th scope="row">
-                {w.label}
-                {w.when ? `, ${w.when}` : ''}
+                {[w.label, w.when].filter(Boolean).join(', ')}
                 {w.current ? ', this week' : ''}
               </th>
               <td>{format(w.value)}</td>

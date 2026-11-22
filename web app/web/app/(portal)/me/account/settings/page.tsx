@@ -5,7 +5,7 @@ import { Card } from '@/web-components/ui/Card';
 import { requirePortalSession } from '@/lib/portal/session';
 import { portalGet, settle } from '@/lib/portal/plan-api';
 import type { PrefsWire } from '@/lib/portal/settings-api';
-import { Message } from '@/web-components/ui/Message';
+import { LoadFailed } from '@/components/portal/LoadFailed';
 
 export const metadata = { title: 'Settings · InclineYou' };
 
@@ -17,7 +17,7 @@ export default async function Page() {
   if (!session.ok) return null;
   const [read, devices] = await Promise.all([portalGet<PrefsWire>('/v1/portal/prefs'), listDevices()]);
   const prefs = settle(read);
-  if (!prefs) return <div className="body"><Message tone="warn">We couldn’t load your settings just now. Reload in a moment.</Message></div>;
+  if (!prefs) return <LoadFailed what="your settings" retryHref="/me/account/settings" />;
   // Signed-in devices (UC-CP-38): the same routes and component as the trainer's Settings → Account.
   const devicesCard = (
     <Card>

@@ -13,6 +13,8 @@ import { Note, Plus, Swap, Timer, Tick } from './Icons';
 import { ActionBar } from '@/web-components/ui/ActionBar';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
+import { RowMenu } from '@/web-components/ui/RowMenu';
+import { NumPad, type NumPadField } from '@/web-components/ui/NumPad';
 import { Tag } from '@/web-components/ui/Tag';
 
 /**
@@ -67,6 +69,11 @@ export interface GridHandlers {
   addSlot: (exerciseId: string) => void;
   /** Change the rest for this exercise. */
   changeRest: (exerciseId: string) => void;
+  /** Skip a set not yet done (this tab only — see `Console`'s *a skipped set*). */
+  skip: (exerciseId: string, row: LogSetRow) => void;
+  unskip: (exerciseId: string, setNumber: number) => void;
+  /** Take back one extra slot nobody logged. */
+  removeSlot: (exerciseId: string) => void;
 }
 
 export interface Draft {
@@ -90,14 +97,29 @@ export function fieldValue(row: LogSetRow, draft: Draft | undefined, which: keyo
   return row.rpe != null ? String(row.rpe) : '';
 }
 
-/** The number last time's column is offering, when the slot is still open. */
+/**
+ * The number an open slot OFFERS: last time's, else the plan's target (21 Nov 2026).
+ *
+ * It is drawn dashed in the field and in the phone's *Log set* button, and it is
+ * written only when the trainer presses — so §09's rule holds: nothing is logged
+ * that nobody confirmed. What changed is that a set with no history (a client's
+ * first session on a movement) offers what the program asked for instead of
+ * nothing, so one press logs it there too. Last time still wins where it exists:
+ * it is what the client actually did.
+ */
 function suggestion(row: LogSetRow, which: 'load' | 'reps'): string {
   if (row.done) return '';
-  // Last time's column is kilograms and repetitions — all the set history maps — so it
-  // is offered only where this set is counted in them.
+  // Kilograms and repetitions only — the two the history and the target both map onto.
   if (which === 'load' ? !LOAD[row.loadKind].kilograms : !EFFORT[row.effortKind].repetitions) return '';
   const value = which === 'load' ? row.previousLoad : row.previousReps;
-  return value != null ? String(value) : '';
+  if (value != null) return String(value);
+  const target = which === 'load' ? row.target?.load : row.target?.effort;
+  return target != null ? String(target) : '';
+}
+
+/** Whether an open slot offers anything a single press could log. */
+function offers(row: LogSetRow): boolean {
+  return !row.done && (suggestion(row, 'load') !== '' || suggestion(row, 'reps') !== '');
 }
 
 /** What is actually in the field: what was typed, else what last time offers. */
@@ -213,6 +235,7 @@ export function SetGrid({
   handlers,
   busy,
   error,
+  skipped,
   restEditable,
   restScope,
   rest,
@@ -228,6 +251,8 @@ export function SetGrid({
   busy: Set<string>;
   /** Set key → what went wrong, said in the row it happened in. */
   error: Record<string, string>;
+  /** Draft keys of the sets skipped in this tab. */
+  skipped: Set<string>;
   restEditable: boolean;
   /**
    * Which row a change lands on, and it is a real difference the trainer should
@@ -311,7 +336,138 @@ export function SetGrid({
     }
   };
 
-  const openSlot = view.sets.find((s) => !s.done) ?? null;
+  const isSkipped = (row: LogSetRow) => skipped.has(KEY(view.exerciseId, row.number));
+  /* The open slot is the first set neither logged nor skipped — what *Log set* presses. */
+  const openSlot = view.sets.find((s) => !s.done && !isSkipped(s)) ?? null;
+
+  /* ── THE NUMBER PAD (phase C, 21 Nov 2026) ─────────────────────────────────
+     On a phone the load and the reps fields no longer raise the OS keyboard — it
+     took half the screen, covered the row, and had no *one plate more*. They open
+     `c-numpad` for that set instead: both figures, the plate step and ±1 as chips,
+     and the pad's own verb, which logs the set and moves the pad to the next open
+     one, so a whole movement is typed without the pad closing. A done set's verb
+     saves the correction. Time-written efforts (`1:30`) keep the OS keyboard — a
+     digits pad cannot write the colon — and so does any load that is not weight. */
+  const [pad, setPadState] = useState<{ exerciseId: string; row: number; field: 'load' | 'reps' } | null>(null);
+  /* Leaving: the pad is still drawn while it slides down, then `onExited` clears it. */
+  const [padOut, setPadOut] = useState(false);
+  const setPad = (next: { exerciseId: string; row: number; field: 'load' | 'reps' } | null) => {
+    if (next) {
+      setPadOut(false);
+      setPadState(next);
+    } else if (pad) {
+      setPadOut(true);
+    }
+  };
+  /* A move to another movement closes the pad (render-time adjustment, trap 21). */
+  const [padEx, setPadEx] = useState(view.exerciseId);
+  if (padEx !== view.exerciseId) {
+    setPadEx(view.exerciseId);
+    setPadState(null);
+    setPadOut(false);
+  }
+  const padLoad = (row: LogSetRow) => dock && weights && LOAD[row.loadKind].kilograms;
+  const padReps = (row: LogSetRow) => dock && EFFORT[row.effortKind].repetitions;
+  const padRow = pad && pad.exerciseId === view.exerciseId ? (view.sets.find((s) => s.number === pad.row) ?? null) : null;
+  const openPad = (row: LogSetRow, field: 'load' | 'reps') =>
+    setPad({ exerciseId: view.exerciseId, row: row.number, field });
+
+  /* The row being typed into sits above the pad, not under it. */
+  const padAt = padRow?.number ?? null;
+  useEffect(() => {
+    if (padAt === null || !table.current) return;
+    table.current
+      .querySelector(`tbody tr[data-set="${padAt}"]`)
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }, [padAt]);
+
+  /* ── SWIPE LEFT ON A ROW (phone, touch) · 21 Nov 2026 ───────────────────────
+     Strong's and Hevy's gesture, with this screen's one rule for it: undo after,
+     never confirm before. What a swipe does follows what the row IS — a logged set
+     is un-logged (the Undo bar), a planned set not done is skipped (a toast with
+     Undo), a skipped one is un-skipped, an extra slot nobody logged is taken back.
+     It locks to an axis on the first 8px, so a vertical scroll that starts on a row
+     stays a scroll; `touch-action: pan-y` on the rows (app.css) is what lets the
+     browser hand the horizontal part to us. The row follows the finger with an
+     inline transform — a gesture's live position, not layout — cleared on release. */
+  const swipe = useRef<{
+    key: string; x: number; y: number; dx: number; axis: 'x' | 'y' | null; el: HTMLTableRowElement; frame: number;
+  } | null>(null);
+  /* THE TRIGGER, AND HOW THE ROW FEELS PAST IT. Up to 72px the row follows the finger
+     one to one; past it, it follows at a third — the resistance that says *this is far
+     enough* without a hard stop, which is what makes a swipe feel like an object rather
+     than a scroll. */
+  const SWIPE_AT = 72;
+  const resist = (dx: number) => (dx >= -SWIPE_AT ? dx : -SWIPE_AT + (dx + SWIPE_AT) / 3);
+  const swipeFor = (row: LogSetRow): { label: string; act: () => void } | null => {
+    if (row.done) return row.setId && row.planSetId ? { label: 'Un-log', act: () => handlers.remove(view.exerciseId, row) } : null;
+    if (isSkipped(row)) return { label: 'Undo skip', act: () => handlers.unskip(view.exerciseId, row.number) };
+    if (!row.planSetId) return { label: 'Remove', act: () => handlers.removeSlot(view.exerciseId) };
+    return { label: 'Skip', act: () => handlers.skip(view.exerciseId, row) };
+  };
+  const swipeProps = (row: LogSetRow, key: string) => {
+    const action = dock ? swipeFor(row) : null;
+    if (!action) return {};
+    const end = (e: React.PointerEvent<HTMLTableRowElement>) => {
+      const sw = swipe.current;
+      if (!sw || sw.key !== key) return;
+      swipe.current = null;
+      cancelAnimationFrame(sw.frame);
+      const fire = e.type === 'pointerup' && sw.axis === 'x' && sw.dx <= -SWIPE_AT;
+      /* Home again on the same curve the sheets use, a touch longer than a tap's
+         feedback so the eye can follow it — and only now does `will-change` go. */
+      sw.el.style.transition = 'transform 280ms cubic-bezier(.2,.8,.2,1)';
+      sw.el.style.transform = '';
+      delete sw.el.dataset.armed;
+      const el = sw.el;
+      window.setTimeout(() => {
+        el.style.transition = '';
+        el.style.willChange = '';
+      }, 300);
+      if (fire) {
+        navigator.vibrate?.(12);
+        action.act();
+      }
+    };
+    return {
+      'data-swipe': action.label,
+      onPointerDown: (e: React.PointerEvent<HTMLTableRowElement>) => {
+        if (e.pointerType !== 'touch') return;
+        swipe.current = { key, x: e.clientX, y: e.clientY, dx: 0, axis: null, el: e.currentTarget, frame: 0 };
+      },
+      onPointerMove: (e: React.PointerEvent<HTMLTableRowElement>) => {
+        const sw = swipe.current;
+        if (!sw || sw.key !== key) return;
+        const dx = e.clientX - sw.x;
+        const dy = e.clientY - sw.y;
+        if (sw.axis === null && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+          sw.axis = Math.abs(dx) > Math.abs(dy) ? 'x' : 'y';
+          if (sw.axis === 'x') {
+            e.currentTarget.setPointerCapture?.(e.pointerId);
+            /* Its own layer for the length of the gesture: the row moves on the compositor. */
+            sw.el.style.willChange = 'transform';
+            sw.el.style.transition = 'none';
+          }
+        }
+        if (sw.axis !== 'x') return;
+        sw.dx = Math.max(-140, resist(Math.min(0, dx)));
+        /* ONE WRITE PER FRAME. A finger reports moves faster than the screen draws, and
+           writing each one is work the eye never sees and the main thread pays for. */
+        if (sw.frame) return;
+        sw.frame = requestAnimationFrame(() => {
+          sw.frame = 0;
+          sw.el.style.transform = `translate3d(${sw.dx}px,0,0)`;
+          const armed = sw.dx <= -SWIPE_AT ? 'true' : 'false';
+          if (sw.el.dataset.armed !== armed) {
+            if (armed === 'true') navigator.vibrate?.(8);
+            sw.el.dataset.armed = armed;
+          }
+        });
+      },
+      onPointerUp: end,
+      onPointerCancel: end,
+    };
+  };
 
   /* ── THE OPEN SLOT HAS TO BE IN THE PANE · 21 Sep 2026 ──────────────────
      The card's body is a scrollport on a desk now (`app.css`, *the console is
@@ -352,6 +508,7 @@ export function SetGrid({
    */
   const acceptLastTime = useCallback(() => {
     if (!openSlot) return;
+    navigator.vibrate?.(12);
     const values = {
       load: suggestion(openSlot, 'load'),
       reps: suggestion(openSlot, 'reps'),
@@ -362,8 +519,9 @@ export function SetGrid({
 
   /* ── THE THUMB DOCK ───────────────────────────────────────────────────────
      Below 620px, the one thing this screen is for at this moment, pinned to the
-     bottom edge of the viewport. Three states and never two at once: a rest
-     that is running, a rest that is spent, or the next thing to press.
+     bottom edge of the viewport: the rest while there is one, and under it the
+     one-press log of the open set (or *Next* once the movement is done) —
+     see *the one press* below for why it became two layers on 21 Nov 2026.
 
      ── IT IS PORTALLED, AND THAT IS NOT TIDINESS ──────────────────────────
      `.wkcw` carries `container-type:inline-size`, and a size container is a
@@ -385,79 +543,184 @@ export function SetGrid({
      carries no prose at all — the exercise is named in the card header
      directly above, and the whole line is on the timer's `aria-label`, where
      the reader who cannot see that header gets it. */
+  /* ── THE ONE PRESS (21 Nov 2026) ──────────────────────────────────────────
+     The phone's bar used to be ONE of four things: a running rest, a spent rest,
+     *take last time's numbers* (only where there was a last time) or *Next*. So
+     during a rest there was no way to log the set the client had already started,
+     and on a first session there was no one-press log at all. It is two layers now:
+     the rest, while there is one, and under it — always, while a set is open — the
+     button that logs that set with exactly the numbers its fields show (typed, else
+     last time's, else the plan's). A slot with nothing to offer asks for numbers and
+     puts the cursor in its row instead. */
+  const openKey = openSlot ? KEY(view.exerciseId, openSlot.number) : '';
+  const openDraft = openSlot ? drafts[openKey] : undefined;
+  const openSaid = openSlot ? offers(openSlot) : false;
+  const shownLoad = openSlot && weights ? shownValue(openSlot, openDraft, 'load', openSaid) : '';
+  const shownReps = openSlot ? shownValue(openSlot, openDraft, 'reps', openSaid) : '';
+  const kg = openSlot ? LOAD[openSlot.loadKind].kilograms : false;
+  const logLabel =
+    shownLoad && shownReps
+      ? `${shownLoad}${kg ? ' kg' : ''} × ${shownReps}`
+      : shownReps
+        ? `${shownReps} ${effortHead(openSlot!.effortKind).toLowerCase()}`
+        : shownLoad
+          ? `${shownLoad}${kg ? ' kg' : ''}`
+          : '';
+
+  const logOpen = () => {
+    if (!openSlot || busy.has(openKey)) return;
+    navigator.vibrate?.(12);
+    const values: Draft = { load: shownLoad, reps: shownReps, ...(openDraft?.rpe ? { rpe: openDraft.rpe } : {}) };
+    onDraft(openKey, values);
+    handlers.commit(view.exerciseId, openSlot, values);
+  };
+  const focusOpen = () => {
+    if (!openSlot || !table.current) return;
+    table.current.querySelector<HTMLInputElement>(`tbody tr[data-set="${openSlot.number}"] input`)?.focus();
+  };
+
+  const restBar = rest?.over ? (
+    <ActionBar tone="ok" role="status" label={`Rest over after a ${view.name.toLowerCase()} set`}>
+      <ActionBar.Lead icon={<Tick />} figure="0:00" />
+      <ActionBar.Text>
+        {openSlot ? (
+          <>
+            Set <b>{openSlot.number}</b> is up
+          </>
+        ) : (
+          'Rest over'
+        )}
+      </ActionBar.Text>
+      <ActionBar.Acts>
+        <Button variant="ghost" size="sm" onClick={() => onAdjustRest(15)}>
+          +15
+        </Button>
+        <Button variant="secondary" size="sm" onClick={onSkipRest}>
+          Got it
+        </Button>
+      </ActionBar.Acts>
+    </ActionBar>
+  ) : rest ? (
+    <ActionBar
+      tone="accent"
+      role="timer"
+      progress={bar(rest.remaining, rest.total)}
+      label={`${clock(rest.remaining)} rest remaining`}
+    >
+      <ActionBar.Lead icon={<Timer />} figure={clock(rest.remaining)} />
+      <ActionBar.Text>Rest</ActionBar.Text>
+      <ActionBar.Acts>
+        <Button variant="ghost" size="sm" onClick={() => onAdjustRest(-15)}>
+          &minus;15
+        </Button>
+        <Button variant="ghost" size="sm" onClick={() => onAdjustRest(15)}>
+          +15
+        </Button>
+        <Button variant="secondary" size="sm" onClick={onSkipRest}>
+          Skip
+        </Button>
+      </ActionBar.Acts>
+    </ActionBar>
+  ) : null;
+
+  const pressBar = openSlot ? (
+    <ActionBar>
+      {logLabel ? (
+        <Button variant="primary" onClick={logOpen} disabled={busy.has(openKey)} className="abar__go logdock__go">
+          <Tick /> Log set {openSlot.number} &middot; {logLabel}
+        </Button>
+      ) : (
+        <Button variant="secondary" onClick={focusOpen} className="abar__go">
+          Set {openSlot.number}: enter the numbers
+        </Button>
+      )}
+    </ActionBar>
+  ) : next ? (
+    /* Every set of this movement is in. On a phone the chip rail is at the top of a page the trainer has
+       scrolled away from, so finishing a movement would otherwise end in a scroll up to find the next. */
+    <ActionBar>
+      <Button variant="secondary" onClick={next.onOpen} className="abar__go">
+        Next &middot; {next.name}
+      </Button>
+    </ActionBar>
+  ) : null;
+
+  /* ── the pad, for the set it is on ─────────────────────────────────────── */
+  let padEl: React.ReactNode = null;
+  if (padRow && pad) {
+    const k = KEY(view.exerciseId, padRow.number);
+    const d = drafts[k];
+    const offered = offers(padRow);
+    const load = weights ? shownValue(padRow, d, 'load', offered) : '';
+    const reps = shownValue(padRow, d, 'reps', offered);
+    const kgUnit = LOAD[padRow.loadKind].kilograms;
+    const stepKg = LOAD[padRow.loadKind].step;
+    const fields: NumPadField[] = [
+      ...(padLoad(padRow)
+        ? [{
+            key: 'load', label: loadHead(padRow.loadKind), value: load, unit: kgUnit ? 'kg' : undefined,
+            decimal: LOAD[padRow.loadKind].inputMode === 'decimal', min: LOAD[padRow.loadKind].min,
+            chips: [
+              { label: `−${stepKg}`, delta: -stepKg },
+              { label: `+${stepKg}`, delta: stepKg },
+              { label: `+${stepKg * 2}`, delta: stepKg * 2 },
+            ],
+          }]
+        : []),
+      ...(padReps(padRow)
+        ? [{
+            key: 'reps', label: effortHead(padRow.effortKind), value: reps, min: 1,
+            chips: [{ label: '−1', delta: -1 }, { label: '+1', delta: 1 }],
+          }]
+        : []),
+    ];
+    const label =
+      load && reps ? `${load}${kgUnit ? ' kg' : ''} × ${reps}` : reps ? `${reps} ${effortHead(padRow.effortKind).toLowerCase()}` : load ? `${load}${kgUnit ? ' kg' : ''}` : '';
+    const press = () => {
+      const values: Draft = { load, reps, ...(d?.rpe ? { rpe: d.rpe } : {}) };
+      navigator.vibrate?.(12);
+      onDraft(k, values);
+      handlers.commit(view.exerciseId, padRow, values);
+      if (padRow.done) {
+        setPad(null);
+        return;
+      }
+      /* On to the next open set of this movement; none left → the pad goes. */
+      const nextRow = view.sets.find((x) => x.number > padRow.number && !x.done && !isSkipped(x));
+      setPad(nextRow ? { exerciseId: view.exerciseId, row: nextRow.number, field: padLoad(nextRow) ? 'load' : 'reps' } : null);
+    };
+    padEl = (
+      <NumPad
+        title={<>Set {padRow.number} · {view.name}</>}
+        aside={rest && !rest.over ? <>Rest {clock(rest.remaining)}</> : undefined}
+        fields={fields}
+        active={fields.some((f) => f.key === pad.field) ? pad.field : (fields[0]?.key ?? 'load')}
+        onActive={(key) => setPad({ ...pad, field: key as 'load' | 'reps' })}
+        onChange={(key, value) => onDraft(k, { [key]: value } as Draft)}
+        onClose={() => setPad(null)}
+        closing={padOut}
+        onExited={() => {
+          setPadState(null);
+          setPadOut(false);
+        }}
+        action={{
+          label: padRow.done ? <>Save set {padRow.number}</> : <><Tick /> Log set {padRow.number}{label ? <> · {label}</> : null}</>,
+          onPress: press,
+          disabled: busy.has(k) || (!padRow.done && !load && !reps),
+        }}
+      />
+    );
+  }
+
   const dockBar =
-    !dock || typeof document === 'undefined'
+    !dock || typeof document === 'undefined' || (!restBar && !pressBar) || padRow
       ? null
       : createPortal(
-          rest?.over ? (
-            <ActionBar
-              tone="ok"
-              role="status"
-              label={`Rest over after a ${view.name.toLowerCase()} set`}
-            >
-              <ActionBar.Lead icon={<Tick />} figure="0:00" />
-              <ActionBar.Text>
-                {openSlot ? (
-                  <>
-                    Set <b>{openSlot.number}</b> is up
-                  </>
-                ) : (
-                  'Last set done'
-                )}
-              </ActionBar.Text>
-              <ActionBar.Acts>
-                <Button variant="ghost" size="sm" onClick={() => onAdjustRest(15)}>
-                  +15
-                </Button>
-                <Button variant="secondary" size="sm" onClick={onSkipRest}>
-                  Got it
-                </Button>
-              </ActionBar.Acts>
-            </ActionBar>
-          ) : rest ? (
-            <ActionBar
-              tone="accent"
-              role="timer"
-              progress={bar(rest.remaining, rest.total)}
-              label={`${clock(rest.remaining)} rest remaining after a ${view.name.toLowerCase()} set`}
-            >
-              <ActionBar.Lead icon={<Timer />} figure={clock(rest.remaining)} />
-              <ActionBar.Acts>
-                <Button variant="ghost" size="sm" onClick={() => onAdjustRest(-15)}>
-                  &minus;15
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => onAdjustRest(15)}>
-                  +15
-                </Button>
-                <Button variant="secondary" size="sm" onClick={onSkipRest}>
-                  Skip
-                </Button>
-              </ActionBar.Acts>
-            </ActionBar>
-          ) : openSlot && openSlot.previous !== null ? (
-            /* The fastest honest path to a logged set, one press wide.
-               `previous === null` is why this is a condition and not a
-               `disabled` — a disabled button is a fine thing in a foot, where
-               it sits beside other controls and explains by contrast. Alone on
-               a 60px bar it is a bar that does nothing, which is worse than no
-               bar. That slot falls through to the next case. */
-            <ActionBar>
-              <Button variant="primary" onClick={acceptLastTime} className="abar__go">
-                <Tick /> Set {openSlot.number} &mdash; take last time&rsquo;s numbers
-              </Button>
-            </ActionBar>
-          ) : next ? (
-            /* Nothing left to press on this card. On a desk the whole plan is
-               a column three inches to the left; on a phone it is a chip rail
-               at the top of a page the trainer has scrolled away from, so
-               finishing an exercise otherwise ends in a scroll UP to find out
-               where to go next. */
-            <ActionBar>
-              <Button variant="secondary" onClick={next.onOpen} className="abar__go">
-                Next &middot; {next.name}
-              </Button>
-            </ActionBar>
-          ) : null,
+          /* One fixed stack, so the two bars cannot overlap; each `.abar` inside is static. */
+          <div className="logdock">
+            {restBar}
+            {pressBar}
+          </div>,
           document.body,
         );
 
@@ -514,6 +777,18 @@ export function SetGrid({
             **History is the phone's half of the third column.** On a desk the
             timeline is beside the fields and this is a duplicate control, so
             the rule below 620px is the only one that draws it. */}
+        {/* ON A PHONE, ONE ⋯ (21 Nov 2026): the two buttons below took a row of their own above the
+            first set — Last sessions & PR and Swap are each reached a few times a session, the sets
+            every few seconds. Both are drawn and CSS picks one, so nothing branches on a width. */}
+        <RowMenu
+          className="setg__more"
+          label={`More for ${view.name}`}
+          items={[
+            { key: 'hist', label: 'Last sessions & PR', onSelect: () => handlers.openHistory(view.exerciseId) },
+            { key: 'swap', label: 'Swap this exercise', onSelect: () => handlers.openSwap(view.exerciseId) },
+            { key: 'rest', label: 'Change the rest', onSelect: () => handlers.changeRest(view.exerciseId) },
+          ]}
+        />
         <span className="setg__acts">
           <Button
             variant="secondary"
@@ -542,7 +817,7 @@ export function SetGrid({
         <span className="vh" role="status">
           {rest?.over ? restOverLine(view.name, openSlot?.number ?? null, true) : ''}
         </span>
-        <table className="sets sets--entry" ref={table} style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <table className="sets sets--entry setlog" ref={table} style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
               <th className="n">
@@ -562,17 +837,31 @@ export function SetGrid({
               const key = KEY(view.exerciseId, row.number);
               const draft = drafts[key];
               const active = openSlot?.number === row.number;
-              const said = !row.done && row.previous !== null;
+              const said = offers(row);
               const working = busy.has(key);
 
               return [
                 <tr
                   key={key}
                   data-set={row.number}
-                  data-state={row.done ? 'done' : active ? 'active' : undefined}
+                  data-state={row.done ? 'done' : isSkipped(row) ? 'skipped' : active ? 'active' : undefined}
                   className={row.pr ? 'pr' : undefined}
+                  {...swipeProps(row, key)}
                 >
-                  <td className="n">{row.number}</td>
+                  <td className="n">
+                    {/* THE SET NUMBER OPENS THE SET (21 Nov 2026) — RPE and a note, Hevy's place for
+                        them. It replaces the *RPE and a note* row a phone drew under every set,
+                        which made each set two rows. A dot says this set already has one. */}
+                    <button
+                      type="button"
+                      className="setg__no"
+                      onClick={() => handlers.openSet(view.exerciseId, row.number)}
+                      aria-label={`Set ${row.number}: RPE and a note`}
+                    >
+                      {row.number}
+                      {row.rpe != null || row.note ? <i className="setg__dot" aria-hidden="true" /> : null}
+                    </button>
+                  </td>
                   {/* `data-l` on the four value cells is what the phone reflow
                       below 620px draws its labels from — the mechanism
                       `.pk__tbl` and `.sets--plan` already use. It is inert
@@ -593,8 +882,12 @@ export function SetGrid({
                           }
                         />
                         <input
-                          className={`ctl${said && !draft?.load ? ' said' : ''}`}
-                          inputMode={LOAD[row.loadKind].inputMode}
+                          className={`ctl${said && !draft?.load ? ' said' : ''}${padRow?.number === row.number && pad?.field === 'load' ? ' ctl--pad' : ''}`}
+                          inputMode={padLoad(row) ? 'none' : LOAD[row.loadKind].inputMode}
+                          readOnly={padLoad(row) || undefined}
+                          data-numpad-field={padLoad(row) ? '' : undefined}
+                          onFocus={padLoad(row) ? () => openPad(row, 'load') : undefined}
+                          onClick={padLoad(row) ? () => openPad(row, 'load') : undefined}
                           autoComplete="off"
                           value={shownValue(row, draft, 'load', said)}
                           onChange={(e) => onDraft(key, { load: e.target.value })}
@@ -632,8 +925,12 @@ export function SetGrid({
                         }
                       />
                       <input
-                        className={`ctl${said && !draft?.reps ? ' said' : ''}`}
-                        inputMode={EFFORT[row.effortKind].inputMode}
+                        className={`ctl${said && !draft?.reps ? ' said' : ''}${padRow?.number === row.number && pad?.field === 'reps' ? ' ctl--pad' : ''}`}
+                        inputMode={padReps(row) ? 'none' : EFFORT[row.effortKind].inputMode}
+                        readOnly={padReps(row) || undefined}
+                        data-numpad-field={padReps(row) ? '' : undefined}
+                        onFocus={padReps(row) ? () => openPad(row, 'reps') : undefined}
+                        onClick={padReps(row) ? () => openPad(row, 'reps') : undefined}
                         autoComplete="off"
                         value={shownValue(row, draft, 'reps', said)}
                         onChange={(e) => onDraft(key, { reps: e.target.value })}
@@ -674,6 +971,17 @@ export function SetGrid({
                     />
                   </td>
                   <td className="tick">
+                    {isSkipped(row) ? (
+                      <button
+                        type="button"
+                        className="tk tk--skip"
+                        onClick={() => handlers.unskip(view.exerciseId, row.number)}
+                        aria-label={`Set ${row.number} skipped — undo the skip`}
+                        title="Skipped — tap to undo"
+                      >
+                        Skip
+                      </button>
+                    ) : (
                     <button
                       type="button"
                       className={`tk${row.done ? ' tk--on' : ''}`}
@@ -689,6 +997,7 @@ export function SetGrid({
                     >
                       <Tick />
                     </button>
+                    )}
                   </td>
                 </tr>,
 
@@ -731,7 +1040,7 @@ export function SetGrid({
                    which is what it has always been for. */
                 <tr
                   key={`${key}-act`}
-                  className={`note${row.done ? '' : active ? ' note--open' : ' note--later'}`}
+                  className={`note note--act${row.done ? '' : active ? ' note--open' : ' note--later'}`}
                 >
                   <td />
                   <td colSpan={5} style={{ paddingBottom: 6 }}>
@@ -777,10 +1086,10 @@ export function SetGrid({
               <Button
                 variant="primary"
                 size="sm"
-                disabled={openSlot.previous === null}
+                disabled={!offers(openSlot)}
                 onClick={acceptLastTime}
               >
-                <Tick /> Take last time&rsquo;s numbers
+                <Tick /> {openSlot.previous !== null ? <>Take last time&rsquo;s numbers</> : <>Take the plan&rsquo;s numbers</>}
               </Button>
               <span className="small mono">&#8984;&#8629;</span>
             </>
@@ -894,6 +1203,7 @@ export function SetGrid({
     </Card>
 
     {dockBar}
+    {padEl}
     </>
   );
 }

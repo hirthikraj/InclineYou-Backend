@@ -43,9 +43,13 @@ export interface PortalMeWire {
     dateOfBirth: string | null;
     phone: string | null;
     version: string;
+    /** V44 (22 Nov 2026): what the trainer recorded, the client's to correct. Null when not given; absent on an older backend. */
+    gender?: string | null;
   };
   moneyVisible: boolean;
   unreadNotices: number;
+  /** Messages from the trainer not yet opened (22 Nov 2026) — the inbox row's count; `unreadNotices` is notifications. */
+  unreadMessages?: number;
   openAssessments: number;
   pendingInvites: { inviteId: string; trainerName: string; headline: string | null; expiresAt: number }[];
   policy: { accepted: string | null; current: string };

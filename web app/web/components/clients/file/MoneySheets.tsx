@@ -14,6 +14,7 @@ import { Button } from '@/web-components/ui/Button';
 import { TextField } from '@/web-components/ui/Field';
 import { Modal, ModalHost } from '@/web-components/ui/Modal';
 import { Select } from '@/web-components/ui/Select';
+import { DateField } from '@/web-components/ui/DateField';
 
 /**
  * THE MONEY BOOK'S CORRECTING WRITES (api-contract 1.1 R73).
@@ -302,8 +303,7 @@ export function EditPaymentSheet({
         {paidRow && (
           <div className="fld mt3">
             <label className="fld__l" htmlFor="ep-date">Paid on</label>
-            <input className="ctl" id="ep-date" type="date" value={paidOn} max={today}
-              onChange={(e) => setPaidOn(e.target.value)} />
+            <DateField id="ep-date" label="Paid on" block value={paidOn} max={today} onChange={setPaidOn} />
           </div>
         )}
         <TextField label={<>Note <span className="ink3">· optional</span></>} className="mt3" value={note}

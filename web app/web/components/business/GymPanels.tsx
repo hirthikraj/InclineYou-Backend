@@ -7,7 +7,11 @@ import { Glyph } from '@/components/shell/Icons';
 import type { PayoutInput } from '@/lib/business/actions';
 import type { Arrangement, Payout } from '@/lib/business/types';
 import { useDismiss } from '@/lib/ui/dismiss';
+import { usePhone } from '@/lib/ui/phone';
+import { ScreenSheet } from '@/web-components/ui/ScreenSheet';
+import { DateField } from '@/web-components/ui/DateField';
 import { Button } from '@/web-components/ui/Button';
+import { Select } from '@/web-components/ui/Select';
 
 /**
  * THE TWO FORMS ON THE GYM PAGE, AS PANELS.
@@ -35,22 +39,38 @@ const METHODS: { id: NonNullable<Payout['method']>; title: string }[] = [
 
 const digits = (v: string, max: number) => v.replace(/\D/g, '').slice(0, max);
 
+/** `YYYY-MM` options from `max` down to `min`, labelled *November 2026*. */
+function monthOptions(min: string, max: string): { value: string; label: string }[] {
+  const out: { value: string; label: string }[] = [];
+  let [y, m] = max.split('-').map(Number);
+  for (let guard = 0; guard < 120; guard++) {
+    const key = `${y}-${String(m).padStart(2, '0')}`;
+    if (key < min) break;
+    out.push({ value: key, label: new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-IN', { month: 'long', year: 'numeric', timeZone: 'UTC' }) });
+    m -= 1;
+    if (m === 0) { m = 12; y -= 1; }
+  }
+  return out;
+}
+
 function Shell({
   title,
   label,
   onClose,
-  footer,
+  save,
   error,
   children,
 }: {
   title: string;
   label: string;
   onClose: () => void;
-  footer: (dismiss: () => void) => React.ReactNode;
+  /** The panel's one verb. Cancel is the Shell's own: the desk's foot, or the phone's back chevron. */
+  save: (size?: 'sm') => React.ReactNode;
   error?: string | null;
   children: React.ReactNode;
 }) {
   const { closing, dismiss, ref } = useDismiss<HTMLDivElement>(onClose);
+  const phone = usePhone();
 
   /* Focus lands on the panel, not a field: on a phone a focused input opens the
      keyboard over the sheet that was just asked for. */
@@ -62,6 +82,27 @@ function Shell({
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [dismiss, ref]);
+
+  const body = (
+    <>
+      {children}
+      {error && <p className="msg msg--err" style={{ marginTop: 12 }} role="alert"><span>{error}</span></p>}
+    </>
+  );
+
+  /* ON A PHONE, A SCREEN AND NOT A BOX (21 Nov 2026, from a screenshot) — the pack
+     form's change, for its reason: below 620px the side panel stopped short of the
+     glass with the page and the tab bar showing under it, a body scrolling inside
+     a page that scrolls, and a foot of two buttons. `c-screensheet` fills the
+     screen; the back chevron is Cancel and the one verb is in the header. */
+  if (phone) {
+    return (
+      <ScreenSheet className="pkx-sheet" title={title} backLabel="Cancel" onBack={dismiss} action={save('sm')}
+        closing={closing} surfaceRef={ref}>
+        {body}
+      </ScreenSheet>
+    );
+  }
 
   return (
     <>
@@ -91,11 +132,11 @@ function Shell({
             icon={<Glyph size={14} d="M18 6 6 18M6 6l12 12" />}
           />
         </div>
-        <div className="panel__body">
-          {children}
-          {error && <p className="msg msg--err" style={{ marginTop: 12 }} role="alert"><span>{error}</span></p>}
+        <div className="panel__body">{body}</div>
+        <div className="panel__foot">
+          <Button variant="ghost" onClick={dismiss}>Cancel</Button>
+          {save()}
         </div>
-        <div className="panel__foot">{footer(dismiss)}</div>
       </div>
     </>
   );
@@ -125,7 +166,14 @@ export function TermsPanel({
   const [note, setNote] = useState(fixing?.note ?? '');
 
   const base = Number(digits(amount, 7)) || 0;
-  const valid = (kind === 'share' || base > 0) && /^\d{4}-\d{2}$/.test(month);
+  /* The server takes a start from 24 months back to 12 ahead (20 Nov 2026); the picker offers the same. */
+  const monthKey = (offset: number) => {
+    const d = new Date();
+    const t = new Date(d.getFullYear(), d.getMonth() + offset, 1);
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`;
+  };
+  const minMonth = monthKey(-24), maxMonth = monthKey(12);
+  const valid = (kind === 'share' || base > 0) && /^\d{4}-\d{2}$/.test(month) && month >= minMonth && month <= maxMonth;
 
   let n = 0;
   return (
@@ -134,11 +182,10 @@ export function TermsPanel({
       label={fixing ? 'Fix these pay terms' : 'Set pay terms'}
       onClose={onClose}
       error={error}
-      footer={(dismiss) => (
-        <>
-          <Button variant="ghost" onClick={dismiss}>Cancel</Button>
+      save={(size) => (
           <Button
             variant="primary"
+            size={size}
             disabled={!valid || pending}
             onClick={() => onSave({
               id,
@@ -150,7 +197,6 @@ export function TermsPanel({
           >
             {pending ? 'Saving…' : fixing ? 'Save' : 'Save terms'}
           </Button>
-        </>
       )}
     >
       <Step n={++n} title={`What does ${gym} pay you?`}>
@@ -178,8 +224,16 @@ export function TermsPanel({
       {!fixing && (
         <Step n={++n} title="From which month?">
           <div className="fld">
-            <label className="fld__l vh" htmlFor="gp-month">From month</label>
-            <input className="ctl pkx-num" id="gp-month" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
+            {/* A `Select` of the months the server accepts (two years back, one ahead), newest
+                first, and not `<input type="month">`: that is an OS control in a light popup
+                whatever the theme, and Firefox and Safari draw it as a bare text box. */}
+            <Select
+              label="From month"
+              hideLabel
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              options={monthOptions(minMonth, maxMonth)}
+            />
             <span className="fld__h">Earlier months keep the terms they were earned under.</span>
           </div>
         </Step>
@@ -233,11 +287,10 @@ export function PayoutPanel({
       label={editing ? 'Fix this payout' : 'Record a payout'}
       onClose={onClose}
       error={error}
-      footer={(dismiss) => (
-        <>
-          <Button variant="ghost" onClick={dismiss}>Cancel</Button>
+      save={(size) => (
           <Button
             variant="primary"
+            size={size}
             disabled={!valid || pending}
             onClick={() => onSave({
               amount: value,
@@ -250,7 +303,6 @@ export function PayoutPanel({
           >
             {pending ? 'Saving…' : editing ? 'Save' : 'Record payout'}
           </Button>
-        </>
       )}
     >
       <Step n={++n} title={`How did ${gym} pay?`}>
@@ -278,7 +330,7 @@ export function PayoutPanel({
       <Step n={++n} title="When?">
         <div className="fld">
           <label className="fld__l vh" htmlFor="gpo-date">Received on</label>
-          <input className="ctl pkx-num" id="gpo-date" type="date" value={date} max={day(now)} onChange={(e) => setDate(e.target.value)} />
+          <DateField id="gpo-date" label="Received on" block value={date} max={day(now)} onChange={setDate} />
         </div>
       </Step>
 

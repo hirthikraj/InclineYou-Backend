@@ -79,7 +79,7 @@
 export type AccountTab = 'me' | 'settings' | 'privacy';
 
 export const ACCOUNT_TABS: { key: AccountTab; label: string }[] = [
-  { key: 'me', label: 'Me' },
+  { key: 'me', label: 'Overview' },
   { key: 'settings', label: 'Settings' },
   { key: 'privacy', label: 'Privacy' },
 ];

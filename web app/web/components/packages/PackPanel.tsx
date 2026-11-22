@@ -16,6 +16,8 @@ import {
   type PackService,
 } from '@/lib/packs/vocab';
 import { useDismiss } from '@/lib/ui/dismiss';
+import { usePhone } from '@/lib/ui/phone';
+import { ScreenSheet } from '@/web-components/ui/ScreenSheet';
 import { rupees } from '@/lib/today/time';
 import { Button } from '@/web-components/ui/Button';
 
@@ -110,6 +112,7 @@ export function PackPanel({
   );
 
   const { closing, dismiss, ref: panelRef } = useDismiss<HTMLDivElement>(onClose);
+  const phone = usePhone();
 
   /* Focus lands on the panel, not a field: on a phone a focused input opens the
      keyboard over the sheet that was just asked for. Escape closes. */
@@ -175,36 +178,10 @@ export function PackPanel({
   let step = 0;
   const n = () => ++step;
 
-  return (
+  /* The steps, once — drawn in the desk's side panel or, on a phone, in a
+     full-screen `ScreenSheet` (21 Nov 2026). */
+  const body = (
     <>
-      <button
-        className={`scrim scrim--soft${closing ? ' scrim--out' : ''}`}
-        type="button"
-        aria-label="Close the pack panel"
-        onClick={dismiss}
-      />
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        className={`panel xl-panel pkx-panel${closing ? ' panel--out' : ''}`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={editing ? 'Edit this pack' : 'New pack'}
-      >
-        <div className="panel__hd">
-          <span className="panel__t">{editing ? 'Edit pack' : 'New pack'}</span>
-          <Button
-            variant="ghost"
-            iconOnly
-            label="Close"
-            onClick={dismiss}
-            style={{ marginLeft: 'auto' }}
-            title={undefined}
-            icon={<Glyph size={14} d="M18 6 6 18M6 6l12 12" />}
-          />
-        </div>
-
-        <div className="panel__body">
           {!editing && gymName && (
             <Step n={n()} title="Who sells it?">
               <div className="pkx-opts" role="radiogroup" aria-label="Who sells it">
@@ -383,13 +360,72 @@ export function PackPanel({
           {error && (
             <p className="msg msg--err" style={{ marginTop: 12 }} role="alert"><span>{error}</span></p>
           )}
+    </>
+  );
+
+  const saveButton = (size?: 'sm') => (
+    <Button variant="primary" size={size} disabled={!valid || pending} onClick={submit}>
+      {pending ? 'Saving…' : editing ? 'Save' : 'Add pack'}
+    </Button>
+  );
+
+  /* ── ON A PHONE, A SCREEN AND NOT A BOX (21 Nov 2026, from a screenshot) ────
+     Below 620px the side panel became a box that stopped short of the glass:
+     the page's own *New pack* bar and the tab bar showed under it, and its body
+     scrolled inside a page that also scrolls. The template editor's answer, for
+     its reason: `c-screensheet` fills the screen, the back chevron is Cancel and
+     Save is in the header. Escape still closes (the listener above), and
+     `dismiss` waits for the sheet's slide-out, as it waits for the panel's. */
+  if (phone) {
+    return (
+      <ScreenSheet
+        className="pkx-sheet"
+        title={editing ? 'Edit pack' : 'New pack'}
+        backLabel="Cancel"
+        onBack={dismiss}
+        action={saveButton('sm')}
+        closing={closing}
+        surfaceRef={panelRef}
+      >
+        {body}
+      </ScreenSheet>
+    );
+  }
+
+  return (
+    <>
+      <button
+        className={`scrim scrim--soft${closing ? ' scrim--out' : ''}`}
+        type="button"
+        aria-label="Close the pack panel"
+        onClick={dismiss}
+      />
+      <div
+        ref={panelRef}
+        tabIndex={-1}
+        className={`panel xl-panel pkx-panel${closing ? ' panel--out' : ''}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={editing ? 'Edit this pack' : 'New pack'}
+      >
+        <div className="panel__hd">
+          <span className="panel__t">{editing ? 'Edit pack' : 'New pack'}</span>
+          <Button
+            variant="ghost"
+            iconOnly
+            label="Close"
+            onClick={dismiss}
+            style={{ marginLeft: 'auto' }}
+            title={undefined}
+            icon={<Glyph size={14} d="M18 6 6 18M6 6l12 12" />}
+          />
         </div>
+
+        <div className="panel__body">{body}</div>
 
         <div className="panel__foot">
           <Button variant="ghost" onClick={dismiss}>Cancel</Button>
-          <Button variant="primary" disabled={!valid || pending} onClick={submit}>
-            {pending ? 'Saving…' : editing ? 'Save' : 'Add pack'}
-          </Button>
+          {saveButton()}
         </div>
       </div>
     </>

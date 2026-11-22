@@ -419,6 +419,9 @@ export const getToday = cache(async (): Promise<TodayData> => {
       // The server's streak over the whole history (L3), not one walked from
       // L4's 30-day window, which would cut off an older streak.
       missedStreak: c.stats.missedStreak,
+      sessionsPerWeek: c.schedule?.sessionsPerWeek ?? null,
+      nextSessionAt: c.stats.nextSessionAt,
+      membershipStatus: c.membershipStatus,
     })),
     sessions: sessionRows.map((s) => ({
       id: s.id,
@@ -432,6 +435,7 @@ export const getToday = cache(async (): Promise<TodayData> => {
       deliveryMode: s.deliveryMode,
       notes: s.notes,
       week: s.workout?.week ?? undefined,
+      billing: s.billing,
     })),
     workouts,
     // The live set counts ride on the session rows now (`DeckWorkout.setsDone`).
@@ -452,6 +456,7 @@ export const getToday = cache(async (): Promise<TodayData> => {
       clientId: p.clientId,
       sessionsTotal: p.sessionsTotal,
       sessionsRemaining: p.sessionsRemaining,
+      basis: p.basis,
       amount: num(p.amount),
       status: p.status,
       updatedAt: p.createdAt,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { Markup } from '@/web-components/ui/Markup';
 
 import { Tack } from '@/components/shell/Icons';
@@ -58,8 +58,28 @@ export function PinnedStrip({
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  /* Whether any note is ACTUALLY cut off by the three-line clamp on this screen — see `more`. */
+  const [clipped, setClipped] = useState(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   const pinned = notes.filter((n) => n.pinned);
+  const bodies = pinned.map((n) => n.body).join('\u0000');
+
+  /* MEASURED, NOT GUESSED. Every note is drawn in full up to three lines (`.cfpin__b`'s clamp),
+     and only one that runs past it gets *Show all*. A character count cannot say where three lines
+     end — that depends on the width, which differs by ~2× between a phone and a desk — so a
+     ResizeObserver reads each note's real overflow at load and on every resize or rotation. It is
+     HEIGHT, not width: a line clamp hides lines, and `scrollWidth` never sees them (AGENTS trap 6).
+     The callback runs after layout, so the state it sets is a measurement, not a prop being synced. */
+  useEffect(() => {
+    const els = Array.from(listRef.current?.querySelectorAll<HTMLElement>('.cfpin__b') ?? []);
+    if (els.length === 0) return;
+    const ro = new ResizeObserver(() =>
+      setClipped(els.some((el) => el.scrollHeight > el.clientHeight + 1)),
+    );
+    els.forEach((el) => ro.observe(el));
+    return () => ro.disconnect();
+  }, [bodies]);
 
   /* NOTHING PINNED DRAWS NOTHING. It was a line of prose — *Nothing pinned. Pin a note
      to keep it above every tab* — on every tab of every client who has never been given
@@ -78,11 +98,12 @@ export function PinnedStrip({
     });
   }
 
-  /* One line by default — the first note, clipped — and open to every note in full.
-     It was a 64px block of amber above all eight tabs; a one-line strip keeps the
-     constraint in sight without taking the window. The toggle is only drawn when
-     there is more to show. */
-  const more = pinned.length > 1 || pinned.some((n) => n.body.length > 90);
+  /* Every pinned note in full, each up to three lines; *Show all* only when one runs past that.
+     It was the first note on one clipped line with the rest behind *+N more*, which cut a
+     constraint mid-word and hid the second note entirely (21 Nov 2026). */
+  /* `open` keeps the toggle while expanded: a wrapped note no longer overflows, and a toggle
+     that vanished the moment it was pressed would leave no way to close it again. */
+  const more = clipped || open;
 
   return (
     <div
@@ -95,7 +116,7 @@ export function PinnedStrip({
             12px a teardrop reads as a location marker. */}
         <Tack size={12} filled />
       </span>
-      <div className="cfpin__l">
+      <div className="cfpin__l" ref={listRef}>
         <span className="vh">Before every session</span>
         {pinned.map((note) => (
           <p key={note.id} className="cfpin__i">
@@ -122,7 +143,7 @@ export function PinnedStrip({
           aria-expanded={open}
           onClick={() => setOpen((o) => !o)}
         >
-          {open ? 'Less' : pinned.length > 1 ? `+${pinned.length - 1} more` : 'More'}
+          {open ? 'Show less' : 'Show all'}
         </button>
       )}
       {error && (

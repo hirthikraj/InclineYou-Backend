@@ -132,6 +132,8 @@ export interface ClientDetailWire {
   heightCm: number | null;
   activityLevel: string | null;
   goal: string | null;
+  /** V43: female · male · other · prefer_not_to_say. Absent (not null) when not given — the server omits nulls. */
+  gender?: string | null;
   pinnedNotes: { id: string; body: string; updatedAt: number }[];
 }
 
@@ -544,7 +546,7 @@ export const restoreNote = (clientId: string, noteId: string) =>
 
 export const patchClient = (
   clientId: string,
-  patch: Partial<Pick<ClientDetailWire, 'name' | 'phone' | 'dateOfBirth' | 'goal' | 'heightCm' | 'activityLevel'>> & {
+  patch: Partial<Pick<ClientDetailWire, 'name' | 'phone' | 'dateOfBirth' | 'goal' | 'heightCm' | 'activityLevel' | 'gender'>> & {
     /** v1.2: no session reminders for this client. */
     remindersExcluded?: boolean;
     /** v1.2: `true` / `false` is the trainer's answer for this client, `null` follows their own setting. */
@@ -604,8 +606,12 @@ export const pausePackage = (packageId: string, input: { reason?: string | null;
 export const resumePackage = (packageId: string, input: { effectiveAt?: number | null } = {}) =>
   call<ClientPackageWire>(`/v1/packages/${cid(packageId)}/resume`, { method: 'POST', body: input });
 
-export const extendPackage = (packageId: string, days: number, reason?: string | null) =>
-  call<ClientPackageWire>(`/v1/packages/${cid(packageId)}/extend`, { method: 'POST', body: { days, reason: reason ?? null } });
+/** `id` (18 Nov 2026): the form's, so a retried extend after a lost answer gives the days once. */
+export const extendPackage = (packageId: string, days: number, reason?: string | null, id?: string) =>
+  call<ClientPackageWire>(`/v1/packages/${cid(packageId)}/extend`, {
+    method: 'POST',
+    body: { ...(id ? { id } : {}), days, reason: reason ?? null },
+  });
 
 /** The Undo on a sale or renew just made (9 Nov 2026): within ten minutes, while nothing is recorded on it. */
 export const deletePackage = (packageId: string) =>

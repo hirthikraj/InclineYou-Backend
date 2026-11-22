@@ -48,7 +48,7 @@ export function SpecialitiesForm({ state }: { state: SetupState }) {
         tone: 'err',
         icon: 'warn',
         lead: 'Pick at least one.',
-        rest: 'It is the first thing a client reads about you, and up to five is the whole ask — but Skip for now is there if you would rather come back to it.',
+        rest: 'It is the first thing a client reads about you, and up to five is the whole ask — but Skip this step is there if you would rather come back to it.',
       });
       return;
     }

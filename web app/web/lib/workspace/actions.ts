@@ -1,5 +1,6 @@
 'use server';
 
+import { WORKSPACE_SWITCHING } from '@/lib/launch';
 import { cookies } from 'next/headers';
 import { revalidatePath } from 'next/cache';
 
@@ -37,6 +38,7 @@ const SECURE = process.env.NODE_ENV === 'production';
  * is at the write, once, rather than invisible forever after.
  */
 export async function switchWorkspace(id: string): Promise<void> {
+  if (!WORKSPACE_SWITCHING) return;   // one workspace per trainer at launch (lib/launch.ts)
   const list = await listWorkspaces();
   if (!list.some((w) => w.id === id)) return;
 
@@ -99,6 +101,7 @@ export async function switchWorkspace(id: string): Promise<void> {
  * would be stored for a YEAR rather than for a sitting.
  */
 export async function setDefaultWorkspace(id: string): Promise<void> {
+  if (!WORKSPACE_SWITCHING) return;
   const list = await listWorkspaces();
   if (!list.some((w) => w.id === id)) return;
 

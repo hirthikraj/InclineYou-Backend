@@ -21,6 +21,7 @@ import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
 import { Tag } from '@/web-components/ui/Tag';
 import { KeyValueRow } from '@/web-components/ui/KeyValue';
+import { formatDuration } from '@/lib/sessionlog/kinds';
 import { Why } from '@/web-components/ui/Why';
 
 /**
@@ -219,19 +220,17 @@ function prescriptionOf(sets: number | null, reps: number | null, effortSaid?: s
 }
 
 /**
- * "90s", "2 min", "2 min 30s". Rest is read at a glance or not at all.
+ * `45 s`, `1:45`, `2:00` — the SAME clock a timed set is written in.
  *
- * PROSE, and it stays prose HERE: this one is read inside a sentence — *Planned
- * 4 × 5 at 100 kg · 3 min rest* — where "180" would be a worse word than "3
- * min". The COLUMN version is `restClock` below, and the two differ for the
- * reason the two contexts differ.
+ * It was "90s" · "105s" · "2 min" · "2 min 30s", so one card said *2 min rest*,
+ * the next *105s rest*, and the plank card beside them wrote its holds as `1:05`
+ * and `55 s` (21 Nov 2026, from a screenshot): four spellings of a duration on one
+ * screen, and *105s* had to be divided by 60 to be read. `formatDuration` is what
+ * the log already writes a hold in, so rest now reads the way the sets do.
  */
 function restLabel(seconds: number | null): string | null {
   if (seconds == null || seconds <= 0) return null;
-  if (seconds < 120) return `${seconds}s`;
-  const min = Math.floor(seconds / 60);
-  const rest = seconds % 60;
-  return rest ? `${min} min ${rest}s` : `${min} min`;
+  return formatDuration(seconds);
 }
 
 /**
@@ -445,7 +444,7 @@ function ClientNotes({
       </div>
       <div className="card__b">
         {pinned.length > 0 && (
-          <div className="cfpin" style={{ marginBottom: shown.length ? 12 : 0 }}>
+          <div className="cfpin cfpin--stack" style={{ marginBottom: shown.length ? 12 : 0 }}>
             <p className="cfpin__k">
               <PinIcon size={12} />
               Before every session
@@ -722,6 +721,9 @@ function ExerciseCard({ group, index, now }: { group: ExerciseGroup; index: numb
   const trend = trendOf(group);
   const top = topSetOf(group.sets);
   const targetReps = group.target?.reps ?? null;
+  /* Only a plain kilogram target: a `%1RM` or bodyweight plan (`loadSaid`) is not
+     comparable with the kilograms in this column. */
+  const targetLoad = group.target?.load != null && !group.target.loadSaid ? group.target.load : null;
 
   /* One number of columns, computed once. The note row spans the rest of them,
      and a note row that spans the wrong count is how a table gets a ragged
@@ -768,8 +770,8 @@ function ExerciseCard({ group, index, now }: { group: ExerciseGroup; index: numb
           <thead>
             <tr>
               <th className="n"></th>
-              {hasWeights && <th className="num">Load kg</th>}
-              {hasReps && <th className="num">{said ? 'Done' : 'Reps'}</th>}
+              {hasWeights && <th className="num ex__c-load">Load kg</th>}
+              {hasReps && <th className="num ex__c-reps">{said ? 'Done' : 'Reps'}</th>}
               {hasRpe && <th className="num">RPE</th>}
               {/* The sink for everything the numeric tracks give back. See
                   `.ex__sets td.ex__pr` in app.css. */}
@@ -785,9 +787,25 @@ function ExerciseCard({ group, index, now }: { group: ExerciseGroup; index: numb
                 <tr data-state="done" data-top={set.id === top?.id ? '' : undefined}>
                   <td className="n">{set.setNumber}</td>
                   {hasWeights && (
-                    <td className="num">
+                    <td className="num ex__c-load">
                       {set.loadKg !== null ? (
-                        <span className="tnum">{set.loadKg}</span>
+                        <span className="ex__fig">
+                          <span className="tnum">{set.loadKg}</span>
+                          {/* OFF THE PLAN'S LOAD, EITHER WAY (21 Nov 2026). A short rep
+                              count was marked (`8 / 10`) and a different load was not, so
+                              32.5 and 37.5 under a plan of 35 read as plain numbers. A load
+                              change is a call made on the floor — lighter or heavier — and
+                              the change from the plan is what a review is looking for, so it
+                              takes the same quiet `/ planned` mark, in both directions. */}
+                          {targetLoad != null && set.loadKg !== targetLoad && (
+                            <span
+                              className="ink3 tnum ex__of"
+                              title={`Planned ${kg(targetLoad)} kg`}
+                            >
+                              / {kg(targetLoad)}
+                            </span>
+                          )}
+                        </span>
                       ) : (
                         <span className="ink3">—</span>
                       )}
@@ -799,9 +817,9 @@ function ExerciseCard({ group, index, now }: { group: ExerciseGroup; index: numb
                     </td>
                   )}
                   {hasReps && !said && (
-                    <td className="num">
+                    <td className="num ex__c-reps">
                       {set.reps !== null ? (
-                        <>
+                        <span className="ex__fig">
                           <span className="tnum">{set.reps}</span>
                           {/* THE TARGET, ONLY WHERE IT WAS MISSED.
                               A set that hit its number needs no annotation, and
@@ -810,9 +828,9 @@ function ExerciseCard({ group, index, now }: { group: ExerciseGroup; index: numb
                               rows that fell short, it is the one place on the
                               card the eye is meant to stop. */}
                           {targetReps != null && set.reps < targetReps && (
-                            <span className="ink3 tnum ex__of"> / {targetReps}</span>
+                            <span className="ink3 tnum ex__of">/ {targetReps}</span>
                           )}
-                        </>
+                        </span>
                       ) : (
                         <span className="ink3">—</span>
                       )}
@@ -1197,7 +1215,7 @@ function WorkoutLogView({ data }: { data: SessionDetailData }) {
         <div className="strip sesh__strip">
           <div>
             <b>{workout.totalSets}</b>
-            <i>{plan?.totalSets ? `of ${plan.totalSets} planned` : 'sets'}</i>
+            <i>{plan?.totalSets ? `of ${plan.totalSets} sets planned` : 'sets'}</i>
           </div>
           {workout.totalVolumeKg > 0 && (
             <div>
@@ -1224,11 +1242,14 @@ function WorkoutLogView({ data }: { data: SessionDetailData }) {
               className={
                 gained === 0 ? 'warn' : gained === compared.length ? 'ok' : undefined
               }
+              /* Why `5 of 5` on a six-movement session: only movements with a last time
+                 to beat are counted, and a hold or a carry has no kg or rep delta. */
+              title="Counted over the movements with a last time to compare, by weight or reps. Holds, carries and first-timers are not counted."
             >
               <b>
                 {gained} <span className="strip__of">of {compared.length}</span>
               </b>
-              <i>up on last time</i>
+              <i>lifts beat last time</i>
             </div>
           ) : (
             <div>

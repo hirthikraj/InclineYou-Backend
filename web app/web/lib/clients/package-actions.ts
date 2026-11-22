@@ -193,12 +193,13 @@ export async function extendPack(
   packageId: string,
   days: number,
   reason?: string,
+  id?: string,
 ): Promise<PackageResult> {
   if (!Number.isFinite(days) || days <= 0 || days > 3650) {
     return { ok: false, message: 'Extend by a number of days between 1 and 3,650.' };
   }
   try {
-    await extendPackage(packageId, Math.round(days), reason?.trim() || null);
+    await extendPackage(packageId, Math.round(days), reason?.trim() || null, id);
     refresh(clientId);
     return { ok: true };
   } catch (error) {

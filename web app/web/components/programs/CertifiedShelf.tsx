@@ -70,7 +70,10 @@ export function CertifiedShelf({
 
   return (
     <>
-      <TopBar crumb="Fitness · Templates · InclineYou" />
+      {/* `title`, because the phone header defaults to the crumb's LAST segment, which here
+          is the brand: the bar read *InclineYou* over a page of templates (21 Nov 2026).
+          Workouts and Programs name themselves the same way. */}
+      <TopBar crumb="Fitness · Templates · InclineYou" title="Templates" />
 
       <main className="main body--flush pg" id="main-content">
         {/* COMING FROM A CLIENT'S PLAN: the same band My templates draws, so the shelf pair says it once. */}

@@ -40,6 +40,8 @@ export const TEMPLATE_FOR_KIND: Record<AttentionKind, NudgeTemplateName | null> 
   quiet: 'check_in',
   milestone: 'well_done',
   'no-program': null,
+  // Nothing is sent: setting a client up is the trainer's own work.
+  setup: null,
   unmarked: null,
   log: null,
   // Nothing is sent: the trainer takes the assessment in the session.

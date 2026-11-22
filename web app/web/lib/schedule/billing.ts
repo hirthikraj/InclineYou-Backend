@@ -31,6 +31,37 @@ export const BILLING_CHOICES: { id: Billing; label: string }[] = [
   { id: 'single', label: 'Single' },
 ];
 
+/**
+ * A PROSPECT'S SESSION IS A TRIAL UNLESS THE TRAINER SAYS OTHERWISE (22 Nov 2026).
+ *
+ * A prospect has no pack, so the old default — Pack — booked their demo as a
+ * session nothing would ever pay for, and Mark done reported it as money nobody
+ * had asked for. The roster's two words for somebody who has not started are
+ * `status = prospect` (Add client's prospect path) and an `invited` / `pending`
+ * membership (`lib/schedule/pivot.ts` `absenceOf`), so either one counts.
+ */
+export function isProspect(c: { status?: string | null; membership?: string | null } | null | undefined): boolean {
+  if (!c) return false;
+  const status = (c.status ?? '').toLowerCase();
+  const membership = (c.membership ?? '').toLowerCase();
+  return status === 'prospect' || membership === 'invited' || membership === 'pending';
+}
+
+/** The Paid-by answer a new booking starts on, before the trainer picks one. */
+export function defaultBilling(c: { status?: string | null; membership?: string | null } | null | undefined): Billing {
+  return isProspect(c) ? 'trial' : 'pack';
+}
+
+/** The word a block on the grid carries for a session that is free on purpose. Null for the paid kinds. */
+export function freeTag(b: Billing): string | null {
+  return b === 'trial' ? 'Trial' : b === 'complimentary' ? 'Free' : null;
+}
+
+/** A wire `billing` read safely: anything unknown, or absent, is the default `pack`. */
+export function asBilling(raw: string | null | undefined): Billing {
+  return raw === 'trial' || raw === 'complimentary' || raw === 'single' ? raw : 'pack';
+}
+
 /** What a client's packs can pay for, per service. */
 export interface ClientBilling {
   /** A gym client buys only the gym's packs, so cannot be sold a single session. */

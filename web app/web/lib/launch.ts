@@ -25,3 +25,11 @@ export const SESSION_REMINDERS_SENDING = false;
  * as reminders: an offer to notify that never notifies is worse than no offer.
  */
 export const PUSH_SENDING = false;
+
+/**
+ * Switching between workspaces (your own book, a team, a gym). Decided 22 Nov 2026: the launch has ONE workspace per
+ * trainer, so the top bar's switcher is not drawn (the screen's name is, as before the switcher existed) and every
+ * read resolves to the trainer's own book whatever a cookie from an earlier sitting says. The menu, the cookies and
+ * the derived list are all kept; turn this on when teams or gyms ship.
+ */
+export const WORKSPACE_SWITCHING = false;

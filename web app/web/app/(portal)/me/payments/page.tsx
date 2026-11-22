@@ -23,11 +23,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
   if (money && !money.visible) notFound();
   return (
     <>
-      <TopBar crumb="Payments" title="Payments" />
+      <TopBar crumb="Payments" title="Me" titleHref="/me/account" />
       <main className="main" id="main-content">
         <PageHeader className="ph--portal" title="Payments" />
         <div className="body">
+          {/* In the portal's centred column (22 Nov 2026): without `.portal` this screen sat flush left on a desk while its title, which reads the column, sat centred — measured at 1568px, the content began 238px left of the heading. */}
+          <div className="portal">
           {money ? <MoneyView money={money} trainerFirstName={(session.me.trainer?.name ?? 'Your trainer').split(' ')[0]} /> : <Message tone="warn">We couldn’t load this just now. Reload in a moment.</Message>}
+          </div>
         </div>
       </main>
     </>

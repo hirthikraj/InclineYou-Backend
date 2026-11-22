@@ -19,7 +19,7 @@ import { Chip } from '@/web-components/ui/Chip';
 import { KeyValueRow } from '@/web-components/ui/KeyValue';
 import { TextField } from '@/web-components/ui/Field';
 import {
-  BILLING_CHOICES, coverage, coverageLine, readPrice, serviceOf, type Billing,
+  BILLING_CHOICES, coverage, coverageLine, defaultBilling, isProspect, readPrice, serviceOf, type Billing,
 } from '@/lib/schedule/billing';
 import { Avatar } from '@/web-components/ui/Avatar';
 
@@ -98,9 +98,10 @@ export function BookPanel({
   const [clientId, setClientId] = useState<string | null>(asked);
   const [minutes, setMinutes] = useState<number | null>(null);
   const [mode, setMode] = useState<'floor' | 'remote' | null>(null);
-  // V32: how this booking is paid for. A pack unless the trainer says otherwise;
-  // the price is only asked for, and only sent, for a single session.
-  const [billingPicked, setBilling] = useState<Billing>('pack');
+  // V32: how this booking is paid for. Null until the trainer picks one, and then
+  // it follows the client: a trial for a prospect, a pack for everyone else
+  // (`defaultBilling`). The price is only asked for, and only sent, for a single session.
+  const [billingPicked, setBilling] = useState<Billing | null>(null);
   const [priceText, setPriceText] = useState<string | null>(null);
   const [startMinute, setStartMinute] = useState(minute);
 
@@ -195,7 +196,8 @@ export function BookPanel({
    */
   const gymClient = client?.billing?.gymClient ?? false;
   // Picking a gym client after choosing Single falls back to the pack: Single is not theirs to have.
-  const billing: Billing = gymClient && billingPicked === 'single' ? 'pack' : billingPicked;
+  const billingWanted: Billing = billingPicked ?? defaultBilling(client);
+  const billing: Billing = gymClient && billingWanted === 'single' ? 'pack' : billingWanted;
   const service = serviceOf(mode, client?.billing ?? null);
   const covered = client ? coverage(client.billing, service) : null;
   const moneyLine = client && covered && billing === 'pack' ? coverageLine(covered, client.name, service) : null;
@@ -477,7 +479,9 @@ export function BookPanel({
                 )}
                 <p className="fld__h">
                   {billing === 'pack' && 'Taken off their pack when you mark it done.'}
-                  {billing === 'trial' && 'A trial before they buy — delivered free, never charged.'}
+                  {billing === 'trial' && (isProspect(client) && billingPicked === null
+                    ? `${client?.name.split(' ')[0] ?? 'They'} hasn’t bought anything yet, so this is booked as a trial — delivered free, never charged.`
+                    : 'A trial before they buy — delivered free, never charged.')}
                   {billing === 'complimentary' && 'On the house — delivered free, never charged.'}
                   {billing === 'single' && 'Sold on its own when you book it: owed from the session’s day until it’s paid. Their pack is not touched.'}
                 </p>

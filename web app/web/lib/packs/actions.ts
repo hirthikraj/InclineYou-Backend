@@ -43,6 +43,7 @@ const BY_CODE: Record<string, string> = {
   GYM_NEEDS_FLOOR: 'A gym is a place you train on the floor — add “On a gym floor” to how you train, then pick the gym.',
   PACK_OWNER_IMMUTABLE: 'A pack cannot move between your list and the gym’s. Add it again on the right list.',
   PACK_NOT_FOUND: 'That price is no longer on your list.',
+  PACK_LIMIT: 'Your price list is full (200 packs, retired ones included). Delete one nothing was sold from, then add this.',
 };
 
 function fail(error: unknown, subject: string): PackResult {

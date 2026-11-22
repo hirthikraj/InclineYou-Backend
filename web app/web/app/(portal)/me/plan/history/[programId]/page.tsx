@@ -1,9 +1,9 @@
 import { notFound } from 'next/navigation';
 
+import { LoadFailed } from '@/components/portal/LoadFailed';
 import { PlanTree } from '@/components/portal/plan/PlanTree';
 import { requirePortalSession } from '@/lib/portal/session';
 import { portalGet, settle, type ProgramTreeWire } from '@/lib/portal/plan-api';
-import { Message } from '@/web-components/ui/Message';
 
 export const metadata = { title: 'Plan · InclineYou' };
 
@@ -17,7 +17,7 @@ export default async function Page({ params }: { params: Promise<{ programId: st
   const r = await portalGet<ProgramTreeWire>(`/v1/portal/programs/${encodeURIComponent(programId)}`);
   if (!r.ok && r.status === 404) notFound();
   const tree = settle(r);
-  if (!tree) return <div className="body"><Message tone="warn">We couldn’t load this plan just now. Reload in a moment.</Message></div>;
+  if (!tree) return <LoadFailed what="this plan" retryHref={`/me/plan/history/${encodeURIComponent(programId)}`} />;
   return (
     <div className="body">
       <PlanTree tree={tree} trainerFirstName={(session.me.trainer?.name ?? 'Your trainer').split(' ')[0]} />

@@ -1,8 +1,8 @@
 import { AssessList } from '@/components/portal/assess/AssessList';
+import { LoadFailed } from '@/components/portal/LoadFailed';
 import { requirePortalSession } from '@/lib/portal/session';
 import { portalGet, settle } from '@/lib/portal/plan-api';
 import type { AssessPageWire, TemplateWire } from '@/lib/portal/assess-api';
-import { Message } from '@/web-components/ui/Message';
 
 export const metadata = { title: 'Assessments · InclineYou' };
 
@@ -19,8 +19,20 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
   ]);
   const o = settle(open);
   const d = settle(done);
-  if (!o || !d) return <div className="body"><Message tone="warn">We couldn’t load your assessments just now. Reload in a moment — nothing has been lost.</Message></div>;
+  if (!o || !d) return <LoadFailed what="your assessments" retryHref="/me/progress/assessments" />;
   const templates = o.canStart ? settle(await portalGet<{ items: TemplateWire[] }>('/v1/portal/assessment-templates'))?.items ?? [] : [];
   const first = (session.me.trainer?.name ?? 'Your trainer').split(' ')[0];
-  return <div className="body"><AssessList open={o.items} done={d.items} counts={o.counts ?? { open: o.items.length, done: d.items.length }} templates={templates} nextCursor={d.nextCursor} trainerFirstName={first} /></div>;
+  return (
+    <div className="body">
+      <AssessList
+        open={o.items}
+        done={d.items}
+        counts={o.counts ?? { open: o.items.length, done: d.items.length }}
+        templates={templates}
+        nextCursor={d.nextCursor}
+        trainerFirstName={first}
+        zone={session.me.myDetails?.timezone ?? 'Asia/Kolkata'}
+      />
+    </div>
+  );
 }

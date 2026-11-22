@@ -4,7 +4,7 @@ import { SESSION_REMINDERS_SENDING } from '@/lib/launch';
 import { useRouter } from 'next/navigation';
 import { useState, useTransition } from 'react';
 
-import { Note, Plus, Tack } from '@/components/shell/Icons';
+import { Lock, Note, Plus, Tack } from '@/components/shell/Icons';
 import type { ClientDetailWire, ClientMessageWire, ClientNoteWire, PortalWire } from '@/lib/clients/client-api';
 import { formatPhone } from '@/lib/auth/policy';
 import { saveContact, savePhysical } from '@/lib/clients/contact-actions';
@@ -31,6 +31,9 @@ import { inviteClient, revokeInvite } from '@/lib/clients/invite-actions';
 import { savePortalPrefs } from '@/lib/clients/portal-actions';
 import type { InviteCreatedWire } from '@/lib/clients/invite-types';
 import { InviteSheet } from '@/components/clients/InviteSheet';
+import { ConsentBanner, ConsentLock } from '@/components/clients/ConsentNotice';
+import { hasConsent } from '@/lib/clients/setup';
+import { GENDERS, genderLabel } from '@/lib/clients/gender';
 import { relativePast } from '@/lib/today/time';
 import { useToast } from '@/lib/toast/store';
 import { ARCHIVE_REASONS } from '@/components/clients/Clients';
@@ -575,6 +578,10 @@ function PhysicalCard({
   const [height, setHeight] = useState(client.heightCm == null ? '' : String(client.heightCm));
   const [dob, setDob] = useState(client.dateOfBirth ?? '');
   const [activity, setActivity] = useState(client.activityLevel ?? '');
+  /* V43: gender is the business record, like the birth day — editable before consent. Height and activity are the
+     consent-locked part of this card (22 Nov 2026), so before consent the form draws them read-only. */
+  const [gender, setGender] = useState(client.gender ?? '');
+  const consented = hasConsent(client.membershipStatus);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -596,28 +603,34 @@ function PhysicalCard({
     h: client.heightCm,
     d: client.dateOfBirth,
     a: client.activityLevel,
+    g: client.gender ?? null,
   });
-  if (committed.h !== client.heightCm || committed.d !== client.dateOfBirth || committed.a !== client.activityLevel) {
-    setCommitted({ h: client.heightCm, d: client.dateOfBirth, a: client.activityLevel });
+  if (committed.h !== client.heightCm || committed.d !== client.dateOfBirth || committed.a !== client.activityLevel
+      || committed.g !== (client.gender ?? null)) {
+    setCommitted({ h: client.heightCm, d: client.dateOfBirth, a: client.activityLevel, g: client.gender ?? null });
     setHeight(client.heightCm == null ? '' : String(client.heightCm));
     setDob(client.dateOfBirth ?? '');
     setActivity(client.activityLevel ?? '');
+    setGender(client.gender ?? '');
   }
 
   const age = ageFrom(client.dateOfBirth ?? null, now);
   const dirty =
     height !== (client.heightCm == null ? '' : String(client.heightCm)) ||
     dob !== (client.dateOfBirth ?? '') ||
-    activity !== (client.activityLevel ?? '');
+    activity !== (client.activityLevel ?? '') ||
+    gender !== (client.gender ?? '');
   const adultAt = adultCutoff(now);
-  const bare = client.heightCm == null && client.dateOfBirth == null && client.activityLevel == null;
+  const bare = client.heightCm == null && client.dateOfBirth == null && client.activityLevel == null && !client.gender;
 
   function submit() {
     if (pending || !dirty) return;
     setError(null);
     start(async () => {
       const result = await savePhysical(clientId, client.version, {
-        heightCm: height, dateOfBirth: dob, activityLevel: activity,
+        dateOfBirth: dob,
+        gender: gender === '' ? null : gender,
+        ...(consented ? { heightCm: height, activityLevel: activity } : {}),
       });
       if (result.ok) close();
       else setError(result.message ?? 'It did not save.');
@@ -630,6 +643,7 @@ function PhysicalCard({
     setHeight(client.heightCm == null ? '' : String(client.heightCm));
     setDob(client.dateOfBirth ?? '');
     setActivity(client.activityLevel ?? '');
+    setGender(client.gender ?? '');
     setError(null);
     close();
   }
@@ -651,13 +665,15 @@ function PhysicalCard({
         >
           <TextField
             label="Height"
-            hint="In centimetres. Leave it empty if you have not measured."
+            hint={consented
+              ? 'In centimetres. Leave it empty if you have not measured.'
+              : 'Waits for their consent — they give it by accepting their invite.'}
             value={height}
-            autoFocus
+            autoFocus={consented}
             inputMode="decimal"
             numeric
             autoComplete="off"
-            disabled={pending}
+            disabled={pending || !consented}
             onChange={(e) => setHeight(e.target.value)}
           />
           {/* The themed date field, with the rule said before the press: the native one drew mm/dd (an
@@ -678,9 +694,17 @@ function PhysicalCard({
             <p id="ph-dob-h" className="fld__h">Clients must be 18 or over.</p>
           </div>
           <Select
+            label="Gender"
+            value={gender}
+            disabled={pending}
+            style={{ marginTop: 12 }}
+            options={[{ value: '', label: 'Not given' }, ...GENDERS]}
+            onChange={(e) => setGender(e.target.value)}
+          />
+          <Select
             label="Activity level"
             value={activity}
-            disabled={pending}
+            disabled={pending || !consented}
             style={{ marginTop: 12 }}
             options={[{ value: '', label: 'Not set' }, ...ACTIVITY]}
             onChange={(e) => setActivity(e.target.value)}
@@ -710,19 +734,23 @@ function PhysicalCard({
       title="Physical information"
       className="cfrec--phys"
       actions={
+        /* Edit stays: birth day and gender are the business record. Height and activity wait for consent
+           (22 Nov 2026) — the notice below says so and carries the invite, and the form draws them read-only. */
         <Button id={editId} variant="secondary" size="sm" onClick={open}>
           Edit
         </Button>
       }
       flush
     >
-      {bare ? (
+      {/* Before consent the tab's banner says what waits and carries the invite (one per screen, not one per
+          card); the two locked rows say so in place of a dash, which would read as "not filled in yet". */}
+      {bare && consented ? (
         /* FOUR DASHES WERE HOMEWORK. A client with nothing measured gets one sentence and the Edit above it. */
-        <p className="cfrec__none">Height, birth day and activity level are not set yet.</p>
+        <p className="cfrec__none">Height, birth day, gender and activity level are not set yet.</p>
       ) : (
       <FactList>
         <FactList.Row k="Height">
-          {client.heightCm == null ? <FactList.Blank /> : `${client.heightCm} cm`}
+          {!consented ? <ConsentLock /> : client.heightCm == null ? <FactList.Blank /> : `${client.heightCm} cm`}
         </FactList.Row>
 
         {/* No weight row: a body is measured in an assessment and nowhere else, and there is no measurement
@@ -735,8 +763,14 @@ function PhysicalCard({
           {client.dateOfBirth == null ? <FactList.Blank /> : birthDateStr(client.dateOfBirth)}
         </FactList.Row>
 
+        <FactList.Row k="Gender">
+          {genderLabel(client.gender) ?? <FactList.Blank />}
+        </FactList.Row>
+
         <FactList.Row k="Activity level">
-          {client.activityLevel == null
+          {!consented
+            ? <ConsentLock />
+            : client.activityLevel == null
             ? <FactList.Blank />
             : ACTIVITY.find((o) => o.value === client.activityLevel)?.label ?? client.activityLevel}
         </FactList.Row>
@@ -1049,15 +1083,7 @@ function ManageCard({ client }: { client: ClientDetailWire }) {
               cancelled. Leave the date empty if you don&apos;t know yet.
             </p>
             <div className="cfdz__a">
-              <TextField
-                label="Back on"
-                hideLabel
-                type="date"
-                autoFocus
-                value={backOn}
-                disabled={pending}
-                onChange={(e) => setBackOn(e.target.value)}
-              />
+              <DateField label="Back on" value={backOn} disabled={pending} onChange={setBackOn} />
               <Button
                 variant="secondary"
                 disabled={pending}
@@ -1314,6 +1340,7 @@ export function PersonalTab({
   /* A note can be shown only to a client who has somewhere to read it. */
   const canShare = client.portal.state === 'accepted' || client.portal.state === 'paused';
   const first = clientName.split(' ')[0];
+  const consented = hasConsent(client.membershipStatus);
 
   /* Pinned first, then newest. The strip's contents should be at the top of the
      list that owns them, or unpinning something means hunting for it. */
@@ -1378,6 +1405,16 @@ export function PersonalTab({
 
   return (
     <div className="cfgrid--pi">
+      {!consented && (
+        <ConsentBanner
+          clientId={client.id}
+          clientName={client.name}
+          phone={client.phone}
+          membership={client.membershipStatus}
+          locked={['height', 'activity level', 'notes']}
+          open={['birth day, gender', 'contact details']}
+        />
+      )}
       {/* The record, in the order a trainer reads a person: what their body is,
           then how to reach them. The third card used to be *Remove* and is now
           across the foot of the grid — a destructive control at the end of a
@@ -1405,7 +1442,9 @@ export function PersonalTab({
              existed the one reassurance a trainer needs before writing about a person was gone. */
           <span className="small ink3">
             {notes.length > 0 ? `${notes.length === 1 ? '1 note' : `${notes.length} notes`} · ` : ''}
-            {canShare || notes.some((n) => n.sharedWithClient) ? 'Private unless you share one' : 'Only you can read these'}
+            {!consented && notes.length === 0
+              ? 'Opens after consent'
+              : canShare || notes.some((n) => n.sharedWithClient) ? 'Private unless you share one' : 'Only you can read these'}
           </span>
         }
         flush
@@ -1424,7 +1463,7 @@ export function PersonalTab({
 
               It still spans in the two cases where it is the only thing in the
               wall that matters — open, and on a client with no notes at all. */}
-          <div className={`cfnw__new${composing || ordered.length === 0 ? ' cfnw__new--wide' : ''}`}>
+          {consented && <div className={`cfnw__new${composing || ordered.length === 0 ? ' cfnw__new--wide' : ''}`}>
             {composing ? (
               <>
                 {/* ── B / I / U / H AND AN EMOJI, THE WORKOUT DIALOG'S OWN FIELD ──
@@ -1500,10 +1539,20 @@ export function PersonalTab({
                 Write something worth remembering about {first}…
               </button>
             )}
-          </div>
+          </div>}
 
           {ordered.length === 0 ? (
-            composing ? null : <EmptyState
+            composing ? null : !consented ? (
+              /* Notes wait for consent (22 Nov 2026): in practice they hold health details. The banner above carries
+                 the invite; this says why the card is shut, and does not invite a note that cannot be written. */
+              <EmptyState
+                kind="first-run"
+                className="cfnw__locked"
+                icon={<Lock size={22} />}
+                title={`Notes open when ${first} accepts`}
+                body={`Notes often end up holding health details, so they wait for ${first}’s consent. Once they accept the invite, everything you write here stays private until you choose to show it.`}
+              />
+            ) : <EmptyState
               kind="first-run"
               icon={<Note size={22} />}
               title="Nothing written down yet"

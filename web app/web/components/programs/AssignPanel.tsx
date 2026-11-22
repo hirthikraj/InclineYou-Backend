@@ -11,7 +11,9 @@ import { Button } from '@/web-components/ui/Button';
 import { Chip } from '@/web-components/ui/Chip';
 import { Message } from '@/web-components/ui/Message';
 import { Why } from '@/web-components/ui/Why';
+import { DateField } from '@/web-components/ui/DateField';
 import { DockPanel } from '@/web-components/ui/DockPanel';
+import { Segment, SegmentButton } from '@/web-components/ui/Segment';
 
 /**
  * The grid a client's standing week seeds, or null when they have none. The template's ordinal days take
@@ -113,6 +115,13 @@ export function AssignPanel({
   const [slots, setSlots] = useState<Record<number, { weekday: number; time: string }>>(
     () => (initial ? seedForClient(days, initial) : null) ?? seedSchedule(days),
   );
+  /* FIXED DAYS, OR IN ORDER (22 Nov 2026). Times are optional on a client now —
+     *3 days a week, mornings* is a real answer before the exact slots are known —
+     so a client with no standing week gets the plan with NO schedule written:
+     each session they book takes the next day of the plan. Seeding 06:00 here
+     and saving it would book a week of sessions nobody agreed to. A client who
+     already has a standing week opens on *fixed*, seeded from it. */
+  const [fixed, setFixed] = useState<boolean>(() => (initial?.weeklySchedule?.length ?? 0) > 0);
 
   const active = useMemo(
     () => clients.filter(c => (c.status ?? 'active') !== 'inactive'),
@@ -153,6 +162,7 @@ export function AssignPanel({
     setClientId(next.id);
     const seeded = seedForClient(days, next);
     if (seeded) setSlots(seeded);
+    setFixed(seeded !== null);
   }
 
   /**
@@ -169,7 +179,7 @@ export function AssignPanel({
   const agreed = client?.sessionsPerWeek ?? null;
   const mismatch = agreed !== null && days.length > 0 && agreed !== days.length;
 
-  const missing = days.filter(d => !slots[d]?.time);
+  const missing = fixed ? days.filter(d => !slots[d]?.time) : [];
   const ready = Boolean(clientId) && missing.length === 0 && days.length > 0;
 
   return (
@@ -244,11 +254,28 @@ export function AssignPanel({
             <span className="card__t">When each day lands</span>
           </div>
           <div className="card__b">
+            {days.length > 0 && (
+              <Segment label="How the plan's days land" mode="single">
+                <SegmentButton mode="single" pressed={!fixed} onClick={() => setFixed(false)}>
+                  In order
+                </SegmentButton>
+                <SegmentButton mode="single" pressed={fixed} onClick={() => setFixed(true)}>
+                  Fixed days and times
+                </SegmentButton>
+              </Segment>
+            )}
+            {days.length > 0 && !fixed && (
+              <p className="small pg__gap">
+                No standing week is saved. Each session you book takes the next day of the plan
+                — Day 1, then Day 2 — whatever weekday it falls on. Set fixed days any time from
+                their file.
+              </p>
+            )}
             {days.length === 0 ? (
               <p className="small">
                 This program has no days laid out yet. Add one before assigning it.
               </p>
-            ) : (
+            ) : !fixed ? null : (
               days.map(day => {
                 const slot = slots[day];
                 return (
@@ -322,10 +349,12 @@ export function AssignPanel({
                 follow it.
               </Message>
             )}
-            <p className="small pg__gap">
-              Each day needs its own weekday — the same one twice would put two sessions on one
-              morning, which is why the taken ones are refused.
-            </p>
+            {fixed && (
+              <p className="small pg__gap">
+                Each day needs its own weekday — the same one twice would put two sessions on one
+                morning, which is why the taken ones are refused.
+              </p>
+            )}
           </div>
         </section>
 
@@ -334,15 +363,20 @@ export function AssignPanel({
             <span className="card__t">From when</span>
           </div>
           <div className="card__b">
-            <label className="fld">
-              <span className="fld__l">Start date</span>
-              <input
-                className="ctl"
-                type="date"
+            <div className="fld">
+              <label className="fld__l" htmlFor="ap-start">Start date</label>
+              <DateField
+                id="ap-start"
+                label="Start date"
+                block
+                /* The server's window (Programs A5, 18 Nov 2026): within 3
+                   months of today either way. */
+                min={isoDay(-3)}
+                max={isoDay(3)}
                 value={start}
-                onChange={e => setStart(e.target.value)}
+                onChange={setStart}
               />
-            </label>
+            </div>
           </div>
         </section>
 
@@ -372,11 +406,14 @@ export function AssignPanel({
             onAssign({
               clientId: clientId!,
               startDate: start ? new Date(`${start}T00:00:00`).getTime() : null,
-              schedule: days.map(day => ({
-                day,
-                weekday: slots[day].weekday,
-                time: slots[day].time,
-              })),
+              /* Empty = in order: `postApply` writes no week and only applies. */
+              schedule: fixed
+                ? days.map(day => ({
+                    day,
+                    weekday: slots[day].weekday,
+                    time: slots[day].time,
+                  }))
+                : [],
             })
           }
         >
@@ -430,4 +467,12 @@ const PATTERNS: Record<number, number[]> = {
 
 function spreadWeekdays(count: number): number[] {
   return PATTERNS[Math.min(7, Math.max(1, count))] ?? [1];
+}
+
+/** Today moved by `months`, as the YYYY-MM-DD a date input takes, on this device's calendar. */
+function isoDay(months: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() + months);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }

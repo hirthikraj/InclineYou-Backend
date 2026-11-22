@@ -10,6 +10,8 @@ import { ResumeButton } from './ResumeButton';
 import { NudgeButton } from '@/components/nudge/NudgeButton';
 
 import { FollowUps } from './FollowUps';
+import { SetupCard } from './SetupCard';
+import { EditWeekButton } from './WeekEditor';
 import { CalendarIcon, ListIcon, dateStr, isoDateStr, num, shortTime } from './shared';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
@@ -353,6 +355,10 @@ export function OverviewTab({
        not win against. `.cfgrid--ov` in app.css measures the ceiling and the
        two rows. */
     <div className="cfgrid cfgrid--ov">
+      {/* ── 0 · WHAT IS LEFT TO SET UP — a sold pack's days a week, plan and first
+             booking, or a prospect's demo. Spans the grid and leaves by itself. */}
+      <SetupCard payload={payload} />
+
       {/* ── 1 · WHEN AM I SEEING THEM ─────────────────────────────────────── */}
       {nextSession ? (
         <HeroCard
@@ -646,10 +652,13 @@ export function OverviewTab({
           className="card__hd--wrap"
           title="Turning up"
           actions={
-            <Button href={`/clients/${client.id}/sessions`} variant="ghost" size="sm">
-              All sessions
-              <Chevron size={13} />
-            </Button>
+            <>
+              <EditWeekButton client={client} />
+              <Button href={`/clients/${client.id}/sessions`} variant="ghost" size="sm">
+                All sessions
+                <Chevron size={13} />
+              </Button>
+            </>
           }
         >
           {/* WHAT THE WEEK WAS SUPPOSED TO BE, which is the fact the seven
@@ -657,9 +666,14 @@ export function OverviewTab({
               said nowhere. A NEUTRAL tag where no week is agreed: step 3 of
               the add flow is optional and a trainer who books by hand has not
               made a mistake. */}
-          {agreedDays.size > 0 ? (
+          {/* Days a week is its own answer since 22 Nov 2026 and can exist with no
+              fixed days at all — *3 a week, any mornings* — so it leads, and the
+              fixed days only stand in for it on an older client that has none. */}
+          {(client.schedule.sessionsPerWeek ?? agreedDays.size) > 0 ? (
             <Tag tone="acc">
-              {agreedDays.size} day{agreedDays.size === 1 ? '' : 's'} a week
+              {client.schedule.sessionsPerWeek ?? agreedDays.size} day
+              {(client.schedule.sessionsPerWeek ?? agreedDays.size) === 1 ? '' : 's'} a week
+              {agreedDays.size === 0 ? ' · no fixed days' : ''}
             </Tag>
           ) : (
             <Tag>Booked by hand</Tag>

@@ -333,6 +333,95 @@ function setsOfRow(r: FlatRow): PlanSetWire[] {
   return Array.from({ length: count }, () => one(d));
 }
 
+/**
+ * WHAT THE FLAT ROW CANNOT HOLD, PUT BACK (19 Nov 2026). A flat row is one exercise as the builder edits it: a count,
+ * reps or seconds, one load, one alternative's id. Saving it rebuilt everything else from that, so every save
+ *  - re-created each exercise row (no id was sent), which cut an open session's `planned_from` to the plan;
+ *  - flattened the set kinds the builder cannot show: a farmer's walk (weight × metres) came back as reps, a plank
+ *    (bodyweight × seconds) as "weight" with no load — and the InclineYou library is written in those kinds;
+ *  - kept only the first alternative, and gave it the main's sets instead of its own.
+ * Each row is matched to the saved exercise it came from — same week, day, workout and movement, the n-th of that
+ * movement there being the n-th — and gets back its id, its alternatives (each with its own sets) and, when the
+ * trainer left its numbers as they were, its sets exactly. Changed numbers are rebuilt, keeping a kind the builder
+ * cannot show (bodyweight, distance) that the trainer did not touch. A row with no match is new and is sent as built.
+ */
+function restorer(saved: PlanWorkoutWire[] | undefined): (r: FlatRow, built: PlanExerciseWire) => PlanExerciseWire {
+  if (!saved || saved.length === 0) return (_, built) => built;
+  type Saved = { e: PlanExerciseWire; row: FlatRow; used: boolean };
+  const exact = new Map<string, Saved[]>();
+  const anywhere = new Map<string, Saved[]>();   // a row moved to another day or workout: kinds and alternatives, no id
+  for (const w of saved) {
+    w.exercises.forEach((e, i) => {
+      const item: Saved = { e, row: rowOf(e, w, i), used: false };
+      const key = `${w.week ?? 1}:${w.day ?? 1}:${w.id ?? ''}:${e.exerciseId}`;
+      exact.set(key, [...(exact.get(key) ?? []), item]);
+      anywhere.set(e.exerciseId, [...(anywhere.get(e.exerciseId) ?? []), item]);
+    });
+  }
+  const take = (list: Saved[] | undefined) => {
+    const found = list?.find(x => !x.used);
+    if (found) found.used = true;
+    return found;
+  };
+  return (r, built) => {
+    const key = `${r.week ?? 1}:${r.dayOfWeek ?? 1}:${r.workoutId ?? ''}:${r.exerciseId}`;
+    const hit = take(exact.get(key));
+    const match = hit ?? take(anywhere.get(r.exerciseId));
+    if (!match) return built;
+    const keepId = hit !== undefined;   // an id names a row in its own workout; a moved row is a new one there
+    const { e, row } = match;
+    const same = numbersOf(r) === numbersOf(row);
+    let sets = same && e.sets.length > 0 ? e.sets.map(stripId) : built.sets;
+    if (!same && e.sets.length > 0) sets = keepKinds(sets, e.sets, r);
+    const firstAlt = e.alternatives?.[0];
+    const alternatives =
+      (r.altExerciseId ?? null) === (firstAlt?.exerciseId ?? null)
+        ? (e.alternatives ?? []).map(altOf)
+        : [
+            ...(r.altExerciseId ? [{ exerciseId: r.altExerciseId, notes: null, sets }] : []),
+            ...(e.alternatives ?? []).slice(1).map(altOf),
+          ];
+    return { ...built, ...(keepId && e.id && UUID.test(e.id) ? { id: e.id } : {}), sets, alternatives };
+  };
+}
+
+/** A saved alternative as the PUT takes it: its own movement, notes and sets. No id — the server rewrites
+ *  alternatives on every save, so an old id would only collide with the row it replaces. */
+function altOf(a: PlanExerciseWire): PlanExerciseWire {
+  return { exerciseId: a.exerciseId, notes: a.notes, sets: a.sets.map(stripId) };
+}
+
+/** The numbers a trainer edits on a row — what decides whether its sets were changed. */
+function numbersOf(r: FlatRow): string {
+  return JSON.stringify([r.sets, r.reps, r.restSeconds, r.targetLoad, r.durationSeconds, r.tempo, r.setDetail]);
+}
+
+/** A set as the PUT takes it: positions are re-numbered by the server, a set has no id of its own on the wire. */
+function stripId(s: PlanSetWire): PlanSetWire {
+  const { position: _position, ...rest } = s as PlanSetWire & { id?: string };
+  void _position;
+  return { ...(rest as PlanSetWire) };
+}
+
+/** Rebuilt sets that keep a saved kind the builder cannot show, where the trainer gave nothing that replaces it. */
+function keepKinds(built: PlanSetWire[], saved: PlanSetWire[], r: FlatRow): PlanSetWire[] {
+  const was = saved[0];
+  return built.map((s, i) => {
+    const old = saved[Math.min(i, saved.length - 1)] ?? was;
+    let out = s;
+    // No load typed, and the saved set had a load kind with no number of its own (bodyweight, level…): keep that kind.
+    if (r.targetLoad == null && old.loadKind !== 'weight' && old.loadKind !== 'weight_range') {
+      out = { ...out, loadKind: old.loadKind, loadValue: old.loadValue };
+    }
+    // An effort the builder has no field for (metres, a rep range…), with no reps or seconds typed over it: keep it.
+    const builderEffort = ['reps', 'time', 'max_reps', 'max_time'];
+    if (!builderEffort.includes(old.effortKind) && r.reps == null && r.durationSeconds == null) {
+      out = { ...out, effortKind: old.effortKind, effortValue: old.effortValue };
+    }
+    return out;
+  });
+}
+
 export interface ShapeInput {
   /** The builder's slots, possibly with gaps. Empty = whatever the rows use. */
   trainingDays?: number[];
@@ -348,7 +437,14 @@ export interface ShapeInput {
  * becomes an empty workout under that label, so the name the trainer gave it is
  * not lost with the rows.
  */
-export function treeOf(rows: FlatRow[], shape: ShapeInput): { days: number; workouts: PlanWorkoutWire[] } {
+export function treeOf(
+  rows: FlatRow[],
+  shape: ShapeInput,
+  /** The program as saved, read just before this save. Given, each row that came from it gets back what the flat row
+   *  cannot hold — see `restore` (19 Nov 2026). */
+  saved?: PlanWorkoutWire[],
+): { days: number; workouts: PlanWorkoutWire[] } {
+  const restore = restorer(saved);
   const used = [...new Set(rows.map(r => r.dayOfWeek ?? 1))];
   const slots = (shape.trainingDays && shape.trainingDays.length > 0 ? shape.trainingDays : used)
     .filter(d => d >= 1 && d <= 7);
@@ -390,14 +486,14 @@ export function treeOf(rows: FlatRow[], shape: ShapeInput): { days: number; work
         .sort((a, b) => a.orderIndex - b.orderIndex)
         .map(r => {
           const sets = setsOfRow(r);
-          return {
+          return restore(r, {
             exerciseId: r.exerciseId,
             groupId: r.groupId,
             section: null,
             notes: r.notes,
             sets,
             alternatives: r.altExerciseId ? [{ exerciseId: r.altExerciseId, notes: null, sets }] : [],
-          };
+          });
         }),
     });
   }

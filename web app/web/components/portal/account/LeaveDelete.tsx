@@ -40,7 +40,7 @@ export function LeaveDelete({ trainerName }: { trainerName: string }) {
           {stage !== 'leave' ? (
             <>
               <p className="pl__s">Ends your training with {first}. They’re told, plainly. Your history stays yours — download it first if you’d like a copy — and nothing about what you’ve paid changes.</p>
-              <Button variant="secondary" onClick={() => setStage('leave')}>Leave {first}…</Button>
+              <div className="mt3"><Button variant="secondary" onClick={() => setStage('leave')}>Leave {first}…</Button></div>
             </>
           ) : (
             <>
@@ -61,7 +61,7 @@ export function LeaveDelete({ trainerName }: { trainerName: string }) {
           {stage === 'rest' || stage === 'leave' ? (
             <>
               <p className="pl__s">Erases you: your details, notes about you, assessments, plan and upcoming bookings go. What was paid stays as amounts and dates under <i>Former client</i> — that’s {first}’s revenue and isn’t yours to remove. This can’t be undone.</p>
-              <Button variant="danger" onClick={() => setStage('delete-ask')}>Delete my account…</Button>
+              <div className="mt3"><Button variant="danger" onClick={() => setStage('delete-ask')}>Delete my account…</Button></div>
             </>
           ) : (
             <>

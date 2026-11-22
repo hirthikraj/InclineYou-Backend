@@ -77,7 +77,7 @@ export function Segment({
     if (mode !== 'single' || !ref.current) return;
     const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp', 'Home', 'End'];
     if (!keys.includes(e.key)) return;
-    const options = [...ref.current.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+    const options = [...ref.current.querySelectorAll<HTMLButtonElement>('[role="radio"]:not(:disabled)')];
     if (options.length === 0) return;
     const from = options.indexOf(document.activeElement as HTMLButtonElement);
     /* A group entered with nothing focused starts at the checked option, which
@@ -112,9 +112,14 @@ export function SegmentButton({
   onClick,
   mode = 'toggle',
   count,
+  disabled,
+  title,
   children,
 }: {
   pressed: boolean;
+  /** Shown but not choosable — e.g. a part of the day with nothing free. Arrow keys skip it. */
+  disabled?: boolean;
+  title?: string;
   onClick: () => void;
   /** Must match the `Segment` it is in. See the two-grammar note above. */
   mode?: SegmentMode;
@@ -138,6 +143,8 @@ export function SegmentButton({
          arrows reach the rest. */
       tabIndex={single ? (pressed ? 0 : -1) : undefined}
       onClick={onClick}
+      disabled={disabled}
+      title={title}
     >
       {children}
       {count !== undefined && <span className="seg__n">{count}</span>}

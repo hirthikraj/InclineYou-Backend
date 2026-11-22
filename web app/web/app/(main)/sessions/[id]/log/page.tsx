@@ -37,6 +37,7 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
         session={result.start.session}
         clientName={result.start.clientName}
         programId={result.start.programId}
+        now={result.now}
       />
     );
   }

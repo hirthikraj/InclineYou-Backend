@@ -34,8 +34,13 @@ import { Segment, SegmentButton } from '@/web-components/ui/Segment';
 import { Select } from '@/web-components/ui/Select';
 import { Switch, SwitchRow } from '@/web-components/ui/Switch';
 import { TextField } from '@/web-components/ui/Field';
+import { useDismiss } from '@/lib/ui/dismiss';
+import { usePhone } from '@/lib/ui/phone';
+import { ChoiceList } from '@/web-components/ui/ChoiceList';
+import { ScreenSheet } from '@/web-components/ui/ScreenSheet';
+import { SearchField } from '@/web-components/ui/SearchField';
 import { Bin, Checklist, Plus } from './Icons';
-import { Ruler } from '@/components/shell/Icons';
+import { Chevron, ChevronDown, ChevronUp, Ruler } from '@/components/shell/Icons';
 
 /**
  * THE ASSESSMENT EDITOR — one dialog, the whole blueprint, one save.
@@ -80,14 +85,42 @@ import { Ruler } from '@/components/shell/Icons';
  * names — a control over something that is not there — so it went out of the
  * model as well as out of this dialog, rather than being switched off.
  */
+/* ── PHONE OR DESK ─────────────────────────────────────────────────────────────
+   One draft, two surfaces: the 640px `Modal` above 620px, a `ScreenSheet` with
+   drill-in screens below. `usePhone` (lib/ui/phone.ts) says why a JS media query
+   is safe here and nowhere a page draws on arrival. */
+
+/** Which screen the phone editor is showing. The desk ignores it. */
+type Screen =
+  | { kind: 'summary' }
+  | { kind: 'measurements' }
+  | { kind: 'questions' }
+  | { kind: 'add' }
+  | { kind: 'question'; id: string };
+
+/** What each answer type looks like to the client — the *Add a question* screen's second line. */
+const KIND_EXAMPLE: Record<AnswerKind, string> = {
+  yesno: 'Did anything hurt this week?',
+  rating: 'How was your energy, out of 10?',
+  text: 'Answered in their own words',
+  choice: 'They pick from answers you write',
+};
+
 export function TemplateEditor({
   template,
   catalog,
+  starters = [],
   onClose,
 }: {
   /** The blueprint being edited, or null for a new one. */
   template: TemplateWire | null;
   catalog: CatalogWire | null;
+  /**
+   * The trainer's own templates, offered as *Start from* on a NEW one. Copying
+   * one fills the draft with its measurements and questions; nothing links the
+   * copy back to it, so editing either never touches the other.
+   */
+  starters?: TemplateWire[];
   onClose: (saved: boolean) => void;
 }) {
   const [name, setName] = useState(template?.name ?? '');
@@ -115,6 +148,60 @@ export function TemplateEditor({
   const [saving, startSave] = useTransition();
 
   const touch = () => setDirty(true);
+
+  const phone = usePhone();
+  /* The phone sheet slides out before it unmounts (`useDismiss`); on a desk there is
+     no element for the hook to watch, so it closes at once, as the dialog always has. */
+  const { closing, dismiss: leave, dismissThen, ref: sheetRef } = useDismiss<HTMLDivElement>(() => onClose(false));
+  const [screen, setScreen] = useState<Screen>({ kind: 'summary' });
+  const [dir, setDir] = useState<'forward' | 'back' | null>(null);
+  const [showDesc, setShowDesc] = useState(Boolean(template?.description));
+  const [mQuery, setMQuery] = useState('');
+  const [starterId, setStarterId] = useState('');
+
+  const go = (next: Screen) => { setDir('forward'); setScreen(next); };
+  const back = () => {
+    setDir('back');
+    setScreen(
+      screen.kind === 'question' || screen.kind === 'add' ? { kind: 'questions' } : { kind: 'summary' },
+    );
+  };
+
+  /* START FROM ONE OF YOUR OWN. Most new templates are an existing one with a
+     change or two, so a new draft can be filled from any template on the shelf:
+     its measurements, its questions (fresh copies, so editing them here cannot
+     reach the original) and its description where this one has none. The name is
+     only filled while still empty, and *Blank* empties the content again. */
+  function startFrom(id: string) {
+    setStarterId(id);
+    touch();
+    const from = starters.find((t) => t.id === id);
+    if (!from) {
+      setMeasurements({ on: true, keys: [] });
+      setQuestions({ on: true, items: [] });
+      return;
+    }
+    setMeasurements({ on: from.measurements.on, keys: [...from.measurements.keys] });
+    setQuestions({
+      on: from.questions.on,
+      items: from.questions.items.map((q) => ({ ...q, options: q.options.map((o) => ({ ...o })) })),
+    });
+    if (!description.trim() && from.description) { setDescription(from.description); setShowDesc(true); }
+    if (!name.trim()) setName(`${from.name} (copy)`);
+  }
+
+  const startField = !template && starters.length > 0 ? (
+    <Select
+      label="Start from"
+      hint="Copy one of your templates and change what you need, or start blank."
+      value={starterId}
+      onChange={(e) => startFrom(e.target.value)}
+      options={[
+        { value: '', label: 'Blank' },
+        ...starters.map((t) => ({ value: t.id, label: t.name })),
+      ]}
+    />
+  ) : null;
 
   /* The catalogue, grouped the way the picker draws it. Built once: it is a
      fixed list of twenty-one rows and re-grouping it on every keystroke in the
@@ -145,18 +232,21 @@ export function TemplateEditor({
         setError(result.message ?? 'That did not save.');
         return;
       }
-      onClose(true);
+      dismissThen(() => onClose(true));
     });
   }
 
   function close() {
     if (dirty) { setAsking(true); return; }
-    onClose(false);
+    leave();
   }
+
+  /* Escape steps back a screen on the phone before it closes anything. */
+  const dismiss = () => (phone && screen.kind !== 'summary' ? back() : close());
 
   return (
     <ModalHost
-      onClose={close}
+      onClose={dismiss}
       /* `frame`, not `main`: this dialog is 640px of form and the rail beside it
          is a set of destinations that would take the half-written draft with
          them. The scrim over the whole app says that plainly. */
@@ -164,9 +254,44 @@ export function TemplateEditor({
       /* The name field, not the close button — `ModalHost`'s own note: the
          default is right for a confirm, whose first control is its cancel, and
          wrong for a form. */
-      initialFocus="#asm-name"
+      /* On a phone, the sheet's HEADING: focusing the name field raises the keyboard over
+         half the screen before the trainer has seen the template they opened. */
+      initialFocus={phone ? '.scrsh__t' : '#asm-name'}
       covered={asking}
     >
+      {phone ? (
+        <PhoneEditor
+          isNew={!template}
+          saving={saving}
+          error={error}
+          screen={screen}
+          dir={dir}
+          go={go}
+          back={back}
+          close={close}
+          save={save}
+          startField={startField}
+          name={name}
+          setName={(v) => { setName(v); touch(); }}
+          description={description}
+          setDescription={(v) => { setDescription(v); touch(); }}
+          showDesc={showDesc}
+          setShowDesc={setShowDesc}
+          clientCanStart={clientCanStart}
+          setClientCanStart={(v) => { setClientCanStart(v); touch(); }}
+          measurements={measurements}
+          setMeasurements={(m) => { setMeasurements(m); touch(); }}
+          questions={questions}
+          setQuestions={(q) => { setQuestions(q); touch(); }}
+          groups={groups}
+          byKey={byKey}
+          bank={bank}
+          mQuery={mQuery}
+          setMQuery={setMQuery}
+          closing={closing}
+          sheetRef={sheetRef}
+        />
+      ) : (
       <Modal
         title={template ? 'Edit template' : 'New template'}
         width={640}
@@ -183,6 +308,8 @@ export function TemplateEditor({
         {/* `alert`, so a refusal is announced: it sits at the top of a body that scrolls while Create is pinned
             at the foot, so a trainer pressing Create from the bottom neither saw nor heard the failure. */}
         {error && <Message tone="err" alert>{error}</Message>}
+
+        {startField && <div className="asm-ed__start">{startField}</div>}
 
         <TextField
           id="asm-name"
@@ -275,6 +402,7 @@ export function TemplateEditor({
           />
         </Fold>
       </Modal>
+      )}
 
       {asking && (
         /* A SECOND DIALOG OVER THE FIRST, and `covered` above is the other half
@@ -284,7 +412,7 @@ export function TemplateEditor({
         <ModalHost onClose={() => setAsking(false)} cover="frame">
           <Modal
             title="Close without saving?"
-            confirm={{ label: 'Discard it', danger: true, onClick: () => onClose(false) }}
+            confirm={{ label: 'Discard it', danger: true, onClick: () => { setAsking(false); leave(); } }}
             cancel={{ label: 'Keep editing', onClick: () => setAsking(false) }}
           >
             <p style={{ margin: 0 }}>
@@ -723,6 +851,29 @@ function QuestionCard({
         {remove}
       </div>
 
+      <QuestionBody q={q} ordinal={ordinal} onPatch={onPatch} />
+    </div>
+  );
+}
+
+/**
+ * WHAT AN ANSWER TYPE NEEDS — the scale, the options and their two switches, or
+ * the sentence saying there is nothing to set. One copy, drawn by the desk's
+ * `QuestionCard` under its header and by the phone's question screen under its
+ * fields, so the two editors cannot offer a question two different sets of
+ * controls.
+ */
+function QuestionBody({
+  q,
+  ordinal,
+  onPatch,
+}: {
+  q: QuestionWire;
+  ordinal: number;
+  onPatch: (next: Partial<QuestionWire>) => void;
+}) {
+  return (
+    <>
       {q.kind === 'rating' && (
         <div className="asm-q__b asm-q__sc">
           <span className="small">Scale</span>
@@ -866,6 +1017,358 @@ function QuestionCard({
           </p>
         </div>
       )}
-    </div>
+    </>
+  );
+}
+
+/* ═════════════════════════════════════════════════════ the phone editor ══ */
+
+/**
+ * THE SAME TEMPLATE, AS SCREENS (21 Nov 2026, from a phone screenshot).
+ *
+ * The desk dialog on a phone was a box over a page with its own scroller and a
+ * pinned foot, and the name, a five-line description and a three-line switch all
+ * came before the first measurement. This is the phone's shape for the same
+ * draft, held by `TemplateEditor` above and saved by the same one Save:
+ *
+ *   SUMMARY       the whole template on one screen — name, two rows that say what
+ *                 is in each block and open it, who can start it, and the
+ *                 description behind *Add a description* (the part edited least).
+ *   MEASUREMENTS  a checklist (`c-choicelist`), grouped as the catalogue is, with
+ *                 search. Ticking appends, so the order is still the order the
+ *                 trainer chose — `MeasurementPicker`'s rule.
+ *   QUESTIONS     the asked list; a row opens the question, ↑ ↓ move it (a drag
+ *                 is unreliable under a thumb, and SC 2.5.7 wants the
+ *                 non-dragging path anyway), *Add a question* opens —
+ *   ADD           the four answer types, each with an example of what the client
+ *                 sees, then the suggested questions from the catalogue's bank.
+ *   QUESTION      the wording, the type, and `QuestionBody` — the desk card's own
+ *                 controls — with *Remove this question* last.
+ *
+ * ── A BLOCK'S SWITCH IS NOT ON THE SUMMARY ──────────────────────────────────
+ *
+ * Ticking a measurement or adding a question turns its block on, so for most
+ * templates the switch is a second way to say what the list already says. It
+ * survives where it still means something: a block switched OFF that still holds
+ * its picks (the desk's `Fold` keeps them) says so on its row, and its screen
+ * opens on the switch to bring them back.
+ */
+function PhoneEditor(p: {
+  isNew: boolean;
+  saving: boolean;
+  error: string | null;
+  screen: Screen;
+  dir: 'forward' | 'back' | null;
+  go: (s: Screen) => void;
+  back: () => void;
+  close: () => void;
+  save: () => void;
+  startField: ReactNode;
+  name: string;
+  setName: (v: string) => void;
+  description: string;
+  setDescription: (v: string) => void;
+  showDesc: boolean;
+  setShowDesc: (v: boolean) => void;
+  clientCanStart: boolean;
+  setClientCanStart: (v: boolean) => void;
+  measurements: { on: boolean; keys: string[] };
+  setMeasurements: (m: { on: boolean; keys: string[] }) => void;
+  questions: { on: boolean; items: QuestionWire[] };
+  setQuestions: (q: { on: boolean; items: QuestionWire[] }) => void;
+  groups: { label: string; rows: Def[] }[];
+  byKey: Map<string, Def>;
+  bank: QuestionWire[];
+  mQuery: string;
+  setMQuery: (v: string) => void;
+  closing: boolean;
+  sheetRef: React.Ref<HTMLDivElement>;
+}) {
+  const { screen, measurements: m, questions: qs } = p;
+  const keys = m.keys;
+  const items = qs.items;
+
+  const setKeys = (next: string[]) => p.setMeasurements({ on: next.length > 0 ? true : m.on, keys: next });
+  const setItems = (next: QuestionWire[]) => p.setQuestions({ on: next.length > 0 ? true : qs.on, items: next });
+
+  const done = (
+    <Button variant="secondary" size="sm" onClick={p.back}>Done</Button>
+  );
+
+  /* ── SUMMARY ─────────────────────────────────────────────────────────── */
+  if (screen.kind === 'summary') {
+    const labels = keys.map((k) => p.byKey.get(k)?.label ?? k);
+    const mSub = keys.length === 0
+      ? 'None yet: choose what to measure'
+      : `${m.on ? '' : 'Switched off · '}${labels.slice(0, 3).join(' · ')}${labels.length > 3 ? ` · +${labels.length - 3}` : ''}`;
+    const qSub = items.length === 0
+      ? 'None yet: add a question'
+      : `${qs.on ? '' : 'Switched off · '}${items[0].text || 'Untitled question'}${items.length > 1 ? ` · +${items.length - 1}` : ''}`;
+
+    return (
+      <ScreenSheet
+        closing={p.closing}
+        surfaceRef={p.sheetRef}
+        className="asm-ph"
+        title={p.isNew ? 'New template' : 'Edit template'}
+        screen="summary"
+        direction={p.dir}
+        backLabel="Close"
+        onBack={p.close}
+        action={
+          <Button variant="primary" size="sm" onClick={p.save} disabled={p.saving}>
+            {p.saving ? 'Saving…' : p.isNew ? 'Create' : 'Save'}
+          </Button>
+        }
+      >
+        {p.error && <Message tone="err" alert>{p.error}</Message>}
+        {p.startField && <div className="asm-ed__start">{p.startField}</div>}
+
+        <TextField
+          id="asm-name"
+          label="Template name"
+          value={p.name}
+          maxLength={120}
+          placeholder="e.g. Month 3 review"
+          onChange={(e) => p.setName(e.target.value)}
+        />
+
+        <p className="sh__l asm-ph__sec">What it asks for</p>
+        <div className="asm-ph__rows">
+          <ListRow
+            onClick={() => p.go({ kind: 'measurements' })}
+            title="Measurements"
+            sub={mSub}
+            right={<span className="asm-ph__chev"><span className="asm-ph__n">{keys.length}</span><Chevron size={16} /></span>}
+            rightInline
+          />
+          <ListRow
+            onClick={() => p.go({ kind: 'questions' })}
+            title="Questions"
+            sub={qSub}
+            right={<span className="asm-ph__chev"><span className="asm-ph__n">{items.length}</span><Chevron size={16} /></span>}
+            rightInline
+          />
+        </div>
+
+        <p className="sh__l asm-ph__sec">Who can start it</p>
+        <SwitchRow
+          checked={p.clientCanStart}
+          onChange={p.setClientCanStart}
+          title="Clients can start this themselves"
+          example="It shows under Start a new one in their portal."
+        />
+
+        {p.showDesc ? (
+          <MarkupField
+            label="Description"
+            hideLabel={false}
+            value={p.description}
+            onChange={p.setDescription}
+            placeholder="What this template is for, and anything to remember when you take it."
+            className="mt3"
+          />
+        ) : (
+          <Button variant="ghost" className="mt3" onClick={() => p.setShowDesc(true)}>
+            <Plus size={14} />
+            Add a description
+          </Button>
+        )}
+      </ScreenSheet>
+    );
+  }
+
+  /* ── MEASUREMENTS ────────────────────────────────────────────────────── */
+  if (screen.kind === 'measurements') {
+    const q = p.mQuery.trim().toLowerCase();
+    const known = new Set(p.groups.flatMap((g) => g.rows.map((r) => r.key)));
+    const unknown = keys.filter((k) => !known.has(k));
+    const total = known.size;
+    const shown = p.groups
+      .map((g) => ({ ...g, rows: q ? g.rows.filter((r) => r.label.toLowerCase().includes(q)) : g.rows }))
+      .filter((g) => g.rows.length > 0);
+
+    const option = (r: Def) => ({
+      id: r.key,
+      text: (
+        <>
+          <span>{r.label}</span>
+          <span className="asm-ph__u">{r.unit}{r.charted ? ' · on the chart' : ''}</span>
+        </>
+      ),
+    });
+
+    return (
+      <ScreenSheet closing={p.closing} surfaceRef={p.sheetRef} className="asm-ph" title="Measurements" screen="measurements" direction={p.dir}
+        backLabel="Back to the template" onBack={p.back} action={done}>
+        {!m.on && keys.length > 0 && (
+          <SwitchRow
+            checked={false}
+            onChange={(on) => p.setMeasurements({ ...m, on })}
+            title="Collect measurements"
+            example={`Switched off. The ${keys.length} below are kept and come back when it is on.`}
+          />
+        )}
+        {p.groups.length === 0 ? (
+          <p className="small" style={{ margin: 0 }}>
+            The measurement catalogue could not be loaded, so nothing can be added right now. Whatever this
+            template already collects is untouched.
+          </p>
+        ) : (
+          <>
+            <SearchField
+              label="Search measurements"
+              placeholder="Search measurements"
+              value={p.mQuery}
+              onChange={(e) => p.setMQuery(e.target.value)}
+            />
+            <div className="asm-ph__bar">
+              <span>{keys.length} of {total} selected</span>
+              {keys.length > 0 && (
+                <Button variant="ghost" size="sm" onClick={() => setKeys(unknown)}>Clear all</Button>
+              )}
+            </div>
+            {unknown.length > 0 && !q && (
+              <div className="asm-ph__grp">
+                <p className="sh__l">Not in the catalogue</p>
+                <ChoiceList name="m-unknown" label="Not in the catalogue" multiple value={keys}
+                  options={unknown.map((k) => ({ id: k, text: k }))} onChange={setKeys} />
+              </div>
+            )}
+            {shown.length === 0 ? (
+              <p className="small asm-ph__grp">Nothing matches &ldquo;{p.mQuery}&rdquo;.</p>
+            ) : shown.map((g) => (
+              <div key={g.label} className="asm-ph__grp">
+                <p className="sh__l">{g.label}</p>
+                {/* `value` is the WHOLE list, so a tick appends and an untick filters — the order the
+                    trainer built is kept across groups, which is `MeasurementPicker`'s rule. */}
+                <ChoiceList name={`m-${g.label}`} label={g.label} multiple value={keys}
+                  options={g.rows.map(option)} onChange={setKeys} />
+              </div>
+            ))}
+          </>
+        )}
+      </ScreenSheet>
+    );
+  }
+
+  /* ── ADD A QUESTION ──────────────────────────────────────────────────── */
+  if (screen.kind === 'add') {
+    const write = (q: QuestionWire) => {
+      setItems([...items, q]);
+      p.go({ kind: 'question', id: q.id });
+    };
+    return (
+      <ScreenSheet closing={p.closing} surfaceRef={p.sheetRef} className="asm-ph" title="Add a question" screen="add" direction={p.dir}
+        backLabel="Back to the questions" onBack={p.back}>
+        <p className="sh__l" style={{ marginTop: 0 }}>Write your own</p>
+        <div className="asm-ph__rows">
+          {KIND_ORDER.map((k) => (
+            <ListRow key={k} onClick={() => write(blankQuestion(`q_new_${Date.now().toString(36)}`, k))}
+              title={KIND_LABEL[k]} sub={KIND_EXAMPLE[k]}
+              right={<Chevron size={16} />} />
+          ))}
+        </div>
+        {p.bank.length > 0 && (
+          <>
+            <p className="sh__l asm-ph__sec">Suggested</p>
+            <div className="asm-ph__rows">
+              {p.bank.map((q) => (
+                <ListRow
+                  key={q.id}
+                  onClick={() => { setItems([...items, q]); p.back(); }}
+                  title={q.text}
+                  sub={KIND_LABEL[q.kind]}
+                  right={<Plus size={16} />}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </ScreenSheet>
+    );
+  }
+
+  /* ── ONE QUESTION ────────────────────────────────────────────────────── */
+  if (screen.kind === 'question') {
+    const i = items.findIndex((x) => x.id === screen.id);
+    const q = items[i];
+    if (q) {
+      const patch = (next: Partial<QuestionWire>) => setItems(items.map((x) => (x.id === q.id ? { ...x, ...next } : x)));
+      return (
+        <ScreenSheet closing={p.closing} surfaceRef={p.sheetRef} className="asm-ph" title={`Question ${i + 1}`} screen={`q-${q.id}`} direction={p.dir}
+          backLabel="Back to the questions" onBack={p.back} action={done}>
+          <TextField
+            id={`asm-q-${q.id}`}
+            label="Question"
+            value={q.text}
+            placeholder="What do you want to ask?"
+            onChange={(e) => patch({ text: e.target.value })}
+          />
+          <div className="mt3">
+            <Select
+              label="Answer type"
+              value={q.kind}
+              onChange={(e) => patch(forKind(q, e.target.value as AnswerKind))}
+              options={KIND_ORDER.map((k) => ({ value: k, label: KIND_LABEL[k] }))}
+            />
+          </div>
+          <div className="mt3">
+            <QuestionBody q={q} ordinal={i + 1} onPatch={patch} />
+          </div>
+          <div className="asm-ph__end">
+            <Button variant="danger" wide onClick={() => { setItems(items.filter((x) => x.id !== q.id)); p.back(); }}>
+              <Bin />
+              Remove this question
+            </Button>
+          </div>
+        </ScreenSheet>
+      );
+    }
+    /* The question went (removed on another screen); fall through to the list. */
+  }
+
+  /* ── QUESTIONS ───────────────────────────────────────────────────────── */
+  return (
+    <ScreenSheet closing={p.closing} surfaceRef={p.sheetRef} className="asm-ph" title="Questions" screen="questions" direction={p.dir}
+      backLabel="Back to the template" onBack={p.back} action={done}>
+      {!qs.on && items.length > 0 && (
+        <SwitchRow
+          checked={false}
+          onChange={(on) => p.setQuestions({ ...qs, on })}
+          title="Ask questions"
+          example={`Switched off. The ${items.length} below are kept and come back when it is on.`}
+        />
+      )}
+      {items.length === 0 ? (
+        <p className="small" style={{ margin: '0 0 14px' }}>
+          Nothing is asked yet. Write your own, or pick from the suggested ones.
+        </p>
+      ) : (
+        <div className="asm-ph__rows" role="list" aria-label="Questions this template asks">
+          {items.map((q, i) => (
+            <div key={q.id} className="asm-ph__qr" role="listitem">
+              <ListRow
+                onClick={() => p.go({ kind: 'question', id: q.id })}
+                title={q.text || 'Untitled question'}
+                sub={`${i + 1} · ${KIND_LABEL[q.kind]}`}
+              />
+              <Button variant="ghost" size="sm" iconOnly label={`Move question ${i + 1} up`}
+                icon={<ChevronUp size={16} />} disabled={i === 0}
+                onClick={() => setItems(moved(items, i, i - 1))} />
+              <Button variant="ghost" size="sm" iconOnly label={`Move question ${i + 1} down`}
+                icon={<ChevronDown size={16} />} disabled={i === items.length - 1}
+                onClick={() => setItems(moved(items, i, i + 1))} />
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="mt3">
+        <Button variant="secondary" wide onClick={() => p.go({ kind: 'add' })}>
+          <Plus size={14} />
+          Add a question
+        </Button>
+      </div>
+    </ScreenSheet>
   );
 }

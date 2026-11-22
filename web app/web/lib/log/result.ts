@@ -8,4 +8,6 @@
 
 export type WriteResult =
   | { ok: true; id?: string }
-  | { ok: false; message: string };
+  /* `code` is additive (21 Nov 2026): the server's error code where it sent one, so a screen
+     can branch on the code rather than on the wording — `AGENTS.md`'s rule for the auth 429s. */
+  | { ok: false; message: string; code?: string };

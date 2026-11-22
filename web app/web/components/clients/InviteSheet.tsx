@@ -8,6 +8,7 @@ import { Avatar } from '@/web-components/ui/Avatar';
 import { Button } from '@/web-components/ui/Button';
 import { Message } from '@/web-components/ui/Message';
 import { Modal, ModalHost } from '@/web-components/ui/Modal';
+import { QrCode } from '@/web-components/ui/QrCode';
 import { Textarea } from '@/web-components/ui/Textarea';
 
 /**
@@ -46,6 +47,10 @@ export function InviteSheet({
 }) {
   const [text, setText] = useState(draft);
   const [copied, setCopied] = useState(false);
+  /* THE CLIENT IS STANDING HERE (22 Nov 2026). Consent comes before a third session, and on a gym floor the
+     quickest way to it is the client scanning the link off this screen and accepting on their own phone — the
+     same page, the same code to their number. The QR is the link itself; nothing about it is different. */
+  const [qr, setQr] = useState(false);
   const missingLink = !text.includes(link);
 
   async function copy() {
@@ -102,6 +107,20 @@ export function InviteSheet({
                 The personal link is no longer in the message, so {clientName} would have nothing to open.
               </Message>
             </div>
+          )}
+          {qr ? (
+            <div className="ivns__qr">
+              <QrCode value={link} label={`Invite link for ${clientName}`} size={196} />
+              <p className="ivns__meta">
+                {clientName.split(' ')[0]} scans this with their phone camera, enters their date of birth, ticks the two
+                consents and types the code sent to {formatPhone(phone)}.
+              </p>
+              <Button variant="ghost" size="sm" onClick={() => setQr(false)}>Hide the QR code</Button>
+            </div>
+          ) : (
+            <Button variant="secondary" size="sm" onClick={() => setQr(true)}>
+              {clientName.split(' ')[0]} is here? Show a QR code to scan
+            </Button>
           )}
           <p className="ivns__meta">
             InclineYou sends nothing. The link works for 14 days and replaces any link you sent before.

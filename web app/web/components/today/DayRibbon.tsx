@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { DayMoney, DayRibbon as Ribbon, Gap } from '@/lib/today/day';
 import { dayFooting, gapWorth, windowsLabel } from '@/lib/today/day';
 import type { DeckSession } from '@/lib/today/deck';
+import { freeTag } from '@/lib/schedule/billing';
 import { MODE_LABELS } from '@/lib/today/mode';
 import { dayLong, formatMinute, formatSpan, minuteOfDay, rupees } from '@/lib/today/time';
 import { NowMarker } from './Clock';
@@ -85,6 +86,11 @@ function Block({ session, left, width }: { session: DeckSession; left: string; w
   if (session.done) classes.push('ev--done');
   else if (session.live) classes.push('ev--live');
   else if (session.late) classes.push('ev--late');
+  // A trial or complimentary session: the dashed edge the schedule draws (22 Nov 2026).
+  // The ribbon block is an avatar with no room for the word, so the word goes in
+  // the title and the accessible name.
+  const free = session.billing ? freeTag(session.billing) : null;
+  if (free) classes.push('ev--free');
 
   const state = session.done
     ? 'done'
@@ -104,7 +110,8 @@ function Block({ session, left, width }: { session: DeckSession; left: string; w
          `/sessions/{id}` did not exist yet. `PhoneStack`'s `SessionRow` carries
          the full note. */
       href={`/sessions/${session.id}`}
-      aria-label={`${session.clientName}, ${formatMinute(start)} to ${formatMinute(start + session.minutes)}, ${session.detail}, ${MODE_LABELS[session.mode].toLowerCase()}, ${state}`}
+      aria-label={`${session.clientName}, ${formatMinute(start)} to ${formatMinute(start + session.minutes)}, ${session.detail}, ${MODE_LABELS[session.mode].toLowerCase()}${free ? `, ${free.toLowerCase()}` : ''}, ${state}`}
+      title={free ? `${session.clientName} · ${free}` : undefined}
     >
       <Avatar name={session.clientName} id={session.clientId} size="sm" />
     </Link>

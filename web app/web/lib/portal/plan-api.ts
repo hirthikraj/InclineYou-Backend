@@ -20,6 +20,11 @@ export interface SessionCard {
   rescheduleUrl?: string;
 }
 
+/** The server's instant for a portal page — read here, not in a component (AGENTS.md trap 20). */
+export function serverNow(): number {
+  return Date.now();
+}
+
 export interface PlanDayWire {
   workoutId: string;
   week: number | null;
@@ -27,6 +32,8 @@ export interface PlanDayWire {
   name: string;
   state: 'done' | 'booked' | 'next' | 'todo';
   sessionId: string | null;
+  /** When the session that did or is booked for this place is scheduled, epoch ms (21 Nov 2026, additive); absent on an older backend. */
+  at?: number | null;
 }
 
 export interface PlanWire {
@@ -77,8 +84,20 @@ export interface PointWire {
 export interface ProgressWire {
   windowDays: number;
   strength: { tracked: number; improved: number; best: { exerciseId: string; name: string; changePct: number; from: PointWire; to: PointWire } | null };
-  consistency: { sessionsDone: number; trainerLed: number; selfRun: number; perWeek: number };
+  consistency: {
+    sessionsDone: number;
+    trainerLed: number;
+    selfRun: number;
+    /** Over the part of the window they were training in (22 Nov 2026). */
+    perWeek: number;
+    /** `yyyy-MM-dd` of their first session ever when it falls inside the window; null/absent otherwise. */
+    since?: string | null;
+  };
   milestones: { kind: string; label: string; at: number }[];
+  /** Every comparable lift, biggest change first (22 Nov 2026, additive; absent on an older backend). */
+  lifts?: { exerciseId: string; name: string; changePct: number; from: PointWire; to: PointWire }[];
+  /** The window week by week, Monday in the client's zone, empty weeks included (22 Nov 2026, additive). */
+  weeks?: { start: string; sessions: number; volumeKg: number }[];
 }
 
 export interface BestSetWire {

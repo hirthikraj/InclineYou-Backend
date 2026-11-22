@@ -724,6 +724,36 @@ preserves exactly.
 
 Four steps: phone check → sell a pack → **pick the days** → **pick a plan**.
 
+> **22 Nov 2026 — days a week is its own answer, and a sold pack owes a setup.**
+> Decided with the product owner; some bullets below predate it.
+> - **Week asks *how many days a week* first and it is REQUIRED**; which days
+>   and what time are optional under it (capped at that count). It is saved as
+>   `sessionsPerWeek` on its own — never `slots.length` — so *3 a week, no fixed
+>   days* is a real state. The Plan step filters on it, not on the slots.
+> - **The picker is `components/clients/WeekFields.tsx`**, extracted from this
+>   flow and also drawn by the client file's `WeekEditor` (*Turning up → Edit
+>   week*, or the checklist's *Set week*). One picker, two doors.
+> - **`lib/clients/setup.ts` is the one rule** for what a client still owes:
+>   a live, non-single, non-empty pack → days a week → a plan → something
+>   booked ahead; a prospect → demo booked → demo done → sell a pack. Overview
+>   pins it as `SetupCard`; Today raises ONE `setup` row per client naming the
+>   next step (it replaces `no-program` for those clients). **Soft block:** no
+>   dismiss, no snooze, nothing refused — logging without a plan stays allowed
+>   (the console's *Add an exercise* now stays open for several picks).
+> - **Consent is step 1 of every checklist (22 Nov 2026).** Accepting the invite
+>   (privacy notice + the required "fit to train" tick, V42) is consent. Before
+>   it the server allows 2 delivered sessions and refuses the 3rd, health data,
+>   height/activity/goal and notes with `409 CONSENT_REQUIRED` (`ConsentGate`);
+>   the web refuses the progress-report download. Locked controls render
+>   `ConsentNotice` (sentence + `InviteButton`), never a silent grey button.
+>   `InviteButton` mints the link and opens `InviteSheet`, which now has a QR
+>   code for a client standing in the gym. The add flow's last step offers it.
+>   `FREE_SESSIONS` and `hasConsent` in `lib/clients/setup.ts` mirror the server.
+> - **`AssignPanel` has *In order* vs *Fixed days and times*.** In order sends
+>   an empty schedule, so `postApply` writes no week and only applies; it is
+>   the default for a client with no standing slots. It used to seed 06:00 and
+>   save it, which booked a week nobody agreed to.
+
 - **Step 3's Continue is what books the sessions.** `PUT /v1/clients/{id}` with a
   `weeklySchedule` runs `DiaryService.reconcile` in the same transaction — it
   always did, and reported nothing, so the one write that produces something a
@@ -2366,6 +2396,69 @@ privacy, because a client will assume the answer is symmetrical.
 
 ## The portal's own rules
 
+- **One portal column: `.portal` is 1040px on every screen — 22 Nov 2026.** It was
+  920 with Home widened to 1200 for its two columns, so moving between the four
+  destinations moved the page's left edge ~140px at a desk. 1040 is the narrowest
+  width that still gives Home its two columns (~570 + 450; `.phome` splits at a
+  960px container), and `.ph--portal`'s children cap at the same `--w-portal`, so
+  the title and tabs line up with the column. Above 1032px `.body` and
+  `.ph--portal` both reserve `scrollbar-gutter:stable` — the header with
+  `overflow:hidden`, **never `auto`**: on an always-visible scrollbar a header a
+  pixel taller than its box became a scroller with its own bar. Narrower on
+  purpose: the check-in flow (one question at a time). The rules are the last
+  block on the subject in `app.css`; earlier 920/1200 rules are overridden, not
+  deleted.
+- **Home is catalogue components on `.portal--home` / `.phome` — 21 Nov 2026.**
+  The first cut on `GET /v1/portal/home` drew bare `Card`s with a private `.pth`
+  family, left-aligned at 720px while every other portal screen sits in the
+  centred `.portal` column, so Home started at a different x from the tab beside
+  it. It is `HeroCard` (one per state, `live` only while a log is open) →
+  an open assessment (secondary verb) → `CoachNote` with *Reply on WhatsApp* →
+  *This week*, then the last session, a milestone and the pack. **The week is
+  `GET /v1/portal/plan` read in parallel** (`p-a2` carries no count): the
+  programme's days in its current week, done of planned — the arrangement, never
+  the diary — and a failed plan read only removes that card. The rest day reads
+  *Recovery is part of the plan*, never *Nothing to do*; the first-run hero's
+  *Say hello* is a real `wa.me` button.
+- **Progress is the same repair, 21 Nov 2026.** All four tabs sat in a 720px
+  left-aligned `.pl`/`.ppg` column under a header centred at 920 (now 1040), so every tab
+  started at a different x from its own title. They are `.portal col gap4` now,
+  and built from `SubTabs` (the range — each pill is a page load), `Change` (the
+  biggest jump as *60 kg → 70 kg, 17% stronger*, never an e1rm figure),
+  `Stat` tiles with `href`, and ONE card of `ListRow`s where there was a card per
+  exercise or session; History groups by month. The exercise screen's name is an
+  `<h2>` (the layout owns the `<h1>`) under a `Crumbs` row. A late assessment is a
+  neutral *Late* tag — it was amber — and dates use the client's zone, not a
+  hard-coded Asia/Kolkata. A failed read is `LoadFailed`: the sentence plus
+  *Try again*. **The default range is 4 weeks, not `all`**: the backend refuses
+  `windowDays` outside 7–365.
+- **Plan too, 21 Nov 2026.** Same column fix. The Schedule drew every week of
+  the programme as a card (twelve for a twelve-week block); now *this week* and
+  *next week* are open and the later and earlier weeks are native `<details>`
+  (`.disc`), so no client JS. The arc card has a `Meter`; *To do* tags are gone
+  (a future day is unmarked, not labelled); rows are `ListRow`s. A past plan's
+  name is an `<h2>` under `Crumbs`, its workouts grouped into a `.disc` per week
+  with the first open.
+- **Me too, 21 Nov 2026.** Same column fix; the first tab is *Overview* (the page
+  is already called *Me*). The trainer is **`ProfileCard`** — the card the trainer
+  previews as *How clients see you*, so the preview is true — with catalogue
+  labels (`lib/setup/options.ts`) where raw ids printed, certifications and
+  languages added, and the bio + WhatsApp button as its children. In the portal
+  only, its headline wraps (`.portal .pfc__hl`): the clip is a signal to the
+  AUTHOR, and here the reader is the client. Privacy ends on the ways out (the
+  data-question contact moved above *Leave*), and dates use the client's zone.
+- **A session's recap, 21 Nov 2026** (`/me/session/:id` when read-only). A
+  `PageHeader` in the portal column with the crumb *Progress / History* (the one
+  screen that lists sessions, whichever door was used), the date in the client's
+  zone. Then three `Stat`s, each a bare figure with its unit as the detail
+  (`54` minutes · `19` of 20 · `4.6` tonnes — volume goes to tonnes above
+  1,000 kg, as Progress prints it), because `54:00` reads as a clock and
+  `4,612.5 kg` broke the row at 390. The trainer's note is a `CoachNote`. The
+  exercises are **one card, one row each, the sets as a wrapping line of
+  figures**, where it was a card per exercise: four phone screens for an hour's
+  session. An exercise with no sets is left out; a set not done is *Not logged*,
+  muted, never a verdict. The PLAYER keeps no header, because its sticky bar is
+  the top of that screen.
 - **Home leads with strength** (§3: *the most motivating number for beginners, and
   the one most apps bury*), and `buildSummary` picks the lead — the screen should
   not decide which of six figures matters. Then rows: consistency, the other lift,

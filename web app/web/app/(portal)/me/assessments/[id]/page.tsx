@@ -37,7 +37,8 @@ export default async function Page({ params }: { params: Promise<{ id: string }>
     <>
       <TopBar crumb="Assessment" title={a.name} />
       <main className="main" id="main-content">
-        <div className="body">{a.state === 'open' ? <Take a={a} trainerFirstName={first} /> : <ReadBack a={a} />}</div>
+        {/* In the portal's centred column (22 Nov 2026), like every other portal screen — it sat flush left on a desk. */}
+        <div className="body"><div className="portal">{a.state === 'open' ? <Take a={a} trainerFirstName={first} /> : <ReadBack a={a} />}</div></div>
       </main>
     </>
   );

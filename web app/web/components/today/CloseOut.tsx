@@ -78,7 +78,7 @@ export function CloseOut({ sessions }: { sessions: CloseOutSession[] }) {
         until you answer them.
       </p>
       <div className="q__scroll">
-        <table className="tbl tbl--stack atn">
+        <table className="tbl tbl--stack atn cls">
           <colgroup>
             <col className="atn__c-who" />
             <col className="atn__c-why" />

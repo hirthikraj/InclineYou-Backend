@@ -15,3 +15,16 @@ export function when(ms: number, zone: string): { day: string; time: string } {
 export function num(n: number | null | undefined): string {
   return n === null || n === undefined ? '' : String(Number(n.toFixed(2)));
 }
+
+/** `yyyy-MM-dd` of an instant in the client's zone — for comparing calendar days. */
+function dayKey(ms: number, zone: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: zone }).format(new Date(ms));
+}
+
+/** *Today*, *Tomorrow*, or the short date — the word a person would use (Home's own rule). */
+export function dayWord(ms: number, now: number, zone: string): string {
+  const k = dayKey(ms, zone);
+  if (k === dayKey(now, zone)) return 'Today';
+  if (k === dayKey(now + 86_400_000, zone)) return 'Tomorrow';
+  return when(ms, zone).day;
+}

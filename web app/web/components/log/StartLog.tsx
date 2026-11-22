@@ -6,9 +6,11 @@ import { useRouter } from 'next/navigation';
 
 import { startLog } from '@/lib/sessionlog/actions';
 import { isoDay, stampDate } from '@/lib/log/log';
+import { DAY_MS } from '@/lib/today/time';
 import { TopBar } from '@/components/shell/TopBar';
 import { Play } from '@/components/shell/Icons';
 import { Button } from '@/web-components/ui/Button';
+import { Message } from '@/web-components/ui/Message';
 import { PageHeader } from '@/web-components/ui/PageHeader';
 import { Why } from '@/web-components/ui/Why';
 
@@ -30,11 +32,14 @@ export function StartLog({
   session,
   clientName,
   programId,
+  now,
 }: {
   routeId: string;
   session: { id: string; clientId: string; scheduledAt: number; dayLabel: string | null; status: string };
   clientName: string;
   programId: string | null;
+  /** The server's instant (trap 20: never `Date.now()` in a render). */
+  now: number;
 }) {
   const router = useRouter();
   const [, startTransition] = useTransition();
@@ -43,6 +48,20 @@ export function StartLog({
 
   const at = new Date(session.scheduledAt);
   const time = `${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')}`;
+
+  /* TOO EARLY TO START (21 Nov 2026, from a screenshot). The server refuses a log that
+     starts more than a day before its session (`SessionStartService`, 19 Nov 2026: a log
+     could otherwise say it began years before the session). This screen offered *Start the
+     log* on a session two days out anyway, and the refusal reached the trainer as the
+     server's own field-level text, *startedAt: at most a day before the session's own
+     start*. So the screen knows the rule: before the window opens there is no button to
+     press, only when it will open. The server stays the authority; this only stops the
+     screen offering what it will refuse. */
+  const opensAt = session.scheduledAt - DAY_MS;
+  const early = now < opensAt;
+  const opens = new Date(opensAt);
+  const opensTime = `${String(opens.getHours()).padStart(2, '0')}:${String(opens.getMinutes()).padStart(2, '0')}`;
+  const tooEarly = `You can start this log from ${stampDate(isoDay(opensAt))} ${opensTime}, a day before the session. A log can’t begin earlier than that.`;
 
   const begin = () => {
     setBusy(true);
@@ -56,7 +75,8 @@ export function StartLog({
       });
       setBusy(false);
       if (!result.ok) {
-        setMessage(result.message);
+        /* The same rule, if the screen's clock and the server's disagree: by the CODE, never the wording. */
+        setMessage(result.code === 'SESSION_TOO_EARLY' ? tooEarly : result.message);
         return;
       }
       router.replace(`/sessions/${routeId}/log`);
@@ -103,10 +123,16 @@ export function StartLog({
                 </p>
               </div>
 
+              {early && (
+                <Message className="slog__early">{tooEarly}</Message>
+              )}
+
               <div className="row" style={{ gap: 9, flexWrap: 'wrap' }}>
-                <Button variant="primary" size="lg" disabled={busy} onClick={begin}>
-                  <Play size={16} /> {busy ? 'Starting…' : 'Start the log'}
-                </Button>
+                {!early && (
+                  <Button variant="primary" size="lg" disabled={busy} onClick={begin}>
+                    <Play size={16} /> {busy ? 'Starting…' : 'Start the log'}
+                  </Button>
+                )}
                 <Button href={`/sessions/${session.id}`} variant="secondary" size="lg">
                   The booking
                 </Button>

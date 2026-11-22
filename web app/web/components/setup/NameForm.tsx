@@ -3,7 +3,6 @@
 import { useRef, useState } from 'react';
 
 import { MessageSlot } from '@/components/auth/MessageSlot';
-import { IconUser } from '@/components/auth/Icons';
 import { finishFromName, saveName } from '@/lib/setup/actions';
 import { GENDERS, initialsOf, labelFor, type Gender } from '@/lib/setup/options';
 import { avatarToken } from '@/lib/today/time';
@@ -74,7 +73,12 @@ export function NameForm({ state }: { state: SetupState }) {
   const [headline, setHeadline] = useState(state.headline);
   const [gender, setGender] = useState<Gender | null>(state.gender);
   const [touched, setTouched] = useState(false);
+  /* Set by a submit with no gender picked; cleared by picking one. Its own state — not the shared step `message` —
+     so it can be drawn UNDER THE CHIPS it is about (22 Nov 2026): in the shared slot it sat ~330px below them,
+     between the preview card and the footnote, wider than the column. */
+  const [genderErr, setGenderErr] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const chips = useRef<HTMLDivElement>(null);
 
   const trimmed = name.trim();
   const empty = trimmed.length === 0;
@@ -101,12 +105,9 @@ export function NameForm({ state }: { state: SetupState }) {
       return false;
     }
     if (missingGender) {
-      setMessage({
-        tone: 'err',
-        icon: 'warn',
-        lead: 'Pick one under “How clients see you”.',
-        rest: '“Prefer not to say” is a real answer — it is stored as one, so we stop asking and nobody has to guess.',
-      });
+      setGenderErr(true);
+      // Same move as the name: take them to the row the message is about.
+      chips.current?.querySelector<HTMLButtonElement>('button')?.focus();
       return false;
     }
     return true;
@@ -157,7 +158,7 @@ export function NameForm({ state }: { state: SetupState }) {
             placeholder="Ravi Kannan"
             disabled={pending}
             aria-invalid={showError ? true : undefined}
-            aria-describedby="nm-msg"
+            aria-describedby="nm-h"
             onBlur={() => setTouched(true)}
             onChange={(e) => {
               setName(e.target.value);
@@ -165,7 +166,17 @@ export function NameForm({ state }: { state: SetupState }) {
               if (message) setMessage(null);
             }}
           />
-          <span className="fld__h">Use the name your clients already know you by.</span>
+          {/* The error replaces the hint, in the hint's place, right under the box it is about (22 Nov 2026) — it was
+              drawn at the foot of the form, ~450px below the field. */}
+          <span className="fld__h" id="nm-h" aria-live="polite">
+            {showError ? (
+              <span className="fld__e">
+                <b>Your name is the one thing we can’t skip.</b> A client receiving an invite has to see who it is from.
+              </span>
+            ) : (
+              'Use the name your clients already know you by.'
+            )}
+          </span>
         </div>
 
         {/*
@@ -189,7 +200,7 @@ export function NameForm({ state }: { state: SetupState }) {
           Clients filter on this — a great many are looking for a woman trainer specifically, and
           no other app lets them ask.
         </p>
-        <div role="radiogroup" aria-label="Gender">
+        <div role="radiogroup" aria-label="Gender" aria-describedby="gd-msg" aria-invalid={genderErr || undefined} ref={chips}>
           <ChipRow top={10}>
             {GENDERS.map((option) => (
               <Chip
@@ -199,11 +210,20 @@ export function NameForm({ state }: { state: SetupState }) {
                 disabled={pending}
                 onClick={() => {
                   setGender(option.id as Gender);
+                  setGenderErr(false);
                   if (message) setMessage(null);
                 }}
               />
             ))}
           </ChipRow>
+        </div>
+        <div id="gd-msg" aria-live="polite">
+          {genderErr && (
+            <p className="fld__e stp__err">
+              <b>Pick one.</b> “Prefer not to say” is a real answer — it is stored as one, so we stop asking and nobody
+              has to guess.
+            </p>
+          )}
         </div>
 
         {/* The optional half of the step. No `Skip` beside it and none needed —
@@ -306,23 +326,13 @@ export function NameForm({ state }: { state: SetupState }) {
           </p>
         ) : null}
 
-        <div id="nm-msg">
-          {showError ? (
-            <div className="msg msg--err" aria-live="polite">
-              <IconUser size={15} />
-              <span>
-                <b>Your name is the one thing we can’t skip.</b> Everything after this step is
-                optional. This isn’t, because a client receiving an invite has to see who it is from.
-              </span>
-            </div>
-          ) : (
-            <MessageSlot message={message} />
-          )}
-        </div>
+        {/* What is left for the shared slot is the SERVER's answer — a failed save — which belongs to the whole step,
+            not to one field. Field errors are drawn under their fields above. */}
+        <MessageSlot message={message} />
 
         <p className="small" style={{ maxWidth: '62ch' }}>
           This is the only step we keep. All seven after it can be skipped, and{' '}
-          <b>Skip to home</b> takes you straight into the app once these two are answered — the rest
+          <b>Finish later</b> takes you straight into the app once these two are answered — the rest
           moves to your profile, where you can finish it whenever you like.
         </p>
 

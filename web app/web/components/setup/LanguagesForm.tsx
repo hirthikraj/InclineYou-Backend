@@ -34,7 +34,7 @@ export function LanguagesForm({ state }: { state: SetupState }) {
         tone: 'err',
         icon: 'warn',
         lead: 'Pick at least one language.',
-        rest: 'A client searching in Tamil or Marathi finds you on this field and nothing else — so it is worth the one tap. Skip for now is there if you would rather not.',
+        rest: 'A client searching in Tamil or Marathi finds you on this field and nothing else — so it is worth the one tap. Skip this step is there if you would rather not.',
       });
       return;
     }

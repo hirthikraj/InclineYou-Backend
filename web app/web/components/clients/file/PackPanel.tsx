@@ -14,6 +14,7 @@ import { num } from './shared';
 import { useDismiss } from '@/lib/ui/dismiss';
 import { Button } from '@/web-components/ui/Button';
 import { Field, TextField } from '@/web-components/ui/Field';
+import { DateField } from '@/web-components/ui/DateField';
 
 /**
  * SELL A PACK, OR RENEW ONE — on the client's own file.
@@ -315,8 +316,8 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
             )}
             <div className="fld mt3">
               <label className="fld__l" htmlFor="pp-start">Starts</label>
-              <input className="ctl" id="pp-start" type="date" value={startDate} min={minStart} max={maxStart}
-                onChange={(e) => setStartDate(e.target.value)} />
+              <DateField id="pp-start" label="Starts" block value={startDate} min={minStart} max={maxStart}
+                onChange={setStartDate} />
               <p className="small" style={{ marginTop: 6, color: 'var(--tx-ink-3)' }}>
                 Leave it blank for today.
               </p>
@@ -412,8 +413,8 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
             {/* ── When it starts ────────────────────────────────────────── */}
             <div className="fld mt3">
               <label className="fld__l" htmlFor="pp-start">Starts</label>
-              <input className="ctl" id="pp-start" type="date" value={startDate} min={minStart} max={maxStart}
-                onChange={(e) => setStartDate(e.target.value)} />
+              <DateField id="pp-start" label="Starts" block value={startDate} min={minStart} max={maxStart}
+                onChange={setStartDate} />
               <p className="small" style={{ marginTop: 6, color: 'var(--tx-ink-3)' }}>
                 {chosen?.validityDays
                   ? `Leave it blank for today. This pack runs ${chosen.validityDays} days from the start.`
@@ -426,8 +427,7 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
               <label className="fld__l" htmlFor="pp-due">
                 Payment due by <span className="ink3">· optional</span>
               </label>
-              <input className="ctl" id="pp-due" type="date" value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)} />
+              <DateField id="pp-due" label="Payment due by" block value={dueDate} onChange={setDueDate} />
               <p className="small" style={{ marginTop: 6, color: 'var(--tx-ink-3)' }}>
                 Blank means due the day it starts. Without a date there is no such thing as
                 &ldquo;11 days late&rdquo;.

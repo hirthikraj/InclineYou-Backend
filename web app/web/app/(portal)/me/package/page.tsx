@@ -16,11 +16,14 @@ export default async function Page() {
   const pack = settle(await portalGet<PackageWire>('/v1/portal/package'));
   return (
     <>
-      <TopBar crumb="Your package" title="Your package" />
+      <TopBar crumb="Your package" title="Me" titleHref="/me/account" />
       <main className="main" id="main-content">
         <PageHeader className="ph--portal" title="Your package" />
         <div className="body">
+          {/* In the portal's centred column (22 Nov 2026): without `.portal` this screen sat flush left on a desk while its title, which reads the column, sat centred — measured at 1568px, the content began 238px left of the heading. */}
+          <div className="portal">
           {pack ? <PackageView pack={pack} trainerFirstName={(session.me.trainer?.name ?? 'Your trainer').split(' ')[0]} moneyVisible={session.me.moneyVisible} /> : <Message tone="warn">We couldn’t load your package just now. Reload in a moment.</Message>}
+          </div>
         </div>
       </main>
     </>

@@ -60,6 +60,8 @@ export interface CreateClientInput {
   /** `YYYY-MM-DD`. The flow asks for it so the 18+ rule is checked before a client
    *  exists (`lib/clients/adult.ts`); the server refuses `CLIENT_UNDER_18` as well. */
   dateOfBirth: string;
+  /** V43: required by the flow; "prefer_not_to_say" is an answer. */
+  gender: 'female' | 'male' | 'other' | 'prefer_not_to_say';
 }
 
 export interface CreatedClient {
@@ -78,6 +80,7 @@ export async function createClient(input: CreateClientInput): Promise<CreatedCli
         name: input.name,
         phone: e164(input.phone),
         dateOfBirth: input.dateOfBirth,
+        gender: input.gender,
         clientType: input.clientType,
         status: input.status,
         schedule: { deliveryMode: input.deliveryMode },
@@ -96,6 +99,8 @@ export interface ClientDetailsPatch {
   phone?: string;
   dateOfBirth?: string;
   clientType?: 'independent' | 'gym';
+  /** V43. `null` clears it (the Profile tab's "Not given"). */
+  gender?: 'female' | 'male' | 'other' | 'prefer_not_to_say' | null;
 }
 
 export async function updateClientDetails(clientId: string, patch: ClientDetailsPatch): Promise<void> {
@@ -139,7 +144,16 @@ export interface WeeklySlot {
 export async function saveSchedule(
   clientId: string,
   version: string,
-  week: { deliveryMode: 'floor' | 'remote'; slots: WeeklySlot[] },
+  week: {
+    deliveryMode: 'floor' | 'remote' | 'home_visit' | null;
+    /** Days a week — its own answer since 22 Nov 2026, never `slots.length`: a
+     *  three-a-week client may have no standing slots at all yet. */
+    sessionsPerWeek: number | null;
+    /** PUT replaces, so an absent field is a cleared one — the file's editor
+     *  sends back what it read. */
+    sessionDurationMinutes?: number | null;
+    slots: (WeeklySlot & { durationMinutes?: number | null; deliveryMode?: string | null })[];
+  },
 ): Promise<{ version: string; booked: number }> {
   try {
     const res = await api<{ schedule: { version: string }; booked: number }>(
@@ -147,10 +161,17 @@ export async function saveSchedule(
       {
         method: 'PUT',
         headers: { 'if-match': `"${version}"` },
-        body: { deliveryMode: week.deliveryMode, sessionsPerWeek: week.slots.length, slots: week.slots },
+        body: {
+          deliveryMode: week.deliveryMode,
+          sessionsPerWeek: week.sessionsPerWeek,
+          sessionDurationMinutes: week.sessionDurationMinutes ?? null,
+          slots: week.slots,
+        },
       },
     );
     revalidatePath('/clients');
+    revalidatePath(`/clients/${clientId}`);
+    revalidatePath('/today');
     return { version: res.schedule.version, booked: res.booked };
   } catch (error) {
     rethrow(error);

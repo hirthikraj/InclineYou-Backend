@@ -15,6 +15,7 @@ import { FoldEntry } from './containers/Fold.entry';
 import { SidecarEntry } from './containers/Sidecar.entry';
 import { SkeletonEntry } from './containers/Skeleton.entry';
 import { ModalEntry } from './containers/Modal.entry';
+import { ScreenSheetEntry } from './containers/ScreenSheet.entry';
 import { PageHeaderEntry } from './containers/PageHeader.entry';
 import { WhyEntry } from './containers/Why.entry';
 import { PromptListEntry } from './containers/PromptList.entry';
@@ -23,6 +24,8 @@ import { KeyValueEntry } from './data/KeyValue.entry';
 import { FactListEntry } from './data/FactList.entry';
 import { MarkupEntry } from './data/Markup.entry';
 import { ListRowEntry } from './data/ListRow.entry';
+import { QrCodeEntry } from './data/QrCode.entry';
+import { ClampTextEntry } from './data/ClampText.entry';
 import { OrderRowEntry } from './data/OrderRow.entry';
 import { ProgramRowEntry } from './data/ProgramRow.entry';
 import { WorkoutRowEntry } from './data/WorkoutRow.entry';
@@ -55,6 +58,7 @@ import { DropdownEntry } from './forms/Dropdown.entry';
 import { FieldEntry } from './forms/Field.entry';
 import { FormGroupEntry } from './forms/FormGroup.entry';
 import { SearchFieldEntry } from './forms/SearchField.entry';
+import { NumPadEntry } from './forms/NumPad.entry';
 import { SearchSelectEntry } from './forms/SearchSelect.entry';
 import { SelectEntry } from './forms/Select.entry';
 import { SwitchEntry } from './forms/Switch.entry';
@@ -113,6 +117,7 @@ export const ENTRY_VIEWS: Record<string, () => ReactNode> = {
   'c-switch': SwitchEntry,
   'c-datefield': DateFieldEntry,
   'c-search': SearchFieldEntry,
+  'c-numpad': NumPadEntry,
   'c-formgroup': FormGroupEntry,
 
   // CONTAINERS
@@ -121,6 +126,7 @@ export const ENTRY_VIEWS: Record<string, () => ReactNode> = {
   'c-pageheader': PageHeaderEntry,
   'c-dock': DockPanelEntry,
   'c-modal': ModalEntry,
+  'c-screensheet': ScreenSheetEntry,
   'c-empty': EmptyStateEntry,
   'c-fold': FoldEntry,
   'c-sidecar': SidecarEntry,
@@ -132,6 +138,8 @@ export const ENTRY_VIEWS: Record<string, () => ReactNode> = {
   'c-markup': MarkupEntry,
   'c-table': TableEntry,
   'c-listrow': ListRowEntry,
+  'c-qrcode': QrCodeEntry,
+  'c-clamptext': ClampTextEntry,
   'c-orderrow': OrderRowEntry,
   'c-stat': StatEntry,
   'c-figures': FiguresEntry,

@@ -186,6 +186,8 @@ export async function deleteTemplate(id: string): Promise<WriteResult> {
  * assigned means visible. `false` is *take it in person only*, which is what *Take it now* always is.
  */
 export async function scheduleAssessment(input: {
+  /** The sheet's, so a retry after a lost answer replays instead of booking a second one (19 Nov 2026). */
+  id?: string;
   clientId: string;
   templateId: string;
   dueOn?: string;
@@ -196,7 +198,7 @@ export async function scheduleAssessment(input: {
   try {
     const row = await api<AssessmentWire>('/v1/assessments', {
       method: 'POST',
-      body: { id: crypto.randomUUID(), ...input },
+      body: { ...input, id: input.id ?? crypto.randomUUID() },
     });
     refresh(input.clientId);
     return { ok: true, data: row };
@@ -220,6 +222,8 @@ export async function sendAssessment(id: string, clientId?: string): Promise<Wri
 
 /** Put a client on a cycle — every `intervalDays`, the first one booked now. `sendToClient` is the cycle's own switch. */
 export async function startCycle(input: {
+  /** The sheet's, so a retry after a lost answer replays instead of starting a second cycle (19 Nov 2026). */
+  id?: string;
   clientId: string;
   templateId: string;
   intervalDays: number;
@@ -231,7 +235,7 @@ export async function startCycle(input: {
   try {
     const row = await api<ScheduleWire>('/v1/assessment-schedules', {
       method: 'POST',
-      body: { id: crypto.randomUUID(), ...input },
+      body: { ...input, id: input.id ?? crypto.randomUUID() },
     });
     refresh(input.clientId);
     return { ok: true, data: row };

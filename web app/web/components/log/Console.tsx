@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { useToast } from '@/lib/toast/store';
 
 import { floorTime, stampDate } from '@/lib/log/log';
 import type { ConsoleDataX } from '@/lib/sessionlog/api';
@@ -14,8 +15,7 @@ import {
 import { UNDO_SECONDS } from '@/lib/sessionlog/result';
 import {
   applyExercise, applySetAdded, applySetDeleted, applySetWrite, buildConsoleView, buildTimelines, totalsOf,
-  type LogExerciseViewX as LogExerciseView, type LogSetRowX as LogSetRow,
-} from '@/lib/sessionlog/select';
+  type LogExerciseViewX as LogExerciseView, type LogSetRowX as LogSetRow, libraryIdOf } from '@/lib/sessionlog/select';
 import type { EffortKind, LoadKind, LogWire, SetPatch, SetWire } from '@/lib/sessionlog/wire';
 import { TopBar } from '@/components/shell/TopBar';
 import { AddPanel } from './AddPanel';
@@ -221,15 +221,35 @@ export function Console({ data }: { data: ConsoleDataX }) {
   const ctx = data.state.ctx;
   const view = useMemo(() => buildConsoleView(log, history, ctx) ?? data.view, [log, history, ctx, data.view]);
   const timelines = useMemo(() => buildTimelines(log, history, ctx), [log, history, ctx]);
+  /* ── A CARD IS A SESSION ROW, NOT A LIBRARY EXERCISE (21 Nov 2026) ───────────
+     A session can hold the same movement twice — a plank mid-session and another
+     added at the end — and this screen keyed every card by the LIBRARY id: the chip
+     rail's React key, `?ex=`, the drafts, the extra slots, the rest. Two planks were
+     one card (React warned of a duplicate key, and tapping the second opened the
+     first). So inside the console `exerciseId` is the card's own `session_exercise`
+     id, which is what every identity use here already meant, and `libraryId` keeps
+     the movement for the uses that genuinely mean the movement: its history, its
+     records, the swap's *from*, and the add panel's *already on the card*. */
   const exercises = useMemo(
-    () => view.exercises.map((e) => (restLocal[e.exerciseId] ? { ...e, restSeconds: restLocal[e.exerciseId] } : e)),
+    () =>
+      view.exercises.map((e) => {
+        const card = e.sxId || e.exerciseId;
+        return {
+          ...e,
+          ...(restLocal[card] ? { restSeconds: restLocal[card] } : {}),
+          exerciseId: card,
+          // The old model's key for a SECOND card of a movement is `<id>~<position>` (`cardKeyOf`).
+          libraryId: libraryIdOf(e.exerciseId),
+        };
+      }),
     [view.exercises, restLocal],
   );
 
+  /* `?ex=` names a card; an address written before 21 Nov names the movement, and still opens its first card. */
+  const asked = params.get('ex');
   const current =
-    params.get('ex') && exercises.some((e) => e.exerciseId === params.get('ex'))
-      ? (params.get('ex') as string)
-      : exercises.find((e) => !e.complete)?.exerciseId ?? exercises[0]?.exerciseId ?? null;
+    (asked && (exercises.find((e) => e.exerciseId === asked) ?? exercises.find((e) => e.libraryId === asked))?.exerciseId) ||
+    (exercises.find((e) => !e.complete)?.exerciseId ?? exercises[0]?.exerciseId ?? null);
 
   const open = exercises.find((e) => e.exerciseId === current) ?? null;
 
@@ -240,6 +260,20 @@ export function Console({ data }: { data: ConsoleDataX }) {
   const inflight = useRef<Set<string>>(new Set());
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [extra, setExtra] = useState<Record<string, number>>({});
+  /* ── A SKIPPED SET (21 Nov 2026) ───────────────────────────────────────────
+     A set the client did not do, said so by the trainer. Kept in THIS TAB only, the
+     way Strong and Hevy treat an unticked set: nothing is written, the set stays
+     *not done* on the server (which is exactly what a skip is there), and a reload
+     simply shows it as not done again. What it changes is the screen: the one-press
+     *Log set* moves past it, and a movement whose remaining sets are all logged or
+     skipped counts as finished for the move to the next one. Keyed like a draft. */
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  /** Sets of a card still to do: not logged and not skipped (one set may be left out — the one just logged). */
+  const openCount = useCallback(
+    (e: LogExerciseView, except: number | null = null, held: Set<string> = skipped) =>
+      e.sets.filter((x) => !x.done && x.number !== except && !held.has(draftKey(e.exerciseId, x.number))).length,
+    [skipped],
+  );
   const [deleted, setDeleted] = useState<Deleted | null>(null);
   const [restFor, setRestFor] = useState<string | null>(null);
   const [rest, setRunningRest] = useState<Rest | null>(null);
@@ -258,6 +292,38 @@ export function Console({ data }: { data: ConsoleDataX }) {
   const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => () => clearTimeout(undoTimer.current), []);
+  const { show } = useToast();
+
+  /* ── THE SCREEN STAYS ON (21 Nov 2026) ───────────────────────────────────
+     A trainer puts the phone down between sets, and a phone that sleeps in the
+     ninety seconds of a rest is a passcode before every set. The Screen Wake Lock
+     API, only while the log is open, asked again when the tab comes back (the
+     browser drops the lock whenever the page is hidden). Where it is not
+     supported, or refused, nothing happens and nothing is said. */
+  useEffect(() => {
+    if (view.endedAt) return;
+    let lock: WakeLockSentinel | null = null;
+    let alive = true;
+    const ask = async () => {
+      try {
+        const next = (await navigator.wakeLock?.request('screen')) ?? null;
+        if (alive) lock = next;
+        else void next?.release();
+      } catch {
+        /* refused (battery saver, permissions) — the phone sleeps as it always did */
+      }
+    };
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void ask();
+    };
+    void ask();
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      alive = false;
+      document.removeEventListener('visibilitychange', onVisible);
+      void lock?.release().catch(() => {});
+    };
+  }, [view.endedAt]);
 
   /* ── the rest clock ─────────────────────────────────────────────────────
      One interval, and only while a rest is actually running — an idle console
@@ -274,7 +340,11 @@ export function Console({ data }: { data: ConsoleDataX }) {
       setRemaining(left);
       // Zero flips the state, which re-runs this effect and lets it return
       // early — so the interval stops the moment there is nothing to count.
-      if (left === 0) setRunningRest((r) => (r && !r.over ? { ...r, over: true } : r));
+      if (left === 0) {
+        /* Rest over, felt as well as seen: the trainer is watching the client, not the phone. */
+        navigator.vibrate?.([180, 90, 180]);
+        setRunningRest((r) => (r && !r.over ? { ...r, over: true } : r));
+      }
     };
     tick();
     const id = setInterval(tick, 250);
@@ -457,6 +527,27 @@ export function Console({ data }: { data: ConsoleDataX }) {
     [exercises, sessionId, update],
   );
 
+  /* ── ON TO THE NEXT MOVEMENT (21 Nov 2026) ─────────────────────────────────
+     A movement's last open set was just logged (or skipped): the card moves to the
+     next one with a set still to do, and a toast says where it went with *Stay* to
+     come back. The rest keeps running across the move. */
+  const moveOn = useCallback(
+    (exercise: LogExerciseView, held: Set<string> = skipped) => {
+      const after = exercises.find((e) => e.exerciseId !== exercise.exerciseId && openCount(e, null, held) > 0);
+      if (!after) return;
+      go({ ex: after.exerciseId, set: null });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      show({
+        tone: 'ok',
+        variant: 'receipt',
+        title: <>Next · {after.name}</>,
+        body: <>{exercise.name} done.</>,
+        action: { label: 'Stay', onClick: () => go({ ex: exercise.exerciseId, set: null }) },
+      });
+    },
+    [skipped, exercises, openCount, go, show],
+  );
+
   const commit = useCallback(
     (exerciseId: string, row: LogSetRow, values: Draft) => {
       const key = draftKey(exerciseId, row.number);
@@ -492,10 +583,50 @@ export function Console({ data }: { data: ConsoleDataX }) {
         });
         /* A new set was logged, so the rest begins — not on an edit to one that already was. */
         if (result.logged) startRest(exercise);
+
+        /* ── ON TO THE NEXT MOVEMENT (21 Nov 2026) ─────────────────────────
+           The last open set of a movement was just logged: the card moves to the
+           next one still to do, and a toast says where it went with *Stay* to come
+           back. Only on a NEW set (a correction to a done one moves nothing), and
+           not while the trainer has added extra slots here — they are still
+           working this movement. The rest keeps running across the move. */
+        if (result.logged && exercise && openCount(exercise, row.number) === 0 && !(extra[exerciseId] > 0)) {
+          moveOn(exercise);
+        }
       })();
     },
-    [exercises, saveSet, go, startRest],
+    [exercises, saveSet, go, startRest, extra, openCount, moveOn],
   );
+
+  /* ── skip, un-skip, and an extra slot taken back ─────────────────────────── */
+  const skip = useCallback(
+    (exerciseId: string, row: LogSetRow) => {
+      const key = draftKey(exerciseId, row.number);
+      const next = new Set(skipped);
+      next.add(key);
+      setSkipped(next);
+      const exercise = exercises.find((e) => e.exerciseId === exerciseId);
+      show({
+        tone: 'neutral',
+        variant: 'receipt',
+        title: <>Set {row.number} skipped</>,
+        body: <>{exercise?.name ?? 'This set'} · it stays not done.</>,
+        action: { label: 'Undo', onClick: () => setSkipped((held) => { const n = new Set(held); n.delete(key); return n; }) },
+      });
+      if (exercise && openCount(exercise, null, next) === 0 && !(extra[exerciseId] > 0)) moveOn(exercise, next);
+    },
+    [skipped, exercises, show, openCount, extra, moveOn],
+  );
+  const unskip = useCallback((exerciseId: string, n: number) => {
+    setSkipped((held) => {
+      const next = new Set(held);
+      next.delete(draftKey(exerciseId, n));
+      return next;
+    });
+  }, []);
+  const removeSlot = useCallback((exerciseId: string) => {
+    setExtra((held) => ({ ...held, [exerciseId]: Math.max(0, (held[exerciseId] ?? 0) - 1) }));
+  }, []);
 
   const remove = useCallback(
     (exerciseId: string, row: LogSetRow) => {
@@ -653,14 +784,31 @@ export function Console({ data }: { data: ConsoleDataX }) {
    * and places get URLs; the card itself arrives when the server's answer is merged in, which is a
    * moment, not a navigation.
    */
+  /* The panel stays open while several are picked (22 Nov 2026), so each pick
+     takes the next position itself rather than reading `exercises`, which has
+     not caught up with the cards still in flight. The first card added is where
+     *Done* lands. */
+  const addedThisOpen = useRef<{ base: number; ids: string[] } | null>(null);
   const pickAdded = useCallback((exerciseId: string) => {
-    const position = exercises.reduce((max, e) => Math.max(max, e.orderIndex), -1) + 1;
+    if (!addedThisOpen.current) {
+      addedThisOpen.current = { base: exercises.reduce((max, e) => Math.max(max, e.orderIndex), -1) + 1, ids: [] };
+    }
+    const batch = addedThisOpen.current;
+    const position = batch.base + batch.ids.length;
+    /* The new row's id is minted here, and it IS the new card's id — so `?ex=` can name it before
+       the server answers, even when the same movement is already on the card. */
+    const rowId = crypto.randomUUID();
+    batch.ids.push(rowId);
     void (async () => {
-      const result = await addExerciseRow(sessionId, { id: crypto.randomUUID(), exerciseId, position });
+      const result = await addExerciseRow(sessionId, { id: rowId, exerciseId, position });
       if (result.ok) update((l) => applyExercise(l, result.data));
     })();
-    go({ add: null, ex: exerciseId });
-  }, [exercises, sessionId, update, go]);
+  }, [exercises, sessionId, update]);
+  const closeAdd = useCallback(() => {
+    const first = addedThisOpen.current?.ids[0] ?? null;
+    addedThisOpen.current = null;
+    go(first ? { add: null, ex: first } : { add: null });
+  }, [go]);
 
   /* ── the strip ─────────────────────────────────────────────────────────── */
 
@@ -772,6 +920,22 @@ export function Console({ data }: { data: ConsoleDataX }) {
             )}
           </Strip>
 
+          {/* THE PHONE'S ONE LINE (21 Nov 2026): the four tiles above stand down below 620px — they
+              are the session's summary, and the finish screen states them again in full — and this is
+              what is left: how far through the session we are, readable at arm's length. */}
+          <div className="logprog" aria-hidden="true">
+            <span className="logprog__t">
+              <b>{view.setsLogged}</b> of {view.setsPlanned} sets
+              {view.volumeKg > 0 ? <> &middot; {view.volumeKg.toLocaleString('en-IN')} kg</> : null}
+            </span>
+            <span className="logprog__bar">
+              <span
+                className="logprog__fill"
+                style={{ width: `${view.setsPlanned ? Math.min(100, (100 * view.setsLogged) / view.setsPlanned) : 0}%` }}
+              />
+            </span>
+          </div>
+
           {view.emptyPlan ? (
             <EmptyPlan data={data} view={view} onAdd={() => go({ add: '1' })} />
           ) : (
@@ -799,6 +963,7 @@ export function Console({ data }: { data: ConsoleDataX }) {
                   }
                   busy={busy}
                   error={errors}
+                  skipped={skipped}
                   /* Always, now. An off-plan card keeps its rest on its own
                      `workout_exercise` row — V13 put the column there for
                      exactly that — so there is no longer a card the control
@@ -810,11 +975,9 @@ export function Console({ data }: { data: ConsoleDataX }) {
                      started it, so opening another one does not inherit its
                      clock — and does not stop it either, because the trainer
                      reading ahead is not the trainer finishing the rest. */
-                  rest={
-                    rest && rest.exerciseId === open.exerciseId
-                      ? { total: rest.total, remaining, over: rest.over }
-                      : null
-                  }
+                  /* ANY exercise's rest (21 Nov 2026). It was this card's only, so moving on to the
+                     next movement — automatically now — hid the rest at the one moment it was for. */
+                  rest={rest ? { total: rest.total, remaining, over: rest.over } : null}
                   onAdjustRest={adjustRest}
                   onSkipRest={() => setRunningRest(null)}
                   /* The next card with a slot still open, for the thumb dock —
@@ -826,7 +989,7 @@ export function Console({ data }: { data: ConsoleDataX }) {
                      the log` is in the header, which is where a session ends. */
                   next={(() => {
                     const after = exercises.find(
-                      (e) => !e.complete && e.exerciseId !== open.exerciseId,
+                      (e) => openCount(e) > 0 && e.exerciseId !== open.exerciseId,
                     );
                     return after
                       ? {
@@ -844,6 +1007,9 @@ export function Console({ data }: { data: ConsoleDataX }) {
                     addSlot: (exerciseId) =>
                       setExtra((held) => ({ ...held, [exerciseId]: (held[exerciseId] ?? 0) + 1 })),
                     changeRest: (exerciseId) => setRestFor(exerciseId),
+                    skip,
+                    unskip,
+                    removeSlot,
                   }}
                 />
               ) : (
@@ -858,8 +1024,8 @@ export function Console({ data }: { data: ConsoleDataX }) {
                   <ExerciseTimeline
                     name={open.name}
                     clientId={view.clientId}
-                    exerciseId={open.exerciseId}
-                    sessions={(timelines[open.exerciseId] ?? []).filter((s) => !s.today)}
+                    exerciseId={open.libraryId}
+                    sessions={(timelines[open.libraryId] ?? []).filter((s) => !s.today)}
                   />
                 ) : null}
                 {view.records.length > 1 ? (
@@ -884,6 +1050,14 @@ export function Console({ data }: { data: ConsoleDataX }) {
           view={open}
           row={panelRow}
           busy={busy.has(draftKey(open.exerciseId, panelRow.number))}
+          skipped={skipped.has(draftKey(open.exerciseId, panelRow.number))}
+          onSkip={() => { skip(open.exerciseId, panelRow); go({ set: null }); }}
+          onUnskip={() => { unskip(open.exerciseId, panelRow.number); go({ set: null }); }}
+          onRemoveSlot={
+            !panelRow.done && !panelRow.planSetId
+              ? () => { removeSlot(open.exerciseId); go({ set: null }); }
+              : undefined
+          }
           message={panelMessage}
           onClose={() => { setPanelMessage(null); go({ set: null }); }}
           onDelete={() => { remove(open.exerciseId, panelRow); go({ set: null }); }}
@@ -914,12 +1088,12 @@ export function Console({ data }: { data: ConsoleDataX }) {
         <HistorySheet
           name={histView.name}
           clientId={view.clientId}
-          exerciseId={histView.exerciseId}
+          exerciseId={histView.libraryId}
           /* `!s.today` for the same reason the third column filters it: today's
              sets are the table behind the sheet, and a session that prints its
              own rows back at itself is an echo rather than a comparison. */
-          sessions={(timelines[histView.exerciseId] ?? []).filter((s) => !s.today)}
-          card={view.records.find((r) => r.exerciseId === histView.exerciseId) ?? null}
+          sessions={(timelines[histView.libraryId] ?? []).filter((s) => !s.today)}
+          card={view.records.find((r) => r.exerciseId === histView.libraryId) ?? null}
           onClose={() => go({ hist: null })}
         />
       ) : null}
@@ -932,9 +1106,9 @@ export function Console({ data }: { data: ConsoleDataX }) {
           search={searchLibrary}
           /* Every added card is in `exercises` now that it is a row, so the
              second list `?plus=` used to contribute has nothing left in it. */
-          already={new Set(exercises.map((e) => e.exerciseId))}
+          already={new Set(exercises.map((e) => e.libraryId))}
           onPick={pickAdded}
-          onClose={() => go({ add: null })}
+          onClose={closeAdd}
         />
       ) : null}
 
@@ -960,7 +1134,7 @@ export function Console({ data }: { data: ConsoleDataX }) {
                 const result = await swapExercise({
                   routeId: sessionId,
                   scope,
-                  fromExerciseId: swapView.exerciseId,
+                  fromExerciseId: swapView.libraryId,
                   toExerciseId,
                   programId: data.programId,
                   templateId: data.templateId,
@@ -989,7 +1163,8 @@ export function Console({ data }: { data: ConsoleDataX }) {
                 return;
               }
               say('swap', null);
-              go({ swap: null, ex: toExerciseId });
+              /* The row keeps its id through a swap (only its movement changes), so the card does too. */
+              go({ swap: null, ex: swapView.exerciseId });
             })();
           }}
         />

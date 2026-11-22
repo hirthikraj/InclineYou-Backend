@@ -13,6 +13,7 @@ import { Card } from '@/web-components/ui/Card';
 import { Chip } from '@/web-components/ui/Chip';
 import { Field, TextField } from '@/web-components/ui/Field';
 import { KeyValueRow } from '@/web-components/ui/KeyValue';
+import { DateField } from '@/web-components/ui/DateField';
 import { Why } from '@/web-components/ui/Why';
 
 /**
@@ -95,6 +96,12 @@ export function RecordPanel({ initialClientId = null, onClose, onRecorded }: Pro
   const [reference, setReference] = useState('');
   const [note, setNote] = useState('');
   const [today] = useState(() => localDate(Date.now()));
+  /* The server's window for when money landed (18 Nov 2026): at most 3 months back. */
+  const [earliest] = useState(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 3);
+    return localDate(d.getTime());
+  });
   const [paidOn, setPaidOn] = useState(today);
   const [awaiting, setAwaiting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -348,13 +355,14 @@ export function RecordPanel({ initialClientId = null, onClose, onRecorded }: Pro
             <label className="fld__l" htmlFor="rp-date">
               {isAwaiting ? 'Requested on' : 'Received on'}
             </label>
-            <input
-              className="ctl"
+            <DateField
               id="rp-date"
-              type="date"
+              label={isAwaiting ? 'Requested on' : 'Received on'}
+              block
               value={paidOn}
+              min={earliest}
               max={today}
-              onChange={(e) => setPaidOn(e.target.value)}
+              onChange={setPaidOn}
               disabled={isAwaiting}
             />
             {/* No future dates: the server clamps a forward-dated payment to now

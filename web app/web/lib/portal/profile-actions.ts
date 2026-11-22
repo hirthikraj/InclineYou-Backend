@@ -18,6 +18,8 @@ export interface DetailsChange {
   heightCm?: number | null;
   timezone?: string;
   activityLevel?: string | null;
+  /** V44: female · male · other · prefer_not_to_say, or null for "not given". */
+  gender?: string | null;
 }
 
 export type SaveDetailsResult =

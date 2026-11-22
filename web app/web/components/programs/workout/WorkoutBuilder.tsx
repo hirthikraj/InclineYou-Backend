@@ -50,7 +50,7 @@ import { ExerciseCard, type CardActions } from './ExerciseCard';
 import type { SheetPosition } from './ExerciseSheet';
 import { LibraryPane } from './LibraryPane';
 import { NoteDialog } from './NoteDialog';
-import { ClockIcon, DumbbellIcon, FlameIcon, Grip, RedoIcon, SlidersIcon, UndoIcon } from './Icons';
+import { ClockIcon, DumbbellIcon, FlameIcon, Grip, NoteIcon, RedoIcon, UndoIcon } from './Icons';
 import { PlusIcon, TrashIcon } from '../Icons';
 import {
   DIVIDER_MIME,
@@ -614,7 +614,9 @@ export function WorkoutBuilder({
             aria-label="A note on this workout"
             onClick={() => setNoteOpen(v => !v)}
           >
-            <SlidersIcon size={16} />
+            {/* The NOTE glyph the set lines and the cards already use for a note (21 Nov 2026). It was
+                sliders, which reads as settings or filters, over a button labelled *A note on this workout*. */}
+            <NoteIcon size={16} />
           </button>
 
           {/* THE STATE, SAID BEFORE THE NAME. Nothing in here is on any shelf

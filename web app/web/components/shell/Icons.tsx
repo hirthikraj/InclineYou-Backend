@@ -261,6 +261,13 @@ export const Warn = ({ size }: IconProps) => (
   </Glyph>
 );
 
+/** A padlock — something held back until somebody else says yes (the client's consent, 22 Nov 2026). */
+export const Lock = ({ size }: IconProps) => (
+  <Glyph size={size}>
+    <rect x="5" y="10.5" width="14" height="10" rx="2.2" />
+    <path d="M8.5 10.5V7.8a3.5 3.5 0 0 1 7 0v2.7" />
+  </Glyph>
+);
 export const Play = ({ size }: IconProps) => <Glyph size={size} d="M8 5.5v13l11-6.5-11-6.5Z" />;
 export const No = ({ size }: IconProps) => (
   <Glyph size={size}>

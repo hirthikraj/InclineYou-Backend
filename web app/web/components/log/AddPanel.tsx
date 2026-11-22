@@ -3,8 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { Plus } from './Icons';
-import { Search } from '@/components/shell/Icons';
+import { Check, Search } from '@/components/shell/Icons';
 import { useDismiss } from '@/lib/ui/dismiss';
+import { usePhone } from '@/lib/ui/phone';
+import { ScreenSheet } from '@/web-components/ui/ScreenSheet';
 import { Button } from '@/web-components/ui/Button';
 import { Chip } from '@/web-components/ui/Chip';
 
@@ -57,11 +59,27 @@ export function AddPanel({
 }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'recent' | 'yours' | 'all' | string>('recent');
+  /* PICK SEVERAL, THEN DONE (22 Nov 2026). A day with no plan is built here a
+     movement at a time, and closing the panel on every press made six
+     exercises six trips. A press now writes the card (as it always did) and the
+     panel stays: the row turns to *Added*, the foot counts, and Done closes it
+     on the first card added. A second press on an added row does nothing — the
+     card is already written, and removing it is the card's own job. */
+  const [picked, setPicked] = useState<string[]>([]);
+  const pick = (exerciseId: string) => {
+    if (picked.includes(exerciseId)) return;
+    setPicked((p) => [...p, exerciseId]);
+    onPick(exerciseId);
+  };
+  const addedMark = (id: string) => (picked.includes(id)
+    ? <span className="small ink3" style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}><Check size={14} />Added</span>
+    : <Plus size={16} />);
 
   /* `dismiss`, not `onClose`, on all three ways out. `lib/ui/dismiss.ts` has
      the argument: `onClose` unmounts this box, and a panel that is already gone
      has nothing left to animate away. */
-  const { closing, dismiss, dismissThen, ref: panelRef } = useDismiss<HTMLDivElement>(onClose);
+  const { closing, dismiss, ref: panelRef } = useDismiss<HTMLDivElement>(onClose);
+  const phone = usePhone();
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -108,28 +126,10 @@ export function AddPanel({
     return null;
   }, [query, filter, library, mine, remote, complete]);
 
-  const recentRows = recents.filter((r) => !already.has(r.exerciseId));
+  const recentRows = recents.filter((r) => !already.has(r.exerciseId) || picked.includes(r.exerciseId));
 
-  return (
+  const body = (
     <>
-      <div
-        className={`scrim scrim--soft${closing ? ' scrim--out' : ''}`}
-        onClick={dismiss}
-        aria-hidden="true"
-      />
-      <div
-        ref={panelRef}
-        className={`panel${closing ? ' panel--out' : ''}`}
-        style={{ width: 420 }}
-        role="dialog"
-        aria-label="Add an exercise"
-      >
-        <div className="panel__hd">
-          <span className="panel__t">Add an exercise</span>
-          <span className="small mono" style={{ marginLeft: 'auto' }}>today only</span>
-        </div>
-
-        <div className="panel__body">
           <label className="search">
             <Search size={15} />
             <input
@@ -163,12 +163,12 @@ export function AddPanel({
               {recentRows.length ? (
                 <div className="lgl">
                   {recentRows.map((r) => (
-                    <button className="lrow" type="button" key={r.exerciseId} onClick={() => dismissThen(() => onPick(r.exerciseId))}>
+                    <button className="lrow" type="button" key={r.exerciseId} aria-pressed={picked.includes(r.exerciseId)} onClick={() => pick(r.exerciseId)}>
                       <span className="lrow__m" style={{ flex: 1 }}>
                         <span className="lrow__t">{r.name}</span>
                         <span className="lrow__s">{r.meta}</span>
                       </span>
-                      <Plus size={16} />
+                      {addedMark(r.exerciseId)}
                     </button>
                   ))}
                 </div>
@@ -187,12 +187,12 @@ export function AddPanel({
                   <p className="micro" style={{ margin: '18px 0 7px' }}>Yours</p>
                   <div className="lgl">
                     {mine.slice(0, 6).map((e) => (
-                      <button className="lrow" type="button" key={e.id} onClick={() => dismissThen(() => onPick(e.id))}>
+                      <button className="lrow" type="button" key={e.id} aria-pressed={picked.includes(e.id)} onClick={() => pick(e.id)}>
                         <span className="lrow__m" style={{ flex: 1 }}>
                           <span className="lrow__t">{e.name}</span>
                           <span className="lrow__s">yours{e.muscleGroup ? ` · ${e.muscleGroup}` : ''}</span>
                         </span>
-                        <Plus size={16} />
+                        {addedMark(e.id)}
                       </button>
                     ))}
                   </div>
@@ -206,14 +206,14 @@ export function AddPanel({
           ) : (
             <div className="lgl" style={{ marginTop: 14 }}>
               {results.map((e) => (
-                <button className="lrow" type="button" key={e.id} onClick={() => dismissThen(() => onPick(e.id))}>
+                <button className="lrow" type="button" key={e.id} aria-pressed={picked.includes(e.id)} onClick={() => pick(e.id)}>
                   <span className="lrow__m" style={{ flex: 1 }}>
                     <span className="lrow__t">{e.name}</span>
                     <span className="lrow__s">
                       {e.isCustom ? 'yours' : e.muscleGroup ?? 'library'}
                     </span>
                   </span>
-                  <Plus size={16} />
+                  {addedMark(e.id)}
                 </button>
               ))}
               {results.length === 0 ? (
@@ -221,13 +221,57 @@ export function AddPanel({
               ) : null}
             </div>
           )}
+    </>
+  );
+
+  /* ── ON A PHONE, A SCREEN AND NOT A SIDE PANEL (21 Nov 2026, from a screenshot) ──
+     A 420px panel on a 390px phone ran off the left edge — the title read *dd an
+     exercise* — with a foot holding one sentence and Cancel. The console's other
+     sheets' answer: `c-screensheet`, the back chevron as Cancel, and the sentence
+     that was in the foot as a note at the top, where it is read before the pick. */
+  if (phone) {
+    return (
+      <ScreenSheet
+        title={picked.length ? `Added ${picked.length}` : 'Add an exercise'}
+        backLabel={picked.length ? 'Done' : 'Cancel'}
+        onBack={dismiss}
+        closing={closing}
+        surfaceRef={panelRef}
+      >
+        <p className="small ink3 addx__note">Goes into today&rsquo;s log only. The program does not change.</p>
+        {body}
+      </ScreenSheet>
+    );
+  }
+
+  return (
+    <>
+      <div
+        className={`scrim scrim--soft${closing ? ' scrim--out' : ''}`}
+        onClick={dismiss}
+        aria-hidden="true"
+      />
+      <div
+        ref={panelRef}
+        className={`panel${closing ? ' panel--out' : ''}`}
+        style={{ width: 420 }}
+        role="dialog"
+        aria-label="Add an exercise"
+      >
+        <div className="panel__hd">
+          <span className="panel__t">Add an exercise</span>
+          <span className="small mono" style={{ marginLeft: 'auto' }}>today only</span>
         </div>
+
+        <div className="panel__body">{body}</div>
 
         <div className="panel__foot">
           <span className="small" style={{ marginRight: 'auto', maxWidth: '26ch' }}>
             Goes into today&rsquo;s log only. The program does not change.
           </span>
-          <Button variant="ghost" onClick={dismiss}>Cancel</Button>
+          {picked.length > 0
+            ? <Button variant="primary" onClick={dismiss}>Done · {picked.length} added</Button>
+            : <Button variant="ghost" onClick={dismiss}>Cancel</Button>}
         </div>
       </div>
     </>

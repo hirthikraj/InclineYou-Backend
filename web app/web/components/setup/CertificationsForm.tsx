@@ -43,7 +43,7 @@ export function CertificationsForm({ state }: { state: SetupState }) {
         tone: 'warn',
         icon: 'warn',
         lead: 'Nothing picked yet.',
-        rest: 'Choose one, tap “Not certified yet” — plenty of excellent trainers do — or press Skip for now.',
+        rest: 'Choose one, tap “Not certified yet” — plenty of excellent trainers do — or press Skip this step.',
       });
       return;
     }

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ProgressBody, ProgressRanges, useProgressQuery } from '@/components/log/Progress';
 import type { ProgressView } from '@/lib/log/log';
 
+import { Lock } from '@/components/shell/Icons';
 import { Blank } from './shared';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
@@ -46,8 +47,11 @@ export function ProgressTab({
   clientId,
   progress,
   failed = false,
+  consented = true,
 }: {
   clientId: string;
+  /** Whether the client has accepted their invite. Before it the report is locked, and its button says so. */
+  consented?: boolean;
   progress: ProgressView | null;
   /** The read FELL OVER — which is not the same fact as *there is nothing here*. */
   failed?: boolean;
@@ -72,11 +76,21 @@ export function ProgressTab({
         )}
         {/* On a phone the header already carries a *Report* button to the same place, directly above
             the tabs, so this one was a second verb for one noun on a line of its own (hidden ≤900px). */}
-        <Button href={`/clients/${clientId}/report`} variant="secondary" size="sm" className="cfprog__rep">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
-            <path d="M12 15V4" /><path d="M8 8l4-4 4 4" />
-          </svg>
+        <Button
+          href={`/clients/${clientId}/report`}
+          variant="secondary"
+          size="sm"
+          className="cfprog__rep"
+          title={consented ? undefined : 'Opens once they accept their invite'}
+        >
+          {consented ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7" />
+              <path d="M12 15V4" /><path d="M8 8l4-4 4 4" />
+            </svg>
+          ) : (
+            <Lock size={14} />
+          )}
           Progress report
         </Button>
       </div>

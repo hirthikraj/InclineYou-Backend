@@ -104,6 +104,9 @@ export interface WorkoutTemplateWire {
   updatedAt: number;
   /** What a save must echo as If-Match; the dialog keeps it from the read. */
   version?: string;
+  /** 19 Nov 2026 — every exercise it uses, by id, a retired one included (the program tree's dictionary). Only on
+   *  GET one; the shelf's summaries carry none. */
+  names?: Record<string, { name: string; equipment: string | null; target: string | null; level: string | null; isCustom: boolean }>;
   /** Counted by the server, never stored — see `workoutTemplateView`. */
   exerciseCount: number;
   setCount: number;

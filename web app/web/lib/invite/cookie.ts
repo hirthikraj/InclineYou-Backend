@@ -27,6 +27,10 @@ export interface InviteSitting {
   /** `YYYY-MM-DD`. Sent back to accept, which re-checks it against the database's calendar. */
   dateOfBirth: string;
   policyVersion: string;
+  /** The client's own "Send me WhatsApp reminders" (21 Nov 2026). Absent in a sitting sealed before it existed: read as no. */
+  whatsappReminders?: boolean;
+  /** The "fit to train" tick (22 Nov 2026, V42). The form cannot be sent without it, so a sitting always holds true. */
+  trainingTerms?: boolean;
   /** Epoch ms, for the countdown beside *Send again*. */
   resendAt: number;
 }

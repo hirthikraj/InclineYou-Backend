@@ -3,6 +3,7 @@ import 'server-only';
 import { cookies } from 'next/headers';
 
 import { getToken } from '@/lib/auth/session';
+import { WORKSPACE_SWITCHING } from '@/lib/launch';
 import { getTrainerIdentity } from '@/lib/shell/api';
 
 import {
@@ -151,6 +152,13 @@ export async function listWorkspaces(): Promise<Workspace[]> {
 export async function resolveWorkspaces(
   list: Workspace[],
 ): Promise<{ activeId: string; defaultId: string }> {
+  /* One workspace per trainer at launch (lib/launch.ts): always their own book, so a cookie left by an earlier
+     sitting cannot strand them in a gym's workspace with no switcher to leave it by. */
+  if (!WORKSPACE_SWITCHING) {
+    const own = list[0]?.id ?? SOLO_ID;
+    return { activeId: own, defaultId: own };
+  }
+
   const jar = await cookies();
   const known = (id: string | undefined): id is string =>
     !!id && list.some((w) => w.id === id);

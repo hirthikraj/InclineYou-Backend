@@ -129,16 +129,28 @@ function listPath(q: Query): string {
 
 /**
  * Page `q.page` of the list. 1.1 pages by cursor, not by number, so the pager's
- * page N is reached by walking N−1 cursors — cheap at twenty a page, and the
- * first read asks for the totals the pager divides.
+ * page is reached by walking cursors — cheap at twenty a page, and the first
+ * read asks for the totals the pager divides.
+ *
+ * `q.page` IS ZERO-BASED (`parsePage`, `Pager`: `?page=1` is the SECOND page), so
+ * page N is N cursors past the first read. The loop used to start at 1 and walk
+ * N−1, which made the second page a second copy of the first and put every later
+ * page one behind its number (21 Nov 2026: "page 1 and page 2 show the same list").
+ *
+ * And a page past the last cursor is EMPTY, not the last page again: walking off
+ * the end used to stop on the final page and return its rows under a later page's
+ * number, which hid the *past the end* state `Assessments.tsx` draws for it.
  */
 async function pageOf(q: Query): Promise<Page> {
   const base = listPath(q);
   let page = await request<Page>(`${base}&includeTotal=true`);
   const totals = { total: page.total ?? 0, grandTotal: page.grandTotal ?? 0 };
-  for (let n = 1; n < q.page && page.nextCursor; n++) {
+  let walked = 0;
+  while (walked < q.page && page.nextCursor) {
     page = await request<Page>(`${base}&cursor=${encodeURIComponent(page.nextCursor)}`);
+    walked++;
   }
+  if (walked < q.page) return { ...page, items: [], nextCursor: null, ...totals };
   return { ...page, ...totals };
 }
 

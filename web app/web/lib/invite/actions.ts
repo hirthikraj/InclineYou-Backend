@@ -25,7 +25,12 @@ interface Requested {
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
-export async function sendInviteCode(token: string, dateOfBirth: string, policyVersion: string): Promise<SendResult> {
+export async function sendInviteCode(
+  token: string,
+  dateOfBirth: string,
+  policyVersion: string,
+  whatsappReminders = false,
+): Promise<SendResult> {
   if (!DATE.test(dateOfBirth)) return { ok: false, kind: 'invalid', message: 'Enter your date of birth as day, month and year.' };
 
   let issued: Requested;
@@ -45,6 +50,8 @@ export async function sendInviteCode(token: string, dateOfBirth: string, policyV
     requestId: issued.requestId,
     dateOfBirth,
     policyVersion,
+    whatsappReminders,
+    trainingTerms: true,
     resendAt: Date.now() + issued.resendAfterSeconds * 1000,
   });
   return { ok: true, resendAfterSeconds: issued.resendAfterSeconds };
@@ -77,7 +84,7 @@ function readFailure(e: ApiError): Extract<SendResult, { ok: false }> {
 export async function resendInviteCode(token: string): Promise<SendResult> {
   const sitting = await getSitting(token);
   if (!sitting) return { ok: false, kind: 'unavailable', message: 'That took too long. Start again from your invite.' };
-  return sendInviteCode(token, sitting.dateOfBirth, sitting.policyVersion);
+  return sendInviteCode(token, sitting.dateOfBirth, sitting.policyVersion, sitting.whatsappReminders === true);
 }
 
 /**
@@ -138,6 +145,10 @@ export async function acceptInvite(token: string, otp: string): Promise<AcceptRe
         otp,
         dateOfBirth: sitting.dateOfBirth,
         policyVersion: sitting.policyVersion,
+        // Only the client's own tick opts them in to WhatsApp reminders (21 Nov 2026), never the trainer's switch.
+        whatsappReminders: sitting.whatsappReminders === true,
+        // The form refuses to send without the "fit to train" tick, so reaching here means it was ticked (V42).
+        trainingTerms: true,
       },
     });
   } catch (error) {
@@ -196,13 +207,19 @@ function readAcceptFailure(e: ApiError): Extract<AcceptResult, { ok: false }> {
  * What comes back is a client session, which replaces that cookie — the credential this call came in on is retired by the server.
  * The date of birth is the only thing typed, and the notice is the version the card showed.
  */
-export async function acceptMyInvite(inviteId: string, dateOfBirth: string, policyVersion: string): Promise<AcceptResult> {
+export async function acceptMyInvite(
+  inviteId: string,
+  dateOfBirth: string,
+  policyVersion: string,
+  whatsappReminders = false,
+): Promise<AcceptResult> {
   if (!DATE.test(dateOfBirth)) return { ok: false, kind: 'wrong', message: 'Enter your date of birth as day, month and year.' };
   let accepted: Accepted;
   try {
     accepted = await api<Accepted>(`/v1/me/invites/${encodeURIComponent(inviteId)}/accept`, {
       method: 'POST',
-      body: { dateOfBirth, policyVersion },
+      // The "fit to train" tick is required by the form before this can be pressed (V42).
+      body: { dateOfBirth, policyVersion, whatsappReminders, trainingTerms: true },
     });
   } catch (error) {
     if (!(error instanceof ApiError)) throw error;

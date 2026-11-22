@@ -56,6 +56,7 @@ import {
 import { DAY_MS, WEEKDAYS_LONG, daysBetween, isoWeekday, startOfDay } from '@/lib/today/time';
 import { readMode, type DeliveryMode } from '@/lib/today/mode';
 import type { ClientWire, PackageWire } from './api';
+import { asGender, type Gender } from './gender';
 
 /** Money is a decimal string on the wire. (Not imported from `./api`, which is server-only.) */
 const num = (v: string | number | null | undefined): number => {
@@ -185,6 +186,8 @@ export interface RosterRow {
   missedStreak: number;
   sessionsLeft: number | null;
   batch: Batch;
+  /** V43: the stated answer, or `unset` when the client has not given one. Never inferred from a name. */
+  gender: GenderFilter;
 }
 
 export interface Tally {
@@ -236,6 +239,8 @@ export interface Filters {
   mode: DeliveryMode[];
   money: ('owes' | 'paid' | 'ending')[];
   batch: Batch[];
+  /** OR within the axis like the other three; `unset` finds the clients whose answer is still missing. */
+  gender: GenderFilter[];
   /**
    * At most one at a time, unlike every other axis here.
    *
@@ -247,10 +252,13 @@ export interface Filters {
   focus: Focus | null;
 }
 
-export const NO_FILTERS: Filters = { mode: [], money: [], batch: [], focus: null };
+export const NO_FILTERS: Filters = { mode: [], money: [], batch: [], gender: [], focus: null };
+
+/** The gender axis: the four stated answers (`lib/clients/gender.ts`) plus *not given yet*. */
+export type GenderFilter = Gender | 'unset';
 
 export function filterCount(f: Filters): number {
-  return f.mode.length + f.money.length + f.batch.length + (f.focus ? 1 : 0);
+  return f.mode.length + f.money.length + f.batch.length + f.gender.length + (f.focus ? 1 : 0);
 }
 
 /**
@@ -804,6 +812,7 @@ export function buildRow(
     missedStreak,
     sessionsLeft,
     batch: readBatch(client.slots),
+    gender: asGender(client.gender) ?? 'unset',
   };
 }
 
@@ -971,6 +980,8 @@ export function filterRows(rows: RosterRow[], filters: Filters, segment: Segment
   }
 
   if (filters.batch.length > 0) result = result.filter((r) => filters.batch.includes(r.batch));
+
+  if (filters.gender.length > 0) result = result.filter((r) => filters.gender.includes(r.gender));
 
   /* Last, so it narrows whatever the other three left rather than competing
      with them — a trainer who has pressed *Gone quiet* and then typed a name

@@ -67,7 +67,12 @@ const BY_CODE: Record<string, string> = {
   SESSION_NOT_STARTED: 'Start the log first, then log sets.',
   SESSION_CANCELLED: 'This session was cancelled, so it cannot be logged. Put it back on the diary first.',
   SESSION_NO_SHOW: 'This session was marked no-show, so it cannot be logged. Put it back on the diary first.',
-  CLIENT_NOT_BOOKABLE: 'They are paused, archived or removed, so they cannot be booked. Bring them back first.',
+  // 19 Nov 2026: also what Start answers for a client who has gone since the session was booked.
+  // 21 Nov 2026: was a 400 naming `startedAt`. `StartLog` says WHEN it opens; this is the fallback wording.
+  SESSION_TOO_EARLY: 'This session’s log can’t be started yet. It opens a day before the session.',
+  CLIENT_NOT_BOOKABLE: 'They are paused, archived or removed, so they cannot be booked or logged. Bring them back first.',
+  // 22 Nov 2026: a third session before the client has accepted their invite (`ConsentGate`).
+  CONSENT_REQUIRED: 'They’ve had 2 sessions without consent. Send their invite from their file — the next session can be logged once they accept it.',
   SESSION_CLIENT_TIME_TAKEN: 'They already have a session starting this minute. Open that one instead.',
   SET_NEEDS_VALUE: 'That set has nothing to copy. Enter what was done.',
   SET_PLANNED: 'A planned set cannot be deleted. Skip it instead.',
@@ -235,7 +240,7 @@ export async function exerciseLibrary(): Promise<Written<Awaited<ReturnType<type
 
 function oldFailure(error: unknown, subject: string): WriteResult {
   const f = failure(error, subject);
-  return { ok: false, message: f.message };
+  return { ok: false, message: f.message, code: f.code };
 }
 
 function refresh(routeId: string): void {

@@ -22,7 +22,7 @@ export default async function Page() {
     <AuthShell
       eyebrow="Trainer console"
       lead="Set up. Go coach."
-      quote="The first booking and the first payment are the things worth celebrating. Both are one screen away."
+      quote={null}
     >
       <Done state={state} />
     </AuthShell>

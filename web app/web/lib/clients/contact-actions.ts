@@ -108,9 +108,11 @@ export async function saveContact(
 export async function savePhysical(
   clientId: string,
   version: string,
-  input: { heightCm: string; dateOfBirth: string; activityLevel: string },
+  /* Only the fields given are sent (22 Nov 2026): before consent the card edits the date of birth and gender alone,
+     and a height or activity sent back unchanged would be refused CONSENT_REQUIRED. */
+  input: { heightCm?: string; dateOfBirth: string; activityLevel?: string; gender?: string | null },
 ): Promise<ContactWriteResult> {
-  const rawHeight = input.heightCm.trim();
+  const rawHeight = (input.heightCm ?? '').trim();
   let heightCm: number | null = null;
   if (rawHeight) {
     const n = Number(rawHeight);
@@ -135,7 +137,12 @@ export async function savePhysical(
   const activityLevel = input.activityLevel || null;
 
   try {
-    await patchClient(clientId, { heightCm, dateOfBirth, activityLevel }, version);
+    await patchClient(clientId, {
+      ...(input.heightCm !== undefined ? { heightCm } : {}),
+      dateOfBirth,
+      ...(input.activityLevel !== undefined ? { activityLevel } : {}),
+      ...(input.gender !== undefined ? { gender: input.gender } : {}),
+    }, version);
     refresh(clientId);
     return { ok: true };
   } catch (error) {

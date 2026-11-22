@@ -31,6 +31,7 @@ import { Tag } from '@/web-components/ui/Tag';
 import { TextField } from '@/web-components/ui/Field';
 import { CompareSelect } from './CompareSelect';
 import { ReadingBar, type Track } from './ReadingBar';
+import { DateField } from '@/web-components/ui/DateField';
 import { MeasurePanel } from './MeasurePanel';
 
 /**
@@ -339,7 +340,12 @@ export function Assessment({
           {error && <Message tone="err">{error}</Message>}
           {moving && (
             <div className="asmv__move">
-              <TextField type="date" label="New date" value={date} onChange={(e) => setDate(e.target.value)} />
+              {/* The server's window (19 Nov 2026): within 3 months of today either way. */}
+              <div className="fld">
+                <label className="fld__l" htmlFor="asmv-move">New date</label>
+                <DateField id="asmv-move" label="New date" value={date} min={monthsFromToday(-3)} max={monthsFromToday(3)}
+                  onChange={setDate} />
+              </div>
               <Button variant="primary" disabled={busy || !date} onClick={reschedule}>
                 Save date
               </Button>
@@ -799,4 +805,11 @@ function NotBack({ data }: { data: AssessmentDetailWire }) {
       )}
     </div>
   );
+}
+
+/** Today moved by `months`, as YYYY-MM-DD on this device's calendar. */
+function monthsFromToday(months: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() + months);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }

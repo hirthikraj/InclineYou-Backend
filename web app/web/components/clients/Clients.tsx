@@ -1,5 +1,6 @@
 'use client';
 
+import { GENDERS } from '@/lib/clients/gender';
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -22,6 +23,7 @@ import {
   FOCUS_LABEL,
   type ClientTag,
   type Filters,
+  type GenderFilter,
   type Focus,
   type Roster,
   type RosterRow,
@@ -69,6 +71,7 @@ import { Chip } from '@/web-components/ui/Chip';
 import { Avatar } from '@/web-components/ui/Avatar';
 import { PackGauge } from '@/web-components/ui/PackGauge';
 import { Table, Row, type Column } from '@/web-components/ui/Table';
+import { DateField } from '@/web-components/ui/DateField';
 
 /* ────────────────────────────────────────────────────── inline-only icons ── */
 
@@ -250,6 +253,14 @@ const FILTER_MONEY: { value: 'owes' | 'paid' | 'ending'; label: string }[] = [
   { value: 'paid', label: 'Paid up' },
   { value: 'ending', label: 'Pack ending' },
 ];
+/* Gender (V43): the four stated answers in the add flow's own order and words, then the clients who have not given
+   one — the chip a trainer uses to find whose record still needs it. */
+const FILTER_GENDER: { value: GenderFilter; label: string }[] = [
+  ...GENDERS,
+  { value: 'unset', label: 'Not given' },
+];
+const genderFilterLabel = (v: GenderFilter) => FILTER_GENDER.find(g => g.value === v)?.label ?? v;
+
 const FILTER_BATCH: { value: 'morning' | 'evening' | 'night' | 'none'; label: string }[] = [
   { value: 'morning', label: 'Morning' },
   { value: 'evening', label: 'Evening' },
@@ -329,6 +340,13 @@ function FilterPanel({
     }));
   }
 
+  function toggleGender(v: GenderFilter) {
+    setDraft(d => ({
+      ...d,
+      gender: d.gender.includes(v) ? d.gender.filter(x => x !== v) : [...d.gender, v],
+    }));
+  }
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.preventDefault(); dismiss(); }
@@ -381,7 +399,7 @@ function FilterPanel({
 
         <div className="panel__body">
           <p className="small" style={{ marginTop: 0 }}>
-            Three axes. Each chip shows the count it would produce on its own.
+            Within a group a client needs any chip you pick; across groups, every group.
           </p>
 
           {/* PHONE ONLY, and the class is what says so — the desk's own sort
@@ -472,6 +490,27 @@ function FilterPanel({
                   } : undefined}
                 >
                   {b.label}
+                </Chip>
+              );
+            })}
+          </div>
+
+          <p className="micro" style={{ margin: '16px 0 8px' }}>Gender</p>
+          <div className="wk">
+            {FILTER_GENDER.map(g => {
+              const on = draft.gender.includes(g.value);
+              return (
+                <Chip
+                  pressed={on}
+                  key={g.value}
+                  onClick={() => toggleGender(g.value)}
+                  style={on ? {
+                    background: 'var(--tx-accent-soft)',
+                    borderColor: 'var(--tx-accent-line)',
+                    color: 'var(--tx-accent-text)',
+                  } : undefined}
+                >
+                  {g.label}
                 </Chip>
               );
             })}
@@ -764,6 +803,8 @@ function RowMenu({
       items[to]?.focus();
     };
     const onDown = (e: PointerEvent) => {
+      /* A press inside a portalled popup (the `DateField` calendar, `data-popup`) belongs to a field in this menu. */
+      if ((e.target as Element).closest?.('[data-popup]')) return;
       if (!wrap.current?.contains(e.target as Node)) onClose();
     };
     document.addEventListener('keydown', onKey);
@@ -820,7 +861,7 @@ function RowMenu({
         </p>
         <label className="menu__note">
           Back on{' '}
-          <input type="date" value={backOn} onChange={(e) => setBackOn(e.target.value)} disabled={pending} />
+          <DateField label="Back on" value={backOn} onChange={setBackOn} disabled={pending} />
         </label>
         <button
           className="menu__i"
@@ -1635,6 +1676,10 @@ export function Clients({
     ...filters.batch.map(v => ({
       label: v === 'morning' ? 'Morning' : v === 'evening' ? 'Evening' : v === 'night' ? 'Night' : 'No batch',
       remove: () => setFilters(f => ({ ...f, batch: f.batch.filter(x => x !== v) })),
+    })),
+    ...filters.gender.map(v => ({
+      label: genderFilterLabel(v),
+      remove: () => setFilters(f => ({ ...f, gender: f.gender.filter(x => x !== v) })),
     })),
     /* The strip's own selection appears here too, and that is not a duplicate
        control. The pressed tile is 90px above and easy to miss once the table

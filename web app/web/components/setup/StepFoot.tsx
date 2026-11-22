@@ -117,15 +117,18 @@ export function StepFoot({
         </Button>
       ) : null}
       {onSkipHome ? (
+        /* RENAMED 22 Nov 2026 with the button beside it: *Skip to home* and *Skip for now* sat in one footer and read
+           as two spellings of one thing. This one leaves the flow for the app — so it says it FINISHES, later. */
         <Button variant="ghost" disabled={pending} onClick={onSkipHome}>
-          Skip to home
+          Finish later
         </Button>
       ) : null}
       {extra}
       <span className="sp" />
       {onSkip ? (
+        /* …and this one moves past THIS question to the next. */
         <Button variant="ghost" disabled={pending} onClick={onSkip}>
-          Skip for now
+          Skip this step
         </Button>
       ) : null}
       <Button

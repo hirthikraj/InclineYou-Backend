@@ -152,6 +152,15 @@ export const ENTRIES: Entry[] = [
   { id: 'c-datefield', name: 'Date field', group: 'FORMS', page: 'forms', badge: 'NEW', impl: 'component',
     desc: 'A date you can type in three segments, and a calendar that gets to 1990 in two taps — a popover on a desk, a bottom sheet on a phone.', cls: 'dfld' },
   { id: 'c-search', name: 'Search field', group: 'FORMS', page: 'forms', badge: null, impl: 'component', desc: '' },
+  /* REGISTERED THE DAY IT WAS WRITTEN (21 Nov 2026), for the workout console on a phone —
+     the screen the product exists for. Checked first: `c-field` with `inputMode="decimal"`
+     still raises the OS keyboard over half the screen and the row being typed into, and
+     `c-scale` is a choice from a closed range. Strong and Hevy each draw their own pad for
+     this, and so does this: big keys, the steps a trainer actually makes as chips, and the
+     screen's verb on the pad itself. */
+  { id: 'c-numpad', name: 'Number pad', group: 'FORMS', page: 'forms', badge: 'NEW', impl: 'component',
+    added: '2026-11-21', cls: 'npad',
+    desc: 'Numbers typed with a thumb instead of the phone’s keyboard: several fields on one pad, one-tap steps as chips, and the screen’s own verb under the keys.' },
   { id: 'c-formgroup', name: 'Form group', group: 'FORMS', page: 'forms', badge: null, impl: 'component', desc: '' },
   /* THE TWO CONTROLS A QUESTION IS ANSWERED WITH, and neither has an anchor in
      `webapp-components.html` — the same road `c-markupfield` above came down.
@@ -238,6 +247,16 @@ export const ENTRIES: Entry[] = [
     desc: 'A band above a surface that still draws, saying what is true of it — a mode the reader can leave, or a standing condition.' , cls: 'ntc' },
   { id: 'c-table', name: 'Data table', group: 'DATA', page: 'data', badge: null, impl: 'component', desc: '' , cls: 'tbl' },
   { id: 'c-listrow', name: 'List row', group: 'DATA', page: 'data', badge: null, impl: 'component', desc: '' , cls: 'lrow' },
+  /* REGISTERED THE DAY IT WAS WRITTEN (21 Nov 2026), for the client's Pay with UPI on a desk, where
+     there is no UPI app for the link to open and the phone's camera is the way across. The encoder is
+     `qrcode-generator` (MIT, no dependencies, pinned): a code that does not scan is worse than none
+     on a payment screen, and nothing in this tree could prove a hand-written encoder. */
+  { id: 'c-clamptext', name: 'Clamp text', group: 'DATA', page: 'data', badge: 'NEW', impl: 'component',
+    added: '2026-11-22', cls: 'clmp',
+    desc: 'One line of a longer text that opens to all of it, only when something is hidden. One paragraph whose box height animates; the type never changes.' },
+  { id: 'c-qrcode', name: 'QR code', group: 'DATA', page: 'data', badge: 'NEW', impl: 'component',
+    added: '2026-11-21', cls: 'qr',
+    desc: 'A link a phone can take from a screen: an SVG drawn from the module grid, black on white in both themes so every scanner reads it.' },
   { id: 'c-orderrow', name: 'Order row', group: 'DATA', page: 'data', badge: 'NEW', impl: 'component',
     added: '2026-09-19', cls: 'orow',
     desc: 'A row in a list somebody arranged: a grip, the position it is in, the row, and its verbs. The position is a label and never a control.' },
@@ -410,6 +429,17 @@ export const ENTRIES: Entry[] = [
   { id: 'c-dock', name: 'Docked panel', group: 'CONTAINERS', page: 'containers', badge: 'NEW', impl: 'component',
     desc: 'A third grid track, not an overlay. It pushes the plane instead of covering the rows the numbers in it are set against.' },
   { id: 'c-modal', name: 'Modal', group: 'CONTAINERS', page: 'containers', badge: null, impl: 'component', desc: '' },
+  /* REGISTERED THE DAY IT WAS WRITTEN (21 Nov 2026), for the assessment template
+     editor on a phone. Checked against what existed first: `c-modal` is a box over
+     a page with a pinned foot and its own scroller, which on a 390px screen spent
+     ~40% of the glass on chrome and scrolled inside a page that also scrolls;
+     `c-dock` is a desk grid track; the program builder's `.pgsheet` is a bottom
+     sheet for ONE list. A multi-part form on a phone wants a whole screen with the
+     way back and one verb in its header, and drill-in screens behind rows — a
+     different promise, so a different component. */
+  { id: 'c-screensheet', name: 'Screen sheet', group: 'CONTAINERS', page: 'containers', badge: 'NEW', impl: 'component',
+    added: '2026-11-21', cls: 'scrsh',
+    desc: 'A whole phone screen of a task: back, a title and one verb in the header, the body the only scroller, and drill-in screens that enter from the side you moved to.' },
   { id: 'c-empty', name: 'Empty state', group: 'CONTAINERS', page: 'containers', badge: null, impl: 'component', desc: '' },
   /* ── THREE ENTRIES FROM THE 19 SEP 2026 ASSESSMENTS PASS ──────────────────
      Same standing as the four above: no anchor in `webapp-components.html`,

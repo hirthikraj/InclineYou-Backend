@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useTransition } from 'react';
+import { useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { scheduleAssessment, startCycle } from '@/lib/assessments/actions';
@@ -64,6 +64,17 @@ export function ScheduleSheet({
   const [send, setSend] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, start] = useTransition();
+  /* One id per thing this sheet would make (19 Nov 2026): a retry after a lost answer sends it again and the server
+     answers the one it already made. A different client, form, date or cadence is a different thing, so a new id. */
+  const ids = useRef(new Map<string, string>());
+  const idFor = (key: string) => {
+    let id = ids.current.get(key);
+    if (!id) {
+      id = crypto.randomUUID();
+      ids.current.set(key, id);
+    }
+    return id;
+  };
 
   const picked = clients.find((c) => c.id === clientId) ?? null;
   const onPortal = presetClient
@@ -84,8 +95,12 @@ export function ScheduleSheet({
     start(async () => {
       const result =
         days > 0 && !takeNow
-          ? await startCycle({ clientId, templateId, intervalDays: days, firstDueOn: date, ...(onPortal ? { sendToClient: send } : {}) })
+          ? await startCycle({
+              id: idFor(`cycle|${clientId}|${templateId}|${days}|${date}`),
+              clientId, templateId, intervalDays: days, firstDueOn: date, ...(onPortal ? { sendToClient: send } : {}),
+            })
           : await scheduleAssessment({
+              id: idFor(`once|${clientId}|${templateId}|${takeNow ? 'now' : date}`),
               clientId,
               templateId,
               dueOn: takeNow ? undefined : date,
@@ -186,6 +201,9 @@ export function ScheduleSheet({
                 label={days > 0 ? 'First due on' : 'Due on'}
                 block
                 value={date}
+                /* The server's window (19 Nov 2026): within 3 months of today either way. */
+                min={shiftMonths(-3)}
+                max={shiftMonths(3)}
                 describedBy="asm-due-h"
                 onChange={(v) => setDate(v)}
               />
@@ -206,6 +224,15 @@ export function ScheduleSheet({
  *  a product whose first verb is *take it now*: the trainer who wants today had to change it. */
 function defaultDate(): string {
   const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/** Today moved by `months`, as YYYY-MM-DD on this device's calendar. */
+function shiftMonths(months: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() + months);
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${m}-${day}`;

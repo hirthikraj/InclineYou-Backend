@@ -48,7 +48,9 @@ export function WorkoutPreview({ preview, trainerFirstName }: { preview: Preview
               {pending ? 'Opening…' : preview.inProgress ? 'Resume workout' : 'Start workout'}
             </Button>
           ) : (
-            <Message tone="warn" className="mt3">
+            /* NEUTRAL, not amber (22 Nov 2026): a booked day is good news — the trainer runs it — and the warning tone
+               made the most reassuring line on the screen read as a problem. */
+            <Message className="mt3">
               {trainerFirstName} has this day booked, so they’ll log it with you — there’s nothing for you to start. You can still read what’s planned.
             </Message>
           )}

@@ -1014,7 +1014,9 @@ function Row({
         {/* No snooze on an assessment row (R31): the attention_dismissal_band
             constraint has no room for it, and "not now" would really mean
             "change the date". The cell stays so the verbs down the list align. */}
-        {item.kind !== 'assess' && (
+        {/* Nor on a setup row (22 Nov 2026): it is the soft block, and it goes
+            away when the step is done, never because it was waved off. */}
+        {item.kind !== 'assess' && item.kind !== 'setup' && (
           <button
             className="q__x-b"
             type="button"

@@ -37,6 +37,11 @@ export function InviteStart({
   const router = useRouter();
   const [dob, setDob] = useState('');
   const [agreed, setAgreed] = useState(false);
+  // Unticked: WhatsApp reminders are the client's own choice, never assumed from the trainer's switch (21 Nov 2026).
+  const [reminders, setReminders] = useState(false);
+  /* Consent to TRAIN (22 Nov 2026, V42): required, beside the privacy notice. Until a client accepts, their trainer
+     may run two sessions and record no health details — this tick is what lifts that. */
+  const [fit, setFit] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [asking, setAsking] = useState(false);
@@ -45,14 +50,14 @@ export function InviteStart({
   const today = new Date();
   const eighteen = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
   const openAt = `${eighteen.getFullYear()}-${String(eighteen.getMonth() + 1).padStart(2, '0')}-${String(eighteen.getDate()).padStart(2, '0')}`;
-  const ready = dob !== '' && agreed && !pending;
+  const ready = dob !== '' && agreed && fit && !pending;
 
   function send() {
     if (!ready) return;
     setError(null);
     start(async () => {
       if (signedInId) {
-        const joined = await acceptMyInvite(signedInId, dob, policyVersion);
+        const joined = await acceptMyInvite(signedInId, dob, policyVersion, reminders);
         if (joined.ok) {
           router.push(joined.next);
           return;
@@ -62,7 +67,7 @@ export function InviteStart({
         if (joined.kind === 'unavailable') router.refresh();
         return;
       }
-      const result = await sendInviteCode(token, dob, policyVersion);
+      const result = await sendInviteCode(token, dob, policyVersion, reminders);
       if (result.ok) {
         router.push(`/invite/${encodeURIComponent(token)}/verify`);
         return;
@@ -119,6 +124,31 @@ export function InviteStart({
         label={
           <>
             I’ve read what {trainerFirstName} can see, and I agree to the privacy notice (version {policyVersion}).
+          </>
+        }
+      />
+
+      <Checkbox
+        className="inv-agree"
+        align="start"
+        checked={fit}
+        onChange={(e) => setFit(e.target.checked)}
+        label={
+          <>
+            I’m fit to take part in exercise, I’ll tell {trainerFirstName} about any injury or health condition before we
+            train, and I accept {trainerFirstName}’s coaching terms.
+          </>
+        }
+      />
+
+      <Checkbox
+        className="inv-agree"
+        align="start"
+        checked={reminders}
+        onChange={(e) => setReminders(e.target.checked)}
+        label={
+          <>
+            Send me a WhatsApp reminder before each session, if {trainerFirstName} turns reminders on. (Optional.)
           </>
         }
       />

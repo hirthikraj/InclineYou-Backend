@@ -12,7 +12,6 @@ import type { SetupState } from '@/lib/setup/steps';
 import { StepHead } from './SetupShell';
 import { StepFoot, skipHomeAction } from './StepFoot';
 import { useStepAction } from './useStepAction';
-import { Card } from '@/web-components/ui/Card';
 
 /**
  * Frame 5c · `/setup/hours` — step 6, the week the diary reads.
@@ -21,9 +20,11 @@ import { Card } from '@/web-components/ui/Card';
  * times are picked FROM these windows, so a trainer who reached "add a client"
  * with no hours on file would be choosing out of a default they never saw.
  *
- * **Skipping is not a hole.** A default week is seeded when the flow finishes,
- * and that seed stands down the moment any window exists — so answering here
- * replaces it rather than fighting it.
+ * **Skipping is not a hole.** A default week (`DEFAULT_DAYS` × `DEFAULT_WINDOWS`)
+ * is written by `seedDefaultWorkingHours` in `finishSetup` when the flow ends with
+ * no hours on file, and it stands down the moment any window exists — so
+ * answering here replaces it rather than fighting it. (Promised since the first
+ * draft; built 22 Nov 2026.)
  *
  * The control itself is `WeekPicker`, shared with the *Work & hours* tab of
  * `/settings/profile` — the fifth of the flow's controls to be extracted rather
@@ -59,7 +60,7 @@ export function HoursForm({ stored, state }: { stored: StoredHour[]; state: Setu
     <>
       <StepHead
         title="When do you work?"
-        sub="Clients’ sessions are booked out of these windows, so the diary needs them before you add anybody."
+        sub="Clients book their sessions inside these hours, so set them before you add anyone."
       />
 
       <WeekPicker value={week} disabled={pending} onChange={setWeek} />
@@ -80,38 +81,15 @@ export function HoursForm({ stored, state }: { stored: StoredHour[]; state: Setu
         </p>
       ) : null}
 
-      {/* `.card__hd` + `.card__t`, like the packs panel and the completion
-          meter. This used to hand-roll its title as a `<p>` with §17's `.h5`
-          values (13px / 700 / ink) copied inline — three cards in one flow, and
-          three different ways of putting a heading on one. */}
-      {/* No `maxWidth`. It was 620 — `--stp-measure`'s old value, copied here
-          as a literal, which meant this one card stayed 620 when the flow's
-          column went to 660 and read as a panel indented from everything above
-          it. The column caps it now, the way it caps the rest of the step. */}
-      <Card title="If you skip this" style={{ marginTop: 22 }}>
-        <p className="small">
-          A default week is seeded when the flow finishes, so the diary is never empty. The seed
-          stands down the moment any window exists — so answering here replaces it rather than
-          fighting it, and skipping is not a hole.
-        </p>
-      </Card>
-
-      {/* The trust line ABOVE the message slot, which is the order every other
-          step uses and the one the slot's own job asks for: `.msg` is where a
-          refused save appears, it keeps its 38px whether or not it holds
-          anything, and it belongs directly over the dock that caused it. Below
-          the trust line it was instead a permanent 38px hole between the card
-          and the promise, with the message — when there was one — stranded two
-          blocks away from Continue.
-
-          No `maxWidth:'66ch'` either: 66ch is a tenth measure on a flow that
-          has one, and `.stp__r`'s column already caps it lower. */}
-      <div className="trust">
+      {/* ONE LINE, NOT TWO BOXES (22 Nov 2026). *If you skip this* and the trust box said overlapping things in our own
+          words ("the seed stands down", "skipping is not a hole", "the diary") and the second was half under the footer.
+          What a trainer needs: what these hours do, that they are not a cage, and what Skip leaves them with — which is
+          now true, because `finishSetup` writes the default week when no hours exist. */}
+      <div className="trust stp__hrsnote">
         <IconClock size={15} />
         <span>
-          <b>These constrain what clients can book, never you.</b> One set of windows, applied to
-          every day you pick — day-by-day differences are real but rare on day one, and the full
-          per-day editor is one click from the diary.
+          <b>Clients can only book inside these hours — you can still book any time.</b> Skip this step and we’ll use
+          Mon–Sat, 6–11 AM and 5–9 PM. Change it any time in Settings.
         </span>
       </div>
 

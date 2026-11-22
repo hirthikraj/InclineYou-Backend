@@ -240,6 +240,32 @@ function cardRows(log: LogWire): ExerciseWire[] {
     .sort((a, b) => a.position - b.position);
 }
 
+/* ── THE SAME MOVEMENT TWICE IN ONE SESSION (21 Nov 2026) ───────────────────────
+   The old model (`buildLog`) keys a card, and today's sets, by the LIBRARY exercise
+   id — fine until a session holds a movement twice (a plank mid-session, another
+   added at the end). Then the two cards shared one key: both got the second row's
+   id, both were handed both rows' sets (colliding on set number), and the console's
+   chip rail warned of a duplicate React key. The fix is at the old model's door:
+   the FIRST card of a movement keeps the plain id (so its history, its "last time"
+   and every link are untouched), and each later card of the same movement is keyed
+   `<exerciseId>~<position>` — `position` is unique within a session. `libraryIdOf`
+   turns a key back into the movement wherever the movement is what is meant. */
+export const CARD_SEP = '~';
+
+export function cardKeyOf(
+  e: { exerciseId: string; position: number },
+  all: readonly { exerciseId: string; position: number }[],
+): string {
+  const earlier = all.some((o) => o.exerciseId === e.exerciseId && o.position < e.position);
+  return earlier ? `${e.exerciseId}${CARD_SEP}${e.position}` : e.exerciseId;
+}
+
+/** The movement a card key names: `abc~6` → `abc`; a plain id is returned as it is. */
+export function libraryIdOf(key: string): string {
+  const at = key.indexOf(CARD_SEP);
+  return at === -1 ? key : key.slice(0, at);
+}
+
 export function logInputFromWire(log: LogWire, history: HistoryParts, ctx: ViewContext): LogInput {
   const s = log.session;
   const today: LogWorkout = {
@@ -252,13 +278,13 @@ export function logInputFromWire(log: LogWire, history: HistoryParts, ctx: ViewC
     endedAt: s.endedAt,
   };
   const rows = cardRows(log);
-  const todaySets = rows.flatMap((e) => setsOnly(e.sets, e.exerciseId, s.id));
+  const todaySets = rows.flatMap((e) => setsOnly(e.sets, cardKeyOf(e, log.exercises), s.id));
   const logExercises: LogExerciseRow[] = rows.map((e) => {
     const planned = e.sets.filter((x) => x.planned);
     const firstTarget = planned.find((x) => x.target !== null)?.target ?? null;
     const maxPosition = e.sets.reduce((m, x) => Math.max(m, x.position), 0);
     return {
-      exerciseId: e.exerciseId,
+      exerciseId: cardKeyOf(e, log.exercises),
       orderIndex: e.position,
       source: e.source === 'added' ? 'unplanned' : 'plan',
       // Every slot on the grid, planned or extra: the old model sizes the grid from this.
@@ -271,8 +297,9 @@ export function logInputFromWire(log: LogWire, history: HistoryParts, ctx: ViewC
   const names = new Map<string, LogExercise>(history.exercises.map((e) => [e.id, e] as const));
   for (const e of log.exercises) {
     const known = names.get(e.exerciseId);
-    names.set(e.exerciseId, {
-      id: e.exerciseId,
+    const key = cardKeyOf(e, log.exercises);
+    names.set(key, {
+      id: key,
       name: e.name,
       equipment: e.equipment,
       isCustom: known?.isCustom ?? false,
@@ -363,7 +390,8 @@ export function buildConsoleView(log: LogWire, history: HistoryParts, ctx: ViewC
   const input = logInputFromWire(log, history, ctx);
   const view = buildLog(input, log.session.id, ctx.now);
   if (!view) return null;
-  const byExercise = new Map(log.exercises.map((e) => [e.exerciseId, e] as const));
+  // By CARD key, so a movement on the card twice pairs each card with its own row (see `cardKeyOf`).
+  const byExercise = new Map(log.exercises.map((e) => [cardKeyOf(e, log.exercises), e] as const));
   /* Frame 1a's heading reads `<plan> · Week n`. The old model computed n from the
      program's start date; the new read says which week of the plan THIS session is
      (`workout.week`), which is the same fact without the arithmetic. */
@@ -413,7 +441,7 @@ const doneSets = (e: ExerciseWire | undefined) => (e?.sets ?? []).filter((x) => 
  * Nothing but text changes: the verdict, the counts and the volume are the old model's.
  */
 function sayByKind(view: LogExerciseViewX, wire: ExerciseWire | undefined, items: HistoryItemWire[]): LogExerciseViewX {
-  const last = lastSessionOf(items, view.exerciseId);
+  const last = lastSessionOf(items, libraryIdOf(view.exerciseId));
   const lastExotic = last !== null && hasExotic(last.sets);
   const today = doneSets(wire);
   const todayExotic = hasExotic(today);

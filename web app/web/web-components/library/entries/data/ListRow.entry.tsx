@@ -103,6 +103,7 @@ export function ListRowEntry() {
             { property: 'Title', value: '13.5px / 600' },
             { property: 'Sub', value: '12px', token: '--tx-ink-3', note: 'Where and what' },
             { property: 'Number', value: <code>.lrow__n</code>, note: 'Tabular, right-ranged' },
+            { property: 'Chevron', value: <code>chevron</code>, token: '--tx-ink-3', note: 'A list of destinations (the portal’s account menu), where nothing else on the row says it goes somewhere. Not for a list of records. aria-hidden.' },
             { property: 'Element', value: <code>&lt;a&gt;</code>, note: 'Selection is a URL change' },
             { property: 'Container', value: <code>role=&quot;listbox&quot;</code>, note: 'Without it aria-selected does nothing' },
           ]}

@@ -10,6 +10,7 @@ import { rupees, rupeesShort } from '@/lib/today/time';
 import { Chevron } from '@/components/shell/Icons';
 import { Card } from '@/web-components/ui/Card';
 import { Tag } from '@/web-components/ui/Tag';
+import { freeTag } from '@/lib/schedule/billing';
 import { Avatar } from '@/web-components/ui/Avatar';
 import { Slab } from '@/web-components/ui/Slab';
 import { Figures, Figure } from '@/web-components/ui/Figures';
@@ -499,7 +500,14 @@ function SessionRow({
       /* The mode tag, on a row that has not happened yet. `AgendaRow` swaps the
          tick in for a delivered one: there is one slot at the end of the row and
          "delivered" outranks "in person" in it. */
-      trailing={<Tag tone={session.mode}>{MODE_LABELS[session.mode]}</Tag>}
+      trailing={
+        <>
+          {/* Trial / Free first — the one fact about this row that changes what
+              the trainer does in it (22 Nov 2026). */}
+          {session.billing && freeTag(session.billing) && <Tag tone="acc">{freeTag(session.billing)}</Tag>}
+          <Tag tone={session.mode}>{MODE_LABELS[session.mode]}</Tag>
+        </>
+      }
       /* The second hero card draws this same session above 1080px, so the row
          hides itself there rather than showing the client twice inside 400px.
          The class is still `.srow--h2` because the rule that reads it is the

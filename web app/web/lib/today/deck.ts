@@ -41,6 +41,8 @@
    of "never twice in seven days" — the phone's `app/src/nudges/rules.ts`, the
    backend's `NudgeService`, `lib/nudges/cooldown.ts` — and a fifth living inside
    the ranking would be the one that silently disagrees. */
+import { packCountsForSetup, setupFor, setupLine, SETUP_COPY } from '@/lib/clients/setup';
+import { asBilling, type Billing } from '@/lib/schedule/billing';
 import { COOLDOWN_DAYS } from '@/lib/nudges/cooldown';
 
 import { readMode, type DeliveryMode } from './mode';
@@ -278,7 +280,20 @@ export const ATTENTION_BANDS = [
   /* ── 4 · gone quiet — no workout logged in QUIET_DAYS. ─────────────────── */
   'quiet',
 
-  /* ── 5 · training, and no plan to train to. ────────────────────────────── */
+  /* ── 5 · a pack sold and the client not set up (22 Nov 2026). ─────────── */
+  /*
+   * Days a week, a plan, a session booked — `lib/clients/setup.ts` is the rule
+   * and the client file's checklist reads the same one. ONE row per client,
+   * naming the next missing step, never three. Above `no-program` because it
+   * replaces it for anybody with a live pack, and a paid pack with nothing booked
+   * is the more urgent of the two. Housekeeping, not risk: not in `RISK_BANDS`.
+   * Like `assessment-due` it cannot be snoozed — the product owner's soft block
+   * is a row that goes away only when the step is done — and the
+   * `attention_dismissal_band` check constraint has no room for it either.
+   */
+  'setup',
+
+  /* ── 5a · training, and no plan to train to. ───────────────────────────── */
   'no-program',
 
   /* ── 5b · an assessment the trainer owes a tape for. ───────────────────── */
@@ -339,6 +354,7 @@ export const DECK_BANDS: AttentionBand[] = [
   'due-soon',
   'missed',
   'quiet',
+  'setup',
   'no-program',
   'assessment-due',
   'unmarked',
@@ -646,6 +662,12 @@ export interface DeckClient {
    * would cut off a streak older than the window.
    */
   missedStreak?: number;
+  /** `schedule.sessionsPerWeek` — days a week, the setup row's first step. */
+  sessionsPerWeek?: number | null;
+  /** `stats.nextSessionAt` — anything booked ahead at any distance (the setup row's third step). */
+  nextSessionAt?: number | null;
+  /** `membershipStatus` — accepted (or paused) is consent, the setup row's first step (22 Nov 2026). */
+  membershipStatus?: string | null;
 }
 export interface DeckScheduled {
   id: string;
@@ -661,6 +683,8 @@ export interface DeckScheduled {
   notes?: string | null;
   /** v1 · `workout.week` — the plan week this session's workout sits in. */
   week?: number;
+  /** V32 — `pack` · `trial` · `complimentary` · `single`; absent reads as `pack`. */
+  billing?: string | null;
 }
 export interface DeckWorkout {
   id: string;
@@ -703,6 +727,8 @@ export interface DeckPackage {
   clientId: string;
   sessionsTotal?: number | null;
   sessionsRemaining?: number | null;
+  /** `sessions` or `period` — a period pack has no count and is never empty by count. */
+  basis?: string;
   amount?: number;
   status: string;
   /** Last decrement — which is the moment a pack became worth renewing. */
@@ -896,6 +922,8 @@ export interface DeckSession {
    * before they start it.
    */
   hasNote: boolean;
+  /** V32 — how it is paid for. Today draws a Trial / Free tag from it (22 Nov 2026). */
+  billing?: Billing;
 }
 
 export type AttentionKind =
@@ -905,6 +933,7 @@ export type AttentionKind =
   | 'log'
   | 'missed'
   | 'no-program'
+  | 'setup'
   | 'unmarked'
   | 'milestone'
   | 'assess';
@@ -995,6 +1024,8 @@ export interface RunningSession {
   durationMinutes: number;
   mode: DeliveryMode;
   detail: string;
+  /** V32 — carried from the session, for the Trial / Free chip. */
+  billing?: Billing;
   setsLogged: number;
   volumeKg: number;
   lastSetAt?: number;
@@ -1277,6 +1308,7 @@ function toDeckSession(
     time,
     meridiem,
     detail: sessionDetail(session, program, at),
+    billing: asBilling(session.billing),
     mode: readMode({
       session: session.deliveryMode,
       client: client?.deliveryMode,
@@ -1614,9 +1646,60 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
   for (const p of input.programs) if (!DEAD_PROGRAM.has(lower(p.status))) planned.add(p.clientId);
   const packed = new Set<string>();
   for (const pkg of input.packages) if (!DEAD_PACKAGE.has(lower(pkg.status))) packed.add(pkg.clientId);
+  /* A pack that counts for setup: live, not a single session's sale, not empty. */
+  const setupPacked = new Set<string>();
+  for (const pkg of input.packages) {
+    if (packCountsForSetup({ status: pkg.status, sessionId: pkg.single ? 'single' : null, basis: pkg.basis, sessionsRemaining: pkg.sessionsRemaining ?? null })) {
+      setupPacked.add(pkg.clientId);
+    }
+  }
+
+  /* --- a pack sold, and the client not set up (22 Nov 2026) ---
+   *
+   * One row naming the NEXT step — days a week, then a plan, then a booking —
+   * and it replaces `no-program` for these clients, so nobody gets two rows
+   * for one unfinished setup. The verb navigates: setting a week, choosing a
+   * plan and booking a time are each a form, not a one-click commit. */
+  const settingUp = new Set<string>();
+  for (const client of input.clients) {
+    const view = setupFor({
+      status: client.status,
+      sessionsPerWeek: client.sessionsPerWeek ?? null,
+      hasPlan: planned.has(client.id),
+      nextSessionAt: client.nextSessionAt ?? null,
+      packLive: setupPacked.has(client.id),
+      membership: client.membershipStatus ?? null,
+    });
+    /* Prospects too, since consent (22 Nov 2026) — but only for the consent step: a prospect's demo steps are
+       the file's checklist and the diary's, not a queue row. */
+    if (!view || !view.next || (view.kind === 'prospect' && view.next.key !== 'consent')) continue;
+    settingUp.add(client.id);
+    const next = view.next.key;
+    items.push({
+      key: `setup:${client.id}`,
+      kind: 'setup',
+      band: 'setup',
+      clientId: client.id,
+      clientName: client.name?.trim() || 'Client',
+      line: setupLine(next, client.sessionsPerWeek ?? null),
+      severity: attentionSeverity('setup'),
+      action: SETUP_COPY[next].verb,
+      href:
+        next === 'plan'
+          ? `/programs/templates?client=${client.id}`
+          : next === 'book'
+            ? `/schedule?new=1&client=${client.id}`
+            : `/clients/${client.id}`,
+      /* Days a week first, then the plan, then the booking: inside the band the
+         earlier the missing step, the higher the row. */
+      weight: attentionWeight('setup', next === 'consent' ? 4 : next === 'rhythm' ? 3 : next === 'plan' ? 2 : 1),
+      at: now,
+    });
+  }
 
   for (const client of input.clients) {
     if (lower(client.status) !== 'active') continue;
+    if (settingUp.has(client.id)) continue;
     if (planned.has(client.id)) continue;
     if (!packed.has(client.id) && !booked.has(client.id)) continue;
     // The soonest thing on their diary dates the row; failing that, today. It is
@@ -2009,6 +2092,7 @@ function buildRunning(
     durationMinutes: live.minutes,
     mode: live.mode,
     detail: live.detail,
+    billing: live.billing,
     setsLogged: summed ? sets.length : workout.setsDone ?? 0,
     volumeKg: Math.round(volume),
     lastSetAt,

@@ -349,12 +349,14 @@ export function SaveRow({
   }
 
   return (
-    <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+    /* A class, not an inline style (22 Nov 2026, AGENTS trap 2): the inline flex-wrap outranked every rule, so the pinned
+       bar could not become one row on a phone. `.svrow` in app.css. */
+    <div className="svrow">
       <Button variant="primary" size="lg" type="submit" disabled={pending}>
         {pending ? 'Saving…' : 'Save'}
       </Button>
       {!pending ? (
-        <span className="small">
+        <span className="small svrow__t">
           {unsaved ?? (
             <>
               <b style={{ color: 'var(--tx-warn)' }}>Unsaved changes.</b> Switching tab loses them.
@@ -384,10 +386,25 @@ export function SavePin({
   message: Message | null;
   unsaved?: React.ReactNode;
 }) {
-  if (!dirty && !pending && !message) return null;
+  /* AT REST AFTER A SAVE, IT STOPS FOLLOWING YOU (22 Nov 2026). Sticky is right while there is a Save to press; once the
+     write has landed the bar held only "Saved." — in a box still sized for the button, drifting over the content on every
+     scroll. So: sticky only while dirty or saving; a result on a clean form sits in the flow as one compact line; and a
+     success fades after a few seconds, while an error stays until the trainer acts on it. The hide is keyed on the
+     message object, so the next save's confirmation shows again (render-time reset, AGENTS trap 21). */
+  const [hiddenFor, setHiddenFor] = useState<Message | null>(null);
+  const resting = !dirty && !pending;
+  const success = message?.tone === 'ok';
+  useEffect(() => {
+    if (!resting || !success || !message) return;
+    const t = window.setTimeout(() => setHiddenFor(message), 4500);
+    return () => window.clearTimeout(t);
+  }, [resting, success, message]);
+
+  const shown = message && hiddenFor !== message ? message : null;
+  if (resting && !shown) return null;
   return (
-    <div className="pfx-pin">
-      {message ? <MessageSlot message={message} /> : null}
+    <div className={`pfx-pin${resting ? ' pfx-pin--done' : ''}`}>
+      {shown ? <MessageSlot message={shown} /> : null}
       {dirty || pending ? <SaveRow pending={pending} dirty={dirty} unsaved={unsaved} /> : null}
     </div>
   );

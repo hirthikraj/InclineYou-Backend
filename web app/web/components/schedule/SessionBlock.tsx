@@ -4,6 +4,7 @@ import { formatMinute, formatMinuteRange, dayLong } from '@/lib/today/time';
 import { laneStyle, type Placed } from '@/lib/schedule/grid';
 import { Check } from '@/components/shell/Icons';
 import { Cross, Remote, WarnTriangle } from './Icons';
+import { freeTag } from '@/lib/schedule/billing';
 
 /**
  * ONE SESSION. A `<button>`, and that is finding §01.5 of the design set.
@@ -136,6 +137,12 @@ export function SessionBlock({
   if (s.mode === 'remote') classes.push('ev--remote');
   if (s.done) classes.push('ev--done');
   if (s.noShow) classes.push('ev--noshow');
+  /* FREE ON PURPOSE (22 Nov 2026). A trial or complimentary session draws its
+     left edge DASHED — the edge is the state channel, and dashed keeps whatever
+     colour the state gives it — and says the word beside the name, because a
+     dashed line alone is a code the trainer would have to learn. */
+  const tag = freeTag(s.billing);
+  if (tag) classes.push('ev--free');
   // Three rings, three meanings, and they are ranked rather than mixed: danger is
   // a clash, warn is a session that has run without being marked. `live` never
   // fires on this screen — it is a fact about `workout_session`, which the
@@ -290,6 +297,7 @@ export function SessionBlock({
     s.clientName,
     s.detail,
     s.mode === 'remote' ? 'remote' : 'floor',
+    tag ? (s.billing === 'trial' ? 'trial, free' : 'complimentary, free') : null,
     state,
     clash ? `clashes with ${clashesWith.join(', ')}` : null,
     just ? 'just moved, undo available' : null,
@@ -329,7 +337,7 @@ export function SessionBlock({
        * narrow ones, because a tooltip that appears on some blocks and not
        * others is a tooltip a trainer has to discover twice.
        */
-      title={`${when} · ${s.clientName}${s.detail ? ` · ${s.detail}` : ''}`}
+      title={`${when} · ${s.clientName}${tag ? ` · ${tag}` : ''}${s.detail ? ` · ${s.detail}` : ''}`}
       style={{
         top: (top - segFrom) * scale,
         height: Math.max(1, (bottom - top) * scale),
@@ -344,7 +352,10 @@ export function SessionBlock({
           inside it is ever read out. */}
       <span className="ev__t ev__t--r">{when}</span>
       <span className="ev__t ev__t--s">{whenShort}</span>
-      <span className="ev__n">{s.clientName}</span>
+      <span className="ev__n">
+        {tag && <em className="ev__tag">{tag}</em>}
+        {s.clientName}
+      </span>
       <span className="ev__p">{s.detail}</span>
       {(modeGlyph || stateGlyph) && (
         <span className="ev__g">

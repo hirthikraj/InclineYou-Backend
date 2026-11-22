@@ -14,7 +14,7 @@ import { Textarea } from '@/web-components/ui/Textarea';
 
 import { RestTimer } from './RestTimer';
 import { Summary } from './Summary';
-import { clock, effortUnit, hasLoad, loadUnit, trim } from './units';
+import { clock, effortUnit, hasLoad, kg, loadUnit, trim } from './units';
 
 type Draft = { load: string; effort: string };
 type Rest = { sxId: string; endsAt: number; seconds: number; label: string | null };
@@ -143,7 +143,7 @@ export function Player({ log, trainerFirstName }: { log: LogWire; trainerFirstNa
   }
 
   return (
-    <div className="pwk">
+    <div className="portal col gap4">
       <Card className="pwk__hero pwk__bar">
         <Card.Body>
           <div className="pwk__barrow">
@@ -154,7 +154,7 @@ export function Player({ log, trainerFirstName }: { log: LogWire; trainerFirstNa
             <div className="pwk__tot">
               <b>{totals.setsDone}</b>
               <span> of {totals.setsPlanned} sets</span>
-              {totals.volumeKg > 0 && <span> · {trim(totals.volumeKg)} kg</span>}
+              {totals.volumeKg > 0 && <span> · {kg(totals.volumeKg)} kg</span>}
             </div>
             <Button variant="secondary" size="sm" onClick={togglePause}>
               {pause.since ? 'Resume' : 'Pause'}
@@ -226,7 +226,7 @@ export function Player({ log, trainerFirstName }: { log: LogWire; trainerFirstNa
               </div>
             </>
           )}
-          {totals.setsDone === 0 && <p className="pwk__s" style={{ marginTop: 10 }}>Log a set to finish. <Link href="/me/today">Back to today</Link> leaves it here for later.</p>}
+          {totals.setsDone === 0 && <p className="pwk__s mt3">Log a set to finish. <Link href="/me/today">Back to today</Link> leaves it here for later.</p>}
         </Card.Body>
       </Card>
     </div>

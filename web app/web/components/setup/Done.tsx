@@ -49,61 +49,50 @@ export function Done({ state }: { state: SetupState }) {
         Your first client is the next thing worth doing.
       </p>
 
-      <Card style={{ marginTop: 22, maxWidth: 520 }}>
-        {/* A real `.card__hd`. The title and the figure were a `.row` inside the
-            body, which put them on the body's ground with no rule under them —
-            one of three different card headings in this flow. */}
-        <Card.Head title="Your profile">
-          
-          <span
-            className="tnum"
-            style={{
-              marginLeft: 'auto',
-              fontSize: 19,
-              fontWeight: 600,
-              color: 'var(--tx-accent-text)',
-            }}
-          >
-            {percent}%
+      {/* ── ONE SCREEN, NOT ~950px (22 Nov 2026) ─────────────────────────────────────────────────────────────────
+          At 100% the card was a full meter plus four rows that all said *Done* — the white "Done" louder than the items
+          it described, and ticks that vanished on the lime boxes. Complete, it is one line. Incomplete, it is the meter
+          and ONLY what is left, each with what it adds; what is done folds into a count. */}
+      {percent >= 100 ? (
+        <div className="dnone">
+          <span className="dnone__tick" aria-hidden="true">
+            <IconCheck size={14} />
           </span>
-        </Card.Head>
-        <Card.Body>
-          <div className="meter meter--lg">
-            <i style={{ width: `${percent}%` }} />
-          </div>
-
-          <div style={{ marginTop: 14 }}>
-            {items.map((item) => (
-              <div key={item.key} className="kv">
-                {/* §07's `.check`, in its indicator form — see app.css. It was
-                    a hand-rolled box duplicating the class's radius, fill and
-                    knocked-out tick, plus a `verticalAlign:-3` nudge to sit it
-                    on the text baseline. `aria-hidden`, because the row's own
-                    Done / +10% already says the state in words. */}
-                <span className="kv__k" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span
-                    className="check check--static"
-                    data-done={item.done}
-                    aria-hidden="true"
-                  >
-                    <IconCheck size={11} />
-                  </span>
-                  {item.label}
-                </span>
-                <span className={`kv__v${item.done ? '' : ' ink3'}`}>
-                  {item.done ? 'Done' : `+${item.weight}%`}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <p className="small mt3" style={{ color: 'var(--tx-ink-3)' }}>
-            {METER_WHY}
+          <p>
+            <b>Profile complete.</b> Clients see your name, languages, certifications and UPI ID before they accept an
+            invite.
           </p>
-        </Card.Body>
-      </Card>
+        </div>
+      ) : (
+        <Card style={{ marginTop: 20, maxWidth: 520 }}>
+          <Card.Head title="Your profile">
+            <span className="tnum dnmeter__pct">{percent}%</span>
+          </Card.Head>
+          <Card.Body>
+            <div className="meter meter--lg">
+              <i style={{ width: `${percent}%` }} />
+            </div>
+            <p className="small ink3 mt2">
+              {items.filter((i) => i.done).length} of {items.length} done · {METER_WHY}
+            </p>
+            <div className="dnleft">
+              {items
+                .filter((item) => !item.done)
+                .map((item) => (
+                  <div key={item.key} className="kv">
+                    <span className="kv__k">{item.label}</span>
+                    <span className="kv__v ink3">+{item.weight}%</span>
+                  </div>
+                ))}
+            </div>
+            <p className="small mt2">
+              <Link href="/settings/profile">Finish in Settings → Your profile</Link>
+            </p>
+          </Card.Body>
+        </Card>
+      )}
 
-      <div className="actrow" style={{ marginTop: 20 }}>
+      <div className="actrow dnacts">
         <Button href="/clients/new" variant="primary" size="lg">
           <IconPlus size={15} />
           Add your first client
@@ -113,27 +102,11 @@ export function Done({ state }: { state: SetupState }) {
         </Button>
       </div>
 
-      {/* Two sentences, not five. The endowed-progress arithmetic and the
-          weighting rationale were addressed to a reviewer, not to a trainer who
-          has just finished eight questions and wants the next thing — and on a
-          phone they were the difference between this screen fitting and not.
-          They live in `lib/setup/meter.ts`, where the weights are. */}
-      <p className="small" style={{ marginTop: 18, maxWidth: '66ch' }}>
-        <b>No confetti.</b> Finishing a form is not an achievement — the celebration belongs to the
-        first booking and the first payment.
-        <br />
-        <br />
-        Whatever you skipped is not asked for again. It is picked up once, by this meter and then by
-        the same one on your deck.
-        <br />
-        <br />
-        {/* The bio and the intro video were never ASKED, which is a different
-            thing from skipped, so they are not on the meter and this is the only
-            place that says where they are. One sentence: the note above it is
-            capped at two on purpose, because on a phone these lines are the
-            difference between the screen fitting and not. */}
-        There are two more things a client can read about you — a short bio and an intro video — in{' '}
-        <Link href="/settings/profile">Settings → Your profile</Link>.
+      {/* One line (22 Nov 2026). *No confetti* and *picked up once, by this meter* were the design's reasoning,
+          addressed to a reviewer; the only fact a trainer needs here is the two profile parts setup never asks for. */}
+      <p className="small ink3 dnmore">
+        Add a short bio and an intro video any time in <Link href="/settings/profile">Settings → Your profile</Link> —
+        clients read both before they accept.
       </p>
     </>
   );

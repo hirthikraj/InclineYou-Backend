@@ -24,7 +24,13 @@ export type ConsoleResult =
   | { ok: false; kind: 'not_found' }
   | { ok: false; kind: 'unreachable' }
   | { ok: false; kind: 'refused'; status: number }
-  | { ok: false; kind: 'not_started'; start: NonNullable<Awaited<ReturnType<typeof getStartPreview>>> };
+  | {
+      ok: false;
+      kind: 'not_started';
+      start: NonNullable<Awaited<ReturnType<typeof getStartPreview>>>;
+      /** The server's instant, so the screen can tell a session it may start from one too far ahead. */
+      now: number;
+    };
 
 export async function requireConsole(sessionId: string): Promise<ConsoleResult> {
   if (!(await getToken())) redirect('/sign-in');
@@ -35,7 +41,7 @@ export async function requireConsole(sessionId: string): Promise<ConsoleResult> 
 
     if (log.session.startedAt === null) {
       const start = await getStartPreview(sessionId);
-      return start ? { ok: false, kind: 'not_started', start } : { ok: false, kind: 'not_found' };
+      return start ? { ok: false, kind: 'not_started', start, now: Date.now() } : { ok: false, kind: 'not_found' };
     }
 
     const data = await getConsoleData(sessionId);

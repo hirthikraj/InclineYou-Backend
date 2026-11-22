@@ -94,7 +94,7 @@ export function PrefsForm({ prefs: initial, trainerFirstName, vapidKey, after }:
   }
 
   return (
-    <div className="pl">
+    <div className="portal col gap4">
       <div aria-live="polite">{failure ? <Message tone="err">{failure}</Message> : null}</div>
 
       <Card>
@@ -111,10 +111,18 @@ export function PrefsForm({ prefs: initial, trainerFirstName, vapidKey, after }:
           {NOTICES.map((n) => (
             <SwitchRow key={n.key} checked={prefs.notify[n.key]} disabled={pending} title={n.title} example={n.example} onChange={(v) => change({ notify: { [n.key]: v } })} />
           ))}
-          <p className="pl__s" style={{ marginTop: 10 }}>About one notice a day at most. Turning a category off means it never appears, here or anywhere else.</p>
+          <p className="small ink3 mt3">
+            About one notice a day at most. Turning a category off means it never appears, here or anywhere else.
+            {/* With no channel sending (the launch state), *Where we can reach you* was a card holding one sentence and
+                no control (22 Nov 2026) — the sentence belongs here, under the notices it is about. */}
+            {!SESSION_REMINDERS_SENDING && !PUSH_SENDING
+              ? ` They all show here, in your portal — ${trainerFirstName} messages you on WhatsApp from their own number.`
+              : null}
+          </p>
         </Card.Body>
       </Card>
 
+      {(SESSION_REMINDERS_SENDING || PUSH_SENDING) && (
       <Card>
         <Card.Head title="Where we can reach you" level={3} />
         <Card.Body>
@@ -128,19 +136,15 @@ export function PrefsForm({ prefs: initial, trainerFirstName, vapidKey, after }:
             </>
           ) : null}
           {PUSH_SENDING && vapidKey && <SwitchRow checked={prefs.channels.push} disabled={pending} title="Notifications on this device" example="A short notice on this phone or computer, even when the site isn’t open" onChange={(v) => void setPush(v)} />}
-          {!SESSION_REMINDERS_SENDING && !PUSH_SENDING && (
-            <p className="pl__s">
-              Everything shows here, in your portal. {trainerFirstName} messages you on WhatsApp from their own number.
-            </p>
-          )}
         </Card.Body>
       </Card>
+      )}
 
       <Card>
         <Card.Head title="A person to speak for you" level={3} />
         <Card.Body>
           <p className="pl__s">Optional. Someone you name who may act for you on your data if you can’t — for example to ask for it to be erased. Leave both empty for none.</p>
-          <div className="as__grid">
+          <div className="as__grid mt3">
             <TextField label="Their name" value={nominee.name} maxLength={80} onChange={(e) => setNominee({ ...nominee, name: e.target.value })} />
             <TextField label="Their number" hint="With country code, like +919841000001" inputMode="tel" value={nominee.phone} onChange={(e) => setNominee({ ...nominee, phone: e.target.value })} />
           </div>

@@ -7,7 +7,7 @@ import { effortTakesNumber, setsSummary, type DraftExercise, type DraftSet } fro
 import { restLabel } from '@/lib/workouts/estimate';
 import { Button } from '@/web-components/ui/Button';
 import { useEscapeGuard } from '@/web-components/ui/Modal';
-import { AltIcon, LinkIcon, TrashIcon } from '../Icons';
+import { AltIcon, ArrowDown, ArrowUp, ChevronDown, LinkIcon, TrashIcon } from '../Icons';
 import { SetLine, type CardActions } from './ExerciseCard';
 
 /**
@@ -144,9 +144,12 @@ export function ExerciseSheet({
       <button className="exs__scrim" type="button" aria-label="Close" onClick={onClose} />
       <div className="exs" role="dialog" aria-modal="true" aria-label={`Edit ${entry.name}`} ref={sheetRef}>
         <div className="exs__hd">
+          {/* BOTH LINES (21 Nov 2026). It printed the meta OR the sets, so on any movement with a meta the
+              live *4 × 12 · 7.5 kg* — the receipt for every stepper press below — was nowhere on screen. */}
           <div className="exs__t">
             <b>{entry.name}</b>
-            <span>{entry.meta || setsSummary(sets)}</span>
+            {entry.meta && <span>{entry.meta}</span>}
+            <span className="exs__sum" aria-live="polite">{setsSummary(sets)}</span>
           </div>
           <Button variant="primary" size="sm" onClick={onClose} ref={closeRef}>
             Done
@@ -159,6 +162,7 @@ export function ExerciseSheet({
               label="Sets"
               value={sets.length}
               shown={String(sets.length)}
+              integer
               min={1}
               max={20}
               onChange={n => actions.onSetCount(entry.uid, n)}
@@ -168,6 +172,7 @@ export function ExerciseSheet({
                 label="Reps"
                 value={first.effortValue ?? 0}
                 shown={first.effortValue === null ? '—' : String(first.effortValue)}
+                integer
                 min={1}
                 max={100}
                 onChange={n => patchAll({ effortValue: n })}
@@ -177,7 +182,8 @@ export function ExerciseSheet({
               <Stepper
                 label="Weight"
                 value={first.loadValue ?? 0}
-                shown={first.loadValue === null ? '—' : `${first.loadValue} kg`}
+                shown={first.loadValue === null ? '—' : String(first.loadValue)}
+                unit="kg"
                 step={2.5}
                 min={0}
                 max={500}
@@ -223,7 +229,10 @@ export function ExerciseSheet({
               onClick={() => setShowSets(v => !v)}
             >
               <span>Edit individual sets</span>
-              <span className="exs__rn">{sets.length}</span>
+              <span className="exs__rr">
+                <span className="exs__rn">{sets.length}</span>
+                <span className="exs__chev" aria-hidden="true"><ChevronDown size={16} /></span>
+              </span>
             </button>
             {showSets && (
               <div className="exs__sets">
@@ -246,12 +255,19 @@ export function ExerciseSheet({
           </section>
 
           <section className="exs__s" aria-label="This exercise">
-            <button className="exs__row" type="button" disabled={!canUp} onClick={() => actions.onMove(entry.uid, -1)}>
-              <span>Move up</span>
-            </button>
-            <button className="exs__row" type="button" disabled={!canDown} onClick={() => actions.onMove(entry.uid, 1)}>
-              <span>Move down</span>
-            </button>
+            {/* ONE ROW, TWO BUTTONS (21 Nov 2026): *Move up* and *Move down* were two full-width rows for one
+                decision. The arrows keep their words as accessible names, and both stay 44px targets. */}
+            <div className="exs__row exs__row--pair" role="group" aria-label="Order in the workout">
+              <span>Order</span>
+              <span className="exs__mv">
+                <button type="button" disabled={!canUp} aria-label="Move up" onClick={() => actions.onMove(entry.uid, -1)}>
+                  <ArrowUp size={16} />
+                </button>
+                <button type="button" disabled={!canDown} aria-label="Move down" onClick={() => actions.onMove(entry.uid, 1)}>
+                  <ArrowDown size={16} />
+                </button>
+              </span>
+            </div>
             {chained && (!canUp || !canDown) && (
               <p className="exs__note">In a circuit, a movement moves within it. Take it out of the circuit to move it further.</p>
             )}
@@ -323,6 +339,15 @@ export function ExerciseSheet({
   );
 }
 
+/**
+ * A FIGURE YOU CAN STEP OR TYPE (21 Nov 2026). The value between − and + was a
+ * label, so the only way to 60 kg was twenty-four presses of a 2.5 kg step. It is
+ * a field now: tap it, the number is selected and the phone's number pad comes
+ * up, and the figure is committed on blur or Enter, clamped to the range. The
+ * buttons still step, for the one-plate change that is most edits. A field being
+ * typed into keeps its own text (`draft`) until it commits, so a half-typed
+ * `6` is not written back as the whole answer.
+ */
 function Stepper({
   label,
   value,
@@ -330,6 +355,8 @@ function Stepper({
   step = 1,
   min,
   max,
+  unit,
+  integer = false,
   onChange,
 }: {
   label: string;
@@ -338,9 +365,24 @@ function Stepper({
   step?: number;
   min: number;
   max: number;
+  /** Drawn after the figure, outside the field: `kg`. */
+  unit?: string;
+  /** A count, typed without a decimal point. */
+  integer?: boolean;
   onChange: (next: number) => void;
 }) {
   const round = (n: number) => Math.round(n * 100) / 100;
+  const [draft, setDraft] = useState<string | null>(null);
+
+  const commit = () => {
+    if (draft === null) return;
+    const n = Number(draft.replace(',', '.'));
+    setDraft(null);
+    if (draft.trim() === '' || !Number.isFinite(n)) return;
+    const v = Math.min(max, Math.max(min, integer ? Math.round(n) : round(n)));
+    if (v !== value) onChange(v);
+  };
+
   return (
     <div className="wsmx__f exs__f">
       <span className="wsmx__fl">{label}</span>
@@ -354,8 +396,20 @@ function Stepper({
         >
           −
         </button>
-        <span className="wsmx__v" aria-live="polite">
-          {shown}
+        <span className="wsmx__v exs__v">
+          <input
+            className="exs__in"
+            type="text"
+            inputMode={integer ? 'numeric' : 'decimal'}
+            aria-label={unit ? `${label}, ${unit}` : label}
+            value={draft ?? (shown === '—' ? '' : shown)}
+            placeholder="—"
+            onFocus={(e) => { setDraft(shown === '—' ? '' : shown); e.currentTarget.select(); }}
+            onChange={(e) => setDraft(e.target.value.replace(integer ? /[^0-9]/g : /[^0-9.,]/g, ''))}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
+          />
+          {unit && <span className="exs__u" aria-hidden="true">{unit}</span>}
         </span>
         <button
           className="wsmx__sb"

@@ -1,5 +1,6 @@
 'use client';
 
+import { ThemeSwitch } from '@/web-components/ui/ThemeSwitch';
 import Link from 'next/link';
 import { useState } from 'react';
 
@@ -72,7 +73,14 @@ export function Rail({ current, state }: { current: SetupStep | null; state: Set
 
   return (
     <div className="stp__l">
-      <Logo cap={18} />
+      {/* The theme beside the logo (22 Nov 2026). Sign-in is always dark; setup follows the saved choice, which is dark
+          until somebody picks light — and nothing on these nine screens let anybody pick. Here at every width: the top
+          of the rail on a desk, the top bar on a phone, with no disclosure to open first. It writes the one preference
+          the whole app reads, so what is chosen here is what the app opens in afterwards. */}
+      <div className="stp__brand">
+        <Logo cap={18} />
+        <ThemeSwitch />
+      </div>
 
       {/* The bar. In the markup at every width and shown only under 900px — see
           the class comment. */}

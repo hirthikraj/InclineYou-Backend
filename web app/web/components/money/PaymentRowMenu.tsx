@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 
 import { editPayment, markPaid, removePayment, writeOffPayment } from '@/lib/money/actions';
 import { rupees } from '@/lib/today/time';
+import { DateField } from '@/web-components/ui/DateField';
 import { Button } from '@/web-components/ui/Button';
 
 /**
@@ -147,6 +148,7 @@ export function PaymentRowMenu({
   const [fNote, setFNote] = useState('');
   /* Today, read when the form opens — a component body may not call `Date.now()` (trap 20). */
   const [fMax, setFMax] = useState('');
+  const [fMin, setFMin] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const editsMethod = collectedBy !== 'gym' && (status === 'paid' || status === 'pending');
   const editsDate = status === 'paid' && paidAt !== null;
@@ -220,6 +222,14 @@ export function PaymentRowMenu({
     setFDate(paidAt !== null ? dateInput(paidAt) : '');
     setFNote(note ?? '');
     setFMax(dateInput(Date.now()));
+    // The server's window for when money landed (18 Nov 2026): at most 3 months back.
+    {
+      const d = new Date();
+      d.setMonth(d.getMonth() - 3);
+      // An older payment keeps its own date reachable: the floor only stops a NEW date beyond the window, and a
+      // prefilled value below `min` would make the browser refuse the form for an unrelated fix.
+      setFMin(dateInput(paidAt !== null ? Math.min(d.getTime(), paidAt) : d.getTime()));
+    }
     setFormError(null);
     setAt((a) => {
       if (!a) return a;
@@ -254,13 +264,19 @@ export function PaymentRowMenu({
     const onDown = (e: PointerEvent) => {
       const target = e.target as Node;
       if (panel.current?.contains(target) || trigger.current?.contains(target)) return;
+      /* A press inside a portalled popup (the `DateField` calendar, `data-popup`) belongs to a field in this menu. */
+      if ((target as Element).closest?.('[data-popup]')) return;
       close(false);
     };
     /* A fixed panel does not travel with the row it points at, so a scroll would
        leave it hanging over the wrong one. Shut rather than re-measure: the menu
        is a decision about ONE row and a menu that follows a moving row is a menu
        whose subject the trainer has to keep track of. */
-    const onScrollOrResize = () => close(false);
+    const onScrollOrResize = (e?: Event) => {
+      /* Scrolling the calendar's year grid is not the page moving under the menu. */
+      if ((e?.target as Element | null)?.closest?.('[data-popup]')) return;
+      close(false);
+    };
 
     document.addEventListener('keydown', onKey);
     document.addEventListener('pointerdown', onDown);
@@ -489,8 +505,8 @@ export function PaymentRowMenu({
                   <label className="fld__l" htmlFor={`pe-d-${paymentId}`}>Received on</label>
                   {/* No future dates: the server refuses them, and a field that
                       would let you type one only to be told no is the worse design. */}
-                  <input className="ctl" id={`pe-d-${paymentId}`} type="date" value={fDate} max={fMax}
-                    onChange={(e) => setFDate(e.target.value)} />
+                  <DateField id={`pe-d-${paymentId}`} label="Received on" block value={fDate} min={fMin} max={fMax}
+                    onChange={setFDate} />
                 </div>
               )}
               <div className="fld mt2">

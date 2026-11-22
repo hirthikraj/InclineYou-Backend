@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react';
+'use client';
+
+import { useId, useState, type ReactNode } from 'react';
 
 import { Avatar } from './Avatar';
 import { Card } from './Card';
@@ -69,6 +71,7 @@ export function ProfileCard({
   socials,
   /** Anything the card should say about itself, under the facts. */
   children,
+  collapsible = false,
 }: {
   title?: ReactNode;
   name: string;
@@ -82,12 +85,22 @@ export function ProfileCard({
   work?: string;
   socials?: { label: string; url: string }[];
   children?: ReactNode;
+  /**
+   * EVERYTHING BELOW THE NAME CAN FOLD (22 Nov 2026). For a caller that puts this card ABOVE a form on a phone — the
+   * profile's tabs — where the whole card is ~500px and would push every field below the fold. The name row always
+   * shows; the rest sits in `.pfc__more` behind a *See full preview* toggle (`aria-expanded`), opening with a CSS
+   * grid-rows transition. The CALLER's stylesheet decides at which width it actually folds (`.pfc--fold`'s rules are
+   * written per screen, inside its own container query); everywhere else the toggle is hidden and the card is whole.
+   */
+  collapsible?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
+  const moreId = useId();
   const named = name.trim();
   const line = headline?.trim() ?? '';
 
   return (
-    <Card title={title} className={named ? undefined : 'pfc--ghost'}>
+    <Card title={title} className={[named ? null : 'pfc--ghost', collapsible ? 'pfc--fold' : null].filter(Boolean).join(' ') || undefined}>
       <div className="pfc__id">
         {named ? (
           <Avatar name={named} id={tintKey ?? named} size="lg" />
@@ -102,6 +115,21 @@ export function ProfileCard({
         </span>
       </div>
 
+      {collapsible ? (
+        <button
+          type="button"
+          className="pfc__tog"
+          aria-expanded={open}
+          aria-controls={moreId}
+          onClick={() => setOpen((o) => !o)}
+        >
+          {open ? 'Hide full preview' : 'See full preview'}
+          <span className="pfc__chev" aria-hidden="true" />
+        </button>
+      ) : null}
+
+      <div className={collapsible ? 'pfc__more' : 'pfc__flat'} id={collapsible ? moreId : undefined} data-open={open || undefined}>
+      <div className="pfc__in">
       {meta ? <p className="pfc__l">{meta}</p> : null}
 
       {/* Specialities lead, because they are the first thing a client reads
@@ -142,6 +170,8 @@ export function ProfileCard({
       ) : null}
 
       {children}
+      </div>
+      </div>
     </Card>
   );
 }

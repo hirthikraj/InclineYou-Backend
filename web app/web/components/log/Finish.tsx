@@ -14,6 +14,7 @@ import { Back, Send, Tick, Warn } from './Icons';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
 import { Stat } from '@/web-components/ui/Stat';
+import { Message } from '@/web-components/ui/Message';
 import { PageHeader } from '@/web-components/ui/PageHeader';
 import { Why } from '@/web-components/ui/Why';
 
@@ -70,6 +71,10 @@ export function Finish({ data }: { data: FinishDataX }) {
      wire and reads better than any pronoun would; where a sentence needs a
      second reference, it takes *they*. */
   const first = view.clientName.split(' ')[0];
+  /* Planned sets with nothing logged, per movement, in the card's order. */
+  const unlogged = view.exercises
+    .map((e) => ({ key: e.sxId || e.exerciseId, name: e.name, sets: e.sets.filter((x) => x.planned && !x.done).map((x) => x.number) }))
+    .filter((e) => e.sets.length > 0);
   const [, startTransition] = useTransition();
   const [send, setSend] = useState(finish.announced > 0);
   const [notTrained, setNotTrained] = useState(false);
@@ -153,6 +158,23 @@ export function Finish({ data }: { data: FinishDataX }) {
                   tone={finish.records.length ? 'acc' : undefined}
                 />
               </div>
+
+              {/* WHAT WAS NOT LOGGED, NAMED (21 Nov 2026). The *Sets* figure says "18 of 22 planned";
+                  this says which four, so a set skipped on purpose and one simply missed can both be
+                  seen before the log is closed — and fixed, from the log, if it was the second. */}
+              {unlogged.length > 0 && (
+                <Message tone="warn" className="fin__unlogged">
+                  <b>Not logged:</b>{' '}
+                  {unlogged.map((u, i) => (
+                    <span key={u.key}>
+                      {i > 0 ? '; ' : ''}
+                      {u.name} · {u.sets.length === 1 ? 'set' : 'sets'} {u.sets.join(', ')}
+                    </span>
+                  ))}
+                  . They stay as not done.{' '}
+                  <Link href={`/sessions/${data.routeId}/log`}>Back to the log</Link>
+                </Message>
+              )}
 
               <Why
                 heading={<>This did not touch {first}&rsquo;s pack</>}

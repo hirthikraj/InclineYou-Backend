@@ -300,6 +300,8 @@ const NOT_MARKED: Record<string, string> = {
   not_found: 'One is no longer in your diary.',
   // 13 Nov 2026: one refused in the moment (its pack changed elsewhere); the others stand, and pressing again retries it.
   MARK_FAILED: 'One could not be marked just now — press Mark again to retry it.',
+  // 22 Nov 2026: a third session for a client who has not accepted their invite.
+  CONSENT_REQUIRED: 'One is a 3rd session for a client who hasn’t consented yet — send their invite from their file.',
 };
 
 /* ──────────────────────────────────────────────── silencing a row ────────── */

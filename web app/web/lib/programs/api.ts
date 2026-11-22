@@ -421,7 +421,7 @@ async function bodyOf(patch: TemplatePatch, currentId: string | null): Promise<R
   const tree = treeOf(rows, {
     trainingDays: patch.trainingDays ?? (current ? trainingDaysOf(current.days) : undefined),
     dayLabels: patch.dayLabels ?? dayLabelsOf(current?.workouts),
-  });
+  }, current?.workouts);   // 19 Nov 2026: so each row gets back its id, alternatives and set kinds (wire.ts, restorer)
   /* Weeks: the patch's, or enough to hold every row written. */
   const deepest = tree.workouts.reduce((m, w) => Math.max(m, w.week ?? 1), 1);
   body.weeks = Math.max(Number(body.weeks ?? current?.weeks ?? 1), deepest);

@@ -15,11 +15,17 @@ export default async function Page() {
 
   return (
     <>
-      <TopBar crumb="Your details" title="Your details" />
+      <TopBar crumb="Your details" title="Me" titleHref="/me/account" />
       <main className="main" id="main-content">
-        <PageHeader title="Your details" />
-        <div className="body" style={{ maxWidth: 560 }}>
-          <MyDetailsForm details={me.myDetails!} trainerName={me.trainer?.name ?? 'your trainer'} />
+        <PageHeader className="ph--portal" title="Your details" />
+        {/* The portal's column, and the form's own 560 as a class — it was an inline `maxWidth` on `.body`
+            (AGENTS.md trap 2), which also left the form flush left under a header that was not `ph--portal`. */}
+        <div className="body">
+          <div className="portal">
+            <div className="pdet">
+              <MyDetailsForm details={me.myDetails!} trainerName={me.trainer?.name ?? 'your trainer'} />
+            </div>
+          </div>
         </div>
       </main>
     </>

@@ -4,6 +4,7 @@ import Link from 'next/link';
 
 import type { Deck, DeckSession, RunningSession } from '@/lib/today/deck';
 import { NEXT_GRACE_MS } from '@/lib/today/deck';
+import { freeTag, type Billing } from '@/lib/schedule/billing';
 import type { DayMoney, Gap } from '@/lib/today/day';
 import { GAP_FOLD_MIN, gapWorth, sellableNote } from '@/lib/today/day';
 import {
@@ -93,9 +94,12 @@ function SessionChips({
    * and read as false — which is the note silently disappearing on the one card a
    * trainer is looking at while the client is in front of them.
    */
-  session: { clientId: string; mode: DeliveryMode; hasNote: boolean };
+  session: { clientId: string; mode: DeliveryMode; hasNote: boolean; billing?: Billing };
   gymName: string | null;
 }) {
+  /* A trial or complimentary session says so first (22 Nov 2026): the trainer
+     walking up to a demo should know it is one before the client says hello. */
+  const free = session.billing ? freeTag(session.billing) : null;
   const place =
     session.mode === 'remote'
       ? MODE_LABELS.remote
@@ -105,6 +109,7 @@ function SessionChips({
   const owed = useOwedAssessment(session.clientId);
   return (
     <>
+      {free && <Tag tone="acc">{free}</Tag>}
       <Tag>
         <Pin size={12} />
         {place}
@@ -201,7 +206,7 @@ function Running({
       detail={<>{running.detail}<i>{formatMinuteRange(minuteOfDay(running.scheduledAt), minuteOfDay(endsAt))}</i></>}
       chips={
         <SessionChips
-          session={{ clientId: running.clientId, mode: running.mode, hasNote }}
+          session={{ clientId: running.clientId, mode: running.mode, hasNote, billing: running.billing }}
           gymName={gymName}
         />
       }

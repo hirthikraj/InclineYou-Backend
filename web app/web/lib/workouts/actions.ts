@@ -126,7 +126,7 @@ export async function removeWorkoutTemplate(id: string): Promise<Result<null>> {
  * about to be drawn.
  */
 export async function fetchWorkoutTemplate(id: string): Promise<
-  | { ok: true; template: WorkoutTemplateWire; names: Record<string, ExerciseWire> }
+  | { ok: true; template: WorkoutTemplateWire; names: Record<string, Pick<ExerciseWire, 'name' | 'target' | 'equipment' | 'level'>> }
   | { ok: false; message: string }
 > {
   try {
@@ -138,7 +138,10 @@ export async function fetchWorkoutTemplate(id: string): Promise<
     const wanted = new Set(
       template.exercises.flatMap(e => [e.exerciseId, ...(e.alternatives ?? []).map(a => a.exerciseId)]),
     );
-    const names: Record<string, ExerciseWire> = {};
+    /* THE SERVER NAMES THEM NOW (19 Nov 2026): `names` rides the read, a retired exercise included, so opening a
+       workout is one request, not one per exercise. Only an id it leaves out — an older server — is fetched alone. */
+    const names: Record<string, Pick<ExerciseWire, 'name' | 'target' | 'equipment' | 'level'>> = { ...(template.names ?? {}) };
+    for (const id of Object.keys(names)) wanted.delete(id);
     if (wanted.size > 0) {
       /* BY ID, NOT BY WINDOW. This read the first 200 rows of the library (it holds 1,324) and kept the ones it
          wanted, so every movement past the 200th alphabetically drew *Exercise not in your library* and counted for

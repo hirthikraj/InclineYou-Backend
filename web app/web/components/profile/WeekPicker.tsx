@@ -4,12 +4,12 @@ import { IconPlus, IconTrash } from '@/components/auth/Icons';
 import { Chip, ChipRow } from '@/components/setup/Chips';
 import { DayRibbon } from '@/components/setup/DayRibbon';
 import { GroupLabel } from '@/components/setup/SetupShell';
-import { TimeField } from '@/components/shell/TimeField';
 import {
   MIN_WINDOW_MINUTES,
   WEEKDAY_SHORT,
   WINDOW_PRESETS,
   formatDuration,
+  formatMinute,
   formatWindow,
   mergeWindows,
   minutesPerDay,
@@ -18,6 +18,35 @@ import {
   type HourWindow,
 } from '@/lib/setup/hours';
 import { Button } from '@/web-components/ui/Button';
+import { Select } from '@/web-components/ui/Select';
+
+/* ── TIMES ARE PICKED, NOT TYPED (22 Nov 2026) ──────────────────────────────────────────────────────────────────────
+   The rows used `TimeField`, a typed field whose hour and minute were 20×23px targets — fiddly with a thumb, which is
+   how most trainers set up. A `Select` in 15-minute steps opens the phone's own wheel and is one tap on a desk (with
+   type-ahead). A stored time off the grid (6:10) is kept as an option, so editing never silently rounds it. */
+const STEP = 15;
+function timeOptions(from: number, to: number, current: number): { value: string; label: string }[] {
+  const set = new Set<number>();
+  for (let m = from; m <= to; m += STEP) set.add(m);
+  set.add(current);
+  return [...set]
+    .sort((a, b) => a - b)
+    .map((m) => ({ value: String(m), label: m >= 1440 ? 'Midnight' : formatMinute(m) }));
+}
+
+/* A row is named by when it is, not by its index: "First window" beside "Window 2" was two spellings of one idea
+   and "window" is our word, not a trainer's. Two mornings read "Morning" and "Morning 2". */
+function rowNames(windows: HourWindow[]): string[] {
+  /* Four bands by start (22 Nov 2026): with three, an 11 AM–3 PM block was "Morning 2". */
+  const band = (m: number) => (m < 11 * 60 ? 'Morning' : m < 14 * 60 ? 'Midday' : m < 17 * 60 ? 'Afternoon' : 'Evening');
+  const base = windows.map((w) => band(w.startMinute));
+  const seen: Record<string, number> = {};
+  return base.map((b) => {
+    seen[b] = (seen[b] ?? 0) + 1;
+    const total = base.filter((x) => x === b).length;
+    return total > 1 ? `${b} ${seen[b]}` : b;
+  });
+}
 
 /**
  * THE WORKING-WEEK PICKER — days, windows, and the band that shows the shape.
@@ -67,7 +96,10 @@ export function WeekPicker({
   value,
   onChange,
   disabled = false,
-  fitRibbon = false,
+  /* Fitted by default since 22 Nov 2026: the one-pixel-a-minute band scrolled sideways in its own scrollbar, so a
+     preview meant to be read at a glance showed only the morning. The literal scale is still there for a caller who
+     asks for it. */
+  fitRibbon = true,
 }: {
   value: Week;
   onChange: (next: Week) => void;
@@ -80,6 +112,7 @@ export function WeekPicker({
   const merged = mergeWindows(windows);
   const tooShort = weekProblem(value) === 'too-short';
   const perDay = minutesPerDay(windows);
+  const names = rowNames(windows);
   const custom = windows.filter(
     (w) => !WINDOW_PRESETS.some((p) => p.window.startMinute === w.startMinute && p.window.endMinute === w.endMinute),
   );
@@ -125,6 +158,8 @@ export function WeekPicker({
       </ChipRow>
 
       <GroupLabel>YOUR HOURS ON THOSE DAYS</GroupLabel>
+      {/* The chips are quick picks for the rows below — pick-several, which a row of pills does not say by itself. */}
+      <p className="small wkp__hint">Tap the hours you work — pick as many as you like, or set your own below.</p>
       <ChipRow top={0}>
         {WINDOW_PRESETS.map((preset) => (
           <Chip
@@ -149,8 +184,8 @@ export function WeekPicker({
           *no evening set*. Say so, once, where the trainer is looking. */}
       {custom.length > 0 ? (
         <p className="small" style={{ marginTop: 8 }}>
-          {custom.length === 1 ? 'One window is' : `${custom.length} windows are`} custom, set below, so no preset above is lit for{' '}
-          {custom.length === 1 ? 'it' : 'them'}.
+          {custom.length === 1 ? 'One of your hours is' : `${custom.length} of your hours are`} your own times, set below — a quick
+          pick only lights up for an exact match.
         </p>
       ) : null}
 
@@ -162,77 +197,64 @@ export function WeekPicker({
           60px and `HH:MM` was clipped AT 1440px, before any phone was involved.
           `.fldrow` in app.css gives the row a real wrap and lets each window
           size itself; under 560px each one takes a line. */}
-      <div className="fldrow" style={{ marginTop: 18, alignItems: 'flex-end' }}>
-        {windows.map((window, i) => (
-          // Keyed by position: an unsaved window has no identity yet, and giving
-          // it one from its own time would re-key the field being edited.
-          <div key={i} className="fld">
-            {/* A span, not a label. The two time inputs carry their own
-                `aria-label` because one visible label cannot name two controls,
-                which left this `<label>` pointing at nothing — a label with no
-                control is a promise to a screen reader that is not kept. */}
-            <span className="fld__l">{i === 0 ? 'First window' : `Window ${i + 1}`}</span>
-            <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
-              <TimeField
-                label={`Window ${i + 1} starts`}
-                value={window.startMinute}
+      <div className="wkp__rows">
+        {windows.map((window, i) => {
+          const name = names[i];
+          return (
+            <div key={i} className="wkp__row" role="group" aria-label={`${name}, ${formatWindow(window)}`}>
+              <span className="wkp__name">{name}</span>
+              <Select
+                label={`${name} starts`}
+                hideLabel
+                className="wkp__time"
+                value={String(window.startMinute)}
                 disabled={disabled}
-                onChange={(v) =>
-                  setWindows(windows.map((w, j) => (j === i ? moveEdge(w, 'start', v) : w)))
-                }
+                options={timeOptions(0, 24 * 60 - MIN_WINDOW_MINUTES, window.startMinute)}
+                onChange={(e) => setWindows(windows.map((w, j) => (j === i ? moveEdge(w, 'start', Number(e.target.value)) : w)))}
               />
-              <span className="small" style={{ flex: '0 0 auto' }}>
-                to
-              </span>
-              <TimeField
-                label={`Window ${i + 1} ends`}
-                value={window.endMinute}
+              <span className="wkp__to">to</span>
+              <Select
+                label={`${name} ends`}
+                hideLabel
+                className="wkp__time"
+                value={String(window.endMinute)}
                 disabled={disabled}
-                onChange={(v) =>
-                  setWindows(windows.map((w, j) => (j === i ? moveEdge(w, 'end', v) : w)))
-                }
+                options={timeOptions(MIN_WINDOW_MINUTES, 24 * 60, window.endMinute)}
+                onChange={(e) => setWindows(windows.map((w, j) => (j === i ? moveEdge(w, 'end', Number(e.target.value)) : w)))}
               />
               <button
-                className="btn btn--ghost btn--icon"
+                className="btn btn--ghost btn--icon wkp__del"
                 type="button"
                 disabled={disabled}
-                style={{ flex: '0 0 auto' }}
-                aria-label={`Remove ${formatWindow(window)}`}
+                aria-label={`Remove ${name.toLowerCase()}, ${formatWindow(window)}`}
                 onClick={() => setWindows(windows.filter((_, j) => j !== i))}
               >
                 <IconTrash size={16} />
               </button>
             </div>
-          </div>
-        ))}
+          );
+        })}
         <Button
           variant="ghost"
           disabled={disabled}
-          style={{ flex: '0 0 auto' }}
+          className="wkp__add"
           onClick={() => setWindows([...windows, nextWindowAfter(windows)])}
         >
           <IconPlus size={14} />
-          {windows.length === 0 ? 'Add hours' : 'Another window'}
+          Add hours
         </Button>
       </div>
 
       <GroupLabel>{fitRibbon ? 'YOUR DAY AT A GLANCE' : 'EVERY DAY YOU PICKED, AT ONE PIXEL PER MINUTE'}</GroupLabel>
       <DayRibbon days={days} windows={windows} fit={fitRibbon} />
 
-      <div className="row" style={{ gap: 20, marginTop: 18, flexWrap: 'wrap' }}>
-        <span className="small">
-          <b>{formatDuration(perDay)}</b> a day
-        </span>
-        <span className="small">
-          <b>{formatDuration(perDay * days.length)}</b> a week
-        </span>
-        <span className="small">
-          {days.length} {days.length === 1 ? 'day' : 'days'}
-          {merged.length > 1
-            ? ' · two windows, because a single range would claim you are free for lunch'
-            : null}
-        </span>
-      </div>
+      {/* One plain sentence (22 Nov 2026). The third span explained a design decision to the trainer ("because a single
+          range would claim you are free for lunch"); what they need is the totals, and to know overlaps count once. */}
+      <p className="small wkp__sum">
+        <b>{days.length} {days.length === 1 ? 'day' : 'days'}</b> · <b>{formatDuration(perDay)}</b> a day ·{' '}
+        <b>{formatDuration(perDay * days.length)}</b> a week
+        {merged.length < windows.length ? <span className="ink3"> · overlapping hours are counted once</span> : null}
+      </p>
 
       {tooShort ? (
         <p className="fld__e" style={{ marginTop: 12 }}>

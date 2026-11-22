@@ -1,5 +1,7 @@
 'use client';
 
+import { hasConsent } from '@/lib/clients/setup';
+import { useState } from 'react';
 import Link from 'next/link';
 
 import { TopBar } from '@/components/shell/TopBar';
@@ -116,13 +118,29 @@ export function ClientFile({
 
      It buys 60px of header back on the one tab whose content was 224px below
      the fold. */
-  /* Nor on the Calendar: that tab answers *did they turn up*, and *before every session* is a
-     note about the session, one tab away. It was ~40px of the 766px window above the month. */
-  const pinStrip = tab !== 'information' && tab !== 'calendar';
+  /* ON THE MONTH VIEW TOO (21 Nov 2026, reversing 6 Nov). It stood down there on the grounds
+     that the month answers *did they turn up*. But List and Month are now two views of ONE tab,
+     behind a switch: a note that is there on one view and gone on the other makes the switch
+     look like it moved the page, and the trainer asked for it on both. ~40px is the price. */
+  const pinStrip = tab !== 'information';
 
   /* The month view is the Sessions tab's second view, so the strip lights
      *Sessions* on it — see `TABS`. */
   const stripTab: Tab = tab === 'calendar' ? 'sessions' : tab;
+  /* ── LIST ⇄ MONTH: WHICH WAY DID WE JUST GO ─────────────────────────────
+     Both views are one page (`?view=month`), so this component stays mounted
+     across the switch and can tell a SWITCH from an arrival. `dir` is set only
+     by a switch, so the panel slides in from the side it was asked for (Month is
+     to the right of List) and never animates on first load or on a refresh.
+     A render-time adjustment, not an effect — trap 21. */
+  const view = tab === 'calendar' ? 'month' : tab === 'sessions' ? 'list' : null;
+  const [seenView, setSeenView] = useState(view);
+  const [dir, setDir] = useState<'fwd' | 'back' | null>(null);
+  if (view !== seenView) {
+    setSeenView(view);
+    setDir(seenView && view ? (view === 'month' ? 'fwd' : 'back') : null);
+  }
+
   const sessionViews = [
     { key: 'list', label: 'List', href: `/clients/${payload.client.id}/sessions` },
     { key: 'month', label: 'Month', href: `/clients/${payload.client.id}/sessions?view=month` },
@@ -226,17 +244,32 @@ export function ClientFile({
           {tab === 'overview' && <OverviewTab payload={payload} now={now} progress={progress} />}
           {(tab === 'sessions' || tab === 'calendar') && (
             <SubTabs
-              className="cfviews"
+              className={view === 'month' ? 'cfviews cfviews--2' : 'cfviews'}
               tabs={sessionViews}
-              current={tab === 'calendar' ? 'month' : 'list'}
+              current={view ?? 'list'}
               label="Show sessions as"
             />
           )}
-          {tab === 'calendar' && (
-            <CalendarTab clientId={client.id} sessions={payload.sessions} month={options.month ?? null} now={now} />
+          {view && (
+            /* Keyed on the view so each switch MOUNTS a fresh box, which is what lets
+               `@starting-style` run its entrance; `data-in` is absent on arrival. */
+            <div key={view} className="cfswap" data-in={dir ?? undefined}>
+              {tab === 'calendar' && (
+                <CalendarTab clientId={client.id} sessions={payload.sessions} month={options.month ?? null} now={now} />
+              )}
+              {tab === 'sessions' && (
+                <SessionsTab
+                  clientId={client.id}
+                  sessions={payload.sessions}
+                  range={options.range ?? '90d'}
+                  older={options.older ?? 0}
+                  now={now}
+                />
+              )}
+            </div>
           )}
           {tab === 'progress' && (
-            <ProgressTab clientId={client.id} progress={progress} failed={progressFailed} />
+            <ProgressTab clientId={client.id} progress={progress} failed={progressFailed} consented={hasConsent(client.membershipStatus)} />
           )}
           {tab === 'assessments' && (
             <ChecksTab
@@ -246,15 +279,6 @@ export function ClientFile({
               rows={assessments}
               schedules={schedules}
               templates={templates}
-              now={now}
-            />
-          )}
-          {tab === 'sessions' && (
-            <SessionsTab
-              clientId={client.id}
-              sessions={payload.sessions}
-              range={options.range ?? '90d'}
-              older={options.older ?? 0}
               now={now}
             />
           )}

@@ -14,7 +14,7 @@ import {
   SetupApiError,
   type PackInput,
 } from './api';
-import { type HourWindow, mergeWindows, sameWindows } from './hours';
+import { DEFAULT_DAYS, DEFAULT_WINDOWS, type HourWindow, mergeWindows, sameWindows } from './hours';
 import { asGender, asWorkMode } from './options';
 import { clearSkipped, dropSkipped, markSkipped } from './skipped';
 import { destinationAfter, isAnswered, isOptional, type SetupStep } from './steps';
@@ -359,11 +359,35 @@ async function onward(step: SetupStep): Promise<StepResult> {
 
 export async function finishSetup(next = '/setup/done'): Promise<StepResult> {
   try {
+    await seedDefaultWorkingHours();
     await completeSetup();
     await dropSkipped();
     return { ok: true, next };
   } catch (error) {
     return failure(error);
+  }
+}
+
+/**
+ * THE DEFAULT WEEK, FOR A TRAINER WHO SKIPPED THE HOURS STEP (22 Nov 2026).
+ *
+ * The hours step promised "a default week is seeded when the flow finishes" and nothing did — the function its comments
+ * named did not exist anywhere — so a trainer who skipped it reached the diary with no hours at all. This is that seed:
+ * Mon–Sat, 6–11 AM and 5–9 PM, the same `DEFAULT_DAYS` / `DEFAULT_WINDOWS` the step opens with, so skipping saves
+ * exactly what the screen was showing.
+ *
+ * It STANDS DOWN the moment any row exists: a trainer who answered the step — or set hours in Settings, or on the phone —
+ * keeps theirs untouched. It runs in `finishSetup`, which every way out of the flow goes through (Continue on the last
+ * step, Skip on the last step, *Finish later*, the pre-flight's two buttons, step 1's own finish). Best effort: a failed
+ * seed must not trap somebody in setup, so it is swallowed — the diary then has no hours, which is what it had before.
+ */
+async function seedDefaultWorkingHours(): Promise<void> {
+  try {
+    const stored = await getHours();
+    if (stored.length > 0) return;
+    await patchWorkingHours(DEFAULT_DAYS.map((weekday) => ({ weekday, windows: DEFAULT_WINDOWS })));
+  } catch {
+    /* best effort — see above */
   }
 }
 

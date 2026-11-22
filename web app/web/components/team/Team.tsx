@@ -31,6 +31,7 @@ import { Glyph, Plus, Team as TeamIcon, Users } from '@/components/shell/Icons';
 import { rupees } from '@/lib/today/time';
 import { useToast } from '@/lib/toast/store';
 import { Button } from '@/web-components/ui/Button';
+import { DateField } from '@/web-components/ui/DateField';
 import { Card } from '@/web-components/ui/Card';
 import { Chip } from '@/web-components/ui/Chip';
 import { PageHeader } from '@/web-components/ui/PageHeader';
@@ -1511,6 +1512,8 @@ function RevenueTab({ team: _team }: { team: TeamResponse }) {
   const firstOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
   const defaultFrom = firstOfMonth.toISOString().slice(0, 10);
   const defaultTo = today.toISOString().slice(0, 10);
+  const [from, setFrom] = useState(defaultFrom);
+  const [to, setTo] = useState(defaultTo);
 
   const [state, action, pending] = useActionState(loadRevenue, {});
   const data = state.data;
@@ -1525,23 +1528,15 @@ function RevenueTab({ team: _team }: { team: TeamResponse }) {
           <div className="date-range-row">
             <div className="fld" style={{ margin: 0 }}>
               <label className="fld__h" htmlFor="rev-from">From</label>
-              <input
-                id="rev-from"
-                name="from"
-                type="date"
-                className="ctl"
-                defaultValue={defaultFrom}
-              />
+              {/* `DateField` is controlled and has no `name`, so the form reads the value
+                  from a hidden input beside it — the same `from` / `to` it always posted. */}
+              <DateField id="rev-from" label="From" value={from} max={to || undefined} onChange={setFrom} />
+              <input type="hidden" name="from" value={from} />
             </div>
             <div className="fld" style={{ margin: 0 }}>
               <label className="fld__h" htmlFor="rev-to">To</label>
-              <input
-                id="rev-to"
-                name="to"
-                type="date"
-                className="ctl"
-                defaultValue={defaultTo}
-              />
+              <DateField id="rev-to" label="To" value={to} min={from || undefined} onChange={setTo} />
+              <input type="hidden" name="to" value={to} />
             </div>
             <Button variant="primary" type="submit" disabled={pending}>
               {pending ? 'Loading…' : 'Load'}

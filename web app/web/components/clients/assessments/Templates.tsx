@@ -255,6 +255,8 @@ export function Templates({ data }: { data: TemplatesData }) {
         <TemplateEditor
           template={editing.row}
           catalog={data.catalog}
+          /* *Start from* on a new template: the trainer's own shelf (21 Nov 2026). */
+          starters={data.templates}
           onClose={(saved) => {
             setEditing(null);
             if (saved) router.refresh();

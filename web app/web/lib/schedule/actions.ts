@@ -2,6 +2,7 @@
 
 import { notChargedLine as chargeLine, type Billing } from './billing';
 import { revalidatePath } from 'next/cache';
+import { rupees } from '@/lib/today/time';
 
 import { api, ApiError } from '@/lib/http/client';
 import { fetchWindow, ScheduleApiError } from './api';
@@ -74,6 +75,9 @@ function readFailure(error: unknown, subject: string): WriteResult {
         return { ok: false, message: `${subject} was refused — ${error.problem.detail ?? 'this client can’t be booked right now.'}` };
       case 'SESSION_NOT_STARTED':
         return { ok: false, message: 'This session hasn’t started yet. Mark it once its start time has passed.' };
+      case 'CONSENT_REQUIRED':
+        /* 22 Nov 2026: a third session before consent; a note or the profile before consent. The server's sentence says which. */
+        return { ok: false, message: error.problem.detail ?? 'This waits for the client to accept their invite.' };
       case 'SESSION_UNDO_EXPIRED':
         /* 10 Nov 2026: a single session's booking can be undone for ten minutes, then it is cancelled. */
         return { ok: false, message: 'It’s been more than 10 minutes since this was booked, so it can’t be undone. Cancel it instead.' };
@@ -241,6 +245,17 @@ export async function markDone(id: string): Promise<WriteResult> {
   }
 }
 
+/**
+ * A no-show's own words for "not charged" (16 Nov 2026). Mark done's lines say
+ * "delivered free" for a trial or a free session, which is the opposite of a
+ * no-show; the pack reasons read the same either way.
+ */
+function noShowNotChargedLine(reason: MarkWire['reason']): string | undefined {
+  if (reason === 'TRIAL') return 'No-show — a trial, nothing charged.';
+  if (reason === 'COMPLIMENTARY') return 'No-show — a free session, nothing charged.';
+  return chargeLine(reason) ?? undefined;
+}
+
 function notChargedLine(reason: MarkWire['reason']): string {
   return chargeLine(reason) ?? 'Not charged — there is no running pack for it.';
 }
@@ -296,7 +311,7 @@ export async function markNoShow(input: {
       ok: true,
       sessionId: input.id,
       charged: res?.charged ?? false,
-      message: input.costsASession && res && !res.charged ? notChargedLine(res.reason) : undefined,
+      message: input.costsASession && res && !res.charged ? noShowNotChargedLine(res.reason) : undefined,
       sessionsRemaining: res?.sessionsRemaining ?? null,
     };
   } catch (error) {
@@ -325,6 +340,23 @@ export async function cancelSession(
 }
 
 /**
+ * The receipt line for a reopen. A single session has no pack, so its own sale
+ * is what changed (`effects.sale`, 17 Nov 2026): after Mark done it stays owed,
+ * after an uncharged cancel or no-show it is owed again, and with none left to
+ * revive (refunded, or booked before sales at booking) it was sold again.
+ */
+function reopenLine(
+  effects: { chargeReversed: boolean; sale?: 'kept' | 'revived' | 'sold' } | undefined,
+  amount: string | undefined,
+): string | undefined {
+  const price = amount ? rupees(Number(amount)) : 'its price';
+  if (effects?.sale === 'kept') return `Its ${price} is still owed.`;
+  if (effects?.sale === 'revived') return `Booked again — ${price} is owed again.`;
+  if (effects?.sale === 'sold') return `Booked again — sold for ${price}.`;
+  return effects?.chargeReversed ? 'The session is back on their pack.' : undefined;
+}
+
+/**
  * Take back a done, no-show or cancel — `POST /v1/sessions/{id}/reopen` (R69).
  * The session is booked again, its log is kept, and a pack charge is reversed
  * (never deleted). The Undo on every settle receipt, and Reopen on a settled
@@ -332,7 +364,10 @@ export async function cancelSession(
  */
 export async function reopenSession(id: string): Promise<WriteResult> {
   try {
-    const res = await api<{ effects: { chargeReversed: boolean; sessionsRemaining?: number } }>(
+    const res = await api<{
+      effects: { chargeReversed: boolean; sessionsRemaining?: number; sale?: 'kept' | 'revived' | 'sold' };
+      session?: { sale?: { amount: string } | null };
+    }>(
       `/v1/sessions/${id}/reopen`,
       { method: 'POST', body: {} },
     );
@@ -340,7 +375,7 @@ export async function reopenSession(id: string): Promise<WriteResult> {
     return {
       ok: true,
       sessionId: id,
-      message: res?.effects?.chargeReversed ? 'The session is back on their pack.' : undefined,
+      message: reopenLine(res?.effects, res?.session?.sale?.amount),
       sessionsRemaining: res?.effects?.sessionsRemaining ?? null,
     };
   } catch (error) {

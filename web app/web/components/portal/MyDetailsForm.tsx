@@ -9,6 +9,7 @@ import { TextField } from '@/web-components/ui/Field';
 import { Message } from '@/web-components/ui/Message';
 import { Select } from '@/web-components/ui/Select';
 import { Textarea } from '@/web-components/ui/Textarea';
+import { GENDERS } from '@/lib/clients/gender';
 
 const ACTIVITY = [
   { value: '', label: 'Not set' },
@@ -22,7 +23,8 @@ const ACTIVITY = [
 const ZONES = ['Asia/Kolkata', 'Asia/Dubai', 'Asia/Singapore', 'Asia/Kathmandu', 'Europe/London', 'America/New_York', 'Australia/Sydney'];
 
 /**
- * §5 · *Your details* — the five things a client may correct about themselves. The number and the date of birth are shown and are not
+ * §5 · *Your details* — the six things a client may correct about themselves. Gender (V44, 22 Nov 2026) is one: the trainer
+ * records it when adding them, and the client is the one who knows — so it is shown here, prefilled, and theirs to change. The number and the date of birth are shown and are not
  * fields: a changed number goes through the trainer (it is the sign-in and the channel), and a date of birth is the adult-only check
  * the invite made. Only what changed is sent, with the version the screen was drawn from, so a second tab cannot be overwritten silently.
  */
@@ -33,6 +35,7 @@ export function MyDetailsForm({ details, trainerName }: { details: MyDetailsWire
   const [height, setHeight] = useState(details.heightCm == null ? '' : String(details.heightCm));
   const [timezone, setTimezone] = useState(details.timezone ?? 'Asia/Kolkata');
   const [activity, setActivity] = useState(details.activityLevel ?? '');
+  const [gender, setGender] = useState(details.gender ?? '');
   const [failure, setFailure] = useState<{ message: string; field?: 'name' | 'height' } | null>(null);
   const [done, setDone] = useState(false);
   const [pending, start] = useTransition();
@@ -54,6 +57,7 @@ export function MyDetailsForm({ details, trainerName }: { details: MyDetailsWire
     }
     if (timezone !== (saved.timezone ?? '')) change.timezone = timezone;
     if (activity !== (saved.activityLevel ?? '')) change.activityLevel = activity || null;
+    if (gender !== (saved.gender ?? '')) change.gender = gender || null;
     if (Object.keys(change).length === 0) return setDone(true);
 
     start(async () => {
@@ -70,6 +74,13 @@ export function MyDetailsForm({ details, trainerName }: { details: MyDetailsWire
         <TextField label="Name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} error={failure?.field === 'name' ? failure.message : undefined} />
         <Textarea label="Your goal" hint={`${trainerName} sees this. Leave it empty if you’d rather not say.`} value={goal} limit={1000} rows={3} onChange={(e) => setGoal(e.target.value)} />
         <TextField label="Height (cm)" inputMode="decimal" numeric width={160} value={height} onChange={(e) => setHeight(e.target.value)} error={failure?.field === 'height' ? failure.message : undefined} />
+        <Select
+          label="Gender"
+          hint={`${trainerName} added this. If it isn’t right, change it — or choose “Prefer not to say”.`}
+          value={gender}
+          options={[{ value: '', label: 'Not given' }, ...GENDERS]}
+          onChange={(e) => setGender(e.target.value)}
+        />
         <Select label="How active are you now" value={activity} options={ACTIVITY} onChange={(e) => setActivity(e.target.value)} />
         <Select label="Time zone" hint="Your sessions and reminders are shown in this." value={timezone} options={zones.map((z) => ({ value: z, label: z.replace('_', ' ') }))} onChange={(e) => setTimezone(e.target.value)} />
 

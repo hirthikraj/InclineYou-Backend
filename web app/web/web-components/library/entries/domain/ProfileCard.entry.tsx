@@ -92,6 +92,7 @@ export function ProfileCardEntry() {
         <SpecTable
           rows={[
             { property: 'Avatar', value: '48px', note: 'Avatar size="lg" — one initials rule' },
+            { property: 'Fold', value: <code>collapsible</code>, token: '--tx-accent-text', note: 'Name row always shown; the rest behind “See full preview” (aria-expanded), grid-rows transition. The caller’s CSS decides the width — the profile folds it when stacked on a phone.' },
             { property: 'Identity gap', value: '13px', token: '—' },
             { property: 'Name', value: '14px / 700', token: '--tx-ink' },
             { property: 'Headline', value: '12.5px, one line', note: 'Ellipses. The only child that clips' },

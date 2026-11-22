@@ -41,8 +41,20 @@ function currentFor(pathname: string): RailKey {
      finishing returns to, which is `AppShell.currentFor`'s own argument for
      `/sessions` falling through to `today`. */
   if (pathname.startsWith('/me/progress')) return 'me-progress';
+  /* An assessment is opened from Progress › Assessments, so the tab it belongs to stays lit (22 Nov 2026). */
+  if (pathname.startsWith('/me/assessments')) return 'me-progress';
+  /* A finished session is read from Progress › History, and its crumb says so. */
+  if (pathname.startsWith('/me/session')) return 'me-progress';
   if (pathname.startsWith('/me/plan')) return 'me-plan';
-  if (pathname.startsWith('/me/account')) return 'me-account';
+  /* The pages *Me* lists under *Yours* — details, messages, package, payments — light *Me*, not *Home*: in the
+     audit at 357px the bar said Home on the package screen the client had just reached from Me. */
+  if (
+    pathname.startsWith('/me/account') ||
+    pathname.startsWith('/me/details') ||
+    pathname.startsWith('/me/inbox') ||
+    pathname.startsWith('/me/package') ||
+    pathname.startsWith('/me/payments')
+  ) return 'me-account';
   return 'me-home';
 }
 

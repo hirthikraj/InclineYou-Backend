@@ -8,6 +8,7 @@ import { endPack, extendPack, pausePack, resumePack } from '@/lib/clients/packag
 import { longDateStr } from './shared';
 import { Button } from '@/web-components/ui/Button';
 import { TextField } from '@/web-components/ui/Field';
+import { DateField } from '@/web-components/ui/DateField';
 
 /**
  * THE THREE MESSY REALITIES — pause, resume, extend.
@@ -65,6 +66,10 @@ export function PackLife({
   const [days, setDays] = useState('14');
   const [effective, setEffective] = useState(todayISO());
   const [error, setError] = useState<string | null>(null);
+  /* One id per Extend form (18 Nov 2026): a retry after a lost answer sends it
+     again and the server answers the pack as it is, instead of giving the days
+     twice. A new form is a new extension, so opening it mints a fresh one. */
+  const [extendId, setExtendId] = useState(() => crypto.randomUUID());
   const [pending, startTransition] = useTransition();
 
   /* FOCUS FOLLOWS THE FORM. The buttons unmounted when a form opened, so focus fell to <body>; Cancel did
@@ -175,7 +180,10 @@ export function PackLife({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setMode('extend')}
+              onClick={() => {
+                setExtendId(crypto.randomUUID());
+                setMode('extend');
+              }}
             >
               Give more time
             </Button>
@@ -223,13 +231,7 @@ export function PackLife({
             <label className="fld__l" htmlFor="pl-date">
               {mode === 'pause' ? 'Paused from' : 'Back from'}
             </label>
-            <input
-              className="ctl"
-              id="pl-date"
-              type="date"
-              value={effective}
-              onChange={(e) => setEffective(e.target.value)}
-            />
+            <DateField id="pl-date" label={mode === 'pause' ? 'Paused from' : 'Back from'} block value={effective} onChange={setEffective} />
             <p className="small" style={{ marginTop: 6, color: 'var(--tx-ink-3)' }}>
               Back-date it to the day it actually happened. Catching up on a Sunday
               should not cost anybody three days.
@@ -321,7 +323,7 @@ export function PackLife({
               variant="primary"
               size="sm"
               disabled={pending}
-              onClick={() => run(() => extendPack(clientId, pkg.id, Number(days), reason))}
+              onClick={() => run(() => extendPack(clientId, pkg.id, Number(days), reason, extendId))}
             >
               {pending ? 'Saving…' : `Give ${Number(days) || 0} days`}
             </Button>

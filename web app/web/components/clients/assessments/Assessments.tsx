@@ -32,6 +32,7 @@ import { Pager } from '@/web-components/ui/Pager';
 import { RowMenu } from '@/web-components/ui/RowMenu';
 import { SearchField } from '@/web-components/ui/SearchField';
 import { Table, Row, type Column } from '@/web-components/ui/Table';
+import { DayRule } from '@/web-components/ui/DayRule';
 import { Tag } from '@/web-components/ui/Tag';
 import { Checklist, Plus } from './Icons';
 import { ScheduleSheet } from './ScheduleSheet';
@@ -89,10 +90,19 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
   /* WHAT NEEDS DOING FIRST, within the page: not taken (oldest first), then to take (soonest first), then
      what is done, newest first as the server sent it. The server pages by date, so across pages the order
      is still the date's; the caption says which. */
-  const rows = useMemo(() => {
-    const need = data.rows.filter((r) => r.state !== 'done').sort((a, b) => a.dueOn.localeCompare(b.dueOn));
-    return [...need, ...data.rows.filter((r) => r.state === 'done')];
-  }, [data.rows]);
+  /* TWO LISTS, DRAWN AS TWO (21 Nov 2026). They were concatenated into one table, so the dates ran
+     forward (11 Nov → 6 Dec) and then jumped BACK to 9 Nov and ran backwards, halfway down, with nothing
+     to say a second list had started. Each now sits under its own rule — *To take* · *Taken* — the
+     split the client file's Assessments tab already makes. Two `<Table>`s with one column model rather
+     than a spanning row: below 1200 the count columns are hidden, and a `GroupRow`'s span has to equal
+     the VISIBLE column count or `table-layout:fixed` rewrites every track (`GroupRow`'s own warning). */
+  const need = useMemo(
+    () => data.rows.filter((r) => r.state !== 'done').sort((a, b) => a.dueOn.localeCompare(b.dueOn)),
+    [data.rows],
+  );
+  const taken = useMemo(() => data.rows.filter((r) => r.state === 'done'), [data.rows]);
+  const rows = useMemo(() => [...need, ...taken], [need, taken]);
+  const split = need.length > 0 && taken.length > 0;
 
   return (
     <>
@@ -204,11 +214,31 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
             <Empty query={query} onClear={() => { setSearch(''); router.push('/clients/assessments'); }} />
           ) : (
             <div className="asm__t">
+              {[
+                { key: 'need', title: 'To take', list: need },
+                { key: 'taken', title: 'Taken', list: taken },
+              ]
+                .filter((g) => g.list.length > 0)
+                .map((g, gi) => (
+              <div key={g.key} className="asm__grp">
+              {split && (
+                <DayRule
+                  className="dayr--sec asm__rule"
+                  day={g.title}
+                  count={g.list.length}
+                  noun="assessments"
+                />
+              )}
               <Table
-                caption={`${rows.length} of ${data.total} assessments, the ones to take first`}
+                caption={
+                  split
+                    ? `${g.title}: ${g.list.length} assessments, ${g.key === 'need' ? 'soonest first' : 'newest first'}`
+                    : `${rows.length} of ${data.total} assessments, the ones to take first`
+                }
+                className={gi > 0 ? 'asm__cont' : undefined}
                 columns={COLUMNS}
               >
-                {rows.map((r) => {
+                {g.list.map((r) => {
                   const client = names.get(r.clientId) ?? 'Unknown client';
                   const when = new Date(`${r.dueOn}T00:00:00`);
                   return (
@@ -223,7 +253,7 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                             <span className="asm__d">
                               <b>{DATE.format(when)}</b>
                               {r.state !== 'done' && (
-                                <em className="asm__rel"> · {relative(r.dueOn, data.now)}</em>
+                                <em className="asm__rel">{relative(r.dueOn, data.now)}</em>
                               )}
                             </span>
                           ),
@@ -327,8 +357,37 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                   );
                 })}
               </Table>
+              </div>
+                ))}
             </div>
           )}
+
+          {/* THE PHONE'S PAGER, AT THE END OF THE LIST (21 Nov 2026, asked for). Under 900px the foot
+              already pins *Schedule an assessment*; pinning the pager under it as well stacked two bars
+              (~110px) over the tab bar on every scroll position, for a control only wanted once the list
+              has been read. So on a phone it scrolls in after the last row, and only the verb is sticky.
+              Two instances, one hidden at each width — the shell's own arrangement — so each is a plain
+              `Pager` and neither branches on a measured width. */}
+          <Pager
+            className="asm__pgin"
+            page={query.page}
+            size={PAGE_SIZE}
+            total={data.total}
+            href={(p) => assessmentsHref({ ...query, page: p })}
+            label="Assessment list pages"
+            noun="assessments"
+          />
+        </div>
+
+        {/* THE PHONE'S PRIMARY, AT THE FOOT (21 Nov 2026) — the pinned bar `/programs/workouts` and the
+            exercise library draw, where a thumb already is. Under 900px the header's copy is hidden
+            (`.asm .ph__acts`), so the verb is drawn once at each width; on a phone it was a lime block
+            squeezed beside *50 in the book*, the one control on the screen above the tabs. */}
+        <div className="pg__shelffoot asm__newfoot">
+          <Button variant="secondary" size="lg" wide onClick={() => setScheduling(true)}>
+            <Plus size={15} />
+            Schedule an assessment
+          </Button>
         </div>
 
         {/* PINNED TO THE FOOT, not scrolling with the rows — `Pager`'s own rule

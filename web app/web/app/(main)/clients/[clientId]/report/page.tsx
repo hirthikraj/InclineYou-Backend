@@ -4,6 +4,9 @@ import { ClientReport } from '@/components/reports/ClientReport';
 import { Unavailable } from '@/components/today/Unavailable';
 import { parseWeeks } from '@/lib/reports/build';
 import { requireClientReport } from '@/lib/reports/guard';
+import { ReportLocked } from '@/components/reports/ReportLocked';
+import { getClientHeader } from '@/lib/clients/client-api';
+import { hasConsent } from '@/lib/clients/setup';
 
 /**
  * `/clients/:id/report` — the client-facing progress card.
@@ -51,6 +54,20 @@ export default async function Page({
       <Unavailable
         kind={result.kind}
         status={result.kind === 'refused' ? result.status : undefined}
+      />
+    );
+  }
+
+  /* The card is the client's data leaving the building, so it waits for their consent (22 Nov 2026). The
+     header read is the file's own cached one. */
+  const header = await getClientHeader(clientId).catch(() => null);
+  if (header && !hasConsent(header.client.membershipStatus)) {
+    return (
+      <ReportLocked
+        clientId={clientId}
+        clientName={header.client.name}
+        phone={header.client.phone}
+        membership={header.client.membershipStatus}
       />
     );
   }

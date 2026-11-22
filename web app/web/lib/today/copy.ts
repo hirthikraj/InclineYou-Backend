@@ -69,6 +69,7 @@ export const KIND_LEAD: Record<AttentionKind, string> = {
   quiet: 'Quiet',
   missed: 'Attendance',
   'no-program': 'Plan',
+  setup: 'Setup',
   assess: 'Measure',
   unmarked: 'Diary',
   log: 'Diary',
