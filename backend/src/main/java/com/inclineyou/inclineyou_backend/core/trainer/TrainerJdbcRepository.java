@@ -90,6 +90,11 @@ public class TrainerJdbcRepository {
     }
 
     /** Soft-deletes every live window on these weekdays — the first half of replacing a day. */
+    /** Serialises one trainer's working-week saves, released at commit; apart from the trainer row, so a profile save is not held. */
+    public void lockWeek(UUID trainerId) {
+        jdbc.query("SELECT pg_advisory_xact_lock(hashtext('working-hours:' || :tid))", Map.of("tid", trainerId.toString()), rs -> { });
+    }
+
     public void softDeleteDays(UUID trainerId, java.util.Collection<Integer> weekdays) {
         if (weekdays.isEmpty()) return;
         jdbc.update("""

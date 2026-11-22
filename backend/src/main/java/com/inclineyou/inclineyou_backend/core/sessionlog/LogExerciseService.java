@@ -57,6 +57,15 @@ public class LogExerciseService {
             }
         }
         var head = sessions.head(trainerId, sessionId, true).orElseThrow(SessionLogReadService::notYours);
+        // Again under the session lock (19 Nov 2026): a double tap's second request missed the lookup above, waited here
+        // for the first, and then met its own id at the INSERT — 409 for an exercise that was added. It has committed now.
+        if (id != null) {
+            var existing = exercises.findOwned(trainerId, id);
+            if (existing.isPresent()) {
+                if (!existing.get().sessionId().equals(sessionId)) throw ApiException.idConflict();
+                return new Created<>(reads.entry(trainerId, sessionId, id), false);
+            }
+        }
         if (head.startedAt() == null) throw SetLogService.notStarted();
         var lib = exercises.library(trainerId, exerciseId).orElseThrow(() -> ApiException.notFound("That exercise is not in the library."));
 
@@ -126,7 +135,9 @@ public class LogExerciseService {
         ExCtx ctx = exercises.lock(trainerId, sessionId, sxId).orElseThrow(() -> ApiException.notFound("That exercise is not in this session."));
         if (!ctx.started()) throw SetLogService.notStarted();
         exercises.library(trainerId, to).orElseThrow(() -> ApiException.notFound("That exercise is not in the library."));
-        if (to.equals(ctx.exerciseId())) throw ApiException.validation("toExerciseId: that is the movement already");
+        // Already that movement: a retry whose first answer was lost (19 Nov 2026). It answers the exercise as it is, not a
+        // 400 for a swap that went through.
+        if (to.equals(ctx.exerciseId())) return reads.entry(trainerId, sessionId, sxId);
         if (planRow != null && exercises.alternative(planRow, ctx.plannedFrom(), to).isEmpty()) {
             throw ApiException.validation("planRowId: not one of this exercise's plan alternatives");
         }
@@ -146,8 +157,9 @@ public class LogExerciseService {
             exercises.insertPlannedFromPlan(sxId, planRow, done);
         }
         if (program != null) {
-            exercises.planSwapExercise(ctx.plannedFrom(), to);
-            if (planRow != null) exercises.planCopySets(planRow, ctx.plannedFrom());
+            // With an alternative the two plan rows trade places (19 Nov 2026), so neither movement appears twice.
+            if (planRow != null) exercises.planTradeRows(ctx.plannedFrom(), planRow);
+            else exercises.planSwapExercise(ctx.plannedFrom(), to);
             exercises.touchProgram(program);
         }
         return reads.entry(trainerId, sessionId, sxId);

@@ -70,6 +70,10 @@ class AssessmentClientSendApiTest {
         joined = client("On The Portal");
         jdbc.update("UPDATE client SET membership_status = 'accepted', invited_at = now(), accepted_at = now() WHERE id = :c::uuid", Map.of("c", joined.toString()));
         stranger = client("Not On It");
+        // Consented but not on the portal (22 Nov 2026): every client is consented before an assessment, so "nowhere to
+        // send it" is now a client the trainer removed after they accepted.
+        jdbc.update("UPDATE client SET membership_status = 'removed', removed_at = now(), removed_by = 'trainer' WHERE id = :c::uuid",
+                Map.of("c", stranger.toString()));
     }
 
     @AfterEach
@@ -138,6 +142,25 @@ class AssessmentClientSendApiTest {
         send(late).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CLIENT_ARCHIVED"));
 
         send(UUID.randomUUID().toString()).andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("one the trainer has started in person is not sent: 409 ASSESSMENT_STARTED, nothing told (20 Nov 2026)")
+    void startedIsNotSent() throws Exception {
+        String tpl = template(FORM);
+        String a = JsonPath.read(give("{\"clientId\":\"" + joined + "\",\"templateId\":\"" + tpl + "\",\"sendNow\":false}")
+                .andReturn().getResponse().getContentAsString(), "$.id");
+        // The trainer took the weight in the session and stopped there.
+        jdbc.update("UPDATE assessment SET readings = '{\"weight\": 72.5}'::jsonb WHERE id = :i::uuid", Map.of("i", a));
+        send(a).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ASSESSMENT_STARTED"));
+        assertEquals(0, count("SELECT count(*) FROM client_notification WHERE client_id = :i::uuid", joined), "nobody is told");
+        assertEquals(0, count("SELECT count(*) FROM assessment WHERE id = '" + a + "'::uuid AND sent_at IS NOT NULL", joined));
+
+        // One sent first and then answered by the client is still the idempotent 200.
+        String sent = JsonPath.read(give("{\"clientId\":\"" + joined + "\",\"templateId\":\"" + tpl + "\"}")
+                .andReturn().getResponse().getContentAsString(), "$.id");
+        jdbc.update("UPDATE assessment SET readings = '{\"weight\": 70}'::jsonb WHERE id = :i::uuid", Map.of("i", sent));
+        send(sent).andExpect(status().isOk());
     }
 
     @Test
@@ -266,6 +289,9 @@ class AssessmentClientSendApiTest {
         var id = UUID.randomUUID();
         jdbc.update("INSERT INTO client (id, trainer_id, name, client_type) VALUES (:id::uuid, :tid::uuid, :name, 'independent')",
                 Map.of("id", id.toString(), "tid", me.toString(), "name", name));
+        // Consented (22 Nov 2026): ConsentGate refuses a third session, notes, the profile and health data without it.
+        jdbc.update("UPDATE client SET membership_status = 'accepted', invited_at = now(), accepted_at = now() WHERE id = :id::uuid",
+                Map.of("id", id.toString()));
         return id;
     }
 

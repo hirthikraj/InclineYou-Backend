@@ -47,9 +47,9 @@ public class InviteController {
     @PostMapping("/{token}/code")
     public OtpRequested sendCode(@PathVariable String token, @Valid @RequestBody InviteCodeRequest body, HttpServletRequest http) {
         String ip = clientAddress.of(http);
-        codes.phoneOf(token).ifPresent(phone -> abuse.beforeSend(ip, phone));
         try {
-            return codes.sendCode(token, body);
+            // The guard runs inside, after the date of birth and the notice are checked (21 Nov 2026).
+            return codes.sendCode(token, body, ip);
         } catch (OtpThrottledException e) {
             abuse.strike(ip);
             throw e;

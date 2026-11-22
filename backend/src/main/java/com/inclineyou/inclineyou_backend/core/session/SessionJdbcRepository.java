@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.session;
 
+import com.inclineyou.inclineyou_backend.core.program.PlanSequence;
 import com.inclineyou.inclineyou_backend.core.session.dto.ClientStanding;
 import com.inclineyou.inclineyou_backend.core.session.dto.NewSession;
 import com.inclineyou.inclineyou_backend.core.session.dto.SessionCharge;
@@ -269,23 +270,15 @@ public class SessionJdbcRepository {
      * when there is no such session; none once the last has been booked.
      */
     public Optional<UUID> nextWorkout(UUID clientId, Instant at) {
-        return jdbc.queryForList("""
-                WITH plan AS (
-                    SELECT w.id, row_number() OVER (ORDER BY w.week, w.day, w.position, w.id) AS n
-                    FROM program pr
-                    JOIN workout w ON w.program_id = pr.id AND w.deleted_at IS NULL
-                    WHERE pr.client_id = :cid::uuid AND pr.status = 'active' AND pr.deleted_at IS NULL
-                ),
-                last AS (
-                    SELECT plan.n FROM scheduled_session s JOIN plan ON plan.id = s.workout_id
-                    WHERE s.client_id = :cid::uuid AND s.deleted_at IS NULL AND s.status <> 'cancelled'
-                      AND (s.logged_by = 'trainer' OR s.status = 'done')   -- R107: a finished self-run day counts as done
-                      AND s.scheduled_at < :at
-                    ORDER BY s.scheduled_at DESC, s.id DESC
-                    LIMIT 1
-                )
+        // A week with nothing of its own repeats week 1 (PlanSequence, 18 Nov 2026).
+        return jdbc.queryForList("WITH " + PlanSequence.ctes("""
+                SELECT id, client_id FROM program
+                WHERE client_id = :cid::uuid AND status = 'active' AND deleted_at IS NULL""", """
+                s.client_id = :cid::uuid AND s.deleted_at IS NULL AND s.status <> 'cancelled'
+                  AND (s.logged_by = 'trainer' OR s.status = 'done')   -- R107: a finished self-run day counts as done
+                  AND s.scheduled_at < :at""") + """
                 SELECT plan.id::text FROM plan
-                WHERE plan.n = coalesce((SELECT n FROM last), 0) + 1
+                WHERE plan.n = coalesce((SELECT n FROM plan_at), 0) + 1
                 """, Map.of("cid", clientId.toString(), "at", Timestamp.from(at)), String.class)
                 .stream().findFirst().map(UUID::fromString);
     }

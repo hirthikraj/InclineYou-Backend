@@ -54,8 +54,10 @@ class SessionBillingTest {
     @Autowired PackageRenewService renewals;
     @Autowired PackageSaleService sales;
     @Autowired PackageUndoService undos;
+    @Autowired com.inclineyou.inclineyou_backend.core.payment.PackageLedgerService ledger;
     @Autowired com.inclineyou.inclineyou_backend.core.payment.PackageJdbcRepository packagesRepo;
     @Autowired com.inclineyou.inclineyou_backend.core.client.ClientScheduleJdbcRepository schedule;
+    @Autowired com.inclineyou.inclineyou_backend.core.client.ClientStateService clientStates;
 
     private UUID trainer;
     private UUID client;
@@ -137,6 +139,7 @@ class SessionBillingTest {
         // Reopened (10 Nov 2026): the charge comes back, and the sale stays owed — it was sold, and it will happen again.
         var back = states.reopen(trainer, s, null);
         assertEquals(1, back.effects().sessionsRemaining());
+        assertEquals("kept", back.effects().sale(), "the charge came off its own sale, which stays owed");
         assertEquals(0, new BigDecimal("800").compareTo(due(sale)), "still owed after a reopen");
         assertEquals(sale.toString(), states.markDone(trainer, s, null).packageId(), "never sold twice");
     }
@@ -214,7 +217,10 @@ class SessionBillingTest {
         var cancelled = states.cancel(trainer, sa, Map.of("reason", "client"));
         assertEquals("cancelled", cancelled.sale().status(), "not charged: closed, kept");
         assertEquals(0, BigDecimal.ZERO.compareTo(due(UUID.fromString(a.sale().packageId()))), "nothing owed");
-        assertEquals("active", states.reopen(trainer, sa, null).session().sale().status(), "booked again: owed again");
+        var revived = states.reopen(trainer, sa, null);
+        assertEquals("active", revived.session().sale().status(), "booked again: owed again");
+        assertEquals("revived", revived.effects().sale());
+        assertFalse(revived.effects().chargeReversed());
 
         var charged = states.cancel(trainer, sa, Map.of("reason", "client", "charge", true));
         assertEquals("completed", charged.sale().status(), "a late cancel charged: the sale is used");
@@ -233,6 +239,77 @@ class SessionBillingTest {
     }
 
     @Test
+    @DisplayName("reopening a single session with no sale to revive sells it again: after a refund, or booked before sales at booking")
+    void reopenSellsWhenNothingToRevive() {
+        long at = Instant.now().plus(Duration.ofDays(1)).truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        var a = bookings.book(trainer, book(at, "single", "800")).session();
+        UUID sa = UUID.fromString(a.id());
+        UUID first = UUID.fromString(a.sale().packageId());
+        ledger.record(trainer, first, Map.of("amount", "800", "method", "upi"));
+        states.cancel(trainer, sa, Map.of("reason", "client"));
+        ledger.refund(trainer, first, Map.of("amount", "800", "method", "upi"));
+        // The row shows the newest sale by created_at, and one test transaction gives every row the same now(): in use
+        // the refund and the reopen are separate transactions, so put the first sale where it would be.
+        jdbc.update("UPDATE package SET created_at = created_at - interval '1 hour' WHERE id = :id::uuid",
+                Map.of("id", first.toString()));
+
+        var reopened = states.reopen(trainer, sa, null);
+        assertEquals("sold", reopened.effects().sale());
+        var sale = reopened.session().sale();
+        assertNotNull(sale, "booked again: sold again");
+        assertNotEquals(first.toString(), sale.packageId(), "a new sale — the refunded one gave up its place (V33)");
+        assertEquals("active", sale.status());
+        assertEquals(0, new BigDecimal("800").compareTo(due(UUID.fromString(sale.packageId()))), "owed again");
+        assertEquals("refunded", packageReads.one(trainer, first).orElseThrow().status(), "the refund stands");
+
+        // A session cancelled before sales were made at booking has no sale at all.
+        var b = bookings.book(trainer, book(at + 7_200_000, "single", "800")).session();
+        UUID sb = UUID.fromString(b.id());
+        states.cancel(trainer, sb, Map.of("reason", "client"));
+        jdbc.update("UPDATE package SET session_id = NULL, deleted_at = now() WHERE id = :id::uuid",
+                Map.of("id", b.sale().packageId()));
+        var legacy = states.reopen(trainer, sb, null);
+        assertNotNull(legacy.session().sale(), "a legacy booking is sold when it is booked again");
+        assertEquals("sold", legacy.effects().sale());
+        assertNull(states.reopen(trainer, sb, null).effects().sale(), "a second reopen changes nothing");
+    }
+
+    @Test
+    @DisplayName("a cancel sent again with a different charge decision re-decides it; the same decision changes nothing")
+    void cancelReDecides() {
+        long at = Instant.now().plus(Duration.ofDays(2)).truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        var s = bookings.book(trainer, book(at, "single", "800")).session();
+        UUID sid = UUID.fromString(s.id());
+        UUID sale = UUID.fromString(s.sale().packageId());
+
+        var first = states.cancel(trainer, sid, Map.of("reason", "client"));
+        assertEquals("cancelled", first.sale().status(), "not charged: nothing owed");
+        assertNull(first.charge());
+
+        var charged = states.cancel(trainer, sid, Map.of("reason", "client", "charge", true));
+        assertEquals("completed", charged.sale().status(), "changed their mind: the late cancel is charged");
+        assertNotNull(charged.charge(), "and the row says so");
+        assertEquals(0, new BigDecimal("800").compareTo(due(sale)));
+        assertEquals("completed", states.cancel(trainer, sid, Map.of("charge", true)).sale().status(), "the same again: no change");
+        assertEquals("completed", states.cancel(trainer, sid, null).sale().status(), "a plain repeat: no change");
+
+        var back = states.cancel(trainer, sid, Map.of("charge", false));
+        assertEquals("cancelled", back.sale().status(), "and back: nothing owed");
+        assertNull(back.charge());
+        assertEquals(0, BigDecimal.ZERO.compareTo(due(sale)));
+
+        // A pack session too: one session, then given back.
+        var pack = pack(12, 12);
+        var p = bookings.book(trainer, book(at + 7_200_000, null, null)).session();
+        UUID pid = UUID.fromString(p.id());
+        states.cancel(trainer, pid, null);
+        states.cancel(trainer, pid, Map.of("charge", true));
+        assertEquals(11, remaining(pack));
+        states.cancel(trainer, pid, Map.of("charge", false));
+        assertEquals(12, remaining(pack));
+    }
+
+    @Test
     @DisplayName("a pause cancels future bookings and closes their sales (nothing owed); a resume brings both back")
     void pauseClosesSales() {
         long at = Instant.now().plus(Duration.ofDays(5)).truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
@@ -243,6 +320,26 @@ class SessionBillingTest {
         assertEquals("cancelled", reads.one(trainer, UUID.fromString(s.id())).orElseThrow().sale().status());
         assertEquals(1, schedule.restoreUpcoming(client, "client_paused", null, zone));
         assertEquals("active", reads.one(trainer, UUID.fromString(s.id())).orElseThrow().sale().status());
+    }
+
+    @Test
+    @DisplayName("pausing and resuming a client leaves a single session's sale owed and unpaused — it is the session's, not a pack the pause stops")
+    void pauseAndResumeLeaveASingleSaleWhole() {
+        long at = Instant.now().plus(Duration.ofDays(5)).truncatedTo(ChronoUnit.MINUTES).toEpochMilli();
+        var s = bookings.book(trainer, book(at, "single", "800")).session();
+        String sale = s.sale().packageId();
+        var pack = pack(12, 12);
+
+        clientStates.pause(trainer, client, new com.inclineyou.inclineyou_backend.core.client.dto.PauseRequest(null));
+        assertNull(jdbc.queryForObject("SELECT paused_at FROM package WHERE id = :id::uuid", Map.of("id", sale), Timestamp.class),
+                "the pause never pauses a single sale: the cancelled session closes it");
+        assertNotNull(jdbc.queryForObject("SELECT paused_at FROM package WHERE id = :id::uuid", Map.of("id", pack.toString()),
+                Timestamp.class), "a real pack is paused");
+
+        clientStates.resume(trainer, client);
+        var row = jdbc.queryForMap("SELECT status, paused_at FROM package WHERE id = :id::uuid", Map.of("id", sale));
+        assertEquals("active", row.get("status"), "owed again with its session");
+        assertNull(row.get("paused_at"), "and not left paused, which would leave its session uncharged at Mark done");
     }
 
     @Test
@@ -287,6 +384,13 @@ class SessionBillingTest {
         assertEquals("SESSION_CHARGED", code(() -> states.billing(trainer, s, Map.of("billing", "trial"))));
         assertEquals("VALIDATION", code(() -> states.billing(trainer, s, Map.of("billing", "trial", "colour", "red"))));
         assertEquals("VALIDATION", code(() -> states.billing(trainer, s, Map.of("billing", "single", "price", 650))));
+
+        // A no-show's money is the no-show's own decision (17 Nov 2026): reopen it first.
+        var missed = session(Duration.ofHours(3), "pack", null);
+        states.noShow(trainer, missed, Map.of("charge", false));
+        assertEquals("SESSION_SETTLED", code(() -> states.billing(trainer, missed, Map.of("billing", "single", "price", "800"))));
+        assertTrue(jdbc.queryForList("SELECT 1 FROM package WHERE session_id = :s::uuid AND deleted_at IS NULL",
+                Map.of("s", missed.toString())).isEmpty(), "no sale for a session that did not happen");
 
         // Before delivery it only records the choice.
         var later = session(Duration.ofHours(-24), "pack", null);
@@ -629,6 +733,9 @@ class SessionBillingTest {
         jdbc.update("""
                 INSERT INTO client (id, trainer_id, name, client_type) VALUES (:id::uuid, :tid::uuid, :name, 'independent')
                 """, Map.of("id", id.toString(), "tid", trainer.toString(), "name", name));
+        // Consented (22 Nov 2026): ConsentGate refuses a third session, notes, the profile and health data without it.
+        jdbc.update("UPDATE client SET membership_status = 'accepted', invited_at = now(), accepted_at = now() WHERE id = :id::uuid",
+                Map.of("id", id.toString()));
         return id;
     }
 

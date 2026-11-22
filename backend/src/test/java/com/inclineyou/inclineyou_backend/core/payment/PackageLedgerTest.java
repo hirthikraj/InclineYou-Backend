@@ -59,6 +59,9 @@ class PackageLedgerTest {
         pack = UUID.randomUUID();
         var p = Map.of("id", client.toString(), "tid", trainer.toString(), "pk", pack.toString());
         jdbc.update("INSERT INTO client (id, trainer_id, name, client_type) VALUES (:id::uuid, :tid::uuid, 'Meera', 'independent')", p);
+        // Consented (22 Nov 2026): ConsentGate refuses a third session, notes, the profile and health data without it.
+        jdbc.update("UPDATE client SET membership_status = 'accepted', invited_at = now(), accepted_at = now() WHERE id = :id::uuid",
+                Map.of("id", client.toString()));
         jdbc.update("""
                 INSERT INTO package (id, trainer_id, client_id, name, service, basis, sessions_total, sessions_remaining,
                                      amount, currency, start_date, end_date, due_date)
@@ -188,6 +191,143 @@ class PackageLedgerTest {
         assertEquals("Left knee — no deep lunges", unpinned.body(), "a pin toggle leaves the text alone");
         assertCode("PRECONDITION_FAILED", () -> notes.patch(trainer, client, id, "\"1\"", new UpdateNoteRequest(Patch.of("x"), null, null)));
         assertEquals(1, notes.list(trainer, client).size());
+    }
+
+    @Test
+    @DisplayName("a single session's own sale has no clock: pause, resume, extend and cancel are 422 PACKAGE_SINGLE_SESSION")
+    void singleSaleHasNoClock() {
+        UUID session = UUID.randomUUID(), sale = UUID.randomUUID();
+        var p = Map.of("s", session.toString(), "k", sale.toString(), "tid", trainer.toString(), "c", client.toString());
+        jdbc.update("""
+                INSERT INTO scheduled_session (id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at, status,
+                                               logged_by, billing, price)
+                VALUES (:s::uuid, :tid::uuid, :c::uuid, now() + interval '2 days', 60, now() + interval '2 days 1 hour',
+                        'scheduled', 'trainer', 'single', 800)""", p);
+        jdbc.update("""
+                INSERT INTO package (id, trainer_id, client_id, name, service, basis, sessions_total, sessions_remaining,
+                                     amount, currency, start_date, due_date, session_id)
+                VALUES (:k::uuid, :tid::uuid, :c::uuid, 'Single session', 'floor', 'sessions', 1, 1, 800, 'INR',
+                        current_date, current_date + 2, :s::uuid)""", p);
+        assertCode("PACKAGE_SINGLE_SESSION", () -> ledger.pause(trainer, sale, null));
+        assertCode("PACKAGE_SINGLE_SESSION", () -> ledger.resume(trainer, sale, null));
+        assertCode("PACKAGE_SINGLE_SESSION", () -> ledger.extend(trainer, sale, body("days", 7)));
+        assertCode("PACKAGE_SINGLE_SESSION", () -> ledger.cancel(trainer, sale, null));
+        assertEquals(0, ledger.adjustments(trainer, sale, null).size(), "nothing was written");
+    }
+
+    @Test
+    @DisplayName("a pause starts no earlier than the pack did and at most 3 months back; inside that it lands")
+    void pauseStartBounds() {
+        long day = 86_400_000L, now = System.currentTimeMillis();
+        jdbc.update("UPDATE package SET start_date = current_date - 200 WHERE id = :pk::uuid", Map.of("pk", pack.toString()));
+        assertCode("VALIDATION", () -> ledger.pause(trainer, pack, body("effectiveAt", now - 365 * day)));   // a year back
+        jdbc.update("UPDATE package SET start_date = current_date - 10 WHERE id = :pk::uuid", Map.of("pk", pack.toString()));
+        assertCode("VALIDATION", () -> ledger.pause(trainer, pack, body("effectiveAt", now - 20 * day)));    // before the start
+        var paused = ledger.pause(trainer, pack, body("effectiveAt", now - 5 * day));
+        assertNotNull(paused.pausedAt());
+    }
+
+    @Test
+    @DisplayName("extend with an id: the same id again gives no more days; that id on another pack is 409 ID_CONFLICT")
+    void extendReplays() {
+        UUID id = UUID.randomUUID();
+        String first = ledger.extend(trainer, pack, body("id", id.toString(), "days", 7)).endDate();
+        assertEquals(first, ledger.extend(trainer, pack, body("id", id.toString(), "days", 7)).endDate(), "a retry, not 14 days");
+        assertEquals(1, ledger.adjustments(trainer, pack, "extend").size());
+        UUID other = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO package (id, trainer_id, client_id, name, service, basis, sessions_total, sessions_remaining,
+                                     amount, currency, start_date, end_date, due_date)
+                VALUES (:pk::uuid, :tid::uuid, :c::uuid, '8 sessions', 'floor', 'sessions', 8, 8, 6000, 'INR',
+                        current_date, current_date + 30, current_date)""",
+                Map.of("pk", other.toString(), "tid", trainer.toString(), "c", client.toString()));
+        assertCode("ID_CONFLICT", () -> ledger.extend(trainer, other, body("id", id.toString(), "days", 7)));
+        ledger.extend(trainer, other, body("days", 1));
+        ledger.extend(trainer, other, body("days", 1));
+        assertEquals(2, ledger.adjustments(trainer, other, "extend").size(), "without an id every call still adds days");
+    }
+
+    @Test
+    @DisplayName("paidAt is at most 3 months back on record, mark-paid and correct; inside the window it lands")
+    void paidAtWindow() {
+        long day = 86_400_000L, now = System.currentTimeMillis();
+        assertCode("VALIDATION", () -> ledger.record(trainer, pack, body("amount", "1000.00", "method", "cash",
+                "paidAt", now - 3650 * day)));
+        var ok = ledger.record(trainer, pack, body("amount", "1000.00", "method", "cash", "paidAt", now - 60 * day));
+        assertTrue(ok.created());
+        UUID yid = UUID.fromString(ok.payment().id());
+        assertCode("VALIDATION", () -> ledger.patch(trainer, yid, null, new java.util.HashMap<>(Map.of("paidAt", now - 400 * day))));
+
+        var pending = ledger.record(trainer, pack, body("amount", "500.00", "method", "upi", "status", "pending"));
+        UUID pid = UUID.fromString(pending.payment().id());
+        assertCode("VALIDATION", () -> ledger.markPaid(trainer, pid, body("paidAt", now - 400 * day)));
+        assertEquals("paid", ledger.markPaid(trainer, pid, body("paidAt", now - day)).payment().status());
+    }
+
+    @Test
+    @DisplayName("a retried full write-off of pending-only money answers 200 with the write-off, not 409 PACKAGE_NOTHING_DUE")
+    void fullWriteOffRetry() {
+        ledger.record(trainer, pack, body("amount", "8500.00", "method", "cash"));
+        var pending = ledger.record(trainer, pack, body("amount", "500.00", "method", "upi", "status", "pending"));
+        UUID id = UUID.randomUUID();
+        var first = ledger.writeOffPackage(trainer, pack, body("id", id.toString()));
+        assertEquals("write_off", first.payment().status());
+        assertEquals(pending.payment().id(), first.payment().id(), "the pending row was written off in place");
+
+        var again = ledger.writeOffPackage(trainer, pack, body("id", id.toString()));
+        assertFalse(again.created(), "a retry, not a second write-off");
+        assertEquals(first.payment().id(), again.payment().id());
+        assertCode("PACKAGE_NOTHING_DUE", () -> ledger.writeOffPackage(trainer, pack, body()));   // no id: still refused
+    }
+
+    @Test
+    @DisplayName("money that lands leaves room for the pending; a refund is refused while one is pending; refundedAt at most 3 months back")
+    void refundRules() {
+        long day = 86_400_000L, now = System.currentTimeMillis();
+        var pending = ledger.record(trainer, pack, body("amount", "500.00", "method", "upi", "status", "pending"));
+        // ₹9,000 in cash beside a pending ₹500 would strand the ₹500 (it could never be marked paid or written off).
+        assertCode("PAYMENT_OVER_DUE", () -> ledger.record(trainer, pack, body("amount", "9000.00", "method", "cash")));
+        ledger.record(trainer, pack, body("amount", "8500.00", "method", "cash"));
+        assertCode("PACKAGE_HAS_DUES", () -> ledger.refund(trainer, pack, body("amount", "9000.00", "method", "cash")));
+
+        ledger.markPaid(trainer, UUID.fromString(pending.payment().id()), body());          // now fully paid, nothing pending
+        assertCode("VALIDATION", () -> ledger.refund(trainer, pack, body("amount", "9000.00", "method", "cash",
+                "refundedAt", now - 3650 * day)));
+        var refunded = ledger.refund(trainer, pack, body("amount", "9000.00", "method", "cash", "refundedAt", now - day));
+        assertEquals("refunded", refunded.pkg().status());
+    }
+
+    @Test
+    @DisplayName("mark-paid leaves room for the other pending payments")
+    void markPaidLeavesRoomForOthers() {
+        var a = ledger.record(trainer, pack, body("amount", "500.00", "method", "upi", "status", "pending"));
+        ledger.record(trainer, pack, body("amount", "500.00", "method", "upi", "status", "pending"));
+        ledger.record(trainer, pack, body("amount", "8000.00", "method", "cash"));
+        // ₹1,000 owed, both ₹500s pending: landing one leaves exactly the other's room.
+        assertEquals("paid", ledger.markPaid(trainer, UUID.fromString(a.payment().id()), body()).payment().status());
+    }
+
+    @Test
+    @DisplayName("correcting a paid amount up leaves room for the pending: ₹8,500 → ₹9,000 beside a pending ₹500 is refused")
+    void correctionLeavesRoomForPending() {
+        ledger.record(trainer, pack, body("amount", "500.00", "method", "upi", "status", "pending"));
+        UUID cash = UUID.fromString(ledger.record(trainer, pack, body("amount", "8500.00", "method", "cash")).payment().id());
+        var refused = assertThrows(ApiException.class,
+                () -> ledger.patch(trainer, cash, null, new java.util.HashMap<>(Map.of("amount", "9000.00"))));
+        assertEquals("PAYMENT_OVER_DUE", refused.getCode());
+        assertTrue(refused.getMessage().contains("pending"), refused.getMessage());
+        assertEquals("8400.00", ledger.patch(trainer, cash, null, new java.util.HashMap<>(Map.of("amount", "8400.00")))
+                .payment().amount());
+    }
+
+    @Test
+    @DisplayName("cancel with only a pending payment in the way names its own way out")
+    void cancelNamesThePending() {
+        ledger.record(trainer, pack, body("amount", "8500.00", "method", "cash"));
+        ledger.record(trainer, pack, body("amount", "500.00", "method", "upi", "status", "pending"));
+        var e = assertThrows(ApiException.class, () -> ledger.cancel(trainer, pack, null));
+        assertEquals("PACKAGE_HAS_DUES", e.getCode());
+        assertTrue(e.getMessage().contains("delete"), e.getMessage());
     }
 
     private int count(String status) {

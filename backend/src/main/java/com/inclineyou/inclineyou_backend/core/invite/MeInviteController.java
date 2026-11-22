@@ -82,7 +82,8 @@ public class MeInviteController {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "INVITE_UNAVAILABLE",
                     "This invite isn’t available any more. Ask your trainer to send it again.");
         }
-        var done = accepts.acceptForSignedIn(phone, mine, body.dateOfBirth(), body.policyVersion());
+        var done = accepts.acceptForSignedIn(phone, mine, body.dateOfBirth(), body.policyVersion(),
+                Boolean.TRUE.equals(body.whatsappReminders()), body.trainingTerms());
         Object raw = http.getAttribute(AuthTokenFilter.TOKEN_ATTRIBUTE);
         if (raw instanceof String s && SessionTokenIssuer.KIND.equals(tokens.kindOf(s))) tokens.revoke(s);
         return ResponseEntity.status(HttpStatus.CREATED).cacheControl(CacheControl.noStore()).body(done.body());

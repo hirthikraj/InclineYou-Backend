@@ -1114,6 +1114,12 @@ class TenantIsolationTest {
             inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c, own.replace("'client')", "'trainer')"))).hasMessageContaining("row-level security"));
             inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE scheduled_session SET paused_seconds = 5 WHERE id = '" + sessionLed + "'")).isZero());
             inRolledBackTransaction(c, () -> assertThat(update(c, "UPDATE set_log SET done_at = now() WHERE id = '" + setLed + "'")).isZero());
+            // somebody else's session id (21 Nov 2026): invisible to a lookup, so Start cannot tell it is taken by reading — a plain INSERT
+            // hits the primary key (the 500 it used to answer), and ON CONFLICT DO NOTHING inserts nothing, which Start answers as ID_CONFLICT
+            String theirs = own.replace(s.toString(), strangerRun.toString());
+            assertThat(count(c, "SELECT count(*) FROM scheduled_session WHERE id = '" + strangerRun + "'")).isZero();
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c, theirs)).hasMessageContaining("duplicate key"));
+            inRolledBackTransaction(c, () -> assertThat(update(c, theirs + " ON CONFLICT (id) DO NOTHING")).isZero());
         }
     }
 
@@ -1219,6 +1225,66 @@ class TenantIsolationTest {
                 rs.next();
                 return new String[]{rs.getString(1), rs.getString(2)};
             }
+        }
+    }
+
+    @Test
+    @DisplayName("V40 · a prospect on the portal starts an assessment like any live client (21 Nov 2026)")
+    void prospectStartsAnAssessment() throws SQLException {
+        accept(meeraPrivate);
+        UUID offered = startable(tenantA, trainerPriya, "weekly " + tag, true);
+        jdbc.update("UPDATE client SET status = 'prospect' WHERE id = :c::uuid", Map.of("c", meeraPrivate.toString()));
+        UUID id = UUID.randomUUID();
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            inRolledBackTransaction(c, () -> assertThat(start(c, id, meeraPrivate, offered, WEEKLY_FORM)).containsExactly("created", id.toString()));
+        }
+    }
+
+    @Test
+    @DisplayName("V39 · a client reads the product key of their own sent assessment through its door, though its template is closed to them (21 Nov 2026)")
+    void clientReadsTheSystemKeyOfTheirOwnAssessment() throws SQLException {
+        portalFixtures();
+        accept(meeraPrivate);
+        // the weekly check-in, not offered to start: the client's template policy does not open it
+        jdbc.update("UPDATE assessment_template SET system_key = 'weekly_check_in', client_can_start = false "
+                + "WHERE id = (SELECT template_id FROM assessment WHERE id = :a::uuid)", Map.of("a", assessmentSent.toString()));
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            assertThat(count(c, "SELECT count(*) FROM assessment_template WHERE id = (SELECT template_id FROM assessment WHERE id = '" + assessmentSent + "')")).isZero();
+            // the join the list used to make: under the client's policies it finds no template, so the key came back null
+            assertThat(strings(c, "SELECT coalesce(t.system_key, 'none') FROM assessment a LEFT JOIN assessment_template t ON t.id = a.template_id WHERE a.id = '" + assessmentSent + "'"))
+                    .containsExactly("none");
+            assertThat(strings(c, "SELECT client_assessment_system_key('" + assessmentSent + "')")).containsExactly("weekly_check_in");
+            // nothing for an assessment not yet sent, or somebody else's
+            assertThat(strings(c, "SELECT coalesce(client_assessment_system_key('" + assessmentUnsent + "'), 'none')")).containsExactly("none");
+            assertThat(strings(c, "SELECT coalesce(client_assessment_system_key('" + UUID.randomUUID() + "'), 'none')")).containsExactly("none");
+        }
+        try (Connection c = asAppRole()) {
+            staff(c, tenantB, List.of(tenantB), trainerArun);
+            set(c, "app.actor", "client");
+            set(c, "app.client_ids", "{" + sanjay + "}");
+            assertThat(strings(c, "SELECT coalesce(client_assessment_system_key('" + assessmentSent + "'), 'none')")).containsExactly("none");
+        }
+    }
+
+    @Test
+    @DisplayName("Mark done's milestone write: in the active workspace it lands, for a client in another it is skipped, never refused (21 Nov 2026)")
+    void markDoneMilestoneStaysInTheActiveWorkspace() throws SQLException {
+        // the statement MilestoneJdbcRepository.record runs
+        java.util.function.Function<UUID, String> record = cid -> """
+                INSERT INTO milestone (tenant_id, client_id, kind, label, value)
+                SELECT c.tenant_id, c.id, 'sessions_1', 'Your first session', 1 FROM client c
+                 WHERE c.id = '%s'
+                   AND (current_setting('app.actor', true) IS DISTINCT FROM 'staff' OR c.tenant_id::text = current_setting('app.tenant_id', true))
+                ON CONFLICT (client_id, kind, value) DO NOTHING""".formatted(cid);
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA, tenantB), trainerPriya);
+            inRolledBackTransaction(c, () -> {
+                assertThat(update(c, record.apply(meeraPrivate))).isEqualTo(1);
+                // Priya coaches Meera at the gym too, but the gym is not her active workspace: nothing written, and no error to sink Mark done
+                assertThat(update(c, record.apply(meeraGym))).isZero();
+            });
         }
     }
 

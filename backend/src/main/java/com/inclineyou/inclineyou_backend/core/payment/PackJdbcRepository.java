@@ -155,9 +155,22 @@ public class PackJdbcRepository {
 
     /** Packages ever sold from it, deleted ones too: the foreign key would still point at it. */
     public int soldCount(UUID packId) {
-        Integer sold = jdbc.queryForObject("SELECT count(*) FROM package WHERE pack_id = :id::uuid",
+        // Live packages only — the count the list's usage shows (20 Nov 2026).
+        Integer sold = jdbc.queryForObject("SELECT count(*) FROM package WHERE pack_id = :id::uuid AND deleted_at IS NULL",
                 Map.of("id", packId.toString()), Integer.class);
         return sold == null ? 0 : sold;
+    }
+
+    /** Serialises one trainer's pack creates (the cap and the replay check), released at commit. */
+    public void lockTrainerPacks(UUID trainerId) {
+        jdbc.query("SELECT pg_advisory_xact_lock(hashtext('pack-create:' || :tid))", Map.of("tid", trainerId.toString()), rs -> { });
+    }
+
+    /** The trainer's packs that are not deleted, retired ones included. */
+    public int liveCount(UUID trainerId) {
+        Integer n = jdbc.queryForObject("SELECT count(*) FROM pack WHERE trainer_id = :tid::uuid AND deleted_at IS NULL",
+                Map.of("tid", trainerId.toString()), Integer.class);
+        return n == null ? 0 : n;
     }
 
     public void softDelete(UUID trainerId, UUID packId) {

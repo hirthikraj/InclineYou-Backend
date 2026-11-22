@@ -39,6 +39,9 @@ public class GymArrangementService {
     private final WorkspaceClock clock;
 
     /** Every live row, the running one first, then by startsMonth newest first. */
+    /** How far ahead new terms may start (20 Nov 2026); how far back is GymInput.MAX_MONTHS, what the gym page shows. */
+    static final int MONTHS_AHEAD = 12;
+
     public List<Arrangement> list(UUID tid) {
         return arrangements.list(tid);
     }
@@ -59,11 +62,28 @@ public class GymArrangementService {
         UUID id = uuid(b.get("id"), "id");
         YearMonth starts = month(b.get("startsMonth"), "startsMonth");
         if (starts == null) throw ApiException.validation("startsMonth: required, as yyyy-MM");
+        // A window (20 Nov 2026): the settlement walks month by month from the oldest terms to today on every
+        // GET /v1/money/gym, and the list is unpaged — a 1990 start meant 430 months and a balance owed for 36 years,
+        // a far-future one let a script add a row a month without end, and a year Postgres cannot store was a 500.
+        YearMonth thisMonth = YearMonth.now(clock.zone());
+        if (starts.isBefore(thisMonth.minusMonths(GymInput.MAX_MONTHS)) || starts.isAfter(thisMonth.plusMonths(MONTHS_AHEAD))) {
+            throw ApiException.validation("startsMonth: from " + thisMonth.minusMonths(GymInput.MAX_MONTHS)
+                    + " to " + thisMonth.plusMonths(MONTHS_AHEAD));
+        }
         String kind = kind(b.get("baseKind"));
         BigDecimal base = b.get("baseAmount") == null ? BigDecimal.ZERO : amount(b.get("baseAmount"), "baseAmount", false);
         baseShape(kind, base);
         String note = text(b.get("note"), 500, "note");
 
+        if (id != null) {
+            var existing = arrangements.find(tid, id);
+            if (existing.isPresent()) return new ArrangementCreated(existing.get(), false);
+        }
+        // One create at a time per trainer (20 Nov 2026). Without it a double tap's second request could not see the
+        // first's uncommitted row: with no terms yet there was no running row to lock, and with terms the locked row was
+        // no longer running once the first committed, so the second inserted too — 409 ID_CONFLICT with the same id,
+        // a 500 on uq_gym_arrangement_open with a new one. Under the lock it finds the first's row and replays it.
+        arrangements.lockTrainerTerms(tid);
         if (id != null) {
             var existing = arrangements.find(tid, id);
             if (existing.isPresent()) return new ArrangementCreated(existing.get(), false);
@@ -95,7 +115,9 @@ public class GymArrangementService {
     @Transactional
     public Arrangement patch(UUID tid, UUID id, String ifMatch, Map<String, Object> raw) {
         var b = body(raw, "baseKind", "baseAmount", "note");
-        var cur = arrangements.find(tid, id).orElseThrow(() -> ApiException.notFound("Those terms do not exist."));
+        // Locked before If-Match is checked (20 Nov 2026): on a plain read two tabs that opened the same version both
+        // passed, and the second save replaced the first without a word.
+        var cur = arrangements.findForUpdate(tid, id).orElseThrow(() -> ApiException.notFound("Those terms do not exist."));
         IfMatch.check(ifMatch, cur.version(), "These terms changed since you opened them.");
         if (b.isEmpty()) return cur;
 
@@ -114,6 +136,12 @@ public class GymArrangementService {
             }
         }
         String note = b.containsKey("note") ? text(b.get("note"), 500, "note") : cur.note();
+        // Nothing changed: answer the row and write nothing (20 Nov 2026), so the version moves only on a real change and
+        // a save pressed again in one tab does not make the other tab's next save a 412.
+        if (java.util.Objects.equals(kind, cur.baseKind()) && base.compareTo(new BigDecimal(cur.baseAmount())) == 0
+                && java.util.Objects.equals(note, cur.note())) {
+            return cur;
+        }
         arrangements.update(id, tid, kind, base, note);
         return arrangements.find(tid, id).orElseThrow();
     }

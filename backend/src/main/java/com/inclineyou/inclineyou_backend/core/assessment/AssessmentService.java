@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.assessment;
 
+import com.inclineyou.inclineyou_backend.core.assessment.dto.ScheduleItem;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentDeleted;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentCreated;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.AssessmentDetail;
@@ -10,6 +11,7 @@ import com.inclineyou.inclineyou_backend.core.assessment.dto.MoveAssessmentReque
 import com.inclineyou.inclineyou_backend.core.client.ClientNoticeJdbcRepository;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
+import com.inclineyou.inclineyou_backend.shared.util.DateWindow;
 import com.inclineyou.inclineyou_backend.shared.wire.IfMatch;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -46,6 +48,7 @@ public class AssessmentService {
     private final AssessmentBooker booker;
     private final ClientNoticeJdbcRepository notices;
     private final WorkspaceClock clock;
+    private final com.inclineyou.inclineyou_backend.core.client.ConsentGate consent;
 
     /** Served from code, not a table; it changes only on a deploy. */
     public Catalog catalog() {
@@ -142,15 +145,30 @@ public class AssessmentService {
                 return new AssessmentCreated(AssessmentForms.item(row, today()), false);
             }
         }
-        var status = assessments.clientStatus(trainerId, req.clientId())
+        var status = assessments.clientStatusForShare(trainerId, req.clientId())
                 .orElseThrow(() -> ApiException.notFound("That client is not on your roster."));
         if ("archived".equals(status)) {
             throw ApiException.conflict("CLIENT_ARCHIVED", "This client is archived. Unarchive them first.");
         }
+        // Health and body data wait for the client's consent (22 Nov 2026).
+        consent.require(req.clientId(), "an assessment");
         var tpl = templates.find(trainerId, req.templateId()).filter(t -> !t.deleted())
                 .orElseThrow(() -> ApiException.notFound("That assessment template is not in your library."));
         LocalDate today = today();
-        UUID id = booker.book(trainerId, req.clientId(), tpl, null, req.dueOn() == null ? today : req.dueOn(), req.id());
+        // Within three months of today either way (19 Nov 2026): 1900 was missed on arrival and 2999 never came due.
+        LocalDate due = req.dueOn() == null ? today : DateWindow.check(req.dueOn(), today, "dueOn");
+        var booked = booker.tryBook(trainerId, req.clientId(), tpl, null, due, req.id());
+        if (booked.isEmpty()) {
+            // The id was taken between the lookup above and the INSERT: a double tap whose first request committed
+            // meanwhile (19 Nov 2026). This trainer's assessment for this client is that one — answered, never sent again.
+            var mine = assessments.isMine(req.id(), trainerId, req.clientId());
+            if (mine.isPresent() && mine.get()) {
+                var row = assessments.find(trainerId, req.id()).orElseThrow(ApiException::idConflict);
+                return new AssessmentCreated(AssessmentForms.item(row, today), false);
+            }
+            throw ApiException.idConflict();
+        }
+        UUID id = booked.get();
         // sendNow is ignored for a client with nowhere to receive it, rather than refused: "Take now" is the same button either way.
         if ((req.sendNow() == null || req.sendNow()) && onPortal(trainerId, req.clientId())) {
             deliver(id, req.clientId(), tpl.name());
@@ -175,6 +193,13 @@ public class AssessmentService {
         if (!onPortal(trainerId, row.clientId())) {
             throw ApiException.conflict("CLIENT_NOT_ON_PORTAL", "They haven’t joined the portal yet, so there is nowhere to send it.");
         }
+        // One started in person stays in person (20 Nov 2026, the owner's call): sent, the client saw the trainer's
+        // half-entered readings and answers, could change them, and submitted them as their own. An already-sent one is
+        // still the idempotent 200 below, whatever the client has entered since.
+        if (!row.sent() && row.started()) {
+            throw ApiException.conflict("ASSESSMENT_STARTED",
+                    "You've already started this one in person, so it can't be sent. Finish it in the session.");
+        }
         if (!row.sent()) deliver(id, row.clientId(), row.name());
         return AssessmentForms.item(assessments.find(trainerId, id).orElseThrow(), today());
     }
@@ -198,6 +223,8 @@ public class AssessmentService {
             throw ApiException.conflict("ASSESSMENT_COMPLETED", "That assessment is already done, so it has no date to move.");
         }
         IfMatch.check(ifMatch, row.version(), "This assessment changed since you opened it. Reload to see it.");
+        // Within three months of today either way (19 Nov 2026), as giving one is.
+        DateWindow.check(req.dueOn(), today(), "dueOn");
         assessments.setDue(id, req.dueOn());
         if (row.scheduleId() != null) {
             schedules.lock(trainerId, row.scheduleId()).filter(AssessmentScheduleJdbcRepository.Locked::live)
@@ -214,14 +241,25 @@ public class AssessmentService {
     @Transactional
     public AssessmentDeleted delete(UUID trainerId, UUID id) {
         var row = assessments.lock(trainerId, id).orElseThrow(AssessmentService::notFound);
-        if (row.deleted()) return new AssessmentDeleted(null);
+        if (row.deleted()) {
+            // A retry of a skip whose answer was lost (19 Nov 2026): answer the cycle's open assessment, which is the one
+            // the first call booked (or what replaced it), rather than "no next", so a screen can trust the answer.
+            if (row.done() || row.scheduleId() == null) return new AssessmentDeleted(null);
+            var open = schedules.one(trainerId, row.scheduleId())
+                    .filter(c -> c.endedAt() == null).map(ScheduleItem::openAssessmentId)
+                    .flatMap(o -> assessments.find(trainerId, UUID.fromString(o)));
+            return new AssessmentDeleted(open.map(r -> AssessmentForms.item(r, today())).orElse(null));
+        }
         assessments.softDelete(id);
         if (row.done() || row.scheduleId() == null) return new AssessmentDeleted(null);
 
         var cycle = schedules.lock(trainerId, row.scheduleId()).filter(AssessmentScheduleJdbcRepository.Locked::live).orElse(null);
         var tpl = cycle == null ? null : templates.find(trainerId, cycle.templateId()).filter(t -> !t.deleted()).orElse(null);
         if (tpl == null) return new AssessmentDeleted(null);
-        LocalDate next = row.dueOn().plusDays(cycle.intervalDays());
+        // Never in the past (19 Nov 2026): skipping one 3 months overdue on a 28-day cycle booked one already missed, and
+        // the trainer had to delete again and again to reach today.
+        LocalDate stepped = row.dueOn().plusDays(cycle.intervalDays()), today = today();
+        LocalDate next = stepped.isBefore(today) ? today : stepped;
         schedules.update(cycle.id(), next, null, null);
         UUID booked = booker.book(trainerId, row.clientId(), tpl, cycle.id(), next, null);
         return new AssessmentDeleted(AssessmentForms.item(assessments.find(trainerId, booked).orElseThrow(), today()));

@@ -26,17 +26,26 @@ public record PortalMe(
         int openAssessments,
         List<AuthResponse.PendingInvite> pendingInvites,
         Policy policy,
-        Push push
+        Push push,
+        /**
+         * Messages from the trainer not yet opened (22 Nov 2026, additive). {@code unreadNotices} is the notification count — plan
+         * changes, bests — and the account screen's *From your trainer* row had been showing it as "3 new" over an inbox where every
+         * message was read.
+         */
+        int unreadMessages
 ) {
     /** {@code whatsappUrl} carries no text: the web appends the draft for whatever the client is asking about. */
     public record Trainer(String name, String headline, String bio, String introVideoId, List<String> certifications,
                           List<String> specialities, List<String> languages, String instagramHandle, String youtubeHandle,
                           String whatsappUrl) {}
 
-    /** {@code dateOfBirth} and {@code phone} are read-only here: a changed number goes through the trainer. */
+    /**
+     * {@code dateOfBirth} and {@code phone} are read-only here: a changed number goes through the trainer. {@code gender} (V43/V44)
+     * is the client's to correct: the trainer records it on adding them, and the client may change it here. Appended last.
+     */
     @JsonInclude(JsonInclude.Include.ALWAYS)
     public record MyDetails(String name, String goal, Double heightCm, String timezone, String activityLevel, String dateOfBirth,
-                            String phone, String version) {}
+                            String phone, String version, String gender) {}
 
     public record Policy(String accepted, String current) {}
 

@@ -14,5 +14,9 @@ public record AcceptRequest(
         @NotBlank(message = "required") String requestId,
         @NotBlank(message = "required") @Pattern(regexp = "^\\d{6}$", message = "six digits") String otp,
         @NotNull(message = "required") LocalDate dateOfBirth,
-        @NotBlank(message = "required") String policyVersion
+        @NotBlank(message = "required") String policyVersion,
+        /* The client's own "Send me WhatsApp reminders" (21 Nov 2026): absent or false is no. */
+        Boolean whatsappReminders,
+        /* "I'm fit to train, and I accept my trainer's coaching terms" (22 Nov 2026, V42): required, and must be true. */
+        Boolean trainingTerms
 ) {}

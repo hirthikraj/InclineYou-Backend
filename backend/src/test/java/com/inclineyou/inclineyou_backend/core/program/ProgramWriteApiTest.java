@@ -30,6 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -47,7 +48,7 @@ class ProgramWriteApiTest {
 
     @Autowired WebApplicationContext context;
     @Autowired NamedParameterJdbcTemplate jdbc;
-    @Autowired ProgramJdbcRepository programs;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean ProgramJdbcRepository programs;
 
     private MockMvc mvc;
     private UUID me, other, tenant;
@@ -249,6 +250,102 @@ class ProgramWriteApiTest {
     }
 
     /** {@code at} is SQL, relative to the test transaction's {@code now()}, which is the same instant the query reads. */
+    @Test
+    @DisplayName("resync keeps a plan row whose template row survives (same workout, position and movement): its id, and an open log's link to it")
+    void resyncKeepsSurvivingRows() throws Exception {
+        var ex = jdbc.queryForList("SELECT id::text FROM exercise WHERE origin = 'inclineyou' AND deleted_at IS NULL ORDER BY name LIMIT 3",
+                Map.of(), String.class);
+        UUID tpl = template(me, tenant, "Source block");
+        UUID tw = workout(tpl, me, tenant, "Day A");
+        UUID squat = mainRow(tw, ex.get(0), 0), row = mainRow(tw, ex.get(1), 1);
+        UUID cid = client(me, "Resync Ravi", "+919876501234");
+        mvc.perform(post("/v1/programs/" + tpl + "/apply").contentType(MediaType.APPLICATION_JSON).content("{\"clientId\":\"" + cid + "\"}"))
+                .andExpect(status().isCreated());
+        UUID planId = jdbc.queryForObject("SELECT id FROM program WHERE client_id = :c::uuid AND status = 'active'", Map.of("c", cid.toString()), UUID.class);
+        UUID keptRow = jdbc.queryForObject("""
+                SELECT we.id FROM workout_exercise we JOIN workout w ON w.id = we.workout_id
+                WHERE w.program_id = :p::uuid AND we.position = 0 AND we.alternative_of IS NULL""", Map.of("p", planId.toString()), UUID.class);
+        // An open log planned from that row.
+        UUID session = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO scheduled_session (id, trainer_id, tenant_id, client_id, scheduled_at, duration_minutes, ends_at, started_at)
+                VALUES (:s::uuid, :t::uuid, :ten::uuid, :c::uuid, now(), 60, now() + interval '1 hour', now())""",
+                Map.of("s", session.toString(), "t", me.toString(), "ten", tenant.toString(), "c", cid.toString()));
+        jdbc.update("""
+                INSERT INTO session_exercise (id, session_id, client_id, exercise_id, position, planned_from, source)
+                VALUES (gen_random_uuid(), :s::uuid, :c::uuid, :e::uuid, 0, :pf::uuid, 'planned')""",
+                Map.of("s", session.toString(), "c", cid.toString(), "e", ex.get(0), "pf", keptRow.toString()));
+
+        // The template changes: position 1 becomes another movement. Position 0 is untouched.
+        jdbc.update("UPDATE workout_exercise SET exercise_id = :e::uuid WHERE id = :id::uuid", Map.of("e", ex.get(2), "id", row.toString()));
+        jdbc.update("UPDATE program SET revised_at = now() + interval '1 minute' WHERE id = :p::uuid", Map.of("p", tpl.toString()));
+
+        mvc.perform(post("/v1/programs/" + planId + "/resync").header("If-Match", versionOf(planId))).andExpect(status().isOk());
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM workout_exercise WHERE id = :id::uuid", Map.of("id", keptRow.toString()), Integer.class),
+                "the surviving row keeps its id");
+        assertEquals(keptRow, jdbc.queryForObject("SELECT planned_from FROM session_exercise WHERE session_id = :s::uuid",
+                Map.of("s", session.toString()), UUID.class), "the open log keeps its plan row");
+        assertEquals(java.util.List.of(ex.get(0), ex.get(2)), jdbc.queryForList("""
+                SELECT we.exercise_id::text FROM workout_exercise we JOIN workout w ON w.id = we.workout_id
+                WHERE w.program_id = :p::uuid AND w.deleted_at IS NULL AND we.alternative_of IS NULL ORDER BY we.position""",
+                Map.of("p", planId.toString()), String.class), "the changed row follows the template");
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM workout_set WHERE workout_exercise_id = :id::uuid",
+                Map.of("id", keptRow.toString()), Integer.class), "its sets are the template's");
+        assertNotNull(squat);
+    }
+
+    private UUID mainRow(UUID workout, String exercise, int position) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("INSERT INTO workout_exercise (id, workout_id, exercise_id, position) VALUES (:id::uuid, :w::uuid, :e::uuid, :pos)",
+                Map.of("id", id.toString(), "w", workout.toString(), "e", exercise, "pos", position));
+        for (int n = 1; n <= 2; n++) {
+            jdbc.update("""
+                    INSERT INTO workout_set (workout_exercise_id, position, load_kind, load_value, effort_kind, effort_value)
+                    VALUES (:w::uuid, :n, 'weight', 40, 'reps', 8)""", Map.of("w", id.toString(), "n", n));
+        }
+        return id;
+    }
+
+    @Test
+    @DisplayName("activating a plan locks the client first; an archived client's plan is 409 CLIENT_ARCHIVED")
+    void activateChecksTheClient() throws Exception {
+        UUID cid = jdbc.queryForObject("SELECT client_id FROM program WHERE id = :p::uuid", java.util.Map.of("p", myPlan.toString()), UUID.class);
+        jdbc.update("UPDATE program SET status = 'paused' WHERE id = :p::uuid", java.util.Map.of("p", myPlan.toString()));
+        jdbc.update("UPDATE client SET status = 'archived', archived_at = now(), archive_reason = 'other' WHERE id = :c::uuid",
+                java.util.Map.of("c", cid.toString()));
+        mvc.perform(patch("/v1/programs/" + myPlan).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"active\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CLIENT_ARCHIVED"));
+        jdbc.update("UPDATE client SET status = 'active', archived_at = NULL, archive_reason = NULL WHERE id = :c::uuid",
+                java.util.Map.of("c", cid.toString()));
+        mvc.perform(patch("/v1/programs/" + myPlan).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"active\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("active"));
+    }
+
+    @Test
+    @DisplayName("a create double-tapped with one id, from scratch or as a library copy: the second answers that program (200), not 409, and counts no second use")
+    void createDoubleTap() throws Exception {
+        UUID scratch = UUID.randomUUID();
+        String body = "{\"id\":\"" + scratch + "\",\"name\":\"Upper lower\"}";
+        mvc.perform(post("/v1/programs").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated());
+        // The second tap's replay check ran before the first committed.
+        org.mockito.Mockito.doReturn(java.util.Optional.empty()).doCallRealMethod().when(programs).templateOwnership(me, scratch);
+        mvc.perform(post("/v1/programs").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(scratch.toString()));
+
+        UUID lib = UUID.fromString(jdbc.queryForObject("SELECT program_id::text FROM certified_program ORDER BY program_id LIMIT 1",
+                java.util.Map.of(), String.class));
+        int uses = jdbc.queryForObject("SELECT used_count FROM certified_program WHERE program_id = :p::uuid",
+                java.util.Map.of("p", lib.toString()), Integer.class);
+        UUID copy = UUID.randomUUID();
+        String copyBody = "{\"id\":\"" + copy + "\",\"copyFrom\":\"" + lib + "\"}";
+        mvc.perform(post("/v1/programs").contentType(MediaType.APPLICATION_JSON).content(copyBody)).andExpect(status().isCreated());
+        org.mockito.Mockito.doReturn(java.util.Optional.empty()).doCallRealMethod().when(programs).templateOwnership(me, copy);
+        mvc.perform(post("/v1/programs").contentType(MediaType.APPLICATION_JSON).content(copyBody))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(copy.toString()));
+        assertEquals(uses + 1, jdbc.queryForObject("SELECT used_count FROM certified_program WHERE program_id = :p::uuid",
+                java.util.Map.of("p", lib.toString()), Integer.class), "one use, not two");
+    }
+
     private UUID session(UUID clientId, UUID workoutId, String at, boolean deleted) {
         UUID id = UUID.randomUUID();
         jdbc.update("INSERT INTO scheduled_session (id, trainer_id, client_id, workout_id, scheduled_at, duration_minutes, ends_at, deleted_at) "

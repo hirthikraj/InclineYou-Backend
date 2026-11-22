@@ -159,6 +159,29 @@ class MoneyReadsTest {
     }
 
     @Test
+    @DisplayName("practice report: a cancelled single sale is not billed, a prospect is not a new client (20 Nov 2026)")
+    void practiceBilledAndNewClients() {
+        UUID session = UUID.randomUUID();
+        var p = Map.of("s", session.toString(), "t", trainer.toString(), "c", client.toString());
+        jdbc.update("""
+                INSERT INTO scheduled_session (id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at, billing, price,
+                                               status, cancel_reason)
+                VALUES (:s::uuid, :t::uuid, :c::uuid, date_trunc('day', now()) + interval '30 hours', 60,
+                        date_trunc('day', now()) + interval '31 hours', 'single', 800, 'cancelled', 'trainer')""", p);
+        jdbc.update("""
+                INSERT INTO package (id, trainer_id, client_id, session_id, name, service, basis, sessions_total, sessions_remaining,
+                                     amount, currency, start_date, due_date, status, closed_at)
+                VALUES (gen_random_uuid(), :t::uuid, :c::uuid, :s::uuid, 'Single session', 'floor', 'sessions', 1, 1, 800, 'INR',
+                        current_date, current_date, 'cancelled', now())""", p);
+        jdbc.update("INSERT INTO client (id, trainer_id, name, client_type, status) VALUES (gen_random_uuid(), :t::uuid, 'Trial only', 'independent', 'prospect')",
+                Map.of("t", trainer.toString()));
+
+        var month = practice.practice(trainer, 1).months().get(0);
+        assertEquals("9000.00", month.billed(), "the 12-session pack, not the cancelled single");
+        assertEquals(1, month.newClients(), "the client from setUp, not the prospect");
+    }
+
+    @Test
     @DisplayName("summary: takeHome equals collected for independent clients")
     void takeHome() {
         ledger.record(trainer, pack, body("amount", "4000.00", "method", "upi"));

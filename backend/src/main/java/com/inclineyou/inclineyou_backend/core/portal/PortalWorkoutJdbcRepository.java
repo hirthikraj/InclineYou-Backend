@@ -110,13 +110,17 @@ public class PortalWorkoutJdbcRepository {
     }
 
     /** A started, unfinished self-run of this day — what "resume" opens. */
-    public Optional<UUID> resumable(UUID client, UUID workoutId) {
+    public Optional<UUID> resumable(UUID client, UUID workoutId, String zone) {
         var m = p(client);
         m.put("w", workoutId.toString());
+        m.put("z", zone);
+        // Today's only, in the client's own time zone (21 Nov 2026): with no day limit, a run started last week and left open came back on
+        // Start today, so the workout was recorded on last week's date and timed from last week's start. An older unfinished one is left be.
         return jdbc.queryForList("""
                 SELECT s.id FROM scheduled_session s
                  WHERE s.client_id = :c::uuid AND s.workout_id = :w::uuid AND s.logged_by = 'client' AND s.deleted_at IS NULL
                    AND s.started_at IS NOT NULL AND s.status = 'scheduled'
+                   AND (s.started_at AT TIME ZONE :z)::date = (now() AT TIME ZONE :z)::date
                  ORDER BY s.started_at DESC LIMIT 1""", m, Object.class).stream().findFirst().map(PortalWorkoutJdbcRepository::uuid);
     }
 
@@ -149,15 +153,21 @@ public class PortalWorkoutJdbcRepository {
                 Map.of("s", sessionId.toString()), Boolean.class));
     }
 
-    public void insertSelfRun(UUID id, UUID trainerId, UUID client, UUID workoutId, int minutes) {
+    /**
+     * False when the id is already taken. ON CONFLICT is what tells (21 Nov 2026): under the client's row policies a session that is
+     * somebody else's is invisible to {@link #idTaken}, so a plain INSERT hit the primary key and answered 500; the constraint is checked
+     * against every row, seen or not.
+     */
+    public boolean insertSelfRun(UUID id, UUID trainerId, UUID client, UUID workoutId, int minutes) {
         var m = p(client);
         m.put("id", id.toString());
         m.put("t", trainerId.toString());
         m.put("w", workoutId.toString());
         m.put("min", minutes);
-        jdbc.update("""
+        return jdbc.update("""
                 INSERT INTO scheduled_session (id, trainer_id, client_id, workout_id, scheduled_at, duration_minutes, ends_at, status, started_at, logged_by)
-                VALUES (:id::uuid, :t::uuid, :c::uuid, :w::uuid, now(), :min, now() + make_interval(mins => :min), 'scheduled', now(), 'client')""", m);
+                VALUES (:id::uuid, :t::uuid, :c::uuid, :w::uuid, now(), :min, now() + make_interval(mins => :min), 'scheduled', now(), 'client')
+                ON CONFLICT (id) DO NOTHING""", m) == 1;
     }
 
     /**
@@ -190,7 +200,8 @@ public class PortalWorkoutJdbcRepository {
     // ── the log's rows ───────────────────────────────────────────────────────────────────────────
 
     public record LogRow(UUID id, UUID exerciseId, String name, int position, String section, UUID groupId, String source, UUID plannedFrom,
-                         UUID swappedFrom, String swappedFromName, String swapSource, String swapReason, Timestamp removedAt, String cue, String description) {}
+                         UUID swappedFrom, String swappedFromName, String swapSource, String swapReason, Timestamp removedAt, String cue, String description,
+                         UUID mainRow) {}
 
     public List<LogRow> logRows(UUID client, UUID sessionId, UUID only) {
         var m = p(client);
@@ -199,7 +210,9 @@ public class PortalWorkoutJdbcRepository {
         return jdbc.query("""
                 SELECT se.id, se.exercise_id, e.name, se.position, we.section, we.group_id, se.source, se.planned_from, se.swapped_from_exercise_id,
                        sf.name AS sf_name, se.swap_source, se.swap_reason, se.removed_at,
-                       CASE WHEN se.swap_source = 'library' THEN NULL ELSE we.notes END AS cue, e.description
+                       CASE WHEN se.swap_source = 'library' THEN NULL ELSE we.notes END AS cue, e.description,
+                       -- the plan's MAIN row: after a swap to an approved alternative planned_from is that alternative's row (21 Nov 2026)
+                       COALESCE(we.alternative_of, se.planned_from) AS main_row
                   FROM session_exercise se
                   JOIN exercise e ON e.id = se.exercise_id
                   LEFT JOIN exercise sf ON sf.id = se.swapped_from_exercise_id
@@ -209,7 +222,7 @@ public class PortalWorkoutJdbcRepository {
                 (rs, i) -> new LogRow(uuid(rs.getObject("id")), uuid(rs.getObject("exercise_id")), rs.getString("name"), rs.getInt("position"),
                         rs.getString("section"), uuid(rs.getObject("group_id")), rs.getString("source"), uuid(rs.getObject("planned_from")),
                         uuid(rs.getObject("swapped_from_exercise_id")), rs.getString("sf_name"), rs.getString("swap_source"), rs.getString("swap_reason"),
-                        rs.getTimestamp("removed_at"), rs.getString("cue"), rs.getString("description")));
+                        rs.getTimestamp("removed_at"), rs.getString("cue"), rs.getString("description"), uuid(rs.getObject("main_row"))));
     }
 
     public Optional<PortalWorkout.Feedback> feedback(UUID client, UUID sessionId) {
@@ -219,15 +232,30 @@ public class PortalWorkoutJdbcRepository {
                 (rs, i) -> new PortalWorkout.Feedback(rs.getString("effort"), rs.getString("note"), rs.getTimestamp("at").getTime())).stream().findFirst();
     }
 
+    /**
+     * The client's answer, replaced (21 Nov 2026, both points):
+     * <ul>
+     *   <li>written only when it changes — {@code at} is when the answer was given, and the trainer's bell lists a hard answer by it, so a
+     *       retry or a second tap of the same answer used to put it back above what the trainer had already seen;</li>
+     *   <li>both empty is taking it back: the row is marked deleted and nothing is answered, instead of keeping an answer with nothing in
+     *       it on the trainer's session. A later answer brings it back ({@code deleted_at = NULL}).</li>
+     * </ul>
+     */
     public Optional<PortalWorkout.Feedback> upsertFeedback(UUID client, UUID sessionId, String effort, String note) {
         var m = p(client);
         m.put("s", sessionId.toString());
         m.put("e", effort);
         m.put("n", note);
+        if (effort == null && note == null) {
+            jdbc.update("UPDATE workout_feedback SET deleted_at = now() WHERE session_id = :s::uuid AND client_id = :c::uuid AND deleted_at IS NULL", m);
+            return Optional.empty();
+        }
         jdbc.update("""
                 INSERT INTO workout_feedback (id, session_id, client_id, tenant_id, effort, note)
                 SELECT gen_random_uuid(), s.id, s.client_id, s.tenant_id, :e, :n FROM scheduled_session s WHERE s.id = :s::uuid AND s.client_id = :c::uuid
-                ON CONFLICT (session_id) DO UPDATE SET effort = EXCLUDED.effort, note = EXCLUDED.note, at = now(), deleted_at = NULL""", m);
+                ON CONFLICT (session_id) DO UPDATE SET effort = EXCLUDED.effort, note = EXCLUDED.note, at = now(), deleted_at = NULL
+                 WHERE workout_feedback.effort IS DISTINCT FROM EXCLUDED.effort OR workout_feedback.note IS DISTINCT FROM EXCLUDED.note
+                    OR workout_feedback.deleted_at IS NOT NULL""", m);
         return feedback(client, sessionId);
     }
 
@@ -259,12 +287,6 @@ public class PortalWorkoutJdbcRepository {
         jdbc.update("UPDATE scheduled_session SET status = 'done', ended_at = greatest(now(), started_at), paused_seconds = COALESCE(:p, paused_seconds) WHERE id = :s::uuid", m);
     }
 
-    /** Sessions of either kind finished, the one just closed included: what a "10th session" counts. */
-    public int doneCount(UUID client) {
-        return jdbc.queryForObject("SELECT count(*) FROM scheduled_session WHERE client_id = :c::uuid AND status = 'done' AND deleted_at IS NULL "
-                + "AND (logged_by = 'trainer' OR EXISTS (SELECT 1 FROM session_exercise se JOIN set_log sl ON sl.session_exercise_id = se.id "
-                + "WHERE se.session_id = scheduled_session.id AND sl.done_at IS NOT NULL))", p(client), Integer.class);
-    }
 
     private static final String E1 = "(sl.load_value * (1 + sl.effort_value / 30.0))";
 
@@ -357,6 +379,20 @@ public class PortalWorkoutJdbcRepository {
     }
 
     /** The plan alternative row of {@code mainPlanRow} that trains {@code exerciseId}, if the trainer approved it. */
+    public record MainRow(UUID id, UUID exerciseId) {}
+
+    /**
+     * The plan's main row behind a session exercise's planned_from (21 Nov 2026): the row itself, or — after a swap to an approved
+     * alternative, which moves planned_from onto the alternative's row — the row that alternative belongs to.
+     */
+    public Optional<MainRow> mainRow(UUID plannedFrom) {
+        if (plannedFrom == null) return Optional.empty();
+        return jdbc.query("""
+                SELECT m.id, m.exercise_id FROM workout_exercise w JOIN workout_exercise m ON m.id = COALESCE(w.alternative_of, w.id)
+                 WHERE w.id = :p::uuid""", Map.of("p", plannedFrom.toString()),
+                (rs, i) -> new MainRow(uuid(rs.getObject("id")), uuid(rs.getObject("exercise_id")))).stream().findFirst();
+    }
+
     public Optional<UUID> approvedRow(UUID mainPlanRow, UUID exerciseId) {
         if (mainPlanRow == null) return Optional.empty();
         return jdbc.queryForList("SELECT id FROM workout_exercise WHERE alternative_of = :m::uuid AND exercise_id = :e::uuid LIMIT 1",

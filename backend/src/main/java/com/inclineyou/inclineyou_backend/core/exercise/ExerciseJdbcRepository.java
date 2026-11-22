@@ -241,6 +241,19 @@ public class ExerciseJdbcRepository {
     }
 
     /** {@code muscle_group} mirrors {@code target}, as it does on every seeded row. */
+    /** Queues this trainer's custom-exercise creates behind each other until the transaction ends. */
+    public void lockTrainerCustoms(UUID trainerId) {
+        jdbc.query("SELECT pg_advisory_xact_lock(hashtext('exercise-custom:' || :tid))", Map.of("tid", trainerId.toString()), rs -> { });
+    }
+
+    /** The trainer's live custom exercises. */
+    public int liveCustomCount(UUID trainerId) {
+        Integer n = jdbc.queryForObject(
+                "SELECT count(*) FROM exercise WHERE trainer_id = :tid::uuid AND origin = 'trainer' AND deleted_at IS NULL",
+                Map.of("tid", trainerId.toString()), Integer.class);
+        return n == null ? 0 : n;
+    }
+
     public void insert(UUID id, UUID trainerId, ExerciseRequest r) {
         /* The library keeps these in `metadata`, and a custom exercise keeps them in the same place so the one panel and
            the one search read both. Left null when nothing was given: the column is an object or nothing. */
@@ -266,6 +279,16 @@ public class ExerciseJdbcRepository {
                 .addValue("status", r.status() == null ? "published" : r.status()));
     }
 
+    /** {@code expr} with {@code key} set to the sent list, or removed when it is cleared or empty. */
+    private String metaKey(String expr, MapSqlParameterSource p, String key, Patch<List<String>> field) {
+        if (field == null) return expr;
+        List<String> v = field.value() == null ? List.of() : field.value().stream().map(String::strip).toList();
+        String base = "(coalesce(" + expr + ", '{}'::jsonb) - '" + key + "')";
+        if (v.isEmpty()) return base;
+        p.addValue("meta_" + key, json(v));
+        return "(" + base + " || jsonb_build_object('" + key + "', CAST(:meta_" + key + " AS jsonb)))";
+    }
+
     private static void putIfAny(Map<String, Object> meta, String key, List<String> values) {
         if (values != null && !values.isEmpty()) meta.put(key, values.stream().map(String::strip).toList());
     }
@@ -287,6 +310,18 @@ public class ExerciseJdbcRepository {
             sets.append(", form_cues = CAST(:formCues AS jsonb)");
             p.addValue("formCues", json(r.formCues().value()));
         }
+        set(sets, p, "movement_pattern", r.movementPattern());
+        if (r.secondaryTargets() != null) {
+            sets.append(", secondary_targets = CAST(:secondary AS jsonb)");
+            p.addValue("secondary", json(r.secondaryTargets().value() == null ? List.of() : r.secondaryTargets().value()));
+        }
+        // The four that live in metadata, as POST keeps them: a key set when there is something, removed when cleared.
+        String meta = "metadata";
+        meta = metaKey(meta, p, "aliases", r.aliases());
+        meta = metaKey(meta, p, "commonMistakes", r.commonMistakes());
+        meta = metaKey(meta, p, "safety", r.safety());
+        meta = metaKey(meta, p, "equipmentNeeded", r.equipmentNeeded());
+        if (!meta.equals("metadata")) sets.append(", metadata = nullif(").append(meta).append(", '{}'::jsonb)");
         jdbc.update("UPDATE exercise SET " + sets.substring(2) + " WHERE id = :id::uuid", p);
     }
 

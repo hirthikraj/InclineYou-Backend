@@ -82,14 +82,17 @@ public class SetHistoryJdbcRepository {
                 rs.getString("set_id"), rs.getString("workout_name")));
     }
 
-    /** Names for the exercises on one page, alphabetical. */
+    /**
+     * Names for the exercises on one page, alphabetical. By primary key (18 Nov 2026): this was {@code id::text IN
+     * (:ids)}, and a cast column cannot use the index, so every page read the whole exercise table.
+     */
     public Map<String, Exercise> exercises(List<String> ids) {
         var out = new LinkedHashMap<String, Exercise>();
         if (ids.isEmpty()) return out;
         jdbc.query("""
                 SELECT id::text AS id, name, equipment, origin <> 'inclineyou' AS custom
-                FROM exercise WHERE id::text IN (:ids) ORDER BY name
-                """, Map.of("ids", ids), rs -> {
+                FROM exercise WHERE id = ANY(CAST(:ids AS uuid[])) ORDER BY name
+                """, Map.of("ids", ids.toArray(String[]::new)), rs -> {
             out.put(rs.getString("id"),
                     new Exercise(rs.getString("name"), rs.getString("equipment"), rs.getBoolean("custom")));
         });

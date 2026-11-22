@@ -29,7 +29,9 @@ public record CreateClientRequest(
          * status a client is ever CREATED into is prospect — paused, inactive
          * and archived are all reached later, through their own verbs. */
         @Pattern(regexp = "active|prospect", message = "active or prospect") String status,
-        @Valid Schedule schedule
+        @Valid Schedule schedule,
+        /* V43 (22 Nov 2026): optional on the wire — the web's add flow asks it; null is not given. */
+        @Pattern(regexp = "female|male|other|prefer_not_to_say", message = "female, male, other or prefer_not_to_say") String gender
 ) {
     public CreateClientRequest {
         name = Text.strip(name);

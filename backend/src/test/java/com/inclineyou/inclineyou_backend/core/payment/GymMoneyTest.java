@@ -107,6 +107,49 @@ class GymMoneyTest {
     }
 
     @Test
+    @DisplayName("a cancelled single session's sale is not a sale: not billed, not a session, not a custom gym sale (20 Nov 2026)")
+    void cancelledSingleIsNotASale() {
+        gym();
+        gymSale();
+        UUID gymClient = jdbc.queryForObject("SELECT id FROM client WHERE trainer_id = :t::uuid AND client_type = 'gym'",
+                Map.of("t", trainer.toString()), UUID.class);
+        UUID own = UUID.randomUUID();
+        jdbc.update("INSERT INTO client (id, trainer_id, name, client_type) VALUES (:c::uuid, :t::uuid, 'Ravi', 'independent')",
+                Map.of("c", own.toString(), "t", trainer.toString()));
+        single(gymClient, "cancelled", 60, 1);     // the gym client's: would be a "Custom gym sale"
+        single(own, "cancelled", null, 2);         // the trainer's own client's: would be "from your own clients"
+        single(own, "active", null, 3);            // a live single still counts
+
+        var g = money.get(trainer, null, null);
+        assertEquals("10000.00", g.stats().floorBilled());
+        assertEquals(12, g.stats().floorSessions());
+        assertEquals("800.00", g.stats().remoteBilled());
+        assertEquals(1, g.stats().remoteSessions());
+        assertEquals("6800.00", g.stats().yours());
+        assertEquals(List.of("Gym 12"), g.shares().stream().map(x -> x.packName()).toList());
+    }
+
+    /** A single session at 07:00 n days ahead, and its 800 sale ({@code share} for a gym client, else none). */
+    private void single(UUID client, String status, Integer share, int daysAhead) {
+        UUID session = UUID.randomUUID();
+        var p = new HashMap<String, Object>();
+        p.put("s", session.toString()); p.put("t", trainer.toString()); p.put("c", client.toString());
+        p.put("st", status); p.put("d", daysAhead); p.put("share", share);
+        jdbc.update("""
+                INSERT INTO scheduled_session (id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at, billing, price,
+                                               status, cancel_reason)
+                VALUES (:s::uuid, :t::uuid, :c::uuid, date_trunc('day', now()) + make_interval(days => :d, hours => 7), 60,
+                        date_trunc('day', now()) + make_interval(days => :d, hours => 8), 'single', 800,
+                        CASE WHEN :st = 'active' THEN 'scheduled' ELSE 'cancelled' END,
+                        CASE WHEN :st = 'active' THEN NULL ELSE 'trainer' END)""", p);
+        jdbc.update("""
+                INSERT INTO package (id, trainer_id, client_id, session_id, name, service, basis, sessions_total, sessions_remaining,
+                                     amount, currency, start_date, due_date, status, closed_at, trainer_share_percent)
+                VALUES (gen_random_uuid(), :t::uuid, :c::uuid, :s::uuid, 'Single session', 'floor', 'sessions', 1, 1, 800, 'INR',
+                        current_date, current_date, :st, CASE WHEN :st = 'cancelled' THEN now() END, CAST(:share AS numeric))""", p);
+    }
+
+    @Test
     @DisplayName("settlement: a minimum, paid in parts, oldest month first")
     void settlement() {
         gym();
@@ -146,12 +189,38 @@ class GymMoneyTest {
     }
 
     @Test
+    @DisplayName("payouts list: a gym name matches as the settlement does, ignoring case and outer spaces (20 Nov 2026)")
+    void payoutsMatchTheSettlementsGym() {
+        gym();
+        arrangements.create(trainer, body("startsMonth", now.minusMonths(1).toString()));
+        var older = payouts.create(trainer, body("amount", "5000.00", "method", "cash")).payout();
+        payouts.create(trainer, body("amount", "3000.00", "method", "cash"));
+        // An older payout recorded under terms typed " cult " — the settlement's key says it is the same gym.
+        jdbc.update("UPDATE trainer_payout SET gym_name = ' cult ' WHERE id = :id::uuid", Map.of("id", older.id()));
+        jdbc.update("""
+                INSERT INTO trainer_payout (id, trainer_id, gym_name, amount, currency, method, received_at)
+                VALUES (gen_random_uuid(), :t::uuid, 'Gold''s', 999, 'INR', 'cash', now())""", Map.of("t", trainer.toString()));
+
+        assertEquals(2, payouts.list(trainer, null, null, null, null, null).items().size(), "the running gym, Cult");
+        assertEquals(2, payouts.list(trainer, "CULT", null, null, null, null).items().size());
+        assertEquals(1, payouts.list(trainer, "gold's", null, null, null, null).items().size());
+        assertEquals("8000.00", money.get(trainer, null, null).settlement().months().stream()
+                .map(m -> new java.math.BigDecimal(m.received())).reduce(java.math.BigDecimal.ZERO, java.math.BigDecimal::add)
+                .setScale(2).toPlainString(), "the settlement received both");
+    }
+
+    @Test
     @DisplayName("arrangements: needs a gym, replay, overlap, closes the running row, started, delete")
     void arrangementRules() {
         assertCode("ARRANGEMENT_NEEDS_GYM", () -> arrangements.create(trainer, body("startsMonth", now.toString())));
         gym();
         assertCode("VALIDATION", () -> arrangements.create(trainer, body("baseKind", "minimum", "startsMonth", now.toString())));
         assertCode("VALIDATION", () -> arrangements.create(trainer, body("startsMonth", "2026-13")));
+        // A window (20 Nov 2026): 24 months back to 12 ahead; a year Postgres cannot store is a 400, not a 500.
+        assertCode("VALIDATION", () -> arrangements.create(trainer, body("startsMonth", now.minusMonths(25).toString())));
+        assertCode("VALIDATION", () -> arrangements.create(trainer, body("startsMonth", now.plusMonths(13).toString())));
+        assertCode("VALIDATION", () -> arrangements.create(trainer, body("startsMonth", "1990-01")));
+        assertCode("VALIDATION", () -> arrangements.create(trainer, body("startsMonth", "+10000-01")));
 
         UUID id = UUID.randomUUID();
         var made = arrangements.create(trainer, body("id", id.toString(), "baseKind", "minimum", "baseAmount", "12000.00",
@@ -175,6 +244,11 @@ class GymMoneyTest {
         UUID nid = UUID.fromString(next.id());
         assertEquals("16000.00", arrangements.patch(trainer, nid, null, body("baseAmount", "16000")).baseAmount());
         assertCode("PRECONDITION_FAILED", () -> arrangements.patch(trainer, nid, "\"1\"", body("note", "x")));
+        // A save with nothing changed writes nothing, so the version holds (20 Nov 2026).
+        var before = arrangements.list(trainer).get(0);
+        var same = arrangements.patch(trainer, nid, "\"" + before.version() + "\"", body("baseAmount", "16000.00", "note", before.note()));
+        assertEquals(before.version(), same.version());
+        assertEquals(before.version(), arrangements.list(trainer).get(0).version());
 
         arrangements.delete(trainer, nid);
         arrangements.delete(trainer, nid);   // idempotent
@@ -191,6 +265,11 @@ class GymMoneyTest {
         assertCode("VALIDATION", () -> payouts.create(trainer, body("amount", "100", "method", "cheque")));
         assertCode("VALIDATION", () -> payouts.create(trainer, body("amount", "100",
                 "receivedAt", System.currentTimeMillis() + 3_600_000L)));
+        // Not before the oldest month the gym page shows (20 Nov 2026): seconds sent for milliseconds is 1970, a 400.
+        assertCode("VALIDATION", () -> payouts.create(trainer, body("amount", "100", "receivedAt", System.currentTimeMillis() / 1000)));
+        assertCode("VALIDATION", () -> payouts.create(trainer, body("amount", "100", "receivedAt", Long.MIN_VALUE)));
+        assertCode("VALIDATION", () -> payouts.create(trainer, body("amount", "100",
+                "receivedAt", System.currentTimeMillis() - 26 * 31 * 86_400_000L)));
 
         UUID id = UUID.randomUUID();
         long past = System.currentTimeMillis() - 5 * 86_400_000L;
@@ -207,6 +286,7 @@ class GymMoneyTest {
         assertEquals(1, payouts.list(trainer, null, null, null, 1, page.nextCursor()).items().size());
 
         assertEquals("1200.00", payouts.patch(trainer, id, null, body("amount", "1200")).amount());
+        assertCode("VALIDATION", () -> payouts.patch(trainer, id, null, body("receivedAt", 0L)));
         payouts.delete(trainer, id);
         payouts.delete(trainer, id);
         assertEquals(1, payouts.list(trainer, null, null, null, null, null).items().size());

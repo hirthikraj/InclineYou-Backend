@@ -50,6 +50,8 @@ class PortalProfileApiTest {
     @Autowired FilterChainProxy securityChain;
     @Autowired NamedParameterJdbcTemplate jdbc;
     @Autowired CapturingSender sender;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    com.inclineyou.inclineyou_backend.core.portal.PortalJdbcRepository portalRepo;
 
     private MockMvc mvc;
     private String phone;
@@ -89,6 +91,53 @@ class PortalProfileApiTest {
                 .andExpect(jsonPath("$.name").value("Priya N"));
         mvc.perform(patch("/v1/portal/me").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Priya N"));
+    }
+
+    @Test
+    @DisplayName("V44 gender: the client sees what the trainer recorded, corrects it, clears it, and a value outside the four is 400")
+    void clientCorrectsGender() throws Exception {
+        clientUser(phone, POLICY);
+        UUID me = liveClient(arun, phone);
+        jdbc.update("UPDATE client SET gender = 'male' WHERE id = :c::uuid", Map.of("c", me.toString()));
+        String token = signInToken();
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/v1/portal/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.myDetails.gender").value("male"));
+        mvc.perform(patch("/v1/portal/me").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"gender\":\"female\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.gender").value("female"));
+        assertEquals("female", jdbc.queryForObject("SELECT gender FROM client WHERE id = :c::uuid", Map.of("c", me.toString()), String.class));
+        mvc.perform(patch("/v1/portal/me").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"gender\":null}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.gender").value(org.hamcrest.Matchers.nullValue()));
+        mvc.perform(patch("/v1/portal/me").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"gender\":\"woman\"}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("a save with nothing changed writes nothing, so the version holds; a real change writes only what differs (21 Nov 2026)")
+    void unchangedSaveWritesNothing() throws Exception {
+        clientUser(phone, POLICY);
+        liveClient(arun, phone);
+        String token = signInToken();
+        mvc.perform(patch("/v1/portal/me").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Priya N\",\"heightCm\":163}")).andExpect(status().isOk());
+        org.mockito.Mockito.clearInvocations(portalRepo);
+
+        // The same values again, height as 163.0: nothing differs, so nothing is written.
+        mvc.perform(patch("/v1/portal/me").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"  Priya N \",\"heightCm\":163.0,\"timezone\":\"Asia/Kolkata\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.name").value("Priya N"));
+        org.mockito.Mockito.verify(portalRepo, org.mockito.Mockito.never())
+                .updateDetails(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+
+        // One field changes: only it is written.
+        mvc.perform(patch("/v1/portal/me").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Priya N\",\"heightCm\":164}")).andExpect(status().isOk()).andExpect(jsonPath("$.heightCm").value(164.0));
+        var written = org.mockito.ArgumentCaptor.forClass(java.util.LinkedHashMap.class);
+        org.mockito.Mockito.verify(portalRepo).updateDetails(org.mockito.ArgumentMatchers.any(), written.capture());
+        assertEquals(java.util.Set.of("height_cm"), written.getValue().keySet());
     }
 
     @Test

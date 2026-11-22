@@ -19,6 +19,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.inclineyou.inclineyou_backend.core.session.MilestoneJdbcRepository;
+import com.inclineyou.inclineyou_backend.core.session.SessionMilestones;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -41,12 +43,12 @@ import java.util.UUID;
 public class PortalWorkoutService {
 
     private static final int MAX_SETS = 50;
-    private static final int[] MILESTONES = {1, 10, 25, 50, 100, 250, 500, 1000};
 
     private final PortalWorkoutJdbcRepository repo;
     private final SessionLogJdbcRepository log;
     private final SetLogService sets;
     private final PortalAccess access;
+    private final MilestoneJdbcRepository milestones;
 
     // ── preview ──────────────────────────────────────────────────────────────────────────────────
 
@@ -75,7 +77,7 @@ public class PortalWorkoutService {
                     approved(alts.get(r.id()), r.exerciseId()), h == null ? null : h.last()));
         }
         boolean startable = "active".equals(day.programStatus()) && !repo.trainerSessionBooked(client, workoutId, Instant.now());
-        var inProgress = repo.resumable(client, workoutId).map(id -> new PortalWorkout.InProgress(id.toString())).orElse(null);
+        var inProgress = repo.resumable(client, workoutId, repo.zoneOf(client)).map(id -> new PortalWorkout.InProgress(id.toString())).orElse(null);
         return new PortalWorkout.Preview(new PortalWorkout.WorkoutHead(day.workoutId().toString(), day.name(), day.week(), day.day(), estimate(seconds)),
                 new PortalWorkout.ProgramHead(day.programId().toString(), day.programName(), day.weeks()), startable, inProgress, out);
     }
@@ -101,7 +103,7 @@ public class PortalWorkoutService {
 
         var day = repo.planDay(client, workoutId)
                 .orElseThrow(() -> ApiException.conflict("WORKOUT_NOT_STARTABLE", "That workout isn't in your plan."));
-        var resume = repo.resumable(client, workoutId);
+        var resume = repo.resumable(client, workoutId, repo.zoneOf(client));
         if (resume.isPresent()) return new Started(view(client, repo.session(client, resume.get(), false).orElseThrow(), null), false);
         if (!"active".equals(day.programStatus())) {
             throw ApiException.conflict("WORKOUT_NOT_STARTABLE", "This plan isn't active right now. Ask your trainer.");
@@ -113,7 +115,7 @@ public class PortalWorkoutService {
         for (var set : log.planSets(repo.planRows(workoutId).stream().map(PortalWorkoutJdbcRepository.PlanRow::id).toList()).values().stream().flatMap(List::stream).toList()) {
             seconds += (set.target() == null || set.target().restSeconds() == null ? 60 : set.target().restSeconds()) + 40;
         }
-        repo.insertSelfRun(id, repo.trainerOf(client), client, workoutId, Math.min(480, estimate(seconds)));
+        if (!repo.insertSelfRun(id, repo.trainerOf(client), client, workoutId, Math.min(480, estimate(seconds)))) throw ApiException.idConflict();
         repo.layDownPlan(id);
         return new Started(view(client, repo.session(client, id, false).orElseThrow(), null), true);
     }
@@ -130,7 +132,11 @@ public class PortalWorkoutService {
     private PortalWorkout.Log view(UUID client, SessionRow s, UUID only) {
         var rows = repo.logRows(client, s.id(), only);
         var sets = log.sets(rows.stream().map(LogRow::id).toList());
-        var alts = log.alternatives(rows.stream().map(LogRow::plannedFrom).filter(java.util.Objects::nonNull).toList());
+        // A set's note on a session the TRAINER ran is the trainer's (21 Nov 2026): the logger's set panel labels it only "Note", and
+        // nothing tells them the client reads it. A note on the client's own self-run is the client's and stays.
+        if (!"client".equals(s.loggedBy())) sets = withoutNotes(sets);
+        // by the plan's main row, which an approved swap does not move (21 Nov 2026)
+        var alts = log.alternatives(rows.stream().map(LogRow::mainRow).filter(java.util.Objects::nonNull).distinct().toList());
         var wantList = new ArrayList<Want>();
         var seen = new LinkedHashMap<UUID, Want>();
         for (var r : rows) {
@@ -147,12 +153,9 @@ public class PortalWorkoutService {
                     r.groupId() == null ? null : r.groupId().toString(), r.source(),
                     r.swappedFrom() == null ? null : new PortalWorkout.Original(r.swappedFrom().toString(), r.swappedFromName()), r.swapSource(), r.swapReason(),
                     r.removedAt() == null ? null : r.removedAt().getTime(), blankToNull(r.cue()), steps(r.description()), sets.getOrDefault(r.id(), List.of()),
-                    r.plannedFrom() == null ? List.of() : approved(alts.get(r.plannedFrom()), r.exerciseId()), h == null ? null : h.last()));
+                    r.mainRow() == null ? List.of() : approved(alts.get(r.mainRow()), r.exerciseId()), h == null ? null : h.last()));
         }
-        var head = new PortalWorkout.SessionHead(s.id().toString(), s.loggedBy(), s.status(), s.startedAt() == null ? null : s.startedAt().getTime(),
-                s.endedAt() == null ? null : s.endedAt().getTime(), s.pausedSeconds(),
-                s.workoutId() == null ? null : new PortalWorkout.WorkoutRef(s.workoutId().toString(), s.workoutName(), s.week(), s.day()), String.valueOf(s.version()));
-        return new PortalWorkout.Log(head, !"client".equals(s.loggedBy()), exercises, log.totals(s.id()), repo.autoRestTimer(client),
+        return new PortalWorkout.Log(head(s), !"client".equals(s.loggedBy()), exercises, log.totals(s.id()), repo.autoRestTimer(client),
                 repo.feedback(client, s.id()).orElse(null), repo.recap(client, s.id()).orElse(null));
     }
 
@@ -181,7 +184,16 @@ public class PortalWorkoutService {
         UUID client = access.clientId(phone);
         var s = ownOpen(client, sessionId);
         if (req.pausedSeconds() != null) repo.setPaused(s.id(), req.pausedSeconds());
-        return view(client, repo.session(client, sessionId, false).orElseThrow(), null).session();
+        // Only the header (21 Nov 2026): this used to build the whole log — every exercise and set, the alternatives, last time across
+        // every past session, the totals, feedback and recap — and keep only session. The header is the session row alone.
+        return head(repo.session(client, sessionId, false).orElseThrow());
+    }
+
+    /** The log's {@code session}: everything in it is the session row. */
+    private static PortalWorkout.SessionHead head(SessionRow s) {
+        return new PortalWorkout.SessionHead(s.id().toString(), s.loggedBy(), s.status(), s.startedAt() == null ? null : s.startedAt().getTime(),
+                s.endedAt() == null ? null : s.endedAt().getTime(), s.pausedSeconds(),
+                s.workoutId() == null ? null : new PortalWorkout.WorkoutRef(s.workoutId().toString(), s.workoutName(), s.week(), s.day()), String.valueOf(s.version()));
     }
 
     // ── swap ─────────────────────────────────────────────────────────────────────────────────────
@@ -206,9 +218,16 @@ public class PortalWorkoutService {
         if (to.equals(sx.exerciseId())) return new PortalWorkout.Swapped(view(client, s, sx.id()).exercises().getFirst(), log.totals(sessionId));
 
         String source = req.source() == null ? "library" : req.source();
+        // Against the plan's MAIN row (21 Nov 2026). An approved swap moves planned_from onto the alternative's row, and reading that as the
+        // main row lost the plan: swapping back kept the alternative's targets and cue, and the other approved alternative was refused.
+        var main = repo.mainRow(sx.plannedFrom()).orElse(null);
         UUID planRow = null;
-        if ("approved".equals(source)) {
-            planRow = repo.approvedRow(sx.plannedFrom(), to).orElseThrow(() -> ApiException.validation("toExerciseId: not one your trainer approved for this exercise"));
+        if (main != null && to.equals(main.exerciseId())) {
+            // Back to the movement the plan has here: back onto the main row, with its own prescription after the sets already done.
+            planRow = main.id();
+        } else if ("approved".equals(source)) {
+            planRow = repo.approvedRow(main == null ? null : main.id(), to)
+                    .orElseThrow(() -> ApiException.validation("toExerciseId: not one your trainer approved for this exercise"));
         }
         if (repo.liveInSession(sessionId, to)) throw ApiException.conflict("EXERCISE_IN_SESSION", "That exercise is already in this session.");
 
@@ -244,7 +263,7 @@ public class PortalWorkoutService {
         UUID client = access.clientId(phone);
         var s = repo.session(client, sessionId, true).orElseThrow(PortalWorkoutService::notYours);
         if (!"client".equals(s.loggedBy())) throw readOnly();
-        if ("done".equals(s.status())) return finished(client, s, repo.milestonesAt(client, s.endedAt().toInstant()), repo.feedback(client, sessionId).orElse(null));
+        if ("done".equals(s.status())) return finished(client, s, repo.milestonesAt(client, s.endedAt().toInstant()), repo.feedback(client, sessionId).orElse(null), null);
 
         if (repo.setsDone(client, sessionId) == 0) {
             throw ApiException.conflict("NOTHING_LOGGED", "Log at least one set before you finish — or leave it, and it won't show up anywhere.");
@@ -259,21 +278,22 @@ public class PortalWorkoutService {
         }
 
         var bests = repo.newBests(client, sessionId, done.startedAt().toInstant());
-        int n = repo.doneCount(client);
+        // The same list and wording as the trainer's Mark done (SessionMilestones, 21 Nov 2026).
         var marks = new ArrayList<Map<String, Object>>();
-        for (int m : MILESTONES) {
-            if (m == n) marks.add(Map.of("kind", "sessions_" + m, "label", m == 1 ? "Your first session" : ordinal(m) + " session", "value", m));
-        }
+        SessionMilestones.at(milestones.doneCount(client))
+                .ifPresent(m -> marks.add(Map.of("kind", m.kind(), "label", m.label(), "value", m.value())));
         String bestText = bests.size() == 1 ? "New best: " + bests.getFirst().name() : "New bests on " + bests.size() + " exercises";
         var made = repo.finishExtras(sessionId, marks, bestText, bests.size());
-        return finished(client, done, made, feedback);
+        return finished(client, done, made, feedback, bests);
     }
 
-    private PortalWorkout.Finished finished(UUID client, SessionRow s, List<PortalWorkout.Milestone> milestones, PortalWorkout.Feedback feedback) {
+    /** {@code bests} when the caller has them already (21 Nov 2026: a first finish ranked the same history twice), else ranked here. */
+    private PortalWorkout.Finished finished(UUID client, SessionRow s, List<PortalWorkout.Milestone> milestones, PortalWorkout.Feedback feedback,
+                                            List<PortalWorkout.NewBest> bests) {
         Totals t = log.totals(s.id());
         long seconds = Math.max(0, (s.endedAt().getTime() - s.startedAt().getTime()) / 1000 - s.pausedSeconds());
         var summary = new PortalWorkout.Summary((int) seconds, t.setsDone(), t.setsPlanned(), t.volumeKg(),
-                repo.newBests(client, s.id(), s.startedAt().toInstant()), milestones);
+                bests != null ? bests : repo.newBests(client, s.id(), s.startedAt().toInstant()), milestones);
         return new PortalWorkout.Finished(new PortalWorkout.FinishedSession(s.id().toString(), s.status(), s.endedAt().getTime(), String.valueOf(s.version())), summary, feedback);
     }
 
@@ -284,7 +304,8 @@ public class PortalWorkoutService {
         var s = repo.session(client, sessionId, false).orElseThrow(PortalWorkoutService::notYours);
         if (!"done".equals(s.status())) throw ApiException.conflict("SESSION_NOT_DONE", "Finish the workout first.");
         String note = req.note() == null || req.note().isBlank() ? null : req.note().strip();
-        return repo.upsertFeedback(client, sessionId, req.effort(), note).orElseThrow();
+        // null: both answers cleared, the answer taken back (204)
+        return repo.upsertFeedback(client, sessionId, req.effort(), note).orElse(null);
     }
 
     // ── the list ─────────────────────────────────────────────────────────────────────────────────
@@ -336,6 +357,13 @@ public class PortalWorkoutService {
         return List.copyOf(seen.values());
     }
 
+    private static Map<UUID, List<SetRow>> withoutNotes(Map<UUID, List<SetRow>> sets) {
+        var out = new java.util.HashMap<UUID, List<SetRow>>();
+        sets.forEach((k, v) -> out.put(k, v.stream().map(x -> new SetRow(x.id(), x.position(), x.planned(), x.loadKind(), x.effortKind(), x.target(),
+                x.loadValue(), x.effortValue(), x.rpe(), null, x.doneAt(), x.enteredBy())).toList()));
+        return out;
+    }
+
     private static List<PortalWorkout.Alt> approved(List<Alternative> alts, UUID current) {
         if (alts == null) return List.of();
         return alts.stream().filter(a -> !a.exerciseId().equals(current.toString())).limit(2)
@@ -357,9 +385,4 @@ public class PortalWorkoutService {
         return Math.max(10, (int) (Math.round(seconds / 60.0 / 5.0) * 5));
     }
 
-    private static String ordinal(int n) {
-        int mod100 = n % 100;
-        String suffix = mod100 >= 11 && mod100 <= 13 ? "th" : switch (n % 10) { case 1 -> "st"; case 2 -> "nd"; case 3 -> "rd"; default -> "th"; };
-        return n + suffix;
-    }
 }

@@ -145,6 +145,9 @@ public class PortalSettingsService {
     public Subscribed subscribe(String phone, PortalSettings.Subscribe req) {
         UUID user = repo.appUserId(phone).orElseThrow(() -> ApiException.notFound("There is no account."));
         UUID id = uuid(req.id(), "id");
+        // One at a time per browser (21 Nov 2026): a double tap, or two tabs, both found nothing and both inserted, and the second met
+        // uq_push_subscription_endpoint (or the primary key) as a 500 for a subscription that was saved. Under the lock the second sees the first.
+        repo.lockEndpoint(req.endpoint());
         var existing = repo.subscriptionByEndpoint(req.endpoint());
         if (existing.isPresent()) {
             repo.takeOver(existing.get().id(), user, req.keys().p256dh(), req.keys().auth(), req.userAgent());

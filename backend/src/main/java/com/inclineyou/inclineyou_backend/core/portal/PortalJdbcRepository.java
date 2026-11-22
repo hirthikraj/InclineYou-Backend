@@ -46,6 +46,13 @@ public class PortalJdbcRepository {
         return n == null ? 0 : n;
     }
 
+    /** Messages from the trainer this client has not opened, through the lens. Same two walls as {@link #unreadNotices}. */
+    public int unreadMessages(UUID clientId) {
+        Integer n = jdbc.queryForObject("SELECT count(*) FROM client_message WHERE client_id = :c::uuid AND read_at IS NULL AND deleted_at IS NULL",
+                Map.of("c", clientId.toString()), Integer.class);
+        return n == null ? 0 : n;
+    }
+
     /** The Assessments tab's badge, through the lens: sent to this client and not yet submitted. Same two walls. */
     public int openAssessments(UUID clientId) {
         Integer n = jdbc.queryForObject("SELECT count(*) FROM assessment WHERE client_id = :c::uuid AND sent_at IS NOT NULL AND completed_at IS NULL AND deleted_at IS NULL",
@@ -62,13 +69,13 @@ public class PortalJdbcRepository {
     /** The client's own row as {@code myDetails}, through their lens. The {@code id} comes from the lens, never from the request. */
     public Optional<PortalMe.MyDetails> details(UUID clientId) {
         return jdbc.query("""
-                SELECT name, goal, height_cm, timezone, activity_level, date_of_birth::text AS dob, phone,
+                SELECT name, goal, height_cm, timezone, activity_level, gender, date_of_birth::text AS dob, phone,
                        (extract(epoch FROM updated_at) * 1000)::bigint AS version
                   FROM client WHERE id = :c::uuid AND deleted_at IS NULL""", Map.of("c", clientId.toString()),
                 (rs, i) -> new PortalMe.MyDetails(rs.getString("name"), rs.getString("goal"),
                         rs.getBigDecimal("height_cm") == null ? null : rs.getBigDecimal("height_cm").doubleValue(),
                         rs.getString("timezone"), rs.getString("activity_level"), rs.getString("dob"), rs.getString("phone"),
-                        String.valueOf(rs.getLong("version")))).stream().findFirst();
+                        String.valueOf(rs.getLong("version")), rs.getString("gender"))).stream().findFirst();
     }
 
     /** The row's version, locked, so an If-Match is checked against the same state the write then changes. */

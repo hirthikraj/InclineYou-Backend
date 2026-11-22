@@ -254,7 +254,7 @@ class MeInviteApiTest {
     }
 
     private static String accept(String dob, String version) {
-        return "{\"dateOfBirth\":\"" + dob + "\",\"policyVersion\":\"" + version + "\"}";
+        return "{\"dateOfBirth\":\"" + dob + "\",\"policyVersion\":\"" + version + "\",\"trainingTerms\":true}";
     }
 
     private String dob(int years) {

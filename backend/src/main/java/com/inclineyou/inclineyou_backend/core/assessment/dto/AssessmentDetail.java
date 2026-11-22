@@ -23,6 +23,17 @@ public record AssessmentDetail(
         List<History> history,
         List<Returned> returned
 ) {
+    /**
+     * The ETag: a hash of the whole answer, and deliberately NOT {@code version} (19 Nov 2026). {@code version} is this
+     * assessment's own updated_at — the If-Match its PATCH and entry take, from the body — but this answer also carries
+     * the client's {@code history} and {@code returned}, the client, the template and the cycle, which change without
+     * touching that column: another assessment completed, and a conditional GET was told 304 with a stale history.
+     * Every part is a record or a list or map of plain values, so the text is stable for equal content.
+     */
+    public String etag() {
+        return com.inclineyou.inclineyou_backend.shared.util.ContentTag.of(this);
+    }
+
     /** {@code onPortal}: accepted or paused — whether <em>send</em> has anywhere to go (api-contract 1.2). */
     public record ClientRef(String id, String name, String status, boolean onPortal) {}
 

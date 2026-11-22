@@ -275,6 +275,20 @@ public class PaymentJdbcRepository {
         return p;
     }
 
+    /**
+     * The pack's most recently changed live payment row: its id and status. Empty when it has none. Rows changed at
+     * the same instant (one transaction's now()) are a tie that the write-off wins: what a retried write-off asks is
+     * whether nothing changed after it.
+     */
+    public Optional<LatestChange> latestChange(UUID packageId) {
+        return jdbc.query("""
+                SELECT id, status FROM payment WHERE package_id = :pid::uuid AND deleted_at IS NULL
+                ORDER BY updated_at DESC, (status = 'write_off') DESC, id DESC LIMIT 1""", Map.of("pid", packageId.toString()),
+                (rs, i) -> new LatestChange((UUID) rs.getObject("id"), rs.getString("status"))).stream().findFirst();
+    }
+
+    public record LatestChange(UUID id, String status) {}
+
     public int markPaid(UUID paymentId, Timestamp paidAt, String method, String reference) {
         var p = new HashMap<String, Object>();
         p.put("yid", paymentId.toString());
@@ -283,7 +297,8 @@ public class PaymentJdbcRepository {
         p.put("paidAt", paidAt);
         return jdbc.update("""
                 UPDATE payment SET status = 'paid', paid_at = :paidAt, method = :method, reference = :reference
-                WHERE id = :yid::uuid""", p);
+                WHERE id = :yid::uuid AND status = 'pending'   -- the caller holds the pack lock; this is the backstop
+                """, p);
     }
 
     /** Stop chasing one pending row, with its note as given. */
@@ -293,7 +308,8 @@ public class PaymentJdbcRepository {
         p.put("note", note);
         return jdbc.update("""
                 UPDATE payment SET status = 'write_off', written_off_at = now(), note = :note
-                WHERE id = :yid::uuid""", p);
+                WHERE id = :yid::uuid AND status = 'pending'   -- the caller holds the pack lock; this is the backstop
+                """, p);
     }
 
     /** Write off a pending row in place, appending the reason to whatever note it has (capped at 500). */

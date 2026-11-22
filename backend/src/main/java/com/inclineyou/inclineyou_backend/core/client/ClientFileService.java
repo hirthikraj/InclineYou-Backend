@@ -27,7 +27,7 @@ public class ClientFileService {
         var own = clients.ownFields(clientId);
         summary = summary.withPortal(summary.portal().withExtras(clients.portalExtras(clientId)));
         return new ClientDetail(summary, own.dateOfBirth(), own.heightCm(), own.activityLevel(), own.goal(),
-                notes.pinned(clientId));
+                notes.pinned(clientId), own.gender());
     }
 
     void requireOwned(UUID trainerId, UUID clientId) {

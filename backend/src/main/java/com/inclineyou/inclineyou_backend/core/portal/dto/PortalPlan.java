@@ -16,7 +16,12 @@ public final class PortalPlan {
 
     // ── pp-l1 · what is coming ───────────────────────────────────────────────────────────────────
 
-    public record Day(String workoutId, Integer week, Integer day, String name, String state, String sessionId) {}
+    /**
+     * One place in the program. {@code at} (21 Nov 2026, additive) is the scheduled time of the session that did or is booked for this
+     * place, epoch ms — null for a place nothing has reached yet. It is what lets the client's Home draw the week as days (Mon … Sun)
+     * rather than a bare count: a done place used to carry no date at all.
+     */
+    public record Day(String workoutId, Integer week, Integer day, String name, String state, String sessionId, Long at) {}
 
     public record ProgramArc(String id, String name, int weeks, String status, String startDate, String endDate, int currentWeek, List<Day> days) {}
 
@@ -46,11 +51,26 @@ public final class PortalPlan {
 
     public record Strength(int tracked, int improved, BestChange best) {}
 
-    public record Consistency(int sessionsDone, int trainerLed, int selfRun, BigDecimal perWeek) {}
+    /**
+     * {@code perWeek} is taken over the part of the window the client was training in — from their first session ever, when that is
+     * inside the window — and {@code since} is that first session's local date ({@code yyyy-MM-dd}), null when they were already
+     * training when the window opened (22 Nov 2026). Divided by the whole window, a client who started in August read 0.6 a week
+     * on the year view.
+     */
+    public record Consistency(int sessionsDone, int trainerLed, int selfRun, BigDecimal perWeek, String since) {}
 
     public record MilestoneItem(String kind, String label, long at) {}
 
-    public record Progress(int windowDays, Strength strength, Consistency consistency, List<MilestoneItem> milestones) {}
+    /** One calendar week (Monday, the client's zone) of the window: finished sessions and weight × reps moved. */
+    public record Week(String start, int sessions, BigDecimal volumeKg) {}
+
+    /**
+     * {@code lifts} and {@code weeks} are additive (22 Nov 2026). {@code lifts} is every tracked lift's change over the window,
+     * biggest first (the old payload kept only {@code strength.best}); {@code weeks} is the window week by week, empty weeks
+     * included, so the client's Progress can draw a rhythm and not only a total.
+     */
+    public record Progress(int windowDays, Strength strength, Consistency consistency, List<MilestoneItem> milestones,
+                           List<BestChange> lifts, List<Week> weeks) {}
 
     // ── pp-l4 · per exercise ─────────────────────────────────────────────────────────────────────
 

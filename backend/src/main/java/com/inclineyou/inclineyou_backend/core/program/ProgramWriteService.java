@@ -31,7 +31,8 @@ import java.util.UUID;
  *
  * <p>A program's version is its {@code revised_at}, and it moves on exactly the
  * writes that change what a copy would inherit or what a builder was looking at:
- * a tree save, a rename, a resync. It does <i>not</i> move on a status change —
+ * a tree save, a resync, and any PATCH of name, goal, description or dates (patchFields; corrected 19 Nov 2026 — this
+ * said "a rename" only). It does <i>not</i> move on a status change —
  * pausing a plan from the switcher must not make the builder open in another tab
  * answer 412 to its next autosave.
  */
@@ -65,7 +66,12 @@ public class ProgramWriteService {
         ProgramMade replay = replay(trainerId, id);
         if (replay != null) return replay;
         requireExercises(trainerId, planned);
-        repo.insertTemplate(id, trainerId, body.name(), body.goal(), body.description(), weeks, days);
+        if (!repo.insertTemplate(id, trainerId, body.name(), body.goal(), body.description(), weeks, days)) {
+            // A double tap whose first request committed after the replay check above (19 Nov 2026): that program.
+            ProgramMade raced = replay(trainerId, id);
+            if (raced != null) return raced;
+            throw ApiException.idConflict();
+        }
         trees.save(id, trainerId, planned);
         log.info("program created trainer={} program={} workouts={}", trainerId, id, planned.size());
         return new ProgramMade(read.get(trainerId, id), true);
@@ -85,7 +91,12 @@ public class ProgramWriteService {
                 : (source.name().length() > 143 ? source.name().substring(0, 143) : source.name()) + " (copy)";
         // A copy of a template or of the library remembers where it came from; a copy of a client's
         // plan is a fresh template that belongs to nothing ("Save as template").
-        repo.insertCopy(id, trainerId, src, name, source.clientId() == null);
+        if (!repo.insertCopy(id, trainerId, src, name, source.clientId() == null)) {
+            // The same race on a copy: the first made it (and counted the library use once); this is that one.
+            ProgramMade raced = replay(trainerId, id);
+            if (raced != null) return raced;
+            throw ApiException.idConflict();
+        }
         trees.copy(src, id, trainerId);
         if ("inclineyou".equals(source.origin())) repo.countUse(src);
         log.info("program copied trainer={} from={} to={}", trainerId, src, id);
@@ -105,6 +116,7 @@ public class ProgramWriteService {
     public ProgramItem put(UUID trainerId, UUID id, String ifMatch, ProgramRequest body) {
         IfMatch.require(ifMatch, "the program");
         Locked row = lock(trainerId, id);
+        repo.lockTree(id, true);   // a resync copying this template waits for the save, or the save for it (19 Nov 2026)
         if (IfMatch.stale(ifMatch, row.version())) throw revised();
         if (body.id() != null && !id.equals(body.id())) throw ApiException.validation("id: does not match the address");
         if (body.copyFrom() != null) throw ApiException.validation("copyFrom: only on POST");
@@ -128,6 +140,19 @@ public class ProgramWriteService {
     @Transactional
     public ProgramItem patch(UUID trainerId, UUID id, String ifMatch, PatchProgramRequest req) {
         if (req.isEmpty()) throw ApiException.validation("body: nothing to change");
+        // Activating ends the client's other active plan, so it locks the CLIENT first (19 Nov 2026) — the order apply
+        // and a client delete use. Two activations of one client's plans each locked their own plan and then reached for
+        // the other's: a deadlock (40P01) or a uq_program_client_active clash, a 500 either way. Now they queue.
+        if (req.status() != null && "active".equals(req.status().value())) {
+            var plan = repo.copySource(trainerId, id).filter(src -> src.clientId() != null);
+            if (plan.isPresent()) {
+                String clientStatus = repo.lockClientStatus(trainerId, UUID.fromString(plan.get().clientId()))
+                        .orElseThrow(() -> ApiException.notFound("That client is not on your roster."));
+                if ("archived".equals(clientStatus)) {
+                    throw ApiException.conflict("CLIENT_ARCHIVED", "This client is archived. Unarchive them first.");
+                }
+            }
+        }
         Locked row = lock(trainerId, id);
         IfMatch.check(ifMatch, row.version(), "This program changed since it was loaded.");
         if (row.clientId() == null && (req.status() != null || req.startDate() != null || req.endDate() != null)) {
@@ -178,6 +203,8 @@ public class ProgramWriteService {
             throw ApiException.conflict("PROGRAM_NOT_A_COPY", "This program was not copied from a template.");
         }
         if (IfMatch.stale(ifMatch, row.version())) throw revised();
+        // The template is read in several statements: hold it so a save to it cannot land half-way (19 Nov 2026).
+        repo.lockTree(UUID.fromString(row.copiedFrom()), false);
         int[] shape = repo.resyncSource(trainerId, row.copiedFrom()).orElseThrow(() ->
                 ApiException.conflict("SOURCE_DELETED", "The template this plan was copied from has been deleted."));
         int before = trees.mainExercises(id);

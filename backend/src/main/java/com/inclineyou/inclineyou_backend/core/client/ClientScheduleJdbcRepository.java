@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.client;
 
+import com.inclineyou.inclineyou_backend.core.program.PlanSequence;
 import com.inclineyou.inclineyou_backend.core.client.dto.CreateClientRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.PutScheduleRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.ScheduleSaved;
@@ -222,6 +223,11 @@ public class ClientScheduleJdbcRepository {
                 INSERT INTO scheduled_session (trainer_id, client_id, slot_id, scheduled_at, duration_minutes, ends_at, delivery_mode)
                 SELECT :tid::uuid, :cid::uuid, d.id, d.at, d.minutes, d.at, d.delivery_mode
                 FROM d WHERE d.at > now()
+                  -- 18 Nov 2026: a date that would overlap a session the client already has (booked by hand at another
+                  -- start) is left free, as a taken start is below; the slot stays, only that date is skipped.
+                  AND NOT EXISTS (SELECT 1 FROM scheduled_session o
+                                  WHERE o.client_id = :cid::uuid AND o.deleted_at IS NULL AND o.status <> 'cancelled'
+                                    AND o.scheduled_at < d.at + make_interval(mins => d.minutes) AND o.ends_at > d.at)
                 ON CONFLICT (client_id, scheduled_at) WHERE deleted_at IS NULL AND status <> 'cancelled' DO NOTHING
                 RETURNING id::text
                 """, p, String.class);
@@ -243,38 +249,35 @@ public class ClientScheduleJdbcRepository {
         p.put("cid", clientId.toString());
         p.put("ids", ids.toArray(String[]::new));
         p.put("tz", zone.getId());
-        return jdbc.update("""
-                WITH prog AS (
-                    SELECT id, coalesce(start_date, (created_at AT TIME ZONE :tz)::date) AS start
+        // The plan's places come from PlanSequence: a week with nothing of its own repeats week 1 (18 Nov 2026).
+        String counted = """
+                s.client_id = :cid::uuid AND s.deleted_at IS NULL AND s.status <> 'cancelled'
+                  AND (s.logged_by = 'trainer' OR s.status = 'done')   -- R107: a finished self-run day counts as done
+                  AND s.scheduled_at < (SELECT min(scheduled_at) FROM t)
+                  AND NOT (s.id = ANY(CAST(:ids AS uuid[])))""";
+        return jdbc.update("WITH " + """
+                prog AS (
+                    SELECT id, client_id, coalesce(start_date, (created_at AT TIME ZONE :tz)::date) AS start
                     FROM program WHERE client_id = :cid::uuid AND status = 'active' AND deleted_at IS NULL
-                ),
-                plan AS (
-                    SELECT w.id, row_number() OVER (ORDER BY w.week, w.day, w.position, w.id) AS n
-                    FROM workout w JOIN prog ON w.program_id = prog.id WHERE w.deleted_at IS NULL
                 ),
                 t AS (
                     SELECT s.id, s.scheduled_at, sl.program_day, (s.scheduled_at AT TIME ZONE :tz)::date AS day
                     FROM scheduled_session s LEFT JOIN client_schedule_slot sl ON sl.id = s.slot_id
                     WHERE s.id = ANY(CAST(:ids AS uuid[]))
                 ),
-                prior AS (
-                    SELECT coalesce((
-                        SELECT plan.n FROM scheduled_session x JOIN plan ON plan.id = x.workout_id
-                        WHERE x.client_id = :cid::uuid AND x.deleted_at IS NULL AND x.status <> 'cancelled'
-                          AND (x.logged_by = 'trainer' OR x.status = 'done')   -- R107: a finished self-run day counts as done
-                          AND x.scheduled_at < (SELECT min(scheduled_at) FROM t)
-                          AND NOT (x.id = ANY(CAST(:ids AS uuid[])))
-                        ORDER BY x.scheduled_at DESC LIMIT 1), 0) AS n
-                ),
+                """ + PlanSequence.ctes("SELECT id, client_id FROM prog", counted) + """
+                ,
                 seq AS (
-                    SELECT t.id, row_number() OVER (ORDER BY t.scheduled_at, t.id) + (SELECT n FROM prior) AS n
+                    SELECT t.id, row_number() OVER (ORDER BY t.scheduled_at, t.id)
+                                 + coalesce((SELECT n FROM plan_at), 0) AS n
                     FROM t WHERE t.program_day IS NULL
                 ),
                 pick AS (
-                    SELECT t.id, (SELECT w.id FROM workout w, prog
-                                  WHERE w.program_id = prog.id AND w.deleted_at IS NULL AND w.day = t.program_day
-                                    AND w.week = greatest(1, (t.day - prog.start) / 7 + 1)
-                                  ORDER BY w.position, w.id LIMIT 1) AS wid
+                    -- A day-pinned slot takes that day of the week the session falls in, counted from the plan's start;
+                    -- past the plan's last week there is none.
+                    SELECT t.id, (SELECT plan.id FROM plan, prog
+                                  WHERE plan.day = t.program_day AND plan.week = greatest(1, (t.day - prog.start) / 7 + 1)
+                                  ORDER BY plan.n LIMIT 1) AS wid
                     FROM t WHERE t.program_day IS NOT NULL
                     UNION ALL
                     SELECT seq.id, plan.id FROM seq LEFT JOIN plan ON plan.n = seq.n

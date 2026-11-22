@@ -189,8 +189,12 @@ class ClientStateTest {
         assertNull(pay.get("note"));
         assertEquals(1, count("SELECT count(*) FROM package WHERE client_id = :c::uuid AND deleted_at IS NULL"));
 
-        // The same 404 shape every other verb gives a client that is gone (deleted_at IS NULL).
-        assertThrows(ApiException.class, () -> states.delete(trainer, client, new DeleteClientRequest("Meera")));
+        // A repeat (its first answer lost) answers 200 with no effects and no client to describe (18 Nov 2026), and
+        // nothing runs a second time; another trainer's id is still a 404.
+        var again = states.delete(trainer, client, new DeleteClientRequest("Meera"));
+        assertNull(again.client());
+        assertTrue(again.effects().values().stream().allMatch(n -> n == 0), "nothing ran twice");
+        assertThrows(ApiException.class, () -> states.delete(trainer, UUID.randomUUID(), new DeleteClientRequest("Meera")));
     }
 
     private int count(String sql) {

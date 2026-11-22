@@ -41,6 +41,10 @@ import java.util.UUID;
 @Slf4j
 public class ExerciseService {
 
+    /** Live custom exercises per trainer (19 Nov 2026); the library itself is 655. */
+    static final int MAX_CUSTOMS = 500;
+
+
     private static final int DEFAULT_LIMIT = 50;
     private static final int MAX_LIMIT = 200;
     private static final int MAX_Q = 100;
@@ -115,6 +119,18 @@ public class ExerciseService {
         if (existing.isPresent()) {
             if (!existing.get()) throw ApiException.idConflict();
             return new ExerciseMade(get(trainerId, id), false);
+        }
+        // One create at a time per trainer (19 Nov 2026): a double tap's second request waits here for the first, and
+        // then finds its own id — it used to miss it and meet its own name, "You already have an exercise with that name".
+        repo.lockTrainerCustoms(trainerId);
+        var raced = repo.ownership(trainerId, id);
+        if (raced.isPresent()) {
+            if (!raced.get()) throw ApiException.idConflict();
+            return new ExerciseMade(get(trainerId, id), false);
+        }
+        // Every unfiltered library page and every /meta read loads a trainer's customs, so they are capped (19 Nov 2026).
+        if (repo.liveCustomCount(trainerId) >= MAX_CUSTOMS) {
+            throw ApiException.conflict("EXERCISE_LIMIT", "You have " + MAX_CUSTOMS + " custom exercises. Retire one you don't use first.");
         }
         requireFreeName(trainerId, body.name(), null);
         try {

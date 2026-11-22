@@ -92,12 +92,19 @@ public class SessionChargeService {
         return packageId;
     }
 
-    /** The sale booking a single session makes. A no-op for any other billing. */
-    void sellAtBooking(UUID trainerId, UUID clientId, UUID sessionId, String service) {
+    /**
+     * The sale booking a single session makes — or a reopen, which books it again. A no-op for any other billing, when
+     * the session already has a sale, and for a gym client (check_package_client_type): booking refuses single for one,
+     * but a reopen can meet a client whose type changed since, who is left unsold as {@link #chargeSingle} leaves them
+     * uncharged.
+     */
+    boolean sellAtBooking(UUID trainerId, UUID clientId, UUID sessionId, String service) {
         var billing = repo.billing(sessionId).orElseThrow();
-        if (!"single".equals(billing.billing())) return;
-        if (repo.sale(sessionId).isPresent()) return;
+        if (!"single".equals(billing.billing())) return false;
+        if ("gym".equals(billing.clientType())) return false;
+        if (repo.sale(sessionId).isPresent()) return false;
         sell(trainerId, clientId, sessionId, service, billing);
+        return true;
     }
 
     /**
@@ -110,10 +117,11 @@ public class SessionChargeService {
                 .ifPresent(s -> repo.closeSale(UUID.fromString(s.id())));
     }
 
-    /** The other half of {@link #close}: the session was reopened, so its sale is owed again. */
-    void revive(UUID sessionId) {
-        repo.sale(sessionId).filter(s -> "cancelled".equals(s.status()))
-                .ifPresent(s -> repo.reviveSale(UUID.fromString(s.id())));
+    /** The other half of {@link #close}: the session was reopened, so its sale is owed again. True when one was. */
+    boolean revive(UUID sessionId) {
+        var closed = repo.sale(sessionId).filter(s -> "cancelled".equals(s.status()));
+        closed.ifPresent(s -> repo.reviveSale(UUID.fromString(s.id())));
+        return closed.isPresent();
     }
 
     /** The session's live sale, for the verbs that need its state (Undo, a billing change, a move). */

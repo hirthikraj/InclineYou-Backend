@@ -55,6 +55,10 @@ class AssessmentApiTest {
     @Autowired WebApplicationContext context;
     @Autowired NamedParameterJdbcTemplate jdbc;
 
+    @Autowired AssessmentService service;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean AssessmentTemplateJdbcRepository templateRepo;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean AssessmentJdbcRepository assessmentRepo;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean AssessmentScheduleJdbcRepository scheduleRepo;
     private MockMvc mvc;
     private UUID me;
     private UUID other;
@@ -94,9 +98,10 @@ class AssessmentApiTest {
                 .andExpect(jsonPath("$.groups", not(hasItem("Vitals"))))
                 .andExpect(jsonPath("$.measurements[?(@.key=='weight')].charted", hasItem(true)))
                 .andExpect(jsonPath("$.measurements[?(@.key=='neck')].charted", hasItem(false)))
-                .andExpect(header().string("ETag", "\"" + AssessmentController.CATALOG_ETAG + "\""));
-        mvc.perform(get("/v1/assessment-catalog").header("If-None-Match", "\"" + AssessmentController.CATALOG_ETAG + "\""))
-                .andExpect(status().isNotModified());
+                .andExpect(header().string("ETag", "\"catalog-" + com.inclineyou.inclineyou_backend.shared.util.ContentTag.of(service.catalog()) + "\""));
+        // The tag is the served content's (19 Nov 2026), so it cannot drift from the catalogue the way a hand-bumped date could.
+        String etag = mvc.perform(get("/v1/assessment-catalog")).andReturn().getResponse().getHeader("ETag");
+        mvc.perform(get("/v1/assessment-catalog").header("If-None-Match", etag)).andExpect(status().isNotModified());
     }
 
     /* ── templates ───────────────────────────────────────────────────────── */
@@ -157,13 +162,16 @@ class AssessmentApiTest {
     }
 
     @Test
-    @DisplayName("deleting a template is 204 twice, ends its live cycles, and every assessment already given still opens")
+    @DisplayName("deleting a template is 204 twice, ends its live cycles, and a started assessment already given still opens")
     void templateDelete() throws Exception {
         String tpl = template().read("$.id");
         String cycle = cycle(tpl, 28, today.toString()).read("$.id");
         String open = JsonPath.parse(mvc.perform(get("/v1/assessment-schedules").param("clientId", meera.toString()))
                 .andReturn().getResponse().getContentAsString()).read("$.items[0].openAssessmentId");
         mvc.perform(get("/v1/assessment-templates")).andExpect(jsonPath("$.items[0].liveCycles").value(1));
+        // Started, so it is kept: since 19 Nov an UNSTARTED open one goes with its cycle (deleteFormEndsCyclesLikeEnd).
+        saveEntry(open, """
+                {"readings":{"weight":70.0},"answers":{},"complete":false}""", null);
 
         mvc.perform(delete("/v1/assessment-templates/" + tpl)).andExpect(status().isNoContent());
         mvc.perform(delete("/v1/assessment-templates/" + tpl)).andExpect(status().isNoContent());
@@ -350,8 +358,9 @@ class AssessmentApiTest {
         // deleting the open one SKIPS it: the cycle books the next at due_on + interval
         var skipped = mvc.perform(delete("/v1/assessments/" + second)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.next.dueOn").value(completedDay.plusDays(56).toString())).andReturn();
-        mvc.perform(delete("/v1/assessments/" + second)).andExpect(status().isOk()).andExpect(jsonPath("$.next").doesNotExist());
         String third = JsonPath.read(skipped.getResponse().getContentAsString(), "$.next.id");
+        // A retry names the same next (19 Nov 2026; it used to answer next: null).
+        mvc.perform(delete("/v1/assessments/" + second)).andExpect(status().isOk()).andExpect(jsonPath("$.next.id").value(third));
 
         // ending stops it: the unstarted open one goes, and ending again is 200 as it is
         mvc.perform(post("/v1/assessment-schedules/" + cid + "/end")).andExpect(status().isOk())
@@ -465,6 +474,196 @@ class AssessmentApiTest {
         entry(id, version(id), body.formatted(monthAgo)).andExpect(status().isOk()).andExpect(jsonPath("$.completedAt").value(monthAgo));
     }
 
+    @Test
+    @DisplayName("GET one: the ETag is the whole answer's, so a repeat is 304 and a change outside the row (the client) is a fresh 200")
+    void detailEtagIsTheWholeAnswer() throws Exception {
+        String id = give(template().read("$.id"), today.toString()).read("$.id");
+        var first = mvc.perform(get("/v1/assessments/" + id)).andExpect(status().isOk()).andReturn().getResponse();
+        String etag = first.getHeader("ETag");
+        String version = JsonPath.read(first.getContentAsString(), "$.version");
+        org.junit.jupiter.api.Assertions.assertNotEquals("\"" + version + "\"", etag, "not the row's version");
+        mvc.perform(get("/v1/assessments/" + id).header("If-None-Match", etag)).andExpect(status().isNotModified());
+
+        // Nothing on the assessment row moved; the answer did.
+        jdbc.update("UPDATE client SET name = 'Meera I.' WHERE id = :c::uuid", Map.of("c", meera.toString()));
+        mvc.perform(get("/v1/assessments/" + id).header("If-None-Match", etag)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.client.name").value("Meera I."))
+                .andExpect(jsonPath("$.version").value(version));
+    }
+
+    @Test
+    @DisplayName("the shelf's ETag is its whole content: a repeat is 304; a new form makes the old tag miss")
+    void shelfEtag() throws Exception {
+        template();
+        String etag = mvc.perform(get("/v1/assessment-templates")).andExpect(status().isOk()).andReturn().getResponse().getHeader("ETag");
+        assertEquals(26, etag.length(), "a 12-byte SHA-256 prefix in quotes, not a 32-bit hashCode: " + etag);
+        mvc.perform(get("/v1/assessment-templates").header("If-None-Match", etag)).andExpect(status().isNotModified());
+        mvc.perform(post("/v1/assessment-templates").contentType(MediaType.APPLICATION_JSON)
+                .content(FORM.replaceFirst("\"name\"\\s*:\\s*\"[^\"]*\"", "\"name\":\"Second form\""))).andExpect(status().isCreated());
+        mvc.perform(get("/v1/assessment-templates").header("If-None-Match", etag)).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("a trainer's live forms are capped at 100: the 101st is 409 TEMPLATE_LIMIT; a deleted one frees a place")
+    void formCap() throws Exception {
+        for (int n = 0; n < AssessmentTemplateService.MAX_FORMS; n++) {
+            jdbc.update("""
+                    INSERT INTO assessment_template (id, trainer_id, name, measurements, questions)
+                    VALUES (gen_random_uuid(), :t::uuid, :n, '{"on":true,"keys":["weight"]}', '{"on":false,"items":[]}')""",
+                    Map.of("t", me.toString(), "n", "Form " + n));
+        }
+        mvc.perform(post("/v1/assessment-templates").contentType(MediaType.APPLICATION_JSON).content(FORM))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("TEMPLATE_LIMIT"));
+        jdbc.update("UPDATE assessment_template SET deleted_at = now() WHERE trainer_id = :t::uuid AND name = 'Form 0'",
+                Map.of("t", me.toString()));
+        template();
+    }
+
+    @Test
+    @DisplayName("a form double-tapped with one id: the first lookup misses the first request, and the answer is that form (200), not 409")
+    void formDoubleTap() throws Exception {
+        UUID id = UUID.randomUUID();
+        String body = FORM.replaceFirst("\\{", "{\"id\":\"" + id + "\",");
+        mvc.perform(post("/v1/assessment-templates").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated());
+        // The second request's first lookup ran before the first committed.
+        org.mockito.Mockito.doReturn(java.util.Optional.empty()).doCallRealMethod().when(templateRepo).isMine(id, me);
+        mvc.perform(post("/v1/assessment-templates").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id.toString()));
+    }
+
+    @Test
+    @DisplayName("PUT a template that changes neither name nor form (a description edit) leaves unstarted assessments untouched")
+    void templatePutLeavesSameFormAlone() throws Exception {
+        var t = template();
+        String id = t.read("$.id"), version = t.read("$.version");
+        String a1 = give(id, today.toString()).read("$.id");
+        // A row's physical address moves on every rewrite, even inside this one transaction, where now() — and so the
+        // version — cannot.
+        String before = jdbc.queryForObject("SELECT ctid::text FROM assessment WHERE id = :id::uuid", Map.of("id", a1), String.class);
+        String described = mvc.perform(put("/v1/assessment-templates/" + id).header("If-Match", "\"" + version + "\"")
+                        .contentType(MediaType.APPLICATION_JSON).content(FORM.replace("\"description\":null", "\"description\":\"Once a month\"")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertEquals(before, jdbc.queryForObject("SELECT ctid::text FROM assessment WHERE id = :id::uuid", Map.of("id", a1), String.class),
+                "a description edit does not rewrite the assessment");
+
+        mvc.perform(put("/v1/assessment-templates/" + id).header("If-Match", "\"" + JsonPath.read(described, "$.version") + "\"")
+                .contentType(MediaType.APPLICATION_JSON).content(FORM.replace("Monthly check", "Monthly check v2"))).andExpect(status().isOk());
+        org.junit.jupiter.api.Assertions.assertNotEquals(before,
+                jdbc.queryForObject("SELECT ctid::text FROM assessment WHERE id = :id::uuid", Map.of("id", a1), String.class),
+                "a renamed form does");
+    }
+
+    @Test
+    @DisplayName("deleting a form ends its cycles as POST …/end does: each cycle's unstarted open assessment goes; a started one stays")
+    void deleteFormEndsCyclesLikeEnd() throws Exception {
+        String tpl = template().read("$.id");
+        cycle(tpl, 7, today.toString());
+        UUID asha = client(me, "Asha");
+        mvc.perform(post("/v1/assessment-schedules").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"clientId\":\"" + asha + "\",\"templateId\":\"" + tpl + "\",\"intervalDays\":7,\"firstDueOn\":\"" + today + "\"}"))
+                .andExpect(status().isCreated());
+        String ashaOpen = jdbc.queryForObject("SELECT id::text FROM assessment WHERE client_id = :c::uuid AND deleted_at IS NULL",
+                Map.of("c", asha.toString()), String.class);
+        saveEntry(ashaOpen, """
+                {"readings":{"weight":61.0},"answers":{},"complete":false}""", null);   // Asha has started hers
+
+        mvc.perform(delete("/v1/assessment-templates/" + tpl)).andExpect(status().isNoContent());
+        assertEquals(0, count("SELECT count(*) FROM assessment WHERE client_id = :id::uuid AND deleted_at IS NULL", meera.toString()),
+                "Meera's unstarted one goes with the cycle");
+        assertEquals(1, count("SELECT count(*) FROM assessment WHERE id = :id::uuid AND deleted_at IS NULL", ashaOpen),
+                "Asha's started one stays");
+    }
+
+    @Test
+    @DisplayName("give: dueOn within 3 months of today either way; a double tap with one id answers the first (200), not 409")
+    void giveRules() throws Exception {
+        String tpl = template().read("$.id");
+        for (String due : new String[]{"1900-01-01", "2999-12-31", today.plusMonths(4).toString()}) {
+            mvc.perform(post("/v1/assessments").contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"clientId\":\"" + meera + "\",\"templateId\":\"" + tpl + "\",\"dueOn\":\"" + due + "\"}"))
+                    .andExpect(status().isBadRequest()).andExpect(jsonPath("$.detail", org.hamcrest.Matchers.containsString("dueOn")));
+        }
+        UUID id = UUID.randomUUID();
+        String body = "{\"id\":\"" + id + "\",\"clientId\":\"" + meera + "\",\"templateId\":\"" + tpl + "\",\"dueOn\":\""
+                + today.plusMonths(2) + "\",\"sendNow\":false}";
+        mvc.perform(post("/v1/assessments").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated());
+        // The second tap's lookup ran before the first committed.
+        org.mockito.Mockito.doReturn(java.util.Optional.empty()).doCallRealMethod().when(assessmentRepo).isMine(id, me, meera);
+        mvc.perform(post("/v1/assessments").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id.toString()));
+        assertEquals(1, count("SELECT count(*) FROM assessment WHERE client_id = :id::uuid AND deleted_at IS NULL", meera.toString()));
+    }
+
+    @Test
+    @DisplayName("start a cycle: firstDueOn within 3 months either way; a double tap meeting its own live cycle answers it (200), not 409")
+    void cycleRules() throws Exception {
+        String tpl = template().read("$.id");
+        mvc.perform(post("/v1/assessment-schedules").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"clientId\":\"" + meera + "\",\"templateId\":\"" + tpl + "\",\"intervalDays\":7,\"firstDueOn\":\"1900-01-01\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.detail", org.hamcrest.Matchers.containsString("firstDueOn")));
+        UUID id = UUID.randomUUID();
+        String body = "{\"id\":\"" + id + "\",\"clientId\":\"" + meera + "\",\"templateId\":\"" + tpl
+                + "\",\"intervalDays\":7,\"firstDueOn\":\"" + today + "\"}";
+        mvc.perform(post("/v1/assessment-schedules").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated());
+        // The second tap's first lookup ran before the first committed; it then meets the live cycle the first made.
+        org.mockito.Mockito.doReturn(java.util.Optional.empty()).doCallRealMethod().when(scheduleRepo).isMine(id, me);
+        mvc.perform(post("/v1/assessment-schedules").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id.toString()));
+        assertEquals(1, count("SELECT count(*) FROM assessment WHERE client_id = :id::uuid AND deleted_at IS NULL", meera.toString()),
+                "one first assessment, not two");
+    }
+
+    @Test
+    @DisplayName("re-pace a cycle: nextDueOn within 3 months; the same date leaves the open assessment untouched, a new one moves it")
+    void cyclePatchRules() throws Exception {
+        String tpl = template().read("$.id");
+        var c = cycle(tpl, 7, today.toString());
+        String id = c.read("$.id"), version = c.read("$.version");
+        String open = jdbc.queryForObject("SELECT id::text FROM assessment WHERE schedule_id = :s::uuid AND deleted_at IS NULL",
+                Map.of("s", id), String.class);
+        mvc.perform(patch("/v1/assessment-schedules/" + id).header("If-Match", "\"" + version + "\"").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nextDueOn\":\"2999-12-31\"}")).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail", org.hamcrest.Matchers.containsString("nextDueOn")));
+        String before = jdbc.queryForObject("SELECT ctid::text FROM assessment WHERE id = :i::uuid", Map.of("i", open), String.class);
+        mvc.perform(patch("/v1/assessment-schedules/" + id).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nextDueOn\":\"" + today + "\"}")).andExpect(status().isOk());
+        assertEquals(before, jdbc.queryForObject("SELECT ctid::text FROM assessment WHERE id = :i::uuid", Map.of("i", open), String.class),
+                "the same date does not rewrite the open assessment");
+        mvc.perform(patch("/v1/assessment-schedules/" + id).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nextDueOn\":\"" + today.plusDays(3) + "\"}")).andExpect(status().isOk());
+        assertEquals(today.plusDays(3).toString(), jdbc.queryForObject("SELECT due_on::text FROM assessment WHERE id = :i::uuid",
+                Map.of("i", open), String.class));
+    }
+
+    @Test
+    @DisplayName("move: dueOn within 3 months; the same date leaves the row untouched")
+    void moveRules() throws Exception {
+        String id = give(template().read("$.id"), today.toString()).read("$.id");
+        mvc.perform(patch("/v1/assessments/" + id).contentType(MediaType.APPLICATION_JSON).content("{\"dueOn\":\"1900-01-01\"}"))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.detail", org.hamcrest.Matchers.containsString("dueOn")));
+        String before = jdbc.queryForObject("SELECT ctid::text FROM assessment WHERE id = :i::uuid", Map.of("i", id), String.class);
+        mvc.perform(patch("/v1/assessments/" + id).contentType(MediaType.APPLICATION_JSON).content("{\"dueOn\":\"" + today + "\"}"))
+                .andExpect(status().isOk());
+        assertEquals(before, jdbc.queryForObject("SELECT ctid::text FROM assessment WHERE id = :i::uuid", Map.of("i", id), String.class));
+        mvc.perform(patch("/v1/assessments/" + id).contentType(MediaType.APPLICATION_JSON).content("{\"dueOn\":\"" + today.plusDays(5) + "\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.dueOn").value(today.plusDays(5).toString()));
+    }
+
+    @Test
+    @DisplayName("skip: an overdue cycle's next is booked no earlier than today; a retried DELETE answers that same next")
+    void skipRules() throws Exception {
+        String tpl = template().read("$.id");
+        String cycle = cycle(tpl, 28, today.minusDays(80).toString()).read("$.id");
+        String open = jdbc.queryForObject("SELECT id::text FROM assessment WHERE schedule_id = :s::uuid AND deleted_at IS NULL",
+                Map.of("s", cycle), String.class);
+        String first = mvc.perform(delete("/v1/assessments/" + open)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.next.dueOn").value(today.toString()))      // not 52 days ago
+                .andReturn().getResponse().getContentAsString();
+        String next = JsonPath.read(first, "$.next.id");
+        mvc.perform(delete("/v1/assessments/" + open)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.next.id").value(next));                      // the retry names the same one
+    }
+
     private String version(String assessmentId) throws Exception {
         return JsonPath.read(mvc.perform(get("/v1/assessments/" + assessmentId)).andReturn().getResponse().getContentAsString(), "$.version");
     }
@@ -514,6 +713,11 @@ class AssessmentApiTest {
         var id = UUID.randomUUID();
         jdbc.update("INSERT INTO client (id, trainer_id, name, client_type) VALUES (:id::uuid, :tid::uuid, :name, 'independent')",
                 Map.of("id", id.toString(), "tid", trainerId.toString(), "name", name));
+        // Consented (22 Nov 2026): ConsentGate refuses a third session, notes, the profile and health data without it.
+        // Consented but off the portal, so nothing is sent and every assessment here stays in person — what these
+        // tests were written against, before consent became a condition of any assessment.
+        jdbc.update("UPDATE client SET membership_status = 'removed', invited_at = now(), accepted_at = now(), removed_at = now(), removed_by = 'trainer' WHERE id = :id::uuid",
+                Map.of("id", id.toString()));
         return id;
     }
 

@@ -75,6 +75,7 @@ class PortalMeApiTest {
         UUID other = liveClient(arun, "+919800000011");
         notice(me, false, false); notice(me, false, false); notice(me, true, false); notice(me, false, true); notice(other, false, false);
         assessment(me, true, false); assessment(me, true, true); assessment(me, false, false); assessment(other, true, false);
+        message(me, false, false); message(me, true, false); message(me, false, true); message(other, false, false);   // 1 unread of mine
         String token = signInToken();
 
         String body = mvc.perform(get("/v1/portal/me").header("Authorization", "Bearer " + token)).andExpect(status().isOk())
@@ -89,6 +90,7 @@ class PortalMeApiTest {
                 .andExpect(jsonPath("$.myDetails.dateOfBirth").value("1994-03-02")).andExpect(jsonPath("$.myDetails.phone").value(phone))
                 .andExpect(jsonPath("$.myDetails.version").isString())
                 .andExpect(jsonPath("$.moneyVisible").value(true)).andExpect(jsonPath("$.unreadNotices").value(2)).andExpect(jsonPath("$.openAssessments").value(1))
+                .andExpect(jsonPath("$.unreadMessages").value(1))   // 22 Nov 2026: messages, apart from the notices
                 .andExpect(jsonPath("$.pendingInvites.length()").value(0)).andExpect(jsonPath("$.policy.accepted").value("2026-09"))
                 .andExpect(jsonPath("$.policy.current").value("2026-09")).andExpect(jsonPath("$.push.vapidPublicKey").value(org.hamcrest.Matchers.nullValue()))
                 .andExpect(jsonPath("$.removedAt").doesNotExist()).andExpect(jsonPath("$.pausedUntil").doesNotExist())
@@ -201,6 +203,13 @@ class PortalMeApiTest {
                 UPDATE client SET membership_status = 'accepted', invited_at = now(), accepted_at = now(), name = 'Priya Nair', goal = 'Lose 6 kg by March',
                        height_cm = 162, activity_level = 'light', date_of_birth = '1994-03-02', timezone = 'Asia/Kolkata' WHERE id = :c::uuid""", Map.of("c", id.toString()));
         return id;
+    }
+
+    private void message(UUID clientId, boolean read, boolean deleted) {
+        jdbc.update("""
+                INSERT INTO client_message (id, tenant_id, client_id, trainer_id, body, kind, at, read_at, deleted_at)
+                SELECT gen_random_uuid(), tenant_id, id, trainer_id, 'hello', 'note', now(), CASE WHEN :r THEN now() END, CASE WHEN :d THEN now() END
+                  FROM client WHERE id = :c::uuid""", Map.of("r", read, "d", deleted, "c", clientId.toString()));
     }
 
     private void notice(UUID clientId, boolean read, boolean deleted) {

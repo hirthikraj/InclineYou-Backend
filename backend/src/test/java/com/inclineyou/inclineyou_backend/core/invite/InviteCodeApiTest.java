@@ -42,6 +42,8 @@ class InviteCodeApiTest {
 
     @Autowired WebApplicationContext context;
     @Autowired NamedParameterJdbcTemplate jdbc;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    com.inclineyou.inclineyou_backend.core.auth.otp.OtpAbuseGuard abuse;
 
     private MockMvc trainerMvc;
     /** No principal at all: the invite page has no session. */
@@ -95,6 +97,21 @@ class InviteCodeApiTest {
         send(token, dob(30), "2026-09").andExpect(status().isOk());
         assertEquals(before, jdbc.queryForList("SELECT status, updated_at::text u FROM client_invite", Map.of()).toString()
                 + jdbc.queryForList("SELECT membership_status, date_of_birth, updated_at::text u FROM client", Map.of()).toString());
+    }
+
+    @Test
+    @DisplayName("a refused request spends nothing from the abuse guard: under 18, a stale notice, a bad date (21 Nov 2026)")
+    void refusalSpendsNoBudget() throws Exception {
+        String token = mint();
+        org.mockito.Mockito.clearInvocations(abuse);
+        send(token, dob(17), "2026-09").andExpect(status().isUnprocessableEntity());
+        send(token, dob(30), "1999-01").andExpect(status().isBadRequest());
+        send(token, today.plusDays(1).toString(), "2026-09").andExpect(status().isBadRequest());
+        org.mockito.Mockito.verify(abuse, org.mockito.Mockito.never())
+                .beforeSend(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+
+        send(token, dob(30), "2026-09").andExpect(status().isOk());
+        org.mockito.Mockito.verify(abuse).beforeSend(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.eq(PHONE));
     }
 
     @Test

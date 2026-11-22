@@ -212,6 +212,37 @@ public class LogExerciseJdbcRepository {
                 Map.of("we", mainPlanRow.toString(), "ex", toExercise.toString()));
     }
 
+    /**
+     * scope program with a plan alternative (19 Nov 2026): the two rows trade places, so each movement stays on the plan
+     * once. The main row takes the alternative's movement and sets; the alternative takes the main's old movement and
+     * sets. It used to copy the alternative onto the main and leave the alternative, so the plan showed it twice.
+     * Three steps, not one swapping UPDATE: a set's position is 1–30 (workout_set_position), so there is no room to park
+     * rows while uq_workout_set_order is checked.
+     */
+    public void planTradeRows(UUID mainRow, UUID altRow) {
+        var p = Map.of("main", mainRow.toString(), "alt", altRow.toString());
+        UUID mainEx = jdbc.queryForObject("SELECT exercise_id FROM workout_exercise WHERE id = :main::uuid", p, UUID.class);
+        UUID altEx = jdbc.queryForObject("SELECT exercise_id FROM workout_exercise WHERE id = :alt::uuid", p, UUID.class);
+        var mainSets = jdbc.queryForList("""
+                SELECT position, load_kind, load_value, effort_kind, effort_value, rest_seconds, tempo, notes
+                FROM workout_set WHERE workout_exercise_id = :main::uuid ORDER BY position""", p);
+        planCopySets(altRow, mainRow);
+        jdbc.update("DELETE FROM workout_set WHERE workout_exercise_id = :alt::uuid", p);
+        for (var row : mainSets) {
+            var q = new java.util.HashMap<String, Object>(row);
+            q.put("we", altRow.toString());
+            jdbc.update("""
+                    INSERT INTO workout_set (id, workout_exercise_id, position, load_kind, load_value, effort_kind,
+                                             effort_value, rest_seconds, tempo, notes)
+                    VALUES (gen_random_uuid(), :we::uuid, :position, :load_kind, :load_value, :effort_kind,
+                            :effort_value, :rest_seconds, :tempo, :notes)""", q);
+        }
+        jdbc.update("UPDATE workout_exercise SET exercise_id = :ex::uuid WHERE id = :we::uuid",
+                Map.of("we", mainRow.toString(), "ex", altEx.toString()));
+        jdbc.update("UPDATE workout_exercise SET exercise_id = :ex::uuid WHERE id = :we::uuid",
+                Map.of("we", altRow.toString(), "ex", mainEx.toString()));
+    }
+
     /** scope program with a plan alternative: the main row takes the alternative's prescription too. */
     public void planCopySets(UUID fromPlanRow, UUID toPlanRow) {
         jdbc.update("DELETE FROM workout_set WHERE workout_exercise_id = :to::uuid", Map.of("to", toPlanRow.toString()));

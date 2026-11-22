@@ -56,6 +56,9 @@ class PortalWorkoutApiTest {
     @Autowired FilterChainProxy securityChain;
     @Autowired NamedParameterJdbcTemplate jdbc;
     @Autowired CapturingSender sender;
+    /** Spied to show what a pause save does NOT read (21 Nov 2026). */
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean com.inclineyou.inclineyou_backend.core.sessionlog.SessionLogJdbcRepository logRepo;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean PortalWorkoutJdbcRepository workoutRepo;
 
     private MockMvc mvc;
     private String phone;
@@ -210,6 +213,37 @@ class PortalWorkoutApiTest {
     }
 
     @Test
+    @DisplayName("a note on a set of the client's own self-run is theirs, and the log gives it back (21 Nov 2026)")
+    void ownSetNoteIsKept() throws Exception {
+        UUID c = live();
+        var p = plan(c);
+        String token = token();
+        UUID sid = UUID.randomUUID();
+        start(token, sid, p.workout).andExpect(status().isCreated());
+        jdbc.update("UPDATE set_log SET notes = 'Felt strong' WHERE id = (SELECT sl.id FROM set_log sl JOIN session_exercise se ON se.id = sl.session_exercise_id WHERE se.session_id = :s::uuid AND se.position = 0 AND sl.position = 1)",
+                Map.of("s", sid.toString()));
+        getLog(token, sid.toString()).andExpect(jsonPath("$.exercises[0].sets[0].notes").value("Felt strong"));
+    }
+
+    @Test
+    @DisplayName("start resumes only a run started today: one left open from an earlier day is not brought back, and the preview does not offer it (21 Nov 2026)")
+    void earlierDaysRunIsNotResumed() throws Exception {
+        UUID c = live();
+        var p = plan(c);
+        String token = token();
+        UUID old = UUID.randomUUID();
+        start(token, old, p.workout).andExpect(status().isCreated());
+        // started two days ago and never finished
+        jdbc.update("UPDATE scheduled_session SET scheduled_at = scheduled_at - interval '2 days', started_at = started_at - interval '2 days', ends_at = ends_at - interval '2 days' WHERE id = :s::uuid",
+                Map.of("s", old.toString()));
+        mvc.perform(get("/v1/portal/workouts/" + p.workout).header("Authorization", "Bearer " + token)).andExpect(jsonPath("$.inProgress").value(nullValue()));
+        UUID fresh = UUID.randomUUID();
+        start(token, fresh, p.workout).andExpect(status().isCreated()).andExpect(jsonPath("$.session.id").value(fresh.toString()));
+        // and today's is the one resumed from now on
+        start(token, UUID.randomUUID(), p.workout).andExpect(status().isOk()).andExpect(jsonPath("$.session.id").value(fresh.toString()));
+    }
+
+    @Test
     @DisplayName("a paused plan cannot be started alone")
     void pausedPlan() throws Exception {
         UUID c = live();
@@ -254,8 +288,13 @@ class PortalWorkoutApiTest {
         assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM set_log WHERE session_exercise_id = :x::uuid", Map.of("x", sx), Integer.class));
 
         // the pause clock
+        // the answer is the session header, built from the session row alone: no exercise, set, history or totals read (21 Nov 2026)
+        org.mockito.Mockito.clearInvocations(logRepo);
         mvc.perform(patch("/v1/portal/sessions/" + sid).header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content("{\"pausedSeconds\":140}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.pausedSeconds").value(140));
+                .andExpect(status().isOk()).andExpect(jsonPath("$.pausedSeconds").value(140)).andExpect(jsonPath("$.id").value(sid.toString()))
+                .andExpect(jsonPath("$.loggedBy").value("client")).andExpect(jsonPath("$.status").value("scheduled")).andExpect(jsonPath("$.startedAt").isNumber())
+                .andExpect(jsonPath("$.workout.id").isString()).andExpect(jsonPath("$.version").isString());
+        org.mockito.Mockito.verifyNoInteractions(logRepo);
         mvc.perform(patch("/v1/portal/sessions/" + sid).header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content("{\"pausedSeconds\":-1}")).andExpect(status().isBadRequest());
         mvc.perform(patch("/v1/portal/sessions/" + sid).header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content("{\"status\":\"done\"}")).andExpect(status().isBadRequest());
     }
@@ -271,11 +310,13 @@ class PortalWorkoutApiTest {
                 INSERT INTO session_exercise (id, session_id, client_id, exercise_id, position, planned_from) VALUES (gen_random_uuid(), :s::uuid, :c::uuid, :e::uuid, 0, :r::uuid)""",
                 Map.of("s", sid.toString(), "c", c.toString(), "e", p.squat.toString(), "r", p.squatRow.toString()));
         UUID sx = UUID.fromString(jdbc.queryForObject("SELECT id::text FROM session_exercise WHERE session_id = :s::uuid", Map.of("s", sid.toString()), String.class));
-        jdbc.update("INSERT INTO set_log (session_exercise_id, position, planned, load_kind, effort_kind, target_load_value, target_effort_value) VALUES (:x::uuid, 1, true, 'weight', 'reps', 60, 8)", Map.of("x", sx.toString()));
+        jdbc.update("INSERT INTO set_log (session_exercise_id, position, planned, load_kind, effort_kind, target_load_value, target_effort_value, notes) VALUES (:x::uuid, 1, true, 'weight', 'reps', 60, 8, 'Knee caving, keep the load down')", Map.of("x", sx.toString()));
         String set = jdbc.queryForObject("SELECT id::text FROM set_log WHERE session_exercise_id = :x::uuid", Map.of("x", sx.toString()), String.class);
 
+        // the trainer's note on a set of their session stays the trainer's (21 Nov 2026)
         getLog(token, sid.toString()).andExpect(status().isOk()).andExpect(jsonPath("$.readOnly").value(true)).andExpect(jsonPath("$.session.loggedBy").value("trainer"))
-                .andExpect(jsonPath("$.exercises[0].name").value("Back squat")).andExpect(jsonPath("$.exercises[0].sets[0].enteredBy").value("trainer"));
+                .andExpect(jsonPath("$.exercises[0].name").value("Back squat")).andExpect(jsonPath("$.exercises[0].sets[0].enteredBy").value("trainer"))
+                .andExpect(jsonPath("$.exercises[0].sets[0].notes").value(nullValue()));
         patchSet(token, sid.toString(), set, "{\"done\":true}").andExpect(status().isUnprocessableEntity()).andExpect(jsonPath("$.code").value("SESSION_READ_ONLY"));
         mvc.perform(post("/v1/portal/sessions/" + sid + "/exercises/" + sx + "/sets").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"loadValue\":20,\"effortValue\":10}")).andExpect(status().isUnprocessableEntity());
@@ -350,6 +391,43 @@ class PortalWorkoutApiTest {
     }
 
     @Test
+    @DisplayName("an approved swap keeps the plan: the other approved alternative is still offered and accepted, and swapping back brings the original's own targets and cue (21 Nov 2026)")
+    void approvedSwapKeepsThePlan() throws Exception {
+        UUID c = live();
+        var p = plan(c);
+        // a second approved alternative on the squat
+        UUID hack = ex("Hack squat", "quads", "weight_reps");
+        UUID alt2 = UUID.randomUUID();
+        jdbc.update("INSERT INTO workout_exercise (id, tenant_id, workout_id, exercise_id, position, alternative_of) VALUES (:id::uuid, :ten::uuid, :w::uuid, :e::uuid, 2, :m::uuid)",
+                Map.of("id", alt2.toString(), "ten", tenant.toString(), "w", p.workout.toString(), "e", hack.toString(), "m", p.squatRow.toString()));
+        set(alt2, 1, "weight", "reps", 80, 10, 90);
+        String token = token();
+        UUID sid = UUID.randomUUID();
+        String log = body(start(token, sid, p.workout).andExpect(status().isCreated()));
+        String sx = JsonPath.read(log, "$.exercises[0].id"), s1 = JsonPath.read(log, "$.exercises[0].sets[0].id");
+        patchSet(token, sid.toString(), s1, "{\"done\":true}").andExpect(status().isOk());
+        String url = "/v1/portal/sessions/" + sid + "/exercises/" + sx + "/swap";
+
+        // to the leg press: the hack squat is still on offer
+        mvc.perform(post(url).header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"toExerciseId\":\"" + p.legPress + "\",\"source\":\"approved\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exercise.alternatives[*].name").value(org.hamcrest.Matchers.contains("Hack squat")));
+        // and accepted, with its own prescription after the done set
+        mvc.perform(post(url).header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"toExerciseId\":\"" + hack + "\",\"source\":\"approved\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exercise.name").value("Hack squat")).andExpect(jsonPath("$.exercise.swappedFrom.name").value("Back squat"))
+                .andExpect(jsonPath("$.exercise.sets", hasSize(2))).andExpect(jsonPath("$.exercise.sets[1].target.load").value(80));
+        // back to the squat: the plan's own two sets after the done one, at 60, with the squat's cue; the swap is forgotten
+        mvc.perform(post(url).header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"toExerciseId\":\"" + p.squat + "\",\"source\":\"library\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exercise.name").value("Back squat")).andExpect(jsonPath("$.exercise.swappedFrom").value(nullValue()))
+                .andExpect(jsonPath("$.exercise.sets", hasSize(3))).andExpect(jsonPath("$.exercise.sets[1].target.load").value(60)).andExpect(jsonPath("$.exercise.sets[2].target.load").value(60))
+                .andExpect(jsonPath("$.exercise.cue").value("Chest up. Knees out."))
+                .andExpect(jsonPath("$.exercise.alternatives[*].name").value(org.hamcrest.Matchers.containsInAnyOrder("Leg press", "Hack squat")));
+        assertEquals(p.squatRow.toString(), jdbc.queryForObject("SELECT planned_from::text FROM session_exercise WHERE id = :x::uuid", Map.of("x", sx), String.class));
+    }
+
+    @Test
     @DisplayName("finish: nothing logged is refused; otherwise it closes the day, never charges a pack, reports the best and the milestone once, and a second finish answers the same without firing again")
     void finishing() throws Exception {
         UUID c = live();
@@ -366,6 +444,7 @@ class PortalWorkoutApiTest {
         String s1 = JsonPath.read(log, "$.exercises[0].sets[0].id");
         patchSet(token, sid.toString(), s1, "{\"loadValue\":62.5,\"effortValue\":8,\"done\":true}").andExpect(status().isOk()).andExpect(jsonPath("$.isBest").value(true));
 
+        org.mockito.Mockito.clearInvocations(workoutRepo);
         String done = body(finish(token, sid.toString(), "{\"effort\":\"right\",\"note\":\" knee a bit stiff \",\"pausedSeconds\":140}").andExpect(status().isOk())
                 .andExpect(jsonPath("$.session.status").value("done")).andExpect(jsonPath("$.session.endedAt").isNumber())
                 .andExpect(jsonPath("$.summary.setsDone").value(1)).andExpect(jsonPath("$.summary.setsPlanned").value(3))
@@ -383,6 +462,8 @@ class PortalWorkoutApiTest {
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid AND kind = 'best' AND session_id = :s::uuid", Map.of("c", c.toString(), "s", sid.toString()), Integer.class));
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM workout_feedback WHERE session_id = :s::uuid", Map.of("s", sid.toString()), Integer.class));
 
+        // the bests are ranked once, for the notice and the summary both (21 Nov 2026)
+        org.mockito.Mockito.verify(workoutRepo, org.mockito.Mockito.times(1)).newBests(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
         // a second finish: the same summary, 200, nothing new
         String again = body(finish(token, sid.toString(), "{\"effort\":\"hard\"}").andExpect(status().isOk()).andExpect(jsonPath("$.summary.newBests", hasSize(1))).andExpect(jsonPath("$.feedback.effort").value("right")));
         assertEquals(JsonPath.<Object>read(done, "$.session.endedAt"), JsonPath.<Object>read(again, "$.session.endedAt"));
@@ -396,6 +477,21 @@ class PortalWorkoutApiTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.effort").value("hard")).andExpect(jsonPath("$.note").value(nullValue()));
         mvc.perform(put("/v1/portal/sessions/" + sid + "/feedback").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content("{\"effort\":\"meh\"}")).andExpect(status().isBadRequest());
         getLog(token, sid.toString()).andExpect(jsonPath("$.feedback.effort").value("hard")).andExpect(jsonPath("$.session.status").value("done"));
+
+        // the same answer again changes nothing — not even when it was given, which is what the trainer's bell orders a hard answer by (21 Nov 2026)
+        jdbc.update("UPDATE workout_feedback SET at = at - interval '1 hour' WHERE session_id = :s::uuid", Map.of("s", sid.toString()));
+        var at = jdbc.queryForObject("SELECT at FROM workout_feedback WHERE session_id = :s::uuid", Map.of("s", sid.toString()), java.sql.Timestamp.class);
+        mvc.perform(put("/v1/portal/sessions/" + sid + "/feedback").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content("{\"effort\":\"hard\",\"note\":null}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.effort").value("hard"));
+        assertEquals(at, jdbc.queryForObject("SELECT at FROM workout_feedback WHERE session_id = :s::uuid", Map.of("s", sid.toString()), java.sql.Timestamp.class));
+        // both cleared: the answer is taken back — 204, and the session carries none
+        mvc.perform(put("/v1/portal/sessions/" + sid + "/feedback").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content("{\"effort\":null,\"note\":\"  \"}"))
+                .andExpect(status().isNoContent());
+        getLog(token, sid.toString()).andExpect(jsonPath("$.feedback").value(nullValue()));
+        // and a new answer brings it back
+        mvc.perform(put("/v1/portal/sessions/" + sid + "/feedback").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content("{\"effort\":\"easy\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.effort").value("easy"));
+        getLog(token, sid.toString()).andExpect(jsonPath("$.feedback.effort").value("easy"));
     }
 
     @Test

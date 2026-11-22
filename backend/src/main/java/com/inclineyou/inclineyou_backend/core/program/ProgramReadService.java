@@ -82,7 +82,12 @@ public class ProgramReadService {
         return named;
     }
 
-    /** {@code GET /v1/programs/{id}} — the trainer's own program with its whole tree. 404 for a library id. */
+    /**
+     * {@code GET /v1/programs/{id}} — the trainer's own program with its whole tree. 404 for a library id. One snapshot
+     * (19 Nov 2026): the summary and the tree are seven statements, and under read committed a save landing between them
+     * paired an older version with a newer tree. Called from a write's transaction, it joins that one instead.
+     */
+    @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public ProgramItem get(UUID trainerId, UUID id) {
         ProgramItem item = summary(trainerId, id);
         var tree = repo.tree(id);
@@ -120,12 +125,15 @@ public class ProgramReadService {
     /** Sessions done on each plan and where today falls — the client file's progress, grouped once. */
     private List<ProgramItem> withProgress(List<ProgramItem> items) {
         if (items.isEmpty()) return items;
-        var done = repo.doneSessions(items.stream().map(ProgramItem::id).toArray(String[]::new));
+        String[] ids = items.stream().map(ProgramItem::id).toArray(String[]::new);
+        var done = repo.doneSessions(ids, items.stream().map(ProgramItem::clientId).filter(java.util.Objects::nonNull)
+                .distinct().toArray(String[]::new));
+        var planned = repo.plannedSessions(ids);
         LocalDate today = WorkspaceClock.today(clock.zone());
         return items.stream().map(i -> {
             Integer week = i.startDate() == null ? null : (int) Math.clamp(
                     (today.toEpochDay() - LocalDate.parse(i.startDate()).toEpochDay()) / 7 + 1, 1, i.weeks());
-            return i.withProgress(new Progress(done.getOrDefault(i.id(), 0), i.workoutCount(), week));
+            return i.withProgress(new Progress(done.getOrDefault(i.id(), 0), planned.getOrDefault(i.id(), i.workoutCount()), week));
         }).toList();
     }
 }

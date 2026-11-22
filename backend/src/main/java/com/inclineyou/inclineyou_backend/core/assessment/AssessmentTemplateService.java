@@ -46,6 +46,10 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AssessmentTemplateService {
 
+    /** Live forms per trainer (19 Nov 2026): the shelf has no page, so it must stay a size one answer can carry. */
+    static final int MAX_FORMS = 100;
+
+
     private static final int MAX_QUESTIONS = 50;
     private static final int MAX_OPTIONS = 20;
     private static final int MAX_TEXT = 500;
@@ -76,12 +80,31 @@ public class AssessmentTemplateService {
         }
         if (req.systemKey() != null) return createSystem(trainerId, req);
         var form = normalise(req);
+        // One create at a time per trainer, so the cap below cannot be passed by two racing at 99.
+        templates.lockTrainerForms(trainerId);
+        // A double tap's second request waits here for the first, which has now committed: look its id up again, or it
+        // would meet its own name below and answer 409 TEMPLATE_NAME_TAKEN for the form it just made.
+        if (req.id() != null) {
+            var mine = templates.isMine(req.id(), trainerId);
+            if (mine.isPresent()) {
+                if (!mine.get()) throw ApiException.idConflict();
+                return new TemplateCreated(one(trainerId, req.id()), false);
+            }
+        }
+        // The shelf has no page and a form can be about 0.5 MB (19 Nov 2026), so a trainer's live forms are capped.
+        if (templates.liveCount(trainerId) >= MAX_FORMS) {
+            throw ApiException.conflict("TEMPLATE_LIMIT", "You have " + MAX_FORMS + " forms. Delete one you don't use first.");
+        }
         if (templates.nameTaken(trainerId, form.name(), null)) throw nameTaken();
         UUID id = req.id() == null ? UUID.randomUUID() : req.id();
         try {
             if (!templates.insert(id, trainerId, form.name(), form.description(),
                     AssessmentJson.write(form.measurements()), AssessmentJson.write(form.questions()),
                     null, Boolean.TRUE.equals(req.clientCanStart()))) {
+                // The id was taken between the lookup above and the INSERT: a double tap whose first request committed
+                // while this one was in flight (19 Nov 2026). ON CONFLICT waited for it, so this read sees it.
+                var mine = templates.isMine(id, trainerId);
+                if (mine.isPresent() && mine.get()) return new TemplateCreated(one(trainerId, id), false);
                 throw ApiException.idConflict();
             }
         } catch (DuplicateKeyException e) {
@@ -166,7 +189,9 @@ public class AssessmentTemplateService {
                 .orElseThrow(() -> ApiException.notFound("That assessment template is not in your library."));
         if (current.deleted()) return;
         templates.softDelete(id);
-        schedules.endLiveOnTemplate(trainerId, id);
+        // Each cycle ends as POST …/end ends one (19 Nov 2026): its open assessment nobody has started goes with it.
+        // They used to stay booked, turn missed, and sit on Today until each was deleted by hand.
+        for (UUID cycle : schedules.endLiveOnTemplate(trainerId, id)) assessments.softDeleteOpenUnstarted(cycle);
     }
 
     // ── wire ──────────────────────────────────────────────────────────────────

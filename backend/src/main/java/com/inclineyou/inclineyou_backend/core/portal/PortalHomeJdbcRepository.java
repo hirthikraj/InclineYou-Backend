@@ -98,43 +98,37 @@ public class PortalHomeJdbcRepository {
     }
 
     /**
-     * The next program day (S-02): the first day, in program order, with no DONE session (of either kind) and not BOOKED to a trainer
-     * session in the coming seven days. Its size comes with it so the card can say what the day is made of.
+     * One program day as Home's self-run card: its exercises and about how long it takes. Which day is next is the plan's first open place
+     * (PortalPlanJdbcRepository.days, 21 Nov 2026), so a repeat week's day comes back with that week's number, not week 1's.
      */
-    public Optional<PortalHome.Workout> nextProgramDay(UUID client, Instant now) {
+    public Optional<PortalHome.Workout> programDay(UUID client, String workoutId, Integer week, Integer day) {
         var m = p(client);
-        m.put("now", ts(now)); m.put("week", ts(now.plusSeconds(7L * 86400)));
+        m.put("w", workoutId);
         return jdbc.query("""
-                SELECT w.id::text AS id, w.name, w.week, w.day,
+                SELECT w.id::text AS id, w.name,
                        (SELECT count(*) FROM workout_exercise we WHERE we.workout_id = w.id AND we.alternative_of IS NULL) AS exercises,
                        (SELECT COALESCE(sum(COALESCE(ws.rest_seconds, 60) + 40), 0)
                           FROM workout_set ws JOIN workout_exercise we ON we.id = ws.workout_exercise_id
                          WHERE we.workout_id = w.id AND we.alternative_of IS NULL) AS seconds
                   FROM program pr JOIN workout w ON w.program_id = pr.id AND w.deleted_at IS NULL
-                 WHERE pr.client_id = :c::uuid AND pr.status = 'active' AND pr.deleted_at IS NULL
-                   AND NOT EXISTS (SELECT 1 FROM scheduled_session s WHERE s.workout_id = w.id AND s.client_id = :c::uuid
-                                    AND s.status = 'done' AND s.deleted_at IS NULL)
-                   AND NOT EXISTS (SELECT 1 FROM scheduled_session s WHERE s.workout_id = w.id AND s.client_id = :c::uuid
-                                    AND s.logged_by = 'trainer' AND s.status = 'scheduled' AND s.deleted_at IS NULL
-                                    AND s.scheduled_at >= :now AND s.scheduled_at < :week)
-                 ORDER BY w.week, w.day, w.position, w.id LIMIT 1""", m, (rs, i) -> {
+                 WHERE w.id = :w::uuid AND pr.client_id = :c::uuid AND pr.deleted_at IS NULL""", m, (rs, i) -> {
             int secs = rs.getInt("seconds");
             // About how long the day is: each set's rest plus forty seconds of work, to the nearest five, never under ten.
             int minutes = Math.max(10, (int) (Math.round(secs / 60.0 / 5.0) * 5));
-            Integer week = rs.getObject("week") == null ? null : rs.getInt("week");
-            Integer day = rs.getObject("day") == null ? null : rs.getInt("day");
             return new PortalHome.Workout(rs.getString("id"), rs.getString("name"), week, day, rs.getInt("exercises"), minutes);
         }).stream().findFirst();
     }
 
-    /** A self-run session of this day that was started and not finished. */
-    public Optional<String> resumable(UUID client, String workoutId) {
+    /** A self-run session of this day that was started today and not finished — the same rule as Start's (21 Nov 2026). */
+    public Optional<String> resumable(UUID client, String workoutId, String zone) {
         var m = p(client);
         m.put("w", workoutId);
+        m.put("z", zone);
         return jdbc.queryForList("""
                 SELECT s.id::text FROM scheduled_session s
                  WHERE s.client_id = :c::uuid AND s.workout_id = :w::uuid AND s.logged_by = 'client' AND s.deleted_at IS NULL
                    AND s.started_at IS NOT NULL AND s.ended_at IS NULL AND s.status NOT IN ('done', 'cancelled', 'no_show')
+                   AND (s.started_at AT TIME ZONE :z)::date = (now() AT TIME ZONE :z)::date
                  ORDER BY s.started_at DESC LIMIT 1""", m, String.class).stream().findFirst();
     }
 

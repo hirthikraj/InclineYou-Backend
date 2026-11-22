@@ -42,7 +42,10 @@ public class TenantJdbcRepository {
      * SELECT only — which is what lets this query run before a workspace is
      * known. It is the only query in the product that is allowed to.
      */
-    public List<TenantScope.Membership> memberships(String phone) {
+    public List<TenantScope.Membership> memberships(String phone, UUID trainerId) {
+        var p = new java.util.HashMap<String, Object>();
+        p.put("phone", phone);
+        p.put("tid", trainerId == null ? null : trainerId.toString());
         return jdbc.query("""
                 SELECT tm.id::text            AS member_id,
                        tm.tenant_id::text     AS tenant_id,
@@ -54,13 +57,18 @@ public class TenantJdbcRepository {
                 JOIN tenant   t  ON t.id = tm.tenant_id
                 JOIN app_user au ON au.id = tm.app_user_id
                 WHERE au.phone = :phone
+                  -- A trainer's credential matches only that trainer's own account (20 Nov 2026). A credential minted before a
+                  -- number change still carries the old number, and once somebody signed up on it the phone alone found the
+                  -- NEWCOMER's memberships, so that session's workspace became a stranger's. With the trainer pinned, a stale
+                  -- number matches nothing and TenantScope falls back to the trainer's own home (homeTenantOf).
+                  AND (CAST(:tid AS uuid) IS NULL OR au.id = (SELECT tr.app_user_id FROM trainer tr WHERE tr.id = CAST(:tid AS uuid)))
                   AND au.deleted_at IS NULL
                   AND tm.deleted_at IS NULL
                   AND tm.status = 'active'
                   AND tm.role <> 'client'
                   AND t.status = 'active'
                 ORDER BY tm.is_home DESC, t.name
-                """, Map.of("phone", phone), (rs, i) -> new TenantScope.Membership(
+                """, p, (rs, i) -> new TenantScope.Membership(
                 UUID.fromString(rs.getString("member_id")),
                 UUID.fromString(rs.getString("tenant_id")),
                 rs.getString("tenant_name"),
@@ -71,7 +79,10 @@ public class TenantJdbcRepository {
 
     /** {@code trainer.home_tenant_id}, or empty for no row or no home. */
     public Optional<UUID> homeTenantOf(UUID trainerId) {
-        return jdbc.queryForList("SELECT home_tenant_id::text FROM trainer WHERE id = :id::uuid",
+        // A closed trainer has no workspace (20 Nov 2026): a phone app's JWT outlives the close (only web sessions are
+        // revoked), and this fallback used to hand it the trainer's books for up to seven days. Now it finds none and the
+        // request reads nothing (AuthTokenFilter: "no workspace — request will read nothing").
+        return jdbc.queryForList("SELECT home_tenant_id::text FROM trainer WHERE id = :id::uuid AND deleted_at IS NULL",
                         Map.of("id", trainerId.toString()), String.class)
                 .stream().filter(java.util.Objects::nonNull).findFirst().map(UUID::fromString);
     }

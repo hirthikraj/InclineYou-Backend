@@ -151,10 +151,13 @@ public class AssessmentScheduleJdbcRepository {
     }
 
     /** A template's delete ends every live cycle on it. */
-    public void endLiveOnTemplate(UUID trainerId, UUID templateId) {
-        jdbc.update("""
+    /** The ids of the cycles it ended, so the caller can do what ending one does to each (19 Nov 2026). */
+    public java.util.List<UUID> endLiveOnTemplate(UUID trainerId, UUID templateId) {
+        return jdbc.queryForList("""
                 UPDATE assessment_schedule SET ended_at = now()
-                 WHERE template_id = :tpl::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL AND ended_at IS NULL""",
-                Map.of("tpl", templateId.toString(), "tid", trainerId.toString()));
+                 WHERE template_id = :tpl::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL AND ended_at IS NULL
+                RETURNING id::text""",
+                Map.of("tpl", templateId.toString(), "tid", trainerId.toString()), String.class)
+                .stream().map(UUID::fromString).toList();
     }
 }

@@ -41,7 +41,9 @@ public class TrainerPayoutJdbcRepository {
             where.add("gym_place_id = :gp::uuid");
         } else if (f.gymName() != null) {
             p.put("gym", f.gymName());
-            where.add("gym_name = :gym");
+            // The settlement's own rule (GymMoneyService.key, 20 Nov 2026): case and outer spaces do not make another gym,
+            // or a payout counted as received on the gym page would be missing from this list under it.
+            where.add("lower(btrim(gym_name)) = lower(btrim(:gym))");
         }
         if (f.from() != null) { p.put("from", Timestamp.from(f.from())); where.add("received_at >= :from"); }
         if (f.to() != null) { p.put("to", Timestamp.from(f.to())); where.add("received_at < :to"); }
@@ -53,6 +55,12 @@ public class TrainerPayoutJdbcRepository {
         p.put("limit", f.limit() + 1);
         return jdbc.query("SELECT " + COLUMNS + " FROM trainer_payout WHERE " + String.join(" AND ", where)
                 + " ORDER BY received_at DESC, id DESC LIMIT :limit", p, TrainerPayoutJdbcRepository::row);
+    }
+
+    /** One live payout, locked for a correction; empty if it is not this trainer's. */
+    public Optional<Payout> findForUpdate(UUID tid, UUID id) {
+        return jdbc.query("SELECT " + COLUMNS + " FROM trainer_payout WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL FOR UPDATE",
+                Map.of("id", id.toString(), "tid", tid.toString()), TrainerPayoutJdbcRepository::row).stream().findFirst();
     }
 
     public Optional<Payout> find(UUID tid, UUID id) {

@@ -38,6 +38,7 @@ public class ClientNoteService {
     private final ClientNoteJdbcRepository repo;
     private final ClientFileService files;
     private final ClientNoticeJdbcRepository notices;
+    private final ConsentGate consent;
 
     public List<Note> list(UUID tid, UUID cid) {
         files.requireOwned(tid, cid);
@@ -47,6 +48,9 @@ public class ClientNoteService {
     @Transactional
     public NoteCreated create(UUID tid, UUID cid, CreateNoteRequest req) {
         files.requireOwned(tid, cid);
+        // Notes hold health details in practice, so they wait for the client's consent (22 Nov 2026). Reading, deleting
+        // and an Undo stay open: none of them records anything new.
+        consent.require(cid, "notes");
         if (req.id() != null) {
             var mine = repo.isMine(req.id(), tid, cid);
             if (mine.isPresent()) {
@@ -56,8 +60,15 @@ public class ClientNoteService {
         }
         UUID id = req.id() == null ? UUID.randomUUID() : req.id();
         if (req.sharedWithClient()) requireOnPortal(tid, cid);
-        if (!repo.insert(id, tid, cid, req.body(), req.pinned(), req.sharedWithClient())) throw ApiException.idConflict();
-        if (req.sharedWithClient()) notices.mint(cid, "note", NoticeText.opening(req.body()), null);
+        if (!repo.insert(id, tid, cid, req.body(), req.pinned(), req.sharedWithClient())) {
+            // The id was taken between the lookup above and the INSERT (19 Nov 2026): a double tap whose first request
+            // committed while this one was in flight. ON CONFLICT waited for it, so this read sees it. This trainer's
+            // note on this client is that same note, a replay; anything else is someone else's id.
+            var mine = repo.isMine(id, tid, cid);
+            if (mine.isPresent() && mine.get()) return new NoteCreated(repo.one(id), false);
+            throw ApiException.idConflict();
+        }
+        if (req.sharedWithClient()) notices.mint(cid, "note", NoticeText.opening(req.body()), null, repo.sharedAt(id));
         return new NoteCreated(repo.one(id), true);
     }
 
@@ -66,6 +77,10 @@ public class ClientNoteService {
     public Note patch(UUID tid, UUID cid, UUID noteId, String ifMatch, UpdateNoteRequest req) {
         if (req.isEmpty()) throw ApiException.validation("body: send body, pinned or sharedWithClient");
         var current = lock(tid, cid, noteId);
+        // Writing or sharing waits for consent; unsharing and unpinning take data away and never do (22 Nov 2026).
+        if (req.body() != null || (req.sharedWithClient() != null && Boolean.TRUE.equals(req.sharedWithClient().value()))) {
+            consent.require(cid, "notes");
+        }
         if (current.deleted()) throw ApiException.notFound("That note was deleted.");
         if (ClientWriteService.stale(ifMatch, current.version())) {
             throw new ApiException(HttpStatus.PRECONDITION_FAILED, "PRECONDITION_FAILED",
@@ -73,17 +88,28 @@ public class ClientNoteService {
         }
         // Showing a private note is the one change that needs the client to be there, and the one that tells them.
         boolean showing = req.sharedWithClient() != null && Boolean.TRUE.equals(req.sharedWithClient().value()) && !current.shared();
+        boolean hiding = req.sharedWithClient() != null && !Boolean.TRUE.equals(req.sharedWithClient().value()) && current.shared();
         if (showing) requireOnPortal(tid, cid);
+        // Made private again: its notice goes with it, before shared_at is cleared (19 Nov 2026).
+        String oldBody = repo.one(noteId).body();
+        if (hiding) notices.retractNote(cid, noteId, NoticeText.opening(oldBody));
         repo.update(noteId, req);
         var note = repo.one(noteId);
-        if (showing) notices.mint(cid, "note", NoticeText.opening(note.body()), null);
+        if (showing) notices.mint(cid, "note", NoticeText.opening(note.body()), null, repo.sharedAt(noteId));
+        // Reworded and still shared (21 Nov 2026): the bell quoted the old opening, and kept quoting it.
+        if (current.shared() && !hiding && !note.body().equals(oldBody)) {
+            notices.retextNote(cid, noteId, NoticeText.opening(oldBody), NoticeText.opening(note.body()));
+        }
         return note;
     }
 
     /** Soft, and idempotent: a deleted note answers 204 again. */
     @Transactional
     public void delete(UUID tid, UUID cid, UUID noteId) {
-        lock(tid, cid, noteId);
+        var current = lock(tid, cid, noteId);
+        // A shared note's bell notice quotes it; deleting the note takes that back too (19 Nov 2026). Restoring the note
+        // does not bring the notice back: it was news once.
+        if (current.shared() && !current.deleted()) notices.retractNote(cid, noteId, NoticeText.opening(repo.one(noteId).body()));
         repo.softDelete(noteId);
     }
 

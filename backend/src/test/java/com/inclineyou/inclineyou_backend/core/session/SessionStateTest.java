@@ -22,6 +22,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -77,12 +78,36 @@ class SessionStateTest {
         assertEquals("scheduled", back.session().status());
         assertTrue(back.effects().chargeReversed());
         assertTrue(back.effects().packageReopened());
+        assertNull(back.effects().sale(), "a pack session has no sale to report");
         assertEquals(1, remaining(pack));
         assertEquals("active", packStatus(pack));
         assertEquals(1, reversedCharges(s), "reversed, never deleted");
 
         var again = states.reopen(trainer, s, null);
         assertFalse(again.effects().chargeReversed(), "a second reopen has no effect");
+    }
+
+    @Test
+    @DisplayName("Mark done records the client's session milestones — the 1st and the 10th — once each, and a reopen keeps them (21 Nov 2026)")
+    void markDoneRecordsMilestones() {
+        var first = session(Duration.ofHours(2));
+        states.markDone(trainer, first, null);
+        assertEquals(List.of("sessions_1|Your first session"), milestones());
+
+        for (int i = 2; i <= 9; i++) states.markDone(trainer, session(Duration.ofHours(2L * i)), null);
+        assertEquals(List.of("sessions_1|Your first session"), milestones(), "nothing between the thresholds");
+        var tenth = session(Duration.ofHours(20));
+        states.markDone(trainer, tenth, null);
+        assertEquals(List.of("sessions_1|Your first session", "sessions_10|10th session"), milestones());
+
+        // reopened and marked again: reached once, kept once
+        states.reopen(trainer, tenth, null);
+        states.markDone(trainer, tenth, null);
+        assertEquals(List.of("sessions_1|Your first session", "sessions_10|10th session"), milestones());
+    }
+
+    private List<String> milestones() {
+        return jdbc.queryForList("SELECT kind || '|' || label FROM milestone WHERE client_id = :c::uuid ORDER BY value", Map.of("c", client.toString()), String.class);
     }
 
     @Test
@@ -276,6 +301,22 @@ class SessionStateTest {
     }
 
     @Test
+    @DisplayName("reopening a cancelled session meets booking's rules: not for a paused client, and no overlap with the client's other session")
+    void reopenMeetsBookingsRules() {
+        long base = Instant.now().plus(Duration.ofDays(4)).truncatedTo(java.time.temporal.ChronoUnit.HOURS).toEpochMilli();
+        var seven = sessionAt(new Timestamp(base));
+        states.cancel(trainer, seven, null);
+        var halfPast = sessionAt(new Timestamp(base + 1_800_000));   // booked in its place, 07:30
+        assertEquals("SESSION_CLIENT_OVERLAP", code(() -> states.reopen(trainer, seven, null)));
+
+        states.cancel(trainer, halfPast, null);
+        jdbc.update("UPDATE client SET status = 'paused', paused_at = now() WHERE id = :c::uuid", Map.of("c", client.toString()));
+        assertEquals("CLIENT_NOT_BOOKABLE", code(() -> states.reopen(trainer, seven, null)));
+        jdbc.update("UPDATE client SET status = 'active', paused_at = NULL WHERE id = :c::uuid", Map.of("c", client.toString()));
+        assertEquals("scheduled", states.reopen(trainer, seven, null).session().status(), "nothing in the way now");
+    }
+
+    @Test
     @DisplayName("delete only takes back a fresh booking, and a replay is still 204")
     void deleteOnlyAFreshBooking() {
         pack(12, 12, null);
@@ -404,6 +445,9 @@ class SessionStateTest {
         jdbc.update("""
                 INSERT INTO client (id, trainer_id, name, client_type) VALUES (:id::uuid, :tid::uuid, :name, 'independent')
                 """, Map.of("id", id.toString(), "tid", trainerId.toString(), "name", name));
+        // Consented (22 Nov 2026): ConsentGate refuses a third session, notes, the profile and health data without it.
+        jdbc.update("UPDATE client SET membership_status = 'accepted', invited_at = now(), accepted_at = now() WHERE id = :id::uuid",
+                Map.of("id", id.toString()));
         return id;
     }
 

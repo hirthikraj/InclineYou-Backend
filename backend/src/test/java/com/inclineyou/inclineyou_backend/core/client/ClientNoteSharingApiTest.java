@@ -91,6 +91,27 @@ class ClientNoteSharingApiTest {
     }
 
     @Test
+    @DisplayName("rewording a shared note rewords its notice; a private note's edit mints nothing (21 Nov 2026)")
+    void rewordedShared() throws Exception {
+        UUID id = UUID.randomUUID();
+        post(c, "{\"id\":\"" + id + "\",\"body\":\"Rest day Friday\",\"sharedWithClient\":true}").andExpect(status().isCreated());
+        patch(c, id, "{\"body\":\"Rest day Saturday\"}").andExpect(status().isOk());
+        assertEquals("Rest day Saturday", jdbc.queryForObject(
+                "SELECT text FROM client_notification WHERE client_id = :c::uuid AND deleted_at IS NULL", Map.of("c", c.toString()), String.class));
+        assertEquals(1, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid", c), "reworded, not a second notice");
+
+        // A pin alone changes nothing in the bell.
+        patch(c, id, "{\"pinned\":true}").andExpect(status().isOk());
+        assertEquals("Rest day Saturday", jdbc.queryForObject(
+                "SELECT text FROM client_notification WHERE client_id = :c::uuid AND deleted_at IS NULL", Map.of("c", c.toString()), String.class));
+
+        UUID secret = UUID.randomUUID();
+        post(c, "{\"id\":\"" + secret + "\",\"body\":\"Private thought\"}").andExpect(status().isCreated());
+        patch(c, secret, "{\"body\":\"Still private\"}").andExpect(status().isOk());
+        assertEquals(1, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid", c));
+    }
+
+    @Test
     @DisplayName("created shared: both columns set together, one `note` notice carrying the opening, and a replay mints no second")
     void createdShared() throws Exception {
         UUID id = UUID.randomUUID();
@@ -106,7 +127,7 @@ class ClientNoteSharingApiTest {
     }
 
     @Test
-    @DisplayName("only a client who has joined can be shown a note: not invited, invited, declined and removed are 409 and write nothing; private is fine for them")
+    @DisplayName("before consent no note is written: not invited, invited, declined and removed-before-accepting are 409 CONSENT_REQUIRED, shared or private")
     void needsThePortal() throws Exception {
         String[][] states = {
                 {"not_invited", "membership_status = 'not_invited'"},
@@ -117,14 +138,15 @@ class ClientNoteSharingApiTest {
         for (String[] s : states) {
             UUID x = client(me, "S " + s[0], "+91984102810" + i++);
             jdbc.update("UPDATE client SET " + s[1] + " WHERE id = :c::uuid", Map.of("c", x.toString()));
-            post(x, "{\"body\":\"Shown\",\"sharedWithClient\":true}").andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CLIENT_NOT_ON_PORTAL"));
+            // Before consent (22 Nov 2026) no note is written at all, shared or private: CONSENT_REQUIRED comes first.
+            post(x, "{\"body\":\"Shown\",\"sharedWithClient\":true}").andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CONSENT_REQUIRED"));
+            post(x, "{\"body\":\"Private\"}").andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("CONSENT_REQUIRED"));
             assertEquals(0, count("SELECT count(*) FROM client_note WHERE client_id = :c::uuid", x), s[0] + ": nothing written");
-            post(x, "{\"body\":\"Private\"}").andExpect(status().isCreated());
         }
     }
 
     @Test
-    @DisplayName("PATCH: sharing a private note mints one notice; re-sharing keeps the date and mints nothing; unsharing clears both columns and keeps the notice; sharing again is a new share")
+    @DisplayName("PATCH: sharing a private note mints one notice; re-sharing keeps the date and mints nothing; unsharing clears both columns and takes back the notice; sharing again is a new share")
     void shareAndUnshare() throws Exception {
         UUID n = note("Plan for the month.");
         String first = patch(c, n, "{\"sharedWithClient\":true}").andExpect(status().isOk()).andExpect(jsonPath("$.sharedWithClient").value(true)).andReturn().getResponse().getContentAsString();
@@ -141,11 +163,37 @@ class ClientNoteSharingApiTest {
 
         patch(c, n, "{\"sharedWithClient\":false}").andExpect(status().isOk()).andExpect(jsonPath("$.sharedWithClient").value(false)).andExpect(jsonPath("$.sharedAt").value(org.hamcrest.Matchers.nullValue()));
         assertEquals(0, count("SELECT count(*) FROM client_note WHERE id = :i::uuid AND (shared_with_client OR shared_at IS NOT NULL)", n));
-        assertEquals(1, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid", c), "unsharing does not take back the notice");
+        // 19 Nov 2026 (the owner's call, reversing "unsharing does not retract it"): the notice quoting it goes too.
+        assertEquals(0, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid AND deleted_at IS NULL", c), "unsharing takes back the notice");
 
         patch(c, n, "{\"sharedWithClient\":true}").andExpect(status().isOk());
-        assertEquals(2, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid", c), "showing it again is a new share");
+        assertEquals(1, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid AND deleted_at IS NULL", c), "showing it again is a new share");
+        assertEquals(2, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid", c), "the old one is kept, deleted");
         patch(c, n, "{\"sharedWithClient\":null}").andExpect(status().isOk()).andExpect(jsonPath("$.sharedWithClient").value(false));
+        assertEquals(0, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid AND deleted_at IS NULL", c));
+    }
+
+    @Test
+    @DisplayName("deleting a shared note takes back its notice, even after the note was edited; restoring it does not bring the notice back")
+    void deleteRetractsTheNotice() throws Exception {
+        String made = post(c, "{\"body\":\"Low iron: talk to her about it\",\"sharedWithClient\":true}")
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        UUID n = UUID.fromString(JsonPath.read(made, "$.id"));
+        UUID other = UUID.fromString(JsonPath.read(post(c, "{\"body\":\"Great week\",\"sharedWithClient\":true}")
+                .andReturn().getResponse().getContentAsString(), "$.id"));
+        assertEquals(2, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid AND deleted_at IS NULL", c));
+        // Two shares are two requests, so two instants; inside this one test transaction now() is the same for both, so
+        // the other note's share is moved a minute back, with its notice, as a separate request would have stamped it.
+        jdbc.update("UPDATE client_note SET shared_at = shared_at - interval '1 minute' WHERE id = :i::uuid", Map.of("i", other.toString()));
+        jdbc.update("UPDATE client_notification SET subject_at = subject_at - interval '1 minute', at = at - interval '1 minute' "
+                + "WHERE client_id = :c::uuid AND text = 'Great week'", Map.of("c", c.toString()));
+        patch(c, n, "{\"body\":\"Reworded before deleting\"}").andExpect(status().isOk());
+
+        mvc.perform(MockMvcRequestBuilders.delete("/v1/clients/" + c + "/notes/" + n)).andExpect(status().isNoContent());
+        assertEquals(1, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid AND deleted_at IS NULL", c), "only that note's notice is taken back");
+        assertEquals(1, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid AND deleted_at IS NULL AND text = 'Great week'", c));
+        mvc.perform(MockMvcRequestBuilders.post("/v1/clients/" + c + "/notes/" + n + "/restore")).andExpect(status().isOk());
+        assertEquals(1, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid AND deleted_at IS NULL", c), "restoring does not bring it back");
     }
 
     @Test

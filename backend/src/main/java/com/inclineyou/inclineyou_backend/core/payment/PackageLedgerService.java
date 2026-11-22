@@ -8,7 +8,9 @@ import com.inclineyou.inclineyou_backend.core.payment.dto.LockedPayment;
 import com.inclineyou.inclineyou_backend.core.payment.dto.NewPayment;
 import com.inclineyou.inclineyou_backend.core.payment.dto.PaymentPatch;
 import com.inclineyou.inclineyou_backend.core.payment.dto.PaymentSums;
+import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
+import com.inclineyou.inclineyou_backend.shared.util.DateWindow;
 import com.inclineyou.inclineyou_backend.shared.util.Money;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,6 +22,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +58,7 @@ public class PackageLedgerService {
 
     private final PackageJdbcRepository packages;
     private final PaymentJdbcRepository payments;
+    private final WorkspaceClock clock;
 
     private static final Set<String> METHODS = Set.of("upi", "cash", "bank_transfer");
     private static final Set<String> KINDS = Set.of("pause", "resume", "extend", "sessions", "session", "due_date");
@@ -67,8 +72,10 @@ public class PackageLedgerService {
         Instant at = pastInstant(b.get("effectiveAt"), "effectiveAt");
         var k = lock(tid, pid);
         running(k);
+        clocked(k);
         // Idempotent by target state: a paused pack stays paused, no second row.
         if (k.pausedAt() == null) {
+            pauseStart(k, at);
             adjust(tid, k, "pause", 0, reason, at);
             log.info("package paused trainer={} package={}", tid, pid);
         }
@@ -81,6 +88,7 @@ public class PackageLedgerService {
         Instant at = pastInstant(b.get("effectiveAt"), "effectiveAt");
         var k = lock(tid, pid);
         running(k);
+        clocked(k);
         if (k.pausedAt() != null) {
             if (at != null && at.isBefore(k.pausedAt().toInstant())) {
                 throw ApiException.validation("effectiveAt: before the pause started");
@@ -92,20 +100,38 @@ public class PackageLedgerService {
         return packages.one(tid, pid).orElseThrow();
     }
 
-    /** Not a state, so every call adds days; the confirm sheet guards the double tap. */
+    /** Not a state, so every call adds days — unless it carries an {@code id} already used (18 Nov 2026): a retry answers as it is. */
     @Transactional
     public CurrentPackage extend(UUID tid, UUID pid, Map<String, Object> body) {
-        var b = body(body, "days", "reason");
+        var b = body(body, "id", "days", "reason");
+        UUID id = uuid(b.get("id"), "id");
         Integer days = whole(b.get("days"), 1, 3650, "days");
         if (days == null) throw ApiException.validation("days: required, 1 to 3650");
         String reason = text(b.get("reason"), 200, "reason");
         var k = lock(tid, pid);
+        // A retried extend (its answer lost on a gym-floor connection) answers the pack as it is instead of giving the
+        // days twice (18 Nov 2026). The id is the adjustment's, minted when the form opens; under the row lock, so two
+        // racing copies cannot both miss it.
+        if (id != null) {
+            var seen = packages.adjustmentKind(id);
+            if (seen.isPresent()) {
+                if (!seen.get().equals(pid + "|extend")) throw ApiException.idConflict();
+                return packages.one(tid, pid).orElseThrow();
+            }
+        }
         running(k);
+        clocked(k);
         if (k.endDate() == null) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "PACKAGE_NO_END_DATE",
                     "This pack never expires, so there is nothing to extend.");
         }
-        adjust(tid, k, "extend", days, reason, null);
+        try {
+            packages.insertAdjustment(id, tid, k, "extend", days, reason, Timestamp.from(Instant.now()));
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            // An id another workspace used: row-level security hid it from the lookup above. Nothing to recover in
+            // this transaction, so it ends here.
+            throw ApiException.idConflict();
+        }
         return packages.one(tid, pid).orElseThrow();
     }
 
@@ -123,13 +149,25 @@ public class PackageLedgerService {
         var b = body(body, "note");
         if (b.get("note") != null) throw ApiException.validation("note: not stored in v1 — send null or leave it out");
         var k = lock(tid, pid);
+        // A single session's own sale is cancelled through its session (19 Nov 2026): cancelled here, the session stayed
+        // booked as single and Mark done revived the sale (the reopen rule) and charged it, so the cancel undid itself.
+        if (k.singleSale()) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "PACKAGE_SINGLE_SESSION",
+                    "This is one session's own sale. Undo or cancel the session instead.");
+        }
         String status = k.status();
         if ("cancelled".equals(status)) return packages.one(tid, pid).orElseThrow();
         if (!"active".equals(status)) {
             throw ApiException.conflict("PACKAGE_CLOSED", "This pack is already " + status + ".");
         }
         var sums = payments.sums(pid);
-        if (due(k, sums).signum() > 0 || sums.pending().signum() > 0) {
+        // Pending first, with its own way out (19 Nov 2026): on a fully paid pack a pending row cannot be written off
+        // (check_package_ledger), only deleted, so "collect it or write it off" named a dead end.
+        if (sums.pending().signum() > 0) {
+            throw ApiException.conflict("PACKAGE_HAS_DUES",
+                    "A payment on this pack is still pending. Mark it paid, write it off or delete it first.");
+        }
+        if (due(k, sums).signum() > 0) {
             throw ApiException.conflict("PACKAGE_HAS_DUES",
                     "Money is still owed on this pack. Collect it or write it off first.");
         }
@@ -162,7 +200,7 @@ public class PackageLedgerService {
         BigDecimal amount = positive(b.get("amount"), "amount");
         String status = b.get("status") == null ? "paid" : String.valueOf(b.get("status"));
         if (!Set.of("paid", "pending").contains(status)) throw ApiException.validation("status: paid or pending");
-        Instant paidAt = pastInstant(b.get("paidAt"), "paidAt");
+        Instant paidAt = paidAt(b.get("paidAt"));
         if (paidAt != null && !"paid".equals(status)) throw ApiException.validation("paidAt: only on a paid payment");
         String method = method(b.get("method"));
         String reference = text(b.get("reference"), 64, "reference");
@@ -179,6 +217,10 @@ public class PackageLedgerService {
         BigDecimal room = due(k, sums);
         if ("pending".equals(status)) room = room.subtract(sums.pending());
         if (amount.compareTo(room) > 0) throw overDue(room.max(BigDecimal.ZERO));
+        // Money that lands must leave room for the money still expected (19 Nov 2026). A paid payment used to be bounded
+        // by what is owed alone, so ₹9,000 in cash on a ₹9,000 pack went through beside a pending ₹500 UPI request —
+        // which then could never be marked paid or written off (more than is owed), only deleted.
+        if ("paid".equals(status)) pendingRoom(room, sums.pending(), amount);
 
         UUID made = id == null ? UUID.randomUUID() : id;
         Timestamp paid = "paid".equals(status) ? Timestamp.from(paidAt == null ? Instant.now() : paidAt) : null;
@@ -196,10 +238,11 @@ public class PackageLedgerService {
         var b = body(body, "method", "reference", "paidAt");
         String method = method(b.get("method"));
         String reference = text(b.get("reference"), 64, "reference");
-        Instant paidAt = pastInstant(b.get("paidAt"), "paidAt");
-        var y = lockPayment(tid, yid);
+        Instant paidAt = paidAt(b.get("paidAt"));
+        var locked = lockPayment(tid, yid);
+        var y = locked.payment();
+        var k = locked.pkg();
         UUID pid = y.packageId();
-        var k = lock(tid, pid);
         String status = y.status();
         if ("paid".equals(status)) {
             boolean same = (method == null || method.equals(y.method()))
@@ -212,10 +255,13 @@ public class PackageLedgerService {
         String m = method != null ? method : y.method();
         String r = reference != null ? reference : y.reference();
         collector(k, m, r);
-        BigDecimal room = due(k, payments.sums(pid));
+        var sums = payments.sums(pid);
+        BigDecimal room = due(k, sums);
         if (y.amount().compareTo(room) > 0) throw overDue(room);
+        // The same for the pending payments other than this one (19 Nov 2026): landing this one must not strand them.
+        pendingRoom(room, sums.pending().subtract(y.amount()), y.amount());
         Timestamp at = Timestamp.from(paidAt == null ? Instant.now() : paidAt);
-        ledger(() -> payments.markPaid(yid, at, m, r));
+        if (ledger(() -> payments.markPaid(yid, at, m, r)) == 0) throw notPending("This payment is no longer pending.");
         packages.touch(pid);
         return answer(tid, yid, pid, false);
     }
@@ -225,15 +271,16 @@ public class PackageLedgerService {
     public Ledgered writeOffPayment(UUID tid, UUID yid, Map<String, Object> body) {
         var b = body(body, "note");
         String reason = text(b.get("note"), 500, "note");
-        var y = lockPayment(tid, yid);
+        var locked = lockPayment(tid, yid);
+        var y = locked.payment();
+        var k = locked.pkg();
         UUID pid = y.packageId();
-        var k = lock(tid, pid);
         String status = y.status();
         if ("write_off".equals(status)) return answer(tid, yid, pid, false);
         if (!"pending".equals(status)) throw notPending("This payment was " + label(status) + ".");
         if ("refunded".equals(k.status())) throw closed(k);
         String note = appended(y.note(), reason);
-        ledger(() -> payments.writeOff(yid, note));
+        if (ledger(() -> payments.writeOff(yid, note)) == 0) throw notPending("This payment is no longer pending.");
         packages.touch(pid);
         return answer(tid, yid, pid, false);
     }
@@ -262,7 +309,19 @@ public class PackageLedgerService {
         takesMoney(k);
         var sums = payments.sums(pid);
         BigDecimal due = due(k, sums);
-        if (due.signum() <= 0) throw ApiException.conflict("PACKAGE_NOTHING_DUE", "Nothing is owed on this pack.");
+        if (due.signum() <= 0) {
+            // A retried "write off everything" (19 Nov 2026). When all that was owed was already pending, the pending
+            // rows are written off in place and no row carries the request's id, so the id cannot replay. Judged by
+            // its end state instead, as pause is: nothing owed and the pack's latest change a write-off is that same
+            // request again, answered 200, not "Nothing is owed" for a write-off that went through.
+            if (id != null && part == null) {
+                var last = payments.latestChange(pid);
+                if (last.isPresent() && "write_off".equals(last.get().status())) {
+                    return answer(tid, last.get().id(), pid, false);
+                }
+            }
+            throw ApiException.conflict("PACKAGE_NOTHING_DUE", "Nothing is owed on this pack.");
+        }
 
         BigDecimal rest;
         UUID answered = null;
@@ -298,7 +357,7 @@ public class PackageLedgerService {
         BigDecimal amount = positive(b.get("amount"), "amount");
         String method = method(b.get("method"));
         String reference = text(b.get("reference"), 64, "reference");
-        Instant at = pastInstant(b.get("refundedAt"), "refundedAt");
+        Instant at = withinWindow(b.get("refundedAt"), "refundedAt");
         String note = text(b.get("note"), 500, "note");
         var k = lock(tid, pid);
         if (id != null) {
@@ -310,6 +369,14 @@ public class PackageLedgerService {
         }
         collector(k, method, reference);
         var sums = payments.sums(pid);
+        // A pending payment would be stranded: a refunded pack takes no money and is closed to write-offs and deletes,
+        // so it stayed on the money to chase for good (19 Nov 2026). A pack can be fully paid with one pending, because
+        // recording a paid payment does not count pending ones against the room — and then the pending one can no longer
+        // be marked paid or written off either (check_package_ledger), only deleted, which is why the sentence names it.
+        if (sums.pending().signum() > 0) {
+            throw ApiException.conflict("PACKAGE_HAS_DUES",
+                    "A payment on this pack is still pending. Mark it paid, write it off or delete it first.");
+        }
         if (sums.paid().compareTo(k.amount()) < 0 || sums.writtenOff().signum() > 0) {
             throw ApiException.conflict("PACKAGE_NOT_FULLY_PAID",
                     "Only a fully paid pack with nothing written off can be refunded.");
@@ -340,9 +407,10 @@ public class PackageLedgerService {
                 throw ApiException.validation(key + ": not a field this route takes");
             }
         }
-        var y = lockPayment(tid, yid);
+        var locked = lockPayment(tid, yid);
+        var y = locked.payment();
+        var k = locked.pkg();
         UUID pid = y.packageId();
-        var k = lock(tid, pid);
         String status = y.status();
         if ("refund".equals(status)) throw frozen();
         if ("refunded".equals(k.status())) throw closed(k);
@@ -361,11 +429,16 @@ public class PackageLedgerService {
             var sums = payments.sums(pid);
             BigDecimal total = k.amount();
             BigDecimal old = y.amount();
-            BigDecimal others = sums.paid().add(sums.writtenOff());
-            if (!"pending".equals(status)) others = others.subtract(old);
-            else others = others.add(sums.pending()).subtract(old);
+            // Everything else on the pack — paid, written off AND pending — whatever this row's status (19 Nov 2026). A
+            // paid or written-off row used to leave the pending ones out, so correcting ₹8,500 up to ₹9,000 beside a
+            // pending ₹500 stranded the ₹500, as recording used to (pendingRoom).
+            BigDecimal others = sums.paid().add(sums.writtenOff()).add(sums.pending()).subtract(old);
             BigDecimal room = total.subtract(others);
-            if (amount.compareTo(room) > 0) throw overDue(room.max(BigDecimal.ZERO));
+            if (amount.compareTo(room) > 0) {
+                BigDecimal otherPending = "pending".equals(status) ? sums.pending().subtract(old) : sums.pending();
+                if (otherPending.signum() > 0) pendingRoom(room.add(otherPending), otherPending, amount);
+                throw overDue(room.max(BigDecimal.ZERO));
+            }
         }
         String method = y.method();
         String reference = y.reference();
@@ -374,7 +447,7 @@ public class PackageLedgerService {
         if (!"write_off".equals(status)) collector(k, method, reference);
         Timestamp paidAt = null;
         if (body.containsKey("paidAt")) {
-            Instant at = pastInstant(body.get("paidAt"), "paidAt");
+            Instant at = paidAt(body.get("paidAt"));
             if (at == null) throw ApiException.validation("paidAt: a paid payment keeps its date");
             paidAt = Timestamp.from(at);
         }
@@ -408,9 +481,20 @@ public class PackageLedgerService {
         return packages.lock(tid, pid).orElseThrow(() -> ApiException.notFound("That package is not on your books."));
     }
 
-    private LockedPayment lockPayment(UUID tid, UUID yid) {
-        return payments.findLive(tid, yid).orElseThrow(() -> ApiException.notFound("That payment is not on your books."));
+    /**
+     * The payment, read AFTER its pack's row lock — the lock every money write takes (18 Nov 2026). It used to be read
+     * first, so a write-off committed by another tab in between left this route holding "pending": mark-paid then set
+     * status paid on a written-off row (refused by payment_state_shape, a 500), and PATCH checked If-Match against a
+     * version that was already gone. A payment never changes pack, so the first read only finds which pack to lock.
+     */
+    private Locked lockPayment(UUID tid, UUID yid) {
+        var first = payments.findLive(tid, yid).orElseThrow(() -> ApiException.notFound("That payment is not on your books."));
+        var k = lock(tid, first.packageId());
+        var y = payments.findLive(tid, yid).orElseThrow(() -> ApiException.notFound("That payment is not on your books."));
+        return new Locked(y, k);
     }
+
+    private record Locked(LockedPayment payment, LockedPackage pkg) {}
 
     /** L5's rule: amount − paid − written off, never below zero. */
     private static BigDecimal due(LockedPackage k, PaymentSums s) {
@@ -419,6 +503,33 @@ public class PackageLedgerService {
 
     private static void running(LockedPackage k) {
         if (!"active".equals(k.status())) throw closed(k);
+    }
+
+    /**
+     * Pause, resume and extend move a pack's clock, and a single session's own sale has none (18 Nov 2026): it is due on
+     * its session's day. A paused sale was skipped at Mark done ("not charged, PACKAGE_EMPTY") while its price stayed
+     * owed, so the session and the money book disagreed. The client pause already leaves single sales alone.
+     */
+    private static void clocked(LockedPackage k) {
+        if (k.singleSale()) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "PACKAGE_SINGLE_SESSION",
+                    "This is one session's own sale. Move or cancel the session instead.");
+        }
+    }
+
+    /**
+     * A pause starts no earlier than the pack did, and at most {@link DateWindow#MONTHS} months back, on the workspace's
+     * calendar (18 Nov 2026). Any past moment was taken: a year-old start resumed today pushed the end date out by 365
+     * days, and one before the start paused time the pack never ran.
+     */
+    private void pauseStart(LockedPackage k, Instant at) {
+        if (at == null) return;
+        ZoneId zone = clock.zone();
+        LocalDate day = at.atZone(zone).toLocalDate();
+        DateWindow.check(day, WorkspaceClock.today(zone), "effectiveAt");
+        if (k.startDate() != null && day.isBefore(k.startDate().toLocalDate())) {
+            throw ApiException.validation("effectiveAt: before the pack started (" + k.startDate() + ")");
+        }
     }
 
     /** A cancelled or refunded pack takes no new money; a finished one can still be owed for. */
@@ -486,6 +597,18 @@ public class PackageLedgerService {
             if (m.contains("payment_collector")) throw ApiException.validation("method: does not fit who collects");
             throw e;
         }
+    }
+
+    /**
+     * Refuses landing {@code amount} when it would leave less owed than the {@code pending} payments still expected:
+     * those could then never be marked paid or written off, only deleted. Names what can be recorded instead.
+     */
+    private static void pendingRoom(BigDecimal room, BigDecimal pending, BigDecimal amount) {
+        if (pending.signum() <= 0 || amount.compareTo(room.subtract(pending)) <= 0) return;
+        BigDecimal free = room.subtract(pending).max(BigDecimal.ZERO);
+        throw ApiException.conflict("PAYMENT_OVER_DUE", "₹" + Money.format(pending) + " of this pack is a pending payment. "
+                + (free.signum() > 0 ? "Record up to ₹" + Money.format(free) + ", or mark" : "Mark")
+                + " the pending one paid or delete it first.");
     }
 
     private static ApiException overDue(BigDecimal room) {
@@ -567,6 +690,24 @@ public class PackageLedgerService {
     }
 
     /** An instant is epoch ms. Back-datable, never in the future (a minute of clock skew allowed). */
+    /**
+     * When money landed: not in the future, and at most {@link DateWindow#MONTHS} months back on the workspace calendar
+     * (18 Nov 2026). Any past moment was taken, so a typo like 2016 for 2026 filed a payment ten years back — out of this
+     * month's collections and into a GST period long closed, while the pack still read it as paid.
+     */
+    private Instant paidAt(Object raw) {
+        return withinWindow(raw, "paidAt");
+    }
+
+    /** {@link #paidAt}'s rule for any moment money moved — a refund's {@code refundedAt} too (19 Nov 2026). */
+    private Instant withinWindow(Object raw, String field) {
+        Instant at = pastInstant(raw, field);
+        if (at == null) return null;
+        ZoneId zone = clock.zone();
+        DateWindow.check(at.atZone(zone).toLocalDate(), WorkspaceClock.today(zone), field);
+        return at;
+    }
+
     private static Instant pastInstant(Object raw, String field) {
         if (raw == null) return null;
         if (!(raw instanceof Number n) || n.doubleValue() != n.longValue()) {

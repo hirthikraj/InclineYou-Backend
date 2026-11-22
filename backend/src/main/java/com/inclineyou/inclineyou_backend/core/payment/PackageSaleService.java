@@ -50,7 +50,7 @@ public class PackageSaleService {
         UUID id = uuid(body.get("id"), "id");
         UUID packId = uuid(body.get("packId"), "packId");
         LocalDate start = PackageStartDate.check(date(body.get("startDate"), "startDate"), WorkspaceClock.today(clock.zone()));
-        LocalDate due = date(body.get("dueDate"), "dueDate");
+        LocalDate due = PackageStartDate.check(date(body.get("dueDate"), "dueDate"), WorkspaceClock.today(clock.zone()), "dueDate");
         BigDecimal discount = money(body.get("discountAmount"), "discountAmount");
         BigDecimal sharePercent = number(body.get("trainerSharePercent"), "trainerSharePercent");
         BigDecimal shareAmount = money(body.get("trainerShareAmount"), "trainerShareAmount");

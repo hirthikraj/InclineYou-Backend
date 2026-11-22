@@ -1,6 +1,7 @@
 package com.inclineyou.inclineyou_backend.core.portal;
 
 import com.inclineyou.inclineyou_backend.core.portal.dto.PortalPlan;
+import com.inclineyou.inclineyou_backend.core.program.PlanSequence;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -64,26 +65,67 @@ public class PortalPlanJdbcRepository {
                         rs.getString("sd"), rs.getString("ed"))).stream().findFirst();
     }
 
-    public record DayRow(String workoutId, String name, Integer week, Integer day, String doneId, String bookedId) {}
+    /** {@code at}: the scheduled time of the done or booked session in this place (21 Nov 2026), epoch ms, or null. */
+    public record DayRow(String workoutId, String name, Integer week, Integer day, String doneId, String bookedId, Long at) {}
 
-    /** A program's days in order, each with the finished session of it and the trainer session booked for it in the coming week, if any. */
+    /**
+     * A program's days in order — its PLACES, not its written rows (21 Nov 2026): a week with nothing of its own repeats week 1, the rule
+     * {@link PlanSequence} gives the trainer's booking and walk-in list, and every InclineYou library program is written as week 1 only. The
+     * old read listed the written rows and called one done if it was ever done, so an eight-week program looked finished after its first
+     * week. Now, as in PlanSequence, the k-th finished session of a workout is its k-th place, and a trainer session booked for it in the
+     * coming week goes to its first place still open.
+     */
     public List<DayRow> days(UUID client, UUID program, Instant now) {
         var m = p(client);
         m.put("p", program.toString());
         m.put("now", Timestamp.from(now));
-        m.put("wk", Timestamp.from(now.plusSeconds(7L * 86400)));
-        return jdbc.query("""
-                SELECT w.id::text AS id, w.name, w.week, w.day,
-                       (SELECT s.id::text FROM scheduled_session s WHERE s.workout_id = w.id AND s.client_id = :c::uuid AND s.status = 'done' AND s.deleted_at IS NULL
-                         ORDER BY COALESCE(s.ended_at, s.scheduled_at) DESC, s.id LIMIT 1) AS done_id,
-                       (SELECT s.id::text FROM scheduled_session s WHERE s.workout_id = w.id AND s.client_id = :c::uuid AND s.logged_by = 'trainer'
-                           AND s.status = 'scheduled' AND s.deleted_at IS NULL AND s.scheduled_at >= :now AND s.scheduled_at < :wk
-                         ORDER BY s.scheduled_at, s.id LIMIT 1) AS booked_id
-                  FROM workout w JOIN program pr ON pr.id = w.program_id
-                 WHERE w.program_id = :p::uuid AND pr.client_id = :c::uuid AND w.deleted_at IS NULL
-                 ORDER BY w.week, w.day, w.position, w.id""", m,
-                (rs, i) -> new DayRow(rs.getString("id"), rs.getString("name"), (Integer) rs.getObject("week"), (Integer) rs.getObject("day"),
-                        rs.getString("done_id"), rs.getString("booked_id")));
+        // A fortnight (22 Nov 2026), the same as `upcoming`: at a week, the plan's week cards dated this week's sessions and
+        // drew next week's — already booked and listed in *Coming up* above them — as bare "Day 1, Day 2".
+        m.put("wk", Timestamp.from(now.plusSeconds(14L * 86400)));
+        record Place(String id, String name, Integer week, Integer day) {}
+        var places = jdbc.query("WITH " + PlanSequence.ctes(
+                        "SELECT id, client_id FROM program WHERE id = :p::uuid AND client_id = :c::uuid AND deleted_at IS NULL", "false") + """
+                SELECT plan.id::text AS id, plan.name, plan.week, plan.day FROM plan ORDER BY plan.n""", m,
+                (rs, i) -> new Place(rs.getString("id"), rs.getString("name"), (Integer) rs.getObject("week"), (Integer) rs.getObject("day")));
+        // Finished sessions of this program's workouts, in the order PlanSequence counts them.
+        // Each row also carries its session's time, kept by session id for the place it lands in (21 Nov 2026).
+        var when = new java.util.HashMap<String, Long>();
+        var done = jdbc.query("""
+                SELECT s.workout_id::text AS w, s.id::text AS s, s.scheduled_at FROM scheduled_session s JOIN workout w ON w.id = s.workout_id
+                 WHERE w.program_id = :p::uuid AND s.client_id = :c::uuid AND s.status = 'done' AND s.deleted_at IS NULL
+                 ORDER BY s.scheduled_at, s.id""", m, (rs, i) -> {
+                    when.put(rs.getString("s"), rs.getTimestamp("scheduled_at").getTime());
+                    return new String[]{rs.getString("w"), rs.getString("s")};
+                });
+        var booked = jdbc.query("""
+                SELECT s.workout_id::text AS w, s.id::text AS s, s.scheduled_at FROM scheduled_session s JOIN workout w ON w.id = s.workout_id
+                 WHERE w.program_id = :p::uuid AND s.client_id = :c::uuid AND s.logged_by = 'trainer' AND s.status = 'scheduled'
+                   AND s.deleted_at IS NULL AND s.scheduled_at >= :now AND s.scheduled_at < :wk
+                 ORDER BY s.scheduled_at, s.id""", m, (rs, i) -> {
+                    when.put(rs.getString("s"), rs.getTimestamp("scheduled_at").getTime());
+                    return new String[]{rs.getString("w"), rs.getString("s")};
+                });
+
+        String[] doneAt = new String[places.size()], bookedAt = new String[places.size()];
+        for (var g : done) assign(places.stream().map(Place::id).toList(), g, doneAt, null);
+        for (var g : booked) assign(places.stream().map(Place::id).toList(), g, bookedAt, doneAt);
+        var out = new ArrayList<DayRow>(places.size());
+        for (int i = 0; i < places.size(); i++) {
+            var pl = places.get(i);
+            String sid = doneAt[i] != null ? doneAt[i] : bookedAt[i];
+            out.add(new DayRow(pl.id(), pl.name(), pl.week(), pl.day(), doneAt[i], bookedAt[i], sid == null ? null : when.get(sid)));
+        }
+        return out;
+    }
+
+    /** The session goes to its workout's first place not yet taken here (nor, when {@code alsoTaken} is given, there); none left, it is dropped. */
+    private static void assign(List<String> placeIds, String[] given, String[] taken, String[] alsoTaken) {
+        for (int i = 0; i < placeIds.size(); i++) {
+            if (placeIds.get(i).equals(given[0]) && taken[i] == null && (alsoTaken == null || alsoTaken[i] == null)) {
+                taken[i] = given[1];
+                return;
+            }
+        }
     }
 
     /** The trainer's own sessions of the next days, not yet over. */
@@ -169,6 +211,35 @@ public class PortalPlanJdbcRepository {
 
     // ── progress ─────────────────────────────────────────────────────────────────────────────────
 
+    /**
+     * The window week by week (22 Nov 2026): finished sessions — the same rule as {@link #consistency} — and their volume
+     * (weight × reps on done weighted sets), grouped on the Monday of the client's own week. Weeks with nothing are absent
+     * here; the service fills them in.
+     */
+    public java.util.Map<String, Object[]> weeks(UUID client, Instant from, Instant to, String tz) {
+        var m = p(client);
+        m.put("from", Timestamp.from(from));
+        m.put("to", Timestamp.from(to));
+        m.put("tz", tz);
+        var out = new java.util.LinkedHashMap<String, Object[]>();
+        jdbc.query("""
+                WITH s AS (
+                  SELECT s.id, (s.scheduled_at AT TIME ZONE :tz)::date AS d FROM scheduled_session s
+                   WHERE s.client_id = :c::uuid AND s.status = 'done' AND s.deleted_at IS NULL AND s.scheduled_at >= :from AND s.scheduled_at <= :to
+                     AND (s.logged_by = 'trainer' OR EXISTS (SELECT 1 FROM session_exercise se JOIN set_log sl ON sl.session_exercise_id = se.id
+                                                              WHERE se.session_id = s.id AND se.removed_at IS NULL AND sl.done_at IS NOT NULL))),
+                v AS (
+                  SELECT se.session_id, sum(sl.load_value * sl.effort_value) AS vol
+                    FROM session_exercise se JOIN set_log sl ON sl.session_exercise_id = se.id
+                   WHERE se.session_id IN (SELECT id FROM s) AND se.removed_at IS NULL AND sl.done_at IS NOT NULL
+                     AND sl.load_kind = 'weight' AND sl.effort_kind = 'reps'
+                   GROUP BY se.session_id)
+                SELECT date_trunc('week', s.d)::date::text AS wk, count(*) AS n, coalesce(sum(v.vol), 0) AS vol
+                  FROM s LEFT JOIN v ON v.session_id = s.id GROUP BY 1 ORDER BY 1""", m,
+                (org.springframework.jdbc.core.RowCallbackHandler) rs -> out.put(rs.getString("wk"), new Object[]{rs.getInt("n"), rs.getBigDecimal("vol")}));
+        return out;
+    }
+
     /** Finished sessions in the window, by who ran them; a self-run with no set done is not a session (R106). */
     public int[] consistency(UUID client, Instant from, Instant to) {
         var m = p(client);
@@ -181,6 +252,16 @@ public class PortalPlanJdbcRepository {
                    AND (s.logged_by = 'trainer' OR EXISTS (SELECT 1 FROM session_exercise se JOIN set_log sl ON sl.session_exercise_id = se.id
                                                             WHERE se.session_id = s.id AND se.removed_at IS NULL AND sl.done_at IS NOT NULL))""", m,
                 (rs, i) -> new int[]{rs.getInt("trainer"), rs.getInt("self")});
+    }
+
+    /** The client's first session ever that counts toward consistency (the same rule as {@link #consistency}), or null. */
+    public Instant firstSession(UUID client) {
+        Timestamp t = jdbc.queryForObject("""
+                SELECT min(s.scheduled_at) FROM scheduled_session s
+                 WHERE s.client_id = :c::uuid AND s.status = 'done' AND s.deleted_at IS NULL
+                   AND (s.logged_by = 'trainer' OR EXISTS (SELECT 1 FROM session_exercise se JOIN set_log sl ON sl.session_exercise_id = se.id
+                                                            WHERE se.session_id = s.id AND se.removed_at IS NULL AND sl.done_at IS NOT NULL))""", p(client), Timestamp.class);
+        return t == null ? null : t.toInstant();
     }
 
     public List<PortalPlan.MilestoneItem> milestones(UUID client, Instant from) {

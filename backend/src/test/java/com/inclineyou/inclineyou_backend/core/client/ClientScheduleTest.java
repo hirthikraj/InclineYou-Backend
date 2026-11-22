@@ -193,6 +193,34 @@ class ClientScheduleTest {
 
     /* ------------------------------------------------------------- fixtures */
 
+    @Test
+    @DisplayName("one person, one session: overlapping slots and a start with seconds are refused; a slot skips a date already taken by a hand booking")
+    void noOverlaps() throws Exception {
+        saveWeek(week("[{\"weekday\":1,\"start\":\"07:00\",\"durationMinutes\":60},{\"weekday\":1,\"start\":\"07:30\"}]"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("Monday 07:00 and 07:30 overlap")));
+        saveWeek(week("[{\"weekday\":2,\"start\":\"07:00:30\"}]")).andExpect(status().isBadRequest());
+        assertEquals(0, diary().size(), "nothing booked by a refused week");
+        // Back to back is fine.
+        saveWeek(week("[{\"weekday\":1,\"start\":\"07:00\",\"durationMinutes\":60},{\"weekday\":1,\"start\":\"08:00\"}]"))
+                .andExpect(status().isOk());
+
+        // A hand booking at 07:30 next Wednesday: the Wednesday 07:00 slot leaves that one date free.
+        LocalDate next = LocalDate.now(IST).plusDays(1);
+        while (next.getDayOfWeek().getValue() != 3) next = next.plusDays(1);
+        final LocalDate wednesday = next;
+        var at = java.sql.Timestamp.from(wednesday.atTime(7, 30).atZone(IST).toInstant());
+        jdbc.update("""
+                INSERT INTO scheduled_session (id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at)
+                SELECT gen_random_uuid(), trainer_id, id, :at, 60, :at FROM client WHERE id = :c::uuid
+                """, Map.of("at", at, "c", client.toString()));
+        saveWeek(week("[{\"weekday\":1,\"start\":\"07:00\",\"durationMinutes\":60},{\"weekday\":1,\"start\":\"08:00\"},"
+                + "{\"weekday\":3,\"start\":\"07:00\"}]")).andExpect(status().isOk());
+        var onThatDay = diary().stream().filter(d -> d.toLocalDate().equals(wednesday)).toList();
+        assertEquals(1, onThatDay.size(), "only the hand booking: the slot skipped the date it would overlap");
+        assertEquals(30, onThatDay.getFirst().getMinute());
+    }
+
     private static String week(String slots) {
         return "{\"slots\":" + slots + "}";
     }

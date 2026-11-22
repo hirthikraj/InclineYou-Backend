@@ -64,6 +64,7 @@ public class PracticeReportJdbcRepository {
         return jdbc.query("""
                 SELECT to_char(created_at AT TIME ZONE :tz, 'YYYY-MM') AS m, count(*) AS n
                 FROM client WHERE trainer_id = :tid::uuid AND deleted_at IS NULL
+                  AND status <> 'prospect'   -- 20 Nov 2026: a trial nobody bought after is not a new client, as in retention
                   AND created_at >= :fromAt AND created_at < :toAt GROUP BY 1
                 """, s.params(), (rs, i) -> new MonthCount(rs.getString("m"), rs.getInt("n")));
     }
@@ -81,6 +82,7 @@ public class PracticeReportJdbcRepository {
         return jdbc.query("""
                 SELECT to_char(start_date, 'YYYY-MM') AS m, sum(amount) AS billed
                 FROM package WHERE trainer_id = :tid::uuid AND deleted_at IS NULL
+                  AND NOT (session_id IS NOT NULL AND status = 'cancelled')   -- 20 Nov 2026: L1's billed, a cancelled single is no sale
                   AND start_date >= :firstDay AND start_date < :endDay GROUP BY 1
                 """, s.params(), (rs, i) -> new MonthAmounts(rs.getString("m"), rs.getBigDecimal("billed"), null));
     }

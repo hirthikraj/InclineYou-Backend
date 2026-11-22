@@ -55,11 +55,23 @@ public class GymArrangementJdbcRepository {
                 """, Map.of("id", id.toString(), "tid", tid.toString()), GymArrangementJdbcRepository::row).stream().findFirst();
     }
 
+    /** One live row, locked for an edit; empty if it is not this trainer's. */
+    public Optional<Arrangement> findForUpdate(UUID tid, UUID id) {
+        return jdbc.query("SELECT " + COLUMNS + """
+                 FROM gym_arrangement WHERE id = :id::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL FOR UPDATE
+                """, Map.of("id", id.toString(), "tid", tid.toString()), GymArrangementJdbcRepository::row).stream().findFirst();
+    }
+
     /** The gym the trainer is with now: its name as a snapshot, and the directory place when it was picked from the search. */
     public Optional<CurrentGym> currentGym(UUID tid) {
         return jdbc.query("SELECT gym_name, gym_place_id::text FROM trainer_business WHERE trainer_id = :tid::uuid",
                 Map.of("tid", tid.toString()), (rs, i) -> new CurrentGym(rs.getString(1), rs.getString(2)))
                 .stream().filter(g -> g.name() != null).findFirst();
+    }
+
+    /** Serialises one trainer's new terms (the replay check, the overlap checks, the close), released at commit. */
+    public void lockTrainerTerms(UUID tid) {
+        jdbc.query("SELECT pg_advisory_xact_lock(hashtext('gym-terms:' || :tid))", Map.of("tid", tid.toString()), rs -> { });
     }
 
     /** The running row, locked so two taps cannot both close it. */

@@ -77,7 +77,12 @@ public class ClientMessageJdbcRepository {
                         rs.getTimestamp("deleted_at") != null)).stream().findFirst();
     }
 
-    public Message insert(UUID id, UUID trainerId, UUID clientId, UUID sessionId, String body, String kind) {
+    /**
+     * Empty when the id already exists (20 Nov 2026): ON CONFLICT (id) DO NOTHING rather than a caught duplicate, because a
+     * unique violation aborts the transaction and the replay must still be read back. A second recap for one session is
+     * a different index and still raises, for RECAP_EXISTS.
+     */
+    public java.util.Optional<Message> insert(UUID id, UUID trainerId, UUID clientId, UUID sessionId, String body, String kind) {
         var p = new HashMap<String, Object>();
         p.put("id", id.toString());
         p.put("tid", trainerId.toString());
@@ -85,12 +90,13 @@ public class ClientMessageJdbcRepository {
         p.put("sid", sessionId == null ? null : sessionId.toString());
         p.put("body", body);
         p.put("kind", kind);
-        return jdbc.queryForObject("""
+        return jdbc.query("""
                 WITH m AS (
                     INSERT INTO client_message (id, trainer_id, client_id, session_id, body, kind)
                     VALUES (:id::uuid, :tid::uuid, :cid::uuid, CAST(:sid AS uuid), :body, :kind)
+                    ON CONFLICT (id) DO NOTHING
                     RETURNING *)
-                SELECT\s""" + COLUMNS + " FROM m", p, (rs, i) -> message(rs));
+                SELECT\s""" + COLUMNS + " FROM m", p, (rs, i) -> message(rs)).stream().findFirst();
     }
 
     public Message updateBody(UUID id, String body) {

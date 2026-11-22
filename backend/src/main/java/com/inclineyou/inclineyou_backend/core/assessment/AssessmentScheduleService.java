@@ -6,6 +6,7 @@ import com.inclineyou.inclineyou_backend.core.assessment.dto.ScheduleItem;
 import com.inclineyou.inclineyou_backend.core.assessment.dto.UpdateScheduleRequest;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
+import com.inclineyou.inclineyou_backend.shared.util.DateWindow;
 import com.inclineyou.inclineyou_backend.shared.wire.IfMatch;
 import lombok.RequiredArgsConstructor;
 import org.springframework.dao.DuplicateKeyException;
@@ -37,6 +38,7 @@ public class AssessmentScheduleService {
     private final AssessmentTemplateJdbcRepository templates;
     private final AssessmentBooker booker;
     private final WorkspaceClock clock;
+    private final com.inclineyou.inclineyou_backend.core.client.ConsentGate consent;
 
     /** Live first, then ended. A client is the caller's or a 404. */
     public List<ScheduleItem> forClient(UUID trainerId, UUID clientId) {
@@ -44,6 +46,13 @@ public class AssessmentScheduleService {
         assessments.clientStatus(trainerId, clientId)
                 .orElseThrow(() -> ApiException.notFound("That client is not on your roster."));
         return schedules.forClient(trainerId, clientId);
+    }
+
+    /** This trainer's live cycle with this id, answered as a replay (200); null when the id is not that. */
+    private ScheduleCreated replay(UUID trainerId, UUID id) {
+        if (id == null) return null;
+        var mine = schedules.isMine(id, trainerId);
+        return mine.isPresent() && mine.get() ? new ScheduleCreated(one(trainerId, id), false) : null;
     }
 
     @Transactional
@@ -55,19 +64,32 @@ public class AssessmentScheduleService {
                 return new ScheduleCreated(one(trainerId, req.id()), false);
             }
         }
-        var status = assessments.clientStatus(trainerId, req.clientId())
+        // FOR SHARE against a client delete's FOR UPDATE (19 Nov 2026): the two queue, so the delete cannot miss a cycle
+        // and first assessment made beside it.
+        var status = assessments.clientStatusForShare(trainerId, req.clientId())
                 .orElseThrow(() -> ApiException.notFound("That client is not on your roster."));
         if ("archived".equals(status)) {
             throw ApiException.conflict("CLIENT_ARCHIVED", "This client is archived. Unarchive them first.");
         }
+        consent.require(req.clientId(), "a measuring cycle");
         var tpl = templates.find(trainerId, req.templateId()).filter(t -> !t.deleted())
                 .orElseThrow(() -> ApiException.notFound("That assessment template is not in your library."));
-        if (schedules.liveExists(req.clientId(), tpl.id())) throw live();
-        LocalDate first = req.firstDueOn() == null ? WorkspaceClock.today(clock.zone()) : req.firstDueOn();
+        // A double tap whose first request committed after the lookup above (19 Nov 2026) meets its own cycle here or
+        // at the INSERT; either way this trainer's cycle with that id is the same request, answered, not refused.
+        if (schedules.liveExists(req.clientId(), tpl.id())) {
+            var replay = replay(trainerId, req.id());
+            if (replay != null) return replay;
+            throw live();
+        }
+        LocalDate today = WorkspaceClock.today(clock.zone());
+        // Within three months of today either way (19 Nov 2026): 1900 was missed on arrival and 2999 never came due.
+        LocalDate first = req.firstDueOn() == null ? today : DateWindow.check(req.firstDueOn(), today, "firstDueOn");
         UUID id = req.id() == null ? UUID.randomUUID() : req.id();
         try {
             if (!schedules.insert(id, trainerId, req.clientId(), tpl.id(), req.intervalDays(), first,
                     req.sendToClient() == null || req.sendToClient())) {
+                var replay = replay(trainerId, id);
+                if (replay != null) return replay;
                 throw ApiException.idConflict();
             }
         } catch (DuplicateKeyException e) {
@@ -88,7 +110,9 @@ public class AssessmentScheduleService {
             throw ApiException.conflict("SCHEDULE_ENDED", "That cycle has ended, so it cannot be moved or re-paced.");
         }
         IfMatch.check(ifMatch, cycle.version(), "This cycle changed since you opened it. Reload to see it.");
-        LocalDate due = req.nextDueOn() == null ? null : req.nextDueOn().value();
+        // Within three months of today either way (19 Nov 2026), as a cycle's first date is.
+        LocalDate due = req.nextDueOn() == null ? null
+                : DateWindow.check(req.nextDueOn().value(), WorkspaceClock.today(clock.zone()), "nextDueOn");
         schedules.update(id, due, req.intervalDays() == null ? null : req.intervalDays().value(),
                 req.sendToClient() == null ? null : req.sendToClient().value());
         if (due != null) assessments.moveOpenDue(id, due);

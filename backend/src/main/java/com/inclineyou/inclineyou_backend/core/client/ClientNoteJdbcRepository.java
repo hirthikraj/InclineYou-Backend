@@ -113,6 +113,12 @@ public class ClientNoteJdbcRepository {
                 Map.of("cid", clientId.toString()));
     }
 
+    /** The exact {@code shared_at}, for the bell notice to carry as its subject (a Note rounds it to milliseconds). */
+    public java.sql.Timestamp sharedAt(UUID noteId) {
+        return jdbc.queryForObject("SELECT shared_at FROM client_note WHERE id = :nid::uuid",
+                Map.of("nid", noteId.toString()), java.sql.Timestamp.class);
+    }
+
     public Note one(UUID noteId) {
         return jdbc.queryForObject("SELECT " + COLUMNS + " FROM client_note WHERE id = :nid::uuid",
                 Map.of("nid", noteId.toString()), ClientNoteJdbcRepository::row);

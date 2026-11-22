@@ -92,6 +92,8 @@ public class PortalWorkoutController {
 
     @PutMapping("/sessions/{id}/feedback")
     public ResponseEntity<PortalWorkout.Feedback> feedback(@PathVariable UUID id, @Valid @RequestBody PortalWorkoutRequests.Feedback req) {
-        return noStore(service.feedback(phone(), id, req));
+        var answer = service.feedback(phone(), id, req);
+        // Both answers cleared: the answer is taken back and there is nothing to return (21 Nov 2026).
+        return answer == null ? ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build() : noStore(answer);
     }
 }

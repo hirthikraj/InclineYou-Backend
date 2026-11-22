@@ -79,6 +79,8 @@ class TrainerAccountTest {
     @Autowired NamedParameterJdbcTemplate jdbc;
     @Autowired CapturingSender sender;
     @Autowired EntityManager em;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean
+    com.inclineyou.inclineyou_backend.core.auth.AppUserRepository users;
 
     private MockMvc mvc;
     private UUID me;
@@ -347,6 +349,18 @@ class TrainerAccountTest {
     }
 
     @Test
+    @DisplayName("a sign-up on the new number between the check and the save is PHONE_TAKEN, not a 500 (20 Nov 2026)")
+    void takenWhileConfirming() throws Exception {
+        String ticket = proveCurrent();
+        request(ticket, FREE);
+        // Somebody signs up on FREE after the check ran: the check is made to answer "free", as it would have.
+        trainer(FREE);
+        org.mockito.Mockito.doReturn(java.util.Optional.empty()).when(users).findByPhone(FREE);
+
+        confirm(ticket, FREE).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("PHONE_TAKEN"));
+    }
+
+    @Test
     @DisplayName("the number they are already on is named, not silently accepted")
     void samePhone() throws Exception {
         String ticket = proveCurrent();
@@ -430,6 +444,52 @@ class TrainerAccountTest {
         confirm(phoneTicket, MINE)
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.code").value("PHONE_TAKEN"));
+    }
+
+    @Test
+    @DisplayName("closing the account archives every client: removed from the portal, upcoming sessions cancelled (20 Nov 2026)")
+    void closingArchivesTheClients() throws Exception {
+        UUID tenant = UUID.fromString(jdbc.queryForObject("SELECT home_tenant_id::text FROM trainer WHERE id = :t::uuid",
+                Map.of("t", me.toString()), String.class));
+        UUID accepted = UUID.randomUUID(), plain = UUID.randomUUID(), already = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO client (id, trainer_id, tenant_id, name, client_type, status, phone, membership_status, invited_at, accepted_at)
+                VALUES (:a::uuid, :t::uuid, :ten::uuid, 'Asha', 'independent', 'active', :ap, 'accepted', now(), now()),
+                       (:b::uuid, :t::uuid, :ten::uuid, 'Ravi', 'independent', 'active', NULL, 'not_invited', NULL, NULL)""",
+                Map.of("a", accepted.toString(), "b", plain.toString(), "t", me.toString(), "ten", tenant.toString(), "ap", FREE));
+        jdbc.update("""
+                INSERT INTO client (id, trainer_id, tenant_id, name, client_type, status, archived_at, archive_reason)
+                VALUES (:c::uuid, :t::uuid, :ten::uuid, 'Old', 'independent', 'archived', now() - interval '30 days', 'cost')""",
+                Map.of("c", already.toString(), "t", me.toString(), "ten", tenant.toString()));
+        jdbc.update("""
+                INSERT INTO scheduled_session (id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at, status)
+                VALUES (gen_random_uuid(), :t::uuid, :c::uuid, now() + interval '2 days', 60, now() + interval '2 days 1 hour', 'scheduled')""",
+                Map.of("t", me.toString(), "c", accepted.toString()));
+
+        String ticket = stepUpTicket(MINE, "account_deletion");
+        // A real request has its workspace set by AuthTokenFilter; this class calls past the filter, so set it as it would.
+        com.inclineyou.inclineyou_backend.core.tenant.CurrentScope.set(new com.inclineyou.inclineyou_backend.core.tenant.TenantScope.Scope(
+                MINE, me, tenant, java.util.List.of(), false));
+        try {
+            mvc.perform(delete("/v1/trainers/me").header("X-Step-Up-Ticket", ticket)).andExpect(status().isNoContent());
+        } finally {
+            com.inclineyou.inclineyou_backend.core.tenant.CurrentScope.clear();
+        }
+
+        var a = jdbc.queryForMap("SELECT status, membership_status, archive_reason, archive_note FROM client WHERE id = :id::uuid",
+                Map.of("id", accepted.toString()));
+        assertThat(a.get("status")).isEqualTo("archived");
+        assertThat(a.get("membership_status")).isEqualTo("removed");
+        assertThat(a.get("archive_reason")).isEqualTo("other");
+        assertThat(a.get("archive_note")).isEqualTo(AccountService.CLOSED_NOTE);
+        assertThat(jdbc.queryForObject("SELECT status FROM client WHERE id = :id::uuid", Map.of("id", plain.toString()), String.class))
+                .isEqualTo("archived");
+        // A client archived before keeps its own reason.
+        assertThat(jdbc.queryForObject("SELECT archive_reason FROM client WHERE id = :id::uuid", Map.of("id", already.toString()), String.class))
+                .isEqualTo("cost");
+        assertThat(jdbc.queryForObject("""
+                SELECT count(*) FROM scheduled_session WHERE client_id = :c::uuid AND status = 'scheduled'""",
+                Map.of("c", accepted.toString()), Integer.class)).isZero();
     }
 
     @Test

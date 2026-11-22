@@ -12,7 +12,7 @@ import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 
 /**
- * {@code PATCH /v1/portal/me} (p-a4): the five things a client may change about themselves — and no others, because strict binding
+ * {@code PATCH /v1/portal/me} (p-a4): the six things a client may change about themselves (gender since V44) — and no others, because strict binding
  * refuses an unknown key before the database's column guard has to. A component left null was not sent; a {@link Patch} holding null
  * clears it, except where the column is NOT NULL ({@code name}, {@code timezone}), where {@code @NotNull} on the type argument means
  * "may be left out, may not be cleared".
@@ -24,7 +24,10 @@ public record UpdatePortalMeRequest(
               @DecimalMax(value = "250", message = "between 50 and 250") BigDecimal> heightCm,
         Patch<@NotNull(message = "required") @Size(max = 64, message = "at most 64 characters") String> timezone,
         Patch<@Pattern(regexp = "sedentary|light|moderate|active|very_active",
-                       message = "sedentary, light, moderate, active, very_active or null") String> activityLevel
+                       message = "sedentary, light, moderate, active, very_active or null") String> activityLevel,
+        /* V44 (22 Nov 2026): the client corrects what the trainer recorded. Null clears it ("not given"). */
+        Patch<@Pattern(regexp = "female|male|other|prefer_not_to_say",
+                       message = "female, male, other or prefer_not_to_say") String> gender
 ) {
     public UpdatePortalMeRequest {
         name = Patch.map(name, String::strip);
@@ -33,6 +36,6 @@ public record UpdatePortalMeRequest(
     }
 
     public boolean isEmpty() {
-        return name == null && goal == null && heightCm == null && timezone == null && activityLevel == null;
+        return name == null && goal == null && heightCm == null && timezone == null && activityLevel == null && gender == null;
     }
 }

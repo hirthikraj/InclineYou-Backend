@@ -96,12 +96,14 @@ public class WorkoutTemplateJdbcRepository {
                 """, Map.of("id", id.toString(), "tid", trainerId.toString()), Boolean.class).stream().findFirst();
     }
 
-    public void insert(UUID id, UUID trainerId, String name, String notes) {
-        jdbc.update("""
+    /** False when the id was taken meanwhile (ON CONFLICT, so the transaction stays usable for the replay read). */
+    public boolean insert(UUID id, UUID trainerId, String name, String notes) {
+        return jdbc.update("""
                 INSERT INTO workout (id, origin, trainer_id, name, notes)
                 VALUES (:id::uuid, 'trainer', :tid::uuid, :name, :notes)
+                ON CONFLICT (id) DO NOTHING
                 """, new MapSqlParameterSource("id", id.toString()).addValue("tid", trainerId.toString())
-                .addValue("name", name).addValue("notes", notes));
+                .addValue("name", name).addValue("notes", notes)) > 0;
     }
 
     /** Always runs on a save, so the row's {@code updated_at} — the version — moves even when only the tree did. */

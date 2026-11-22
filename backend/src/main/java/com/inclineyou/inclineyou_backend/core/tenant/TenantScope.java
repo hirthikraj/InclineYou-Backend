@@ -87,7 +87,7 @@ public class TenantScope {
      * @param combined      whether reads should span every workspace
      */
     public Scope resolve(String phone, UUID trainerId, UUID requested, boolean combined) {
-        List<Membership> memberships = membershipsFor(phone);
+        List<Membership> memberships = membershipsFor(phone, trainerId);
 
         UUID active = null;
         if (requested != null && memberships.stream().anyMatch(m -> m.tenantId().equals(requested))) {
@@ -110,14 +110,14 @@ public class TenantScope {
     }
 
     /**
-     * Every live membership for a number.
+     * Every live membership for a number — and, for a trainer's credential, only that trainer's own (20 Nov 2026).
      *
      * <p>Reads through the bootstrap policy in V42 — see
      * {@link TenantJdbcRepository#memberships}.
      */
-    public List<Membership> membershipsFor(String phone) {
+    public List<Membership> membershipsFor(String phone, UUID trainerId) {
         if (phone == null || phone.isBlank()) return List.of();
-        return repo.memberships(phone);
+        return repo.memberships(phone, trainerId);
     }
 
     /** Where a trainer's own data lives, for a token that predates the claim. */

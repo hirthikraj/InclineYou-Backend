@@ -177,6 +177,14 @@ class PortalInboxApiTest {
         get(token, "/v1/portal/notes").andExpect(jsonPath("$.items", hasSize(1))).andExpect(jsonPath("$.items[0].id").value(older.toString()));
         String page = body(get(token, "/v1/portal/notes?limit=1"));
         assertNull(com.jayway.jsonpath.JsonPath.read(page, "$.nextCursor"));
+
+        // a note written long ago and shared today goes on top, and paging follows the share (21 Nov 2026)
+        UUID oldShared = note(c, "Written in August, shared today.", false, false, ago(90));
+        jdbc.update("UPDATE client_note SET shared_with_client = true, shared_at = now() WHERE id = :n::uuid", Map.of("n", oldShared.toString()));
+        String first = body(get(token, "/v1/portal/notes?limit=1").andExpect(jsonPath("$.items[0].id").value(oldShared.toString())));
+        String cursor = com.jayway.jsonpath.JsonPath.read(first, "$.nextCursor");
+        get(token, "/v1/portal/notes?limit=1&cursor=" + cursor).andExpect(jsonPath("$.items", hasSize(1))).andExpect(jsonPath("$.items[0].id").value(older.toString()))
+                .andExpect(jsonPath("$.nextCursor").value(nullValue()));
     }
 
     @Test

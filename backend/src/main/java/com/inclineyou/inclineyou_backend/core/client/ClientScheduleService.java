@@ -51,7 +51,13 @@ public class ClientScheduleService {
         var seen = new HashSet<String>();
         for (var s : req.slots()) {
             if (!seen.add(s.weekday() + "@" + s.start())) throw ApiException.validation("slots: the same weekday and start twice");
+            // A whole minute, as a booking must be (18 Nov 2026): "07:00:30" made sessions that slipped past the
+            // same-start rule beside a hand-booked 07:00.
+            if (s.start().getSecond() != 0 || s.start().getNano() != 0) {
+                throw ApiException.validation("slots: a start is a whole minute (HH:mm), no seconds");
+            }
         }
+        requireNoOverlap(req);
 
         var client = lockClient(trainerId, clientId);
         if (client.archived()) throw archived();
@@ -120,6 +126,31 @@ public class ClientScheduleService {
         var summary = summaries.one(trainerId, clientId).orElseThrow();
         return new ScheduleSaved(summary.schedule(), summary.slots(), booked, cancelled,
                 repo.clashes(trainerId, clientId));
+    }
+
+    private static final String[] WEEKDAYS = {"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"};
+
+    /**
+     * One person cannot be in two sessions (18 Nov 2026): two slots of one day that overlap (Monday 07:00 for an hour and
+     * 07:30) booked the client into both, every week, and the top-up kept doing it. A slot's length is its own, else the
+     * week's, else 60 — the same fallback the booking uses. Back to back is fine.
+     */
+    private static void requireNoOverlap(PutScheduleRequest req) {
+        int fallback = req.sessionDurationMinutes() != null ? req.sessionDurationMinutes() : 60;
+        var byDay = new java.util.TreeMap<Integer, List<PutScheduleRequest.Slot>>();
+        for (var s : req.slots()) byDay.computeIfAbsent(s.weekday(), d -> new ArrayList<>()).add(s);
+        for (var day : byDay.entrySet()) {
+            var slots = day.getValue();
+            slots.sort(java.util.Comparator.comparing(PutScheduleRequest.Slot::start));
+            for (int i = 1; i < slots.size(); i++) {
+                var before = slots.get(i - 1);
+                int minutes = before.durationMinutes() != null ? before.durationMinutes() : fallback;
+                if (before.start().toSecondOfDay() + minutes * 60 > slots.get(i).start().toSecondOfDay()) {
+                    throw ApiException.validation("slots: " + WEEKDAYS[day.getKey() - 1] + " " + before.start() + " and "
+                            + slots.get(i).start() + " overlap — one person can't be in two sessions");
+                }
+            }
+        }
     }
 
     /**

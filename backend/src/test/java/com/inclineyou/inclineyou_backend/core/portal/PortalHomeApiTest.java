@@ -162,6 +162,8 @@ class PortalHomeApiTest {
     void rest() throws Exception {
         UUID c = live();
         UUID prog = program(c);
+        // one week long, so one day done is the whole plan: a longer one repeats week 1 (PlanSequence, 21 Nov 2026)
+        jdbc.update("UPDATE program SET weeks = 1 WHERE id = :p::uuid", Map.of("p", prog.toString()));
         UUID d1 = workout(prog, 1, 1, "Day A");
         Instant next = Instant.now().plus(2, ChronoUnit.DAYS);
         session(c, null, next, 60, "scheduled", "trainer", null, null);

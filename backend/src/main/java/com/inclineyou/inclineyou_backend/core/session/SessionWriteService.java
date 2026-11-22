@@ -32,6 +32,8 @@ public class SessionWriteService {
 
     private final SessionStateJdbcRepository repo;
     private final SessionChargeService charges;
+    private final MilestoneJdbcRepository milestones;
+    private final com.inclineyou.inclineyou_backend.core.client.ConsentGate consent;
     /** One transaction per session for {@link #markDone}; see there. */
     private final TransactionTemplate tx;
 
@@ -140,8 +142,16 @@ public class SessionWriteService {
         // delivering it, and must be able to finish it (notStarted is false once started_at is set). Checked after
         // `done`, so a session somebody marked early still answers already_done.
         if (target.notStarted()) return new MarkResult(sid, "skipped", null, null, "SESSION_NOT_STARTED");
+        // Two sessions before consent (22 Nov 2026). A session whose log was opened was counted when it opened, so it
+        // can always be marked; one marked straight from the diary is delivered here.
+        if (consent.blocksSession(clientId, sessionId)) {
+            return new MarkResult(sid, "skipped", null, null, com.inclineyou.inclineyou_backend.core.client.ConsentGate.CODE);
+        }
 
         repo.markDone(sessionId);
+        // The client's 1st, 10th, 25th … session, when this is it (21 Nov 2026): a session the trainer ran counts as much as one the
+        // client ran alone, and before this only the client's own finish recorded a milestone. Kept on an Undo or reopen: it was reached.
+        SessionMilestones.at(milestones.doneCount(clientId)).ifPresent(m -> milestones.record(clientId, m));
 
         // Decided 27 Sep (1.1): a no-show can be marked done — the client came after all. If the no-show already cost a
         // session, that charge stands and nothing more is taken.

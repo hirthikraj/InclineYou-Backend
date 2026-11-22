@@ -83,6 +83,36 @@ class PortalPlanApiTest {
     }
 
     /** A done session of the client with one exercise's sets, the same shape the trainer's console logs. */
+    @Test
+    @DisplayName("a program written as week 1 only repeats it: once week 1 is done, week 2's first day is next, on the plan and on Home (21 Nov 2026)")
+    void weekOneRepeats() throws Exception {
+        UUID c = live();
+        UUID prog = program(c);
+        jdbc.update("UPDATE program SET weeks = 3 WHERE id = :p::uuid", Map.of("p", prog.toString()));
+        UUID w1 = workout(prog, 1, 1, "Push"), w2 = workout(prog, 1, 2, "Pull");
+        UUID ex = ex("Back squat", "quads", "weight_reps");
+        UUID first = done(c, w1, ago(6), "trainer", ex, 50, 8);
+        UUID second = done(c, w2, ago(4), "client", ex, 50, 8);
+        UUID again = done(c, w1, ago(2), "trainer", ex, 55, 8);   // Push a second time: week 2's Push
+        String token = tokenFor(phone);
+
+        get(token, "/v1/portal/plan").andExpect(status().isOk())
+                .andExpect(jsonPath("$.program.days", hasSize(6)))
+                .andExpect(jsonPath("$.program.days[0].state").value("done")).andExpect(jsonPath("$.program.days[0].sessionId").value(first.toString()))
+                .andExpect(jsonPath("$.program.days[1].state").value("done")).andExpect(jsonPath("$.program.days[1].sessionId").value(second.toString()))
+                .andExpect(jsonPath("$.program.days[2].name").value("Push")).andExpect(jsonPath("$.program.days[2].week").value(2))
+                .andExpect(jsonPath("$.program.days[2].state").value("done")).andExpect(jsonPath("$.program.days[2].sessionId").value(again.toString()))
+                .andExpect(jsonPath("$.program.days[3].name").value("Pull")).andExpect(jsonPath("$.program.days[3].week").value(2))
+                .andExpect(jsonPath("$.program.days[3].state").value("next"))
+                .andExpect(jsonPath("$.program.days[4].state").value("todo")).andExpect(jsonPath("$.program.days[5].state").value("todo"))
+                // `at` (21 Nov 2026): a done place carries its session's time; a place nothing has reached carries none.
+                .andExpect(jsonPath("$.program.days[0].at").isNumber())
+                .andExpect(jsonPath("$.program.days[3].at").doesNotExist());
+        // Home offers the same day to run alone, with its week
+        get(token, "/v1/portal/home").andExpect(jsonPath("$.hero.kind").value("selfRun"))
+                .andExpect(jsonPath("$.hero.workout.id").value(w2.toString())).andExpect(jsonPath("$.hero.workout.week").value(2));
+    }
+
     private UUID done(UUID c, UUID workout, Instant at, String by, UUID ex, int load, int reps) {
         UUID s = session(c, workout, at, 60, "done", by, at, at.plusSeconds(3000));
         setDone(s, c, ex, load, reps, at);
@@ -100,6 +130,7 @@ class PortalPlanApiTest {
         UUID ex = ex("Back squat", "quads", "weight_reps");
         UUID finished = done(c, w1, ago(3), "trainer", ex, 50, 8);
         UUID booked = session(c, w2, Instant.now().plus(2, ChronoUnit.DAYS), 60, "scheduled", "trainer", null, null);
+        UUID nextWeek = session(c, w4, Instant.now().plus(10, ChronoUnit.DAYS), 60, "scheduled", "trainer", null, null);   // next week: still booked (22 Nov 2026)
         session(c, null, Instant.now().plus(20, ChronoUnit.DAYS), 60, "scheduled", "trainer", null, null);   // beyond the fortnight
         session(c, null, ago(1), 60, "scheduled", "trainer", null, null);                                      // over, so not "coming"
         session(c, w3, Instant.now().plus(1, ChronoUnit.DAYS), 30, "scheduled", "client", Instant.now().plus(1, ChronoUnit.DAYS), null);   // a self-run is not the trainer's
@@ -108,17 +139,22 @@ class PortalPlanApiTest {
         String token = tokenFor(phone);
 
         String out = body(get(token, "/v1/portal/plan").andExpect(status().isOk()).andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")))
-                .andExpect(jsonPath("$.upcoming", hasSize(1))).andExpect(jsonPath("$.upcoming[0].id").value(booked.toString())).andExpect(jsonPath("$.upcoming[0].workoutName").value("Day two"))
+                .andExpect(jsonPath("$.upcoming", hasSize(2))).andExpect(jsonPath("$.upcoming[0].id").value(booked.toString())).andExpect(jsonPath("$.upcoming[0].workoutName").value("Day two"))
                 .andExpect(jsonPath("$.upcoming[0].place").value("Cult Koramangala")).andExpect(jsonPath("$.upcoming[0].rescheduleUrl").value(org.hamcrest.Matchers.startsWith("https://wa.me/919100002501?text=")))
                 .andExpect(jsonPath("$.program.name").value("Plan")).andExpect(jsonPath("$.program.weeks").value(4)).andExpect(jsonPath("$.program.currentWeek").value(2))
-                .andExpect(jsonPath("$.program.days", hasSize(4)))
+                // four weeks: week 1's three days, week 2's own day, and weeks 3 and 4 repeating week 1 (PlanSequence, 21 Nov 2026)
+                .andExpect(jsonPath("$.program.days", hasSize(10)))
+                .andExpect(jsonPath("$.program.days[4].name").value("Day one")).andExpect(jsonPath("$.program.days[4].week").value(3))
+                .andExpect(jsonPath("$.program.days[4].state").value("next"))   // week 3: the first open place from the current week (22 Nov 2026)
                 .andExpect(jsonPath("$.program.days[0].state").value("done")).andExpect(jsonPath("$.program.days[0].sessionId").value(finished.toString()))
                 .andExpect(jsonPath("$.program.days[1].state").value("booked")).andExpect(jsonPath("$.program.days[1].sessionId").value(booked.toString()))
-                .andExpect(jsonPath("$.program.days[2].state").value("next")).andExpect(jsonPath("$.program.days[2].sessionId").value(nullValue()))
-                .andExpect(jsonPath("$.program.days[3].state").value("todo")));
+                .andExpect(jsonPath("$.program.days[1].at").isNumber())
+                // week 1's open day is in a PAST week (current week is 2): left as todo, never "next" (22 Nov 2026)
+                .andExpect(jsonPath("$.program.days[2].state").value("todo")).andExpect(jsonPath("$.program.days[2].sessionId").value(nullValue()))
+                .andExpect(jsonPath("$.program.days[3].state").value("booked")).andExpect(jsonPath("$.program.days[3].sessionId").value(nextWeek.toString())));
         assertFalse(out.contains("Day four\",\"state\":\"next"));
-        // and Home agrees on the day: the same rule picks the self-run
-        get(token, "/v1/portal/home").andExpect(jsonPath("$.hero.workout.id").value(w3.toString()));
+        // and Home agrees on the day: the same rule picks the self-run — week 3 repeating Day one, not week 1's missed Day three (22 Nov 2026)
+        get(token, "/v1/portal/home").andExpect(jsonPath("$.hero.workout.id").value(w1.toString()));
 
         // nobody's plan yet: both empty, the program null
         UUID c2 = liveOther2();
@@ -193,15 +229,24 @@ class PortalPlanApiTest {
                 .andExpect(jsonPath("$.strength.best.changePct").value(24))
                 .andExpect(jsonPath("$.consistency.sessionsDone").value(3)).andExpect(jsonPath("$.consistency.trainerLed").value(2)).andExpect(jsonPath("$.consistency.selfRun").value(1))
                 .andExpect(jsonPath("$.consistency.perWeek").value(0.8))
-                .andExpect(jsonPath("$.milestones", hasSize(1))).andExpect(jsonPath("$.milestones[0].kind").value("sessions_10"));
+                .andExpect(jsonPath("$.consistency.since").value(nullValue()))   // their first session (60 days ago) is before the window
+                .andExpect(jsonPath("$.milestones", hasSize(1))).andExpect(jsonPath("$.milestones[0].kind").value("sessions_10"))
+                // lifts and weeks (22 Nov 2026, additive): every comparable lift biggest change first; the window week by week
+                .andExpect(jsonPath("$.lifts[0].name").value("Back squat")).andExpect(jsonPath("$.lifts[0].changePct").value(24))
+                .andExpect(jsonPath("$.weeks", hasSize(org.hamcrest.Matchers.greaterThanOrEqualTo(4))))
+                .andExpect(jsonPath("$.weeks[0].start").isString()).andExpect(jsonPath("$.weeks[0].sessions").isNumber());
         // a longer window reaches back to the first session and its milestone; the earlier sessions then count too
-        get(token, "/v1/portal/progress?windowDays=120").andExpect(jsonPath("$.milestones", hasSize(2))).andExpect(jsonPath("$.consistency.sessionsDone").value(5));
+        get(token, "/v1/portal/progress?windowDays=120").andExpect(jsonPath("$.milestones", hasSize(2))).andExpect(jsonPath("$.consistency.sessionsDone").value(5))
+                // started inside this window (22 Nov 2026): the rate runs from their first session — 5 in ~61 days, not 5 in 120 (0.3)
+                .andExpect(jsonPath("$.consistency.since").value(org.hamcrest.Matchers.notNullValue()))
+                .andExpect(jsonPath("$.consistency.perWeek").value(0.6));
         get(token, "/v1/portal/progress?windowDays=3").andExpect(status().isBadRequest());
         get(token, "/v1/portal/progress?windowDays=900").andExpect(status().isBadRequest());
         // nothing logged: zeros and no best, never an error
         UUID c2 = liveOther2();
         get(tokenFor(phoneOf(c2)), "/v1/portal/progress").andExpect(status().isOk()).andExpect(jsonPath("$.strength.tracked").value(0)).andExpect(jsonPath("$.strength.best").value(nullValue()))
-                .andExpect(jsonPath("$.consistency.sessionsDone").value(0)).andExpect(jsonPath("$.milestones", hasSize(0)));
+                .andExpect(jsonPath("$.consistency.sessionsDone").value(0)).andExpect(jsonPath("$.milestones", hasSize(0)))
+                .andExpect(jsonPath("$.lifts", hasSize(0)));
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM scheduled_session WHERE id = :s::uuid", Map.of("s", self.toString()), Integer.class));
     }
 

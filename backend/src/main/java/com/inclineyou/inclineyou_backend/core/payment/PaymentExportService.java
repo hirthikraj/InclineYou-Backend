@@ -5,6 +5,8 @@ import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.io.Writer;
@@ -25,8 +27,16 @@ import java.util.UUID;
  * the first byte (the caller opens its response only once the first page has been
  * read), so a bad range is a clean 400 and not a file cut short.
  *
- * <p>Cells starting with {@code = + - @} are prefixed with an apostrophe: a payment's
- * client name and note are typed by people, and a spreadsheet would run them.
+ * <p>Every page is read in ONE read-only REPEATABLE READ transaction (20 Nov 2026). The pages walk
+ * {@code book_at}, and {@code book_at} moves when a pending payment is marked paid (it becomes
+ * {@code paid_at}): with each page its own snapshot, a payment marked paid while the file streamed
+ * jumped past the part already written and was missing from the file, or, paid with an earlier
+ * date, written twice. One snapshot makes the file one moment of the book. The cost is one pooled
+ * connection held while the file streams; a solo trainer's three years is a few thousand rows.
+ *
+ * <p>Cells starting with {@code = + - @}, a tab or a carriage return are prefixed with an apostrophe
+ * (OWASP's CSV-injection list): a payment's client name, reference and note are typed by people,
+ * and a spreadsheet would run them.
  */
 @Service
 @RequiredArgsConstructor
@@ -44,6 +54,7 @@ public class PaymentExportService {
         Writer open(String filename) throws IOException;
     }
 
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public void export(UUID tid, String from, String to, String status, String method, String clientId,
                        String collectedBy, String clientType, Sink sink) throws IOException {
         LocalDate f = WorkspaceClock.parseDate(from, "from");
@@ -86,16 +97,19 @@ public class PaymentExportService {
                 collectedBy, clientType, PAGE, cursor, false);
     }
 
-    /** RFC 4180 quoting plus the spreadsheet-formula guard. */
     /**
      * The name column for a client who was deleted (and so erased) since: the row's amount and date are the
      * trainer's books and stay, the name does not. The web draws the same words.
      */
     static final String DELETED_CLIENT = "Deleted client";
 
+    /** What a spreadsheet may read as the start of a formula: OWASP's list, tab and CR included. */
+    private static final String FORMULA_START = "=+-@\t\r";
+
+    /** RFC 4180 quoting plus the spreadsheet-formula guard. */
     static String cell(String v) {
         if (v == null || v.isEmpty()) return "";
-        if ("=+-@".indexOf(v.charAt(0)) >= 0) v = "'" + v;
+        if (FORMULA_START.indexOf(v.charAt(0)) >= 0) v = "'" + v;
         if (v.indexOf(',') >= 0 || v.indexOf('"') >= 0 || v.indexOf('\n') >= 0 || v.indexOf('\r') >= 0) {
             return "\"" + v.replace("\"", "\"\"") + "\"";
         }

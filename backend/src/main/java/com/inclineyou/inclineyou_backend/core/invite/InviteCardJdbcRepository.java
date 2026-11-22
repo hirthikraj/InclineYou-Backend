@@ -57,12 +57,17 @@ public class InviteCardJdbcRepository {
      * account. Answers its {@code result}: {@code accepted} · {@code age_requirement} · {@code unavailable} · {@code expired}.
      * Must run with the proved number as {@code app.phone} — the function refuses an invite for any other number.
      */
-    public String accept(String inviteId, java.time.LocalDate dateOfBirth, String policyVersion) {
+    /** {@code whatsappReminders} is the client's own opt-in (V37): only it stamps client_prefs.whatsapp_opt_in_at. */
+    /** {@code trainingTerms} (V42): the client's "fit to train" tick, stamped on the client when the invite ends accepted. */
+    public String accept(String inviteId, java.time.LocalDate dateOfBirth, String policyVersion, boolean whatsappReminders,
+                         boolean trainingTerms) {
         var p = new java.util.HashMap<String, Object>();
         p.put("i", inviteId);
         p.put("dob", java.sql.Date.valueOf(dateOfBirth));
         p.put("pv", policyVersion);
-        String json = jdbc.queryForObject("SELECT accept_client_invite(:i::uuid, :dob, :pv)::text", p, String.class);
+        p.put("wa", whatsappReminders);
+        p.put("tt", trainingTerms);
+        String json = jdbc.queryForObject("SELECT accept_client_invite(:i::uuid, :dob, :pv, :wa, :tt)::text", p, String.class);
         return tools.jackson.databind.json.JsonMapper.builder().build().readTree(json).path("result").asString();
     }
 

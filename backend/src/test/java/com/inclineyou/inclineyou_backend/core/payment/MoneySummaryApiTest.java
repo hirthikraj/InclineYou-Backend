@@ -125,6 +125,35 @@ class MoneySummaryApiTest {
     }
 
     @Test
+    @DisplayName("a cancelled single session's sale is not billed: it is left out of billed and sold; a live one counts")
+    void cancelledSingleIsNotBilled() throws Exception {
+        UUID c = client("Arjun", "independent");
+        pack(c, 9000, today.withDayOfMonth(1), today.withDayOfMonth(1), null);
+        for (String status : new String[]{"active", "cancelled"}) {
+            UUID session = UUID.randomUUID();
+            var p = new java.util.HashMap<String, Object>();
+            p.put("s", session.toString()); p.put("t", me.toString()); p.put("c", c.toString()); p.put("st", status);
+            p.put("day", java.sql.Date.valueOf(today.withDayOfMonth(1)));
+            jdbc.update("""
+                    INSERT INTO scheduled_session (id, trainer_id, client_id, scheduled_at, duration_minutes, ends_at, billing, price,
+                                                   status, cancel_reason)
+                    VALUES (:s::uuid, :t::uuid, :c::uuid, CAST(:day AS date) + time '07:00' + make_interval(hours => 0)
+                            + (CASE WHEN :st = 'active' THEN interval '0' ELSE interval '3 hours' END), 60,
+                            CAST(:day AS date) + time '08:00' + (CASE WHEN :st = 'active' THEN interval '0' ELSE interval '3 hours' END),
+                            'single', 800, CASE WHEN :st = 'active' THEN 'scheduled' ELSE 'cancelled' END,
+                            CASE WHEN :st = 'active' THEN NULL ELSE 'trainer' END)""", p);
+            jdbc.update("""
+                    INSERT INTO package (id, trainer_id, client_id, session_id, name, service, basis, sessions_total, sessions_remaining,
+                                         amount, currency, start_date, due_date, status, closed_at)
+                    VALUES (gen_random_uuid(), :t::uuid, :c::uuid, :s::uuid, 'Single session', 'floor', 'sessions', 1, 1, 800, 'INR',
+                            :day, :day, :st, CASE WHEN :st = 'cancelled' THEN now() END)""", p);
+        }
+        mvc.perform(get("/v1/money/summary").param("months", "1")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.months[0].billed").value("9800.00"))    // the pack and the live single, not the cancelled one
+                .andExpect(jsonPath("$.months[0].packagesSold").value(2));
+    }
+
+    @Test
     @DisplayName("months is 1–24, from/to are yyyy-MM in order, and months cannot be sent with them")
     void refusals() throws Exception {
         mvc.perform(get("/v1/money/summary").param("months", "0")).andExpect(status().isBadRequest());

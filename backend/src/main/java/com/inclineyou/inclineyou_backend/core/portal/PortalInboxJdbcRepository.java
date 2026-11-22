@@ -59,15 +59,18 @@ public class PortalInboxJdbcRepository {
 
     public record NoteRow(PortalInbox.Note item, Timestamp key) {}
 
-    /** Only what the trainer chose to share, newest first; unsharing removes it from the next read. */
+    /**
+     * Only what the trainer chose to share, newest SHARE first; unsharing removes it from the next read. Ordered and paged by when it was
+     * shared, not written (21 Nov 2026): an old note shared today belongs at the top, where the bell's "shared a note" sends the client.
+     */
     public List<NoteRow> notes(UUID client, Timestamp beforeAt, UUID beforeId, int limit, String author) {
         return jdbc.query("""
                 SELECT id::text AS id, body, shared_at, created_at FROM client_note
                  WHERE client_id = :c::uuid AND shared_with_client AND deleted_at IS NULL
-                   AND (CAST(:at AS timestamptz) IS NULL OR (created_at, id) < (CAST(:at AS timestamptz), CAST(:id AS uuid)))
-                 ORDER BY created_at DESC, id DESC LIMIT :n""", p(client, beforeAt, beforeId, limit),
+                   AND (CAST(:at AS timestamptz) IS NULL OR (shared_at, id) < (CAST(:at AS timestamptz), CAST(:id AS uuid)))
+                 ORDER BY shared_at DESC, id DESC LIMIT :n""", p(client, beforeAt, beforeId, limit),
                 (rs, i) -> new NoteRow(new PortalInbox.Note(rs.getString("id"), rs.getString("body"), rs.getTimestamp("shared_at").getTime(),
-                        rs.getTimestamp("created_at").getTime(), author), rs.getTimestamp("created_at")));
+                        rs.getTimestamp("created_at").getTime(), author), rs.getTimestamp("shared_at")));
     }
 
     public record NoticeRow(PortalInbox.Notice item, Timestamp at) {}

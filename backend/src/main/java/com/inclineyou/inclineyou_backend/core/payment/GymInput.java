@@ -82,9 +82,18 @@ final class GymInput {
     }
 
     /** Epoch ms, back-datable, never in the future (a minute of clock skew allowed). */
-    static Instant pastInstant(Object raw, String field) {
+    /**
+     * An instant no later than a minute from now and no earlier than the first day of the oldest month the gym page can
+     * show (MAX_MONTHS back, 20 Nov 2026). There was no lower bound: seconds sent for milliseconds (1790000000 for
+     * today) landed on 21 Jan 1970 without a word, and a value far enough back was a 500 from Postgres.
+     */
+    static Instant pastInstant(Object raw, String field, java.time.ZoneId zone) {
         if (!(raw instanceof Number n) || n.doubleValue() != n.longValue()) {
             throw ApiException.validation(field + ": epoch milliseconds");
+        }
+        Instant earliest = java.time.YearMonth.now(zone).minusMonths(MAX_MONTHS).atDay(1).atStartOfDay(zone).toInstant();
+        if (n.longValue() < earliest.toEpochMilli()) {
+            throw ApiException.validation(field + ": epoch milliseconds, not before " + java.time.YearMonth.now(zone).minusMonths(MAX_MONTHS));
         }
         Instant at = Instant.ofEpochMilli(n.longValue());
         if (at.isAfter(Instant.now().plusSeconds(60))) throw ApiException.validation(field + ": in the future");

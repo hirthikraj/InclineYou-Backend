@@ -115,7 +115,9 @@ class ClientPortalApiTest {
     void selfRun() throws Exception {
         UUID c = client(me, "Runner", "+919841026010");
         UUID none = client(me, "Never", "+919841026011");
-        Instant at = Instant.now().minusSeconds(86_400);
+        // Whole milliseconds (18 Nov 2026): Instant.now() carries microseconds, which the read path rounds to the
+        // millisecond while toEpochMilli() truncates, so this failed now and then by exactly 1 ms.
+        Instant at = Instant.now().minusSeconds(86_400).truncatedTo(java.time.temporal.ChronoUnit.MILLIS);
         selfRun(c, at.minusSeconds(86_400 * 3), "done");
         selfRun(c, at, "done");
         selfRun(c, Instant.now().minusSeconds(60), "scheduled");   // not finished
@@ -242,6 +244,36 @@ class ClientPortalApiTest {
         assertNull(jdbc.queryForObject("SELECT removed_by FROM client WHERE id = :c::uuid", Map.of("c", c.toString()), String.class));
         assertNull(JsonPath.read(read(c), "$.portal.removedBy"));
         mvc.perform(post("/v1/clients/" + c + "/invites")).andExpect(status().isCreated());
+    }
+
+    @Test
+    @DisplayName("unarchive clears the removed wall's \"seen\" with the rest of the removal, so a later removal is shown afresh (21 Nov 2026)")
+    void unarchiveClearsTheAcknowledgement() throws Exception {
+        UUID c = client(me, "Returner", "+919841026090");
+        mvc.perform(post("/v1/clients/" + c + "/archive").contentType("application/json").content("{\"reason\":\"other\"}"))
+                .andExpect(status().isOk());
+        // The client saw the removed wall and pressed Got it.
+        jdbc.update("UPDATE client SET removed_ack_at = now() WHERE id = :c::uuid", Map.of("c", c.toString()));
+        mvc.perform(post("/v1/clients/" + c + "/unarchive")).andExpect(status().isOk());
+        assertNull(jdbc.queryForObject("SELECT removed_ack_at FROM client WHERE id = :c::uuid", Map.of("c", c.toString()), java.sql.Timestamp.class));
+    }
+
+    @Test
+    @DisplayName("archiving a client who left the portal themselves keeps who left and when (20 Nov 2026)")
+    void archiveKeepsWhoLeft() throws Exception {
+        UUID c = client(me, "Walked", "+919841026080");
+        // They accepted, then left on their own three days ago.
+        jdbc.update("""
+                UPDATE client SET membership_status = 'removed', invited_at = now() - interval '20 days',
+                       accepted_at = now() - interval '19 days', removed_at = now() - interval '3 days', removed_by = 'client'
+                WHERE id = :c::uuid""", Map.of("c", c.toString()));
+        var before = jdbc.queryForObject("SELECT removed_at FROM client WHERE id = :c::uuid", Map.of("c", c.toString()), java.sql.Timestamp.class);
+
+        mvc.perform(post("/v1/clients/" + c + "/archive").contentType("application/json").content("{\"reason\":\"other\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.client.portal.state").value("removed"));
+        assertEquals("client", jdbc.queryForObject("SELECT removed_by FROM client WHERE id = :c::uuid", Map.of("c", c.toString()), String.class));
+        assertEquals(before, jdbc.queryForObject("SELECT removed_at FROM client WHERE id = :c::uuid", Map.of("c", c.toString()), java.sql.Timestamp.class));
+        assertEquals("client", JsonPath.read(read(c), "$.portal.removedBy"));
     }
 
     @Test

@@ -48,6 +48,7 @@ class ExerciseLibraryTest {
 
     @Autowired WebApplicationContext context;
     @Autowired NamedParameterJdbcTemplate jdbc;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean ExerciseJdbcRepository exercises;
 
     private MockMvc mvc;
     private UUID owner;
@@ -272,6 +273,10 @@ class ExerciseLibraryTest {
                 .andReturn();
         mvc.perform(get("/v1/exercises/meta").header("If-None-Match", r.getResponse().getHeader("ETag")))
                 .andExpect(status().isNotModified());
+        // 19 Nov 2026: a content hash (a 12-byte SHA-256 prefix in quotes), and private, since the counts are this trainer's.
+        assertEquals(26, r.getResponse().getHeader("ETag").length(), r.getResponse().getHeader("ETag"));
+        org.junit.jupiter.api.Assertions.assertTrue(r.getResponse().getHeader("Cache-Control").contains("private"),
+                r.getResponse().getHeader("Cache-Control"));
     }
 
     /* ── helpers ────────────────────────────────────────────────────────── */
@@ -279,6 +284,46 @@ class ExerciseLibraryTest {
     private int metaTotal() throws Exception {
         String body = mvc.perform(get("/v1/exercises/meta")).andReturn().getResponse().getContentAsString();
         return com.jayway.jsonpath.JsonPath.read(body, "$.total");
+    }
+
+    @Test
+    @DisplayName("a custom double-tapped with one id answers it (200), not \"name taken\"; the 501st live custom is 409 EXERCISE_LIMIT")
+    void customDoubleTapAndCap() throws Exception {
+        UUID id = UUID.randomUUID();
+        String body = "{\"id\":\"" + id + "\",\"name\":\"Zqx band pull-apart\"}";
+        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated());
+        // The second tap's first lookup ran before the first committed.
+        org.mockito.Mockito.doReturn(java.util.Optional.empty()).doCallRealMethod().when(exercises).ownership(owner, id);
+        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id.toString()));
+
+        int live = jdbc.queryForObject("SELECT count(*) FROM exercise WHERE trainer_id = :t::uuid AND origin = 'trainer' AND deleted_at IS NULL",
+                java.util.Map.of("t", owner.toString()), Integer.class);
+        for (int n = live; n < ExerciseService.MAX_CUSTOMS; n++) {
+            jdbc.update("INSERT INTO exercise (id, origin, trainer_id, name) VALUES (gen_random_uuid(), 'trainer', :t::uuid, :n)",
+                    java.util.Map.of("t", owner.toString(), "n", "Zqx filler " + n));
+        }
+        mvc.perform(post("/v1/exercises").contentType(MediaType.APPLICATION_JSON).content("{\"name\":\"Zqx one too many\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EXERCISE_LIMIT"));
+    }
+
+    @Test
+    @DisplayName("PATCH can correct the six fields POST takes: movement pattern, secondary muscles and the four metadata lists, set and cleared")
+    void patchTheSixFields() throws Exception {
+        String id = create("{\"name\":\"Zqx floor press\",\"movementPattern\":\"pull\",\"aliases\":[\"Floor bench\"],\"safety\":[\"Elbows soft\"]}");
+        mvc.perform(patch("/v1/exercises/" + id).contentType(MediaType.APPLICATION_JSON).content("""
+                {"movementPattern":"push","secondaryTargets":["Triceps","triceps"," Delts "],"aliases":["DB floor press"],
+                 "commonMistakes":["Bouncing the elbows"],"safety":null,"equipmentNeeded":["Dumbbells"]}"""))
+                .andExpect(status().isOk());
+        mvc.perform(get("/v1/exercises/" + id)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.movementPattern").value("push"))
+                .andExpect(jsonPath("$.secondaryTargets", org.hamcrest.Matchers.contains("triceps", "delts")))
+                .andExpect(jsonPath("$.aliases", org.hamcrest.Matchers.contains("DB floor press")))
+                .andExpect(jsonPath("$.commonMistakes", org.hamcrest.Matchers.contains("Bouncing the elbows")))
+                .andExpect(jsonPath("$.equipmentNeeded", org.hamcrest.Matchers.contains("Dumbbells")))
+                .andExpect(jsonPath("$.safety").isEmpty());   // cleared: the key is gone, which the read answers as []
+        mvc.perform(patch("/v1/exercises/" + id).contentType(MediaType.APPLICATION_JSON).content("{\"aliases\":[\"x\",\"y\",\"z\",\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\"]}"))
+                .andExpect(status().isBadRequest());
     }
 
     private String create(String body) throws Exception {

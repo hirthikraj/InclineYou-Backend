@@ -84,6 +84,37 @@ class TrainerSettingsTest {
     }
 
     @Test
+    @DisplayName("PATCH takes the ETag GET sent back as its If-Match, reach counts and all (20 Nov 2026)")
+    void ifMatchTakesTheEtag() throws Exception {
+        String etag = mvc.perform(get("/v1/trainers/me")).andReturn().getResponse().getHeader("ETag");
+        mvc.perform(patch("/v1/trainers/me").header("If-Match", etag).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"serviceAreas\":[\"Adyar\"]}"))
+                .andExpect(status().isOk());
+        // A stale tag in the same shape is still a 412 (a later save cannot move updated_at inside this test's one
+        // transaction, so the stale one is made by hand).
+        mvc.perform(patch("/v1/trainers/me").header("If-Match", "\"1-0-0-0\"").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"serviceAreas\":[\"Besant Nagar\"]}"))
+                .andExpect(status().isPreconditionFailed());
+        org.junit.jupiter.api.Assertions.assertEquals("\"1790000000000\"",
+                TrainerService.versionOfTag("\"1790000000000-3-2-1\""));
+        org.junit.jupiter.api.Assertions.assertEquals("W/\"17\"", TrainerService.versionOfTag("W/\"17-0-0-0\""));
+        org.junit.jupiter.api.Assertions.assertEquals("\"17\"", TrainerService.versionOfTag("\"17\""));
+    }
+
+    @Test
+    @DisplayName("a preference is a text of at most 200, a number or true/false — not a nested object or a list (20 Nov 2026)")
+    void preferenceValues() throws Exception {
+        patchMe("{\"preferences\":{\"restSeconds\":90,\"units\":\"kg\",\"haptics\":true}}").andExpect(status().isOk())
+                .andExpect(jsonPath("$.preferences.restSeconds").value(90))
+                .andExpect(jsonPath("$.preferences.units").value("kg"));
+        patchMe("{\"preferences\":{\"deep\":{\"a\":{\"b\":1}}}}").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION"));
+        patchMe("{\"preferences\":{\"list\":[1,2,3]}}").andExpect(status().isBadRequest());
+        patchMe("{\"preferences\":{\"note\":\"" + "x".repeat(201) + "\"}}").andExpect(status().isBadRequest());
+        patchMe("{\"preferences\":{\"note\":\"" + "x".repeat(200) + "\"}}").andExpect(status().isOk());
+    }
+
+    @Test
     @DisplayName("acceptPrivacyPolicy and completeSetup are unknown keys on PATCH — an old caller fails loudly")
     void retiredKeys() throws Exception {
         patchMe("{\"acceptPrivacyPolicy\":true}").andExpect(status().isBadRequest())
@@ -197,6 +228,11 @@ class TrainerSettingsTest {
         week("{\"days\":[{\"weekday\":8,\"windows\":[]}]}").andExpect(status().isBadRequest());
         week("{\"days\":[{\"weekday\":3,\"windows\":[]},{\"weekday\":3,\"windows\":[]}]}").andExpect(status().isBadRequest());
         week("{\"days\":[{\"weekday\":2,\"windows\":[{\"start\":\"6am\",\"end\":\"8am\"}]}]}").andExpect(status().isBadRequest());
+        // At most WorkingHoursService.MAX_WINDOWS (8) a day (20 Nov 2026): nine one-hour windows are refused.
+        StringBuilder nine = new StringBuilder();
+        for (int h = 0; h < 9; h++) nine.append(h == 0 ? "" : ",").append(String.format("{\"start\":\"%02d:00\",\"end\":\"%02d:30\"}", h + 8, h + 8));
+        week("{\"days\":[{\"weekday\":2,\"windows\":[" + nine + "]}]}").andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION"));
 
         // Touching windows are a split shift, not an overlap — but the earlier refusals changed nothing.
         mvc.perform(get("/v1/working-hours")).andExpect(jsonPath("$.items.length()").value(1))

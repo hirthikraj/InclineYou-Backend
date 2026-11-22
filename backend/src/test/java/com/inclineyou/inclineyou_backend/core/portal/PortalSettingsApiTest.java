@@ -137,6 +137,18 @@ class PortalSettingsApiTest {
         patchPrefs(token, "1", "{\"hideWeight\":false}").andExpect(status().isPreconditionFailed());
         String v = com.jayway.jsonpath.JsonPath.read(body(get(token, "/v1/portal/prefs")), "$.version");
         patchPrefs(token, v, "{\"hideWeight\":false}").andExpect(status().isOk()).andExpect(jsonPath("$.hideWeight").value(false));
+
+        // the same values again write nothing, so the version holds and another tab's save is not refused (21 Nov 2026). Inside one test
+        // transaction now() does not move, so the row's ctid — new on every written version of a row — is what tells a write from none.
+        var ctid = (java.util.function.Supplier<String>) () -> jdbc.queryForObject("SELECT ctid::text FROM client_prefs WHERE client_id = :c::uuid", Map.of("c", c.toString()), String.class);
+        String before = ctid.get();
+        String held = com.jayway.jsonpath.JsonPath.read(body(get(token, "/v1/portal/prefs")), "$.version");
+        patchPrefs(token, held, "{\"hideWeight\":false,\"notify\":{\"assessment\":false},\"channels\":{\"push\":true}}").andExpect(status().isOk())
+                .andExpect(jsonPath("$.version").value(held));
+        assertEquals(before, ctid.get(), "nothing differed, nothing written");
+        // a real change is written
+        patchPrefs(token, held, "{\"autoRestTimer\":true}").andExpect(status().isOk()).andExpect(jsonPath("$.autoRestTimer").value(true));
+        org.junit.jupiter.api.Assertions.assertNotEquals(before, ctid.get());
     }
 
     @Test
@@ -237,7 +249,13 @@ class PortalSettingsApiTest {
         note(c, "Private to Arun", false, false, ago(1));
         message(c, "note", "See you Friday.", null, ago(1), false);
         UUID s = session(c, null, ago(2), 60, "done", "trainer", ago(2), ago(2).plusSeconds(3000));
-        setDone(s, c, ex("Back squat", "quads", "weight_reps"), 60, 8, ago(2));
+        UUID squat = ex("Back squat", "quads", "weight_reps");
+        setDone(s, c, squat, 60, 8, ago(2));
+        // a set note on the trainer's session is the trainer's; one on the client's own self-run is theirs (21 Nov 2026)
+        jdbc.update("UPDATE set_log SET notes = 'Knee caving, keep the load down' WHERE session_exercise_id IN (SELECT id FROM session_exercise WHERE session_id = :s::uuid)", Map.of("s", s.toString()));
+        UUID own = session(c, null, ago(3), 60, "done", "client", ago(3), ago(3).plusSeconds(3000));
+        setDone(own, c, squat, 50, 10, ago(3));
+        jdbc.update("UPDATE set_log SET notes = 'Felt strong' WHERE session_exercise_id IN (SELECT id FROM session_exercise WHERE session_id = :s::uuid)", Map.of("s", own.toString()));
         UUID other = liveOther();
         note(other, "Somebody else's note", true, false, ago(1));
         message(other, "note", "Somebody else's message", null, ago(1), false);
@@ -247,10 +265,11 @@ class PortalSettingsApiTest {
         var res = get(token, "/v1/portal/export").andExpect(status().isOk()).andExpect(header().string("Content-Type", org.hamcrest.Matchers.containsString("application/json")))
                 .andExpect(header().string("Content-Disposition", org.hamcrest.Matchers.startsWith("attachment; filename=\"inclineyou-data-"))).andExpect(jsonPath("$.arrangements", hasSize(1)))
                 .andExpect(jsonPath("$.arrangements[0].trainer").value("Arun Prakash")).andExpect(jsonPath("$.messages[0].body").value("See you Friday.")).andExpect(jsonPath("$.shared_notes", hasSize(1)))
-                .andExpect(jsonPath("$.sessions", hasSize(1))).andExpect(jsonPath("$.sessions[0].exercises[0].name").value("Back squat")).andExpect(jsonPath("$.sessions[0].exercises[0].sets[0].load").value(60))
+                .andExpect(jsonPath("$.sessions", hasSize(2))).andExpect(jsonPath("$.sessions[1].exercises[0].name").value("Back squat")).andExpect(jsonPath("$.sessions[1].exercises[0].sets[0].load").value(60))
                 .andExpect(jsonPath("$.packages", hasSize(1))).andExpect(jsonPath("$.payments", hasSize(0)));
         String out = body(res);
-        assertFalse(out.contains("Private to Arun") || out.contains("Somebody else"), "nothing that is not theirs");
+        assertFalse(out.contains("Private to Arun") || out.contains("Somebody else") || out.contains("Knee caving"), "nothing that is not theirs");
+        org.junit.jupiter.api.Assertions.assertTrue(out.contains("Felt strong"), "their own note on their own run is theirs");
         // the money switch off: the keys are null, not an empty list that hints at a book
         jdbc.update("UPDATE client SET portal_show_money = false WHERE id = :c::uuid", Map.of("c", c.toString()));
         get(token, "/v1/portal/export").andExpect(jsonPath("$.packages").value(nullValue())).andExpect(jsonPath("$.payments").value(nullValue())).andExpect(jsonPath("$.messages", hasSize(1)));

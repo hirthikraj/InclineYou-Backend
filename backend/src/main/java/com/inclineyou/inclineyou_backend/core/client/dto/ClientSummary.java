@@ -29,12 +29,17 @@ public record ClientSummary(
         /** {@code client.updated_at} as epoch ms — If-Match for {@code PATCH /v1/clients/{id}}. */
         String version,
         /** v1.2, tr-a5: where the client stands on the portal. Added to the end, so a 1.1 reader never notices. */
-        Portal portal
+        Portal portal,
+        /**
+         * V43: female · male · other · prefer_not_to_say; null when not given. Added to the end (22 Nov 2026) so the
+         * roster can filter on it — the business record, like the date of birth, so it is not behind consent.
+         */
+        String gender
 ) {
     public ClientSummary withPortal(Portal replacement) {
         return new ClientSummary(id, name, phone, status, pausedAt, pausedUntil, archivedAt, archiveReason, archiveNote,
                 membershipStatus, clientType, hasPinnedNote, schedule, slots, program, stats, createdAt, version,
-                replacement);
+                replacement, gender);
     }
 
     /**

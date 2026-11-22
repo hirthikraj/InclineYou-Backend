@@ -235,6 +235,8 @@ public class SessionStateService {
             case "not_found" -> throw notFound();
             case "skipped" -> throw "SESSION_CANCELLED".equals(r.reason())
                     ? ApiException.conflict("SESSION_CANCELLED", "This session was cancelled. Reopen it first.")
+                    : com.inclineyou.inclineyou_backend.core.client.ConsentGate.CODE.equals(r.reason())
+                    ? com.inclineyou.inclineyou_backend.core.client.ConsentGate.sessionRefusal()
                     : ApiException.conflict("SESSION_NOT_STARTED", "This session's start time hasn't come yet.");
             default -> r;
         };
@@ -302,6 +304,7 @@ public class SessionStateService {
     @Transactional
     public SessionRow cancel(UUID trainerId, UUID sessionId, Map<String, Object> body) {
         boolean charge = false;
+        boolean chargeSent = body != null && body.containsKey("charge");
         if (body != null) {
             for (String key : body.keySet()) {
                 if (!"reason".equals(key) && !"charge".equals(key)) {
@@ -318,7 +321,20 @@ public class SessionStateService {
         }
         String reason = body != null && body.get("reason") instanceof String r ? r : "trainer";
         LockedSession s = lockLive(trainerId, sessionId);
-        if ("cancelled".equals(s.status())) return row(trainerId, sessionId);
+        if ("cancelled".equals(s.status())) {
+            // Already cancelled: a repeat changes nothing — unless it sends a different charge decision, which is
+            // re-decided as a no-show's is (17 Nov 2026). It used to answer 200 and keep the first decision, so a
+            // trainer who chose "no" and then "yes, charge the late cancel" was silently left uncharged.
+            if (chargeSent && charge && !s.liveCharge()) {
+                charges.charge(trainerId, UUID.fromString(s.clientId()), sessionId, s.service());
+                log.info("cancelled session charged trainer={} session={}", trainerId, sessionId);
+            } else if (chargeSent && !charge && s.liveCharge()) {
+                charges.reverse(sessionId);
+                charges.close(sessionId);   // a single session's sale: nothing owed after all
+                log.info("cancelled session uncharged trainer={} session={}", trainerId, sessionId);
+            }
+            return row(trainerId, sessionId);
+        }
         if (!"scheduled".equals(s.status()) || s.started()) {
             throw settled("This session is " + describe(s) + ", so it can't be cancelled.");
         }
@@ -341,8 +357,10 @@ public class SessionStateService {
      * delivered and not charged, it settles it now: {@code single} sells it and charges the sale, {@code pack} tries
      * the live pack again (a pack sold since), and {@code trial} / {@code complimentary} take it off the money still to
      * chase. A session that already carries a charge is refused — reopen it first, so the charge is reversed in the
-     * open rather than swapped behind the trainer's back. Sending what it already is answers 200 and changes nothing.
-     * A no-show is never charged from here: whether it costs a session is the no-show's own question.
+     * open rather than swapped behind the trainer's back. Sending what it already is writes nothing and answers 200 —
+     * except on a session delivered and not charged, where it is how the charge is tried again: the same {@code pack}
+     * charges a pack sold since, and the same {@code single} sells it if it has no sale. A no-show is never charged
+     * from here: whether it costs a session is the no-show's own question.
      */
     @Transactional
     public BillingResult billing(UUID trainerId, UUID sessionId, Map<String, Object> body) {
@@ -362,6 +380,12 @@ public class SessionStateService {
         LockedSession s = lockLive(trainerId, sessionId);
         if ("cancelled".equals(s.status())) {
             throw ApiException.conflict("SESSION_CANCELLED", "This session was cancelled. Reopen it first.");
+        }
+        // A no-show's money is the no-show's own decision, charge or free (17 Nov 2026). Changing its billing treated it
+        // as still to come, so a free no-show switched to single was sold an ₹800 sale owed for a session that did not
+        // happen. Re-decide on the no-show, or reopen it first, as a cancelled session must be.
+        if ("no_show".equals(s.status())) {
+            throw settled("This session is a no-show. Reopen it first to change how it's paid for.");
         }
         var now = repo.billing(sessionId).orElseThrow(SessionStateService::notFound);
         boolean same = now.billing().equals(want.billing())
@@ -406,17 +430,27 @@ public class SessionStateService {
         noKeys(body);
         LockedSession s = lockLive(trainerId, sessionId);
         if ("scheduled".equals(s.status())) {
-            return new Reopened(row(trainerId, sessionId), new ReopenEffects(false, null, null, false));
+            return new Reopened(row(trainerId, sessionId), ReopenEffects.NONE);
         }
         UUID clientId = UUID.fromString(s.clientId());
         if ("cancelled".equals(s.status())) {
+            // A cancelled session is booked again, so it meets booking's rules (17 Nov 2026): a paused client is not
+            // bookable either (only archived and removed were checked, so a session the pause itself cancelled could be
+            // put back into a client's break), and one person cannot be in two sessions — a 07:30 booked in a
+            // cancelled 07:00's place used to be overlapped by reopening the 07:00.
             var client = repo.clientStanding(clientId).orElseThrow(SessionStateService::notFound);
-            if ("archived".equals(client.status()) || "removed".equals(client.membershipStatus())) {
+            if ("paused".equals(client.status()) || "archived".equals(client.status())
+                    || "removed".equals(client.membershipStatus())) {
                 throw ApiException.conflict("CLIENT_NOT_BOOKABLE",
-                        "This client is " + ("removed".equals(client.membershipStatus()) ? "removed" : "archived")
+                        "This client is " + ("removed".equals(client.membershipStatus()) ? "removed" : client.status())
                                 + ", so the session can't be booked again.");
             }
-            if (repo.startTaken(clientId, repo.scheduledAt(sessionId), sessionId)) throw timeTaken();
+            var timing = repo.timing(sessionId);
+            if (repo.startTaken(clientId, timing.getKey(), sessionId)) throw timeTaken();
+            if (reads.clientClash(clientId, timing.getKey(), timing.getValue(), sessionId).isPresent()) {
+                throw ApiException.conflict("SESSION_CLIENT_OVERLAP",
+                        "This client has another session at that time now, so this one can't be booked again. Move it first.");
+            }
         }
         try {
             repo.reschedule(sessionId);
@@ -425,16 +459,27 @@ public class SessionStateService {
             throw timeTaken();
         }
 
-        ReopenEffects effects = new ReopenEffects(false, null, null, false);
-        if (s.liveCharge()) {
-            var back = charges.reverse(sessionId);
-            effects = new ReopenEffects(true, back.packageId(), back.sessionsRemaining(), back.reopened());
-        } else {
+        // What happened to a single session's own sale, for effects.sale (17 Nov 2026): the four older fields describe a
+        // pack charge only, so a revived or newly made sale used to answer "nothing changed".
+        String sale = null;
+        var back = s.liveCharge() ? charges.reverse(sessionId) : null;
+        if (back != null) {
+            // The charge came off the session's own sale, which stays owed: it was sold when it was booked.
+            boolean ownSale = charges.sale(sessionId).filter(k -> k.id().equals(back.packageId())).isPresent();
+            if (ownSale) sale = "kept";
+        } else if (charges.revive(sessionId)) {
             // A single session's sale closed by an uncharged cancel or no-show is owed again: it is booked again.
-            charges.revive(sessionId);
+            sale = "revived";
         }
-        log.info("session reopened trainer={} session={} from={} chargeReversed={}",
-                trainerId, sessionId, s.status(), effects.chargeReversed());
+        // Booked again with no sale to revive — its sale was refunded (V33 gives up the session's place for exactly
+        // this), or it was booked before sales were made at booking: a single session is sold when it is booked, so
+        // sell it now rather than leave it owing nothing until Mark done. A no-op when a sale exists or not single.
+        if (charges.sellAtBooking(trainerId, clientId, sessionId, s.service())) sale = "sold";
+        ReopenEffects effects = back == null
+                ? new ReopenEffects(false, null, null, false, sale)
+                : new ReopenEffects(true, back.packageId(), back.sessionsRemaining(), back.reopened(), sale);
+        log.info("session reopened trainer={} session={} from={} chargeReversed={} sale={}",
+                trainerId, sessionId, s.status(), effects.chargeReversed(), sale);
         return new Reopened(row(trainerId, sessionId), effects);
     }
 

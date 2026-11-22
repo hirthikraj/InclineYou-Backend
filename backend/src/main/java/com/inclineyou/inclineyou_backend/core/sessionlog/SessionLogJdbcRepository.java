@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.sessionlog;
 
+import com.inclineyou.inclineyou_backend.core.program.PlanSequence;
 import com.inclineyou.inclineyou_backend.core.sessionlog.dto.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -31,7 +32,12 @@ public class SessionLogJdbcRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
     /** The session row as the verbs need it. */
-    public record Head(UUID id, UUID clientId, String status, Timestamp startedAt, Timestamp endedAt, UUID workoutId, String loggedBy) {}
+    /**
+     * {@code scheduledAt} and the client's standing ({@code clientStatus}, {@code clientMembership}, {@code clientDeleted})
+     * came with the start's two checks (19 Nov 2026).
+     */
+    public record Head(UUID id, UUID clientId, String status, Timestamp startedAt, Timestamp endedAt, UUID workoutId, String loggedBy,
+                       Timestamp scheduledAt, String clientStatus, String clientMembership, boolean clientDeleted) {}
 
     /** One session_exercise (or, in a preview, one main plan row) before its sets are attached. */
     public record ExRow(UUID id, UUID exerciseId, String name, String equipment, int position, String section, UUID groupId,
@@ -49,13 +55,16 @@ public class SessionLogJdbcRepository {
     /** Read, or read under {@code FOR UPDATE} when a write is about to decide on what it sees. */
     public Optional<Head> head(UUID trainerId, UUID sessionId, boolean lock) {
         return jdbc.query("""
-                SELECT s.id, s.client_id, s.status, s.started_at, s.ended_at, s.workout_id, s.logged_by
-                FROM scheduled_session s
+                SELECT s.id, s.client_id, s.status, s.started_at, s.ended_at, s.workout_id, s.logged_by, s.scheduled_at,
+                       c.status AS client_status, c.membership_status, c.deleted_at IS NOT NULL AS client_deleted
+                FROM scheduled_session s JOIN client c ON c.id = s.client_id
                 WHERE s.id = :sid::uuid AND s.trainer_id = :tid::uuid AND s.deleted_at IS NULL
                 """ + (lock ? " FOR UPDATE OF s" : ""),
                 Map.of("sid", sessionId.toString(), "tid", trainerId.toString()),
                 (rs, i) -> new Head(uuid(rs.getObject("id")), uuid(rs.getObject("client_id")), rs.getString("status"),
-                        rs.getTimestamp("started_at"), rs.getTimestamp("ended_at"), uuid(rs.getObject("workout_id")), rs.getString("logged_by")))
+                        rs.getTimestamp("started_at"), rs.getTimestamp("ended_at"), uuid(rs.getObject("workout_id")), rs.getString("logged_by"),
+                        rs.getTimestamp("scheduled_at"), rs.getString("client_status"), rs.getString("membership_status"),
+                        rs.getBoolean("client_deleted")))
                 .stream().findFirst();
     }
 
@@ -119,6 +128,8 @@ public class SessionLogJdbcRepository {
                 ) t ON t.session_id = s.id
                 WHERE s.trainer_id = :tid::uuid AND s.deleted_at IS NULL AND s.logged_by = 'trainer'   -- R107
                   AND s.started_at IS NOT NULL AND s.ended_at IS NULL
+                  -- Not a deleted client's (19 Nov 2026). An archived or paused client's open log stays, so it can be closed.
+                  AND c.deleted_at IS NULL
                 ORDER BY s.started_at DESC, s.id
                 """.formatted(volume("sl")), Map.of("tid", trainerId.toString()),
                 (rs, i) -> new OpenLog(rs.getString("id"), rs.getString("client_id"), rs.getString("client_name"),
@@ -135,6 +146,9 @@ public class SessionLogJdbcRepository {
                 LEFT JOIN workout w ON w.id = s.workout_id
                 WHERE s.trainer_id = :tid::uuid AND s.deleted_at IS NULL AND s.logged_by = 'trainer' AND s.status = 'scheduled'   -- R107
                   AND s.started_at IS NULL AND s.scheduled_at >= :from AND s.scheduled_at < :to
+                  -- Only an active client's (19 Nov 2026): pause, archive and delete cancel bookings from now on, so one
+                  -- from earlier today stayed here and could be started (and charged) for a client who had gone.
+                  AND c.deleted_at IS NULL AND c.status = 'active'
                 ORDER BY s.scheduled_at, s.id
                 """, Map.of("tid", trainerId.toString(), "from", from, "to", to),
                 (rs, i) -> new BookedSession(rs.getString("id"), rs.getString("client_id"), rs.getString("client_name"),
@@ -147,28 +161,21 @@ public class SessionLogJdbcRepository {
      * newest delivered session — all clients in one pass, never a query per client.
      */
     public List<Everybody> everybody(UUID trainerId, Timestamp now) {
-        return jdbc.query("""
-                WITH plan AS (
-                    SELECT pr.client_id, w.id, w.name,
-                           row_number() OVER (PARTITION BY pr.client_id ORDER BY w.week, w.day, w.position, w.id) AS n
-                    FROM program pr JOIN workout w ON w.program_id = pr.id AND w.deleted_at IS NULL
-                    WHERE pr.trainer_id = :tid::uuid AND pr.status = 'active' AND pr.deleted_at IS NULL
-                ),
-                last_booked AS (
-                    SELECT DISTINCT ON (s.client_id) s.client_id, plan.n
-                    FROM scheduled_session s JOIN plan ON plan.id = s.workout_id AND plan.client_id = s.client_id
-                    WHERE s.trainer_id = :tid::uuid AND s.deleted_at IS NULL AND s.status <> 'cancelled'
-                      AND (s.logged_by = 'trainer' OR s.status = 'done')   -- R107: a finished self-run day counts as done
-                      AND s.scheduled_at < :now
-                    ORDER BY s.client_id, s.scheduled_at DESC, s.id DESC
-                ),
+        // A week with nothing of its own repeats week 1 (PlanSequence, 18 Nov 2026).
+        return jdbc.query("WITH " + PlanSequence.ctes("""
+                SELECT id, client_id FROM program
+                WHERE trainer_id = :tid::uuid AND status = 'active' AND deleted_at IS NULL""", """
+                s.trainer_id = :tid::uuid AND s.deleted_at IS NULL AND s.status <> 'cancelled'
+                  AND (s.logged_by = 'trainer' OR s.status = 'done')   -- R107: a finished self-run day counts as done
+                  AND s.scheduled_at < :now""") + """
+                ,
                 done AS (
                     SELECT client_id, max(scheduled_at) AS last_done FROM scheduled_session
                     WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND logged_by = 'trainer' AND status = 'done' GROUP BY client_id   -- R107
                 )
                 SELECT c.id, c.name, p.name AS next_name, d.last_done
                 FROM client c
-                LEFT JOIN last_booked lb ON lb.client_id = c.id
+                LEFT JOIN plan_at lb ON lb.client_id = c.id
                 LEFT JOIN plan p ON p.client_id = c.id AND p.n = coalesce(lb.n, 0) + 1
                 LEFT JOIN done d ON d.client_id = c.id
                 WHERE c.trainer_id = :tid::uuid AND c.deleted_at IS NULL AND c.status = 'active'

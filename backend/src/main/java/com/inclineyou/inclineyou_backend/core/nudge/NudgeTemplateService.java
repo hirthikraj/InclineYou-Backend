@@ -69,9 +69,14 @@ public class NudgeTemplateService {
         return out;
     }
 
-    /** The list's ETag: every version, in order — it changes when any one template does. */
+    /**
+     * The list's ETag: a hash of the whole answer (20 Nov 2026). It used to be the override versions alone, so a deploy
+     * that changed a BUILT-IN template — its wording, label, purpose or variables — left the tag as it was and a
+     * conditional GET answered 304 with the old text; and it was a 32-bit hashCode. The records' toString carries every
+     * field, nested variables included, so the tag moves with anything a client would draw.
+     */
     public static String listVersion(List<TemplateResponse> rows) {
-        return Integer.toHexString(rows.stream().map(r -> r.name() + ":" + r.version()).collect(Collectors.joining("|")).hashCode());
+        return com.inclineyou.inclineyou_backend.shared.util.ContentTag.of(rows);
     }
 
     /* ── write ────────────────────────────────────────────────────────────── */
@@ -90,6 +95,10 @@ public class NudgeTemplateService {
         if (template == null) throw ApiException.notFound("There is no template called \"" + name + "\".");
         IfMatch.require(ifMatch, "this template");
 
+        // One save of this message at a time per trainer, and If-Match checked under it (20 Nov 2026). Unlocked, two tabs
+        // saving from the same version both passed, and the upsert's ON CONFLICT turned the second "*" into an overwrite:
+        // the later wording silently won where the contract promises a 412.
+        repo.lockTemplate(trainerId, name);
         var current = repo.overrides(trainerId).get(name);
         if ("*".equals(ifMatch.strip())) {
             if (current != null) throw precondition("You already reworded this message — reload to see it.");
@@ -123,6 +132,7 @@ public class NudgeTemplateService {
     public TemplateResponse reset(UUID trainerId, String name) {
         var template = NudgeTemplateCatalog.find(name);
         if (template == null) throw ApiException.notFound("There is no template called \"" + name + "\".");
+        repo.lockTemplate(trainerId, name);   // the same lock as save, so a reset and a save cannot interleave
         repo.delete(trainerId, name);
         return row(template, null);
     }

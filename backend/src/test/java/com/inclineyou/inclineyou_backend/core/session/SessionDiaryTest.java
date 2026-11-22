@@ -215,9 +215,12 @@ class SessionDiaryTest {
                 .andExpect(jsonPath("$.endsAt").isNumber());
         mvc.perform(post("/v1/sessions").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isOk());
 
-        // The next booking, later in time, takes the next workout; and after the last one there is none, not a restart.
+        // The next booking, later in time, takes the next workout. Only week 1 is written, and a week with nothing of
+        // its own repeats week 1 (18 Nov 2026), so the 4-week plan has eight places: A B · A B · A B · A B. After the
+        // last one there is none, not a restart.
         book(future(2)).andExpect(jsonPath("$.workout.name").value("Day B"));
-        book(future(3)).andExpect(jsonPath("$.workout").doesNotExist());
+        for (int n = 3; n <= 8; n++) book(future(n)).andExpect(jsonPath("$.workout.name").value(n % 2 == 1 ? "Day A" : "Day B"));
+        book(future(9)).andExpect(jsonPath("$.workout").doesNotExist());
     }
 
     @Test

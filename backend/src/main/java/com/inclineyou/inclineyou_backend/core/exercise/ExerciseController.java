@@ -51,9 +51,12 @@ public class ExerciseController {
     @GetMapping("/meta")
     public ResponseEntity<ExerciseMeta> meta(WebRequest request) {
         ExerciseMeta meta = service.meta(trainerId());
-        String etag = "\"" + Integer.toHexString(meta.hashCode()) + "\"";
+        // The whole answer's content, and private (19 Nov 2026): a 32-bit hashCode could match for two different facet
+        // sets and give a false 304, and the counts include this trainer's own customs, so no shared cache may keep it.
+        String etag = "\"" + com.inclineyou.inclineyou_backend.shared.util.ContentTag.of(meta) + "\"";
         if (request.checkNotModified(etag)) return null;
-        return ResponseEntity.ok().eTag(etag).body(meta);
+        return ResponseEntity.ok().eTag(etag)
+                .cacheControl(org.springframework.http.CacheControl.noCache().cachePrivate()).body(meta);
     }
 
     @GetMapping("/{id}")

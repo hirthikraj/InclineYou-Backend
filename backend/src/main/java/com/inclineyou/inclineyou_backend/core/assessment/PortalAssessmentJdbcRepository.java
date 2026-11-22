@@ -70,9 +70,10 @@ public class PortalAssessmentJdbcRepository {
             order = "a.completed_at DESC, a.id DESC";
         }
         return jdbc.query("""
-                SELECT a.id::text AS id, a.name, t.system_key, a.sent_at, a.due_on, a.completed_at,
+                SELECT a.id::text AS id, a.name, client_assessment_system_key(a.id) AS system_key, a.sent_at, a.due_on, a.completed_at,
                        jsonb_array_length(COALESCE(a.form -> 'measurements', '[]'::jsonb)) AS ms, jsonb_array_length(COALESCE(a.form -> 'questions', '[]'::jsonb)) AS qs
-                  FROM assessment a LEFT JOIN assessment_template t ON t.id = a.template_id
+                  -- the key through V39's door (21 Nov 2026): the client's policy on assessment_template opens only templates they may start
+                  FROM assessment a
                  WHERE a.client_id = :c::uuid AND a.sent_at IS NOT NULL AND a.deleted_at IS NULL AND %s
                  ORDER BY %s LIMIT :n""".formatted(where, order), m, (rs, i) -> {
             LocalDate due = rs.getDate("due_on").toLocalDate();

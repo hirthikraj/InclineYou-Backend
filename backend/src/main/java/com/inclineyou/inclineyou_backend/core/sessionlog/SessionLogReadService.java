@@ -38,16 +38,26 @@ public class SessionLogReadService {
     private final WorkspaceClock clock;
 
     public SessionLog log(UUID trainerId, UUID sessionId) {
-        var head = repo.head(trainerId, sessionId, false).orElseThrow(SessionLogReadService::notYours);
-        return assemble(trainerId, head, null);
+        return assemble(trainerId, readable(trainerId, sessionId), null);
     }
 
     /** One exercise in the console shape — what every exercise write answers with. */
     public ExerciseEntry entry(UUID trainerId, UUID sessionId, UUID sessionExerciseId) {
-        var head = repo.head(trainerId, sessionId, false).orElseThrow(SessionLogReadService::notYours);
+        var head = readable(trainerId, sessionId);
         var entries = entries(trainerId, head, sessionExerciseId, clock.zone());
         if (entries.isEmpty()) throw ApiException.notFound("That exercise is not in this session.");
         return entries.getFirst();
+    }
+
+    /**
+     * The session, if the trainer may read its log. A client's own workout (R107) is the trainer's to read only once a
+     * set in it is done — the rule the diary and the client's history already follow (19 Nov 2026); before that it was
+     * readable mid-way, with nothing done, by anyone holding its id.
+     */
+    private SessionLogJdbcRepository.Head readable(UUID trainerId, UUID sessionId) {
+        var head = repo.head(trainerId, sessionId, false).orElseThrow(SessionLogReadService::notYours);
+        if (!"trainer".equals(head.loggedBy()) && repo.totals(head.id()).setsDone() == 0) throw notYours();
+        return head;
     }
 
     private SessionLog assemble(UUID trainerId, SessionLogJdbcRepository.Head head, UUID only) {

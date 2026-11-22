@@ -57,6 +57,9 @@ public class PackService {
     private static final Set<String> BASES = Set.of("sessions", "period");
     private static final BigDecimal MAX_MONEY = new BigDecimal("99999999.99");
 
+    /** Packs per trainer, retired ones included (20 Nov 2026); a working price list is ten or twenty. */
+    static final int MAX_PACKS = 200;
+
     /** What PATCH may touch. {@code owner} is named and refused, not ignored. */
     private static final Set<String> PATCHABLE = Set.of("name", "service", "basis", "sessions", "validityDays",
             "amount", "trainerSharePercent", "trainerShareAmount", "status", "orderIndex");
@@ -100,11 +103,18 @@ public class PackService {
         }
         UUID id = body.get("id") == null ? UUID.randomUUID() : uuid(body.get("id"), "id");
 
-        var existing = packs.ownership(id);
-        if (existing.isPresent()) {
-            var e = existing.get();
-            if (!trainerId.toString().equals(e.trainerId()) || e.deleted()) throw ApiException.idConflict();
-            return new PackCreated(packs.find(trainerId, id).orElseThrow(), false);
+        var replay = replay(trainerId, id);
+        if (replay != null) return replay;
+        // One create at a time per trainer (20 Nov 2026), so the cap below cannot be raced past, and a double tap's
+        // second request waits for the first and then finds its own id instead of meeting its own name.
+        packs.lockTrainerPacks(trainerId);
+        replay = replay(trainerId, id);
+        if (replay != null) return replay;
+        // The list (GET /v1/packs) has no page, and every Packages and Business load reads it, so a trainer's packs are
+        // capped. Retired ones count: retiring is a PATCH, so a cap on active packs alone would not bound the list.
+        if (packs.liveCount(trainerId) >= MAX_PACKS) {
+            throw ApiException.conflict("PACK_LIMIT",
+                    "You have " + MAX_PACKS + " packs. Delete one nothing was sold from first.");
         }
 
         String owner = body.get("owner") == null ? "trainer" : text(body.get("owner"), "owner");
@@ -122,7 +132,7 @@ public class PackService {
         if ("gym".equals(shape.owner())) requireGymName(trainerId);
         requireNameFree(trainerId, shape.name(), null);
 
-        int order = body.get("orderIndex") == null ? packs.nextOrder(trainerId) : intRequired(body.get("orderIndex"), "orderIndex");
+        int order = body.get("orderIndex") == null ? packs.nextOrder(trainerId) : orderIndex(body.get("orderIndex"));
         try {
             packs.insert(id, trainerId, shape, clock.currency(), order);
         } catch (DuplicateKeyException e) {
@@ -130,6 +140,15 @@ public class PackService {
             throw String.valueOf(e.getMessage()).contains("uq_pack_live_name") ? PackRuleException.nameTaken() : ApiException.idConflict();
         }
         return new PackCreated(packs.find(trainerId, id).orElseThrow(), true);
+    }
+
+    /** A replayed id: the row if it is this trainer's live pack, 409 ID_CONFLICT if it is anyone else's or deleted. */
+    private PackCreated replay(UUID trainerId, UUID id) {
+        var existing = packs.ownership(id);
+        if (existing.isEmpty()) return null;
+        var e = existing.get();
+        if (!trainerId.toString().equals(e.trainerId()) || e.deleted()) throw ApiException.idConflict();
+        return new PackCreated(packs.find(trainerId, id).orElseThrow(), false);
     }
 
     /**
@@ -165,7 +184,7 @@ public class PackService {
             status = text(body.get("status"), "status");
             if (!STATUSES.contains(status)) throw ApiException.validation("status: active or inactive");
         }
-        int order = body.containsKey("orderIndex") ? intRequired(body.get("orderIndex"), "orderIndex") : cur.orderIndex();
+        int order = body.containsKey("orderIndex") ? orderIndex(body.get("orderIndex")) : cur.orderIndex();
 
         var now = new PackShape(cur.name(), cur.service(), cur.basis(), cur.sessions(), cur.validityDays(),
                 new BigDecimal(cur.amount()), cur.owner(), cur.trainerSharePercent(),
@@ -174,14 +193,23 @@ public class PackService {
 
         if (!merged.name().equalsIgnoreCase(cur.name())) requireNameFree(trainerId, merged.name(), packId);
 
-        packs.update(packId, trainerId, merged, status, order);
+        try {
+            packs.update(packId, trainerId, merged, status, order);
+        } catch (DuplicateKeyException e) {
+            // The lock is on this pack only, so another pack renamed (or created) with this name at the same time can
+            // pass requireNameFree too; the unique index refuses the second, which is the name taken, not a 500.
+            throw PackRuleException.nameTaken();
+        }
         return packs.find(trainerId, packId).orElseThrow();
     }
 
     /**
-     * {@code DELETE /v1/packs/{id}} — soft, and only for a pack nothing was ever
-     * sold from (any package row counts, even a deleted one: the foreign key
-     * would still point at it). 204, and 204 again; a pack that is not yours is 404.
+     * {@code DELETE /v1/packs/{id}} — soft, and only for a pack nothing stands sold
+     * from. 204, and 204 again; a pack that is not yours is 404. A sale that was
+     * undone (a deleted package) does not count (20 Nov 2026): it used to, so the
+     * card said "0 sold", offered Delete, and the press answered 409 PACK_SOLD. The
+     * old reason, "the foreign key would still point at it", never held — deleting
+     * a pack is soft too, so the row and the key stay.
      */
     @Transactional
     public void delete(UUID trainerId, UUID packId) {
@@ -291,6 +319,19 @@ public class PackService {
         if (v instanceof Integer i) return i;
         if (v instanceof Long l && l >= Integer.MIN_VALUE && l <= Integer.MAX_VALUE) return l.intValue();
         throw ApiException.validation(field + ": must be a whole number");
+    }
+
+    /** The highest position a pack may be given (20 Nov 2026); a list of at most MAX_PACKS never needs more. */
+    static final int MAX_ORDER = 10_000;
+
+    /**
+     * A position, 0 to MAX_ORDER. It used to be any int, and a create without one is placed at max + 1: one pack at
+     * 2147483647 made that overflow to -2147483648, so every new pack landed at the top of the list.
+     */
+    private static int orderIndex(Object v) {
+        int i = intRequired(v, "orderIndex");
+        if (i < 0 || i > MAX_ORDER) throw ApiException.validation("orderIndex: 0 to " + MAX_ORDER);
+        return i;
     }
 
     private static int intRequired(Object v, String field) {

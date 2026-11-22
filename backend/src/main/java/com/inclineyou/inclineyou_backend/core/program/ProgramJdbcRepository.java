@@ -244,22 +244,51 @@ public class ProgramJdbcRepository {
                 FROM program
                 WHERE trainer_id = :tid::uuid AND origin = 'trainer' AND client_id IS NULL AND deleted_at IS NULL
                   AND copied_from_program_id = ANY(CAST(:ids AS uuid[]))
-                ORDER BY copied_from_program_id, created_at DESC
+                ORDER BY copied_from_program_id, created_at DESC, id DESC   -- id: two copies made at one instant pick the same one every time
                 """, Map.of("tid", trainerId.toString(), "ids", libraryIds),
                 (rs, i) -> new LibraryCopy(rs.getString("src"), rs.getString("id"),
                         rs.getTimestamp("created_at").getTime(), rs.getTimestamp("synced_at").getTime()));
     }
 
     /** Sessions done on each of these plans, by program id. */
-    public Map<String, Integer> doneSessions(String[] programIds) {
+    /**
+     * Done sessions per plan. {@code clientIds} are the plans' clients (19 Nov 2026): the read started from every session
+     * in the workspace (37 ms at 20k programs); narrowed to these clients it reads idx_scheduled_session_client (1 ms).
+     * The answer is the same — a plan's sessions are its client's.
+     */
+    public Map<String, Integer> doneSessions(String[] programIds, String[] clientIds) {
         var done = new HashMap<String, Integer>();
         jdbc.query("""
                 SELECT w.program_id::text AS pid, count(*) AS done FROM scheduled_session s
                 JOIN workout w ON w.id = s.workout_id
-                WHERE w.program_id = ANY(CAST(:ids AS uuid[])) AND s.status = 'done' AND s.deleted_at IS NULL
+                WHERE s.client_id = ANY(CAST(:cids AS uuid[]))
+                  AND w.program_id = ANY(CAST(:ids AS uuid[])) AND s.status = 'done' AND s.deleted_at IS NULL
                 GROUP BY w.program_id
-                """, Map.of("ids", programIds), rs -> { done.put(rs.getString("pid"), rs.getInt("done")); });
+                """, Map.of("ids", programIds, "cids", clientIds), rs -> { done.put(rs.getString("pid"), rs.getInt("done")); });
         return done;
+    }
+
+    /**
+     * How many sessions each plan covers: every week up to {@code weeks}, each its own workouts or, when it has none,
+     * week 1's — the places {@link PlanSequence} walks (18 Nov 2026). It used to be the count of workouts written, so an
+     * eight-week block written as week 1 only planned 3 and the Program card read "10 of 3".
+     */
+    public Map<String, Integer> plannedSessions(String[] programIds) {
+        var planned = new HashMap<String, Integer>();
+        jdbc.query("""
+                WITH c AS (
+                    SELECT program_id, week, count(*) AS n FROM workout
+                    WHERE program_id = ANY(CAST(:ids AS uuid[])) AND deleted_at IS NULL GROUP BY program_id, week
+                )
+                SELECT p.id::text AS pid, sum(coalesce(own.n, first.n, 0))::int AS planned
+                FROM program p
+                CROSS JOIN LATERAL generate_series(1, p.weeks) AS g(wk)
+                LEFT JOIN c own ON own.program_id = p.id AND own.week = g.wk
+                LEFT JOIN c first ON first.program_id = p.id AND first.week = 1
+                WHERE p.id = ANY(CAST(:ids AS uuid[]))
+                GROUP BY p.id
+                """, Map.of("ids", programIds), rs -> { planned.put(rs.getString("pid"), rs.getInt("planned")); });
+        return planned;
     }
 
     /** One program's four levels — a set-based query each — plus the names of the exercises it uses. */
@@ -283,20 +312,26 @@ public class ProgramJdbcRepository {
             out.add(new PlanWorkout(w.id(), w.name(), w.notes(), w.week(), w.day(), w.position(),
                     byWorkout.getOrDefault(w.id(), List.of())));
         }
+        return new Tree(out, exerciseRefs(used));
+    }
+
+    /**
+     * The names dictionary for these exercise ids — a program's tree, and since 19 Nov 2026 a standalone workout too.
+     * Deleted exercises are read too: a plan that still prescribes one keeps its name (R83).
+     */
+    public Map<String, ExerciseRef> exerciseRefs(java.util.Collection<String> ids) {
         var dictionary = new LinkedHashMap<String, ExerciseRef>();
-        if (!used.isEmpty()) {
-            // Deleted exercises are read too: a plan that still prescribes one keeps its name (R83).
-            jdbc.query("""
-                    SELECT id::text, name, equipment, log_type, muscle_group, body_part, target, movement_pattern, level,
-                           (origin = 'trainer') AS custom
-                    FROM exercise WHERE id = ANY(CAST(:ids AS uuid[]))
-                    """, Map.of("ids", used.toArray(String[]::new)), rs -> {
-                dictionary.put(rs.getString(1), new ExerciseRef(rs.getString(2), rs.getString(3), rs.getString(4),
-                        rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8), rs.getString(9),
-                        rs.getBoolean(10)));
-            });
-        }
-        return new Tree(out, dictionary);
+        if (ids.isEmpty()) return dictionary;
+        jdbc.query("""
+                SELECT id::text, name, equipment, log_type, muscle_group, body_part, target, movement_pattern, level,
+                       (origin = 'trainer') AS custom
+                FROM exercise WHERE id = ANY(CAST(:ids AS uuid[]))
+                """, Map.of("ids", ids.toArray(String[]::new)), rs -> {
+            dictionary.put(rs.getString(1), new ExerciseRef(rs.getString(2), rs.getString(3), rs.getString(4),
+                    rs.getString(5), rs.getString(6), rs.getString(7), rs.getString(8), rs.getString(9),
+                    rs.getBoolean(10)));
+        });
+        return dictionary;
     }
 
     /**
@@ -391,14 +426,16 @@ public class ProgramJdbcRepository {
                 """, Map.of("id", id.toString(), "tid", trainerId.toString()), Boolean.class).stream().findFirst();
     }
 
-    public void insertTemplate(UUID id, UUID trainerId, String name, String goal, String description, int weeks,
+    /** False when the id was taken meanwhile (ON CONFLICT, so the transaction stays usable for the replay read). */
+    public boolean insertTemplate(UUID id, UUID trainerId, String name, String goal, String description, int weeks,
                                int days) {
-        jdbc.update("""
+        return jdbc.update("""
                 INSERT INTO program (id, origin, trainer_id, name, goal, description, weeks, days)
                 VALUES (:id::uuid, 'trainer', :tid::uuid, :name, :goal, :description, :weeks, :days)
+                ON CONFLICT (id) DO NOTHING
                 """, new MapSqlParameterSource("id", id.toString()).addValue("tid", trainerId.toString())
                 .addValue("name", name).addValue("goal", goal).addValue("description", description)
-                .addValue("weeks", weeks).addValue("days", days));
+                .addValue("weeks", weeks).addValue("days", days)) > 0;
     }
 
     /** What a copy would start from: the trainer's own program, or a live library one. */
@@ -411,16 +448,29 @@ public class ProgramJdbcRepository {
                 .stream().findFirst();
     }
 
+    /**
+     * A program's tree, held for writing (a PUT) or for reading (a resync copying it), until the transaction ends
+     * (19 Nov 2026). Advisory, not a row lock: a FOR SHARE on the program is checked against its UPDATE policy, and a
+     * library program is in no workspace, so it would read as missing under the app's role. A resync read the source in
+     * six statements with nothing held, so a template PUT landing in between gave the plan two versions of the template.
+     */
+    public void lockTree(UUID programId, boolean exclusive) {
+        jdbc.query("SELECT " + (exclusive ? "pg_advisory_xact_lock" : "pg_advisory_xact_lock_shared")
+                + "(hashtext('program-tree:' || :id))", Map.of("id", programId.toString()), rs -> { });
+    }
+
     /** The new template's row. {@code linked} keeps the source as {@code copied_from_program_id}. */
-    public void insertCopy(UUID id, UUID trainerId, UUID sourceId, String name, boolean linked) {
-        jdbc.update("""
+    /** False when the id was taken meanwhile (ON CONFLICT, so the transaction stays usable for the replay read). */
+    public boolean insertCopy(UUID id, UUID trainerId, UUID sourceId, String name, boolean linked) {
+        return jdbc.update("""
                 INSERT INTO program (id, origin, trainer_id, name, goal, description, weeks, days,
                                      copied_from_program_id, synced_at)
                 SELECT :id::uuid, 'trainer', :tid::uuid, :name, goal, description, weeks, days,
                        CASE WHEN :linked THEN id END, CASE WHEN :linked THEN now() END
                 FROM program WHERE id = :src::uuid
+                ON CONFLICT (id) DO NOTHING
                 """, new MapSqlParameterSource("id", id.toString()).addValue("tid", trainerId.toString())
-                .addValue("src", sourceId.toString()).addValue("name", name).addValue("linked", linked));
+                .addValue("src", sourceId.toString()).addValue("name", name).addValue("linked", linked)) > 0;
     }
 
     /**
@@ -514,11 +564,17 @@ public class ProgramJdbcRepository {
                 """, Map.of("cid", clientId.toString(), "tid", trainerId.toString()), String.class).stream().findFirst();
     }
 
-    /** Does this id exist, and is it this trainer's plan for this client? Empty when nothing has it. */
-    public Optional<Boolean> planOwnership(UUID trainerId, UUID id, UUID clientId) {
+    /**
+     * Does this id exist, and is it this trainer's plan for this client, copied from this template — i.e. a replay of
+     * the same apply? Empty when nothing has it. The template is part of it (18 Nov 2026): the same id sent again with
+     * a different program used to answer 200 with the first plan, and the screen took the second as applied.
+     */
+    public Optional<Boolean> planOwnership(UUID trainerId, UUID id, UUID clientId, UUID templateId) {
         return jdbc.queryForList("""
-                SELECT (trainer_id = :tid::uuid AND client_id = :cid::uuid) FROM program WHERE id = :id::uuid
-                """, Map.of("id", id.toString(), "tid", trainerId.toString(), "cid", clientId.toString()), Boolean.class)
+                SELECT (trainer_id = :tid::uuid AND client_id = :cid::uuid
+                        AND copied_from_program_id IS NOT DISTINCT FROM :src::uuid) FROM program WHERE id = :id::uuid
+                """, Map.of("id", id.toString(), "tid", trainerId.toString(), "cid", clientId.toString(),
+                        "src", templateId.toString()), Boolean.class)
                 .stream().findFirst();
     }
 

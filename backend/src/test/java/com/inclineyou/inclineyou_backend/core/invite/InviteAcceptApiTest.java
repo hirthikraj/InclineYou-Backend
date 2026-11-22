@@ -34,6 +34,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -85,10 +86,19 @@ class InviteAcceptApiTest {
     }
 
     @Test
-    @DisplayName("201: the account is made in one go — client accepted with the date and notice, a client login, prefs, the invite used — and a client web session comes back")
+    @DisplayName("201 (and 400 TRAINING_TERMS_REQUIRED without the V42 tick): the account is made in one go — client accepted with the date and notice, a client login, prefs, the invite used — and a client web session comes back")
     void letMeIn() throws Exception {
         String token = mint();
-        String body = accept(token, codeFor(token), dob(30), "2026-09").andExpect(status().isCreated())
+        String rc = codeFor(token);
+        // V42: the fit-to-train tick is required, and refused before the code is spent (22 Nov 2026).
+        String[] parts = rc.split("\\|");
+        String without = "{\"requestId\":\"" + parts[0] + "\",\"otp\":\"" + parts[1] + "\",\"dateOfBirth\":\"" + dob(30)
+                + "\",\"policyVersion\":\"2026-09\"}";
+        publicMvc.perform(MockMvcRequestBuilders.post("/v1/invites/" + token + "/accept").header(WEB, "web")
+                        .contentType(MediaType.APPLICATION_JSON).content(without))
+                .andExpect(status().isBadRequest()).andExpect(jsonPath("$.code").value("TRAINING_TERMS_REQUIRED"));
+        assertNothingMade();
+        String body = accept(token, rc, dob(30), "2026-09").andExpect(status().isCreated())
                 .andExpect(jsonPath("$.role").value("client")).andExpect(jsonPath("$.isNewUser").value(true))
                 .andExpect(jsonPath("$.access").value("active"))
                 .andExpect(jsonPath("$.trainer.name").value("Arun Prakash")).andExpect(jsonPath("$.pendingInvites.length()").value(0))
@@ -97,6 +107,8 @@ class InviteAcceptApiTest {
         String session = JsonPath.read(body, "$.token");
         assertTrue(session.startsWith("xs_"), "a revocable web session, not a JWT");
         assertFalse(body.contains("919841022119"), "the number is not echoed");
+        assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM client WHERE phone = :p AND training_terms_accepted_at IS NOT NULL",
+                Map.of("p", PHONE), Integer.class), "the tick is recorded on the client");
         assertFalse(body.contains(client.toString()), "no client id either: nothing in the portal is addressed by it");
 
         var c = jdbc.queryForMap("SELECT membership_status, accepted_at IS NOT NULL AS at, date_of_birth::text AS dob, accepted_policy_version AS pv FROM client WHERE id = :c::uuid", Map.of("c", client.toString()));
@@ -242,6 +254,42 @@ class InviteAcceptApiTest {
 
     /* ── helpers ─────────────────────────────────────────────────────────── */
 
+    @Test
+    @DisplayName("WhatsApp reminders are the client's own choice: not ticked, no opt-in even with the trainer's switch on (21 Nov 2026)")
+    void remindersNotTicked() throws Exception {
+        jdbc.update("UPDATE trainer SET session_reminders = true WHERE id = :t::uuid", Map.of("t", me.toString()));
+        // A number of its own: the class's PHONE is near the per-number daily ceiling, which a rolled-back test does not reset.
+        UUID c = client(me, "Asha Rao", "+919841022128");
+        acceptOwn(c, "+919841022128", null);
+        assertNull(optIn(c), "accepting is not consent to WhatsApp reminders");
+    }
+
+    @Test
+    @DisplayName("ticked, the opt-in is recorded at accept — even while the trainer's switch is off (21 Nov 2026)")
+    void remindersTicked() throws Exception {
+        jdbc.update("UPDATE trainer SET session_reminders = false WHERE id = :t::uuid", Map.of("t", me.toString()));
+        UUID c = client(me, "Ravi Iyer", "+919841022129");
+        acceptOwn(c, "+919841022129", true);
+        assertNotNull(optIn(c), "the client said yes");
+    }
+
+    /** Invite, code and accept for a client of its own number; {@code reminders} null leaves the field out. */
+    private void acceptOwn(UUID c, String phone, Boolean reminders) throws Exception {
+        String link = JsonPath.read(trainerMvc.perform(MockMvcRequestBuilders.post("/v1/clients/" + c + "/invites")).andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString(), "$.link");
+        String token = link.substring(link.lastIndexOf('/') + 1);
+        String requestId = send(token);
+        String body = json(requestId, sender.codeFor(phone), dob(30), "2026-09");
+        if (reminders != null) body = body.replace("}", ",\"whatsappReminders\":" + reminders + "}");
+        publicMvc.perform(MockMvcRequestBuilders.post("/v1/invites/" + token + "/accept").header(WEB, "web")
+                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated());
+    }
+
+    private java.sql.Timestamp optIn(UUID c) {
+        return jdbc.queryForObject("SELECT whatsapp_opt_in_at FROM client_prefs WHERE client_id = :c::uuid",
+                Map.of("c", c.toString()), java.sql.Timestamp.class);
+    }
+
     private ResultActions accept(String token, String requestAndCode, String dob, String version) throws Exception {
         String[] rc = requestAndCode.split("\\|");
         return acceptWith(token, rc[0], rc[1], dob, version);
@@ -253,7 +301,7 @@ class InviteAcceptApiTest {
     }
 
     private static String json(String requestId, String code, String dob, String version) {
-        return "{\"requestId\":\"" + requestId + "\",\"otp\":\"" + code + "\",\"dateOfBirth\":\"" + dob + "\",\"policyVersion\":\"" + version + "\"}";
+        return "{\"requestId\":\"" + requestId + "\",\"otp\":\"" + code + "\",\"dateOfBirth\":\"" + dob + "\",\"policyVersion\":\"" + version + "\",\"trainingTerms\":true}";
     }
 
     /** Sends the invite's code and returns {@code requestId|code}. */

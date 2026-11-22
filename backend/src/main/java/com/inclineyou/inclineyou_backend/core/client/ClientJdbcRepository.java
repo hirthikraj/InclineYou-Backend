@@ -38,14 +38,23 @@ public class ClientJdbcRepository {
 
     private final NamedParameterJdbcTemplate jdbc;
 
+    /** The trainer's clients that are live and not yet archived — what closing the account archives (20 Nov 2026). */
+    public List<UUID> unarchivedOf(UUID trainerId) {
+        return jdbc.queryForList("""
+                SELECT id::text FROM client
+                WHERE trainer_id = :tid::uuid AND deleted_at IS NULL AND archived_at IS NULL
+                ORDER BY created_at, id""", Map.of("tid", trainerId.toString()), String.class)
+                .stream().map(UUID::fromString).toList();
+    }
+
     /** The client row a PATCH decides on, locked. */
-    public record PatchTarget(String phone, String version, String membershipStatus) {}
+    public record PatchTarget(String phone, String version, String membershipStatus, String clientType) {}
 
     /** A running pack and what is still owed on it. */
     public record OpenPackage(String id, BigDecimal due) {}
 
     /** The client's own fields the file header draws beside the summary. */
-    public record OwnFields(String dateOfBirth, BigDecimal heightCm, String activityLevel, String goal) {}
+    public record OwnFields(String dateOfBirth, BigDecimal heightCm, String activityLevel, String goal, String gender) {}
 
     // ── ownership ──────────────────────────────────────────────────────────────
 
@@ -64,26 +73,72 @@ public class ClientJdbcRepository {
     // ── create and patch ───────────────────────────────────────────────────────
 
     /** tenant_id is stamp_tenant_id's; the client_schedule row is ensure_client_schedule's. */
-    public void insert(UUID id, UUID trainerId, CreateClientRequest req) {
+    /**
+     * Inserts the client and answers whether it did. {@code ON CONFLICT DO NOTHING} rather than letting a unique index
+     * throw (18 Nov 2026): a violation aborts the transaction in Postgres, so the caller could not then ask what was
+     * in the way (a phone check after it failed too, and two adds racing for one number answered 500). Skipped, the
+     * caller looks: the same id is a replay, the same number the guard's refusal.
+     */
+    public boolean insert(UUID id, UUID trainerId, CreateClientRequest req) {
         var p = params(trainerId, id);
         p.put("name", req.name());
         p.put("phone", req.phone());
         p.put("dob", req.dateOfBirth() == null ? null : Date.valueOf(req.dateOfBirth()));
         p.put("type", req.clientType());
         p.put("status", req.status());
-        jdbc.update("""
-                INSERT INTO client (id, trainer_id, name, phone, date_of_birth, client_type, status)
-                VALUES (:cid::uuid, :tid::uuid, :name, :phone, :dob, :type, :status)
-                """, p);
+        p.put("gender", req.gender());
+        return jdbc.update("""
+                INSERT INTO client (id, trainer_id, name, phone, date_of_birth, client_type, status, gender)
+                VALUES (:cid::uuid, :tid::uuid, :name, :phone, :dob, :type, :status, :gender)
+                ON CONFLICT DO NOTHING
+                """, p) == 1;
     }
 
     public Optional<PatchTarget> lockForPatch(UUID trainerId, UUID clientId) {
         return jdbc.query("""
-                SELECT phone, updated_at, membership_status FROM client
+                SELECT phone, updated_at, membership_status, client_type FROM client
                 WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL FOR UPDATE
                 """, params(trainerId, clientId), (rs, i) -> new PatchTarget(rs.getString("phone"),
-                String.valueOf(rs.getTimestamp("updated_at").getTime()), rs.getString("membership_status")))
+                String.valueOf(rs.getTimestamp("updated_at").getTime()), rs.getString("membership_status"),
+                rs.getString("client_type")))
                 .stream().findFirst();
+    }
+
+    /**
+     * Whether the client holds a package that is running or still owed — the money a change of {@code client_type} would
+     * leave under the wrong owner (18 Nov 2026). Owed is the ledger's rule: amount less paid and written off.
+     */
+    public boolean hasLiveMoney(UUID clientId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (
+                    SELECT 1 FROM package k
+                    WHERE k.client_id = :cid::uuid AND k.deleted_at IS NULL
+                      AND (k.status = 'active'
+                           OR (k.status NOT IN ('cancelled', 'refunded')
+                               AND k.amount > coalesce((SELECT sum(y.amount) FROM payment y
+                                                        WHERE y.package_id = k.id AND y.deleted_at IS NULL
+                                                          AND y.status IN ('paid', 'write_off')), 0))))
+                """, Map.of("cid", clientId.toString()), Boolean.class));
+    }
+
+    /**
+     * {@link #update}, inside a savepoint (18 Nov 2026), answering false when the new number is taken — the database's
+     * {@code uq_client_phone_live} refused it, which another write racing this one can still cause after the checks.
+     * Rolled back to the savepoint, the transaction is still usable, so the caller can ask the guard what is in the way;
+     * a refusal without the savepoint aborted the whole transaction and the follow-up query answered 500.
+     */
+    public boolean updateUnlessNumberTaken(UUID clientId, UpdateClientRequest req) {
+        var raw = jdbc.getJdbcTemplate();
+        raw.execute("SAVEPOINT client_update");
+        try {
+            update(clientId, req);
+            raw.execute("RELEASE SAVEPOINT client_update");
+            return true;
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            raw.execute("ROLLBACK TO SAVEPOINT client_update");
+            if (String.valueOf(e.getMostSpecificCause().getMessage()).contains("uq_client_phone_live")) return false;
+            throw e;
+        }
     }
 
     /** Only the fields that were sent; the caller has refused an empty patch. */
@@ -102,6 +157,7 @@ public class ClientJdbcRepository {
         set(sets, p, "goal", "goal", req.goal());
         set(sets, p, "height_cm", "height", req.heightCm());
         set(sets, p, "activity_level", "activity", req.activityLevel());
+        set(sets, p, "gender", "gender", req.gender());
         if (req.remindersExcluded() != null) {
             p.put("excluded", req.remindersExcluded());
             sets.append(", reminders_excluded = :excluded");
@@ -133,11 +189,18 @@ public class ClientJdbcRepository {
      * Every running pack stops its clock with the client (R19). The adjustment's
      * trigger sets package.paused_at; resume measures the days.
      */
+    /**
+     * Pause the client's running packs. Never a single session's own sale (17 Nov 2026, {@code session_id} set): it
+     * belongs to its session, which the pause cancels (closing the sale) or leaves booked, and a resume restores. Paused
+     * here, a cancelled sale was skipped by the resume (which resumes only running packs), came back with its session
+     * still paused, and its session was delivered with nothing charged.
+     */
     public int pausePackages(UUID clientId, String reason) {
         return jdbc.update("""
                 INSERT INTO package_adjustment (trainer_id, package_id, client_id, kind, reason)
                 SELECT trainer_id, id, client_id, 'pause', :reason FROM package
                 WHERE client_id = :cid::uuid AND status = 'active' AND paused_at IS NULL AND deleted_at IS NULL
+                  AND session_id IS NULL
                 """, Map.of("cid", clientId.toString(), "reason", reason));
     }
 
@@ -166,8 +229,12 @@ public class ClientJdbcRepository {
         p.put("note", note);
         jdbc.update("""
                 UPDATE client SET status = 'archived', archived_at = now(), archive_reason = :reason, archive_note = :note,
-                       paused_at = NULL, paused_until = NULL, membership_status = 'removed', removed_at = now(),
-                       removed_by = 'trainer'
+                       paused_at = NULL, paused_until = NULL, membership_status = 'removed',
+                       -- Who ended portal access, and when, is kept for a client already removed (20 Nov 2026): archiving
+                       -- someone who left the portal themselves used to rewrite it as the trainer's doing, today, and the
+                       -- trainer's bell ("left", from removed_by = 'client') lost the notice.
+                       removed_at = CASE WHEN membership_status = 'removed' THEN removed_at ELSE now() END,
+                       removed_by = CASE WHEN membership_status = 'removed' THEN removed_by ELSE 'trainer' END
                 WHERE id = :cid::uuid
                 """, p);
     }
@@ -207,7 +274,7 @@ public class ClientJdbcRepository {
     public void delete(UUID clientId) {
         jdbc.update("""
                 UPDATE client SET deleted_at = now(), phone = NULL, date_of_birth = NULL, goal = NULL,
-                       height_cm = NULL, activity_level = NULL, metadata = NULL,
+                       height_cm = NULL, activity_level = NULL, gender = NULL, metadata = NULL,
                        membership_status = 'removed', removed_at = now(), removed_by = 'trainer'
                 WHERE id = :cid::uuid
                 """, Map.of("cid", clientId.toString()));
@@ -223,10 +290,21 @@ public class ClientJdbcRepository {
     }
 
     /** Throws DuplicateKeyException when uq_client_phone_live says the number was taken meanwhile. */
+    /** This trainer's client, erased already — a repeat of the delete that did it (18 Nov 2026). */
+    public boolean erasedClientOf(UUID trainerId, UUID clientId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM client
+                               WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND erased_at IS NOT NULL)
+                """, Map.of("cid", clientId.toString(), "tid", trainerId.toString()), Boolean.class));
+    }
+
     public void unarchive(UUID clientId) {
         jdbc.update("""
                 UPDATE client SET status = 'active', archived_at = NULL, archive_reason = NULL, archive_note = NULL,
-                       membership_status = 'not_invited', removed_at = NULL, removed_by = NULL
+                       membership_status = 'not_invited', removed_at = NULL, removed_by = NULL,
+                       -- The "I have seen it" of the removal being undone goes with it (21 Nov 2026): kept, a client who came
+                       -- back and was removed again met the wall already marked seen, without what happened, by whom, when.
+                       removed_ack_at = NULL
                 WHERE id = :cid::uuid
                 """, Map.of("cid", clientId.toString()));
     }
@@ -235,9 +313,9 @@ public class ClientJdbcRepository {
 
     public OwnFields ownFields(UUID clientId) {
         return jdbc.queryForObject("""
-                SELECT date_of_birth::text AS dob, height_cm, activity_level, goal FROM client WHERE id = :cid::uuid
+                SELECT date_of_birth::text AS dob, height_cm, activity_level, goal, gender FROM client WHERE id = :cid::uuid
                 """, Map.of("cid", clientId.toString()), (rs, i) -> new OwnFields(rs.getString("dob"),
-                rs.getBigDecimal("height_cm"), rs.getString("activity_level"), rs.getString("goal")));
+                rs.getBigDecimal("height_cm"), rs.getString("activity_level"), rs.getString("goal"), rs.getString("gender")));
     }
 
     // ── the L3 summary ─────────────────────────────────────────────────────────
@@ -266,7 +344,7 @@ public class ClientJdbcRepository {
         return jdbc.query("""
                 SELECT c.id::text AS id, c.name, c.phone, c.status, c.paused_at, c.paused_until::text AS paused_until,
                        c.archived_at, c.archive_reason, c.archive_note, c.created_at, c.updated_at,
-                       c.membership_status, c.client_type, c.invited_at, c.accepted_at, c.last_portal_seen_at,
+                       c.membership_status, c.client_type, c.gender, c.invited_at, c.accepted_at, c.last_portal_seen_at,
                        -- true: a pending invitation past its date; false: a live one; null: none. uq_client_invite_pending
                        -- allows one pending row per client, so this is a single-row lookup on that index.
                        (SELECT i.expires_at <= now() FROM client_invite i
@@ -317,7 +395,8 @@ public class ClientJdbcRepository {
                     stats.getOrDefault(id, NO_SESSIONS),
                     rs.getTimestamp("created_at").getTime(),
                     String.valueOf(rs.getTimestamp("updated_at").getTime()),
-                    portal(rs, selfRuns.get(id)));
+                    portal(rs, selfRuns.get(id)),
+                    rs.getString("gender"));
         });
     }
 

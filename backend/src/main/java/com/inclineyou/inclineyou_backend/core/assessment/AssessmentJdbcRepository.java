@@ -146,8 +146,12 @@ public class AssessmentJdbcRepository {
         jdbc.update("UPDATE assessment SET " + sets + " WHERE id = :id::uuid", p);
     }
 
+    /**
+     * Only a real move (19 Nov 2026): the same date rewrote the row and moved its version, so a Take screen open on it
+     * elsewhere was told 412 on its next save.
+     */
     public void setDue(UUID id, LocalDate dueOn) {
-        jdbc.update("UPDATE assessment SET due_on = :due WHERE id = :id::uuid",
+        jdbc.update("UPDATE assessment SET due_on = :due WHERE id = :id::uuid AND due_on IS DISTINCT FROM :due",
                 java.util.Map.of("id", id.toString(), "due", Date.valueOf(dueOn)));
     }
 
@@ -169,7 +173,10 @@ public class AssessmentJdbcRepository {
     public void moveOpenDue(UUID scheduleId, LocalDate dueOn) {
         jdbc.update("""
                 UPDATE assessment SET due_on = :due
-                 WHERE schedule_id = :sid::uuid AND completed_at IS NULL AND deleted_at IS NULL""",
+                 WHERE schedule_id = :sid::uuid AND completed_at IS NULL AND deleted_at IS NULL
+                   -- Only a real move (19 Nov 2026): the same date rewrote the row and moved its version, so a Take
+                   -- screen open on it was told 412 on its first save.
+                   AND due_on IS DISTINCT FROM :due""",
                 java.util.Map.of("sid", scheduleId.toString(), "due", Date.valueOf(dueOn)));
     }
 
@@ -190,13 +197,30 @@ public class AssessmentJdbcRepository {
         return jdbc.update("""
                 UPDATE assessment SET name = :name, form = CAST(:form AS jsonb)
                  WHERE template_id = :tpl::uuid AND completed_at IS NULL AND sent_at IS NULL
-                   AND readings = '{}' AND answers = '{}' AND deleted_at IS NULL""",
+                   AND readings = '{}' AND answers = '{}' AND deleted_at IS NULL
+                   -- Only what really differs (19 Nov 2026): a description edit or a clientCanStart toggle rewrote every
+                   -- unstarted one anyway, moving its version, so a Take screen open on it was told 412 on its first save.
+                   -- jsonb compares by content, so key order is not a difference.
+                   AND (name IS DISTINCT FROM :name OR form IS DISTINCT FROM CAST(:form AS jsonb))""",
                 java.util.Map.of("tpl", templateId.toString(), "name", name, "form", formJson));
     }
 
     // ── the client the assessment is on ────────────────────────────────────────
 
     /** {@code status} of the trainer's live client, or empty when it is not theirs. */
+    /**
+     * {@link #clientStatus}, holding the client row FOR SHARE until the transaction ends (19 Nov 2026): a client delete
+     * takes it FOR UPDATE, so the two queue instead of the delete missing an assessment made beside it.
+     */
+    public Optional<String> clientStatusForShare(UUID trainerId, UUID clientId) {
+        return jdbc.queryForList("""
+                SELECT status FROM client
+                 WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL
+                 FOR SHARE""",
+                java.util.Map.of("cid", clientId.toString(), "tid", trainerId.toString()), String.class)
+                .stream().findFirst();
+    }
+
     public Optional<String> clientStatus(UUID trainerId, UUID clientId) {
         return jdbc.queryForList("""
                 SELECT status FROM client
@@ -237,6 +261,14 @@ public class AssessmentJdbcRepository {
      * measurement yet.
      */
     public List<HistoryPoint> history(UUID clientId, Collection<String> keys) {
+        return history(clientId, keys, false);
+    }
+
+    /**
+     * {@code sentOnly} for the client's own reading (21 Nov 2026): an assessment never sent to them — one the trainer took in a session —
+     * is not theirs to open, so it is not in their series either. The policy hides it too; the query must not lean on that.
+     */
+    public List<HistoryPoint> history(UUID clientId, Collection<String> keys, boolean sentOnly) {
         if (keys.isEmpty()) return List.of();
         var p = new HashMap<String, Object>();
         p.put("cid", clientId.toString());
@@ -246,7 +278,8 @@ public class AssessmentJdbcRepository {
                   FROM assessment a
                  CROSS JOIN LATERAL jsonb_each(a.readings) r
                  WHERE a.client_id = :cid::uuid AND a.deleted_at IS NULL AND a.completed_at IS NOT NULL
-                   AND r.key IN (:keys) AND jsonb_typeof(r.value) = 'number'
+                   AND r.key IN (:keys) AND jsonb_typeof(r.value) = 'number'""" + (sentOnly ? " AND a.sent_at IS NOT NULL" : "") + """
+
                  ORDER BY a.completed_at, a.id, r.key""", p,
                 (rs, i) -> new HistoryPoint(rs.getString("key"), rs.getString("id"),
                         rs.getTimestamp("completed_at").toInstant(), rs.getBigDecimal("value")));
@@ -254,9 +287,15 @@ public class AssessmentJdbcRepository {
 
     /** This client's completed assessments, newest first — the Compare picker. */
     public List<AssessmentDetail.Returned> returned(UUID clientId) {
+        return returned(clientId, false);
+    }
+
+    /** {@code sentOnly}: the client's Compare offers only what they can open (21 Nov 2026), as {@link #history(UUID, Collection, boolean)}. */
+    public List<AssessmentDetail.Returned> returned(UUID clientId, boolean sentOnly) {
         return jdbc.query("""
                 SELECT id::text, name, completed_at FROM assessment
-                 WHERE client_id = :cid::uuid AND deleted_at IS NULL AND completed_at IS NOT NULL
+                 WHERE client_id = :cid::uuid AND deleted_at IS NULL AND completed_at IS NOT NULL""" + (sentOnly ? " AND sent_at IS NOT NULL" : "") + """
+
                  ORDER BY completed_at DESC, id""", java.util.Map.of("cid", clientId.toString()),
                 (rs, i) -> new AssessmentDetail.Returned(rs.getString(1), rs.getString(2),
                         rs.getTimestamp(3).toInstant().toEpochMilli()));

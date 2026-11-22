@@ -29,14 +29,71 @@ public class ClientNoticeJdbcRepository {
      *         error for the caller, who did what they meant to, but is something a screen may want to say
      */
     public boolean mint(UUID clientId, String kind, String text, UUID sessionId) {
+        return mint(clientId, kind, text, sessionId, null);
+    }
+
+    /** The same, with {@code subject_at}: what the notice is about, by its time — a shared note's {@code shared_at}. */
+    public boolean mint(UUID clientId, String kind, String text, UUID sessionId, java.sql.Timestamp subjectAt) {
         var p = new HashMap<String, Object>();
         p.put("cid", clientId.toString());
         p.put("kind", kind);
         p.put("text", text);
         p.put("sid", sessionId == null ? null : sessionId.toString());
-        var ids = jdbc.queryForList("SELECT mint_client_notification(:cid::uuid, :kind, :text, CAST(:sid AS uuid), NULL, NULL, NULL)::text AS id",
-                p, String.class);
+        p.put("subject", subjectAt);
+        var ids = jdbc.queryForList("SELECT mint_client_notification(:cid::uuid, :kind, :text, CAST(:sid AS uuid), "
+                + "CAST(:subject AS timestamptz), NULL, NULL)::text AS id", p, String.class);
         return !ids.isEmpty() && ids.get(0) != null;
+    }
+
+    /**
+     * The bell notice a trainer's message made, matched to it (20 Nov 2026): this client's {@code note} notice made since the
+     * message, by {@code subject_at} = the message's own time (stamped at send since this change), or — for one minted
+     * before — by its quoted opening. The WHERE both of the two writes below share.
+     */
+    private static final String MESSAGE_NOTICE = """
+             WHERE client_id = :cid::uuid AND kind = 'note' AND deleted_at IS NULL AND at >= :at
+               AND (subject_at = :at OR (subject_at IS NULL AND text = :old))""";
+
+    /** An unread message was reworded: its notice quotes the new opening, not the words the trainer just corrected. */
+    public int retextMessageNotice(UUID clientId, java.sql.Timestamp messageAt, String oldOpening, String newOpening) {
+        return jdbc.update("UPDATE client_notification SET text = :new " + MESSAGE_NOTICE,
+                Map.of("cid", clientId.toString(), "at", messageAt, "old", oldOpening, "new", newOpening));
+    }
+
+    /** A message was deleted: its notice goes too, so a line sent to the wrong client stops showing them its first words. */
+    public int retractMessageNotice(UUID clientId, java.sql.Timestamp messageAt, String oldOpening) {
+        return jdbc.update("UPDATE client_notification SET deleted_at = now() " + MESSAGE_NOTICE,
+                Map.of("cid", clientId.toString(), "at", messageAt, "old", oldOpening));
+    }
+
+    /**
+     * Takes back the bell notice a shared note made, when the note is deleted or made private again (19 Nov 2026): it
+     * quotes up to 160 characters of the note, and a note shared by mistake and removed at once stayed readable in the
+     * bell. Matched by {@code subject_at} = the note's {@code shared_at} (set since 19 Nov), else — for older notices —
+     * by the quoted opening, made since it was shared. Run while the note is still shared: unsharing clears shared_at.
+     */
+    /**
+     * A shared note was reworded and stays shared (21 Nov 2026): its notice quotes the new opening, not the words the trainer
+     * just corrected. Matched as {@link #retractNote} matches. Run while the note is still shared.
+     */
+    public int retextNote(UUID clientId, UUID noteId, String oldOpening, String newOpening) {
+        return jdbc.update("""
+                UPDATE client_notification n SET text = :new
+                  FROM client_note cn
+                 WHERE cn.id = :nid::uuid AND cn.shared_at IS NOT NULL
+                   AND n.client_id = :cid::uuid AND n.kind = 'note' AND n.deleted_at IS NULL AND n.at >= cn.shared_at
+                   AND (n.subject_at = cn.shared_at OR n.text = :text)""",
+                Map.of("cid", clientId.toString(), "nid", noteId.toString(), "text", oldOpening, "new", newOpening));
+    }
+
+    public int retractNote(UUID clientId, UUID noteId, String opening) {
+        return jdbc.update("""
+                UPDATE client_notification n SET deleted_at = now()
+                  FROM client_note cn
+                 WHERE cn.id = :nid::uuid AND cn.shared_at IS NOT NULL
+                   AND n.client_id = :cid::uuid AND n.kind = 'note' AND n.deleted_at IS NULL AND n.at >= cn.shared_at
+                   AND (n.subject_at = cn.shared_at OR n.text = :text)""",
+                Map.of("cid", clientId.toString(), "nid", noteId.toString(), "text", opening));
     }
 
     /**

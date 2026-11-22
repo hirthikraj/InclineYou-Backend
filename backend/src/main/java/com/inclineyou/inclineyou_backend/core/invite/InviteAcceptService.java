@@ -64,7 +64,7 @@ public class InviteAcceptService {
         if (target == null || !(target.live() || "accepted".equals(target.status()))) throw unavailable();
 
         LocalDate dob = req.dateOfBirth();
-        checkWhatTheyAreSaying(dob, req.policyVersion());
+        checkWhatTheyAreSaying(dob, req.policyVersion(), req.trainingTerms());
 
         UUID requestId = parse(req.requestId());
         boolean replay = !target.live();
@@ -79,7 +79,8 @@ public class InviteAcceptService {
         // stays pending and works once the client has left the first trainer. (The unique index is the backstop for a race.)
         if (!replay && target.withAnotherTrainer()) throw alreadyWithATrainer();
 
-        return finish(target.phone(), target.inviteId(), dob, req.policyVersion().strip(), target.trainerName(), target.headline(), replay);
+        return finish(target.phone(), target.inviteId(), dob, req.policyVersion().strip(), Boolean.TRUE.equals(req.whatsappReminders()),
+                target.trainerName(), target.headline(), replay);
     }
 
     /**
@@ -88,13 +89,19 @@ public class InviteAcceptService {
      * the whole proof that it is theirs — and that they are not a live client of somebody else. What is left is the part they say:
      * their date of birth and the notice, and then it is the same single act as the link's.
      */
-    public Result acceptForSignedIn(String phone, AuthResponse.PendingInvite invite, LocalDate dob, String policyVersion) {
-        checkWhatTheyAreSaying(dob, policyVersion);
-        return finish(phone, invite.inviteId(), dob, policyVersion.strip(), invite.trainerName(), invite.headline(), false);
+    public Result acceptForSignedIn(String phone, AuthResponse.PendingInvite invite, LocalDate dob, String policyVersion,
+                                    boolean whatsappReminders, Boolean trainingTerms) {
+        checkWhatTheyAreSaying(dob, policyVersion, trainingTerms);
+        return finish(phone, invite.inviteId(), dob, policyVersion.strip(), whatsappReminders, invite.trainerName(), invite.headline(), false);
     }
 
     /** The two things the client says about themselves, refused before anything is spent or written. */
-    private void checkWhatTheyAreSaying(LocalDate dob, String policyVersion) {
+    private void checkWhatTheyAreSaying(LocalDate dob, String policyVersion, Boolean trainingTerms) {
+        // Consent to TRAIN (22 Nov 2026, V42): the invite page's required tick. Refused before the code is spent.
+        if (!Boolean.TRUE.equals(trainingTerms)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "TRAINING_TERMS_REQUIRED",
+                    "trainingTerms: tick that you're fit to train and accept your trainer's coaching terms.");
+        }
         if (dob.isBefore(LocalDate.of(1900, 1, 1))) throw ApiException.validation("dateOfBirth: before 1900");
         if (dob.isAfter(LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")))) throw ApiException.validation("dateOfBirth: in the future");
         String inForce = props.getPrivacy().getPolicyVersion();
@@ -105,9 +112,10 @@ public class InviteAcceptService {
     }
 
     /** Make the account (or find it made), then open the client's session. */
-    private Result finish(String phone, String inviteId, LocalDate dob, String policyVersion, String trainerName, String headline, boolean replay) {
+    private Result finish(String phone, String inviteId, LocalDate dob, String policyVersion, boolean whatsappReminders,
+                          String trainerName, String headline, boolean replay) {
         boolean hadAccount = appUsers.findByPhoneAndDeletedAtIsNull(phone).isPresent();
-        String result = run(inviteId, phone, dob, policyVersion);
+        String result = run(inviteId, phone, dob, policyVersion, whatsappReminders);
         switch (result) {
             case "accepted" -> { }
             case "age_requirement" -> throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "AGE_REQUIREMENT",
@@ -123,11 +131,11 @@ public class InviteAcceptService {
     }
 
     /** The one statement that makes the account, with the proved number as the database's idea of who is asking. */
-    private String run(String inviteId, String phone, LocalDate dob, String policyVersion) {
+    private String run(String inviteId, String phone, LocalDate dob, String policyVersion, boolean whatsappReminders) {
         TenantContext before = TenantContext.current();
         TenantContext.set(TenantContext.bootstrap(phone));
         try {
-            return repo.accept(inviteId, dob, policyVersion);
+            return repo.accept(inviteId, dob, policyVersion, whatsappReminders, true);
         } catch (DuplicateKeyException e) {
             throw alreadyWithATrainer();
         } finally {

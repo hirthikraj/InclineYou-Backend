@@ -17,10 +17,13 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.WebApplicationContext;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -106,6 +109,23 @@ class NudgeTemplateTest {
                 /* The variables are on the wire because the web holds no copy of them. */
                 .andExpect(jsonPath("$.items[1].variables[0].token").value("{name}"))
                 .andExpect(jsonPath("$.items[1].variables[0].label").exists());
+    }
+
+    @Test
+    @DisplayName("the ETag follows the built-in wording too: a deploy that rewords a default moves it (20 Nov 2026)")
+    void etagFollowsTheBuiltIns() {
+        var vars = List.of(new com.inclineyou.inclineyou_backend.core.nudge.dto.VariableResponse("{name}", "Name", "the client"));
+        var before = List.of(new com.inclineyou.inclineyou_backend.core.nudge.dto.TemplateResponse(
+                "payment_reminder", "Payment reminder", "p", "Hi {name}, your payment is due.", true, vars, null));
+        var reworded = List.of(new com.inclineyou.inclineyou_backend.core.nudge.dto.TemplateResponse(
+                "payment_reminder", "Payment reminder", "p", "Hi {name}, your payment is due. {pay_by_upi}", true, vars, null));
+        var moreVars = List.of(new com.inclineyou.inclineyou_backend.core.nudge.dto.TemplateResponse(
+                "payment_reminder", "Payment reminder", "p", "Hi {name}, your payment is due.", true,
+                List.of(vars.get(0), new com.inclineyou.inclineyou_backend.core.nudge.dto.VariableResponse("{upi}", "UPI ID", "yours")), null));
+        String tag = NudgeTemplateService.listVersion(before);
+        assertEquals(tag, NudgeTemplateService.listVersion(List.copyOf(before)), "the same answer, the same tag");
+        assertNotEquals(tag, NudgeTemplateService.listVersion(reworded), "a built-in reworded, no override version");
+        assertNotEquals(tag, NudgeTemplateService.listVersion(moreVars), "a built-in gained a variable");
     }
 
     @Test

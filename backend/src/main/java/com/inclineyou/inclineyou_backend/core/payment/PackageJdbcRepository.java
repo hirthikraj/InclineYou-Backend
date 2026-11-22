@@ -170,11 +170,18 @@ public class PackageJdbcRepository {
      * What one client still owes across every package, off the ONE ledger definition above — the client's own portal reads it, so what they are
      * shown as owing and what the trainer's books say can never be two different sums. Zero, not null, when nothing is owed.
      */
-    public java.math.BigDecimal dueForClient(UUID trainerId, UUID clientId) {
+    /**
+     * What one client owes as of {@code today}. A single session's sale for a day still to come, nothing paid, is not owed yet
+     * ({@link #NOT_YET_OWED}) — left out here as in every trainer-side "owes" (21 Nov 2026: the portal's money screen showed a client
+     * booked four weeks ahead as owing for all four, with a pay link).
+     */
+    public java.math.BigDecimal dueForClient(UUID trainerId, UUID clientId, LocalDate today) {
         var p = new HashMap<String, Object>();
         p.put("tid", trainerId.toString());
         p.put("cid", clientId.toString());
-        return jdbc.queryForObject("WITH " + ledger(ONE_CLIENT) + " SELECT coalesce(sum(amount_due), 0) FROM ledger", p, java.math.BigDecimal.class);
+        p.put("today", Date.valueOf(today));
+        return jdbc.queryForObject("WITH " + ledger(ONE_CLIENT) + " SELECT coalesce(sum(amount_due), 0) FROM ledger WHERE NOT " + NOT_YET_OWED,
+                p, java.math.BigDecimal.class);
     }
 
     /**
@@ -527,13 +534,15 @@ public class PackageJdbcRepository {
     /** The trainer's package, locked, with its client's type. Empty if not theirs. */
     public Optional<LockedPackage> lock(UUID trainerId, UUID packageId) {
         return jdbc.query("""
-                SELECT k.id, k.client_id, k.status, k.amount, k.currency, k.paused_at, k.end_date, c.client_type
+                SELECT k.id, k.client_id, k.status, k.amount, k.currency, k.paused_at, k.end_date, c.client_type,
+                       k.session_id, k.start_date
                 FROM package k JOIN client c ON c.id = k.client_id
                 WHERE k.id = :pid::uuid AND k.trainer_id = :tid::uuid AND k.deleted_at IS NULL
                 FOR UPDATE OF k""", Map.of("pid", packageId.toString(), "tid", trainerId.toString()),
                 (rs, i) -> new LockedPackage((UUID) rs.getObject("id"), (UUID) rs.getObject("client_id"),
                         rs.getString("status"), rs.getBigDecimal("amount"), rs.getString("currency"),
-                        rs.getTimestamp("paused_at"), rs.getDate("end_date"), rs.getString("client_type")))
+                        rs.getTimestamp("paused_at"), rs.getDate("end_date"), rs.getString("client_type"),
+                        (UUID) rs.getObject("session_id"), rs.getDate("start_date")))
                 .stream().findFirst();
     }
 
@@ -568,7 +577,13 @@ public class PackageJdbcRepository {
 
     /** apply_package_adjustment applies the row to the package, under the same row lock. */
     public void insertAdjustment(UUID trainerId, LockedPackage k, String kind, int days, String reason, Timestamp at) {
+        insertAdjustment(null, trainerId, k, kind, days, reason, at);
+    }
+
+    /** The same, with the caller's id (a replayable write); null lets the database mint one. */
+    public void insertAdjustment(UUID id, UUID trainerId, LockedPackage k, String kind, int days, String reason, Timestamp at) {
         var p = new HashMap<String, Object>();
+        p.put("id", id == null ? null : id.toString());
         p.put("tid", trainerId.toString());
         p.put("pid", k.id().toString());
         p.put("cid", k.clientId().toString());
@@ -577,8 +592,15 @@ public class PackageJdbcRepository {
         p.put("reason", reason);
         p.put("at", at);
         jdbc.update("""
-                INSERT INTO package_adjustment (trainer_id, package_id, client_id, kind, days, reason, effective_at)
-                VALUES (:tid::uuid, :pid::uuid, :cid::uuid, :kind, :days, :reason, :at)""", p);
+                INSERT INTO package_adjustment (id, trainer_id, package_id, client_id, kind, days, reason, effective_at)
+                VALUES (coalesce(CAST(:id AS uuid), gen_random_uuid()), :tid::uuid, :pid::uuid, :cid::uuid, :kind, :days,
+                        :reason, :at)""", p);
+    }
+
+    /** "packageId|kind" of the adjustment with this id, whoever's it is; empty when no row has it. */
+    public Optional<String> adjustmentKind(UUID id) {
+        return jdbc.queryForList("SELECT package_id::text || '|' || kind FROM package_adjustment WHERE id = :id::uuid",
+                Map.of("id", id.toString()), String.class).stream().findFirst();
     }
 
     /** A child-row write moves its parent's version (Conventions · Concurrency). */

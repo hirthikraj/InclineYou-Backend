@@ -63,7 +63,10 @@ public class WorkoutTemplateService {
     @Transactional(readOnly = true)
     public WorkoutTemplateItem get(UUID trainerId, UUID id) {
         Row row = repo.find(trainerId, id).orElseThrow(() -> ApiException.notFound("That workout is not in your library."));
-        return item(row, programs.exercisesByWorkout(List.of(id)).getOrDefault(row.id(), List.of()));
+        var stored = programs.exercisesByWorkout(List.of(id)).getOrDefault(row.id(), List.of());
+        var used = new java.util.LinkedHashSet<String>();
+        stored.forEach(e -> { used.add(e.exerciseId()); e.alternatives().forEach(a -> used.add(a.exerciseId())); });
+        return item(row, stored, programs.exerciseRefs(used));
     }
 
     @Transactional
@@ -78,7 +81,12 @@ public class WorkoutTemplateService {
         }
         requireExercises(trainerId, planned);
         try {
-            repo.insert(id, trainerId, body.name(), body.notes());
+            if (!repo.insert(id, trainerId, body.name(), body.notes())) {
+                // A double tap whose first request committed after the check above (19 Nov 2026): that workout.
+                var raced = repo.ownership(trainerId, id);
+                if (raced.isPresent() && raced.get()) return new WorkoutTemplateMade(get(trainerId, id), false);
+                throw ApiException.idConflict();
+            }
             trees.replaceExercises(id, planned, sections);
         } catch (DuplicateKeyException e) {
             throw ApiException.idConflict();
@@ -142,7 +150,7 @@ public class WorkoutTemplateService {
     }
 
     /** The row and its mains, with each divider read back out of the section it was stored in. */
-    private static WorkoutTemplateItem item(Row row, List<Exercise> stored) {
+    private static WorkoutTemplateItem item(Row row, List<Exercise> stored, java.util.Map<String, com.inclineyou.inclineyou_backend.core.program.dto.ExerciseRef> names) {
         var dividers = new ArrayList<WorkoutTemplateItem.Divider>();
         var exercises = new ArrayList<Exercise>();
         int sets = 0;
@@ -154,6 +162,6 @@ public class WorkoutTemplateService {
             exercises.add(new Exercise(e.id(), e.exerciseId(), e.position(), e.groupId(), null, e.notes(), e.sets(), e.alternatives()));
         }
         return new WorkoutTemplateItem(row.id(), row.name(), row.notes(), exercises, dividers, exercises.size(), sets,
-                row.createdAt().getTime(), row.updatedAt().getTime(), row.version());
+                row.createdAt().getTime(), row.updatedAt().getTime(), row.version(), names);
     }
 }

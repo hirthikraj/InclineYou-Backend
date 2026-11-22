@@ -182,6 +182,14 @@ class ClientLoggedSessionsTest {
                 .andExpect(jsonPath("$.exercises.length()").value(1));
     }
 
+    @Test
+    @DisplayName("but not while it holds no done set: a client's own workout started and empty is 404 to the trainer (19 Nov 2026)")
+    void trainerCannotReadAnEmptyClientLog() throws Exception {
+        UUID empty = selfRun(twoDaysAgo, w2, false);
+        mvc.perform(get("/v1/sessions/" + empty + "/log")).andExpect(status().isNotFound());
+        // One done set later it is readable, as trainerCanReadTheLog shows.
+    }
+
     /* ─────────────────────────────────────────── what the log learns (api-contract 1.2) ── */
 
     @Test

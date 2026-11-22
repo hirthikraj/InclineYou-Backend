@@ -202,6 +202,11 @@ class PortalAssessmentApiTest {
         UUID t = tpl(arun, "Weekly check-in", true, "weekly_check_in", "\"waist\"", Q_ENERGY);
         UUID first = asm(c, t, "Weekly check-in", WAIST, Q_ENERGY, true, today.minusDays(30), null); complete(first, "{\"waist\":84}", "{}", 28);
         UUID second = asm(c, t, "Weekly check-in", WAIST, Q_ENERGY, true, today.minusDays(7), null); complete(second, "{\"waist\":82}", "{\"q_energy\":{\"rating\":4}}", 6);
+        // one the trainer took in a session and never sent, between the two: not the client's to open, so in neither their series nor Compare,
+        // and not the "previous" either — on this owner connection only the query itself can leave it out (21 Nov 2026)
+        UUID taken = asm(c, t, "Weekly check-in", WAIST, Q_ENERGY, false, today.minusDays(15), null);
+        jdbc.update("UPDATE assessment SET readings = '{\"waist\":90}'::jsonb, completed_at = now() - interval '14 days', entered_by = 'trainer' WHERE id = :id::uuid",
+                Map.of("id", taken.toString()));
         String token = tokenFor(phone);
 
         get(token, "/v1/portal/assessments/" + second).andExpect(status().isOk()).andExpect(jsonPath("$.state").value("done")).andExpect(jsonPath("$.completedAt").isNumber())
@@ -303,6 +308,22 @@ class PortalAssessmentApiTest {
     }
 
     @Test
+    @DisplayName("a prospect or an inactive client on the portal is offered Start and gets an assessment, not a 500 (21 Nov 2026)")
+    void prospectStarts() throws Exception {
+        UUID c = live();
+        UUID offered = tpl(arun, "Weekly check-in", true, "weekly_check_in", "\"weight\"", Q_ENERGY);
+        String token = tokenFor(phone);
+        for (String status : new String[]{"prospect", "inactive"}) {
+            jdbc.update("UPDATE client SET status = :s WHERE id = :c::uuid", Map.of("s", status, "c", c.toString()));
+            get(token, "/v1/portal/assessments?state=open").andExpect(jsonPath("$.canStart").value(true));
+            UUID id = UUID.randomUUID();
+            mvc.perform(post("/v1/portal/assessments").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"id\":\"" + id + "\",\"templateId\":\"" + offered + "\"}")).andExpect(status().is2xxSuccessful());
+            jdbc.update("UPDATE assessment SET deleted_at = now() WHERE client_id = :c::uuid", Map.of("c", c.toString()));
+        }
+    }
+
+    @Test
     @DisplayName("start one: only the templates the trainer offers and only their own, Continue when one is already waiting; starting makes a sent, open assessment due today — once, whatever the retries")
     void startOne() throws Exception {
         UUID c = live();
@@ -311,6 +332,7 @@ class PortalAssessmentApiTest {
         UUID theirs = tpl(divya, "Another trainer's", true, null, "\"waist\"", "");
         String token = tokenFor(phone);
 
+        String tagBefore = get(token, "/v1/portal/assessment-templates").andReturn().getResponse().getHeader("ETag");
         get(token, "/v1/portal/assessment-templates").andExpect(status().isOk()).andExpect(header().exists("ETag")).andExpect(jsonPath("$.items", hasSize(1)))
                 .andExpect(jsonPath("$.items[0].id").value(offered.toString())).andExpect(jsonPath("$.items[0].systemKey").value("weekly_check_in")).andExpect(jsonPath("$.items[0].asks.measurements").value(1))
                 .andExpect(jsonPath("$.items[0].asks.questions").value(1)).andExpect(jsonPath("$.items[0].openAssessmentId").value(nullValue()));
@@ -329,7 +351,12 @@ class PortalAssessmentApiTest {
         mvc.perform(post("/v1/portal/assessments").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"id\":\"" + UUID.randomUUID() + "\",\"templateId\":\"" + offered + "\"}")).andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id.toString()));
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM assessment WHERE client_id = :c::uuid", Map.of("c", c.toString()), Integer.class));
-        get(token, "/v1/portal/assessment-templates").andExpect(jsonPath("$.items[0].openAssessmentId").value(id.toString()));
+        // the tag follows the answer: starting one changed openAssessmentId, so it is not the tag from before (21 Nov 2026)
+        String tagAfter = get(token, "/v1/portal/assessment-templates").andExpect(jsonPath("$.items[0].openAssessmentId").value(id.toString()))
+                .andReturn().getResponse().getHeader("ETag");
+        org.junit.jupiter.api.Assertions.assertNotEquals(tagBefore, tagAfter);
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/v1/portal/assessment-templates").header("Authorization", "Bearer " + token)
+                .header("If-None-Match", tagBefore)).andExpect(status().isOk());
         get(token, "/v1/portal/assessments?state=open").andExpect(jsonPath("$.items[0].id").value(id.toString()));
 
         // a template that is not offered, or is another trainer's, or does not exist: one answer

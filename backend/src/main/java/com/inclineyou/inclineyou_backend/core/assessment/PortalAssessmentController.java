@@ -50,7 +50,10 @@ public class PortalAssessmentController {
 
     @GetMapping("/assessment-templates")
     public ResponseEntity<PortalAssessment.Templates> templates() {
-        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).eTag("\"" + service.templatesVersion(phone()) + "\"").body(service.templates(phone()));
+        // One read, tagged by what it says (21 Nov 2026): the tag was the newest template edit, which did not move when a template other than
+        // the newest went away or when one was started (openAssessmentId), and the shelf was loaded twice to make it.
+        var answer = service.templates(phone());
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).eTag("\"" + com.inclineyou.inclineyou_backend.shared.util.ContentTag.of(answer) + "\"").body(answer);
     }
 
     @PostMapping("/assessments")

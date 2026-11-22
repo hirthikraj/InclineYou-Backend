@@ -111,6 +111,9 @@ class ClientRequestBindingTest {
     @Test
     @DisplayName("a PATCH leaves an absent key alone and clears a null one")
     void patchPresence() throws Exception {
+        // The profile waits for consent (22 Nov 2026); this test is about PATCH presence, so the client has consented.
+        jdbc.update("UPDATE client SET membership_status = 'accepted', invited_at = now(), accepted_at = now() WHERE id = :c::uuid",
+                java.util.Map.of("c", client.toString()));
         send(patch("/v1/clients/" + client), "{\"goal\":\"  Run 10k  \",\"heightCm\":170}").andExpect(status().isOk());
         send(patch("/v1/clients/" + client), "{\"activityLevel\":\"light\"}").andExpect(status().isOk());
         detail().andExpect(jsonPath("$.goal").value("Run 10k"))
@@ -124,6 +127,33 @@ class ClientRequestBindingTest {
         refused(patch("/v1/clients/" + client), "{\"name\":null}", "name: required");
         refused(patch("/v1/clients/" + client), "{\"status\":\"paused\"}", "status: use pause, resume, archive or unarchive");
         refused(patch("/v1/clients/" + client), "{}", "body: send at least one field");
+    }
+
+    @Test
+    @DisplayName("V43 gender: taken on create, changed and cleared by PATCH without consent, refused outside the four values, scrubbed on delete")
+    void gender() throws Exception {
+        UUID other = UUID.randomUUID();
+        send(post("/v1/clients"), """
+                {"id":"%s","name":"Asha","clientType":"independent","gender":"female"}
+                """.formatted(other)).andExpect(status().isCreated());
+        mvc.perform(get("/v1/clients/" + other)).andExpect(status().isOk()).andExpect(jsonPath("$.gender").value("female"));
+
+        // `client` has not consented: gender is the business record, like the date of birth, and is not locked.
+        send(patch("/v1/clients/" + client), "{\"gender\":\"prefer_not_to_say\"}").andExpect(status().isOk());
+        detail().andExpect(jsonPath("$.gender").value("prefer_not_to_say"));
+        send(patch("/v1/clients/" + client), "{\"gender\":null}").andExpect(status().isOk());
+        detail().andExpect(jsonPath("$.gender").doesNotExist());
+
+        refused(patch("/v1/clients/" + client), "{\"gender\":\"f\"}", "gender: female, male, other or prefer_not_to_say");
+        refused(post("/v1/clients"), "{\"name\":\"B\",\"clientType\":\"gym\",\"gender\":\"woman\"}",
+                "gender: female, male, other or prefer_not_to_say");
+
+        // Erased: the trigger clears it whatever path set erased_at.
+        jdbc.update("UPDATE client SET deleted_at = now(), erased_at = now(), name = NULL, phone = NULL, date_of_birth = NULL, "
+                + "goal = NULL, metadata = NULL, height_cm = NULL, activity_level = NULL, timezone = NULL, archive_note = NULL "
+                + "WHERE id = :c::uuid", Map.of("c", other.toString()));
+        org.junit.jupiter.api.Assertions.assertNull(jdbc.queryForObject("SELECT gender FROM client WHERE id = :c::uuid",
+                Map.of("c", other.toString()), String.class));
     }
 
     @Test

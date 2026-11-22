@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.sessionlog;
 
+import com.inclineyou.inclineyou_backend.core.client.ConsentGate;
 import com.inclineyou.inclineyou_backend.core.session.SessionBookingService;
 import com.inclineyou.inclineyou_backend.core.session.SessionReadService;
 import com.inclineyou.inclineyou_backend.core.session.dto.BookRequest;
@@ -36,6 +37,7 @@ public class SessionStartService {
     private final SessionLogReadService reads;
     private final SessionBookingService bookings;
     private final SessionReadService sessions;
+    private final ConsentGate consent;
 
     /** A clock a little ahead of the server's is not a back-dated request in the future. */
     private static final long SKEW_SECONDS = 60;
@@ -60,8 +62,16 @@ public class SessionStartService {
         var booked = bookings.book(trainerId, new BookRequest(req.id(), req.clientId(), minute,
                 req.durationMinutes(), req.workoutId(), null, null, null, null));
         UUID sid = UUID.fromString(booked.session().id());
+        if (!booked.created()) {
+            // A replay is answered before the client lock, by the id alone (19 Nov 2026). A walk-in is started in the
+            // transaction that books it, so a true replay finds its session started; an unstarted one is some other
+            // booking of this client's (Friday's, say), which this route must not start now.
+            var head = repo.head(trainerId, sid, true).orElseThrow(SessionLogReadService::notYours);
+            if (head.startedAt() == null) throw ApiException.idConflict();
+            return new Created<>(reads.log(trainerId, sid), false);
+        }
         startLocked(trainerId, sid, Instant.now());
-        return new Created<>(reads.log(trainerId, sid), booked.created());
+        return new Created<>(reads.log(trainerId, sid), true);
     }
 
     /** Idempotent: an already-started session is left alone, so the replay of a walk-in lays nothing down. */
@@ -75,6 +85,24 @@ public class SessionStartService {
             throw ApiException.conflict("SESSION_NO_SHOW", "This session was marked a no-show, so it can't be logged.");
         }
         if (head.startedAt() != null) return;
+        // Booking's rule, at the start (19 Nov 2026): pause, archive and delete cancel bookings from now on, so one from
+        // earlier today could still be opened — then marked done and charged — for a client who had gone. A log already
+        // open is past this line above, so it can still be closed.
+        if (head.clientDeleted() || "paused".equals(head.clientStatus()) || "archived".equals(head.clientStatus())
+                || "removed".equals(head.clientMembership())) {
+            String state = head.clientDeleted() ? "deleted" : "removed".equals(head.clientMembership()) ? "removed" : head.clientStatus();
+            throw ApiException.conflict("CLIENT_NOT_BOOKABLE", "This client is " + state + ", so they can't be logged.");
+        }
+        // Not more than a day before the session itself (19 Nov 2026): any past moment was taken, so a log could say it
+        // began years before its session. A coded 409 with a sentence (21 Nov 2026), not `400 VALIDATION` naming the
+        // field: the trainer pressed Start on a session two days out and was shown "startedAt: at most a day before…".
+        if (at.isBefore(head.scheduledAt().toInstant().minus(java.time.Duration.ofDays(1)))) {
+            throw ApiException.conflict("SESSION_TOO_EARLY",
+                    "This session's log can't be started yet. It opens a day before the session.");
+        }
+        // Two sessions before consent, and no more (22 Nov 2026): opening a log is delivering a session, so the third
+        // waits for the client to accept their invite. A log already open is past the early return above.
+        consent.requireForSession(head.clientId(), sessionId);
         if (repo.stampStarted(sessionId, Timestamp.from(at)) == 1 && head.workoutId() != null) {
             repo.layDownPlan(sessionId);
             log.info("session log opened trainer={} session={} planned={}", trainerId, sessionId, true);

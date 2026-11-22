@@ -61,12 +61,14 @@ public class AssessmentEntryService {
     private final AssessmentBooker booker;
     private final AssessmentService detail;
     private final WorkspaceClock clock;
+    private final com.inclineyou.inclineyou_backend.core.client.ConsentGate consent;
 
     @Transactional
     public AssessmentDetail put(UUID trainerId, UUID id, String ifMatch, EntryRequest req) {
         IfMatch.require(ifMatch, "the assessment");
         var row = assessments.lock(trainerId, id).filter(r -> !r.deleted()).orElseThrow(AssessmentService::notFound);
         IfMatch.check(ifMatch, row.version(), "This assessment changed since you opened it. Reload to see it.");
+        consent.require(row.clientId(), "assessment readings");
 
         var form = AssessmentForms.read(row.form());
         var readings = readings(form, req.readings());

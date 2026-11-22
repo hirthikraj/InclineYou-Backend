@@ -38,9 +38,15 @@ public class InviteCodeService {
 
     private final InviteCardJdbcRepository repo;
     private final OtpService otp;
+    private final com.inclineyou.inclineyou_backend.core.auth.otp.OtpAbuseGuard abuse;
     private final AppProperties props;
 
-    public OtpRequested sendCode(String token, InviteCodeRequest req) {
+    /**
+     * @param ip the caller's address, for the abuse guard. The guard runs only once the request is known good (21 Nov
+     *           2026): it used to run first, in the controller, so a try refused for age, a date or a stale notice still
+     *           took one of the day's first codes to a new number and counted toward the address's limit, with no code sent.
+     */
+    public OtpRequested sendCode(String token, InviteCodeRequest req, String ip) {
         var target = InviteToken.wellFormed(token) ? repo.sendTarget(InviteToken.hash(token)).orElse(null) : null;
         if (target == null) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "INVITE_UNAVAILABLE",
@@ -59,12 +65,9 @@ public class InviteCodeService {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "AGE_REQUIREMENT",
                     "This isn’t available for you. Please talk to your trainer.");
         }
+        abuse.beforeSend(ip, target.phone());
         var issued = otp.send(target.phone(), OtpRequest.SIGN_IN);
         return new OtpRequested(issued.requestId().toString(), issued.expiresAt().toEpochMilli(), issued.resendAfterSeconds(), false);
     }
 
-    /** The number a code will go to — for the controller's per-number abuse guard, which keys on it. Empty for a dead link. */
-    public java.util.Optional<String> phoneOf(String token) {
-        return InviteToken.wellFormed(token) ? repo.sendTarget(InviteToken.hash(token)).map(InviteCardJdbcRepository.SendTarget::phone) : java.util.Optional.empty();
-    }
 }

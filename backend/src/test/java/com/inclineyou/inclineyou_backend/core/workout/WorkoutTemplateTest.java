@@ -38,6 +38,8 @@ import static org.hamcrest.Matchers.containsString;
 @Transactional
 class WorkoutTemplateTest {
 
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean WorkoutTemplateJdbcRepository workouts;
+
     @Autowired WebApplicationContext context;
     @Autowired NamedParameterJdbcTemplate jdbc;
 
@@ -227,6 +229,67 @@ class WorkoutTemplateTest {
         mvc.perform(get("/v1/workout-templates/" + id)).andExpect(status().isNotFound());
         org.junit.jupiter.api.Assertions.assertNotNull(jdbc.queryForObject(
                 "SELECT deleted_at FROM workout WHERE id = :id::uuid", Map.of("id", id), Object.class));
+    }
+
+    @Test
+    @DisplayName("GET one carries names for every exercise it uses, alternatives and a retired custom included; the shelf carries none")
+    void oneCarriesNames() throws Exception {
+        UUID band = exercise("Band pull-apart", me);
+        String id = create("""
+                {"name":"Upper A","exercises":[
+                   {"exerciseId":"%s","position":0,"sets":[{"effortValue":8}],"alternatives":[{"exerciseId":"%s","sets":[{"effortValue":10}]}]},
+                   {"exerciseId":"%s","position":1,"sets":[{"effortValue":15}]}]}
+                """.formatted(bench, row, band));
+        jdbc.update("UPDATE exercise SET deleted_at = now() WHERE id = :id::uuid", java.util.Map.of("id", band.toString()));
+        mvc.perform(get("/v1/workout-templates/" + id)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.names['" + bench + "'].name").value("Bench press"))
+                .andExpect(jsonPath("$.names['" + row + "'].name").value("Barbell row"))
+                .andExpect(jsonPath("$.names['" + band + "'].name").value("Band pull-apart"))      // retired, still named
+                .andExpect(jsonPath("$.names['" + band + "'].isCustom").value(true));
+        mvc.perform(get("/v1/workout-templates")).andExpect(jsonPath("$.items[0].names").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("a workout double-tapped with one id: the second misses the replay check, the insert skips, and the answer is that workout (200)")
+    void createDoubleTap() throws Exception {
+        UUID id = UUID.randomUUID();
+        String body = "{\"id\":\"" + id + "\",\"name\":\"Upper A\",\"exercises\":[{\"exerciseId\":\"" + bench + "\",\"position\":0,\"sets\":[{\"effortValue\":8}]}]}";
+        mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isCreated());
+        org.mockito.Mockito.doReturn(java.util.Optional.empty()).doCallRealMethod().when(workouts).ownership(me, id);
+        mvc.perform(post("/v1/workout-templates").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.id").value(id.toString()));
+        org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject(
+                "SELECT count(*) FROM workout_exercise WHERE workout_id = :w::uuid", java.util.Map.of("w", id.toString()), Integer.class));
+    }
+
+    @Test
+    @DisplayName("PUT keeps a row still at its position with its movement (its id), so a session planned from it keeps the link; a changed row is new")
+    void putKeepsSurvivingRows() throws Exception {
+        String id = create("""
+                {"name":"Upper A","exercises":[
+                   {"exerciseId":"%s","position":0,"sets":[{"effortValue":8}]},
+                   {"exerciseId":"%s","position":1,"sets":[{"effortValue":10}]}]}
+                """.formatted(bench, row));
+        UUID benchRow = jdbc.queryForObject("SELECT id FROM workout_exercise WHERE workout_id = :w::uuid AND position = 0",
+                java.util.Map.of("w", id), UUID.class);
+        String version = com.jayway.jsonpath.JsonPath.read(mvc.perform(get("/v1/workout-templates/" + id)).andReturn()
+                .getResponse().getContentAsString(), "$.version");
+        mvc.perform(put("/v1/workout-templates/" + id).header("If-Match", "\"" + version + "\"").contentType(MediaType.APPLICATION_JSON).content("""
+                {"name":"Upper A","exercises":[
+                   {"exerciseId":"%s","position":0,"notes":"slow down","sets":[{"effortValue":6},{"effortValue":6}]},
+                   {"exerciseId":"%s","position":1,"sets":[{"effortValue":12}]}]}
+                """.formatted(bench, bench))).andExpect(status().isOk());
+        org.junit.jupiter.api.Assertions.assertEquals(benchRow, jdbc.queryForObject(
+                "SELECT id FROM workout_exercise WHERE workout_id = :w::uuid AND position = 0", java.util.Map.of("w", id), UUID.class),
+                "the unchanged movement keeps its row");
+        org.junit.jupiter.api.Assertions.assertEquals(2, jdbc.queryForObject(
+                "SELECT count(*) FROM workout_set WHERE workout_exercise_id = :e::uuid", java.util.Map.of("e", benchRow.toString()), Integer.class),
+                "and takes the new sets");
+        org.junit.jupiter.api.Assertions.assertEquals("slow down", jdbc.queryForObject(
+                "SELECT notes FROM workout_exercise WHERE id = :e::uuid", java.util.Map.of("e", benchRow.toString()), String.class));
+        org.junit.jupiter.api.Assertions.assertEquals(bench.toString(), jdbc.queryForObject(
+                "SELECT exercise_id::text FROM workout_exercise WHERE workout_id = :w::uuid AND position = 1", java.util.Map.of("w", id), String.class),
+                "the changed position follows the save");
     }
 
     private String create(String body) throws Exception {

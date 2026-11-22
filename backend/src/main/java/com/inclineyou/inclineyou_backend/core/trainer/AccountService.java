@@ -82,12 +82,17 @@ import java.util.UUID;
 @Slf4j
 public class AccountService {
 
+    /** The archive note on every client when the trainer closes their account. */
+    static final String CLOSED_NOTE = "Trainer closed their account";
+
     private final TrainerRepository trainerRepo;
     private final AppUserRepository appUserRepo;
     private final OtpService otpService;
     private final OtpAbuseGuard abuse;
     private final StepUpService stepUp;
     private final SessionStore sessions;
+    private final com.inclineyou.inclineyou_backend.core.client.ClientStateService clientStates;
+    private final com.inclineyou.inclineyou_backend.core.client.ClientJdbcRepository clients;
 
     /* ─────────────────────────────────────────────────── changing a number ── */
 
@@ -127,7 +132,7 @@ public class AccountService {
         stepUp.require(req.ticket(), StepUpService.PHONE_CHANGE, trainerId, rawToken);
         String newPhone = requireValidPhone(req.phone());
         Trainer t = load(trainerId);
-        AppUser user = appUserRepo.findById(t.getAppUserId())
+        AppUser user = appUserRepo.findByIdForUpdate(t.getAppUserId())   // locked: the save writes the whole row (20 Nov 2026)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
         String previous = user.getPhone();
 
@@ -140,7 +145,13 @@ public class AccountService {
         requireAvailable(previous, newPhone);
 
         user.setPhone(newPhone);
-        appUserRepo.save(user);
+        try {
+            // Flushed here, not at commit (20 Nov 2026): a sign-up on the same number between requireAvailable and this
+            // write meets app_user_phone_key. At commit that was an uncaught 500; here it is the number taken, as above.
+            appUserRepo.saveAndFlush(user);
+        } catch (org.springframework.dao.DataIntegrityViolationException e) {
+            throw AccountRuleException.phoneTaken();
+        }
         sessions.revokeOthers(trainerId.toString(), currentSessionHash(rawToken), Instant.now(), SessionStore.PHONE_CHANGED);
 
         log.info("trainer {} changed phone {} → {}", trainerId, masked(previous), masked(newPhone));
@@ -160,8 +171,11 @@ public class AccountService {
      */
     @Transactional
     public void deleteAccount(UUID trainerId, String ticket, String rawToken) {
-        Trainer t = load(trainerId);
-        AppUser user = appUserRepo.findById(t.getAppUserId())
+        // Locked (20 Nov 2026): a profile PATCH in flight saves the whole row, and without the lock wrote deleted_at back.
+        Trainer t = trainerRepo.findByIdForUpdate(trainerId)
+                .filter(x -> x.getDeletedAt() == null)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
+        AppUser user = appUserRepo.findByIdForUpdate(t.getAppUserId())   // locked: the save writes the whole row (20 Nov 2026)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
         String phone = user.getPhone();
 
@@ -170,6 +184,13 @@ public class AccountService {
         } else {
             throw AccountRuleException.stepUpRequired();
         }
+
+        // Every client is archived first, in this transaction (20 Nov 2026), as archiving one does: their portal shows the
+        // removed wall instead of an active one of a trainer who is gone, the number is free for another trainer's invite
+        // (uq_client_one_trainer counts accepted live rows), pending invites are revoked, upcoming sessions are cancelled,
+        // and packs with nothing owed close. Before, all of that was left as it was and the clients were stuck.
+        var closing = new com.inclineyou.inclineyou_backend.core.client.dto.ArchiveRequest("other", CLOSED_NOTE);
+        for (UUID clientId : clients.unarchivedOf(trainerId)) clientStates.archive(trainerId, clientId, closing);
 
         Instant now = Instant.now();
         t.setDeletedAt(now);

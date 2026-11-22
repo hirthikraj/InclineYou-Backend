@@ -50,6 +50,12 @@ public class WorkingHoursService {
     private static final Pattern HH_MM = Pattern.compile("^([01]\\d|2[0-3]):[0-5]\\d$");
 
     /**
+     * Windows per day (20 Nov 2026). A split shift is two; with no cap, back-to-back one-minute windows made ~1,440 a day
+     * and ~10,000 single-row INSERTs in one request.
+     */
+    static final int MAX_WINDOWS = 8;
+
+    /**
      * {@code PATCH /v1/working-hours} — replace the listed weekdays, in one transaction: each listed
      * day's live rows are soft-deleted and its new windows inserted, an empty list making it a rest
      * day. Weekdays not listed are not touched, and sending the same body twice gives the same week.
@@ -71,6 +77,9 @@ public class WorkingHoursService {
             if (weekday < 1 || weekday > 7) throw ApiException.validation(at + ".weekday: 1 (Monday) to 7 (Sunday)");
             if (!seen.add(weekday)) throw ApiException.validation(at + ".weekday: listed twice — send one entry per day");
             if (day.windows() == null) throw ApiException.validation(at + ".windows: required — send [] for a rest day");
+            if (day.windows().size() > MAX_WINDOWS) {
+                throw ApiException.validation(at + ".windows: at most " + MAX_WINDOWS + " a day");
+            }
             var windows = new ArrayList<String[]>();
             for (int w = 0; w < day.windows().size(); w++) {
                 var win = day.windows().get(w);
@@ -95,6 +104,9 @@ public class WorkingHoursService {
             }
             for (String[] win : windows) plan.add(new Object[] {weekday, win[0], win[1]});
         }
+        // One save at a time per trainer (20 Nov 2026): each save soft-deletes only the rows that existed when it started,
+        // so two at once both inserted — overlapping windows the rules forbid, or a 500 on uq_working_hours_window.
+        repo.lockWeek(trainerId);
         repo.softDeleteDays(trainerId, seen);
         for (Object[] p : plan) repo.insertWindow(trainerId, (Integer) p[0], (String) p[1], (String) p[2]);
         return repo.workingHours(trainerId);

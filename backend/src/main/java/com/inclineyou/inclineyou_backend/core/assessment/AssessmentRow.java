@@ -24,6 +24,14 @@ record AssessmentRow(UUID id, UUID clientId, UUID templateId, UUID scheduleId, S
         return sentAt != null;
     }
 
+    /**
+     * Whether anything has been entered yet — a reading or an answer. Unstarted is exactly the column defaults ({@code '{}'}),
+     * the same rule AssessmentJdbcRepository's unstarted refreshes use.
+     */
+    boolean started() {
+        return !"{}".equals(readings) || !"{}".equals(answers);
+    }
+
     boolean done() {
         return completedAt != null;
     }

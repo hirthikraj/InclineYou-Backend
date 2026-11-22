@@ -108,6 +108,20 @@ public class AssessmentTemplateJdbcRepository {
                                   AND (CAST(:except AS uuid) IS NULL OR id <> CAST(:except AS uuid)))""", p, Boolean.class));
     }
 
+    /** Queues this trainer's form creates behind each other until the transaction ends (the form cap's lock). */
+    public void lockTrainerForms(UUID trainerId) {
+        jdbc.query("SELECT pg_advisory_xact_lock(hashtext('assessment_template:' || :tid))",
+                Map.of("tid", trainerId.toString()), rs -> { });
+    }
+
+    /** The trainer's live forms, the weekly check-in included. */
+    public int liveCount(UUID trainerId) {
+        Integer n = jdbc.queryForObject(
+                "SELECT count(*) FROM assessment_template WHERE trainer_id = :tid::uuid AND deleted_at IS NULL",
+                Map.of("tid", trainerId.toString()), Integer.class);
+        return n == null ? 0 : n;
+    }
+
     /** False when the id was taken meanwhile; uq_assessment_template_name raises for a taken name. */
     public boolean insert(UUID id, UUID trainerId, String name, String description, String measurementsJson, String questionsJson,
                           String systemKey, boolean clientCanStart) {

@@ -50,11 +50,13 @@ public class PortalMoneyService {
         if (!repo.moneyVisible(client)) return new PortalMoney.Money(false, null, null, null, null);
         int n = Math.max(1, Math.min(limit, 50));
         var cursor = Cursor.decode(rawCursor);
-        var rows = repo.payments(client, repo.zoneOf(client), cursor == null ? null : cursor.keyAsTimestamp(), cursor == null ? null : cursor.id(), n + 1);
+        String zone = repo.zoneOf(client);
+        var rows = repo.payments(client, zone, cursor == null ? null : cursor.keyAsTimestamp(), cursor == null ? null : cursor.id(), n + 1);
         boolean more = rows.size() > n;
         var page = more ? rows.subList(0, n) : rows;
         String next = more ? Cursor.encode(Cursor.key(page.getLast().paidAt()), page.getLast().item().id()) : null;
-        BigDecimal due = packages.dueForClient(repo.trainerOf(client), client);
+        // Owed as of the client's today: a single session sold for a day still to come is not owed yet (21 Nov 2026).
+        BigDecimal due = packages.dueForClient(repo.trainerOf(client), client, java.time.LocalDate.now(java.time.ZoneId.of(zone)));
         // Only when there is something to pay: a pay link beside ₹0.00 is a prompt with nothing behind it.
         String payTo = due.signum() > 0 ? repo.payTo(client) : null;
         return new PortalMoney.Money(true, repo.currency(client), due.setScale(2).toPlainString(),

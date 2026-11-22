@@ -35,7 +35,7 @@ public class PortalMeService {
         if (wall == null) {
             // An account that is a client's in name only (every arrangement erased): the wall for somebody who has left.
             return new PortalMe(phone, "removed", null, null, null, null, null, null, false, 0, 0, lookup.invitesFor(phone),
-                    new PortalMe.Policy(repo.acceptedPolicy(phone), current), push);
+                    new PortalMe.Policy(repo.acceptedPolicy(phone), current), push, 0);
         }
         String access = wall.path("access").asString();
         boolean active = "active".equals(access);
@@ -48,13 +48,14 @@ public class PortalMeService {
                         list(t.path("certifications")), list(t.path("specialities")), list(t.path("languages")),
                         SocialLink.handleOf(text(t, "instagram_url")), SocialLink.handleOf(text(t, "youtube_url")), whatsapp(text(t, "phone")));
         var mine = d.isObject() ? new PortalMe.MyDetails(text(d, "name"), text(d, "goal"), d.path("height_cm").isNumber() ? d.path("height_cm").asDouble() : null,
-                text(d, "timezone"), text(d, "activity_level"), text(d, "date_of_birth"), text(d, "phone"), String.valueOf(d.path("version").asLong())) : null;
+                text(d, "timezone"), text(d, "activity_level"), text(d, "date_of_birth"), text(d, "phone"), String.valueOf(d.path("version").asLong()),
+                text(d, "gender")) : null;
         return new PortalMe(text(d, "phone") != null ? text(d, "phone") : phone, access,
                 text(wall, "paused_until"), wall.path("removed_at").isNumber() ? wall.path("removed_at").asLong() : null, text(wall, "removed_by"),
                 wall.path("acknowledged_at").isNumber() ? wall.path("acknowledged_at").asLong() : null, trainer, mine,
                 active && repo.moneyVisible(clientId), active ? repo.unreadNotices(clientId) : 0, active ? repo.openAssessments(clientId) : 0,
                 "removed".equals(access) ? lookup.invitesFor(phone) : List.of(),
-                new PortalMe.Policy(repo.acceptedPolicy(phone), current), push);
+                new PortalMe.Policy(repo.acceptedPolicy(phone), current), push, active ? repo.unreadMessages(clientId) : 0);
     }
 
     /** {@code https://wa.me/919841022119} — digits only, no text: the web appends the draft for whatever is being asked about. */

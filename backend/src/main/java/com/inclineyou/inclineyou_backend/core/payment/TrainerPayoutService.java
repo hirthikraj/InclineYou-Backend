@@ -68,7 +68,7 @@ public class TrainerPayoutService {
         String method = payoutMethod(b.get("method"));
         String reference = text(b.get("reference"), 64, "reference");
         String note = text(b.get("note"), 500, "note");
-        Instant at = b.get("receivedAt") == null ? Instant.now() : pastInstant(b.get("receivedAt"), "receivedAt");
+        Instant at = b.get("receivedAt") == null ? Instant.now() : pastInstant(b.get("receivedAt"), "receivedAt", clock.zone());
         if (id != null) {
             var existing = payouts.find(tid, id);
             if (existing.isPresent()) return new PayoutCreated(existing.get(), false);
@@ -79,22 +79,35 @@ public class TrainerPayoutService {
         UUID newId = id == null ? UUID.randomUUID() : id;
         int n = payouts.insert(newId, tid, run.gymName(), run.gymPlaceId(), amount, clock.currency(), method,
                 reference, note, Timestamp.from(at));
-        if (n == 0) throw ApiException.idConflict();
+        if (n == 0) {
+            // A double tap (20 Nov 2026): the first request's row was not visible to the id check above, and the insert
+            // waited for it and skipped. It has committed by now, so a fresh read finds it: a replay, not a 409. An id
+            // that is another trainer's (or a deleted one) is still not found here, and is the conflict.
+            return payouts.find(tid, newId).map(p -> new PayoutCreated(p, false)).orElseThrow(ApiException::idConflict);
+        }
         return new PayoutCreated(payouts.find(tid, newId).orElseThrow(), true);
     }
 
     @Transactional
     public Payout patch(UUID tid, UUID id, String ifMatch, Map<String, Object> raw) {
         var b = body(raw, "amount", "method", "reference", "receivedAt", "note");
-        var cur = payouts.find(tid, id).orElseThrow(() -> ApiException.notFound("That payout does not exist."));
+        // Locked before If-Match is checked (20 Nov 2026): on a plain read two tabs that opened the same version both
+        // passed, and the second correction replaced the first without a word.
+        var cur = payouts.findForUpdate(tid, id).orElseThrow(() -> ApiException.notFound("That payout does not exist."));
         IfMatch.check(ifMatch, cur.version(), "This payout changed since you opened it.");
         if (b.isEmpty()) return cur;
         BigDecimal amount = b.containsKey("amount") ? amount(b.get("amount"), "amount", true) : new BigDecimal(cur.amount());
         String method = b.containsKey("method") ? payoutMethod(b.get("method")) : cur.method();
         String reference = b.containsKey("reference") ? text(b.get("reference"), 64, "reference") : cur.reference();
         String note = b.containsKey("note") ? text(b.get("note"), 500, "note") : cur.note();
-        Instant at = b.containsKey("receivedAt") ? pastInstant(b.get("receivedAt"), "receivedAt")
+        Instant at = b.containsKey("receivedAt") ? pastInstant(b.get("receivedAt"), "receivedAt", clock.zone())
                 : Instant.ofEpochMilli(cur.receivedAt());
+        // Nothing changed: answer the row and write nothing (20 Nov 2026), so the version moves only on a real change.
+        if (amount.compareTo(new BigDecimal(cur.amount())) == 0 && java.util.Objects.equals(method, cur.method())
+                && java.util.Objects.equals(reference, cur.reference()) && java.util.Objects.equals(note, cur.note())
+                && at.toEpochMilli() == cur.receivedAt()) {
+            return cur;
+        }
         payouts.update(id, tid, amount, method, reference, note, Timestamp.from(at));
         return payouts.find(tid, id).orElseThrow();
     }

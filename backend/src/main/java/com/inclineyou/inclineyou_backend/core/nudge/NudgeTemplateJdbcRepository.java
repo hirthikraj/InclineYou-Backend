@@ -36,6 +36,12 @@ public class NudgeTemplateJdbcRepository {
         return out;
     }
 
+    /** Serialises one trainer's writes to one template (save and reset), released at commit. */
+    public void lockTemplate(UUID trainerId, String template) {
+        jdbc.query("SELECT pg_advisory_xact_lock(hashtext('nudge-template:' || :tid || ':' || :t))",
+                Map.of("tid", trainerId.toString(), "t", template), rs -> { });
+    }
+
     /** Insert or reword; answers the new version. */
     public long upsert(UUID trainerId, String template, String body) {
         Long version = jdbc.queryForObject("""

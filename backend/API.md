@@ -119,11 +119,17 @@ branches on (`exception/GlobalExceptionHandler.java`):
 | `NOTHING_OWED` | 409 | 9 Nov 2026 — `POST /v1/clients/{id}/nudges` with `payment_reminder` when nothing is owed (on the named pack, or on any). The message used to say "₹0". Nothing is logged; a replay of one drafted while money was owed still answers 200. |
 | `SESSION_CHARGED` | 409 | 9 Nov 2026 (V32) — `POST /v1/sessions/{id}/billing` on a session that already carries a charge. Reopen it first. |
 | `SESSION_NOT_UNCHARGED` | 409 | 9 Nov 2026 (V32) — a sale or renew's `chargeSessionIds` names a session that is no longer delivered-and-uncharged for this client and service. Refused whole. |
-| `PACKAGE_SINGLE_SESSION` | 422 | 9 Nov 2026 (V32) — `POST /v1/packages/{id}/renew` on a single session's own one-session sale (`sessionId` set on the package). Not a pack; nothing to repeat. |
+| `PACKAGE_SINGLE_SESSION` | 422 | 9 Nov 2026 (V32) — `POST /v1/packages/{id}/renew` on a single session's own one-session sale (`sessionId` set on the package). Not a pack; nothing to repeat. 18 Nov 2026: also `POST /v1/packages/{id}/pause`, `/resume` and `/extend` on one — a single sale has no clock; move or cancel the session instead. 19 Nov 2026: and `POST /v1/packages/{id}/cancel` — cancel or Undo the session. |
+| `TEMPLATE_LIMIT` | 409 | 19 Nov 2026 — `POST /v1/assessment-templates` when the trainer already has 100 live forms (the shelf has no page). Delete one first. |
+| `EXERCISE_LIMIT` | 409 | 19 Nov 2026 — `POST /v1/exercises` when the trainer already has 500 live custom exercises (every library page loads them). Retire one first. |
+| `PACK_LIMIT` | 409 | 20 Nov 2026 — `POST /v1/packs` when the trainer already has 200 packs, retired ones included (the price list has no page). Delete one nothing was sold from first. A replayed id still answers 200. |
+| `ASSESSMENT_STARTED` | 409 | 20 Nov 2026 — `POST /v1/assessments/{id}/send` on one the trainer has already started in person (a reading or an answer entered): it stays in person, and the trainer finishes it in the session. An already-sent one is still 200. |
+| `PACKAGE_HAS_DUES` | 409 | `POST /v1/packages/{id}/cancel` while money is still owed or a payment is pending ("Collect it or write it off first"). 19 Nov 2026: also `POST /v1/packages/{id}/refund` while a payment is pending — a refunded pack is closed to mark-paid, write-off and delete, so it would be stranded. On both routes a pending payment gets its own sentence naming delete ("Mark it paid, write it off or delete it first"). |
 | `PACKAGE_UNDONE` | 409 | 9 Nov 2026 — `POST /v1/packages/{id}/renew` resent with the `id` of a renew that was undone since. Nothing is sold; a new press carries a new id. |
 | `MARK_FAILED` | — | 13 Nov 2026 — a `reason` inside `POST /v1/sessions/done`'s results (outcome `failed`), not an error status: the database refused that one session in the moment; the rest of the batch stands. Mark again to retry. |
 | `SESSION_UNDO_EXPIRED` | 409 | 10 Nov 2026 — `DELETE /v1/sessions/{id}` more than 10 minutes after the session was booked (16 Nov 2026: every billing, not single alone). Cancel it instead. |
 | `SESSION_SALE_PAID` | 409 | 10 Nov 2026 — undoing a single session, or changing its billing, after money was recorded on its sale. Refund first, or cancel. |
+| `CLIENT_HAS_PACKAGES` | 409 | 18 Nov 2026 — `PATCH /v1/clients/{id}` switching `clientType` while a pack is running or still owed. Finish or close it first. |
 | `SESSION_SINGLE_GYM_CLIENT` | 422 | 9 Nov 2026 (V32) — `billing: single` for a gym client, who buys only the gym's packs. |
 | `CLIENT_NOT_ARCHIVED` | 409 | 9 Nov 2026 — `POST /v1/clients/{id}/delete` on a client who is active or paused. Archive first, then delete: delete is the DPDP erasure (`erase_client()`) and cannot be undone, so it is the second of two steps. |
 | `CLIENT_DELETE_NOT_CONFIRMED` | 400 | `POST /v1/clients/{id}/delete` with a typed name that is not the client's (case and whitespace ignored). |
@@ -151,6 +157,7 @@ branches on (`exception/GlobalExceptionHandler.java`):
 | `TICKET_EXPIRED` | 401 | The step-up ticket was right but has aged out or been spent — start the step-up again. |
 | `PHONE_INVALID` | 400 | The new number is not an E.164 Indian mobile. |
 | `SESSION_CANCELLED` | 409 | **Portal 11b.** Starting a workout against a cancelled session. |
+| `SESSION_TOO_EARLY` | 409 | `POST /v1/sessions/{id}/start` more than a day before the session's own start (21 Nov 2026; was `400 VALIDATION` naming `startedAt`). The log opens a day ahead. |
 | `PHONE_UNCHANGED` · `PHONE_TAKEN` · `PHONE_CHANGE_UNPROVEN` | 400 · 409 · 401 | Also returned by the **portal's** number change (11e), with the trainer's meanings. `PHONE_TAKEN` never says who holds the number, and on the trainer's change it is only answered at `confirm`, after the new number's code was right. |
 
 The rows from `VALIDATION` down were added on 23 Sep 2026: the six V8 codes are
@@ -647,6 +654,12 @@ number the trainer typed already signs in as a *trainer* account, so the invite
 can never be delivered — the row needs a **Fix number** action rather than a
 silent wait, and a client that could not read the field could not draw it.
 Appended last, like every other additive field.
+
+**`gender`** (22 Nov 2026) — V43's column, `female` | `male` | `other` |
+`prefer_not_to_say`, or `null` when the client has not given one. Appended last
+so the roster's filter panel can narrow on it without one read per client. It is
+the business record, like the date of birth, so it is not held back before
+consent.
 
 ### `POST /v1/clients` → `201`
 **Purpose:** add a client.
@@ -2022,19 +2035,19 @@ Built on the v1 schema; money is always a decimal string and every response stat
 | Route | What it does |
 | --- | --- |
 | `GET /v1/money/summary` | Adds `takeHome` to every month and to `total` (collected less the gym's part of paid payments). |
-| `GET /v1/money/activity?from&to&limit&cursor` | `sold` · `paid` · `write_off` · `refund`, newest first, keyset on `(at, id)`. Limit 8 default, 100 max. |
-| `GET /v1/payments/export?from&to&…` | CSV, streamed page by page. `from` and `to` required, 3 years max (`RANGE_TOO_LARGE`). Cells starting `= + - @` are prefixed with `'`. |
+| `GET /v1/money/activity?from&to&limit&cursor` | `sold` · `paid` · `write_off` · `refund`, newest first, keyset on `(at, id)`. Limit 8 default, 100 max. A cancelled single-session sale is not a `sold` event (20 Nov 2026). |
+| `GET /v1/payments/export?from&to&…` | CSV, streamed page by page, every page in one read-only snapshot (REPEATABLE READ, 20 Nov 2026). `from` and `to` required, 3 years max (`RANGE_TOO_LARGE`). Cells starting `= + - @`, a tab or a CR are prefixed with `'`. |
 | `GET /v1/money/gym?from&to` | `stats`, `shares[]` (per pack: `sold`, `billed`, `trainerTake`, `gymCut`, `gymSharePercent`, `gymShareAmount`) and `settlement` (null until pay terms exist). 24 months max. |
-| `GET · POST /v1/gym-arrangements`, `PATCH · DELETE /{id}` | Pay terms with a gym. Errors `ARRANGEMENT_NEEDS_GYM` · `ARRANGEMENT_OVERLAP` · `ARRANGEMENT_STARTED` · `ID_CONFLICT`. |
-| `GET · POST /v1/trainer-payouts`, `PATCH · DELETE /{id}` | What the gym paid. `ARRANGEMENT_REQUIRED` with no running terms; `receivedAt` never in the future. |
+| `GET · POST /v1/gym-arrangements`, `PATCH · DELETE /{id}` | Pay terms with a gym. `startsMonth` from 24 months back to 12 ahead, else 400 `VALIDATION` (20 Nov 2026). Errors `ARRANGEMENT_NEEDS_GYM` · `ARRANGEMENT_OVERLAP` · `ARRANGEMENT_STARTED` · `ID_CONFLICT`. |
+| `GET · POST /v1/trainer-payouts`, `PATCH · DELETE /{id}` | What the gym paid. `ARRANGEMENT_REQUIRED` with no running terms; `receivedAt` not before the first day of the month 24 months back (20 Nov 2026) and never in the future. |
 | `GET /v1/reports/practice?months=12` | Months, headline (`retentionPercent`, `takeHome`), top ten clients with `collected` and `yours`. 24 months max. |
-| `POST /v1/packs` · `PATCH /v1/packs/{id}` · `DELETE /v1/packs/{id}` | Price list on the v1 columns: `service`, `basis`, `sessions`, `validityDays`, `trainerSharePercent` | `trainerShareAmount`. Unknown keys (including the old `type`) are 400. DELETE only for a pack never sold. |
+| `POST /v1/packs` · `PATCH /v1/packs/{id}` · `DELETE /v1/packs/{id}` | Price list on the v1 columns: `service`, `basis`, `sessions`, `validityDays`, `trainerSharePercent` | `trainerShareAmount`. Unknown keys (including the old `type`) are 400. DELETE only for a pack with no live sale (an undone sale does not count, 20 Nov 2026). `orderIndex` 0 to 10,000 on POST and PATCH (20 Nov 2026). POST refuses a 201st pack, retired ones included (`PACK_LIMIT`). |
 
 `PackRow` (`GET /v1/packs`) gains `gymSharePercent` and `gymShareAmount`: what the gym keeps, derived and never stored.
 
 ### Gym directory (V8, 3 Oct 2026)
 
-`PATCH /v1/trainers/me` accepts `gymPlace: {placeId, name, address?, city?, lat?, lng?, mapLink?} | null` — the gym picked from the web's place search (the web's server reads Places; this backend never calls out). `placeId` (≤300) and `name` (≤120) are required; `lat` and `lng` come together, within ±90 / ±180; `mapLink` must be http(s). Setting it adds the place to the shared directory (or reuses the row with that `placeId`; blanks are filled, nothing is overwritten), links the profile, and snapshots `gymName = name`. `null` clears the link **and** `gymName`. `gymName` alone stays free text and **unlinks**; sending both is 400 `VALIDATION`. A gym needs `gym_floor` among `trainingModes`, else 400 `GYM_NEEDS_FLOOR` (was a bare `VALIDATION`). Arrangements and payouts recorded earlier under the same typed name join the place when it is picked.
+`PATCH /v1/trainers/me` locks the trainer row, takes the ETag (version plus reach) as `If-Match`, and takes a `preferences` value only as a text of at most 200 characters, a number or true/false (20 Nov 2026). It accepts `gymPlace: {placeId, name, address?, city?, lat?, lng?, mapLink?} | null` — the gym picked from the web's place search (the web's server reads Places; this backend never calls out). `placeId` (≤300) and `name` (≤120) are required; `lat` and `lng` come together, within ±90 / ±180; `mapLink` must be http(s). Setting it adds the place to the shared directory (or reuses the row with that `placeId`; blanks are filled, nothing is overwritten), links the profile, and snapshots `gymName = name`. `null` clears the link **and** `gymName`. `gymName` alone stays free text and **unlinks**; sending both is 400 `VALIDATION`. A gym needs `gym_floor` among `trainingModes`, else 400 `GYM_NEEDS_FLOOR` (was a bare `VALIDATION`). Arrangements and payouts recorded earlier under the same typed name join the place when it is picked.
 
 `GET /v1/trainers/me` and `GET /v1/me` return `gymPlace: {id, placeId, name, address, city, mapLink} | null`. Arrangement and payout rows carry `gymPlaceId`. Settlement keys on the place when there is one, else on the case-insensitive name, so a rename cannot split one gym's balance. Support reads `gym_place_stats` with `scripts/gym-stats.sh` — trainers and active clients per gym, counts only.
 
@@ -2062,7 +2075,7 @@ New error codes: `PACK_NAME_TAKEN` · `PACK_SOLD` · `GYM_PACK_NEEDS_GYM` · `PA
 
 **`totals`** `{setsDone, setsPlanned, volumeKg}` — one aggregate over the session's non-removed exercises; `volumeKg` is done weight × reps sets only, the same figure as `log.volumeKg` on the Schedule row.
 
-**Errors.** `404` — not your session / set / exercise, or a library exercise you can't use · `409 SESSION_NOT_STARTED` · `409 SESSION_CANCELLED` · `409 SESSION_NO_SHOW` · `409 CLIENT_NOT_BOOKABLE` (walk-in: paused, archived or removed) · `409 SESSION_CLIENT_TIME_TAKEN` · `409 ID_CONFLICT` (a client-minted id that is someone else's) · `409 SET_PLANNED` (DELETE on a planned set) · `409 SET_LIMIT` (50 sets on one exercise) · `409 EXERCISE_REMOVED` (a write to a removed exercise — restore it first) · `422 SET_NEEDS_VALUE` (`done:true` with nothing prescribed to copy, or an extra set with no value) · `400 VALIDATION` — rpe not 1–10 in half steps, a value outside the set's range (load 0–2000, effort 0–86400), a load on a bodyweight set, a key that is not a field, a string where a number belongs, set notes over 200, exercise notes over 500, rest outside 0–3600, swapping to the same exercise, a bad `reason` / `scope` / `planRowId`, `scope: program` or `onPlan` on an exercise that is not from the client's own program, an `endedAt` / `startedAt` in the future or before the start, values on a not-done set without `done:true`, `done:false` on an extra set.
+**Errors.** `404` — not your session / set / exercise, or a library exercise you can't use · `409 SESSION_NOT_STARTED` · `409 SESSION_CANCELLED` · `409 SESSION_NO_SHOW` · `409 SESSION_TOO_EARLY` (start more than a day before the session's own start; 21 Nov 2026, was `400 VALIDATION`) · `409 CLIENT_NOT_BOOKABLE` (walk-in: paused, archived or removed; 19 Nov 2026: also start, for a client paused, archived, removed or deleted since the booking — an open log is not refused) · `409 SESSION_CLIENT_TIME_TAKEN` · `409 ID_CONFLICT` (a client-minted id that is someone else's) · `409 SET_PLANNED` (DELETE on a planned set) · `409 SET_LIMIT` (50 sets on one exercise) · `409 EXERCISE_REMOVED` (a write to a removed exercise — restore it first) · `422 SET_NEEDS_VALUE` (`done:true` with nothing prescribed to copy, or an extra set with no value) · `400 VALIDATION` — rpe not 1–10 in half steps, a value outside the set's range (load 0–2000, effort 0–86400), a load on a bodyweight set, a key that is not a field, a string where a number belongs, set notes over 200, exercise notes over 500, rest outside 0–3600, swapping to the same exercise, a bad `reason` / `scope` / `planRowId`, `scope: program` or `onPlan` on an exercise that is not from the client's own program, an `endedAt` / `startedAt` in the future or before the start, values on a not-done set without `done:true`, `done:false` on an extra set.
 
 ### Also changed for the console (3 Oct 2026, additive)
 
@@ -2158,3 +2171,45 @@ and the trainer has set one — otherwise the key is absent. It is read through 
 answers only a CLIENT session about one of its own client ids while that client may see money. The portal turns it
 into a `upi://pay` link; nothing moves through InclineYou and the trainer still records the payment. The UPI ID itself
 is written with `PATCH /v1/trainers/me {upiVpa}` (`''` clears it), now from Settings → Account as well as setup.
+
+## Invite accept — the client's WhatsApp-reminder choice (21 Nov 2026)
+
+`POST /v1/invites/{token}/accept` and `POST /v1/me/invites/{inviteId}/accept` take an optional `whatsappReminders`
+(boolean; absent is `false`): the invite page's unticked "Send me a WhatsApp reminder before each session". Only `true`
+records the opt-in (`client_prefs.whatsapp_opt_in_at`), and it is recorded even while the trainer's `session_reminders`
+switch is off; a reminder still needs both. Accepting used to opt the client in whenever the trainer's switch was on, with
+no question asked — D-17 says reminders are opt-in on both sides. `V37__accept_invite_reminder_choice.sql` adds the
+four-argument `accept_client_invite` and replaces V11's three-argument one to pass `false`. The full routes are in
+`api-contract-v1.2.html` (inv-a3, inv-a7).
+
+## Client gender (22 Nov 2026)
+
+`gender` — `female` · `male` · `other` · `prefer_not_to_say` — is taken by `POST /v1/clients` (optional on the wire; the
+web's add flow requires an answer) and `PATCH /v1/clients/{id}` (`null` clears it), and returned by `GET /v1/clients/{id}`
+(absent when not given). Anything else is `400 VALIDATION` "gender: female, male, other or prefer_not_to_say". It is not
+consent-locked. `V43__client_gender.sql`: the column, a trigger that clears it on erase, and `client_export()` carrying it.
+
+**The client corrects it (V44).** `GET /v1/portal/me` carries `myDetails.gender`, and `PATCH /v1/portal/me` takes
+`gender` with the same four values (`null` clears it) — the trainer records it, the client is the authority on it. The
+database's client-column guard (`trg_client_client_guard`) lists `gender` among the columns a client may change.
+
+## Consent before the third session (22 Nov 2026)
+
+**Invite accept now requires `trainingTerms: true`** on both `POST /v1/invites/{token}/accept` and
+`POST /v1/me/invites/{inviteId}/accept` — the invite page's required "I'm fit to take part in exercise … and I accept my
+trainer's coaching terms". Absent or `false` is `400 TRAINING_TERMS_REQUIRED`, refused before the code is spent.
+`V42__client_training_terms.sql` adds `client.training_terms_accepted_at` and a five-argument `accept_client_invite` that
+stamps it. The privacy notice's version is not bumped (it is shared with the trainer's own consent).
+
+**`409 CONSENT_REQUIRED` (`ConsentGate`)** — a client has consented once they accepted an invite (`membership_status`
+accepted or paused, or removed after accepting). Until then:
+
+| Refused | Route |
+| --- | --- |
+| A **third delivered session**. Delivered = marked done or its log opened; a demo counts; no-shows, cancellations and bookings do not; a log already open can always be marked or finished. | `POST /v1/sessions/{id}/start`, a walk-in start, `POST /v1/sessions/{id}/done`; the batch `POST /v1/sessions/done` answers that item `skipped` with `reason: CONSENT_REQUIRED` |
+| Health and body data | `POST /v1/assessments`, `PUT /v1/assessments/{id}/entry`, `POST /v1/assessment-schedules` |
+| The personal profile | `PATCH /v1/clients/{id}` setting `goal`, `heightCm` or `activityLevel` (clearing one is allowed) |
+| Notes | `POST /v1/clients/{id}/notes`; `PATCH …/notes/{noteId}` changing `body` or sharing (unshare, unpin, delete and restore are allowed) |
+
+Reads are never refused. The progress-report download is painted in the browser, so that lock is the web's. The free
+allowance is `ConsentGate.FREE_SESSIONS = 2`, mirrored as `FREE_SESSIONS` in the web's `lib/clients/setup.ts`.

@@ -111,6 +111,44 @@ class PortalMoneyApiTest {
     }
 
     @Test
+    @DisplayName("money: a single session sold for a day still to come, nothing paid, is not owed yet — only the past one is due (21 Nov 2026)")
+    void futureSingleSaleIsNotDue() throws Exception {
+        UUID c = live();
+        UUID ahead = session(c, null, Instant.now().plus(7, java.time.temporal.ChronoUnit.DAYS), 60, "scheduled", "trainer", null, null);
+        UUID before = session(c, null, Instant.now().minus(7, java.time.temporal.ChronoUnit.DAYS), 60, "done", "trainer", null, null);
+        for (UUID sid : new UUID[]{ahead, before}) {
+            int days = sid == ahead ? 7 : -7;
+            jdbc.update("""
+                    INSERT INTO package (id, trainer_id, client_id, session_id, name, service, basis, sessions_total, sessions_remaining, amount, currency, start_date, due_date)
+                    VALUES (gen_random_uuid(), :t::uuid, :c::uuid, :s::uuid, 'Single session', 'floor', 'sessions', 1, 1, 800, 'INR', CURRENT_DATE + :d, CURRENT_DATE + :d)""",
+                    Map.of("t", arun.toString(), "c", c.toString(), "s", sid.toString(), "d", days));
+        }
+        get(tokenFor(phone), "/v1/portal/money").andExpect(status().isOk()).andExpect(jsonPath("$.amountDue").value("800.00"));
+    }
+
+    @Test
+    @DisplayName("a single-session sale is not the client's package: the pack stays the package, on this screen and on Home's card, and singles are not past packs (21 Nov 2026)")
+    void singleSaleIsNotThePackage() throws Exception {
+        UUID c = live();
+        UUID now = pack(c, "12 sessions", "active", 12, 7, 12000, 40, 50);
+        // an extra session sold on its own, booked after the pack was bought: the newest active package row
+        UUID extra = session(c, null, Instant.now().plus(2, java.time.temporal.ChronoUnit.DAYS), 60, "scheduled", "trainer", null, null);
+        UUID past = session(c, null, Instant.now().minus(3, java.time.temporal.ChronoUnit.DAYS), 60, "done", "trainer", null, null);
+        for (UUID[] sale : new UUID[][]{{extra, null}, {past, null}}) {
+            jdbc.update("""
+                    INSERT INTO package (id, trainer_id, client_id, session_id, name, service, basis, sessions_total, sessions_remaining, amount, currency, start_date, due_date, status, closed_at)
+                    VALUES (gen_random_uuid(), :t::uuid, :c::uuid, :s::uuid, 'Single session', 'floor', 'sessions', 1, :left, 800, 'INR', CURRENT_DATE, CURRENT_DATE, :st,
+                            CASE WHEN :st = 'active' THEN NULL ELSE now() END)""",
+                    Map.of("t", arun.toString(), "c", c.toString(), "s", sale[0].toString(), "left", sale[0] == extra ? 1 : 0, "st", sale[0] == extra ? "active" : "completed"));
+        }
+        String token = tokenFor(phone);
+        get(token, "/v1/portal/package").andExpect(status().isOk()).andExpect(jsonPath("$.package.id").value(now.toString()))
+                .andExpect(jsonPath("$.package.name").value("12 sessions")).andExpect(jsonPath("$.past", hasSize(0)));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/v1/portal/home").header("Authorization", "Bearer " + token))
+                .andExpect(jsonPath("$.package.sessionsTotal").value(12)).andExpect(jsonPath("$.package.sessionsLeft").value(7));
+    }
+
+    @Test
     @DisplayName("the package: the one being followed with sessions used and left and its dates, the closed ones apart, and the ledger only while the trainer lets this client see money — sessions never go with the switch")
     void pack() throws Exception {
         UUID c = live();
@@ -128,7 +166,8 @@ class PortalMoneyApiTest {
                 .andExpect(jsonPath("$.past", hasSize(1))).andExpect(jsonPath("$.past[0].id").value(old.toString())).andExpect(jsonPath("$.past[0].status").value("completed"))
                 .andExpect(jsonPath("$.past[0].sessionsTotal").value(6)).andExpect(jsonPath("$.past[0].endedOn").isString())
                 .andExpect(jsonPath("$.history", hasSize(1))).andExpect(jsonPath("$.history[0].kind").value("extend")).andExpect(jsonPath("$.history[0].days").value(14)).andExpect(jsonPath("$.history[0].sessions").doesNotExist()));
-        assertFalse(out.contains("12000") || out.contains("amount") || out.contains("999"), "no price, and nobody else's");
+        // By meaning, not by digits (19 Nov 2026): "999" was found by chance inside a random id or a timestamp now and then.
+        assertFalse(out.contains("12000") || out.contains("amount") || out.contains("Somebody else"), "no price, and nobody else's");
 
         // the switch off: sessions stay, the ledger goes — the key is absent, not empty
         jdbc.update("UPDATE client SET portal_show_money = false WHERE id = :c::uuid", Map.of("c", c.toString()));

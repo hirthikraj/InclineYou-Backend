@@ -52,6 +52,10 @@ public class JwtTokenIssuer implements AuthTokenIssuer {
     public Optional<AuthPrincipal> resolve(String rawToken) {
         try {
             var claims = jwtService.parse(rawToken);
+            // A step-up ticket is a second factor carried beside the bearer token, never one (20 Nov 2026). It was
+            // accepted here like any signed JWT, so on the authenticated() routes — /v1/auth/sessions and POST
+            // /v1/trainers — the ticket alone signed the caller in. StepUpService reads tickets itself, not through here.
+            if (JwtService.ROLE_STEP_UP.equals(claims.get("role", String.class))) return Optional.empty();
             return Optional.of(new AuthPrincipal(
                     claims.getSubject(),
                     claims.get("phone", String.class),

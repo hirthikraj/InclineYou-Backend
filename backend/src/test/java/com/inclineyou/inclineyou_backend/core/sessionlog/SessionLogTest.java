@@ -40,6 +40,8 @@ class SessionLogTest {
 
     @Autowired WebApplicationContext context;
     @Autowired NamedParameterJdbcTemplate jdbc;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean SetLogJdbcRepository setRepo;
+    @org.springframework.test.context.bean.override.mockito.MockitoSpyBean LogExerciseJdbcRepository exerciseRepo;
 
     private MockMvc mvc;
     private UUID me, other, tenant, client, program, workout;
@@ -256,6 +258,109 @@ class SessionLogTest {
         doGet("/v1/sessions/" + session + "/log").andExpect(jsonPath("$.totals.setsDone").value(3)).andExpect(jsonPath("$.totals.volumeKg").value(1210));
     }
 
+    @Test
+    @DisplayName("pick: today's booked leaves out an archived or deleted client; open leaves out a deleted one but keeps an archived one's log")
+    void pickLeavesOutGoneClients() throws Exception {
+        String noon = "date_trunc('day', now() AT TIME ZONE 'Asia/Kolkata') AT TIME ZONE 'Asia/Kolkata' + interval '12 hours'";
+        UUID gone = client(me, tenant, "Archived Anu", "active");
+        UUID goneBooked = booked(gone, noon, null);
+        UUID goneOpen = booked(gone, "now() - interval '2 hours'", null);
+        jdbc.update("UPDATE scheduled_session SET started_at = now() - interval '2 hours' WHERE id = :s::uuid", Map.of("s", goneOpen.toString()));
+        jdbc.update("UPDATE client SET status = 'archived', archived_at = now(), archive_reason = 'other' WHERE id = :c::uuid",
+                Map.of("c", gone.toString()));
+        UUID erased = client(me, tenant, "Deleted Dev", "active");
+        UUID erasedOpen = booked(erased, "now() - interval '3 hours'", null);
+        jdbc.update("UPDATE scheduled_session SET started_at = now() - interval '3 hours' WHERE id = :s::uuid", Map.of("s", erasedOpen.toString()));
+        jdbc.update("UPDATE client SET status = 'archived', archived_at = now(), archive_reason = 'other', deleted_at = now() WHERE id = :c::uuid",
+                Map.of("c", erased.toString()));
+
+        doGet("/v1/sessions/pick").andExpect(status().isOk())
+                .andExpect(jsonPath("$.booked[?(@.sessionId=='" + goneBooked + "')]").isEmpty())
+                .andExpect(jsonPath("$.open[?(@.sessionId=='" + goneOpen + "')].clientName").value("Archived Anu"))   // can still be closed
+                .andExpect(jsonPath("$.open[?(@.sessionId=='" + erasedOpen + "')]").isEmpty());
+    }
+
+    @Test
+    @DisplayName("start: a client archived or paused since the booking is 409 CLIENT_NOT_BOOKABLE; a start more than a day before the session is 409 SESSION_TOO_EARLY")
+    void startRules() throws Exception {
+        UUID anu = client(me, tenant, "Anu", "active");
+        UUID early = booked(anu, "now() - interval '2 hours'", null);
+        jdbc.update("UPDATE client SET status = 'archived', archived_at = now(), archive_reason = 'other' WHERE id = :c::uuid",
+                Map.of("c", anu.toString()));
+        doPost("/v1/sessions/" + early + "/start", "{}").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CLIENT_NOT_BOOKABLE"));
+
+        UUID pat = client(me, tenant, "Pat", "active");
+        UUID booking = booked(pat, "now() - interval '1 hour'", null);
+        long twoDaysEarlier = System.currentTimeMillis() - 2 * 86_400_000L - 3_600_000L;
+        doPost("/v1/sessions/" + booking + "/start", "{\"startedAt\":" + twoDaysEarlier + "}").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("SESSION_TOO_EARLY"));
+        doPost("/v1/sessions/" + booking + "/start", "{}").andExpect(status().isOk());
+        jdbc.update("UPDATE client SET status = 'paused', paused_at = now() WHERE id = :c::uuid", Map.of("c", pat.toString()));
+        doPost("/v1/sessions/" + booking + "/start", "{}").andExpect(status().isOk());   // already open: still reachable, to close it
+    }
+
+    @Test
+    @DisplayName("walk-in: replaying the id of one of the client's ordinary future bookings is 409 ID_CONFLICT, and that booking stays unstarted")
+    void walkInReplayIsOnlyAWalkIn() throws Exception {
+        UUID friday = booked(client, "date_trunc('minute', now()) + interval '3 days'", null);   // an ordinary future booking
+        doPost("/v1/sessions/walk-in", "{\"id\":\"" + friday + "\",\"clientId\":\"" + client + "\"}")
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ID_CONFLICT"));
+        org.junit.jupiter.api.Assertions.assertNull(jdbc.queryForObject("SELECT started_at FROM scheduled_session WHERE id = :s::uuid",
+                Map.of("s", friday.toString()), java.sql.Timestamp.class), "Friday's booking was not started");
+
+        UUID walk = UUID.randomUUID();
+        UUID other = client(me, tenant, "Walk In", "active");
+        doPost("/v1/sessions/walk-in", "{\"id\":\"" + walk + "\",\"clientId\":\"" + other + "\"}").andExpect(status().isCreated());
+        doPost("/v1/sessions/walk-in", "{\"id\":\"" + walk + "\",\"clientId\":\"" + other + "\"}").andExpect(status().isOk());   // a true replay
+    }
+
+    @Test
+    @DisplayName("an extra set double-tapped with one id: the first lookup misses the first request, and the answer is that set (200), not 409")
+    void extraSetDoubleTap() throws Exception {
+        start();
+        UUID id = UUID.randomUUID();
+        String body = "{\"id\":\"" + id + "\",\"loadValue\":20,\"effortValue\":10}";
+        doPost("/v1/sessions/" + session + "/exercises/" + sx(0) + "/sets", body).andExpect(status().isCreated());
+        // The second tap's first lookup ran before the first committed.
+        org.mockito.Mockito.doReturn(java.util.Optional.empty()).doCallRealMethod().when(setRepo).findOwned(me, id);
+        doPost("/v1/sessions/" + session + "/exercises/" + sx(0) + "/sets", body).andExpect(status().isOk())
+                .andExpect(jsonPath("$.set.id").value(id.toString()));
+        org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM set_log WHERE id = :i::uuid",
+                Map.of("i", id.toString()), Integer.class));
+    }
+
+    @Test
+    @DisplayName("deleting an extra set twice: the repeat answers 200 with the totals (the set is gone either way); another trainer's session is still 404")
+    void deleteSetRepeats() throws Exception {
+        start();
+        String made = doPost("/v1/sessions/" + session + "/exercises/" + sx(0) + "/sets", "{\"loadValue\":20,\"effortValue\":10}")
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String id = com.jayway.jsonpath.JsonPath.read(made, "$.set.id");
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/v1/sessions/" + session + "/sets/" + id))
+                .andExpect(status().isOk());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/v1/sessions/" + session + "/sets/" + id))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totals").exists());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete("/v1/sessions/" + UUID.randomUUID() + "/sets/" + id))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    @DisplayName("an exercise double-tapped with one id: the first lookup misses the first request, and the answer is that exercise (200), not 409")
+    void addExerciseDoubleTap() throws Exception {
+        start();
+        UUID id = UUID.randomUUID();
+        UUID goblet = exercise("Goblet squat", "weight_reps");
+        String body = "{\"id\":\"" + id + "\",\"exerciseId\":\"" + goblet + "\",\"sets\":3}";
+        doPost("/v1/sessions/" + session + "/exercises", body).andExpect(status().isCreated());
+        org.mockito.Mockito.doReturn(java.util.Optional.empty()).doCallRealMethod().when(exerciseRepo).findOwned(me, id);
+        doPost("/v1/sessions/" + session + "/exercises", body).andExpect(status().isOk());
+        org.junit.jupiter.api.Assertions.assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM session_exercise WHERE id = :i::uuid",
+                Map.of("i", id.toString()), Integer.class));
+        org.junit.jupiter.api.Assertions.assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM set_log WHERE session_exercise_id = :i::uuid",
+                Map.of("i", id.toString()), Integer.class), "its sets laid down once");
+    }
+
     /* ------------------------------------------------------------------------------------ sets */
 
     @Test
@@ -423,9 +528,10 @@ class SessionLogTest {
         doPost("/v1/sessions/" + session + "/exercises/" + sx + "/sets", "{\"loadValue\":50,\"done\":false}").andExpect(status().isBadRequest());
         doPost("/v1/sessions/" + session + "/exercises/" + sx + "/sets", "{\"loadValue\":50,\"effortValue\":8,\"loadKind\":\"kettlebell\"}").andExpect(status().isBadRequest());
 
-        // Delete: an extra set goes (and the grid's counts come back); a planned one is a 409; a gone one is a 404.
+        // Delete: an extra set goes (and the grid's counts come back); a planned one is a 409; a repeat answers as the
+        // delete did (19 Nov 2026; it was a 404, which a retry after a lost answer showed as an error).
         doDelete("/v1/sessions/" + session + "/sets/" + id).andExpect(status().isOk()).andExpect(jsonPath("$.totals.setsDone").value(0));
-        doDelete("/v1/sessions/" + session + "/sets/" + id).andExpect(status().isNotFound());
+        doDelete("/v1/sessions/" + session + "/sets/" + id).andExpect(status().isOk()).andExpect(jsonPath("$.totals.setsDone").value(0));
         doDelete("/v1/sessions/" + session + "/sets/" + setAt(0, 1)).andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("SET_PLANNED"));
     }
 
@@ -597,7 +703,9 @@ class SessionLogTest {
         doPost("/v1/sessions/" + session + "/exercises/" + sx + "/swap", "{\"toExerciseId\":\"" + squat + "\"}")
                 .andExpect(status().isOk()).andExpect(jsonPath("$.swappedFrom").doesNotExist()).andExpect(jsonPath("$.swapReason").doesNotExist());
 
-        doPost("/v1/sessions/" + session + "/exercises/" + sx + "/swap", "{\"toExerciseId\":\"" + squat + "\"}").andExpect(status().isBadRequest());
+        // Already that movement: a retry whose first answer was lost answers the exercise as it is (19 Nov 2026; it was a 400).
+        doPost("/v1/sessions/" + session + "/exercises/" + sx + "/swap", "{\"toExerciseId\":\"" + squat + "\"}")
+                .andExpect(status().isOk()).andExpect(jsonPath("$.exerciseId").value(squat.toString()));
         doPost("/v1/sessions/" + session + "/exercises/" + sx + "/swap", "{\"toExerciseId\":\"" + curl + "\",\"reason\":\"bored\"}").andExpect(status().isBadRequest());
         doPost("/v1/sessions/" + session + "/exercises/" + sx + "/swap", "{\"toExerciseId\":\"" + curl + "\",\"scope\":\"template\"}").andExpect(status().isBadRequest());
         doPost("/v1/sessions/" + session + "/exercises/" + sx + "/swap", "{\"toExerciseId\":\"" + UUID.randomUUID() + "\"}").andExpect(status().isNotFound());
@@ -626,7 +734,12 @@ class SessionLogTest {
         UUID sx = sx(0);
         sleep();
         long before = revisedAt();
+        int mainSets = jdbc.queryForObject("SELECT count(*) FROM workout_set WHERE workout_exercise_id = :w::uuid", Map.of("w", wSquat.toString()), Integer.class);
         doPost("/v1/sessions/" + session + "/exercises/" + sx + "/swap", "{\"toExerciseId\":\"" + goblet + "\",\"planRowId\":\"" + wGoblet + "\",\"scope\":\"program\"}").andExpect(status().isOk());
+        // The two rows trade places (19 Nov 2026): the alternative now holds the squat and the main's old sets, so each
+        // movement is on the plan once.
+        assertEquals(squat, jdbc.queryForObject("SELECT exercise_id FROM workout_exercise WHERE id = :w::uuid", Map.of("w", wGoblet.toString()), UUID.class));
+        assertEquals(mainSets, jdbc.queryForObject("SELECT count(*) FROM workout_set WHERE workout_exercise_id = :w::uuid", Map.of("w", wGoblet.toString()), Integer.class));
         assertEquals(goblet, jdbc.queryForObject("SELECT exercise_id FROM workout_exercise WHERE id = :w::uuid", Map.of("w", wSquat.toString()), UUID.class));
         assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM workout_set WHERE workout_exercise_id = :w::uuid", Map.of("w", wSquat.toString()), Integer.class));   // the alternative's prescription
         assertEquals(40, jdbc.queryForObject("SELECT load_value FROM workout_set WHERE workout_exercise_id = :w::uuid AND position = 1", Map.of("w", wSquat.toString()), Integer.class));
@@ -727,6 +840,9 @@ class SessionLogTest {
         UUID id = UUID.randomUUID();
         jdbc.update("INSERT INTO client (id, trainer_id, tenant_id, name, client_type, status, paused_at) VALUES (:id::uuid, :t::uuid, :ten::uuid, :n, 'independent', :s, CASE WHEN :s = 'paused' THEN now() END)",
                 Map.of("id", id.toString(), "t", trainer.toString(), "ten", tenant.toString(), "n", name, "s", status));
+        // Consented (22 Nov 2026): ConsentGate refuses a third session, notes, the profile and health data without it.
+        jdbc.update("UPDATE client SET membership_status = 'accepted', invited_at = now(), accepted_at = now() WHERE id = :id::uuid",
+                Map.of("id", id.toString()));
         return id;
     }
 

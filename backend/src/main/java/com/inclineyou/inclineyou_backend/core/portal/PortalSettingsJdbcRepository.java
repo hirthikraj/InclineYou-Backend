@@ -62,10 +62,19 @@ public class PortalSettingsJdbcRepository {
         var m = new HashMap<String, Object>(set);
         m.put("c", client.toString());
         var sql = new StringBuilder();
-        set.keySet().forEach(col -> sql.append(sql.isEmpty() ? "" : ", ").append(col).append(" = :").append(col));
-        if (recordOptIn) sql.append(sql.isEmpty() ? "" : ", ").append("whatsapp_opt_in_at = COALESCE(whatsapp_opt_in_at, now())");
+        var differs = new StringBuilder();
+        set.keySet().forEach(col -> {
+            sql.append(sql.isEmpty() ? "" : ", ").append(col).append(" = :").append(col);
+            differs.append(differs.isEmpty() ? "" : " OR ").append(col).append(" IS DISTINCT FROM :").append(col);
+        });
+        if (recordOptIn) {
+            sql.append(sql.isEmpty() ? "" : ", ").append("whatsapp_opt_in_at = COALESCE(whatsapp_opt_in_at, now())");
+            differs.append(differs.isEmpty() ? "" : " OR ").append("whatsapp_opt_in_at IS NULL");
+        }
         if (sql.isEmpty()) return;
-        jdbc.update("UPDATE client_prefs SET " + sql + " WHERE client_id = :c::uuid", m);
+        // Only when something differs (21 Nov 2026): the updated_at trigger is the version, and a save that changed nothing moved it, so
+        // another tab's next save was 412 "changed on another device" for no change at all.
+        jdbc.update("UPDATE client_prefs SET " + sql + " WHERE client_id = :c::uuid AND (" + differs + ")", m);
     }
 
     // ── privacy ──────────────────────────────────────────────────────────────────────────────────
@@ -117,6 +126,11 @@ public class PortalSettingsJdbcRepository {
     // ── push ─────────────────────────────────────────────────────────────────────────────────────
 
     public record Sub(UUID id, UUID owner, boolean revoked) {}
+
+    /** Serialises the subscribes of one browser (its endpoint), until the transaction ends. */
+    public void lockEndpoint(String endpoint) {
+        jdbc.queryForList("SELECT pg_advisory_xact_lock(hashtext('push:' || :e))", Map.of("e", endpoint));
+    }
 
     public Optional<Sub> subscriptionByEndpoint(String endpoint) {
         return jdbc.query("SELECT id, app_user_id, revoked_at IS NOT NULL AS revoked FROM push_subscription WHERE endpoint = :e", Map.of("e", endpoint),

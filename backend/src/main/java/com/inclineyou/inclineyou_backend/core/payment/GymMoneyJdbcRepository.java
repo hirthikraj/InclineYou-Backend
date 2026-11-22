@@ -33,6 +33,12 @@ public class GymMoneyJdbcRepository {
     private static final String TAKE = "(k.amount - gym_cut(k.amount, k.trainer_share_percent, k.trainer_share_amount))";
     /** "Floor" is a package sold with a share (a gym pack, floor only by the schema). */
     private static final String HAS_SHARE = "(k.trainer_share_percent IS NOT NULL OR k.trainer_share_amount IS NOT NULL)";
+    /**
+     * A sale that happened (20 Nov 2026): a single session is sold when it is booked, and a cancel or an uncharged
+     * no-show keeps the sale as status cancelled with nothing owed — not a sale, so not billed, not a session, not
+     * take-home. The same rule as MoneyReportJdbcRepository.packagesByMonth.
+     */
+    private static final String SOLD = "NOT (k.session_id IS NOT NULL AND k.status = 'cancelled')";
 
     private static Map<String, Object> span(UUID tid, YearMonth first, YearMonth last) {
         var p = new HashMap<String, Object>();
@@ -51,9 +57,9 @@ public class GymMoneyJdbcRepository {
                        coalesce(sum(k.amount) FILTER (WHERE NOT %1$s), 0) AS remote_billed,
                        coalesce(sum(k.sessions_total) FILTER (WHERE NOT %1$s), 0) AS remote_sessions
                 FROM package k
-                WHERE k.trainer_id = :tid::uuid AND k.deleted_at IS NULL
+                WHERE k.trainer_id = :tid::uuid AND k.deleted_at IS NULL AND %3$s
                   AND k.start_date >= :firstDay AND k.start_date < :endDay
-                """.formatted(HAS_SHARE, TAKE), span(tid, first, last), (rs, i) -> new GymSaleStats(
+                """.formatted(HAS_SHARE, TAKE, SOLD), span(tid, first, last), (rs, i) -> new GymSaleStats(
                 rs.getBigDecimal("floor_billed"), rs.getLong("floor_sessions"), rs.getBigDecimal("gym_cut"),
                 rs.getBigDecimal("remote_billed"), rs.getLong("remote_sessions")));
     }
@@ -70,10 +76,10 @@ public class GymMoneyJdbcRepository {
                        max(pk.trainer_share_percent) AS ppct, max(pk.trainer_share_amount) AS pamt,
                        max(pk.order_index) AS ord
                 FROM package k LEFT JOIN pack pk ON pk.id = k.pack_id
-                WHERE k.trainer_id = :tid::uuid AND k.deleted_at IS NULL AND %1$s
+                WHERE k.trainer_id = :tid::uuid AND k.deleted_at IS NULL AND %1$s AND %3$s
                   AND k.start_date >= :firstDay AND k.start_date < :endDay
                 GROUP BY 1
-                """.formatted(HAS_SHARE, TAKE), span(tid, first, last), rs -> {
+                """.formatted(HAS_SHARE, TAKE, SOLD), span(tid, first, last), rs -> {
             sold.put(rs.getString("pid"), new PackSales(rs.getInt("sold"), rs.getBigDecimal("billed"), rs.getBigDecimal("take")));
         });
         return sold;

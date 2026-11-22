@@ -272,6 +272,40 @@ class ClientMessageApiTest {
         assertNull(jdbc.queryForObject("SELECT deleted_at FROM client_message WHERE id = :i::uuid", Map.of("i", foreign.toString()), java.sql.Timestamp.class));
     }
 
+    @Test
+    @DisplayName("the bell follows the message: an edit rewords its notice, a delete takes it back (20 Nov 2026)")
+    void bellFollowsTheMessage() throws Exception {
+        String sent = post(c, "{\"body\":\"Session moved to 6pm tomorrow\"}").andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        UUID m = UUID.fromString(JsonPath.read(sent, "$.id"));
+        assertEquals("Session moved to 6pm tomorrow", noticeText(c));
+
+        patch(c, m, "{\"body\":\"Session moved to 7pm tomorrow\"}", null).andExpect(status().isOk());
+        assertEquals("Session moved to 7pm tomorrow", noticeText(c), "the bell quotes the corrected words");
+
+        mvc.perform(delete("/v1/clients/" + c + "/messages/" + m)).andExpect(status().isNoContent());
+        assertEquals(0, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid AND deleted_at IS NULL", c),
+                "a deleted message leaves nothing in the bell");
+    }
+
+    @Test
+    @DisplayName("a notice made before subject_at was stamped is still found by its opening, and only that one")
+    void oldNoticeFoundByText() throws Exception {
+        UUID m = message(c, "Bring your shoes", 0);
+        jdbc.update("""
+                INSERT INTO client_notification (client_id, kind, text, at)
+                VALUES (:c::uuid, 'note', 'Bring your shoes', now()), (:c::uuid, 'note', 'Something else', now())""",
+                Map.of("c", c.toString()));
+        mvc.perform(delete("/v1/clients/" + c + "/messages/" + m)).andExpect(status().isNoContent());
+        assertEquals(1, count("SELECT count(*) FROM client_notification WHERE client_id = :c::uuid AND deleted_at IS NULL", c));
+        assertEquals("Something else", noticeText(c));
+    }
+
+    private String noticeText(UUID client) {
+        return jdbc.queryForObject("SELECT text FROM client_notification WHERE client_id = :c::uuid AND deleted_at IS NULL ORDER BY at DESC LIMIT 1",
+                Map.of("c", client.toString()), String.class);
+    }
+
     /* ─────────────────────────────────────────────────────────────── fixtures ── */
 
     private ResultActions post(UUID client, String body) throws Exception {

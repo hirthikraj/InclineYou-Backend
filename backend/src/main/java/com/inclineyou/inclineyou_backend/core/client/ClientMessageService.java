@@ -66,9 +66,9 @@ public class ClientMessageService {
         }
         String kind = req.sessionId() != null ? "recap" : req.kind() != null ? req.kind() : "note";
 
-        Message row;
+        java.util.Optional<Message> inserted;
         try {   // two writers racing for one recap meet the unique index here
-            row = messages.insert(id, trainerId, clientId, req.sessionId(), req.body(), kind);
+            inserted = messages.insert(id, trainerId, clientId, req.sessionId(), req.body(), kind);
         } catch (DuplicateKeyException e) {
             String msg = String.valueOf(e.getMostSpecificCause().getMessage());
             if (msg.contains("uq_client_message_recap")) {
@@ -76,7 +76,16 @@ public class ClientMessageService {
             }
             throw ApiException.idConflict();
         }
-        notices.mint(clientId, "note", NoticeText.opening(req.body()), req.sessionId());
+        if (inserted.isEmpty()) {
+            // A double tap (20 Nov 2026): the first request's row was not visible to the replay check above, and this
+            // insert waited for it and skipped. It has committed by now, so read it back: a replay, not a 409.
+            var s = messages.find(id).orElseThrow(ApiException::idConflict);
+            if (s.deleted() || !trainerId.equals(s.trainerId()) || !clientId.equals(s.clientId())) throw ApiException.idConflict();
+            return new Made(s.message(), false);
+        }
+        Message row = inserted.get();
+        // subject_at is the message's own time, so an edit or a delete can find this notice again (20 Nov 2026).
+        notices.mint(clientId, "note", NoticeText.opening(req.body()), req.sessionId(), new java.sql.Timestamp(row.at()));
         log.info("client message trainer={} client={} kind={}", trainerId, clientId, kind);
         return new Made(row, true);
     }
@@ -102,7 +111,11 @@ public class ClientMessageService {
         if (stored.message().readAt() != null) {
             throw ApiException.conflict("MESSAGE_ALREADY_READ", "They have already opened it, so it can’t be reworded. Write a new one.");
         }
-        return messages.updateBody(messageId, req.body());
+        var updated = messages.updateBody(messageId, req.body());
+        // The bell quoted the old opening (20 Nov 2026): it now quotes the corrected words.
+        notices.retextMessageNotice(clientId, new java.sql.Timestamp(stored.message().at()),
+                NoticeText.opening(stored.message().body()), NoticeText.opening(updated.body()));
+        return updated;
     }
 
     /** Allowed at any time. A repeat is a 204; 404 only when there never was such a message. */
@@ -110,7 +123,12 @@ public class ClientMessageService {
     public void delete(UUID trainerId, UUID clientId, UUID messageId) {
         messages.client(trainerId, clientId).orElseThrow(ClientMessageService::noClient);
         var stored = ownedLocked(trainerId, clientId, messageId);
-        if (!stored.deleted()) messages.softDelete(messageId);
+        if (!stored.deleted()) {
+            messages.softDelete(messageId);
+            // Its notice goes with it (20 Nov 2026): it quoted the opening, and stayed in the client's bell.
+            notices.retractMessageNotice(clientId, new java.sql.Timestamp(stored.message().at()),
+                    NoticeText.opening(stored.message().body()));
+        }
     }
 
     private ClientMessageJdbcRepository.Stored ownedLocked(UUID trainerId, UUID clientId, UUID messageId) {

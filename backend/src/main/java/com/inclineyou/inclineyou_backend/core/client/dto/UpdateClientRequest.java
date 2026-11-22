@@ -37,7 +37,9 @@ public record UpdateClientRequest(
         Boolean remindersExcluded,
         /** v1.2: {@code true} / {@code false} is the trainer's answer for this client, {@code null} follows {@code clients_see_money}. */
         Patch<Boolean> portalShowMoney,
-        @Null(message = "use pause, resume, archive or unarchive") Object status
+        @Null(message = "use pause, resume, archive or unarchive") Object status,
+        /* V43 (22 Nov 2026): the business record, like the date of birth — not consent-locked. Null clears it. */
+        Patch<@Pattern(regexp = "female|male|other|prefer_not_to_say", message = "female, male, other or prefer_not_to_say") String> gender
 ) {
     public UpdateClientRequest {
         name = Patch.map(name, String::strip);
@@ -47,7 +49,7 @@ public record UpdateClientRequest(
 
     public boolean isEmpty() {
         return name == null && phone == null && dateOfBirth == null && clientType == null
-                && goal == null && heightCm == null && activityLevel == null
+                && goal == null && heightCm == null && activityLevel == null && gender == null
                 && remindersExcluded == null && portalShowMoney == null;
     }
 }

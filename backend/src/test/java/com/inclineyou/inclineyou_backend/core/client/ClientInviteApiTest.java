@@ -45,6 +45,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @Transactional
 class ClientInviteApiTest {
+    // Counts over client_invite are scoped to this test's trainer (20 Nov 2026): the suite runs against the dev database,
+    // whose three-month seed holds invites of its own, and the unscoped counts failed by exactly that many.
 
     @Autowired WebApplicationContext context;
     @Autowired NamedParameterJdbcTemplate jdbc;
@@ -227,7 +229,7 @@ class ClientInviteApiTest {
         }
 
         // exactly the two created ones have a pending invite, and a refused client has none
-        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM client_invite WHERE status = 'pending'", Map.of(), Integer.class));
+        assertEquals(2, jdbc.queryForObject("SELECT count(*) FROM client_invite WHERE trainer_id = :me::uuid AND status = 'pending'", Map.of("me", me.toString()), Integer.class));
         assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM client_invite WHERE client_id IN (:ids)",
                 Map.of("ids", List.of(noPhone, accepted, archived, trainersNumber, theirs)), Integer.class));
     }
@@ -245,7 +247,7 @@ class ClientInviteApiTest {
         List<String> drafts = JsonPath.read(json, "$.results[*].draft");
         assertEquals(20, new java.util.HashSet<>(links).size(), "twenty distinct links");
         assertEquals(20, new java.util.HashSet<>(drafts).size(), "twenty distinct drafts");
-        assertEquals(20, jdbc.queryForObject("SELECT count(DISTINCT token_hash) FROM client_invite WHERE status = 'pending'", Map.of(), Integer.class));
+        assertEquals(20, jdbc.queryForObject("SELECT count(DISTINCT token_hash) FROM client_invite WHERE trainer_id = :me::uuid AND status = 'pending'", Map.of("me", me.toString()), Integer.class));
         assertEquals(1, jdbc.queryForObject("SELECT count(*) FROM client_invite WHERE client_id = :c::uuid AND status = 'revoked' AND revoked_reason = 'replaced'",
                 Map.of("c", client.toString()), Integer.class), "Priya's earlier link was replaced");
     }
@@ -261,7 +263,7 @@ class ClientInviteApiTest {
         for (int i = 0; i < 51; i++) fiftyOne.add(UUID.randomUUID());
         bulk(fiftyOne).andExpect(status().isBadRequest());
         mvc.perform(post("/v1/client-invites")).andExpect(status().isBadRequest());
-        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM client_invite", Map.of(), Integer.class), "a refused batch writes nothing");
+        assertEquals(0, jdbc.queryForObject("SELECT count(*) FROM client_invite WHERE trainer_id = :me::uuid", Map.of("me", me.toString()), Integer.class), "a refused batch writes nothing");
         // fifty is the ceiling and is fine
         var fifty = new java.util.ArrayList<UUID>();
         for (int i = 0; i < 50; i++) fifty.add(UUID.randomUUID());

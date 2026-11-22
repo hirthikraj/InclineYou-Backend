@@ -167,6 +167,13 @@ public class ClientStateService {
      */
     @Transactional
     public StateResult delete(UUID trainerId, UUID clientId, DeleteClientRequest req) {
+        // A repeat of a delete that went through (its answer lost to a dropped connection) answers as every other
+        // client verb answers a repeat: 200 and no effects (18 Nov 2026). It used to be a 404 "not on your roster", and
+        // the screen said the delete had failed about a client who was gone. There is no client left to describe, so
+        // `client` is null. Another trainer's id, or one that never existed, is still a 404.
+        if (clients.erasedClientOf(trainerId, clientId)) {
+            return new StateResult(null, effects("sessionsCancelled", "packagesClosed", "packagesOwing", "notesDeleted"));
+        }
         var locked = schedules.lockClient(trainerId, clientId);
         if (!locked.archived()) throw ClientRuleException.notArchived();
         var summary = summaries.one(trainerId, clientId)

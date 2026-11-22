@@ -26,11 +26,17 @@ class AssessmentBooker {
      */
     UUID book(UUID trainerId, UUID clientId, AssessmentTemplateJdbcRepository.Stored tpl,
               UUID scheduleId, LocalDate dueOn, UUID id) {
+        return tryBook(trainerId, clientId, tpl, scheduleId, dueOn, id).orElseThrow(ApiException::idConflict);
+    }
+
+    /** {@link #book}, answering empty when the id was already taken (the caller decides whether that is a replay). */
+    java.util.Optional<UUID> tryBook(UUID trainerId, UUID clientId, AssessmentTemplateJdbcRepository.Stored tpl,
+                                     UUID scheduleId, LocalDate dueOn, UUID id) {
         UUID made = id == null ? UUID.randomUUID() : id;
         String form = AssessmentJson.write(AssessmentForms.copyOf(tpl));
         if (!assessments.insert(made, trainerId, clientId, tpl.id(), scheduleId, tpl.name(), form, dueOn)) {
-            throw ApiException.idConflict();
+            return java.util.Optional.empty();
         }
-        return made;
+        return java.util.Optional.of(made);
     }
 }

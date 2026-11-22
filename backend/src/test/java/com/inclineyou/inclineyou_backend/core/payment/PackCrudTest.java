@@ -186,6 +186,111 @@ class PackCrudTest {
         assertCode("PACK_NOT_FOUND", () -> packs.delete(trainer, otherTrainersPack()));
     }
 
+    @Test
+    @DisplayName("orderIndex is 0 to MAX_ORDER on create and on patch; a create without one goes last (20 Nov 2026)")
+    void orderIndexBounds() {
+        for (Object bad : new Object[]{-1, PackService.MAX_ORDER + 1, Integer.MAX_VALUE}) {
+            assertCode("VALIDATION", () -> packs.create(trainer, body("name", "Bad " + bad, "service", "floor", "sessions", 4,
+                    "amount", 100, "orderIndex", bad)));
+        }
+        var top = packs.create(trainer, body("name", "Top", "service", "floor", "sessions", 4, "amount", 100,
+                "orderIndex", PackService.MAX_ORDER)).row();
+        assertEquals(PackService.MAX_ORDER, top.orderIndex());
+        assertCode("VALIDATION", () -> packs.patch(trainer, UUID.fromString(top.id()), null, body("orderIndex", Integer.MAX_VALUE)));
+        packs.patch(trainer, UUID.fromString(top.id()), null, body("orderIndex", 5));
+        var next = packs.create(trainer, body("name", "Next", "service", "floor", "sessions", 4, "amount", 100)).row();
+        assertEquals(6, next.orderIndex(), "placed after the highest position");
+    }
+
+    @Test
+    @DisplayName("an undone sale (a deleted package) does not stop a delete: the list says 0 sold, and Delete agrees")
+    void deleteAfterUndoneSale() {
+        UUID pack = UUID.fromString(packs.create(trainer, body("name", "Sold by mistake", "service", "floor", "sessions", 12,
+                "amount", 9000)).row().id());
+        sell(pack, client("Asha"), "active", "now()");
+        assertEquals(0, packs.list(trainer, null, null, "usage").stream()
+                .filter(r -> r.id().equals(pack.toString())).findFirst().orElseThrow().soldCount());
+        packs.delete(trainer, pack);
+        assertTrue(packs.one(trainer, pack).isEmpty());
+    }
+
+    @Test
+    @DisplayName("at most MAX_PACKS packs, retired ones included; a replayed id still answers at the cap; a delete makes room")
+    void cap() {
+        jdbc.update("""
+                INSERT INTO pack (id, trainer_id, name, service, basis, sessions, amount, currency, owner, status, order_index)
+                SELECT gen_random_uuid(), :t::uuid, 'Pack ' || g, 'floor', 'sessions', 4, 100, 'INR', 'trainer',
+                       CASE WHEN g % 2 = 0 THEN 'inactive' ELSE 'active' END, g
+                FROM generate_series(1, :n - 1) g""", Map.of("t", trainer.toString(), "n", PackService.MAX_PACKS));
+        UUID last = UUID.randomUUID();
+        assertTrue(packs.create(trainer, body("id", last.toString(), "name", "The last one", "service", "floor",
+                "sessions", 4, "amount", 100)).created());
+        assertCode("PACK_LIMIT", () -> packs.create(trainer, body("name", "One too many", "service", "floor",
+                "sessions", 4, "amount", 100)));
+        assertFalse(packs.create(trainer, body("id", last.toString(), "name", "The last one", "service", "floor",
+                "sessions", 4, "amount", 100)).created(), "a replay is not a new pack");
+        packs.delete(trainer, last);
+        assertTrue(packs.create(trainer, body("name", "Room again", "service", "floor", "sessions", 4, "amount", 100)).created());
+    }
+
+    @Test
+    @DisplayName("the list: active by default, all on request, the trainer's own order, owner filter, usage figures, and the refusals")
+    void list() {
+        UUID second = UUID.fromString(packs.create(trainer, body("name", "Monthly 8", "service", "floor", "sessions", 8,
+                "amount", "6000")).row().id());
+        UUID first = UUID.fromString(packs.create(trainer, body("name", "12 sessions", "service", "floor", "sessions", 12,
+                "amount", "9000")).row().id());
+        UUID retired = UUID.fromString(packs.create(trainer, body("name", "Old 5", "service", "remote", "sessions", 5,
+                "amount", "2500")).row().id());
+        jdbc.update("UPDATE pack SET order_index = CASE WHEN id = :a::uuid THEN 0 WHEN id = :b::uuid THEN 1 ELSE 2 END WHERE trainer_id = :t::uuid",
+                Map.of("a", first.toString(), "b", second.toString(), "t", trainer.toString()));
+        jdbc.update("UPDATE pack SET status = 'inactive' WHERE id = :id::uuid", Map.of("id", retired.toString()));
+        otherTrainersPack();   // never on this trainer's list
+
+        var active = packs.list(trainer, null, null, null);
+        assertEquals(List.of(first.toString(), second.toString()), active.stream().map(r -> r.id()).toList(),
+                "active by default, in the trainer's own order");
+        assertNull(active.get(0).activeClients(), "no usage unless asked");
+        assertEquals(3, packs.list(trainer, "all", null, null).size(), "all includes the retired one");
+        assertTrue(packs.list(trainer, null, "gym", null).isEmpty(), "owner filters: no gym packs here");
+        assertEquals(2, packs.list(trainer, null, "trainer", null).size());
+
+        // Usage: two clients hold the 12-session pack now, three were sold (one closed), one undone (deleted) is not counted.
+        UUID a = client("A"), b = client("B");
+        sell(first, a, "active", null);
+        sell(first, b, "active", null);
+        sell(first, a, "completed", null);
+        sell(first, b, "cancelled", "now()");
+        var used = packs.list(trainer, null, null, "usage").get(0);
+        assertEquals(2, used.activeClients());
+        assertEquals(3, used.soldCount());
+        assertEquals(0, packs.list(trainer, null, null, "usage").get(1).soldCount());
+
+        assertCode("VALIDATION", () -> packs.list(trainer, "archived", null, null));
+        assertCode("VALIDATION", () -> packs.list(trainer, null, "studio", null));
+        assertCode("VALIDATION", () -> packs.list(trainer, null, null, "money"));
+    }
+
+    private UUID client(String name) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO client (id, trainer_id, tenant_id, name, client_type, status)
+                SELECT :id::uuid, :t::uuid, home_tenant_id, :n, 'independent', 'active' FROM trainer WHERE id = :t::uuid
+                """, Map.of("id", id.toString(), "t", trainer.toString(), "n", name));
+        return id;
+    }
+
+    /** A package sold from {@code pack}; {@code deletedAt} is SQL or null. */
+    private void sell(UUID pack, UUID client, String status, String deletedAt) {
+        jdbc.update("""
+                INSERT INTO package (id, trainer_id, client_id, pack_id, name, service, basis, sessions_total, sessions_remaining,
+                                     amount, currency, start_date, status, closed_at, deleted_at)
+                VALUES (gen_random_uuid(), :t::uuid, :c::uuid, :p::uuid, '12 sessions', 'floor', 'sessions', 12, 6, 9000, 'INR',
+                        current_date, :s, CASE WHEN :s = 'active' THEN NULL ELSE now() END, %s)
+                """.formatted(deletedAt == null ? "NULL" : deletedAt),
+                Map.of("t", trainer.toString(), "c", client.toString(), "p", pack.toString(), "s", status));
+    }
+
     private UUID otherTrainersPack() {
         String phone = "+919100000094";
         jdbc.update("INSERT INTO app_user (id, phone, role) VALUES (gen_random_uuid(), :p, 'trainer') ON CONFLICT (phone) DO NOTHING",

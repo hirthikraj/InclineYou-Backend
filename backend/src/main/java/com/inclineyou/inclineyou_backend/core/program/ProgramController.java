@@ -46,7 +46,9 @@ public class ProgramController {
     @GetMapping("/certified")
     public ResponseEntity<Items<ProgramItem>> certified(WebRequest request) {
         List<ProgramItem> items = read.certified(trainerId());
-        String etag = "\"" + Integer.toHexString(items.hashCode()) + "\"";
+        // The whole answer's content (19 Nov 2026), as the forms shelf: a 32-bit hashCode could match for two different
+        // answers and give a false 304.
+        String etag = "\"" + com.inclineyou.inclineyou_backend.shared.util.ContentTag.of(items) + "\"";
         if (request.checkNotModified(etag)) return null;
         return ResponseEntity.ok().eTag(etag).body(Items.of(items));
     }

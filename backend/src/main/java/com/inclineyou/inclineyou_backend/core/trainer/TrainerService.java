@@ -77,6 +77,13 @@ public class TrainerService {
 
 
 
+    /**
+     * One snapshot (20 Nov 2026): the profile is about seven statements — the trainer, the business row, the user, the
+     * gym place, the version, the portal settings and the reminder reach. Each in its own snapshot, a PATCH committing
+     * between them could return old fields under the NEW version, and that body was then cached against an ETag that
+     * kept answering 304 until the next change. REPEATABLE READ makes them one moment.
+     */
+    @Transactional(readOnly = true, isolation = org.springframework.transaction.annotation.Isolation.REPEATABLE_READ)
     public TrainerResponse get(UUID trainerId) {
         return toResponse(load(trainerId), loadBusiness(trainerId));
     }
@@ -87,9 +94,9 @@ public class TrainerService {
      */
     @Transactional
     public TrainerResponse update(UUID trainerId, UpdateTrainerRequest req, String ifMatch) {
-        Trainer t = load(trainerId);
+        Trainer t = loadForUpdate(trainerId);
         TrainerBusiness b = loadBusiness(trainerId);
-        IfMatch.check(ifMatch, String.valueOf(sql.profileVersion(trainerId)),
+        IfMatch.check(versionOfTag(ifMatch), String.valueOf(sql.profileVersion(trainerId)),
                 "Your profile changed since you opened it. Reload and try again.");
 
         if (req.name() != null && !req.name().isBlank()) t.setName(trim(req.name(), 100));
@@ -190,7 +197,7 @@ public class TrainerService {
      */
     @Transactional
     public TrainerResponse completeSetup(UUID trainerId) {
-        Trainer t = load(trainerId);
+        Trainer t = loadForUpdate(trainerId);
         if (t.getSetupCompletedAt() == null) repo.saveAndFlush(stampSetup(t));
         return toResponse(load(trainerId), loadBusiness(trainerId));
     }
@@ -216,7 +223,8 @@ public class TrainerService {
                     "policyVersion: the privacy notice in force is " + inForce + ". Reload the notice and accept that one.");
         }
         Trainer t = load(trainerId);
-        AppUser user = appUserRepo.findById(t.getAppUserId())
+        // Locked (20 Nov 2026): the save writes the whole app_user row, phone and deleted_at included.
+        AppUser user = appUserRepo.findByIdForUpdate(t.getAppUserId())
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
         if (!inForce.equals(user.getPrivacyPolicyVersion()) || user.getPrivacyAcceptedAt() == null) {
             user.setPrivacyPolicyVersion(inForce);
@@ -252,6 +260,22 @@ public class TrainerService {
         String t = v.trim();
         if (t.length() > max) throw ApiException.validation(field + ": at most " + max + " characters");
         return t;
+    }
+
+    /**
+     * The version inside an If-Match (20 Nov 2026). GET and PATCH send the ETag as the version plus the reminder reach
+     * ({@code "<version>-<onPortal>-<optedIn>-<excluded>"}, TrainerController.tag), so a client echoing the ETag — the
+     * HTTP convention — always met a 412. The version is epoch milliseconds, so the reach is the "-n-n-n" at the end.
+     */
+    static String versionOfTag(String ifMatch) {
+        return ifMatch == null ? null : ifMatch.replaceFirst("-\\d+-\\d+-\\d+(\"?)\\s*$", "$1");
+    }
+
+    /** The live trainer, locked for a write that saves the row; 404 when it is gone or deleted. */
+    private Trainer loadForUpdate(UUID trainerId) {
+        return repo.findByIdForUpdate(trainerId)
+                .filter(t -> t.getDeletedAt() == null)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Trainer not found"));
     }
 
     private Trainer load(UUID trainerId) {
@@ -302,7 +326,7 @@ public class TrainerService {
         patch.forEach((key, value) -> {
             if (key == null || key.isBlank()) return;
             if (value == null) prefs.remove(key);
-            else prefs.put(trim(key, 60), value);
+            else prefs.put(trim(key, 60), prefValue(key, value));
         });
 
         if (prefs.size() > MAX_PREFS) {
@@ -311,6 +335,24 @@ public class TrainerService {
 
         metadata.put(PREFS_KEY, prefs);
         t.setMetadata(new HashMap<>(metadata));
+    }
+
+    /** The longest text a preference may hold (20 Nov 2026). */
+    static final int MAX_PREF_TEXT = 200;
+
+    /**
+     * One preference value: a text of at most MAX_PREF_TEXT characters, a number or true/false (20 Nov 2026). It was any
+     * JSON — 60 keys of any depth and size stored in trainer.metadata and sent back on every profile read.
+     */
+    private static Object prefValue(String key, Object value) {
+        if (value instanceof Boolean || value instanceof Number) return value;
+        if (value instanceof String text) {
+            if (text.length() > MAX_PREF_TEXT) {
+                throw ApiException.validation("preferences." + key + ": at most " + MAX_PREF_TEXT + " characters");
+            }
+            return text;
+        }
+        throw ApiException.validation("preferences." + key + ": a text, a number or true/false");
     }
 
     private String trim(String value, int max) {

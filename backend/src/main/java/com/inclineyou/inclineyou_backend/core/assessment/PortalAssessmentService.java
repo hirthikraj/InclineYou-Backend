@@ -106,7 +106,7 @@ public class PortalAssessmentService {
         if (done) {
             var keys = measurements.stream().map(AssessmentDetail.FormMeasurement::key).toList();
             var points = new HashMap<String, List<AssessmentDetail.Point>>();
-            for (var p : assessments.history(client, keys)) {
+            for (var p : assessments.history(client, keys, true)) {
                 points.computeIfAbsent(p.key(), k -> new ArrayList<>()).add(new AssessmentDetail.Point(p.assessmentId(), p.at().toEpochMilli(), p.value()));
             }
             history = new ArrayList<>();
@@ -124,7 +124,7 @@ public class PortalAssessmentService {
                 readings.add(new PortalAssessment.Reading(m.key(), m.label(), m.group(), m.unit(), value, previous, previous == null ? null : value.subtract(previous)));
             }
             answers = answerViews(form, AssessmentJson.plainMap(row.answers()));
-            returned = assessments.returned(client).stream().filter(r -> !r.id().equals(row.id().toString())).toList();
+            returned = assessments.returned(client, true).stream().filter(r -> !r.id().equals(row.id().toString())).toList();
         }
         return new PortalAssessment.Detail(row.id().toString(), row.name(), done ? "done" : "open", row.sentAt() == null ? null : row.sentAt().toEpochMilli(),
                 row.dueOn().toString(), !done && row.dueOn().isBefore(today), done ? row.completedAt().toEpochMilli() : null, row.version(), asked, entry,
@@ -208,12 +208,6 @@ public class PortalAssessmentService {
         return new PortalAssessment.Templates(out);
     }
 
-    /** The shelf's version: the newest edit among what is offered, so a conditional re-read is honest. */
-    public String templatesVersion(String phone) {
-        UUID client = access.clientId(phone);
-        return String.valueOf(templates.live(repo.trainerOf(client)).stream().filter(AssessmentTemplateJdbcRepository.Stored::clientCanStart)
-                .mapToLong(t -> t.updatedAt().toEpochMilli()).max().orElse(0));
-    }
 
     public record Started(PortalAssessment.Detail detail, boolean created) {}
 

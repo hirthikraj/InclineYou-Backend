@@ -11,7 +11,14 @@ import java.util.List;
  */
 public record WorkoutTemplateItem(
         String id, String name, String notes, List<Exercise> exercises, List<Divider> dividers,
-        int exerciseCount, int setCount, long createdAt, long updatedAt, String version
+        int exerciseCount, int setCount, long createdAt, long updatedAt, String version,
+        /*
+         * Every exercise it uses, by id, a retired one included — the program tree's dictionary (19 Nov 2026). The web
+         * fetched each exercise on its own to name the rows, one request per exercise, and a retired custom came back 404
+         * with no name. Additive; absent on the shelf's summaries.
+         */
+        @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+        java.util.Map<String, com.inclineyou.inclineyou_backend.core.program.dto.ExerciseRef> names
 ) {
     public record Divider(int position, String label) {}
 }

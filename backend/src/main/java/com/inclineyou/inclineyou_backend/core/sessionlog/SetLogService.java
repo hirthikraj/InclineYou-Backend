@@ -108,6 +108,15 @@ public class SetLogService {
             }
         }
         var ex = exercises.lock(trainerId, sessionId, sxId).orElseThrow(() -> ApiException.notFound("That exercise is not in this session."));
+        // Again under the exercise lock (19 Nov 2026): a double tap's second request missed the lookup above, waited here
+        // for the first, and then met its own id at the INSERT — 409 for a set that was saved. The first has committed now.
+        if (id != null) {
+            var existing = sets.findOwned(trainerId, id);
+            if (existing.isPresent()) {
+                if (!existing.get().getKey().equals(sxId)) throw ApiException.idConflict();
+                return new Created<>(new SetAdded(existing.get().getValue(), log.totals(sessionId)), false);
+            }
+        }
         if (!ex.started()) throw notStarted();
         if (ex.removedAt() != null) throw removed();
         if (Boolean.FALSE.equals(req.done())) throw ApiException.validation("done: an extra set is logged as it is added");
@@ -135,7 +144,14 @@ public class SetLogService {
     /** Only an extra set is ever deleted; a planned one is skipped with {@code done: false}. */
     @Transactional
     public SetDeleted delete(UUID trainerId, UUID sessionId, UUID setId) {
-        SetCtx ctx = sets.lock(trainerId, sessionId, setId).orElseThrow(() -> ApiException.notFound("That set is not in this session."));
+        var found = sets.lock(trainerId, sessionId, setId);
+        if (found.isEmpty()) {
+            // An extra set is deleted outright, so a retry after a lost answer finds nothing (19 Nov 2026). On this
+            // trainer's own session that is the delete already done: answer as it did. Anyone else's session stays 404.
+            if (log.head(trainerId, sessionId, false).isPresent()) return new SetDeleted(log.totals(sessionId));
+            throw ApiException.notFound("That set is not in this session.");
+        }
+        SetCtx ctx = found.get();
         if (ctx.planned()) {
             throw ApiException.conflict("SET_PLANNED", "A planned set can't be deleted — skip it instead (done: false).");
         }

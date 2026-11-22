@@ -194,13 +194,40 @@ public class PlanTreeJdbcRepository {
      * — and write {@code rows} with {@code sections} (a divider's label) folded onto the main at that
      * position. A standalone workout's save: nothing below the workout keeps an id across it.
      */
+    /**
+     * A standalone workout's exercises, written whole. A main row still at the same position with the same movement keeps
+     * its existing id (19 Nov 2026): this deleted every row and inserted new ids, and session_exercise.planned_from is ON
+     * DELETE SET NULL, so a session booked on the workout lost its plan rows on every save — and with them the console's
+     * alternatives. Kept rows take the new notes, group, section and sets; alternatives are rewritten; the rest goes or
+     * comes. A kept row sits at its own position and the rows' positions are unique, so nothing collides.
+     */
     public void replaceExercises(UUID workoutId, List<E> rows, Map<Integer, String> sections) {
         String wid = workoutId.toString();
-        jdbc.update("DELETE FROM workout_exercise WHERE workout_id = :wid::uuid", Map.of("wid", wid));
+        var existing = new HashMap<String, UUID>();   // "position|exercise" → the row's id today
+        jdbc.query("SELECT id, position, exercise_id FROM workout_exercise WHERE workout_id = :wid::uuid AND alternative_of IS NULL",
+                Map.of("wid", wid), rs -> { existing.put(rs.getInt("position") + "|" + rs.getString("exercise_id"), (UUID) rs.getObject("id")); });
+        var reuse = new HashMap<UUID, UUID>();         // the minted id → the kept row's id
+        for (E e : rows) {
+            UUID kept = existing.get(e.position() + "|" + e.exerciseId());
+            if (kept != null) reuse.put(e.id(), kept);
+        }
+        java.util.function.Function<E, String> idOf = e -> reuse.getOrDefault(e.id(), e.id()).toString();
+        String[] keptIds = reuse.values().stream().map(UUID::toString).toArray(String[]::new);
+        var keepParams = Map.of("wid", wid, "keep", keptIds);
+        jdbc.update("DELETE FROM workout_exercise WHERE workout_id = :wid::uuid AND alternative_of IS NOT NULL", keepParams);
+        jdbc.update("DELETE FROM workout_exercise WHERE workout_id = :wid::uuid AND NOT (id = ANY(CAST(:keep AS uuid[])))", keepParams);
+        if (keptIds.length > 0) {
+            jdbc.update("DELETE FROM workout_set WHERE workout_exercise_id = ANY(CAST(:keep AS uuid[]))", keepParams);
+            jdbc.batchUpdate("UPDATE workout_exercise SET group_id = :gid::uuid, section = :section, notes = :notes WHERE id = :id::uuid",
+                    rows.stream().filter(e -> reuse.containsKey(e.id())).map(e -> new MapSqlParameterSource()
+                            .addValue("id", idOf.apply(e)).addValue("gid", str(e.groupId()))
+                            .addValue("section", sections.get(e.position())).addValue("notes", e.notes()))
+                            .toArray(SqlParameterSource[]::new));
+        }
         jdbc.batchUpdate("""
                 INSERT INTO workout_exercise (id, workout_id, exercise_id, position, group_id, section, notes)
                 VALUES (:id::uuid, :wid::uuid, :exid::uuid, :position, :gid::uuid, :section, :notes)
-                """, rows.stream().map(e -> new MapSqlParameterSource().addValue("id", e.id().toString())
+                """, rows.stream().filter(e -> !reuse.containsKey(e.id())).map(e -> new MapSqlParameterSource().addValue("id", e.id().toString())
                 .addValue("wid", wid).addValue("exid", e.exerciseId().toString()).addValue("position", e.position())
                 .addValue("gid", str(e.groupId())).addValue("section", sections.get(e.position()))
                 .addValue("notes", e.notes())).toArray(SqlParameterSource[]::new));
@@ -213,12 +240,12 @@ public class PlanTreeJdbcRepository {
                 owners.add(a);
                 alts.add(new MapSqlParameterSource().addValue("id", a.id().toString()).addValue("wid", wid)
                         .addValue("exid", a.exerciseId().toString()).addValue("position", a.position())
-                        .addValue("main", e.id().toString()).addValue("notes", a.notes()));
+                        .addValue("main", idOf.apply(e)).addValue("notes", a.notes()));
             }
             for (E owner : owners) {
                 for (S s : owner.sets()) {
                     setRows.add(new MapSqlParameterSource().addValue("id", s.id().toString())
-                            .addValue("eid", owner.id().toString()).addValue("position", s.position())
+                            .addValue("eid", owner == e ? idOf.apply(e) : owner.id().toString()).addValue("position", s.position())
                             .addValue("lk", s.loadKind()).addValue("lv", s.load()).addValue("ek", s.effortKind())
                             .addValue("ev", s.effort()).addValue("rest", s.rest()).addValue("tempo", s.tempo())
                             .addValue("notes", s.notes()));
@@ -270,10 +297,6 @@ public class PlanTreeJdbcRepository {
         jdbc.update("UPDATE workout SET position = position + " + PARK
                 + " WHERE program_id = :plan::uuid AND deleted_at IS NULL", p);
         jdbc.update("""
-                DELETE FROM workout_exercise WHERE workout_id IN
-                    (SELECT id FROM workout WHERE program_id = :plan::uuid AND deleted_at IS NULL)
-                """, p);
-        jdbc.update("""
                 UPDATE workout p SET week = s.week, day = s.day, position = s.position, name = s.name, notes = s.notes
                 FROM workout s
                 WHERE p.program_id = :plan::uuid AND p.deleted_at IS NULL AND s.id = p.copied_from_workout_id
@@ -287,29 +310,88 @@ public class PlanTreeJdbcRepository {
                     SELECT 1 FROM workout p WHERE p.program_id = :plan::uuid AND p.deleted_at IS NULL
                       AND p.copied_from_workout_id = s.id)
                 """, p);
+        syncExercises(p);
+        return gone.stream().map(UUID::fromString).toList();
+    }
+
+    /**
+     * The exercises of a resync, kept where they survive (19 Nov 2026). This deleted every exercise row of the plan and
+     * copied the template's in with new ids, and session_exercise.planned_from is ON DELETE SET NULL, so an open log lost
+     * its plan rows: no plan alternatives in the console, and "on the plan" / scope program refused it as added today.
+     * Now a plan main row whose template row is still there — same workout, same position, same movement — keeps its id
+     * and has its notes, group, section and sets taken from the template; only the rest is removed or added. Alternatives
+     * are rewritten as before (nothing durable points at them). Positions cannot collide: a kept row sits at its template
+     * row's position, which is unique, and every plan row without a match is gone before anything is inserted.
+     */
+    private void syncExercises(Map<String, String> p) {
+        String planLive = "SELECT id FROM workout WHERE program_id = :plan::uuid AND deleted_at IS NULL";
+        jdbc.update("DELETE FROM workout_exercise WHERE alternative_of IS NOT NULL AND workout_id IN (" + planLive + ")", p);
+        var keep = new java.util.ArrayList<String>();
+        var from = new java.util.ArrayList<String>();
+        jdbc.query("""
+                SELECT pm.id::text AS keep, sm.id::text AS src
+                FROM workout_exercise pm
+                JOIN workout pw ON pw.id = pm.workout_id
+                JOIN workout sw ON sw.id = pw.copied_from_workout_id
+                JOIN workout_exercise sm ON sm.workout_id = sw.id AND sm.alternative_of IS NULL
+                                        AND sm.position = pm.position AND sm.exercise_id = pm.exercise_id
+                WHERE pw.program_id = :plan::uuid AND pw.deleted_at IS NULL AND pm.alternative_of IS NULL
+                  AND sw.program_id = :src::uuid AND sw.deleted_at IS NULL
+                """, p, rs -> { keep.add(rs.getString("keep")); from.add(rs.getString("src")); });
+        var q = new HashMap<String, Object>(p);
+        q.put("keep", keep.toArray(String[]::new));
+        q.put("from", from.toArray(String[]::new));
+        jdbc.update("DELETE FROM workout_exercise WHERE alternative_of IS NULL AND workout_id IN (" + planLive + ")"
+                + " AND NOT (id = ANY(CAST(:keep AS uuid[])))", q);
+        if (!keep.isEmpty()) {
+            jdbc.update("""
+                    UPDATE workout_exercise pm SET group_id = sm.group_id, section = sm.section, notes = sm.notes
+                    FROM unnest(CAST(:keep AS uuid[]), CAST(:from AS uuid[])) AS pr(keep, src)
+                    JOIN workout_exercise sm ON sm.id = pr.src
+                    WHERE pm.id = pr.keep
+                    """, q);
+            jdbc.update("DELETE FROM workout_set WHERE workout_exercise_id = ANY(CAST(:keep AS uuid[]))", q);
+        }
         jdbc.update("""
                 WITH w AS (
                     SELECT s.id AS old, p.id AS new FROM workout s JOIN workout p ON p.copied_from_workout_id = s.id
                     WHERE s.program_id = :src::uuid AND s.deleted_at IS NULL
                       AND p.program_id = :plan::uuid AND p.deleted_at IS NULL
                 ),
-                e AS (
-                    SELECT we.id AS old, gen_random_uuid() AS new, w.new AS wnew, we.exercise_id, we.position,
-                           we.alternative_of, we.group_id, we.section, we.notes
-                    FROM workout_exercise we JOIN w ON w.old = we.workout_id
+                kept AS (
+                    SELECT pr.src, pr.keep AS plan FROM unnest(CAST(:keep AS uuid[]), CAST(:from AS uuid[])) AS pr(keep, src)
                 ),
-                ei AS (
+                fresh AS (
+                    SELECT sm.id AS src, gen_random_uuid() AS plan, w.new AS wnew, sm.exercise_id, sm.position,
+                           sm.group_id, sm.section, sm.notes
+                    FROM workout_exercise sm JOIN w ON w.old = sm.workout_id
+                    WHERE sm.alternative_of IS NULL AND sm.id NOT IN (SELECT src FROM kept)
+                ),
+                ins AS (
                     INSERT INTO workout_exercise (id, workout_id, exercise_id, position, alternative_of, group_id, section, notes)
-                    SELECT e.new, e.wnew, e.exercise_id, e.position, alt.new, e.group_id, e.section, e.notes
-                    FROM e LEFT JOIN e alt ON alt.old = e.alternative_of
+                    SELECT plan, wnew, exercise_id, position, NULL, group_id, section, notes FROM fresh
+                ),
+                mains AS (
+                    SELECT src, plan FROM kept UNION ALL SELECT src, plan FROM fresh
+                ),
+                alts AS (
+                    SELECT sa.id AS src, gen_random_uuid() AS plan, w.new AS wnew, m.plan AS main, sa.exercise_id, sa.position,
+                           sa.notes
+                    FROM workout_exercise sa JOIN mains m ON m.src = sa.alternative_of JOIN w ON w.old = sa.workout_id
+                ),
+                insa AS (
+                    INSERT INTO workout_exercise (id, workout_id, exercise_id, position, alternative_of, group_id, section, notes)
+                    SELECT plan, wnew, exercise_id, position, main, NULL, NULL, notes FROM alts
+                ),
+                every AS (
+                    SELECT src, plan FROM mains UNION ALL SELECT src, plan FROM alts
                 )
                 INSERT INTO workout_set (workout_exercise_id, position, load_kind, load_value, effort_kind, effort_value,
                                          rest_seconds, tempo, notes)
-                SELECT e.new, s.position, s.load_kind, s.load_value, s.effort_kind, s.effort_value, s.rest_seconds,
+                SELECT e.plan, s.position, s.load_kind, s.load_value, s.effort_kind, s.effort_value, s.rest_seconds,
                        s.tempo, s.notes
-                FROM workout_set s JOIN e ON e.old = s.workout_exercise_id
-                """, p);
-        return gone.stream().map(UUID::fromString).toList();
+                FROM workout_set s JOIN every e ON e.src = s.workout_exercise_id
+                """, q);
     }
 
     /** The plan now follows the source's length, and is up to date with it. */

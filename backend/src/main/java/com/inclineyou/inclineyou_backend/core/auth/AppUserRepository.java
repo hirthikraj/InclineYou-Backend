@@ -1,6 +1,8 @@
 package com.inclineyou.inclineyou_backend.core.auth;
 
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -12,6 +14,15 @@ import java.util.UUID;
 public interface AppUserRepository extends JpaRepository<AppUser, UUID> {
 
     Optional<AppUser> findByPhoneAndDeletedAtIsNull(String phone);
+
+    /**
+     * The sign-in row, locked (SELECT … FOR UPDATE) for a write that saves it (20 Nov 2026). The JPA save writes the whole
+     * row as loaded — phone, deleted_at, the consent pair — so an unlocked consent in flight while a phone change or an
+     * account close committed wrote the old phone, or a null deleted_at, back.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT u FROM AppUser u WHERE u.id = :id")
+    Optional<AppUser> findByIdForUpdate(@Param("id") UUID id);
 
     /**
      * Any row on this number, soft-deleted included — V36.

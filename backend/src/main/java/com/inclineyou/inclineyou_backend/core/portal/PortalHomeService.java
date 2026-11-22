@@ -37,6 +37,7 @@ public class PortalHomeService {
     private static final DateTimeFormatter WHEN = DateTimeFormatter.ofPattern("EEE d MMM, h:mm a", Locale.ENGLISH);
 
     private final PortalHomeJdbcRepository repo;
+    private final PortalPlanJdbcRepository plans;
     private final PortalJdbcRepository portal;
     private final PortalAccess access;
 
@@ -78,9 +79,13 @@ public class PortalHomeService {
         if (rested) return new PortalHome.Hero("rest", null, null, null, next);
 
         if (repo.hasActiveProgram(client)) {
-            var day = repo.nextProgramDay(client, now);
+            // The plan's first open place — the arc's own reading, so Home and the plan screen agree, and a repeat week counts (21 Nov 2026).
+            var day = plans.currentProgram(client).filter(pr -> "active".equals(pr.status()))
+                    // ...in the current week or later (22 Nov 2026) — `PortalPlanService.firstOpen`, the one copy of the rule.
+                    .flatMap(pr -> PortalPlanService.firstOpen(plans.days(client, pr.id(), now), PortalPlanService.weekNow(pr, zone)))
+                    .flatMap(d -> repo.programDay(client, d.workoutId(), d.week(), d.day()));
             if (day.isPresent()) {
-                var resume = repo.resumable(client, day.get().id()).map(PortalHome.Resume::new).orElse(null);
+                var resume = repo.resumable(client, day.get().id(), zone.getId()).map(PortalHome.Resume::new).orElse(null);
                 return new PortalHome.Hero("selfRun", null, day.get(), resume, null);
             }
             return new PortalHome.Hero("rest", null, null, null, next);   // nothing left in this cycle

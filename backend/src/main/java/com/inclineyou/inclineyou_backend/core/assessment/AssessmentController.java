@@ -38,8 +38,19 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class AssessmentController {
 
-    /** Bump when {@link AssessmentCatalogue} changes: the catalogue changes only on a deploy. */
-    static final String CATALOG_ETAG = "catalog-2026-11-04";
+    /**
+     * The catalogue's ETag, worked out from what it serves the first time it is asked (19 Nov 2026). It was a constant to
+     * bump by hand whenever {@link AssessmentCatalogue} changed, and a change shipped without the bump kept every browser
+     * on the old catalogue with 304s. The catalogue is code, the same for every trainer, so it changes only on a deploy
+     * — a restart — and one hash per process is exact.
+     */
+    private volatile String catalogEtag;
+
+    String catalogEtag() {
+        String tag = catalogEtag;
+        if (tag == null) catalogEtag = tag = "catalog-" + com.inclineyou.inclineyou_backend.shared.util.ContentTag.of(assessments.catalog());
+        return tag;
+    }
 
     private final AssessmentService assessments;
     private final AssessmentEntryService entries;
@@ -62,10 +73,13 @@ public class AssessmentController {
         return list.list(trainerId(), state, clientId, q, dueBy, limit, cursor, includeTotal);
     }
 
+    /** The ETag is a hash of the whole answer (19 Nov 2026), so a 304 means nothing in it changed; edits take If-Match from the body's version. */
     @GetMapping("/assessments/{id}")
-    public ResponseEntity<AssessmentDetail> get(@PathVariable UUID id) {
+    public ResponseEntity<AssessmentDetail> get(@PathVariable UUID id, WebRequest request) {
         var detail = assessments.get(trainerId(), id);
-        return ResponseEntity.ok().eTag(detail.item().version()).body(detail);
+        String etag = detail.etag();
+        if (request.checkNotModified(etag)) return null;
+        return ResponseEntity.ok().eTag(etag).cacheControl(CacheControl.noCache().cachePrivate()).body(detail);
     }
 
     /** 201 the first time, 200 on a replayed id. */
@@ -113,8 +127,9 @@ public class AssessmentController {
     @GetMapping("/assessment-templates")
     public ResponseEntity<Items<TemplateItem>> templates(WebRequest request) {
         var shelf = templates.list(trainerId());
-        String etag = Integer.toHexString(shelf.stream()
-                .map(t -> t.id() + ":" + t.version() + ":" + t.liveCycles()).toList().hashCode());
+        // The whole shelf's content (19 Nov 2026): a 32-bit hashCode of id:version:liveCycles could match for two
+        // different shelves and answer a false 304.
+        String etag = com.inclineyou.inclineyou_backend.shared.util.ContentTag.of(shelf);
         if (request.checkNotModified(etag)) return null;
         return ResponseEntity.ok().eTag(etag).cacheControl(CacheControl.noCache().cachePrivate()).body(Items.of(shelf));
     }
@@ -147,8 +162,9 @@ public class AssessmentController {
 
     @GetMapping("/assessment-catalog")
     public ResponseEntity<Catalog> catalog(WebRequest request) {
-        if (request.checkNotModified(CATALOG_ETAG)) return null;
-        return ResponseEntity.ok().eTag(CATALOG_ETAG).cacheControl(CacheControl.noCache().cachePrivate()).body(assessments.catalog());
+        String etag = catalogEtag();
+        if (request.checkNotModified(etag)) return null;
+        return ResponseEntity.ok().eTag(etag).cacheControl(CacheControl.noCache().cachePrivate()).body(assessments.catalog());
     }
 
     /* ── cycles ───────────────────────────────────────────────────────────── */
