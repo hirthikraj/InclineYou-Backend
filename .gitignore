@@ -73,3 +73,5 @@ __MACOSX/
 .github/agents/
 .github/hooks/
 .github/skills/
+backend/.agents/
+backend/skills-lock.json
