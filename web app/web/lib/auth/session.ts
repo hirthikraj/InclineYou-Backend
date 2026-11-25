@@ -15,6 +15,13 @@ import type { AuthResponse, WallKind } from './types';
  * (`POST /v1/trainers`).
  */
 const TOKEN_COOKIE = 'inclineyou_token';
+/**
+ * WHOSE opaque session the token is (22 Nov 2026). An `xs_` token says nothing
+ * about itself, and since the portal a client holds one too — so the role the
+ * sign-in answered is kept beside it, for routing only. Not a permission:
+ * tampering with it sends you to a screen whose every read the server refuses.
+ */
+const ROLE_COOKIE = 'inclineyou_role';
 
 /**
  * A session is 30 days after LAST USE, sliding (api-contract R61) — the server
@@ -86,10 +93,13 @@ const SECURE = process.env.NODE_ENV === 'production';
  *                  that dies sooner than a session does — the pending one — so
  *                  the cookie never outlives the 15 minutes the token has.
  */
-export async function setToken(token: string, expiresAt?: number | null): Promise<void> {
+export async function setToken(token: string, expiresAt?: number | null, role?: string | null): Promise<void> {
   const untilExpiry = expiresAt ? Math.floor((expiresAt - Date.now()) / 1000) : SESSION_MAX_AGE;
   const maxAge = Math.max(1, Math.min(SESSION_MAX_AGE, untilExpiry));
-  (await cookies()).set(TOKEN_COOKIE, token, {
+  const jar = await cookies();
+  if (role) jar.set(ROLE_COOKIE, role, { httpOnly: true, secure: SECURE, sameSite: 'lax', path: '/', maxAge });
+  else jar.delete(ROLE_COOKIE);
+  jar.set(TOKEN_COOKIE, token, {
     httpOnly: true,
     secure: SECURE,
     // `lax` rather than `strict`: the invite links in this product arrive by
@@ -107,6 +117,12 @@ export async function getToken(): Promise<string | null> {
 
 export async function clearToken(): Promise<void> {
   (await cookies()).delete(TOKEN_COOKIE);
+  (await cookies()).delete(ROLE_COOKIE);
+}
+
+/** The role the sign-in answered for the token in the cookie, or null when none was kept. */
+export async function getTokenRole(): Promise<string | null> {
+  return (await cookies()).get(ROLE_COOKIE)?.value ?? null;
 }
 
 export async function setPendingPhone(phone: string): Promise<void> {

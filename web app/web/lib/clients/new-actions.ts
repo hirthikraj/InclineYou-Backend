@@ -37,6 +37,10 @@ export interface PhoneCheckResult {
   clientId?: string;
   clientName?: string;
   clientStatus?: string;
+  /** Available, but this number asked to join through the trainer's join link and is waiting (23 Nov 2026).
+   *  Adding by hand closes the request; approving it keeps their consent and answers. */
+  joinRequestId?: string;
+  joinRequestName?: string;
 }
 
 export async function checkPhone(phone: string): Promise<PhoneCheckResult> {
@@ -62,6 +66,9 @@ export interface CreateClientInput {
   dateOfBirth: string;
   /** V43: required by the flow; "prefer_not_to_say" is an answer. */
   gender: 'female' | 'male' | 'other' | 'prefer_not_to_say';
+  /** V48, the prospect path only: where they came from and what they asked about. Optional. */
+  leadSource?: string | null;
+  interestedPackId?: string | null;
 }
 
 export interface CreatedClient {
@@ -84,6 +91,8 @@ export async function createClient(input: CreateClientInput): Promise<CreatedCli
         clientType: input.clientType,
         status: input.status,
         schedule: { deliveryMode: input.deliveryMode },
+        ...(input.leadSource ? { leadSource: input.leadSource } : {}),
+        ...(input.interestedPackId ? { interestedPackId: input.interestedPackId } : {}),
       },
     });
     revalidatePath('/clients');
@@ -101,6 +110,10 @@ export interface ClientDetailsPatch {
   clientType?: 'independent' | 'gym';
   /** V43. `null` clears it (the Profile tab's "Not given"). */
   gender?: 'female' | 'male' | 'other' | 'prefer_not_to_say' | null;
+  /** V48 — the lead's fields; `null` clears each. Not consent-gated. */
+  leadSource?: string | null;
+  interestedPackId?: string | null;
+  nextFollowUpOn?: string | null;
 }
 
 export async function updateClientDetails(clientId: string, patch: ClientDetailsPatch): Promise<void> {
@@ -111,6 +124,7 @@ export async function updateClientDetails(clientId: string, patch: ClientDetails
     });
     revalidatePath('/clients');
     revalidatePath(`/clients/${clientId}`);
+    if (patch.nextFollowUpOn !== undefined) revalidatePath('/today');
   } catch (error) {
     rethrow(error);
   }

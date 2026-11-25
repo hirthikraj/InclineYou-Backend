@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
 
 /**
@@ -31,6 +31,7 @@ export function Modal({
   width = 472,
   /** Drawn in place, for a specimen. Never in the product. */
   inline,
+  sheet,
   className,
   children,
 }: {
@@ -60,6 +61,9 @@ export function Modal({
   foot?: ReactNode;
   width?: number;
   inline?: boolean;
+  /** Under 900px, rise from the bottom as a sheet (`.modal--sheet`). For FORMS;
+   *  a short confirm stays a centred question. */
+  sheet?: boolean;
   className?: string;
   children: ReactNode;
 }) {
@@ -67,7 +71,7 @@ export function Modal({
 
   return (
     <div
-      className={['modal', className].filter(Boolean).join(' ')}
+      className={['modal', sheet && !inline ? 'modal--sheet' : null, className].filter(Boolean).join(' ')}
       role="dialog"
       aria-modal={inline ? undefined : true}
       aria-labelledby={`${id}-t`}
@@ -223,6 +227,65 @@ export function useEscapeGuard(open: boolean) {
  *   handed across this boundary is what `react-hooks/refs` refuses, and the
  *   established repair in this codebase is to find the element by selector.
  */
+/**
+ * THE EXIT, FOR EVERY WAY A DIALOG CLOSES (24 Nov 2026).
+ *
+ * A dialog closes from Escape, the scrim, its own Cancel, or a parent that unmounts
+ * it after a save — and the last three remove it in the same commit, so there was
+ * never a frame to animate in. Rather than route every call-site through a delay,
+ * the host copies its scrim and box at the moment it is removed and plays the
+ * copy out: a sheet slides down on a phone, a centred dialog fades and settles, the
+ * scrim fades. The copy is inert and gone in under 400ms.
+ *
+ * - The clone is taken in the layout cleanup, while the nodes are still attached,
+ *   and each field's live value is copied across (`cloneNode` copies attributes, and
+ *   React sets `value` as a property, so a select would flick to its first option).
+ * - It is inserted only if the real box is gone a microtask later. React's dev
+ *   double-mount runs this cleanup on OPEN with the box still connected, and that
+ *   must not paint a ghost.
+ * - Nothing is played under reduced motion, or when the parent left the page too
+ *   (a route change), where there is nowhere to play it.
+ */
+function playExit(scrim: HTMLElement | null, host: HTMLElement | null) {
+  if (!scrim || !host || typeof window === 'undefined') return;
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const parent = host.parentNode;
+  if (!parent) return;
+  const ghostScrim = scrim.cloneNode(true) as HTMLElement;
+  const ghostHost = host.cloneNode(true) as HTMLElement;
+  const live = host.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input,select,textarea');
+  const copies = ghostHost.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input,select,textarea');
+  live.forEach((el, i) => {
+    const c = copies[i];
+    if (!c) return;
+    if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
+      (c as HTMLInputElement).checked = el.checked;
+    } else {
+      c.value = el.value;
+    }
+  });
+  queueMicrotask(() => {
+    if (host.isConnected || !(parent as Node).isConnected) return;
+    for (const g of [ghostScrim, ghostHost]) {
+      g.setAttribute('aria-hidden', 'true');
+      g.inert = true;
+      g.removeAttribute('tabindex');
+      g.removeAttribute('id');
+    }
+    ghostScrim.classList.add('scrim--ghost');
+    ghostHost.classList.add('mhost--ghost');
+    parent.appendChild(ghostScrim);
+    parent.appendChild(ghostHost);
+    void ghostHost.getBoundingClientRect();
+    ghostScrim.classList.add('is-out');
+    ghostHost.classList.add('is-out');
+    window.setTimeout(() => {
+      ghostScrim.remove();
+      ghostHost.remove();
+    }, 380);
+  });
+}
+
 export function ModalHost({
   onClose,
   cover = 'main',
@@ -254,6 +317,13 @@ export function ModalHost({
   children: ReactNode;
 }) {
   const box = useRef<HTMLDivElement>(null);
+  const scrimRef = useRef<HTMLDivElement>(null);
+  /* See `playExit` above. */
+  useLayoutEffect(() => {
+    const scrim = scrimRef.current;
+    const host = box.current;
+    return () => playExit(scrim, host);
+  }, []);
   const returnTo = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -329,6 +399,7 @@ export function ModalHost({
   return (
     <>
       <div
+        ref={scrimRef}
         className={cover === 'frame' ? 'scrim scrim--top scrim--frame' : 'scrim scrim--top'}
         onClick={onClose}
         aria-hidden="true"

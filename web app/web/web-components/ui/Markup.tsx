@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 
 import { parseMarkup, type Mark, type Span } from '@/lib/text/markup';
+import { parseWhatsApp } from '@/lib/text/whatsapp';
 
 /**
  * Markup — trainer-written text, drawn with the little formatting it carries.
@@ -42,11 +43,14 @@ export function Markup({
   value,
   /** Passed through, so a call-site keeps its own block's geometry. */
   className,
+  /** `whatsapp` reads WhatsApp's markers (`*bold*`, `_italic_`) — a nudge, as the client will see it. */
+  dialect = 'markup',
 }: {
   value: string;
   className?: string;
+  dialect?: 'markup' | 'whatsapp';
 }) {
-  const blocks = parseMarkup(value);
+  const blocks = dialect === 'whatsapp' ? parseWhatsApp(value) : parseMarkup(value);
 
   return (
     <span className={['mkp', className].filter(Boolean).join(' ')}>
@@ -74,4 +78,6 @@ const ELEMENT: Record<Mark, (node: React.ReactNode) => React.ReactNode> = {
      and the one HTML5 kept for precisely this after deprecating it for style.
      A styled span would say nothing at all to a reader that does not paint. */
   underline: node => <u>{node}</u>,
+  /* WhatsApp's `~text~`, as the client will see it. */
+  strike: node => <s>{node}</s>,
 };

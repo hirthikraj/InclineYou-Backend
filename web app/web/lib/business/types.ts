@@ -285,6 +285,36 @@ export interface GymMoney {
   shares: GymShareRow[];
   /** Null until the trainer has recorded any pay terms: then there is nothing to settle. */
   settlement: GymSettlement | null;
+  /** The statement for the span (23 Nov 2026): what the trainer did for the gym. Null from an older backend. */
+  statement: GymStatement | null;
+  /** Since the first gym-pack sale. Null from an older backend. */
+  lifetime: GymLifetime | null;
+}
+
+/**
+ * THE GYM STATEMENT — "the proof" (`release/business-module-plan.html`): from the trainer's own book, what they sold and
+ * delivered for the gym in the span. A renewal is a sale to a client who had bought before; *gym desk* is a client whose
+ * source is the gym's front desk (V48), everyone else the trainer brought.
+ */
+export interface GymStatement {
+  clientsCoached: number;
+  sessionsDelivered: number;
+  newSales: number;
+  renewals: number;
+  billedYouBrought: number;
+  billedGymDesk: number;
+  /** What the gym paid the trainer in the span. */
+  received: number;
+}
+
+export interface GymLifetime {
+  /** yyyy-MM of the first gym-pack sale; null when there has been none. */
+  since: string | null;
+  sales: number;
+  billed: number;
+  gymCut: number;
+  yours: number;
+  received: number;
 }
 
 /**

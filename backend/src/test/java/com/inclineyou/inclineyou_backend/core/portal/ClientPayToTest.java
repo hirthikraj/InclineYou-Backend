@@ -44,7 +44,8 @@ class ClientPayToTest {
                 "SELECT t.id::text FROM trainer t JOIN app_user a ON a.id = t.app_user_id WHERE a.phone = :p",
                 Map.of("p", phone), String.class));
         jdbc.update("UPDATE trainer SET clients_see_money = true WHERE id = :t::uuid", Map.of("t", trainer.toString()));
-        jdbc.update("UPDATE trainer_business SET upi_vpa = 'anbu@okaxis' WHERE trainer_id = :t::uuid", Map.of("t", trainer.toString()));
+        // V46: the UPI ID is the workspace's business's (the trainer's home workspace, which the client is in).
+        jdbc.update("UPDATE tenant_business SET upi_vpa = 'anbu@okaxis' WHERE tenant_id = (SELECT home_tenant_id FROM trainer WHERE id = :t::uuid)", Map.of("t", trainer.toString()));
         client = UUID.randomUUID();
         jdbc.update("INSERT INTO client (id, trainer_id, name, client_type) VALUES (:c::uuid, :t::uuid, 'Meera', 'independent')",
                 Map.of("c", client.toString(), "t", trainer.toString()));
@@ -82,7 +83,8 @@ class ClientPayToTest {
         assertNull(payTo(client), "Payments hidden for this client means no way to pay through it either");
 
         jdbc.update("UPDATE client SET portal_show_money = NULL WHERE id = :c::uuid", Map.of("c", client.toString()));
-        jdbc.update("UPDATE trainer_business SET upi_vpa = '  ' WHERE trainer_id = :t::uuid", Map.of("t", trainer.toString()));
-        assertNull(payTo(client), "a blank UPI ID is no UPI ID");
+        // V46: a blank UPI ID can no longer be stored (tenant_business_upi_shape), so "none" is NULL.
+        jdbc.update("UPDATE tenant_business SET upi_vpa = NULL WHERE tenant_id = (SELECT home_tenant_id FROM trainer WHERE id = :t::uuid)", Map.of("t", trainer.toString()));
+        assertNull(payTo(client), "no UPI ID is no way to pay");
     }
 }

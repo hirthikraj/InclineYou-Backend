@@ -34,12 +34,14 @@ public record ClientSummary(
          * V43: female · male · other · prefer_not_to_say; null when not given. Added to the end (22 Nov 2026) so the
          * roster can filter on it — the business record, like the date of birth, so it is not behind consent.
          */
-        String gender
+        String gender,
+        /** V48: where they came from, what they asked about, when to follow up and the last contact. Never null. Appended. */
+        Lead lead
 ) {
     public ClientSummary withPortal(Portal replacement) {
         return new ClientSummary(id, name, phone, status, pausedAt, pausedUntil, archivedAt, archiveReason, archiveNote,
                 membershipStatus, clientType, hasPinnedNote, schedule, slots, program, stats, createdAt, version,
-                replacement, gender);
+                replacement, gender, lead);
     }
 
     /**

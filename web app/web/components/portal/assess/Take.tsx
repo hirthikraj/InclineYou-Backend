@@ -5,15 +5,14 @@ import { useState, useTransition } from 'react';
 
 import { readingAllowed, readingInputMode, readingRule } from '@/lib/assessments/bounds';
 import { saveEntry } from '@/lib/portal/assess-actions';
-import type { AnswerWire, AssessDetailWire, QuestionWire } from '@/lib/portal/assess-api';
+import type { AnswerWire, AssessDetailWire } from '@/lib/portal/assess-api';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
 import { TextField } from '@/web-components/ui/Field';
 import { Message } from '@/web-components/ui/Message';
-import { Tag } from '@/web-components/ui/Tag';
-import { Textarea } from '@/web-components/ui/Textarea';
 
 import { day } from '../plan/format';
+import { QuestionAnswer } from '@/components/assessments/QuestionAnswer';
 
 function num(text: string, m: { min?: number; minInclusive?: boolean } | undefined): number | null | 'bad' {
   const t = text.trim();
@@ -123,7 +122,7 @@ export function Take({ a, trainerFirstName }: { a: AssessDetailWire; trainerFirs
           <Card.Body>
             <div className="as__qs">
               {a.asked.questions.map((q) => (
-                <Question key={q.id} q={q} value={answers[q.id]} onChange={(p) => set(q.id, p)} />
+                <QuestionAnswer key={q.id} q={q} value={answers[q.id]} onChange={(p) => set(q.id, p)} />
               ))}
             </div>
           </Card.Body>
@@ -141,49 +140,5 @@ export function Take({ a, trainerFirstName }: { a: AssessDetailWire; trainerFirs
       </div>
       <p className="pl__s">Handing it in is final — if something’s wrong afterwards, {trainerFirstName} can correct it.</p>
     </div>
-  );
-}
-
-function Question({ q, value, onChange }: { q: QuestionWire; value: AnswerWire | undefined; onChange: (v: AnswerWire | null) => void }) {
-  return (
-    <fieldset className="as__q">
-      <legend className="pl__t">{q.text}</legend>
-      {q.kind === 'rating' && (
-        <div className="pwk__chips" role="group" aria-label={q.text}>
-          {Array.from({ length: q.scale ?? 5 }, (_, i) => i + 1).map((n) => (
-            <Button key={n} variant={value?.rating === n ? 'primary' : 'secondary'} size="sm" aria-pressed={value?.rating === n} onClick={() => onChange(value?.rating === n ? null : { rating: n })}>{n}</Button>
-          ))}
-          <span className="pl__s">1 = low · {q.scale ?? 5} = high</span>
-        </div>
-      )}
-      {q.kind === 'yesno' && (
-        <div className="pwk__chips" role="group" aria-label={q.text}>
-          {[true, false].map((v) => (
-            <Button key={String(v)} variant={value?.yes === v ? 'primary' : 'secondary'} size="sm" aria-pressed={value?.yes === v} onClick={() => onChange(value?.yes === v ? null : { yes: v })}>{v ? 'Yes' : 'No'}</Button>
-          ))}
-        </div>
-      )}
-      {q.kind === 'text' && (
-        <Textarea label={q.text} hideLabel rows={3} limit={2000} value={value?.text ?? ''} onChange={(e) => onChange(e.target.value ? { text: e.target.value } : null)} />
-      )}
-      {q.kind === 'choice' && (
-        <>
-          <div className="pwk__chips" role="group" aria-label={q.text}>
-            {q.options.map((o) => {
-              const on = value?.optionIds?.includes(o.id) ?? false;
-              return (
-                <Button key={o.id} variant={on ? 'primary' : 'secondary'} size="sm" aria-pressed={on} onClick={() => {
-                  const cur = value?.optionIds ?? [];
-                  const next = on ? cur.filter((x) => x !== o.id) : q.allowMultiple ? [...cur, o.id] : [o.id];
-                  onChange(next.length || value?.text ? { ...value, optionIds: next } : null);
-                }}>{o.text}</Button>
-              );
-            })}
-          </div>
-          {q.allowCustom && <TextField label="Something else" value={value?.text ?? ''} onChange={(e) => onChange({ ...value, text: e.target.value })} />}
-          {q.allowMultiple && <Tag>Pick any</Tag>}
-        </>
-      )}
-    </fieldset>
   );
 }

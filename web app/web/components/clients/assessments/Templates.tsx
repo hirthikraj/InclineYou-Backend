@@ -249,6 +249,24 @@ export function Templates({ data }: { data: TemplatesData }) {
             </div>
           )}
         </div>
+
+        {/* THE PHONE'S PRIMARY, AT THE FOOT (23 Nov 2026) — the Assessments tab's own bar. Under 900px
+            `.asm .ph__acts` hides the header's buttons on both tabs, and this tab never drew the foot, so a
+            phone had no way to write a template. Left out when the shelf is empty: first run's empty state
+            already offers both verbs, larger, in the body. */}
+        {data.templates.length > 0 && (
+          <div className="pg__shelffoot asm__newfoot">
+            <Button variant="secondary" size="lg" wide onClick={() => setEditing({ row: null })}>
+              <Plus size={15} />
+              New template
+            </Button>
+            {!hasWeekly && (
+              <Button variant="ghost" size="lg" wide disabled={busy} onClick={addWeekly}>
+                Add the weekly check-in
+              </Button>
+            )}
+          </div>
+        )}
       </main>
 
       {editing && (

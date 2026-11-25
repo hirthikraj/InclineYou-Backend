@@ -17,6 +17,10 @@ import { rupees } from '@/lib/today/time';
 import { TopBar } from '@/components/shell/TopBar';
 import { LedgerTab } from '@/components/money/LedgerTab';
 import { RecordPanel } from '@/components/money/RecordPanel';
+import { ClaimsQueue } from './ClaimsQueue';
+import { OwedList } from './OwedList';
+import type { OwedClient } from '@/lib/business/api';
+import type { PaymentClaimWire } from '@/lib/claims/types';
 import { BizHeader } from './BizHeader';
 import { usePeriodScope } from './PeriodScope';
 
@@ -62,6 +66,8 @@ export function Transactions({
   start,
   recordFor = null,
   initialFilter = null,
+  claims = null,
+  owed = null,
 }: {
   start: { now: number; hasGym: boolean; hasAnyPayments: boolean; summary: MoneySummary; page: LedgerPage };
   /**
@@ -71,6 +77,10 @@ export function Transactions({
   recordFor?: string | null;
   /** Which chip is pressed on arrival: `/business?tab=owed` and `?tab=writeoffs` redirect here with `?filter=`. */
   initialFilter?: LedgerFilter;
+  /** V50 · the open "I've paid" reports — drawn above the ledger; null (read failed) or empty draws nothing. */
+  claims?: PaymentClaimWire[] | null;
+  /** 23 Nov 2026 · who owes, by how late — the *Owed* card above the ledger. */
+  owed?: OwedClient[] | null;
 }) {
   const { period, now } = usePeriodScope();
 
@@ -147,6 +157,8 @@ export function Transactions({
   }, [period, now, filter, view.cursors, view.index]);
 
   const [recordPanelOpen, setRecordPanelOpen] = useState(recordFor !== null);
+  /* Which client the panel opens on: `?record=` on arrival, or the *Owed* row that was pressed. */
+  const [recordClient, setRecordClient] = useState<string | null>(recordFor);
 
   /* ARRIVING HERE FROM HERE. The initialiser above runs once per mount, which is
      enough for a client's file and NOT enough for the tab bar's + — pressing it on
@@ -161,7 +173,7 @@ export function Transactions({
   }
   const router = useRouter();
   useEffect(() => {
-    if (recordFor !== null) router.replace('/business/transactions', { scroll: false });
+    if (recordFor !== null) router.replace('/business/payments', { scroll: false });
   }, [recordFor, router]);
 
   const handleExport = () => {
@@ -180,10 +192,10 @@ export function Transactions({
 
   return (
     <>
-      <TopBar crumb="Business / Transactions" title="Business" />
+      <TopBar crumb="Business / Payments" title="Business" />
       <main className="main" id="main-content">
         <BizHeader
-          title="Transactions"
+          title="Payments"
           subtitle={
             t.packagesSold === 0 && t.paymentsCount === 0 && view.page.rows.length === 0
               ? `Nothing billed in ${periodProse(period)}`
@@ -197,6 +209,8 @@ export function Transactions({
         />
 
         <div className="body">
+          <ClaimsQueue claims={claims} now={now} onChanged={() => { void reload(); }} />
+          <OwedList owed={owed} claims={claims} now={now} onRecord={(id) => { setRecordClient(id); setRecordPanelOpen(true); }} />
           <LedgerTab
             summary={view.summary}
             rows={view.page.rows}
@@ -224,8 +238,8 @@ export function Transactions({
 
       {recordPanelOpen && (
         <RecordPanel
-          initialClientId={recordFor}
-          onClose={() => setRecordPanelOpen(false)}
+          initialClientId={recordClient}
+          onClose={() => { setRecordPanelOpen(false); setRecordClient(recordFor); }}
           onRecorded={() => { void reload(); }}
         />
       )}

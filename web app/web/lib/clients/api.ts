@@ -3,6 +3,7 @@ import 'server-only';
 import { cache } from 'react';
 
 import { api, ApiError, listAll, type ListEnvelope } from '@/lib/http/client';
+import type { LeadWire } from './lead';
 
 /**
  * The roster's reads on the v1.1 wire — api-contract *Clients · Roster load*.
@@ -72,6 +73,8 @@ export interface ClientWire {
   portal: { state: string; invitedAt: number | null; acceptedAt: number | null; lastSeenAt: number | null; lastSelfRunAt: number | null };
   /** V43 (22 Nov 2026): female · male · other · prefer_not_to_say; null or absent when not given. */
   gender?: string | null;
+  /** V48: where they came from, what they asked about, the next follow-up. Absent on an older server. */
+  lead?: LeadWire;
 }
 
 /** L5 · `PackageReadService.CurrentPackage`, the fields the roster reads. Money is a decimal string. */

@@ -300,7 +300,7 @@ function Section({
                   className: 'cfchk__c-st',
                   /* *With client* is a check-in that has been sent and not come back: the one state that is somebody else's move. */
                   content: (
-                    <Tag tone={assessmentTag(r.state, r.sentAt).tone}>{assessmentTag(r.state, r.sentAt).label}</Tag>
+                    <Tag tone={assessmentTag(r.state, r.sentAt, r.reviewedAt).tone}>{assessmentTag(r.state, r.sentAt, r.reviewedAt).label}</Tag>
                   ),
                 },
                 {

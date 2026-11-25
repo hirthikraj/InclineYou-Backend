@@ -81,7 +81,7 @@ export function RestCard({ day, label, parked, onMakeWorkout, ...props }: RestCa
               kept rather than cleared. */}
           {label && <span className="wsd__nm wsd__nm--rest">{label}</span>}
           <span className="wsd__sp" />
-          <span className="wsd__restb">REST</span>
+          <span className="wsd__restb">Rest</span>
         </div>
       </div>
 
@@ -105,7 +105,10 @@ export function RestCard({ day, label, parked, onMakeWorkout, ...props }: RestCa
         )}
         {onMakeWorkout && (
           <div className="wsd__ract">
-            <Button variant="secondary" size="sm" onClick={onMakeWorkout} style={{ width: '100%' }}>
+            {/* GHOST (25 Nov 2026): on an empty board these four solid buttons were the strongest thing
+                on screen, so a trainer's eye went to the days the program RESTS before the days it trains.
+                Turning a rest day into a training day is the rarer move; it stays one press, quietly. */}
+            <Button variant="ghost" size="sm" onClick={onMakeWorkout} style={{ width: '100%' }}>
               Make it a workout
             </Button>
           </div>

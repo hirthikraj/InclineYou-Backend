@@ -7,6 +7,7 @@ import { startWorkout } from '@/lib/portal/workout-actions';
 import type { PreviewWire } from '@/lib/portal/workout-api';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
+import { Crumbs } from '@/web-components/ui/Crumbs';
 import { Message } from '@/web-components/ui/Message';
 import { Tag } from '@/web-components/ui/Tag';
 
@@ -35,6 +36,9 @@ export function WorkoutPreview({ preview, trainerFirstName }: { preview: Preview
 
   return (
     <div className="pwk">
+      {/* A DAY OF THE PLAN, AND THE WAY BACK TO IT (25 Nov 2026): this is the preview of a plan day — the kicker
+          says *Week 4 · Day 1* — reached from Plan's weeks and from Home's *See what's in it*. */}
+      <Crumbs items={[{ label: 'Plan', href: '/me/plan' }, { label: workout.name }]} />
       <Card className="pwk__hero">
         <Card.Body>
           <p className="pwk__k">{program.name}{workout.week ? ` · Week ${workout.week}` : ''}{workout.day ? ` · Day ${workout.day}` : ''}</p>

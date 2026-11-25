@@ -102,7 +102,8 @@ export function ExerciseList({
               </span>
               <span className="exr__s">{e.summary}</span>
             </span>
-            <span className="exr__n">{e.volumeKg > 0 ? `${e.volumeKg.toLocaleString('en-IN')} kg` : '—'}</span>
+            {/* Empty until something is lifted: a column of em-dashes read as collapse controls. */}
+            <span className="exr__n">{e.volumeKg > 0 ? `${e.volumeKg.toLocaleString('en-IN')} kg` : ''}</span>
           </button>
         ))}
 

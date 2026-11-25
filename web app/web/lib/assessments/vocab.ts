@@ -83,6 +83,11 @@ export interface AssessmentWire {
   version: string;
   /** Epoch ms it was sent to the client — what makes it theirs to open — or null while it is the trainer's alone. */
   sentAt?: number | null;
+  /**
+   * Epoch ms the trainer marked a done one reviewed, or null — *to review* (23 Nov 2026). Taken is not the end of an
+   * assessment: somebody has to read what came back. Absent from a backend before it.
+   */
+  reviewedAt?: number | null;
 }
 
 /** A client's cycle on one template (contract Assessments L5). */
@@ -189,26 +194,50 @@ export const STATUS_ORDER: AssessmentStatus[] = ['missed', 'booked', 'done'];
  * ones*. An explicit *All* then costs nothing and buys the row a trainer looks
  * for first, rather than making them find *Clear status* at the foot of a menu.
  */
-export type StatusFilter = 'all' | 'done' | 'missed' | 'incoming';
+export type StatusFilter = 'all' | 'incoming' | 'missed' | 'done' | 'review' | 'reviewed';
 
-/** The order the facet draws them: everything, then the two that need doing. */
+/**
+ * The order the facet draws them: everything, then the life of an assessment —
+ * to take → (not taken) → taken, and taken splits into *to review* and
+ * *reviewed* (23 Nov 2026: once taken, the trainer reads it and marks it
+ * reviewed). *Taken* stays as the union of the last two.
+ */
 export const STATUS_FILTERS: { value: StatusFilter; label: string }[] = [
   { value: 'all', label: 'All' },
-  { value: 'done', label: 'Taken' },
-  { value: 'missed', label: 'Not taken' },
   { value: 'incoming', label: 'To take' },
+  { value: 'missed', label: 'Not taken' },
+  { value: 'done', label: 'Taken' },
+  { value: 'review', label: 'To review' },
+  { value: 'reviewed', label: 'Reviewed' },
 ];
 
 /**
- * Which stored states a filter selects — the one place the collapse is
- * written down, read by the address on the way out and the wire on the way in.
+ * What a filter asks the wire for — the one place the collapse is written
+ * down, read by the address on the way out and the wire on the way in.
+ * `reviewed` is the list's `?reviewed=` (absent = either).
  */
-export const STATUSES_FOR: Record<StatusFilter, AssessmentStatus[]> = {
-  all: [],
-  done: ['done'],
-  missed: ['missed'],
-  incoming: ['booked'],
+export const WIRE_FOR: Record<StatusFilter, { states: AssessmentStatus[]; reviewed?: boolean }> = {
+  all: { states: [] },
+  incoming: { states: ['booked'] },
+  missed: { states: ['missed'] },
+  done: { states: ['done'] },
+  review: { states: ['done'], reviewed: false },
+  reviewed: { states: ['done'], reviewed: true },
 };
+
+/** `state=…&reviewed=…` for one filter, without the leading `&`. Empty for *All*. */
+export function wireQuery(f: StatusFilter): string {
+  const w = WIRE_FOR[f];
+  const p = new URLSearchParams();
+  if (w.states.length > 0) p.set('state', w.states.join(','));
+  if (w.reviewed !== undefined) p.set('reviewed', String(w.reviewed));
+  return p.toString();
+}
+
+/** A done assessment nobody has marked reviewed yet. */
+export function toReview(a: { state: AssessmentStatus; reviewedAt?: number | null }): boolean {
+  return a.state === 'done' && a.reviewedAt == null;
+}
 
 /**
  * What the client is shown, and therefore what the editor has to draw.
@@ -373,8 +402,11 @@ export function moved<T>(rows: T[], from: number, to: number): T[] {
 export function assessmentTag(
   state: AssessmentStatus,
   sentAt: number | null | undefined,
+  reviewedAt?: number | null,
 ): { label: string; tone: 'neutral' | 'ok' | 'warn' } {
-  if (state === 'done') return { label: 'Done', tone: 'ok' };
+  /* TAKEN SPLITS IN TWO (23 Nov 2026): what came back still has to be read. *To review* is the one done state that asks
+     the trainer for something, so it takes the amber; *Reviewed* is the finished record. */
+  if (state === 'done') return reviewedAt != null ? { label: 'Reviewed', tone: 'ok' } : { label: 'To review', tone: 'warn' };
   if (sentAt != null) {
     return state === 'missed'
       ? { label: 'Late · with client', tone: 'warn' }

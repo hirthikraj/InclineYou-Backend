@@ -20,6 +20,7 @@ import { requireConsole } from '@/lib/sessionlog/guard';
  * device, not just the tab that added it.
  */
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Logging a session · InclineYou' };
 
 /* No `searchParams`: every query this screen uses is read on the client with
    `useSearchParams`, and the one the server needed — `?plus=` — is gone. */

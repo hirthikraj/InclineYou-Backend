@@ -1,6 +1,5 @@
 'use server';
 
-import { isUpiFormat } from '@/lib/setup/upi';
 import { revalidatePath } from 'next/cache';
 import { cookies } from 'next/headers';
 
@@ -82,7 +81,7 @@ export type StepResult = { ok: true } | { ok: false; message: string; restart?: 
  * same rule and it matters more here, because Settings and the profile are two
  * screens a trainer can genuinely have open at once.
  */
-export async function saveAccount(input: { name: string; email: string; upiVpa: string }): Promise<AccountResult> {
+export async function saveAccount(input: { name: string; email: string }): Promise<AccountResult> {
   const name = input.name.trim().slice(0, MAX_NAME);
   // The server IGNORES a blank name rather than clearing it — `trainer.name` is
   // NOT NULL — so an empty value would report a successful save and change
@@ -101,19 +100,13 @@ export async function saveAccount(input: { name: string; email: string; upiVpa: 
     return { ok: false, message: 'That doesn’t look like an email address.' };
   }
 
-  // The UPI ID is checked for SHAPE only — setup's own rule (`isUpiFormat`), the
-  // phone's pattern character for character. Nothing confirms the account exists,
-  // so the screen says so; one wrong letter sends a client's money to a stranger.
-  const upiVpa = input.upiVpa.trim();
-  if (upiVpa.length > 0 && !isUpiFormat(upiVpa)) {
-    return { ok: false, message: 'That doesn’t look like a UPI ID — it should look like name@bank.' };
-  }
+  // The UPI ID is not this screen's any more: it is the workspace's business's (Settings → Business, V46).
 
   try {
     // `''` CLEARS the column, which is the correct meaning of emptying a field
     // and pressing Save — the same rule every profile tab follows. Omitting it
     // would make this screen able to add an address and never remove one.
-    const account = await patchAccount({ name, email, upiVpa });
+    const account = await patchAccount({ name, email });
     // The account menu, the rail's foot and every screen that greets the trainer
     // by name read `/v1/trainers/me`. Without this a renamed trainer keeps the
     // old name in the shell until a hard reload.

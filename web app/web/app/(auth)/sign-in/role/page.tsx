@@ -4,7 +4,7 @@ import { AuthShell } from '@/components/auth/AuthShell';
 import { RosterPicker } from '@/components/auth/RosterPicker';
 import { loadRosters } from '@/lib/auth/actions';
 import { readClaims } from '@/lib/auth/claims';
-import { getToken } from '@/lib/auth/session';
+import { getToken, getTokenRole } from '@/lib/auth/session';
 
 export const metadata = { title: 'Whose book · InclineYou' };
 
@@ -51,7 +51,7 @@ export const metadata = { title: 'Whose book · InclineYou' };
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
-  const claims = readClaims(await getToken());
+  const claims = readClaims(await getToken(), await getTokenRole());
   if (!claims) redirect('/sign-in');
 
   if (claims.role !== 'client') {

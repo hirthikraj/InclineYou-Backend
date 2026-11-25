@@ -97,7 +97,8 @@ function shapeOf(sets: WorkoutTemplateSetWire[]): {
     d =>
       d.reps === detail[0].reps &&
       d.durationSeconds === detail[0].durationSeconds &&
-      d.toFailure === detail[0].toFailure,
+      d.toFailure === detail[0].toFailure &&
+      (d.load ?? null) === (detail[0].load ?? null),
   );
   /* STRAIGHT SETS STAY STRAIGHT. `prescribe` reads a null list as `N × reps`,
      and a three-entry `setDetail` holding the same pair three times would print
@@ -117,6 +118,7 @@ function setDetailOf(set: WorkoutTemplateSetWire): SetDetail {
        week sheet calls to failure, and what `prescribe` prints in the fail
        tone. Every other kind is a number the trainer chose. */
     toFailure: set.effortKind === 'max_reps' || set.effortKind === 'max_time',
+    load: set.loadKind === 'weight' ? set.loadValue : null,
   };
 }
 
@@ -198,6 +200,7 @@ function setsOf(row: Entry): WorkoutTemplateSetWire[] {
   if (row.setDetail && row.setDetail.length > 0) {
     return row.setDetail.map(d => ({
       ...base,
+      loadValue: d.load != null ? d.load : base.loadValue,
       effortKind: d.toFailure ? ('max_reps' as const) : d.durationSeconds != null ? ('time' as const) : ('reps' as const),
       effortValue: d.durationSeconds ?? d.reps,
     }));

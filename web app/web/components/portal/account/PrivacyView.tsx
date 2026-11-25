@@ -30,7 +30,9 @@ export function PrivacyView({ privacy, zone }: { privacy: PrivacyWire; zone: str
         {/* Its own divided body: drawn inside the list's body it read as the last item's second line — *Notes they share with you*,
             then *Arun can't see…* as though it were about notes. */}
         <Card.Body divided>
-          <p className="pl__s">{first} can’t see: {privacy.doesNotSee.map((x) => x.toLowerCase()).join(', ')}.</p>
+          {/* THE REASSURANCE IS NOT FINE PRINT (25 Nov 2026). *What your trainer can't see* is the half of this card a client
+              opened the page to read, and it sat in the small grey caption under the list. Same size as the list now. */}
+          <p className="pl__nosee"><b>{first} can’t see</b> {privacy.doesNotSee.map((x) => x.toLowerCase()).join(', ')}.</p>
           {privacy.policyVersion && <p className="pl__s">You accepted our privacy notice (version {privacy.policyVersion}){privacy.acceptedAt ? ` on ${new Date(privacy.acceptedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: zone })}` : ''}.</p>}
         </Card.Body>
       </Card>
@@ -47,7 +49,7 @@ export function PrivacyView({ privacy, zone }: { privacy: PrivacyWire; zone: str
         <Card.Head title="A question about your data" level={3} />
         <Card.Body>
           <p className="pl__s">This is a different route from messaging {first}: it goes to InclineYou, who decide what is stored and who can read it. We reply within {GRIEVANCE_RESPONSE_DAYS} days.</p>
-          <p className="pl__s"><b>{GRIEVANCE_OFFICER.name}</b> · <a href={`mailto:${GRIEVANCE_OFFICER.email}`}>{GRIEVANCE_OFFICER.email}</a> · <a href={GRIEVANCE_TEL}>{GRIEVANCE_OFFICER.phone}</a></p>
+          <p className="pl__s pl__contact"><b>{GRIEVANCE_OFFICER.name}</b> · <a href={`mailto:${GRIEVANCE_OFFICER.email}`}>{GRIEVANCE_OFFICER.email}</a> · <a href={GRIEVANCE_TEL}>{GRIEVANCE_OFFICER.phone}</a></p>
         </Card.Body>
       </Card>
 

@@ -29,6 +29,7 @@ import { BizHeader } from './BizHeader';
 export function PackagesPage({
   data,
   fromNewClient = false,
+  startOnGym = false,
 }: {
   data: PacksData;
   /**
@@ -44,6 +45,8 @@ export function PackagesPage({
    * one.
    */
   fromNewClient?: boolean;
+  /** `?list=gym`: open on the gym's list rather than the trainer's own. */
+  startOnGym?: boolean;
 }) {
   return (
     <>
@@ -88,7 +91,7 @@ export function PackagesPage({
               </div>
             </Why>
           )}
-          <Packages data={data} />
+          <Packages data={data} startOnGym={startOnGym} />
         </div>
       </main>
     </>

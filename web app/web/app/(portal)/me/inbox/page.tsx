@@ -7,6 +7,7 @@ import { Card } from '@/web-components/ui/Card';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 import { Message } from '@/web-components/ui/Message';
 import { PageHeader } from '@/web-components/ui/PageHeader';
+import { Crumbs } from '@/web-components/ui/Crumbs';
 
 export const metadata = { title: 'From your trainer · InclineYou' };
 
@@ -36,7 +37,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ c
     <>
       <TopBar crumb="From your trainer" title="Me" titleHref="/me/account" />
       <main className="main" id="main-content">
-        <PageHeader className="ph--portal" title={`From ${first}`} />
+        {/* The way back, as on Payments and the receipt (25 Nov 2026): this page is reached from *Me*. */}
+        <PageHeader
+          className="ph--portal"
+          title={`From ${first}`}
+          crumbs={<Crumbs items={[{ label: 'Me', href: '/me/account' }, { label: `From ${first}` }]} />}
+        />
         <div className="body">
           {/* In the portal's centred column (22 Nov 2026): without `.portal` this screen sat flush left on a desk while its title, which reads the column, sat centred — measured at 1568px, the content began 238px left of the heading. */}
           <div className="portal">

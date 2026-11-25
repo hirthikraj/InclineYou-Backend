@@ -57,6 +57,8 @@ import { CheckboxCell } from './Checkbox';
  * relative date computed in the browser is the render-time clock, and this
  * component has no business holding one.
  */
+const WEEKDAY_NAME = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+
 export function ProgramRow({
   name,
   href,
@@ -70,6 +72,7 @@ export function ProgramRow({
   edited,
   editedLabel = 'edited ',
   certified,
+  weekdays,
   select,
   actions,
   className,
@@ -129,6 +132,12 @@ export function ProgramRow({
   /** Copied from the certified shelf. Provenance, and it is permanent. */
   certified?: boolean;
   /**
+   * The CLIENT'S WEEKDAYS (1 = Monday) for the strip, where a copy has a real week. A template's
+   * slots are ordinal, so its strip can only ever light the first N cells — on a client's copy it
+   * can say WHICH days, the one thing the *Days* figure beside it cannot (25 Nov 2026).
+   */
+  weekdays?: number[];
+  /**
    * THE ROW IS PICKABLE, and the box is a SIBLING of the link rather than a
    * child of it.
    *
@@ -181,15 +190,17 @@ export function ProgramRow({
            ordinal, which is the same law that gives the builder no Rest column.
            The title says so in words for a pointer; the days column beside it
            carries the figure for a reader. */
-        title={`Trains ${days.length} of 7 day slots: ${days.join(', ')}`}
+        title={weekdays
+          ? `Trains ${weekdays.map((d) => WEEKDAY_NAME[d - 1]).join(', ')}`
+          : `Trains ${days.length} of 7 day slots: ${days.join(', ')}`}
       >
         {/* The strip is a picture of the same number the next column prints, so
             the column carries the accessible text and the strip is hidden.
             Drawn anyway, because *which of these trains four days* is answered
             faster by a shape than by reading five 4s. */}
-        <span className="shape" aria-hidden="true">
+        <span className={weekdays ? 'shape shape--week' : 'shape'} aria-hidden="true">
           {[1, 2, 3, 4, 5, 6, 7].map((slot) => (
-            <i key={slot} className={active.has(slot) ? 'shape__c shape__c--1' : 'shape__c'} />
+            <i key={slot} className={(weekdays ? weekdays.includes(slot) : active.has(slot)) ? 'shape__c shape__c--1' : 'shape__c'} />
           ))}
         </span>
       </span>
@@ -316,7 +327,8 @@ export function ProgramRowHead({
   return (
     <div className={cls} aria-hidden="true">
       <span>Program</span>
-      <span>Shape</span>
+      {/* On the client list the strip is their real week, Mon to Sun. */}
+      <span>{client ? 'Week' : 'Shape'}</span>
       <span>Days</span>
       <span>Weeks</span>
       <span>{client ? 'Client' : 'Used'}</span>

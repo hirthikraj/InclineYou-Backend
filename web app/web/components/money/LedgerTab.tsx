@@ -9,7 +9,7 @@ import { rupees, initials, avatarToken } from '@/lib/today/time';
 import { PaymentRowMenu } from './PaymentRowMenu';
 import { Button } from '@/web-components/ui/Button';
 import { Tag } from '@/web-components/ui/Tag';
-import { Chip } from '@/web-components/ui/Chip';
+import { Segment as SegmentGroup, SegmentButton } from '@/web-components/ui/Segment';
 import { Stat } from '@/web-components/ui/Stat';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 
@@ -218,12 +218,15 @@ export function LedgerTab({
             </span>
           </div>
 
-          <div className="card__band" role="group" aria-label="Filter the ledger">
-            {chips.map((c) => (
-              <Chip pressed={filter === c.key} key={c.label} onClick={() => onFilterChange(c.key)}>
-                {c.label}
-              </Chip>
-            ))}
+          {/* One of a set: the shared neutral pills, not lime chips (24 Nov 2026). */}
+          <div className="card__band" aria-label="Filter the ledger">
+            <SegmentGroup label="Filter the ledger" mode="single">
+              {chips.map((c) => (
+                <SegmentButton mode="single" pressed={filter === c.key} key={c.label} onClick={() => onFilterChange(c.key)}>
+                  {c.label}
+                </SegmentButton>
+              ))}
+            </SegmentGroup>
           </div>
 
           <div className="card__b card__b--flush" aria-busy={paging.busy}>

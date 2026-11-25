@@ -150,6 +150,61 @@ class GymMoneyTest {
     }
 
     @Test
+    @DisplayName("statement: clients coached, sessions, new vs renewed sales, who found the client, payouts, and the lifetime line (23 Nov 2026)")
+    void statement() {
+        gym();
+        UUID pack = UUID.randomUUID(), asha = UUID.randomUUID(), ravi = UUID.randomUUID();
+        var p = new java.util.HashMap<String, Object>(Map.of("pk", pack.toString(), "a", asha.toString(), "r", ravi.toString(), "t", trainer.toString()));
+        jdbc.update("""
+                INSERT INTO pack (id, trainer_id, name, service, basis, sessions, amount, currency, owner, trainer_share_percent)
+                VALUES (:pk::uuid, :t::uuid, 'Gym 12', 'floor', 'sessions', 12, 10000, 'INR', 'gym', 60)""", p);
+        jdbc.update("INSERT INTO client (id, trainer_id, name, client_type) VALUES (:a::uuid, :t::uuid, 'Asha', 'gym')", p);
+        jdbc.update("INSERT INTO client (id, trainer_id, name, client_type, lead_source) VALUES (:r::uuid, :t::uuid, 'Ravi', 'gym', 'gym_desk')", p);
+        String sale = """
+                INSERT INTO package (trainer_id, client_id, pack_id, name, service, basis, sessions_total, sessions_remaining,
+                                     amount, currency, start_date, trainer_share_percent, created_at)
+                VALUES (:t::uuid, CAST(:c AS uuid), :pk::uuid, 'Gym 12', 'floor', 'sessions', 12, 12, 10000, 'INR', :on, 60, :at)""";
+        // Asha bought last year (outside the span), and again this month: a renewal. Ravi, from the gym desk, is new.
+        var older = new java.util.HashMap<String, Object>(p);
+        older.put("c", asha.toString()); older.put("on", java.sql.Date.valueOf(now.minusMonths(13).atDay(1)));
+        older.put("at", java.sql.Timestamp.valueOf(now.minusMonths(13).atDay(1).atStartOfDay()));
+        jdbc.update(sale, older);
+        var again = new java.util.HashMap<String, Object>(p);
+        again.put("c", asha.toString()); again.put("on", java.sql.Date.valueOf(now.atDay(1)));
+        again.put("at", java.sql.Timestamp.valueOf(now.atDay(1).atStartOfDay().plusHours(1)));
+        jdbc.update(sale, again);
+        var fresh = new java.util.HashMap<String, Object>(p);
+        fresh.put("c", ravi.toString()); fresh.put("on", java.sql.Date.valueOf(now.atDay(1)));
+        fresh.put("at", java.sql.Timestamp.valueOf(now.atDay(1).atStartOfDay().plusHours(2)));
+        jdbc.update(sale, fresh);
+        // Two done sessions for Asha and one for Ravi this month; one still only booked does not count.
+        int hour = 0;
+        for (String[] s : new String[][]{{asha.toString(), "done"}, {asha.toString(), "done"}, {ravi.toString(), "done"}, {ravi.toString(), "scheduled"}}) {
+            jdbc.update("""
+                    INSERT INTO scheduled_session (trainer_id, client_id, scheduled_at, duration_minutes, ends_at, status, logged_by)
+                    VALUES (:t::uuid, :c::uuid, CAST(:at AS timestamptz), 60, CAST(:at AS timestamptz) + interval '1 hour', :st, 'trainer')""",
+                    Map.of("t", trainer.toString(), "c", s[0], "st", s[1],
+                            "at", java.sql.Timestamp.valueOf(now.atDay(1).atTime(6 + hour++, 0))));
+        }
+
+        var g = money.get(trainer, now.toString(), now.toString());
+        var st = g.statement();
+        assertEquals(2, st.clientsCoached());
+        assertEquals(3, st.sessionsDelivered());
+        assertEquals(1, st.newSales());
+        assertEquals(1, st.renewals());
+        assertEquals("10000.00", st.billedYouBrought());
+        assertEquals("10000.00", st.billedGymDesk());
+        assertEquals("0.00", st.received());
+        var life = g.lifetime();
+        assertEquals(now.minusMonths(13).toString(), life.since());
+        assertEquals(3, life.sales());
+        assertEquals("30000.00", life.billed());
+        assertEquals("12000.00", life.gymCut());
+        assertEquals("18000.00", life.yours());
+    }
+
+    @Test
     @DisplayName("settlement: a minimum, paid in parts, oldest month first")
     void settlement() {
         gym();

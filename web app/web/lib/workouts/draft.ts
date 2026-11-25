@@ -550,7 +550,7 @@ export function patchAlternativeSet(
 ): Draft {
   return mapAlternative(draft, exerciseUid, altUid, a => ({
     ...a,
-    sets: a.sets.map(s => (s.uid === setUid ? { ...s, ...patch } : s)),
+    sets: carryForward(a.sets, setUid, patch),
   }));
 }
 
@@ -611,6 +611,36 @@ export function setSetCount(draft: Draft, exerciseUid: string, count: number): D
   });
 }
 
+/**
+ * THE NUMBERS CARRY FORWARD (25 Nov 2026). Building a program from scratch, *3 × 10 at 40 kg* meant
+ * typing 10 and 40 into set 1, then again into set 2, then again into set 3 — about nine fields an
+ * exercise, well over a hundred for a three-day block. The common case is every set the same.
+ *
+ * So a value typed into one set is copied onto the sets AFTER it that still held that set's old value,
+ * stopping at the first that differs. Untouched later sets follow; a set the trainer has already made
+ * different (the 90 in a 100 · 90 · 80 pyramid) stops the carry, and so protects everything after it.
+ * Only the four prescription numbers carry — a note is scoped by its own dialog, and a kind change is
+ * already written to every set by `patchSets`.
+ */
+const CARRIED = ['loadValue', 'effortValue', 'restSeconds', 'tempo'] as const;
+
+function carryForward(sets: DraftSet[], setUid: string, patch: Partial<Omit<DraftSet, 'uid'>>): DraftSet[] {
+  const at = sets.findIndex(s => s.uid === setUid);
+  if (at === -1) return sets;
+  const before = sets[at];
+  const out = sets.map(s => (s.uid === setUid ? { ...s, ...patch } : s));
+  for (const key of CARRIED) {
+    if (!(key in patch)) continue;
+    const old = before[key];
+    const next = patch[key];
+    for (let j = at + 1; j < out.length; j++) {
+      if (out[j][key] !== old) break;
+      out[j] = { ...out[j], [key]: next };
+    }
+  }
+  return out;
+}
+
 export function patchSet(
   draft: Draft,
   exerciseUid: string,
@@ -619,7 +649,7 @@ export function patchSet(
 ): Draft {
   return mapExercise(draft, exerciseUid, e => ({
     ...e,
-    sets: e.sets.map(s => (s.uid === setUid ? { ...s, ...patch } : s)),
+    sets: carryForward(e.sets, setUid, patch),
   }));
 }
 

@@ -344,6 +344,10 @@ export function ExercisePanel({
      Show bodyPart when it adds something the muscle group tag doesn't already say. */
   const showBodyPart =
     exercise.bodyPart && exercise.bodyPart !== exercise.muscleGroup;
+  /* Whether the Targets block draws — read once, because the muscle chip above it stands down when it does. */
+  const showsTargets =
+    (exercise.target && exercise.target.toLowerCase() !== (exercise.muscleGroup ?? '').toLowerCase()) ||
+    (exercise.secondaryTargets?.length ?? 0) > 0;
 
   return (
     <>
@@ -374,19 +378,21 @@ export function ExercisePanel({
         </div>
 
         <div className="panel__body">
-          {/* Tags */}
+          {/* Tags — SENTENCE CASE, the list's spelling (*Abs*, *Body weight*), and the muscle only when the Targets
+              block below does not already say it (25 Nov 2026): it read *abs · waist · ab wheel · intermediate*
+              over *Targets: abs*. */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 20 }}>
-            {exercise.muscleGroup && (
-              <Tag>{exercise.muscleGroup}</Tag>
+            {exercise.muscleGroup && !showsTargets && (
+              <Tag>{cap(exercise.muscleGroup)}</Tag>
             )}
             {showBodyPart && (
-              <Tag>{exercise.bodyPart}</Tag>
+              <Tag>{cap(exercise.bodyPart ?? '')}</Tag>
             )}
             {exercise.equipment && (
-              <Tag>{exercise.equipment}</Tag>
+              <Tag>{cap(exercise.equipment)}</Tag>
             )}
             {exercise.level && (
-              <Tag>{exercise.level}</Tag>
+              <Tag>{cap(exercise.level)}</Tag>
             )}
             {exercise.isCustom && (
               <Tag tone="acc">Yours</Tag>
@@ -399,12 +405,11 @@ export function ExercisePanel({
               *Close-Grip Bench Press* opened to the same four tags and the same
               word, *Chest*, on the one surface whose entire job is telling one
               exercise from another. */}
-          {(exercise.target && exercise.target.toLowerCase() !== (exercise.muscleGroup ?? '').toLowerCase()) ||
-          exercise.secondaryTargets?.length > 0 ? (
+          {showsTargets ? (
             <div style={{ marginBottom: 18 }}>
               <p className="micro" style={{ marginBottom: 4, marginTop: 0 }}>Targets</p>
               {exercise.target && (
-                <p style={{ fontSize: 13, margin: 0, fontWeight: 600 }}>{exercise.target}</p>
+                <p style={{ fontSize: 13, margin: 0, fontWeight: 600 }}>{cap(exercise.target)}</p>
               )}
               {exercise.secondaryTargets?.length > 0 && (
                 <p style={{ fontSize: 12, margin: '3px 0 0', color: 'var(--tx-ink-3)' }}>
@@ -418,7 +423,7 @@ export function ExercisePanel({
           {exercise.movementPattern && (
             <div style={{ marginBottom: 18 }}>
               <p className="micro" style={{ marginBottom: 4, marginTop: 0 }}>Movement</p>
-              <p style={{ fontSize: 13, margin: 0 }}>{exercise.movementPattern}</p>
+              <p style={{ fontSize: 13, margin: 0 }}>{cap(exercise.movementPattern)}</p>
             </div>
           )}
 
@@ -527,3 +532,7 @@ export function ExercisePanel({
   );
 }
 
+/** *ab wheel* → *Ab wheel*: the library stores lower case; the list beside this panel prints sentence case. */
+function cap(s: string): string {
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}

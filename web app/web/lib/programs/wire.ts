@@ -153,6 +153,11 @@ export interface FlatSetDetail {
   reps: number | null;
   durationSeconds: number | null;
   toFailure: boolean | null;
+  /** THIS SET'S OWN LOAD in kg, when the sets of a row do not share one (a 32 · 27.5 · 27.5 back-off).
+   *  Absent or null means the row's `targetLoad`. Added 25 Nov 2026: the schema stores a load per set
+   *  (`workout_set`), and without this field the flat row kept set 1's load for every set, so a pyramid
+   *  typed in the workout dialog came back flat the next time it was opened. */
+  load?: number | null;
 }
 
 /** Structurally `TemplateExerciseWire` (and `DiffRow`). */
@@ -223,6 +228,7 @@ function detailOf(s: PlanSetWire): FlatSetDetail {
     reps: s.effortKind === 'reps' || s.effortKind === 'rep_interval' ? s.effortValue : null,
     durationSeconds: isTimed(s.effortKind) ? s.effortValue : null,
     toFailure: s.effortKind.startsWith('max_') ? true : null,
+    load: s.loadKind === 'weight' ? s.loadValue : null,
   };
 }
 
@@ -230,7 +236,9 @@ function detailOf(s: PlanSetWire): FlatSetDetail {
 function uniform(sets: PlanSetWire[]): boolean {
   const [first, ...rest] = sets;
   if (!first) return true;
-  return rest.every(s => s.effortKind === first.effortKind && s.effortValue === first.effortValue);
+  /* The load counts too: sets that differ only in kg are a back-off, not straight sets. */
+  return rest.every(s => s.effortKind === first.effortKind && s.effortValue === first.effortValue
+    && (s.loadKind === 'weight' ? s.loadValue : null) === (first.loadKind === 'weight' ? first.loadValue : null));
 }
 
 function rowOf(
@@ -323,6 +331,7 @@ function setsOfRow(r: FlatRow): PlanSetWire[] {
     const effortKind: EffortKind = d.toFailure ? (timed ? 'max_time' : 'max_reps') : timed ? 'time' : 'reps';
     return {
       ...base,
+      loadValue: d.load != null ? d.load : base.loadValue,
       effortKind,
       effortValue: effortKind.startsWith('max_') ? null : timed ? d.durationSeconds : d.reps,
     };

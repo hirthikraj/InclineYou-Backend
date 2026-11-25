@@ -146,7 +146,7 @@ export function LibraryDock({
           open while the trainer clicks around the board is a dock that can add
           to the wrong day, and the tokens are the answer. */}
       <div className="wslib__to">
-        <span className="wslib__tok">ADDING TO</span>
+        <span className="wslib__tok">Adding to</span>
         <span className="wslib__tok wslib__tok--on">
           {dayWord(day)}
           {dayLabel ? ` · ${dayLabel.toUpperCase()}` : ''}

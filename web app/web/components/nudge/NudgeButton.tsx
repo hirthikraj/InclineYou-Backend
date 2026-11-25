@@ -120,6 +120,8 @@ export interface NudgeButtonProps {
    * row in the same list a moment later.
    */
   role?: string;
+  /** Drop to a ghost button while this client was messaged inside the cooldown (the roster's rows). */
+  quietWhenContacted?: boolean;
 }
 
 export function NudgeButton({
@@ -132,6 +134,7 @@ export function NudgeButton({
   lastNudgedAt = null,
   now,
   showContactedNote = true,
+  quietWhenContacted = false,
   role,
 }: NudgeButtonProps) {
   const [state, setState] = useState<State>({ kind: 'idle' });
@@ -152,6 +155,11 @@ export function NudgeButton({
      note this component cannot honestly draw, and reading the clock here would
      be a hydration mismatch on top of an impure render. */
   const contacted = seenAt != null && at != null && withinCooldown(seenAt, at);
+  /* Already messaged this week (22 Nov 2026): the queue's rule is to go QUIET about someone contacted, not to refuse the
+     button — so it stays pressable and drops from its bordered weight to a ghost one, under its "Messaged …" note. */
+  const buttonClass = quietWhenContacted && contacted && state.kind === 'idle'
+    ? className.replace(/\bbtn--(secondary|primary)\b/, 'btn--ghost')
+    : className;
 
   const press = () => {
     setState({ kind: 'idle' });
@@ -191,7 +199,7 @@ export function NudgeButton({
   return (
     <span className="ndg">
       <button
-        className={className}
+        className={buttonClass}
         type="button"
         role={role}
         onClick={press}

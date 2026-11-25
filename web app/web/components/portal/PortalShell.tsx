@@ -46,6 +46,9 @@ function currentFor(pathname: string): RailKey {
   /* A finished session is read from Progress › History, and its crumb says so. */
   if (pathname.startsWith('/me/session')) return 'me-progress';
   if (pathname.startsWith('/me/plan')) return 'me-plan';
+  /* A workout's PREVIEW is a day of the plan (25 Nov 2026), and its crumb says *Plan*. The header above argued for
+     *Home* because the flow starts and finishes there — that is the live run, which is not this route. */
+  if (pathname.startsWith('/me/workout')) return 'me-plan';
   /* The pages *Me* lists under *Yours* — details, messages, package, payments — light *Me*, not *Home*: in the
      audit at 357px the bar said Home on the package screen the client had just reached from Me. */
   if (

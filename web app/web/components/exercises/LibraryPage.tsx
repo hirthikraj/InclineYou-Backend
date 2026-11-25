@@ -1,5 +1,6 @@
 'use client';
 
+import { rankForTrainer } from '@/lib/exercises/rank';
 import { useEffect, useRef, useState, useTransition, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -15,7 +16,6 @@ import { Chip } from '@/web-components/ui/Chip';
 import { CountBadge } from '@/web-components/ui/CountBadge';
 import { Crumbs } from '@/web-components/ui/Crumbs';
 import { EmptyState } from '@/web-components/ui/EmptyState';
-import { Facet } from '@/web-components/ui/Facet';
 import { Pager } from '@/web-components/ui/Pager';
 import { SearchField } from '@/web-components/ui/SearchField';
 import { Row as TableRow, Table } from '@/web-components/ui/Table';
@@ -23,19 +23,20 @@ import { Tag } from '@/web-components/ui/Tag';
 import { CreateForm } from './CreateExercise';
 import { ChevronRightIcon, ExercisePanel, FilterIcon, PlusIcon, XIcon } from './ExerciseLibrary';
 import { activeFilters, BODY_ORDER, SearchFilters, title } from './SearchFilters';
-import { BodyArt, EquipmentArt, hasMuscleArt, hasOwnArt, LibraryTile, MuscleArt, type BodyPartId } from './TileArt';
+import { BodyArt, LibraryTile, type BodyPartId } from './TileArt';
 
 /**
- * THE EXERCISE LIBRARY, IN THREE WAYS IN.
+ * THE EXERCISE LIBRARY, IN TWO WAYS IN.
  *
  * It was one list with a muscle-group tab, built for a library nobody could
  * browse. The library is now 655 exercises with a body part, a muscle, kit, a
  * movement, a level and a way of counting each, and the page lets a trainer arrive
  * from whichever of those they are thinking in: **Categories** (a body part, then
- * its muscles), **Equipment** (a kind of kit, then which one) or **Search**, every
- * filter at once.
+ * its muscles) or **Search**, every filter at once — kit is one of its filters.
+ * (An Equipment tab of kit tiles was removed on 23 Nov 2026: its drawings did not
+ * match the rest of the product and it only repeated the kit filter.)
  *
- * The first two open as TILES with a picture, because they are doors and not
+ * Categories opens as TILES with a picture, because they are doors and not
  * results: the picture says what is behind each one before it is opened, and the
  * count says how deep. Only when a door is opened does a list of exercises appear
  * (`wantsList`), so the front page of each tab is a few big targets, not 655 rows.
@@ -120,14 +121,12 @@ export function ExerciseLibraryPage({ data }: { data: LibraryData }) {
         {query.view === 'categories' && (
           <CategoriesView meta={meta} query={query} data={data} pending={pending} onOpen={setSelected} selectedId={selected?.id ?? null} />
         )}
-        {query.view === 'equipment' && (
-          <EquipmentView meta={meta} query={query} data={data} pending={pending} onOpen={setSelected} selectedId={selected?.id ?? null} />
-        )}
         {query.view === 'search' && (
           <SearchView
             meta={meta}
             query={query}
-            exercises={initial?.exercises ?? []}
+            /* The same trainer's order as the builder's library (`lib/exercises/rank.ts`). */
+            exercises={rankForTrainer(initial?.exercises ?? [], query.q)}
             total={initial?.total ?? 0}
             size={size}
             pending={pending}
@@ -281,11 +280,11 @@ function ExerciseRow({ exercise, selected, onClick }: { exercise: ExerciseWire; 
 /**
  * WHERE YOU ARE, AND THE WAY UP FROM EACH LEVEL.
  *
- * Equipment › Cardio machine › Treadmill. A single *All equipment* button only said
+ * Categories › Upper legs › Quads. A single *All categories* button only said
  * how to go back to the top; the trail says how deep you are and takes you to ANY
  * level above in one press, which on a phone — where there is no room for a side
  * rail — is the only orientation there is. The chips below stay: they are the
- * way to move SIDEWAYS to a sibling (Treadmill → Stationary bike) without climbing
+ * way to move SIDEWAYS to a sibling (Quads → Hamstrings) without climbing
  * up and down, so the trail is the vertical axis and the chips the horizontal one.
  */
 function DrillHeader({
@@ -309,36 +308,7 @@ function DrillHeader({
   );
 }
 
-/**
- * The kind of kit, for a category with too many kinds to draw — the machines. Twenty-odd tiles under one family
- * picture said nothing and twenty-odd chips were a wall, so the kind is one `Facet`: the axis is named, the chosen kind
- * is printed in the pill, a find field copes with the length, and clearing it is the pill's own ×. Picking a kind is a
- * navigation like every other choice on this page.
- */
-function KindFilter({
-  category, current, items,
-}: {
-  category: string;
-  current: string;
-  items: { value: string; label: string; count: number }[];
-}) {
-  const router = useRouter();
-  return (
-    <div className="facets lib-kind">
-      <Facet
-        label={`Kind of ${category}`}
-        single
-        width={288}
-        search={{ placeholder: `Find a ${category}`, empty: `No ${category} matches`, noun: 'kinds' }}
-        selected={current ? [current] : []}
-        onChange={next => router.replace(libraryHref({ view: 'equipment', ecat: category, ekey: next[0] ?? '' }), { scroll: false })}
-        options={items}
-      />
-    </div>
-  );
-}
-
-/** A row of links narrowing a drill-down, with the one in force marked — a muscle, or a kind of kit. */
+/** A row of links narrowing a drill-down, with the one in force marked — a muscle. */
 function NarrowRow({
   dense = false,
   label,
@@ -408,32 +378,6 @@ function CategoriesView({
   const muscle = muscles.find(m => m.target === query.muscle) ?? null;
   const many = muscles.length > 1;
 
-  /* LEVEL 2 — a body part with several muscles opens onto them, as tiles, and lists nothing yet. Drawn throughout
-     or text throughout: see `MuscleArt` for why a mixed set is never drawn. */
-  if (many && !muscle) {
-    const drawn = muscles.every(m => hasMuscleArt(m.target));
-    return (
-      <div className="lib-body">
-        <DrillHeader
-          crumbs={[{ label: 'Categories', href: libraryHref({ view: 'categories' }) }, { label: title(query.group) }]}
-          heading={title(query.group)}
-          count={groupTotal}
-        />
-        <div className={`lt-grid ${drawn ? 'lt-grid--lib' : 'lt-grid--plain'}`}>
-          {muscles.map(m => (
-            <LibraryTile
-              key={m.target}
-              title={title(m.target)}
-              count={m.count}
-              art={drawn ? <MuscleArt target={m.target} /> : undefined}
-              href={libraryHref({ view: 'categories', group: query.group, muscle: m.target })}
-            />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
   /* LEVEL 3 — one muscle's exercises (or the only muscle a body part has). The trail reads
      Categories / Upper legs / Quads; the chips move sideways to a sibling. */
   const ex = data.initial?.exercises ?? [];
@@ -450,7 +394,9 @@ function CategoriesView({
         heading={muscle ? title(muscle.target) : title(query.group)}
         count={muscle ? muscle.count : groupTotal}
       />
-      {many && muscle && (
+      {/* THE MUSCLES ARE PILLS OVER THE LIST, from the first click (25 Nov 2026) — *All muscles* in force until
+          one is picked. They used to be a page of tiles in front of the list. */}
+      {many && (
         <NarrowRow
           label={`Other muscles in ${query.group}`}
           allLabel="All muscles"
@@ -476,136 +422,6 @@ function CategoriesView({
             title={total > 0 ? 'That page is past the end' : `Nothing in ${query.group}`}
             body={total > 0 ? 'The link you followed points past the last page.' : 'No exercise in the library is in this group.'}
             action={<Button variant="secondary" href={libraryHref({ view: 'categories' })}>Back to the categories</Button>}
-          />
-        }
-      />
-    </div>
-  );
-}
-
-/* ────────────────────────────────────────────────────────── view · equipment ── */
-
-function EquipmentView({
-  meta, query, data, pending, onOpen, selectedId,
-}: {
-  meta: LibraryMeta; query: LibraryQuery; data: LibraryData; pending: boolean;
-  onOpen: (ex: ExerciseWire) => void; selectedId: string | null;
-}) {
-  const groups = meta.equipmentGroups.map(g => ({ ...g, count: g.items.reduce((n, i) => n + i.count, 0) }));
-
-  /* LEVEL 1 — the kinds of kit. */
-  if (!query.ecat) {
-    return (
-      <div className="lib-body">
-        <div className="lt-grid lt-grid--lib">
-          {groups.map(g => (
-            <LibraryTile
-              key={g.category}
-              title={title(g.category)}
-              count={g.count}
-              note={g.items.length > 1 ? `${g.items.length} kinds` : undefined}
-              art={<EquipmentArt category={g.category} />}
-              href={libraryHref({ view: 'equipment', ecat: g.category })}
-            />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  const group = groups.find(g => g.category === query.ecat);
-  const kit = group?.items.find(i => i.key === query.ekey) ?? null;
-  const many = (group?.items.length ?? 0) > 1;
-
-  /* LEVEL 2 — a category with several kinds, every one drawn, opens onto them as tiles and lists nothing yet.
-     A category where only some kinds are drawn (the machines: twenty-odd kinds, one family picture) has no tile
-     level at all: `wantsList` sends it straight to the list and the kind is chosen from a filter below. */
-  const allDrawn = !!group && group.items.every(i => hasOwnArt(i.key));
-  if (group && many && !kit && allDrawn) {
-    return (
-      <div className="lib-body">
-        <DrillHeader
-          crumbs={[{ label: 'Equipment', href: libraryHref({ view: 'equipment' }) }, { label: title(group.category) }]}
-          heading={title(group.category)}
-          count={group.count}
-        />
-        <div className="lt-grid lt-grid--lib">
-          {group.items.map(i => (
-            <LibraryTile
-              key={i.key}
-              title={i.name}
-              count={i.count}
-              art={<EquipmentArt equipmentKey={i.key} category={group.category} />}
-              href={libraryHref({ view: 'equipment', ecat: group.category, ekey: i.key })}
-            />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  /* LEVEL 3 — one kind's exercises (or the only kind a category has). The trail reads
-     Equipment / Cardio machine / Treadmill; the chips move sideways to a sibling. */
-  const ex = data.initial?.exercises ?? [];
-  const total = data.initial?.total ?? 0;
-  return (
-    <div className="lib-body">
-      <DrillHeader
-        crumbs={[
-          { label: 'Equipment', href: libraryHref({ view: 'equipment' }) },
-          { label: title(query.ecat), href: kit && many ? libraryHref({ view: 'equipment', ecat: query.ecat }) : undefined },
-          ...(kit && many ? [{ label: kit.name }] : []),
-        ]}
-        heading={kit ? kit.name : title(query.ecat)}
-        count={kit ? kit.count : group?.count ?? 0}
-        aside={group && many && !allDrawn ? (
-          <KindFilter
-            category={group.category}
-            current={query.ekey}
-            items={[...group.items]
-              /* the commonest kinds first, then alphabetical: the list arrived in seed order, which read as
-                 13, 6, 3, 2, 3, 2, 1, 3 and gave nobody a reason to look where they did */
-              .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
-              .map(i => {
-                /* the heading already says the category: *Leg press machine* under *Machine* is the word twice.
-                   A kind that is only its category (*Smith machine*) keeps the word, or it reads as *Smith*. */
-                const short = i.name.replace(new RegExp(`\\s+${group.category}$`, 'i'), '');
-                return { value: i.key, label: short.includes(' ') ? short : i.name, count: i.count };
-              })}
-          />
-        ) : undefined}
-      />
-      {group && many && kit && allDrawn && (
-        <NarrowRow
-          label={`Other kinds of ${group.category}`}
-          allLabel="All kinds"
-          allHref={libraryHref({ view: 'equipment', ecat: group.category })}
-          allCount={group.count}
-          current={query.ekey}
-          items={group.items.map(i => ({
-            value: i.key,
-            label: i.name,
-            count: i.count,
-            href: libraryHref({ view: 'equipment', ecat: group.category, ekey: i.key }),
-          }))}
-        />
-      )}
-      <ResultList
-        exercises={ex}
-        total={total}
-        size={data.size}
-        page={query.page}
-        hrefFor={p => libraryHref({ ...query, page: p })}
-        noun={kit ? kit.name : title(query.ecat)}
-        pending={pending}
-        onOpen={onOpen}
-        selectedId={selectedId}
-        empty={
-          <EmptyState
-            kind="filtered"
-            title={total > 0 ? 'That page is past the end' : `Nothing uses ${kit ? kit.name : query.ecat}`}
-            body={total > 0 ? 'The link you followed points past the last page.' : 'No exercise in the library uses this kit.'}
-            action={<Button variant="secondary" href={libraryHref({ view: 'equipment' })}>Back to the equipment</Button>}
           />
         }
       />

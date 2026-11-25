@@ -136,11 +136,18 @@ export function HeaderDetail({
      server and `deck.ts` uses on Today. One number, three screens. */
   const packLow = left !== null && left <= 2;
   const phone = client.phone ? dialable(client.phone) : null;
+  /* A PROSPECT WITH NOTHING BOUGHT AND NOTHING OWED (23 Nov 2026): the two figures read *— No pack* and
+     *₹0 Pending*, two slots saying nothing on the screen a trainer opens to turn them into a client, and the
+     Overview's checklist already says *Sell a pack*. Drawn again the moment there is a pack or money. */
+  const prospect = (client.status ?? '').toLowerCase() === 'prospect';
+  const figures = !(prospect && !hasPack && owed === 0);
+  /* …and no Report until there is a session to report on: a prospect's card is refused as too thin anyway. */
+  const report = !(prospect && client.stats.sessionsDone === 0);
 
   return (
     <>
       {/* The two figures. See `.cfhead` in app.css for why they do not flex. */}
-      <div className="strip cfhead">
+      {figures && <div className="strip cfhead">
         <div>
           <b>
             {left !== null ? (
@@ -176,7 +183,7 @@ export function HeaderDetail({
               read as "nothing has been paid". */}
           <i>{late ? 'Overdue' : 'Pending'}</i>
         </div>
-      </div>
+      </div>}
 
       <div className="ph__acts">
         {/* Icon-only, because four labelled buttons do not fit beside a name and
@@ -211,7 +218,7 @@ export function HeaderDetail({
             one tab deep, on Progress, and at the foot of Business → Reports. */}
         {/* Before consent the card is locked (22 Nov 2026): the lock says so before the press, and the page it
             opens explains and carries the invite rather than being a dead end. */}
-        <Button
+        {report && <Button
           href={`/clients/${client.id}/report`}
           variant="secondary"
           title={hasConsent(client.membershipStatus) ? undefined : 'Opens once they accept their invite'}
@@ -225,7 +232,7 @@ export function HeaderDetail({
             <Lock size={14} />
           )}
           Report
-        </Button>
+        </Button>}
       </div>
     </>
   );

@@ -106,6 +106,16 @@ export function IconPlus(p: IconProps) {
   );
 }
 
+/** Two stacked sheets — "copy these to other days" on the weekly-hours editor. */
+export function IconCopy(p: IconProps) {
+  return (
+    <Glyph {...p}>
+      <rect x="8.5" y="8.5" width="11" height="11" rx="2" />
+      <path d="M15.5 8.5V6.5a2 2 0 0 0-2-2h-7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h2" />
+    </Glyph>
+  );
+}
+
 export function IconSearch(p: IconProps) {
   return (
     <Glyph {...p}>

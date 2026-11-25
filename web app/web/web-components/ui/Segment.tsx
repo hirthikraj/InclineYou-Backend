@@ -114,9 +114,12 @@ export function SegmentButton({
   count,
   disabled,
   title,
+  className,
   children,
 }: {
   pressed: boolean;
+  /** A screen's own hook (e.g. a rule that hides one pill at a width). */
+  className?: string;
   /** Shown but not choosable — e.g. a part of the day with nothing free. Arrow keys skip it. */
   disabled?: boolean;
   title?: string;
@@ -131,7 +134,7 @@ export function SegmentButton({
   const single = mode === 'single';
   return (
     <button
-      className="seg__b"
+      className={className ? `seg__b ${className}` : 'seg__b'}
       type="button"
       /* One attribute or the other, never both: a node carrying `aria-pressed`
          and `aria-checked` at once is announced twice and the two can disagree

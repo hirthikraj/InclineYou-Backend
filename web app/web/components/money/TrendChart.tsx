@@ -86,8 +86,7 @@ export function TrendChart({
                 right: 12,
                 bottom: avgOffset,
                 height: 0,
-                borderTop: '1px dashed var(--tx-accent)',
-                opacity: 0.55,
+                borderTop: '1px dashed var(--tx-ink-off)',
               }}
             />
           )}
@@ -95,13 +94,17 @@ export function TrendChart({
           {bars.map((bar, i) => (
             <i
               key={`${bar.year}-${bar.month}`}
-              className="chart__b"
+              className={bar.isCurrent ? 'chart__b chart__b--now' : 'chart__b'}
+              /* CENTRED IN ITS MONTH AND CAPPED (24 Nov 2026). Each bar filled its whole slot
+                 — ~155px slabs on a desk — and started 16px into it while its label was pulled
+                 half a slot left, so "Aug" sat at the edge of the Aug column. Bar and label now
+                 share one centre, inside the gridlines' 12px inset. */
               style={{
-                left: `calc(${(i / n) * 100}% + 16px)`,
-                width: `calc(${(1 / n) * 100}% - 10px)`,
+                left: `calc(12px + (100% - 24px) * ${(i + 0.5) / n})`,
+                width: `min(56px, calc((100% - 24px) / ${n} - 12px))`,
+                transform: 'translateX(-50%)',
                 bottom: FLOOR,
                 height: heightOf(bar.amount),
-                ...(bar.isCurrent ? { background: 'var(--tx-accent)' } : {}),
               }}
               title={`${bar.label} ${bar.year}: ${rupees(bar.amount)}${bar.isCurrent ? ' so far' : ''}`}
             >
@@ -116,9 +119,7 @@ export function TrendChart({
               key={`lbl-${bar.year}-${bar.month}`}
               className="chart__x"
               style={{
-                left: `calc(${(i / n) * 100}% + 16px)`,
-                width: `calc(${(1 / n) * 100}% - 10px)`,
-                textAlign: 'center',
+                left: `calc(12px + (100% - 24px) * ${(i + 0.5) / n})`,
                 /* `--tx-accent-text` and NOT `--tx-accent`. The raw accent is a
                    FILL — the rule §04 states in one line — and as ink on the
                    card it measured 1.3:1 in light, which is the current month's

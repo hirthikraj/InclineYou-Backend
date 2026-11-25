@@ -6,6 +6,7 @@ import { ScheduleKey } from './ScheduleKey';
 import { STEP_LABELS, VIEWS, VIEW_LABELS, type ScheduleView } from '@/lib/schedule/view';
 import type { WeekLayout } from '@/lib/schedule/pivot';
 import { Chip } from '@/web-components/ui/Chip';
+import { Segment, SegmentButton } from '@/web-components/ui/Segment';
 
 /** *Hours* rather than *Grid*, and *Clients* rather than *Roster*: both name the
  *  thing the ROWS are, which is what a trainer is choosing between. The glyph is
@@ -52,6 +53,8 @@ interface ToolbarProps {
   counts: { floor: number; remote: number };
   modes: { floor: boolean; remote: boolean };
   gaps: boolean;
+  /** A past session nobody marked is on screen, so the key names its amber frame. */
+  late: boolean;
   /** How many sellable hours the range holds, for the gap chip's own count. */
   gapSlots: number;
   /**
@@ -74,7 +77,7 @@ interface ToolbarProps {
 }
 
 export function Toolbar({
-  view, layout, label, counts, modes, gaps, gapSlots, pivoting, hoursHref,
+  view, layout, label, counts, modes, gaps, gapSlots, pivoting, late, hoursHref,
   onView, onLayout, onStep, onMode, onGaps,
 }: ToolbarProps) {
   return (
@@ -194,7 +197,7 @@ export function Toolbar({
         behaviours — so this one is a `<dl>`, has no press state, and takes no
         pointer events.
       */}
-      <ScheduleKey view={view} gaps={gaps} pivoting={pivoting} />
+      <ScheduleKey view={view} gaps={gaps} pivoting={pivoting} late={late} />
 
       <div className="sch__filters">
         {/*
@@ -203,42 +206,27 @@ export function Toolbar({
           un-ticked — recognition rather than recall, and it is also the only
           place on the screen the delivery split is stated as a number.
         */}
-        {/*
-          `chip--zero` rides `className` rather than becoming a `Chip` prop, for
-          the reason `ui/Chip.tsx` gives about `chip--sm` and
-          `chip--active-status`: the class is defined only in `app/styles/app.css`
-          and a prop in the catalogue's API for a class a designer cannot reach
-          in the design file would be a lie about where that class lives.
-
-          It is on the COUNT and not on `pressed`, because they are different
-          facts. The chip is still pressed — un-ticking it is still a thing that
-          does something — it just has nothing to remove, and a pill that is
-          shouting about zero sessions is spending the accent that `New session`
-          eighteen pixels above needs. See §26.6 in app.css.
-        */}
-        <Chip
-          pressed={modes.floor}
-          className={counts.floor === 0 ? 'chip--zero' : undefined}
-          onClick={() => onMode('floor')}
-        >
-          In Person {counts.floor}
-        </Chip>
-        <Chip
-          pressed={modes.remote}
-          className={counts.remote === 0 ? 'chip--zero' : undefined}
-          onClick={() => onMode('remote')}
-        >
-          Online {counts.remote}
-        </Chip>
-        {view !== 'month' && !pivoting && (
-          <Chip
-            pressed={gaps}
-            className={gapSlots === 0 ? 'sch__gaps chip--zero' : 'sch__gaps'}
-            onClick={onGaps}
-          >
-            {gapSlots > 0 ? `Show gaps · ${gapSlots}` : 'Show gaps'}
-          </Chip>
-        )}
+        {/* 24 Nov 2026: the same toggle pills as Today's filters — a neutral fill
+            and a tick when on. They were lime chips, which put two lime plates
+            beside `New session` for controls that take no action. */}
+        <Segment label="Filter the calendar">
+          <SegmentButton pressed={modes.floor} count={counts.floor} onClick={() => onMode('floor')}>
+            In Person
+          </SegmentButton>
+          <SegmentButton pressed={modes.remote} count={counts.remote} onClick={() => onMode('remote')}>
+            Online
+          </SegmentButton>
+          {view !== 'month' && !pivoting && (
+            <SegmentButton
+              pressed={gaps}
+              className="sch__gaps"
+              count={gapSlots > 0 ? gapSlots : undefined}
+              onClick={onGaps}
+            >
+              Show gaps
+            </SegmentButton>
+          )}
+        </Segment>
         {/* Visible only on mobile (≤900px) — the header link is hidden there. */}
         <Chip href={hoursHref} className="sch__hours--mobile">
           Working hours

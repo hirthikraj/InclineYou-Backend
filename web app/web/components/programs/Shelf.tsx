@@ -26,7 +26,7 @@ import { Button } from '@/web-components/ui/Button';
 import { BulkBar } from '@/web-components/ui/BulkBar';
 import { Modal, ModalHost } from '@/web-components/ui/Modal';
 import { Tag } from '@/web-components/ui/Tag';
-import { Chip } from '@/web-components/ui/Chip';
+import { Segment as SegmentGroup, SegmentButton } from '@/web-components/ui/Segment';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 import { RowMenu } from '@/web-components/ui/RowMenu';
 
@@ -514,39 +514,29 @@ export function Shelf({
         {table && (
           <div className="pgt__sort">
             <span className="pgt__sortk">Sort</span>
-            <div className="tools" role="group" aria-label="Sort the list">
+            {/* One of a set: the shared neutral pills, single-select, not lime chips (25 Nov 2026). */}
+            <SegmentGroup label="Sort the list" mode="single">
               {/* *Most used* sorts nothing while every count is zero. */}
               {SORTS.filter(o => o.key !== 'used' || templates.some(t => t.assignedCount > 0)).map(o => (
-                <Chip
-                  pressed={sort === o.key}
-                  key={o.key}
-                  onClick={() => setSort(o.key)}
-                >
+                <SegmentButton mode="single" pressed={sort === o.key} key={o.key} onClick={() => setSort(o.key)}>
                   {o.label}
-                </Chip>
+                </SegmentButton>
               ))}
-            </div>
+            </SegmentGroup>
           </div>
         )}
 
         {useful && (
-          <div className="tools" role="group" aria-label="Filter by goal">
-            <Chip
-              pressed={goal === null}
-              onClick={() => setGoal(null)}
-            >
-              All {templates.length}
-            </Chip>
+          <SegmentGroup label="Filter by goal" mode="single">
+            <SegmentButton mode="single" pressed={goal === null} count={templates.length} onClick={() => setGoal(null)}>
+              All
+            </SegmentButton>
             {GOALS.filter(g => (counts.get(g.key) ?? 0) > 0).map(g => (
-              <Chip
-                pressed={goal === g.key}
-                key={g.key}
-                onClick={() => setGoal(goal === g.key ? null : g.key)}
-              >
-                {g.label} {counts.get(g.key)}
-              </Chip>
+              <SegmentButton mode="single" pressed={goal === g.key} key={g.key} count={counts.get(g.key)} onClick={() => setGoal(g.key)}>
+                {g.label}
+              </SegmentButton>
             ))}
-          </div>
+          </SegmentGroup>
         )}
           </>
         )}
@@ -765,7 +755,8 @@ function TableRow({
          *Upper A · Lower A · Upper B · Lower B* against *Push · Pull · Legs*.
          Computed off the SAME `days` the strip is drawn from, so the two
          cannot disagree about which slots this program trains. */
-      sub={dayNamesOf(template, days)}
+      /* Only when a day has a NAME: *Day 1 · Day 2 · Day 3* is the day count a third time (name, Days, strip). */
+      sub={Object.values(template.dayLabels ?? {}).some((l) => l && l.trim()) ? dayNamesOf(template, days) : undefined}
       days={days}
       /* LIFETIME, every copy ever made for a client — `ProgramRow`'s own
          bullet on the used column. */

@@ -87,7 +87,7 @@ export function Rail({ current, state }: { current: SetupStep | null; state: Set
       <div className="stp__mob">
         <div className="stp__mobrow">
           <span className="micro">
-            {current ? `STEP ${index + 1} OF ${SETUP_STEPS.length}` : 'SETTING UP'}
+            {current ? `Step ${index + 1} of ${SETUP_STEPS.length}` : 'Setting up'}
           </span>
           <Button
             variant="ghost"

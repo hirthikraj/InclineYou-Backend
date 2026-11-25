@@ -73,6 +73,11 @@ export interface SetDetailWire {
   reps: number | null;
   durationSeconds: number | null;
   toFailure: boolean | null;
+  /** THIS SET'S OWN LOAD in kg, when the sets of a row do not share one (a 32 · 27.5 · 27.5 back-off).
+   *  Absent or null means the row's `targetLoad`. Added 25 Nov 2026: the schema stores a load per set
+   *  (`workout_set`), and without this field the flat row kept set 1's load for every set, so a pyramid
+   *  typed in the workout dialog came back flat the next time it was opened. */
+  load?: number | null;
 }
 
 /**

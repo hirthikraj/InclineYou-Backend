@@ -123,12 +123,12 @@ export function Bests({ data }: { data: ConsoleDataX }) {
                 >
                   <p className="vrd__k">
                     {b.verdict === 'record'
-                      ? 'A RECORD'
+                      ? 'A record'
                       : b.verdict === 'quiet'
-                        ? 'A RECORD, QUIETLY'
+                        ? 'A record, quietly'
                         : b.verdict === 'matched'
-                          ? 'MATCHED'
-                          : 'HER FIRST'}
+                          ? 'Matched'
+                          : 'A first'}
                   </p>
                   <p className="small" style={{ color: 'var(--tx-ink-2)' }}>{b.name}</p>
                   <p className="vrd__v">{b.value}</p>

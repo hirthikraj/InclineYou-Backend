@@ -58,6 +58,7 @@ public class PackageLedgerService {
 
     private final PackageJdbcRepository packages;
     private final PaymentJdbcRepository payments;
+    private final PaymentClaimJdbcRepository claims;
     private final WorkspaceClock clock;
 
     private static final Set<String> METHODS = Set.of("upi", "cash", "bank_transfer");
@@ -471,6 +472,8 @@ public class PackageLedgerService {
         if ("refund".equals(ref.status())) throw frozen();
         if ("refunded".equals(k.status())) throw closed(k);
         ledger(() -> payments.softDelete(yid));
+        // V50: a payment a client's "I've paid" was confirmed into goes back to waiting — this delete is that confirm's Undo.
+        claims.reopenForPayment(yid);
         packages.touch(pid);
         log.info("payment deleted trainer={} payment={}", tid, yid);
     }
@@ -563,6 +566,11 @@ public class PackageLedgerService {
         if (mine.isEmpty()) return null;
         if (!mine.get()) throw ApiException.idConflict();
         return answer(tid, id, pid, false);
+    }
+
+    /** A payment and its pack as a money write answers them — for a replayed confirm (V50) that recorded it earlier. */
+    public Ledgered answerFor(UUID tid, UUID yid, UUID pid) {
+        return answer(tid, yid, pid, false);
     }
 
     private Ledgered answer(UUID tid, UUID yid, UUID pid, boolean created) {

@@ -226,7 +226,7 @@ export function firstName(name: string): string {
  *  counted from the start date in calendar weeks, clamped into the block, and
  *  `/me/plan` clamps it the same way so the trainer and the client cannot read
  *  two different weeks off one plan. */
-function weekOf(
+export function weekOf(
   program: { startDate: string | null; endDate: string | null },
   now: number,
 ): { current: number; total: number | null } | null {

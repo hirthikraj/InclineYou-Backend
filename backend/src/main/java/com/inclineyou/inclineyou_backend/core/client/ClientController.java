@@ -4,7 +4,10 @@ import com.inclineyou.inclineyou_backend.core.client.dto.ArchiveRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.ClientDetail;
 import com.inclineyou.inclineyou_backend.core.client.dto.ClientSummary;
 import com.inclineyou.inclineyou_backend.core.client.dto.CreateClientRequest;
+import com.inclineyou.inclineyou_backend.core.client.dto.CreateLeadContactRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.CreateNoteRequest;
+import com.inclineyou.inclineyou_backend.core.client.dto.LeadContact;
+import com.inclineyou.inclineyou_backend.core.client.dto.LeadContactSaved;
 import com.inclineyou.inclineyou_backend.core.client.dto.DeleteClientRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.Note;
 import com.inclineyou.inclineyou_backend.core.client.dto.PauseRequest;
@@ -44,6 +47,7 @@ public class ClientController {
     private final ClientScheduleService schedules;
     private final ClientFileService files;
     private final ClientNoteService notes;
+    private final LeadContactService leadContacts;
 
     /**
      * api-contract Today L3 — the v1 roster read, and since 1.1 the default:
@@ -170,6 +174,28 @@ public class ClientController {
     @PostMapping("/{id}/notes/{noteId}/restore")
     public Note restoreNote(@PathVariable UUID id, @PathVariable UUID noteId) {
         return notes.restore(trainerId(), id, noteId);
+    }
+
+    /* The lead's contact log (V48) — under the client, like notes. Not consent-gated (LeadRules). */
+
+    @GetMapping("/{id}/lead-contacts")
+    public Items<LeadContact> listLeadContacts(@PathVariable UUID id) {
+        return Items.of(leadContacts.list(trainerId(), id));
+    }
+
+    /** 201 the first time, 200 on a replayed id. Moves the client's follow-up date in the same transaction. */
+    @PostMapping("/{id}/lead-contacts")
+    public ResponseEntity<LeadContactSaved> addLeadContact(@PathVariable UUID id,
+                                                           @Valid @RequestBody CreateLeadContactRequest body) {
+        var saved = leadContacts.create(trainerId(), id, body);
+        return ResponseEntity.status(saved.created() ? HttpStatus.CREATED : HttpStatus.OK).body(saved);
+    }
+
+    /** The toast's Undo. 204, again for one already gone. */
+    @DeleteMapping("/{id}/lead-contacts/{contactId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteLeadContact(@PathVariable UUID id, @PathVariable UUID contactId) {
+        leadContacts.delete(trainerId(), id, contactId);
     }
 
     private UUID trainerId() {

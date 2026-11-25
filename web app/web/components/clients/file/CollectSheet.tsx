@@ -140,6 +140,7 @@ export function CollectSheet({
   return (
     <ModalHost onClose={onClose} cover="frame" initialFocus="#cs-amount">
       <Modal
+        sheet
         title={settling ? `Settle ${rupees(owed)}` : `Take a payment from ${first}`}
         foot={
           <>

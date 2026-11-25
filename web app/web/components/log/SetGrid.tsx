@@ -74,6 +74,8 @@ export interface GridHandlers {
   unskip: (exerciseId: string, setNumber: number) => void;
   /** Take back one extra slot nobody logged. */
   removeSlot: (exerciseId: string) => void;
+  /** Take the whole movement out of today's log (Undo is offered). */
+  removeExercise: (exerciseId: string) => void;
 }
 
 export interface Draft {
@@ -576,8 +578,28 @@ export function SetGrid({
   };
   const focusOpen = () => {
     if (!openSlot || !table.current) return;
-    table.current.querySelector<HTMLInputElement>(`tbody tr[data-set="${openSlot.number}"] input`)?.focus();
+    const input = table.current.querySelector<HTMLInputElement>(`tbody tr[data-set="${openSlot.number}"] input`);
+    input?.focus();
+    /* Selected, as Tab and the arrow keys already leave it: the field holds last time's
+       number, and a caret at its start turned "27.5" typed over "25" into "27.525". */
+    input?.select();
   };
+
+  /* THE CURSOR STARTS IN THE SET (24 Nov 2026). A keyboard console opened with focus on the
+     page body, so the first set began with a click. On a desk with a fine pointer, and only
+     when nothing else has focus — it never takes the cursor from a field, a menu or a dialog,
+     and never on a phone, where focusing would raise the keyboard over the grid. Re-runs when
+     the movement changes, so picking one in the list puts the cursor in its first open set.
+     `openNumber` is the scroll effect's, declared above. */
+  useEffect(() => {
+    if (openNumber === null || !table.current) return;
+    if (!window.matchMedia('(min-width: 901px) and (pointer: fine)').matches) return;
+    const a = document.activeElement;
+    if (a && a !== document.body && !a.closest('.exl')) return;
+    const input = table.current.querySelector<HTMLInputElement>(`tbody tr[data-set="${openNumber}"] input`);
+    input?.focus({ preventScroll: true });
+    input?.select();
+  }, [view.exerciseId, openNumber === null]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const restBar = rest?.over ? (
     <ActionBar tone="ok" role="status" label={`Rest over after a ${view.name.toLowerCase()} set`}>
@@ -782,11 +804,12 @@ export function SetGrid({
             every few seconds. Both are drawn and CSS picks one, so nothing branches on a width. */}
         <RowMenu
           className="setg__more"
-          label={`More for ${view.name}`}
+          label={view.name}
           items={[
             { key: 'hist', label: 'Last sessions & PR', onSelect: () => handlers.openHistory(view.exerciseId) },
             { key: 'swap', label: 'Swap this exercise', onSelect: () => handlers.openSwap(view.exerciseId) },
             { key: 'rest', label: 'Change the rest', onSelect: () => handlers.changeRest(view.exerciseId) },
+            { key: 'remove', label: 'Remove from today', danger: true, onSelect: () => handlers.removeExercise(view.exerciseId) },
           ]}
         />
         <span className="setg__acts">
@@ -805,6 +828,14 @@ export function SetGrid({
           >
             <Swap /> Swap
           </Button>
+          {/* The desk's own way to take a movement off today, beside Swap — the phone has it in the ⋯. */}
+          <RowMenu
+            label={view.name}
+            items={[
+              { key: 'rest', label: 'Change the rest', onSelect: () => handlers.changeRest(view.exerciseId) },
+              { key: 'remove', label: 'Remove from today', danger: true, onSelect: () => handlers.removeExercise(view.exerciseId) },
+            ]}
+          />
         </span>
       </Card.Head>
 
@@ -1083,8 +1114,10 @@ export function SetGrid({
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', width: '100%' }}>
           {openSlot && !dock ? (
             <>
+              {/* Secondary: a shortcut, not the action. The lime on a desk is the active
+                  row's tick, which is what a trainer presses nineteen times (24 Nov 2026). */}
               <Button
-                variant="primary"
+                variant="secondary"
                 size="sm"
                 disabled={!offers(openSlot)}
                 onClick={acceptLastTime}

@@ -137,8 +137,13 @@ export function balance(
     }
   }
 
-  const push = (pattern['Horizontal push'] ?? 0) + (pattern['Vertical push'] ?? 0);
-  const pull = (pattern['Horizontal pull'] ?? 0) + (pattern['Vertical pull'] ?? 0);
+  /* CASE-BLIND (25 Nov 2026). The library writes patterns in lower case (*horizontal push*) and this
+     read them in title case, so both sums were always 0 and the panel said *0 : 0 — balanced* over bars
+     showing six sets of pressing and four of rowing. */
+  const sumOf = (...names: string[]) =>
+    Object.entries(pattern).reduce((n, [k, v]) => (names.includes(k.toLowerCase()) ? n + (v ?? 0) : n), 0);
+  const push = sumOf('horizontal push', 'vertical push');
+  const pull = sumOf('horizontal pull', 'vertical pull');
   const all = days.flatMap(d => entriesFor(rows, week, d));
 
   return {

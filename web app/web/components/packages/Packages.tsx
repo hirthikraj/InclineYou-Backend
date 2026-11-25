@@ -18,6 +18,7 @@ import { Tag } from '@/web-components/ui/Tag';
 import { Avatar } from '@/web-components/ui/Avatar';
 import { Table, Row } from '@/web-components/ui/Table';
 import { EmptyState } from '@/web-components/ui/EmptyState';
+import { Segment as SegmentGroup, SegmentButton } from '@/web-components/ui/Segment';
 
 /**
  * **The price list** — the phone's § 06 · 4b, on a desk, and since the
@@ -47,9 +48,15 @@ import { EmptyState } from '@/web-components/ui/EmptyState';
  * asks which of the two applies before it asks anything else, so the two lists
  * have to be two lists all the way down.
  *
- * *How you work* is therefore the first thing on the page and not a setting
- * buried elsewhere: it is the answer the rest of the screen is a consequence of.
- * It is a **defaults hint, never a gate** — who actually collects is still
+ * **Since 25 Nov 2026 the two lists are two VIEWS, picked at the top** —
+ * *Your packs* and the gym's, each with its count. In one scroll the gym's list
+ * was a fifth heading under four service headings of the trainer's own, below
+ * the fold, with the gym's name set in a sidebar card. Now the service names are
+ * sub-headings inside *Your packs*, the gym's name is set and changed on the
+ * gym's own view, and the one *New pack* adds to the list on screen (the panel
+ * still asks *who sells it*, pre-answered).
+ *
+ * The gym is a **defaults hint, never a gate** — who actually collects is still
  * decided per client at add-client time, because the mix changes month to month.
  * Switching to *On my own* hides the gym group but never deletes a price on it,
  * which is why `buildPacks` keeps drawing a trainer's own list even under *At a
@@ -70,7 +77,7 @@ import { EmptyState } from '@/web-components/ui/EmptyState';
  * confirmation says that in those words, because the button otherwise reads like
  * a delete.
  */
-export function Packages({ data }: { data: PacksData }) {
+export function Packages({ data, startOnGym = false }: { data: PacksData; startOnGym?: boolean }) {
   const [pending, startTransition] = useTransition();
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -83,7 +90,6 @@ export function Packages({ data }: { data: PacksData }) {
   /** The open panel: who it starts as, the row it edits, or a preset it starts from. */
   const [editing, setEditing] = useState<{ owner: 'trainer' | 'gym'; pack: PackRow | null; preset: PackPreset | null } | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
-  const [tray, setTray] = useState<string | null>(null);
   const [showRetired, setShowRetired] = useState(false);
 
   const view = buildPacks({
@@ -95,6 +101,18 @@ export function Packages({ data }: { data: PacksData }) {
 
   /** The gym is only real once it has a name — an unnamed list belongs to nobody. */
   const gym = data.trainer.gymName;
+
+  /* WHICH LIST IS OPEN — the trainer's own, or the gym's. Two lists with two
+     owners, so they are two views picked at the top rather than one scroll in
+     which the gym's prices were a fifth heading under four service headings of
+     the trainer's own (25 Nov 2026). State, not the URL: both lists are already
+     in the payload, so switching fetches nothing (trap 25). Opens on the gym's
+     only when the trainer sells nothing of their own and the gym's has rows. */
+  const [list, setList] = useState<'mine' | 'gym'>(
+    () => (startOnGym || (view.selling.length === 0 && view.gymSelling.length > 0) ? 'gym' : 'mine'),
+  );
+  /* The gym's name is edited on the gym's list, where it is the heading. */
+  const [gymOpen, setGymOpen] = useState(false);
 
   /* A refusal that names a next move keeps its code, so the message can offer it. */
   const [refusedCode, setRefusedCode] = useState<string | null>(null);
@@ -136,6 +154,7 @@ export function Packages({ data }: { data: PacksData }) {
         return;
       }
       setEditing(null);
+      if (!target.pack) setList(owner === 'gym' ? 'gym' : 'mine');
       trigger?.focus();
       setNotice(
         target.pack
@@ -157,7 +176,6 @@ export function Packages({ data }: { data: PacksData }) {
     setNotice(null);
     setError(null);
     setConfirming(null);
-    setTray(null);
     setFormError(null);
     if (!pack) setNewId(crypto.randomUUID());
     setEditing({ owner, pack, preset });
@@ -181,13 +199,11 @@ export function Packages({ data }: { data: PacksData }) {
                 row={row}
                 first={above === null}
                 last={below === null}
-                trayOpen={tray === row.id}
                 confirming={confirming === row.id}
                 sold={soldIds.has(row.id)}
                 pending={pending}
                 gym={gym}
                 onEdit={() => open(row.owner, row)}
-                onTray={() => setTray(tray === row.id ? null : row.id)}
                 onMove={(dir) => {
                   const other = dir < 0 ? above : below;
                   if (!other) return;
@@ -199,7 +215,7 @@ export function Packages({ data }: { data: PacksData }) {
                     `${row.name} moved ${dir < 0 ? 'earlier' : 'later'}.`,
                   );
                 }}
-                onAskRemove={() => { setTray(null); setConfirming(row.id); }}
+                onAskRemove={() => setConfirming(row.id)}
                 onCancelRemove={() => setConfirming(null)}
                 onRetire={() => {
                   setConfirming(null);
@@ -231,18 +247,79 @@ export function Packages({ data }: { data: PacksData }) {
     );
   }
 
-  const nothing = view.selling.length === 0 && view.gymSelling.length === 0;
+  const mine = list === 'mine';
+  const retired = view.retired.filter((r) => r.owner === (mine ? 'trainer' : 'gym'));
+  const gymTitle = gym ?? 'At a gym';
+  /* The one way in adds to the list on screen. The panel still asks *who sells
+     it* first, pre-answered, so the owner is an answer the trainer can see and
+     change — never a side effect of which button they happened to press. */
+  const addHere = () => open(mine || !gym ? 'trainer' : 'gym', null);
+  const canAdd = mine || gym !== null;
+
+  /** The gym's name, set or changed in place. Shared by the no-gym prompt and *Change gym*. */
+  const gymForm = (
+    <div className="pkx-gymf">
+      <GymPicker
+        id="pk-gym"
+        label="Which gym"
+        name={gymDraft}
+        place={gymPlaceDraft ?? null}
+        maxLength={80}
+        onChange={(next) => {
+          setGymDraft(next.name);
+          setGymPlaceDraft(next.place as PlaceHit | null);
+        }}
+      />
+      <p className="pkx-hint">Whatever it is called on the board outside. We count how many trainers work at each gym — never who they coach.</p>
+      <div className="row" style={{ gap: 8, marginTop: 12 }}>
+        <Button
+          variant="primary"
+          size="sm"
+          disabled={pending || gymDraft.trim() === (data.trainer.gymName ?? '')}
+          onClick={() =>
+            run(
+              () => saveGym(gymDraft, gymPlaceDraft, data.trainer.trainingModes),
+              gymDraft.trim() === ''
+                ? 'Saved. No gym on your profile now.'
+                : `Saved. ${gymDraft.trim()}'s price list is open.`,
+            )
+          }
+        >
+          {pending ? 'Saving…' : 'Save'}
+        </Button>
+        {gym && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setGymDraft(data.trainer.gymName ?? '');
+              setGymPlaceDraft(undefined);
+              setGymOpen(false);
+            }}
+          >
+            Cancel
+          </Button>
+        )}
+      </div>
+    </div>
+  );
 
   return (
     <>
-      {/* ONE WAY IN. Two *Add a pack* buttons, one per list, made the owner a
-          side effect of which card the trainer happened to press. The panel asks
-          it instead, as its first question, and only of a trainer who has a gym. */}
       <div className="pkx__tools">
-        <p className="small pk__hd__s">{view.subtitle}</p>
-        <Button variant="primary" className="pkx__new" onClick={() => open('trainer', null)}>
-          New pack
-        </Button>
+        <SegmentGroup label="Which price list" mode="single">
+          <SegmentButton mode="single" pressed={mine} count={view.selling.length} onClick={() => { setList('mine'); setConfirming(null); }}>
+            Your packs
+          </SegmentButton>
+          <SegmentButton mode="single" pressed={!mine} count={gym || view.gymSelling.length ? view.gymSelling.length : undefined} onClick={() => { setList('gym'); setConfirming(null); }}>
+            {gymTitle}
+          </SegmentButton>
+        </SegmentGroup>
+        {canAdd && (
+          <Button variant="primary" className="pkx__new" onClick={addHere}>
+            {mine ? 'New pack' : 'New gym pack'}
+          </Button>
+        )}
       </div>
 
       {(notice || error) && (
@@ -250,7 +327,7 @@ export function Packages({ data }: { data: PacksData }) {
           <span>
             {error ?? notice}
             {error && refusedCode === 'GYM_PACK_NEEDS_GYM' && (
-              <> Add it under <b>Your gym</b> on this page, or on the <a href="/settings/profile/work">Work &amp; hours</a> tab.</>
+              <> Name your gym on its tab on this page, or on the <a href="/settings/profile/work">Work &amp; hours</a> tab.</>
             )}
           </span>
         </p>
@@ -258,67 +335,91 @@ export function Packages({ data }: { data: PacksData }) {
 
       <div className="pkx">
         <div className="pkx__main">
-          {nothing ? (
-            <Card>
-              <Card.Body>
-                <EmptyState
-                  kind="first-run"
-                  title="No price list yet"
-                  body="Add what you actually charge. Everything else on this screen, and the add-client flow, is built from it."
-                  action={
-                    <div className="pkx-presets" role="group" aria-label="Start from">
-                      {PRESETS.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className="pkx-preset"
-                          onClick={() => open('trainer', null, p.terms)}
-                        >
-                          <b>{p.title}</b>
-                          <span>{p.note}</span>
-                        </button>
-                      ))}
-                    </div>
-                  }
-                />
-              </Card.Body>
-            </Card>
+          {mine ? (
+            <>
+              <p className="pkx-lead">Your own prices, paid to you.</p>
+              {view.selling.length === 0 ? (
+                <Card>
+                  <Card.Body>
+                    <EmptyState
+                      kind="first-run"
+                      title="No packs of your own yet"
+                      body="Add what you charge. Adding a client offers exactly these."
+                      action={
+                        <div className="pkx-presets" role="group" aria-label="Start from">
+                          {PRESETS.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              className="pkx-preset"
+                              onClick={() => open('trainer', null, p.terms)}
+                            >
+                              <b>{p.title}</b>
+                              <span>{p.note}</span>
+                            </button>
+                          ))}
+                        </div>
+                      }
+                    />
+                  </Card.Body>
+                </Card>
+              ) : (
+                SERVICES.map((s) => {
+                  const rows = view.selling.filter((r) => r.service === s.id);
+                  if (rows.length === 0) return null;
+                  return (
+                    <section className="pkx-g" key={s.id} aria-label={s.label}>
+                      <h3 className="pkx-g__t">{s.label} <span className="pkx-g__c">{rows.length}</span></h3>
+                      <p className="pkx-g__n">{s.note}</p>
+                      {cards(rows)}
+                    </section>
+                  );
+                })
+              )}
+            </>
           ) : (
             <>
-              {SERVICES.map((s) => {
-                const rows = view.selling.filter((r) => r.service === s.id);
-                if (rows.length === 0) return null;
-                return (
-                  <section className="pkx-g" key={s.id} aria-label={s.label}>
-                    <h2 className="pkx-g__t">{s.label} <Tag>{rows.length}</Tag></h2>
-                    <p className="pkx-g__n">{s.note}</p>
-                    {cards(rows)}
-                  </section>
-                );
-              })}
+              {gym && !gymOpen ? (
+                <div className="pkx-gymhd">
+                  <p className="pkx-lead">
+                    <b>{gym}</b>’s counter prices. The gym collects; you state only your share.
+                  </p>
+                  <Button variant="ghost" size="sm" onClick={() => setGymOpen(true)}>Change gym</Button>
+                </div>
+              ) : (
+                <Card className="pkx-gymcard">
+                  <Card.Body>
+                    <h3 className="pkx-gymcard__t">{gym ? 'Change your gym' : 'Do you also coach at a gym?'}</h3>
+                    {!gym && (
+                      <p className="small" style={{ color: 'var(--tx-ink-3)', margin: '2px 0 12px' }}>
+                        Name it and add what its counter charges. When a client pays the gym, you pick its pack and your share is worked out.
+                      </p>
+                    )}
+                    {gymForm}
+                  </Card.Body>
+                </Card>
+              )}
 
-              {view.showsGym && (
-                <section className="pkx-g" aria-label={gym ? `${gym} packs` : 'Gym packs'}>
-                  <h2 className="pkx-g__t">{gym ? `${gym}` : 'Gym packs'} <Tag>{view.gymSelling.length}</Tag></h2>
-                  <p className="pkx-g__n">The gym’s counter price. You state only your own share.</p>
-                  {view.gymSelling.length === 0 ? (
-                    <p className="pkx-g__e">
-                      {gym
-                        ? <>Nothing from {gym} yet. Add what their counter charges and you can pick it when a client pays the gym instead of you.</>
-                        : <>Add your gym on the right and its price list opens here.</>}
-                      {gym && (
-                        <span><Button variant="secondary" size="sm" onClick={() => open('gym', null)}>Add a gym pack</Button></span>
-                      )}
-                    </p>
-                  ) : (
-                    cards(view.gymSelling)
-                  )}
+              {gym && (view.gymSelling.length === 0 ? (
+                <div className="pkx-g__e">
+                  Nothing from {gym} yet. Add what their counter charges, and you can pick it when a client pays the gym instead of you.
+                  <span><Button variant="secondary" size="sm" onClick={addHere}>Add a gym pack</Button></span>
+                </div>
+              ) : (
+                cards(view.gymSelling)
+              ))}
+
+              {/* Gym packs on file with no gym named: still the trainer's to see and fix. */}
+              {!gym && view.gymSelling.length > 0 && (
+                <section className="pkx-g mt4" aria-label="Gym packs">
+                  <p className="pkx-g__n">Already on file from a gym. Name the gym above to add more.</p>
+                  {cards(view.gymSelling)}
                 </section>
               )}
             </>
           )}
 
-          {view.retired.length > 0 && (
+          {retired.length > 0 && (
             <section className="pkx-g pkx-ret">
               <button
                 type="button"
@@ -326,27 +427,19 @@ export function Packages({ data }: { data: PacksData }) {
                 aria-expanded={showRetired}
                 onClick={() => setShowRetired(!showRetired)}
               >
-                Retired <Tag>{view.retired.length}</Tag>
+                Retired <span className="pkx-g__c">{retired.length}</span>
                 <span className="pkx-ret__c" aria-hidden="true">{showRetired ? '–' : '+'}</span>
               </button>
               {showRetired && (
                 <Card flush className="mt4">
                   <div className="tblwrap">
                     <Table caption="Retired packs, no longer on sale">
-                      {view.retired.map((row) => (
+                      {retired.map((row) => (
                         <Row
                           key={row.id}
                           style={{ color: 'var(--tx-ink-3)' }}
                           cells={[
-                            {
-                              key: 'pack',
-                              content: (
-                                <>
-                                  <b style={{ color: 'var(--tx-ink-2)' }}>{row.name}</b>
-                                  {row.owner === 'gym' && gym && <Tag style={{ marginLeft: 8 }}>{gym}</Tag>}
-                                </>
-                              ),
-                            },
+                            { key: 'pack', content: <b style={{ color: 'var(--tx-ink-2)' }}>{row.name}</b> },
                             { key: 'price', content: rupees(row.amount), numeric: true },
                             {
                               key: 'note',
@@ -419,57 +512,12 @@ export function Packages({ data }: { data: PacksData }) {
             </Card>
           )}
 
-          {view.priceNote && (
+          {mine && view.priceNote && (
             <Card title="The per-session check" tone="acc" className={view.ending.length > 0 ? 'mt4' : undefined}>
               <p className="small" style={{ lineHeight: 1.6 }}>{view.priceNote}</p>
             </Card>
           )}
 
-          <Card title="Your gym" className="mt4">
-            <p className="small" style={{ color: 'var(--tx-ink-3)', marginBottom: 10 }}>
-              Work at a gym? Name it and its price list opens here, with your share of each sale.
-            </p>
-
-            <GymPicker
-              id="pk-gym"
-              label="Which gym"
-              name={gymDraft}
-              place={gymPlaceDraft ?? null}
-              maxLength={80}
-              onChange={(next) => {
-                setGymDraft(next.name);
-                setGymPlaceDraft(next.place as PlaceHit | null);
-              }}
-            />
-
-            {gymDraft.trim() !== (data.trainer.gymName ?? '') && (
-              <div className="row" style={{ gap: 8, marginTop: 14 }}>
-                <Button
-                  variant="primary"
-                  disabled={pending}
-                  onClick={() =>
-                    run(
-                      () => saveGym(gymDraft, gymPlaceDraft, data.trainer.trainingModes),
-                      gymDraft.trim() === ''
-                        ? 'Saved. Your own price list only.'
-                        : `Saved. ${gymDraft.trim()}'s price list is on this screen.`,
-                    )
-                  }
-                >
-                  {pending ? 'Saving…' : 'Save'}
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    setGymDraft(data.trainer.gymName ?? '');
-                    setGymPlaceDraft(undefined);
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
-            )}
-          </Card>
         </aside>
       </div>
 
@@ -477,7 +525,7 @@ export function Packages({ data }: { data: PacksData }) {
           top is gone after the first swipe. Hidden at a desk, where the toolbar
           button is in reach. */}
       <div className="pkx__bar">
-        <Button variant="primary" onClick={() => open('trainer', null)}>New pack</Button>
+        {canAdd && <Button variant="primary" onClick={addHere}>{mine ? 'New pack' : 'New gym pack'}</Button>}
       </div>
 
       {editing && (

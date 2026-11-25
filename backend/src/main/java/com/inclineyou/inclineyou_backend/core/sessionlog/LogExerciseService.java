@@ -37,6 +37,8 @@ public class LogExerciseService {
     private static final Set<String> REASONS = Set.of("unavailable", "difficulty");
     private static final Set<String> SCOPES = Set.of("today", "program");
     private static final int MAX_NOTES = 500, MAX_REST = 3600, MAX_SETS = 50;
+    /** A plan row's sets are 1–30 (`workout_set_position`); a program-scope add with no count gets three. */
+    private static final int MAX_PLAN_SETS = 30, DEFAULT_PLAN_SETS = 3;
 
     /** 201, or 200 with the same entry on a replayed id — no second row, no more sets laid down. */
     @Transactional
@@ -48,6 +50,9 @@ public class LogExerciseService {
         int sets = req.sets() == null ? 0 : req.sets();
         if (sets < 0 || sets > MAX_SETS) throw ApiException.validation("sets: between 0 and " + MAX_SETS);
         if (req.position() != null && req.position() < 0) throw ApiException.validation("position: not negative");
+        String scope = req.scope() == null ? "today" : req.scope();
+        if (!SCOPES.contains(scope)) throw ApiException.validation("scope: today or program");
+        if ("program".equals(scope) && sets > MAX_PLAN_SETS) throw ApiException.validation("sets: at most " + MAX_PLAN_SETS + " on the plan");
 
         if (id != null) {
             var existing = exercises.findOwned(trainerId, id);
@@ -68,6 +73,11 @@ public class LogExerciseService {
         }
         if (head.startedAt() == null) throw SetLogService.notStarted();
         var lib = exercises.library(trainerId, exerciseId).orElseThrow(() -> ApiException.notFound("That exercise is not in the library."));
+        // Resolved before anything is written, so a session with no plan to change refuses the whole add.
+        UUID program = "program".equals(scope)
+                ? exercises.clientProgramOf(head.workoutId(), head.clientId())
+                        .orElseThrow(() -> ApiException.validation("scope: this session is not from the client's own program"))
+                : null;
 
         int next = exercises.nextPosition(sessionId);
         int position = req.position() == null ? next : Math.min(req.position(), next);
@@ -79,9 +89,16 @@ public class LogExerciseService {
             throw ApiException.idConflict();
         }
         // Kinds come from the exercise's log type (R49, widened in V9): weight or bodyweight, by reps, seconds or metres.
-        if (sets > 0) {
-            var kinds = LogTypes.kindsOf(lib.logType());
-            exercises.insertEmptySets(sxId, sets, kinds.loadKind(), kinds.effortKind());
+        var kinds = LogTypes.kindsOf(lib.logType());
+        if (sets > 0) exercises.insertEmptySets(sxId, sets, kinds.loadKind(), kinds.effortKind());
+        if (program != null) {
+            // On the plan day, last among the mains, with empty targets the trainer fills in the builder; today's row
+            // is linked to it, so a later rest change or swap with `program` scope finds it like any planned movement.
+            // Same transaction and the same version bump as a program swap (R44).
+            UUID planRow = exercises.planAppend(head.workoutId(), lib.id());
+            exercises.planEmptySets(planRow, sets > 0 ? sets : DEFAULT_PLAN_SETS, kinds.loadKind(), kinds.effortKind());
+            exercises.linkPlanned(sxId, planRow);
+            exercises.touchProgram(program);
         }
         return new Created<>(reads.entry(trainerId, sessionId, sxId), true);
     }

@@ -141,6 +141,7 @@ export function RefundSheet({
   return (
     <ModalHost onClose={onClose} cover="frame" initialFocus="#rf-amount">
       <Modal
+        sheet
         title={`Refund ${packName(pkg)}`}
         foot={
           <>
@@ -266,6 +267,7 @@ export function EditPaymentSheet({
   return (
     <ModalHost onClose={onClose} cover="frame" initialFocus="#ep-amount">
       <Modal
+        sheet
         title={`Correct ${rupees(num(payment.amount))}`}
         foot={
           <>

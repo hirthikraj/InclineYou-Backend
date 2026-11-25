@@ -3,12 +3,13 @@
 import { revalidatePath } from 'next/cache';
 
 import { api, ApiError } from '@/lib/http/client';
-import type { BulkInviteWire, InviteCreatedWire, InviteWire } from './invite-types';
+import type { InviteCreatedWire, InviteWire } from './invite-types';
 
 /**
- * INVITE ONE, INVITE MANY — api-contract 1.2 tr-a1 and tr-a2 (and, further down, tr-a4 withdraw).
+ * INVITE ONE — api-contract 1.2 tr-a1 (and, further down, tr-a4 withdraw). The web has no bulk invite (tr-a2): it was
+ * removed with the Joining list's multi-select on 23 Nov 2026, and `POST /v1/client-invites` is not called from here.
  *
- * Nothing here sends anything. Both answer a link, a drafted message and a `wa.me` URL, and the trainer reads the draft
+ * Nothing here sends anything. An invite answers a link, a drafted message and a `wa.me` URL, and the trainer reads the draft
  * and presses send from their own WhatsApp. The link is the raw token's only appearance anywhere (the server stores a
  * hash), so these results are returned to the one component that asked and are not cached, revalidated into a page or
  * logged: `revalidatePath` below refreshes what the screens DRAW (a state changed to *Invited*), never the link.
@@ -23,10 +24,6 @@ export type InviteResult =
 
 export type RevokeResult = { ok: true; invite: InviteWire } | { ok: false; message: string };
 
-export type BulkInviteResult =
-  | { ok: true; result: BulkInviteWire }
-  | { ok: false; message: string };
-
 function fail(error: unknown, subject: string): { ok: false; message: string } {
   if (error instanceof ApiError) {
     if (error.problem.detail) return { ok: false, message: error.problem.detail };
@@ -39,7 +36,7 @@ function fail(error: unknown, subject: string): { ok: false; message: string } {
 
 function refresh(clientId?: string): void {
   revalidatePath('/clients');
-  revalidatePath('/clients/invitations');
+  revalidatePath('/clients/joining');
   if (clientId) revalidatePath(`/clients/${clientId}`, 'layout');
 }
 
@@ -50,16 +47,6 @@ export async function inviteClient(clientId: string): Promise<InviteResult> {
     return { ok: true, invite };
   } catch (error) {
     return fail(error, 'The invitation');
-  }
-}
-
-export async function inviteClients(clientIds: string[]): Promise<BulkInviteResult> {
-  try {
-    const result = await api<BulkInviteWire>('/v1/client-invites', { method: 'POST', body: { clientIds } });
-    refresh();
-    return { ok: true, result };
-  } catch (error) {
-    return fail(error, 'The invitations');
   }
 }
 

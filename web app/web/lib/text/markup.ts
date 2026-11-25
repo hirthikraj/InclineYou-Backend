@@ -53,7 +53,8 @@
  * disagree about what `**` means.
  */
 
-export type Mark = 'bold' | 'italic' | 'underline';
+/** `strike` is WhatsApp's `~text~` (25 Nov 2026); the app's own format has no marker for it and never writes it. */
+export type Mark = 'bold' | 'italic' | 'underline' | 'strike';
 
 /** A run of text under zero or more marks. `marks` is outermost-first. */
 export interface Span {

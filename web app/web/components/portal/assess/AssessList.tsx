@@ -45,6 +45,12 @@ export function AssessList({
 }) {
   const completed = (ms: number) => new Date(ms).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: zone });
 
+  /* ONE DOOR PER CHECK-IN (25 Nov 2026). A template whose open copy is already under *To do* was listed again here
+     with *Continue* — the same check-in behind *Fill it in* and *Continue*, under a heading that says *Start a new
+     one*. Such a template is left out; the card goes when nothing is left to start. */
+  const waiting = new Set(open.map((a) => a.id));
+  const startable = templates.filter((t) => !t.openAssessmentId || !waiting.has(t.openAssessmentId));
+
   return (
     <div className="portal col gap4">
       <Card>
@@ -78,14 +84,14 @@ export function AssessList({
         )}
       </Card>
 
-      {templates.length > 0 && (
+      {startable.length > 0 && (
         <Card>
           <CardHead title="Start a new one">
             <span className="small ink3">whenever you like</span>
           </CardHead>
           <CardBody flush>
             <ListRows label="Assessments you can start yourself">
-              {templates.map((t) => (
+              {startable.map((t) => (
                 <ListRow
                   key={t.id}
                   title={t.name}

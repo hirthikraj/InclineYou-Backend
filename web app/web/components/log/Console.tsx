@@ -18,7 +18,7 @@ import {
   type LogExerciseViewX as LogExerciseView, type LogSetRowX as LogSetRow, libraryIdOf } from '@/lib/sessionlog/select';
 import type { EffortKind, LoadKind, LogWire, SetPatch, SetWire } from '@/lib/sessionlog/wire';
 import { TopBar } from '@/components/shell/TopBar';
-import { AddPanel } from './AddPanel';
+import { AddPanel, type AddScope } from './AddPanel';
 import { ExerciseList } from './ExerciseList';
 import { ExerciseTimeline, HistorySheet, RecordCard } from './RecordCard';
 import { FinishLog } from './FinishLog';
@@ -548,6 +548,50 @@ export function Console({ data }: { data: ConsoleDataX }) {
     [skipped, exercises, openCount, go, show],
   );
 
+  /* ── TAKING A MOVEMENT OUT OF TODAY (24 Nov 2026) ─────────────────────────
+     An exercise added by mistake had no way off the card. The route always had it (`removed`
+     hides the row; its sets stay and leave the totals), and the view kept removed rows "so the
+     console can offer Undo" — the button was the missing half. Today's log only: the plan is
+     never touched from here, and Undo puts the card back exactly as it was. */
+  const removeCard = useCallback(
+    (exerciseId: string) => {
+      const card = exercises.find((e) => e.exerciseId === exerciseId);
+      if (!card?.sxId) return;
+      const sxId = card.sxId;
+      void (async () => {
+        const result = await patchExerciseRow(sessionId, sxId, { removed: true });
+        if (!result.ok) {
+          show({ tone: 'danger', title: <>{card.name} is still here</>, body: <>{result.message ?? 'That did not go through.'}</> });
+          return;
+        }
+        update((l) => applyExercise(l, result.data));
+        const after = exercises.find((e) => e.exerciseId !== exerciseId);
+        go({ ex: after ? after.exerciseId : null, set: null });
+        show({
+          tone: 'neutral',
+          variant: 'receipt',
+          /* Ten seconds, not a receipt's five: a whole movement left the card, and a trainer
+             mid-set may look up a beat late. */
+          duration: 10_000,
+          title: <>{card.name} removed</>,
+          body: <>Taken out of today&rsquo;s log.{card.unplanned ? '' : ' The plan is unchanged.'}</>,
+          action: {
+            label: 'Undo',
+            onClick: () => {
+              void (async () => {
+                const back = await patchExerciseRow(sessionId, sxId, { removed: false });
+                if (!back.ok) return;
+                update((l) => applyExercise(l, back.data));
+                go({ ex: exerciseId, set: null });
+              })();
+            },
+          },
+        });
+      })();
+    },
+    [exercises, sessionId, update, go, show],
+  );
+
   const commit = useCallback(
     (exerciseId: string, row: LogSetRow, values: Draft) => {
       const key = draftKey(exerciseId, row.number);
@@ -789,7 +833,7 @@ export function Console({ data }: { data: ConsoleDataX }) {
      not caught up with the cards still in flight. The first card added is where
      *Done* lands. */
   const addedThisOpen = useRef<{ base: number; ids: string[] } | null>(null);
-  const pickAdded = useCallback((exerciseId: string) => {
+  const pickAdded = useCallback((exerciseId: string, scope: AddScope = 'today') => {
     if (!addedThisOpen.current) {
       addedThisOpen.current = { base: exercises.reduce((max, e) => Math.max(max, e.orderIndex), -1) + 1, ids: [] };
     }
@@ -799,9 +843,21 @@ export function Console({ data }: { data: ConsoleDataX }) {
        the server answers, even when the same movement is already on the card. */
     const rowId = crypto.randomUUID();
     batch.ids.push(rowId);
-    void (async () => {
-      const result = await addExerciseRow(sessionId, { id: rowId, exerciseId, position });
-      if (result.ok) update((l) => applyExercise(l, result.data));
+    /* `scope` is sent only for the plan: a today-only add is the request it always was, so it
+       works against any build of the server. The panel waits on the answer before saying *Added*. */
+    return (async () => {
+      const result = await addExerciseRow(sessionId, {
+        id: rowId, exerciseId, position, ...(scope === 'program' ? { scope } : {}),
+      });
+      if (result.ok) {
+        say('add', null);
+        update((l) => applyExercise(l, result.data));
+        return true;
+      }
+      // It was silent: a failed add simply never produced its card.
+      batch.ids = batch.ids.filter((id) => id !== rowId);
+      say('add', result.message ?? 'That exercise was not added. Try again.');
+      return false;
     })();
   }, [exercises, sessionId, update]);
   const closeAdd = useCallback(() => {
@@ -868,7 +924,11 @@ export function Console({ data }: { data: ConsoleDataX }) {
               title="Client file"
               icon={<Dots />}
             />
-            <FinishLog routeId={data.routeId} workoutId={view.workoutId} /></>}
+            <FinishLog
+              routeId={data.routeId}
+              workoutId={view.workoutId}
+              ready={view.setsPlanned > 0 && view.setsLogged >= view.setsPlanned}
+            /></>}
           className="ph--log"
         />
 
@@ -1007,6 +1067,7 @@ export function Console({ data }: { data: ConsoleDataX }) {
                     addSlot: (exerciseId) =>
                       setExtra((held) => ({ ...held, [exerciseId]: (held[exerciseId] ?? 0) + 1 })),
                     changeRest: (exerciseId) => setRestFor(exerciseId),
+                    removeExercise: removeCard,
                     skip,
                     unskip,
                     removeSlot,
@@ -1108,7 +1169,9 @@ export function Console({ data }: { data: ConsoleDataX }) {
              second list `?plus=` used to contribute has nothing left in it. */
           already={new Set(exercises.map((e) => e.libraryId))}
           onPick={pickAdded}
-          onClose={closeAdd}
+          hasProgram={data.programId !== null}
+          message={errors.add ?? null}
+          onClose={() => { say('add', null); closeAdd(); }}
         />
       ) : null}
 

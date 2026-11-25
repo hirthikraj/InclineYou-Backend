@@ -111,4 +111,57 @@ public class GymMoneyJdbcRepository {
                 Map.of("tid", tid.toString(), "tz", zone.getId()),
                 (rs, i) -> new MonthShare(rs.getString("m"), rs.getBigDecimal("s"), rs.getInt("c")));
     }
+
+    /**
+     * The statement's sales for a span: new sales and renewals (a client who had any earlier pack), and what was billed split
+     * by who found the client — the gym's front desk (V48 {@code lead_source = 'gym_desk'}) or the trainer.
+     */
+    public Map<String, Object> statementSales(UUID tid, YearMonth first, YearMonth last) {
+        return jdbc.queryForMap("""
+                SELECT count(*) FILTER (WHERE NOT prior) AS new_sales, count(*) FILTER (WHERE prior) AS renewals,
+                       coalesce(sum(amount) FILTER (WHERE desk), 0) AS billed_desk,
+                       coalesce(sum(amount) FILTER (WHERE NOT desk), 0) AS billed_you
+                FROM (SELECT k.amount, c.lead_source IS NOT DISTINCT FROM 'gym_desk' AS desk,
+                             EXISTS (SELECT 1 FROM package k2 WHERE k2.client_id = k.client_id AND k2.deleted_at IS NULL
+                                       AND k2.session_id IS NULL AND k2.created_at < k.created_at) AS prior
+                        FROM package k JOIN client c ON c.id = k.client_id
+                       WHERE k.trainer_id = :tid::uuid AND k.deleted_at IS NULL AND %1$s AND %2$s
+                         AND k.start_date >= :firstDay AND k.start_date < :endDay) x
+                """.formatted(HAS_SHARE, SOLD), span(tid, first, last));
+    }
+
+    /** Gym clients' sessions the trainer marked done in the span, on the workspace's calendar: how many, and for how many people. */
+    public Map<String, Object> statementSessions(UUID tid, YearMonth first, YearMonth last, ZoneId zone) {
+        var p = span(tid, first, last);
+        p.put("tz", zone.getId());
+        return jdbc.queryForMap("""
+                SELECT count(*) AS sessions, count(DISTINCT s.client_id) AS clients
+                FROM scheduled_session s JOIN client c ON c.id = s.client_id
+                WHERE s.trainer_id = :tid::uuid AND c.client_type = 'gym' AND s.status = 'done' AND s.logged_by = 'trainer'
+                  AND s.deleted_at IS NULL
+                  AND (s.scheduled_at AT TIME ZONE :tz)::date >= :firstDay AND (s.scheduled_at AT TIME ZONE :tz)::date < :endDay
+                """, p);
+    }
+
+    /** What the gym paid the trainer: in the span (by the day it arrived), and ever. */
+    public Map<String, Object> payoutsReceived(UUID tid, YearMonth first, YearMonth last, ZoneId zone) {
+        var p = span(tid, first, last);
+        p.put("tz", zone.getId());
+        return jdbc.queryForMap("""
+                SELECT coalesce(sum(amount) FILTER (WHERE (received_at AT TIME ZONE :tz)::date >= :firstDay
+                                                     AND (received_at AT TIME ZONE :tz)::date < :endDay), 0) AS in_span,
+                       coalesce(sum(amount), 0) AS ever
+                FROM trainer_payout WHERE trainer_id = :tid::uuid AND deleted_at IS NULL
+                """, p);
+    }
+
+    /** Every gym-pack sale ever: since when, how many, billed, the gym's part and the trainer's. */
+    public Map<String, Object> lifetime(UUID tid) {
+        return jdbc.queryForMap("""
+                SELECT to_char(min(k.start_date), 'YYYY-MM') AS since, count(*) AS sales, coalesce(sum(k.amount), 0) AS billed,
+                       coalesce(sum(k.amount - %2$s), 0) AS gym_cut, coalesce(sum(%2$s), 0) AS yours
+                FROM package k
+                WHERE k.trainer_id = :tid::uuid AND k.deleted_at IS NULL AND %1$s AND %3$s
+                """.formatted(HAS_SHARE, TAKE, SOLD), Map.of("tid", tid.toString()));
+    }
 }

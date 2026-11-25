@@ -432,6 +432,40 @@ export async function saveWorkingWeek(
   }
 }
 
+/**
+ * The working week, DAY BY DAY — what the Work & hours tab's weekly editor
+ * saves. `perDay[0]` is Monday … `perDay[6]` Sunday; an empty day is a rest day.
+ *
+ * Only weekdays whose merged windows differ from what is stored are sent, so a
+ * day the trainer did not touch is never rewritten.
+ */
+export async function saveWorkingDays(perDay: HourWindow[][]): Promise<WeekResult> {
+  const merged = Array.from({ length: 7 }, (_, d) => mergeWindows(perDay[d] ?? []));
+  if (merged.every((w) => w.length === 0)) {
+    return {
+      ok: false,
+      message: 'Give at least one day some hours — clients’ sessions are booked out of these.',
+    };
+  }
+
+  try {
+    const stored = await getWorkingWeek();
+    const changes: { weekday: number; windows: HourWindow[] }[] = [];
+    for (let weekday = 0; weekday < 7; weekday += 1) {
+      const before = mergeWindows(stored.filter((h) => h.weekday === weekday));
+      if (sameWindows(before, merged[weekday])) continue;
+      changes.push({ weekday, windows: merged[weekday] });
+    }
+    if (changes.length > 0) await patchWorkingHours(changes);
+    revalidatePath('/today');
+    revalidatePath('/schedule');
+    revalidatePath('/settings/profile/work');
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, message: messageFor(error) };
+  }
+}
+
 /** Re-read after a failed save, so the form can offer the stored value back. */
 export async function reloadIdentity(): Promise<Identity | null> {
   try {

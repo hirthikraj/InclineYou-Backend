@@ -1,9 +1,11 @@
 package com.inclineyou.inclineyou_backend.core.payment;
 
 import com.inclineyou.inclineyou_backend.core.payment.dto.Arrangement;
+import com.inclineyou.inclineyou_backend.core.payment.dto.GymLifetime;
 import com.inclineyou.inclineyou_backend.core.payment.dto.GymMoney;
 import com.inclineyou.inclineyou_backend.core.payment.dto.GymPack;
 import com.inclineyou.inclineyou_backend.core.payment.dto.GymShare;
+import com.inclineyou.inclineyou_backend.core.payment.dto.GymStatement;
 import com.inclineyou.inclineyou_backend.core.payment.dto.GymStats;
 import com.inclineyou.inclineyou_backend.core.payment.dto.PackSales;
 import com.inclineyou.inclineyou_backend.core.payment.dto.PayoutRecord;
@@ -81,7 +83,32 @@ public class GymMoneyService {
                 money(floorBilled.add(remoteBilled).subtract(gymCut)));
 
         return new GymMoney(clock.currency(), gymName, stats, shares(tid, first, last),
-                settlement(tid, first, last, gymName == null ? null : key(gym.placeId(), gymName)));
+                settlement(tid, first, last, gymName == null ? null : key(gym.placeId(), gymName)),
+                statement(tid, first, last), lifetime(tid));
+    }
+
+    // ── the statement (23 Nov 2026): what the trainer did for the gym, from their own book ──
+
+    private GymStatement statement(UUID tid, YearMonth first, YearMonth last) {
+        var zone = clock.zone();
+        var sales = money.statementSales(tid, first, last);
+        var sessions = money.statementSessions(tid, first, last, zone);
+        var paid = money.payoutsReceived(tid, first, last, zone);
+        return new GymStatement(num(sessions.get("clients")), num(sessions.get("sessions")),
+                num(sales.get("new_sales")), num(sales.get("renewals")),
+                money((BigDecimal) sales.get("billed_you")), money((BigDecimal) sales.get("billed_desk")),
+                money((BigDecimal) paid.get("in_span")));
+    }
+
+    private GymLifetime lifetime(UUID tid) {
+        var l = money.lifetime(tid);
+        var paid = money.payoutsReceived(tid, YearMonth.now(clock.zone()), YearMonth.now(clock.zone()), clock.zone());
+        return new GymLifetime((String) l.get("since"), num(l.get("sales")), money((BigDecimal) l.get("billed")),
+                money((BigDecimal) l.get("gym_cut")), money((BigDecimal) l.get("yours")), money((BigDecimal) paid.get("ever")));
+    }
+
+    private static int num(Object o) {
+        return o == null ? 0 : ((Number) o).intValue();
     }
 
     // ── per-pack ──

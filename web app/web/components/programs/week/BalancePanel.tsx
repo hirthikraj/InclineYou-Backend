@@ -140,8 +140,10 @@ export function BalancePanel({
             <div className="wsbal__ton">{grouped(balance.ton.kgs)} kg volume load</div>
             {balance.ton.skipped > 0 && (
               <div className="wsbal__fine">
-                {balance.ton.skipped} bodyweight row{balance.ton.skipped === 1 ? '' : 's'} not
-                counted — {balance.ton.skipped === 1 ? 'it carries' : 'they carry'} no load
+                {/* *No load*, not *bodyweight*: an exercise whose load is still blank lands here too,
+                    and calling a barbell bench press a bodyweight row is the screen inventing a fact. */}
+                {balance.ton.skipped} exercise{balance.ton.skipped === 1 ? '' : 's'} with no load
+                {' '}not counted
               </div>
             )}
           </>

@@ -17,6 +17,7 @@ import { rupees } from '@/lib/today/time';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
 import { Tag } from '@/web-components/ui/Tag';
+import { RowMenu } from '@/web-components/ui/RowMenu';
 import { PayoutPanel, TermsPanel } from './GymPanels';
 
 /**
@@ -67,12 +68,15 @@ export function GymSettlement({
   now,
   onChanged,
   children,
+  after,
 }: {
   gymName: string | null;
   settlement: Settlement | null;
   now: number;
   onChanged: () => Promise<void>;
   children?: React.ReactNode;
+  /** Set-up read now and then (the pack-by-pack terms), drawn after the money history. */
+  after?: React.ReactNode;
 }) {
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
@@ -83,7 +87,6 @@ export function GymSettlement({
     | null
   >(null);
   const [confirming, setConfirming] = useState<string | null>(null);
-  const [tray, setTray] = useState(false);
 
   const name = gymName ?? 'the gym';
   const thisMonth = new Date(now);
@@ -99,7 +102,6 @@ export function GymSettlement({
       if (result.ok) {
         setForm(null);
         setConfirming(null);
-        setTray(false);
         setMessage({ tone: 'ok', text: done });
         await onChanged();
       } else if (form) {
@@ -113,7 +115,6 @@ export function GymSettlement({
   function openForm(next: NonNullable<typeof form>) {
     setMessage(null);
     setPanelError(null);
-    setTray(false);
     setForm(next);
   }
 
@@ -179,7 +180,7 @@ export function GymSettlement({
                 <div className="gsx-ask" role="group" aria-label="Delete these terms">
                   <p>The months they covered fall back to your share only.</p>
                   <span className="gsx-acts">
-                    <Button variant="secondary" size="sm" disabled={pending} onClick={() => run(() => removeArrangement(arrangement.id), 'Terms deleted.')}>
+                    <Button variant="danger" size="sm" disabled={pending} onClick={() => run(() => removeArrangement(arrangement.id), 'Terms deleted.')}>
                       Delete them
                     </Button>
                     <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>Keep</Button>
@@ -190,19 +191,14 @@ export function GymSettlement({
                   <Button variant="secondary" size="sm" disabled={pending} onClick={() => openForm({ kind: 'terms', fixing: null })}>
                     Set new terms
                   </Button>
-                  <Button variant="ghost" size="sm" aria-expanded={tray} onClick={() => setTray(!tray)}>More</Button>
-                </span>
-              )}
-              {tray && confirming !== arrangement.id && (
-                <span className="gsx-acts gsx-acts--tray">
-                  {canFix && (
-                    <Button variant="ghost" size="sm" disabled={pending} onClick={() => openForm({ kind: 'terms', fixing: arrangement })}>
-                      Fix these terms
-                    </Button>
-                  )}
-                  <Button variant="ghost" size="sm" disabled={pending} onClick={() => { setTray(false); setConfirming(arrangement.id); }}>
-                    Delete terms
-                  </Button>
+                  {/* A ⋯ menu, not a *More* tray (25 Nov 2026) — the same change as the price list's cards. */}
+                  <RowMenu
+                    label="More for these terms"
+                    items={[
+                      ...(canFix ? [{ label: 'Fix these terms', onSelect: () => openForm({ kind: 'terms', fixing: arrangement }), disabled: pending }] : []),
+                      { label: 'Delete terms…', onSelect: () => setConfirming(arrangement.id), danger: true, disabled: pending },
+                    ]}
+                  />
                 </span>
               )}
             </div>
@@ -284,7 +280,7 @@ export function GymSettlement({
                     {confirming === p.id ? (
                       <>
                         <span className="gsx-po__ask">The balance moves back.</span>
-                        <Button variant="secondary" size="sm" disabled={pending} onClick={() => run(() => removePayout(p.id), 'Payout deleted.')}>
+                        <Button variant="danger" size="sm" disabled={pending} onClick={() => run(() => removePayout(p.id), 'Payout deleted.')}>
                           Delete it
                         </Button>
                         <Button variant="ghost" size="sm" onClick={() => setConfirming(null)}>Keep</Button>
@@ -306,6 +302,8 @@ export function GymSettlement({
           )}
         </Card>
       )}
+
+      {after}
 
       {form?.kind === 'terms' && (
         <TermsPanel

@@ -250,6 +250,85 @@ class AssessmentApiTest {
                 .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ASSESSMENT_COMPLETED"));
         // there is no separate readings read (removed 10 Oct 2026): the assessment itself carries them, corrected above
         mvc.perform(get("/v1/assessments/" + id)).andExpect(jsonPath("$.readings[0].value").value(77.9));
+
+        // taken → to review → reviewed (23 Nov 2026): the mark does not move the version, and it filters the list
+        String before = JsonPath.read(mvc.perform(get("/v1/assessments/" + id)).andReturn().getResponse().getContentAsString(), "$.version");
+        mvc.perform(get("/v1/assessments/" + id)).andExpect(jsonPath("$.reviewedAt").doesNotExist());
+        mvc.perform(get("/v1/assessments").param("state", "done").param("reviewed", "false"))
+                .andExpect(jsonPath("$.items[?(@.id == '" + id + "')]").isNotEmpty());
+        mvc.perform(post("/v1/assessments/" + id + "/review").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.reviewedAt").isNumber())
+                .andExpect(jsonPath("$.version").value(before));
+        mvc.perform(post("/v1/assessments/" + id + "/review").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isOk());
+        mvc.perform(get("/v1/assessments").param("reviewed", "true"))
+                .andExpect(jsonPath("$.items[?(@.id == '" + id + "')]").isNotEmpty());
+        mvc.perform(get("/v1/assessments").param("reviewed", "false"))
+                .andExpect(jsonPath("$.items[?(@.id == '" + id + "')]").isEmpty());
+        mvc.perform(delete("/v1/assessments/" + id + "/review")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.reviewedAt").doesNotExist());
+
+        // one not taken yet has nothing to review
+        String open = give(tpl, null).read("$.id");
+        mvc.perform(post("/v1/assessments/" + open + "/review").contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("ASSESSMENT_NOT_DONE"));
+    }
+
+    @Test
+    @DisplayName("order=work pages To take (oldest owed first) · To review · Reviewed (newest first) across every page")
+    void workOrder() throws Exception {
+        String tpl = template().read("$.id");
+        // days from today, then section: 0 to take, 1 to review, 2 reviewed
+        String booked = at(tpl, 5, 0), missed = at(tpl, -10, 0);
+        String reviewNew = at(tpl, -3, 1), reviewOld = at(tpl, -20, 1);
+        String doneNew = at(tpl, -1, 2), doneOld = at(tpl, -30, 2);
+        List<String> expected = List.of(missed, booked, reviewNew, reviewOld, doneNew, doneOld);
+
+        // walked two at a time, the pages join into one ordered list
+        var seen = new java.util.ArrayList<String>();
+        String cursor = null;
+        String firstCursor = null;
+        do {
+            var req = get("/v1/assessments").param("order", "work").param("limit", "2");
+            if (cursor != null) req = req.param("cursor", cursor);
+            var page = JsonPath.parse(mvc.perform(req).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+            List<String> ids = page.read("$.items[*].id");
+            seen.addAll(ids);
+            cursor = page.read("$.nextCursor");
+            if (firstCursor == null) firstCursor = cursor;
+        } while (cursor != null);
+        assertEquals(expected, seen);
+
+        // the date order is untouched and still the default
+        var due = JsonPath.parse(mvc.perform(get("/v1/assessments")).andReturn().getResponse().getContentAsString());
+        List<String> dueIds = due.read("$.items[*].id");
+        assertEquals(List.of(booked, doneNew, reviewNew, missed, reviewOld, doneOld), dueIds);
+
+        // a work cursor sent to the date order (or the other way) is a 400, and so is an order nobody wrote
+        mvc.perform(get("/v1/assessments").param("cursor", firstCursor)).andExpect(status().isBadRequest());
+        String dueCursor = JsonPath.read(mvc.perform(get("/v1/assessments").param("limit", "1")).andReturn().getResponse()
+                .getContentAsString(), "$.nextCursor");
+        mvc.perform(get("/v1/assessments").param("order", "work").param("cursor", dueCursor)).andExpect(status().isBadRequest());
+        mvc.perform(get("/v1/assessments").param("order", "newest")).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION"));
+
+        // with a filter it is the same order inside the filter: to review only, newest first
+        var review = JsonPath.parse(mvc.perform(get("/v1/assessments").param("order", "work")
+                .param("state", "done").param("reviewed", "false")).andReturn().getResponse().getContentAsString());
+        List<String> reviewIds = review.read("$.items[*].id");
+        assertEquals(List.of(reviewNew, reviewOld), reviewIds);
+    }
+
+    /** An assessment due {@code days} from today, put straight into one of the work order's three sections. */
+    private String at(String tpl, int days, int section) throws Exception {
+        String id = give(tpl, null).read("$.id");
+        jdbc.update("""
+                UPDATE assessment SET due_on = :due,
+                       completed_at = CASE WHEN :s > 0 THEN now() END,
+                       entered_by = CASE WHEN :s > 0 THEN 'trainer' END, read_at = CASE WHEN :s = 2 THEN now() END
+                WHERE id = :id::uuid""",
+                Map.of("id", id, "due", java.sql.Date.valueOf(today.plusDays(days)), "s", section));
+        return id;
     }
 
     @Test

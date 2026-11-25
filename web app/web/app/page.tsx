@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 
 import { readClaims } from '@/lib/auth/claims';
-import { getToken } from '@/lib/auth/session';
+import { getToken, getTokenRole } from '@/lib/auth/session';
 
 /**
  * Nothing lives at the root. It is the fork between signed in and not — and
@@ -26,7 +26,7 @@ import { getToken } from '@/lib/auth/session';
  * revisited.
  */
 export default async function RootPage() {
-  const claims = readClaims(await getToken());
+  const claims = readClaims(await getToken(), await getTokenRole());
   if (!claims) redirect('/sign-in');
 
   switch (claims.role) {

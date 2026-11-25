@@ -138,7 +138,7 @@ class ConsentGateTest {
     }
 
     private static UpdateClientRequest profile(Patch<String> goal) {
-        return new UpdateClientRequest(null, null, null, null, goal, null, null, null, null, null, null);
+        return new UpdateClientRequest(null, null, null, null, goal, null, null, null, null, null, null, null, null, null, null);
     }
 
     private void consent() {

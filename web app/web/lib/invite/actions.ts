@@ -156,8 +156,11 @@ export async function acceptInvite(token: string, otp: string): Promise<AcceptRe
     return readAcceptFailure(error);
   }
 
-  await setToken(accepted.token, accepted.expiresAt);
+  /* The old sitting goes FIRST. It was cleared after the new token was set, and
+     `clearSitting` deletes the token — so accepting an invite signed the client
+     straight back out (22 Nov 2026). */
   await clearSitting();
+  await setToken(accepted.token, accepted.expiresAt, 'client');
   return { ok: true, next: '/me/today' };
 }
 
@@ -226,7 +229,7 @@ export async function acceptMyInvite(
     if (error.status === 401) return { ok: false, kind: 'restart', message: 'Your sign-in ran out. Sign in again to continue.' };
     return readAcceptFailure(error);
   }
-  await setToken(accepted.token, accepted.expiresAt);
+  await setToken(accepted.token, accepted.expiresAt, 'client');
   return { ok: true, next: '/me/today' };
 }
 

@@ -40,6 +40,8 @@ export interface SetupStep {
   done: boolean;
   /** Blocked by an earlier step that is not done — drawn, but its verb waits. */
   waiting: boolean;
+  /** The step it waits on, when it waits — so the screen names the right one. */
+  after?: SetupStepKey;
 }
 
 export interface SetupFacts {
@@ -91,7 +93,8 @@ export function packCountsForSetup(p: {
 function chain(keys: SetupStepKey[], done: Record<string, boolean>, gated: Partial<Record<SetupStepKey, SetupStepKey>>): SetupStep[] {
   return keys.map((key) => {
     const gate = gated[key];
-    return { key, done: done[key], waiting: !done[key] && gate !== undefined && !done[gate] };
+    const waiting = !done[key] && gate !== undefined && !done[gate];
+    return waiting ? { key, done: done[key], waiting, after: gate } : { key, done: done[key], waiting };
   });
 }
 
@@ -129,10 +132,13 @@ export function setupFor(f: SetupFacts): SetupView | null {
 }
 
 /** The words for a step, shared by the file's checklist and Today's row. */
-export const SETUP_COPY: Record<SetupStepKey, { title: string; doneTitle: string; verb: string; why: string }> = {
+/** `doneWhy` is the line a FINISHED step shows. Without it a ticked step fell back to
+ *  `why`, its to-do line, so *Plan assigned ✓* read "No plan yet?" (24 Nov 2026). */
+export const SETUP_COPY: Record<SetupStepKey, { title: string; doneTitle: string; verb: string; why: string; doneWhy?: string }> = {
   consent: {
     title: 'Get their consent',
     doneTitle: 'Consent given',
+    doneWhy: 'Health details, profile and notes are open.',
     verb: 'Send invite',
     why: `They accept the invite on their phone. Until then you can run ${FREE_SESSIONS} sessions and record no health details or notes.`,
   },
@@ -145,30 +151,35 @@ export const SETUP_COPY: Record<SetupStepKey, { title: string; doneTitle: string
   plan: {
     title: 'Assign a plan',
     doneTitle: 'Plan assigned',
+    doneWhy: 'Change it any time from Plan.',
     verb: 'Assign',
     why: 'No plan yet? You can still pick exercises as you go when you log.',
   },
   book: {
     title: 'Book a session',
     doneTitle: 'Session booked',
+    doneWhy: 'Something is on the calendar.',
     verb: 'Book',
     why: 'Their pack is paid for and nothing is on the calendar.',
   },
   'demo-book': {
     title: 'Book the demo',
     doneTitle: 'Demo booked',
+    doneWhy: 'The trial session is on the calendar.',
     verb: 'Book demo',
     why: 'A free trial session, booked like any other.',
   },
   'demo-run': {
     title: 'Run the demo',
     doneTitle: 'Demo done',
+    doneWhy: 'The trial session happened.',
     verb: 'Open it',
     why: 'Mark it done once it has happened.',
   },
   sell: {
     title: 'Sell a pack',
     doneTitle: 'Pack sold',
+    doneWhy: 'They are an active client now.',
     verb: 'Sell a pack',
     why: 'Selling a pack makes them an active client.',
   },

@@ -117,9 +117,21 @@ public class ClientPhoneGuard {
      */
     @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
     public record Verdict(boolean available, String code, String message,
-                          String clientId, String clientName, String clientStatus) {
+                          String clientId, String clientName, String clientStatus,
+                          String joinRequestId, String joinRequestName) {
+        Verdict(boolean available, String code, String message, String clientId, String clientName, String clientStatus) {
+            this(available, code, message, clientId, clientName, clientStatus, null, null);
+        }
         public static Verdict ok() { return new Verdict(true, null, null, null, null, null); }
         static Verdict no(String code, String message) { return new Verdict(false, code, message, null, null, null); }
+
+        /**
+         * Still available, but this number asked to join through the caller's join link and is waiting (23 Nov 2026):
+         * approving keeps their consent and answers, so the add flow offers that first. Adding by hand closes the request.
+         */
+        public Verdict withJoinRequest(String id, String name) {
+            return new Verdict(available, code, message, clientId, clientName, clientStatus, id, name);
+        }
     }
 
     /** The {@code client_phone_format} rule, before any query. */

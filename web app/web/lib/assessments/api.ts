@@ -3,7 +3,7 @@ import 'server-only';
 import { api, ApiError, listAll, type ListEnvelope } from '@/lib/http/client';
 import { PAGE_SIZE, type Query } from './address';
 import type { AssessmentDetailWire } from './detail';
-import { STATUSES_FOR } from './vocab';
+import { wireQuery } from './vocab';
 import type { AssessmentWire, CatalogWire, ScheduleWire, TemplateWire } from './vocab';
 
 /**
@@ -107,7 +107,7 @@ export interface AssessmentsData {
   /** The roster read FAILED: names and the picker are unavailable, and the page says so. */
   clientsFailed: boolean;
   /** The whole book by what the trainer filters on — the Status options' counts. */
-  counts: Record<'all' | 'done' | 'missed' | 'incoming', number>;
+  counts: Record<'all' | 'done' | 'missed' | 'incoming' | 'review' | 'reviewed', number>;
   now: number;
 }
 
@@ -117,12 +117,15 @@ function listPath(q: Query): string {
      trainer's question — *incoming* — and the wire takes the stored states it
      selects, which for that one is two. `STATUSES_FOR` is the single copy of
      that mapping; a second one in the route handler is how a filter chip comes
-     to disagree with the rows it selects. */
-  const states = STATUSES_FOR[q.status];
-  // `state`, not `status` — the value is derived, not a column (1.1).
-  if (states.length > 0) p.set('state', states.join(','));
+     to disagree with the rows it selects. `state`, not `status` — the value is
+     derived, not a column (1.1). */
+  for (const [k, v] of new URLSearchParams(wireQuery(q.status))) p.set(k, v);
   if (q.clientId) p.set('clientId', q.clientId);
   if (q.q.trim()) p.set('q', q.q.trim());
+  /* WORK ORDER (23 Nov 2026): the server pages *To take* (oldest owed first) · *To review* · *Reviewed* (newest
+     first) across every page, so page 1 always opens on what needs doing. It used to page by date alone and the
+     screen split each twenty into sections, which left a to-review row on page 3 under a page 1 with none. */
+  p.set('order', 'work');
   p.set('limit', String(PAGE_SIZE));
   return `/v1/assessments?${p.toString()}`;
 }
@@ -165,21 +168,23 @@ async function pageOf(q: Query): Promise<Page> {
  * from the other end.
  */
 export async function getAssessments(q: Query): Promise<AssessmentsData> {
-  const countOf = async (state: string) =>
-    (await lenient<Page>(`/v1/assessments?limit=1&includeTotal=true${state ? `&state=${state}` : ''}`, {
+  const countOf = async (filter: string) =>
+    (await lenient<Page>(`/v1/assessments?limit=1&includeTotal=true${filter ? `&${filter}` : ''}`, {
       items: [],
       nextCursor: null,
       total: 0,
     })).total ?? 0;
-  const [page, all, templates, catalog, clients, nDone, nMissed, nIncoming] = await Promise.all([
+  const [page, all, templates, catalog, clients, nDone, nMissed, nIncoming, nReview, nReviewed] = await Promise.all([
     pageOf(q),
     lenient<Page>('/v1/assessments?limit=1&includeTotal=true', { items: [], nextCursor: null, total: 0 }),
     lenient<Shelf>('/v1/assessment-templates', { items: [] }),
     lenient<CatalogWire | null>('/v1/assessment-catalog', null),
     clientsOrNull(),
-    countOf('done'),
-    countOf('missed'),
-    countOf('booked'),
+    countOf(wireQuery('done')),
+    countOf(wireQuery('missed')),
+    countOf(wireQuery('incoming')),
+    countOf(wireQuery('review')),
+    countOf(wireQuery('reviewed')),
   ]);
 
   return {
@@ -190,7 +195,14 @@ export async function getAssessments(q: Query): Promise<AssessmentsData> {
     catalog,
     clients: clients ?? [],
     clientsFailed: clients === null,
-    counts: { all: all.total ?? 0, done: nDone, missed: nMissed, incoming: nIncoming },
+    counts: {
+      all: all.total ?? 0,
+      done: nDone,
+      missed: nMissed,
+      incoming: nIncoming,
+      review: nReview,
+      reviewed: nReviewed,
+    },
     now: Date.now(),
   };
 }

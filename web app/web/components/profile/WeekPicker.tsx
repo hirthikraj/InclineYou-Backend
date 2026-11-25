@@ -51,6 +51,10 @@ function rowNames(windows: HourWindow[]): string[] {
 /**
  * THE WORKING-WEEK PICKER — days, windows, and the band that shows the shape.
  *
+ * **No caller since 23 Nov 2026.** Setup step 6 and the Work & hours tab both
+ * draw `WeeklyHours` (each day its own windows) now. Kept, not deleted, per the
+ * catalogue rule; `weekProblem` and `Week` still type-check against it.
+ *
  * One component, two callers: setup step 6 (`HoursForm`) and the *Work & hours*
  * tab of `/settings/profile`. The fifth control extracted rather than copied,
  * for the reason the other four record — two versions of one answer is how one
@@ -144,7 +148,7 @@ export function WeekPicker({
       {/* No `top={22}`. The step's three group labels were 22, 24 and 24 — one
           rhythm written three times and got wrong once. `GroupLabel`'s own
           default is 24 and it is the only value any of them wanted. */}
-      <GroupLabel>THE DAYS YOU WORK</GroupLabel>
+      <GroupLabel>The days you work</GroupLabel>
       <ChipRow top={0} className="chiprow--days">
         {WEEKDAY_SHORT.map((label, i) => (
           <Chip
@@ -157,7 +161,7 @@ export function WeekPicker({
         ))}
       </ChipRow>
 
-      <GroupLabel>YOUR HOURS ON THOSE DAYS</GroupLabel>
+      <GroupLabel>Your hours on those days</GroupLabel>
       {/* The chips are quick picks for the rows below — pick-several, which a row of pills does not say by itself. */}
       <p className="small wkp__hint">Tap the hours you work — pick as many as you like, or set your own below.</p>
       <ChipRow top={0}>
@@ -245,7 +249,7 @@ export function WeekPicker({
         </Button>
       </div>
 
-      <GroupLabel>{fitRibbon ? 'YOUR DAY AT A GLANCE' : 'EVERY DAY YOU PICKED, AT ONE PIXEL PER MINUTE'}</GroupLabel>
+      <GroupLabel>{fitRibbon ? 'Your day at a glance' : 'Every day you picked, at one pixel per minute'}</GroupLabel>
       <DayRibbon days={days} windows={windows} fit={fitRibbon} />
 
       {/* One plain sentence (22 Nov 2026). The third span explained a design decision to the trainer ("because a single

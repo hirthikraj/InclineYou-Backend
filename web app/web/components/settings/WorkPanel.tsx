@@ -2,17 +2,17 @@
 
 import { useEffect, useState, useTransition } from 'react';
 
-import { weekProblem, type Week } from '@/components/profile/WeekPicker';
+import { weekHoursProblem, type DayHours } from '@/components/profile/WeeklyHours';
 import { SavePin } from '@/components/settings/IdentityForm';
 import { usePublishDraft } from '@/components/settings/ProfileDraft';
 import { WorkPlaceFields, atGym, type PlaceDraft } from '@/components/settings/WorkPlaceFields';
-import { WorkingWeekFields, weekFrom } from '@/components/settings/WorkingWeekFields';
+import { WorkingWeekFields, daysFrom } from '@/components/settings/WorkingWeekFields';
 import type { Message } from '@/lib/auth/copy';
-import { saveWorkPlace, saveWorkingWeek } from '@/lib/profile/actions';
+import { saveWorkPlace, saveWorkingDays } from '@/lib/profile/actions';
 import type { Identity, StoredHour } from '@/lib/profile/api';
 import type { PlaceHit } from '@/lib/places/types';
 import { modeLabel } from '@/lib/profile/work';
-import { formatWindow, mergeWindows, sameWindows } from '@/lib/setup/hours';
+import { formatDuration, mergeWindows, minutesPerDay, sameWindows } from '@/lib/setup/hours';
 
 /**
  * WORK & HOURS — the profile's sixth tab. **One form, one Save button, and it
@@ -46,11 +46,9 @@ import { formatWindow, mergeWindows, sameWindows } from '@/lib/setup/hours';
  * request. Editing the gym name makes one PATCH and no push; editing Tuesday
  * makes one push and no PATCH; editing both makes both.
  *
- * That is not an optimisation, it is the correctness rule the week half needs.
- * `WeekPicker` shows ONE set of windows standing for every day, so writing the
- * week back when nobody touched it would flatten a Saturday that genuinely
- * differs. A Save pressed to change the map link must not be able to do that,
- * and here it cannot — the push is never reached.
+ * The week is edited day by day (`WeeklyHours`, 23 Nov 2026) and
+ * `saveWorkingDays` sends only the weekdays whose windows changed, so a Save
+ * pressed to change the map link never reaches the hours write at all.
  *
  * ── AND THE BUTTON IS ONLY THERE WHEN THERE IS SOMETHING TO SAVE ────────────
  *
@@ -75,10 +73,8 @@ export function WorkPanel({
 
   /* --------------------------------------------------- your working week */
 
-  const [savedWeek, setSavedWeek] = useState<Week>(() => weekFrom(hours));
-  const [week, setWeek] = useState<Week>(() => weekFrom(hours));
-  /** The rows as the server sent them. Only `daysVary` reads this. */
-  const [storedHours, setStoredHours] = useState<StoredHour[]>(hours);
+  const [savedWeek, setSavedWeek] = useState<DayHours>(() => daysFrom(hours));
+  const [week, setWeek] = useState<DayHours>(() => daysFrom(hours));
   const [unanswered, setUnanswered] = useState(hours.length === 0);
 
   const [pressed, setPressed] = useState(false);
@@ -116,17 +112,16 @@ export function WorkPanel({
     !sameSet(place.modes, savedPlace.trainingModes) ||
     !sameSet(place.areas, savedPlace.serviceAreas);
 
-  const weekChanged =
-    week.days.length !== savedWeek.days.length ||
-    week.days.some((d) => !savedWeek.days.includes(d)) ||
-    !sameWindows(mergeWindows(week.windows), mergeWindows(savedWeek.windows));
+  const weekChanged = week.some(
+    (windows, d) => !sameWindows(mergeWindows(windows), mergeWindows(savedWeek[d])),
+  );
   // An unanswered week is dirty from the first render: the suggestion on screen
   // is not what the server holds, and the marker is the honest way to say so
   // before the trainer navigates away from it.
   const weekDirty = weekChanged || unanswered;
 
   const dirty = placeDirty || weekDirty;
-  const weekProblemNow = weekProblem(week);
+  const weekProblemNow = weekHoursProblem(week);
 
   function submit() {
     setPressed(true);
@@ -169,18 +164,13 @@ export function WorkPanel({
       }
 
       if (weekDirty) {
-        const result = await saveWorkingWeek(week.days, week.windows);
+        const result = await saveWorkingDays(week);
         if (result.ok) {
           // Merged, because that is what was written: two touching windows
           // become one row, and a form still showing the pair reads as unsaved.
-          const merged = mergeWindows(week.windows);
-          setSavedWeek({ days: [...week.days], windows: merged });
-          setWeek({ days: [...week.days], windows: merged });
-          setStoredHours(
-            week.days.flatMap((weekday) =>
-              merged.map((w, i) => ({ id: `${weekday}-${i}`, weekday, ...w })),
-            ),
-          );
+          const merged = week.map((windows) => mergeWindows(windows));
+          setSavedWeek(merged);
+          setWeek(merged);
           setUnanswered(false);
           saved.push('your working week');
         } else {
@@ -221,7 +211,6 @@ export function WorkPanel({
       <section id="wk-week" className="pfx-sec">
       <WorkingWeekFields
         value={week}
-        stored={storedHours}
         unanswered={unanswered}
         showProblem={pressed}
         disabled={pending}
@@ -304,7 +293,7 @@ function outcome(
   failures: { half: string; message: string }[],
   clearedGym: string,
   modes: string[],
-  week: Week,
+  week: DayHours,
 ): Message {
   if (failures.length === 0) {
     return {
@@ -314,11 +303,9 @@ function outcome(
       rest: clearedGym
         ? `${clearedGym} is off your profile, and the gym’s share of a floor session with it. Your past settlements are untouched.`
         : saved.includes('your working week')
-          ? `${week.days.length === 7 ? 'Every day' : `${week.days.length} days`}, ${mergeWindows(
-              week.windows,
-            )
-              .map(formatWindow)
-              .join(' and ')}. Your diary and every slot list read this.`
+          ? `${week.filter((d) => d.length > 0).length} working days, ${formatDuration(
+              week.reduce((sum, d) => sum + minutesPerDay(d), 0),
+            )} a week. Your diary and every slot list read this.`
           : modes.length > 0
             ? `A client can see you coach ${modes.map(modeLabel).join(', ').toLowerCase()}.`
             : 'Your profile does not yet say how you coach.',

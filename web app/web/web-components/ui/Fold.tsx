@@ -1,6 +1,6 @@
 'use client';
 
-import { useId } from 'react';
+import { useEffect, useId, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 
 /**
@@ -84,6 +84,29 @@ export function Fold({
   const id = useId();
   const cls = ['fold', off ? 'fold--off' : null, className].filter(Boolean).join(' ');
 
+  /* ── IT OPENS AND CLOSES, IT DOES NOT BLINK (25 Nov 2026) ────────────────────
+     The body still UNMOUNTS when shut (the note below says why), but it now stays mounted for one short
+     closing phase so it can shrink away instead of vanishing, and it grows in on opening. `phase` is
+     adjusted during render rather than in an effect (trap 21); the timers only end a phase. While moving,
+     the wrapper clips (`data-phase` ≠ `idle`) — at rest it does not, so a popup inside the body (the
+     emoji picker, a date calendar) is never cut off. */
+  const [shown, setShown] = useState(open);
+  const [phase, setPhase] = useState<'idle' | 'in' | 'out'>('idle');
+  if (open && (!shown || phase === 'out')) {
+    setShown(true);
+    setPhase('in');
+  } else if (!open && shown && phase !== 'out') {
+    setPhase('out');
+  }
+  useEffect(() => {
+    if (phase === 'idle') return;
+    const t = window.setTimeout(() => {
+      if (phase === 'out') setShown(false);
+      setPhase('idle');
+    }, 240);
+    return () => window.clearTimeout(t);
+  }, [phase]);
+
   return (
     <section className={cls} style={style}>
       <div className="fold__hd">
@@ -112,9 +135,12 @@ export function Fold({
           three sets of fields a tab press walks through invisibly. Unmounting
           is also what makes `aria-controls` honest — it points at a region that
           is there when it says it is. */}
-      {open && (
-        <div id={`${id}-b`} className={flush ? 'fold__b fold__b--flush' : 'fold__b'}>
-          {children}
+      {shown && (
+        /* `inert` while it closes, so a Tab press cannot land in a body that is on its way out. */
+        <div className="fold__bw" data-phase={phase} inert={phase === 'out' || undefined}>
+          <div id={`${id}-b`} className={flush ? 'fold__b fold__b--flush' : 'fold__b'}>
+            {children}
+          </div>
         </div>
       )}
     </section>

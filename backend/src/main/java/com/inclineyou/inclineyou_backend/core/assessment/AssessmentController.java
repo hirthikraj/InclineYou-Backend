@@ -67,10 +67,12 @@ public class AssessmentController {
             @RequestParam(required = false) String clientId,
             @RequestParam(required = false) String q,
             @RequestParam(required = false) String dueBy,
+            @RequestParam(required = false) Boolean reviewed,
+            @RequestParam(required = false) String order,
             @RequestParam(required = false) Integer limit,
             @RequestParam(required = false) String cursor,
             @RequestParam(defaultValue = "false") boolean includeTotal) {
-        return list.list(trainerId(), state, clientId, q, dueBy, limit, cursor, includeTotal);
+        return list.list(trainerId(), state, clientId, q, dueBy, reviewed, order, limit, cursor, includeTotal);
     }
 
     /** The ETag is a hash of the whole answer (19 Nov 2026), so a 304 means nothing in it changed; edits take If-Match from the body's version. */
@@ -94,6 +96,20 @@ public class AssessmentController {
     public ResponseEntity<AssessmentItem> send(@PathVariable UUID id, @RequestBody(required = false) EmptyBody body) {
         var sent = assessments.send(trainerId(), id);
         return ResponseEntity.ok().eTag(sent.version()).body(sent);
+    }
+
+    /** Mark a done assessment reviewed. 200 with the item, whether it was marked now or already; 409 before it is done. */
+    @PostMapping("/assessments/{id}/review")
+    public ResponseEntity<AssessmentItem> review(@PathVariable UUID id, @RequestBody(required = false) EmptyBody body) {
+        var item = assessments.review(trainerId(), id, true);
+        return ResponseEntity.ok().eTag(item.version()).body(item);
+    }
+
+    /** Take the reviewed mark off again — back to "to review". Idempotent. */
+    @DeleteMapping("/assessments/{id}/review")
+    public ResponseEntity<AssessmentItem> unreview(@PathVariable UUID id) {
+        var item = assessments.review(trainerId(), id, false);
+        return ResponseEntity.ok().eTag(item.version()).body(item);
     }
 
     /** Record readings and answers — save for later, finish, or correct. If-Match required. */

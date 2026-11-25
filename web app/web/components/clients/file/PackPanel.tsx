@@ -68,6 +68,8 @@ interface Props {
   priceList: PriceListPackWire[];
   /** Present in renew mode: the pack being repeated. Absent when selling fresh. */
   renewing?: ClientPackageWire | null;
+  /** A pack from the price list to start on — the plan a join request picked (`?sell=`, V45). Ignored when it is not on the list. */
+  initialPackId?: string | null;
   onClose: () => void;
 }
 
@@ -78,7 +80,7 @@ const SERVICES = [
   { value: 'programming', label: 'Programming only' },
 ] as const;
 
-export function PackPanel({ clientId, clientName, clientType, priceList, renewing = null, onClose }: Props) {
+export function PackPanel({ clientId, clientName, clientType, priceList, renewing = null, initialPackId = null, onClose }: Props) {
   const isRenewal = renewing !== null;
   const gym = clientType === 'gym';
 
@@ -118,14 +120,15 @@ export function PackPanel({ clientId, clientName, clientType, priceList, renewin
     packageId,
   });
 
-  const [packId, setPackId] = useState<string>(gym ? (priceList[0]?.id ?? '') : '');
+  const preset = initialPackId ? priceList.find((p) => p.id === initialPackId) ?? null : null;
+  const [packId, setPackId] = useState<string>(preset ? preset.id : gym ? (priceList[0]?.id ?? '') : '');
   const [name, setName] = useState('');
   const [service, setService] = useState<string>('floor');
   const [basis, setBasis] = useState<'sessions' | 'period'>('sessions');
   const [sessions, setSessions] = useState('');
   const [validity, setValidity] = useState('');
   const [amount, setAmount] = useState<string>(() => {
-    const first = gym ? priceList[0] : null;
+    const first = preset ?? (gym ? priceList[0] : null);
     return first ? String(num(first.amount)) : '';
   });
   const [startDate, setStartDate] = useState('');

@@ -7,6 +7,7 @@ import { requirePacks } from '@/lib/packs/guard';
  * money book; `components/business/PackagesPage.tsx` says why that matters.
  *
  * `?from=new-client` is the detour flag from step 2 of *add a client*.
+ * `?list=gym` opens the gym's price list (the Gym share page's *Edit gym packs*).
  */
 export const dynamic = 'force-dynamic';
 
@@ -27,5 +28,5 @@ export default async function Page(props: {
     );
   }
 
-  return <PackagesPage data={packs.data} fromNewClient={q.from === 'new-client'} />;
+  return <PackagesPage data={packs.data} fromNewClient={q.from === 'new-client'} startOnGym={q.list === 'gym'} />;
 }

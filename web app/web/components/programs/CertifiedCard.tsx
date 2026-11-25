@@ -205,16 +205,18 @@ export function CertifiedCard({ row }: { row: CertifiedWire }) {
           </>
         ) : (
           <>
+            {/* NOT LIME (25 Nov 2026): twelve cards made twelve lime buttons, so the screen had no
+                primary at all. Copy keeps the weight (secondary, with its +); Preview is the quiet one. */}
             <Button
               href={withClient(`/programs/certified/${row.id}`, forClient)}
-              variant="secondary"
+              variant="ghost"
               size="sm"
               aria-label={`Preview ${row.name}`}
             >
               Preview
             </Button>
             <Button
-              variant="primary"
+              variant="secondary"
               size="sm"
               disabled={busy}
               aria-label={`Copy ${row.name} to my templates`}

@@ -31,11 +31,19 @@ public record CreateClientRequest(
         @Pattern(regexp = "active|prospect", message = "active or prospect") String status,
         @Valid Schedule schedule,
         /* V43 (22 Nov 2026): optional on the wire — the web's add flow asks it; null is not given. */
-        @Pattern(regexp = "female|male|other|prefer_not_to_say", message = "female, male, other or prefer_not_to_say") String gender
+        @Pattern(regexp = "female|male|other|prefer_not_to_say", message = "female, male, other or prefer_not_to_say") String gender,
+        /* V48 (23 Nov 2026): where a prospect came from, what they asked about and when to get back to them. All optional,
+         * on any status; the add flow asks them on the prospect path. The pack and the date are checked by the service. */
+        @Pattern(regexp = Lead.SOURCES, message = Lead.SOURCES_MESSAGE) String leadSource,
+        @Size(max = 80, message = "at most 80 characters") String leadSourceDetail,
+        UUID interestedPackId,
+        LocalDate nextFollowUpOn
 ) {
     public CreateClientRequest {
         name = Text.strip(name);
         phone = Text.orNull(phone);
+        leadSource = Text.orNull(leadSource);
+        leadSourceDetail = Text.orNull(leadSourceDetail);
         status = status == null || status.isBlank() ? "active" : status;
     }
 

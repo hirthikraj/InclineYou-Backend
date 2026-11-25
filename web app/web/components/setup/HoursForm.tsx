@@ -4,10 +4,9 @@ import { useState } from 'react';
 
 import { MessageSlot } from '@/components/auth/MessageSlot';
 import { IconClock } from '@/components/auth/Icons';
-import { WeekPicker, weekProblem, type Week } from '@/components/profile/WeekPicker';
+import { WeeklyHours, daysFrom, weekHoursProblem, type DayHours } from '@/components/profile/WeeklyHours';
 import { saveHours, skipStep } from '@/lib/setup/actions';
 import type { StoredHour } from '@/lib/setup/api';
-import { DEFAULT_DAYS, DEFAULT_WINDOWS, mergeWindows } from '@/lib/setup/hours';
 import type { SetupState } from '@/lib/setup/steps';
 import { StepHead } from './SetupShell';
 import { StepFoot, skipHomeAction } from './StepFoot';
@@ -26,8 +25,9 @@ import { useStepAction } from './useStepAction';
  * answering here replaces it rather than fighting it. (Promised since the first
  * draft; built 22 Nov 2026.)
  *
- * The control itself is `WeekPicker`, shared with the *Work & hours* tab of
- * `/settings/profile` — the fifth of the flow's controls to be extracted rather
+ * The control itself is `WeeklyHours` (day by day since 23 Nov 2026 — each
+ * weekday its own windows, `+` per day, copy to other days), shared with the
+ * *Work & hours* tab of `/settings/profile` — the fifth of the flow's controls to be extracted rather
  * than copied, and the argument is the one the other four record. What is left
  * here is what only setup has: the Skip, the seed promise, and the sentences
  * that can offer that Skip as a way out.
@@ -35,25 +35,17 @@ import { useStepAction } from './useStepAction';
 export function HoursForm({ stored, state }: { stored: StoredHour[]; state: SetupState }) {
   const { run, pending, message } = useStepAction();
 
-  // A resumed trainer sees the week they saved, not the default over it. The
-  // windows come from the earliest saved day, because this screen keeps one set
-  // for the whole week and per-day differences belong to the full editor.
-  const savedDays = [...new Set(stored.map((h) => h.weekday))].sort((a, b) => a - b);
-  const [week, setWeek] = useState<Week>(() => ({
-    days: savedDays.length ? savedDays : DEFAULT_DAYS,
-    windows:
-      savedDays.length === 0
-        ? DEFAULT_WINDOWS
-        : mergeWindows(stored.filter((h) => h.weekday === savedDays[0])),
-  }));
+  // A resumed trainer sees the week they saved, day by day; a fresh one sees the
+  // Mon–Sat suggestion, which is not stored until Continue.
+  const [week, setWeek] = useState<DayHours>(() => daysFrom(stored));
   const [pressed, setPressed] = useState(false);
 
-  const problem = weekProblem(week);
+  const problem = weekHoursProblem(week);
 
   function submit() {
     setPressed(true);
     if (problem !== 'none') return;
-    run(() => saveHours(week.days, week.windows));
+    run(() => saveHours(week));
   }
 
   return (
@@ -63,7 +55,7 @@ export function HoursForm({ stored, state }: { stored: StoredHour[]; state: Setu
         sub="Clients book their sessions inside these hours, so set them before you add anyone."
       />
 
-      <WeekPicker value={week} disabled={pending} onChange={setWeek} />
+      <WeeklyHours value={week} disabled={pending} onChange={setWeek} />
 
       {/* The two emptiness sentences, together and below the band rather than
           each under the row it is about. They belong to pressing Continue, not
@@ -71,13 +63,9 @@ export function HoursForm({ stored, state }: { stored: StoredHour[]; state: Setu
           half of it only setup can write, because only setup has a Skip to
           offer as the other way out. `too-short` is the picker's own, and it
           draws it there. */}
-      {pressed && problem === 'no-days' ? (
+      {pressed && problem === 'empty' ? (
         <p className="fld__e" style={{ marginTop: 12 }}>
-          Pick at least one day, or skip the step.
-        </p>
-      ) : pressed && problem === 'no-windows' ? (
-        <p className="fld__e" style={{ marginTop: 12 }}>
-          Add at least one window, or skip the step.
+          Give at least one day some hours, or skip the step.
         </p>
       ) : null}
 

@@ -46,6 +46,8 @@ export const TEMPLATE_FOR_KIND: Record<AttentionKind, NudgeTemplateName | null> 
   log: null,
   // Nothing is sent: the trainer takes the assessment in the session.
   assess: null,
+  // Nothing is sent (V48): the follow-up is a call or a chat from the trainer's own phone, logged on the file.
+  'follow-up': null,
 };
 
 /**

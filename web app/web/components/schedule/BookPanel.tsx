@@ -10,7 +10,11 @@ import { useToast } from '@/lib/toast/store';
 import { lengthChoices, SNAP_MINUTES } from '@/lib/schedule/result';
 import { TimeField } from '@/components/shell/TimeField';
 import { collisionsAt, insideHours, suggestClients } from '@/lib/schedule/book';
-import { Check, Search } from '@/components/shell/Icons';
+import { Check, ChevronLeft, Search } from '@/components/shell/Icons';
+import { SlotPicker } from '@/web-components/ui/SlotPicker';
+import { openTimes, weekDays, weekTitle, windowsOn, zoneLabel } from '@/lib/schedule/slots';
+import type { WorkWindow } from '@/lib/today/day';
+import { DAY_MS, MONTHS_LONG, startOfDay, startOfWeek } from '@/lib/today/time';
 import { Cross, Remote, WarnTriangle } from './Icons';
 import { useDismiss } from '@/lib/ui/dismiss';
 import { Button } from '@/web-components/ui/Button';
@@ -82,15 +86,45 @@ interface BookPanelProps {
    * that about anybody. `collisionsAt` narrows to the slot's own day itself.
    */
   sessions: BookSession[];
+  /** The opening day's merged windows — the fallback when `hours` is not given. */
   windows: { startMinute: number; endMinute: number }[];
+  /**
+   * Every `working_hours` row. With it, step 2's week strip can say which times
+   * are open on ANY day, not only the one the panel opened on.
+   */
+  hours?: WorkWindow[];
+  /**
+   * Fetches one Monday-first week of the diary, so a day outside the screen's
+   * own window is counted against its real bookings. Without it the strip
+   * counts against `sessions` alone.
+   */
+  loadWeek?: (weekStart: number) => Promise<BookSession[] | null>;
+  /**
+   * The minute was CLICKED on the grid, so keep it. Otherwise (the + button, a
+   * default slot) it is a guess, and step 2 snaps it to the day's first open time.
+   */
+  exact?: boolean;
+  /** The screen's clock (`useNow`) — no `Date.now()` during render (trap 20). */
+  now: number;
   rates: RateSource;
   onClose: () => void;
   onBooked: () => void;
 }
 
 export function BookPanel({
-  dayAt, minute, clients, clientId: asked = null, sessions, windows, rates, onClose, onBooked,
+  dayAt, minute, clients, clientId: asked = null, sessions, windows, hours, loadWeek, now, exact = false, rates, onClose, onBooked,
 }: BookPanelProps) {
+  /* TWO STEPS (23 Nov 2026). Step 1 asks WHO and nothing else; step 2 asks
+     everything that follows from the answer — length, delivery, when, paid by —
+     with Back to change the client. Opened from the week-by-client pivot the
+     client is already named, so it opens on step 2. */
+  const [step, setStep] = useState<1 | 2>(asked ? 2 : 1);
+  const [day, setDay] = useState(startOfDay(dayAt));
+  const [weekAt, setWeekAt] = useState(startOfWeek(dayAt));
+  const [otherOpen, setOtherOpen] = useState(false);
+  // A day picked before its week's diary arrived: snapped once the rows land.
+  const [snapOn, setSnapOn] = useState<number | null>(null);
+  const [weeks, setWeeks] = useState<ReadonlyMap<number, BookSession[]>>(() => new Map());
   const [pending, start] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const { show } = useToast();
@@ -104,6 +138,8 @@ export function BookPanel({
   const [billingPicked, setBilling] = useState<Billing | null>(null);
   const [priceText, setPriceText] = useState<string | null>(null);
   const [startMinute, setStartMinute] = useState(minute);
+  // Whether the start is still the guess `exact` describes; cleared once snapped.
+  const guessed = useRef(!exact && !asked);
 
   const returnTo = useRef<Element | null>(null);
 
@@ -160,7 +196,32 @@ export function BookPanel({
     };
   }, [dismiss, panelRef]);
 
-  const at = dayAt + startMinute * 60_000;
+  /* Each week the strip shows is fetched once (`loadWeek`) so its counts are
+     against that week's real bookings. setState lands in the promise, never
+     synchronously in the effect. */
+  useEffect(() => {
+    if (!loadWeek || weeks.has(weekAt)) return;
+    let live = true;
+    void loadWeek(weekAt).then((rows) => {
+      if (live && rows) setWeeks((m) => new Map(m).set(weekAt, rows));
+    });
+    return () => {
+      live = false;
+    };
+  }, [loadWeek, weekAt, weeks]);
+
+  const known = useMemo(() => {
+    const byId = new Map<string, BookSession>();
+    for (const s of sessions) byId.set(s.id, s);
+    for (const rows of weeks.values()) for (const s of rows) byId.set(s.id, s);
+    return [...byId.values()];
+  }, [sessions, weeks]);
+
+  const windowsFor = (d: number) =>
+    hours ? windowsOn(hours, d) : d === startOfDay(dayAt) ? windows : [];
+  const dayWindows = windowsFor(day);
+
+  const at = day + startMinute * 60_000;
   const client = clients.find((c) => c.id === clientId) ?? null;
 
   // The length is the CLIENT's until the trainer says otherwise. `minutes` stays
@@ -181,8 +242,58 @@ export function BookPanel({
     return suggestions.filter((s) => s.client.name.toLowerCase().includes(q));
   }, [suggestions, query]);
 
-  const collisions = collisionsAt(sessions, at, length);
-  const outside = !insideHours(windows, at, length);
+  const collisions = collisionsAt(known, at, length);
+  const outside = !insideHours(dayWindows, at, length);
+
+  /* ── WHEN: the week strip and the open times ─────────────────────────── */
+  const today = startOfDay(now);
+  const weekLoaded = !loadWeek || weeks.has(weekAt);
+  const stripDays = weekDays(weekAt).map((d) => {
+    const date = new Date(d);
+    return {
+      at: d,
+      label: d === today ? 'Today' : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][date.getDay()],
+      date: date.getDate(),
+      open: weekLoaded ? openTimes(windowsFor(d), known, d, length, now).length : null,
+    };
+  });
+  const times = openTimes(dayWindows, known, day, length, now);
+  const offered = times.includes(startMinute);
+  const showOther = otherOpen || !offered;
+  // Adjust-during-render (trap 21): the week has landed, so the day's first
+  // open time is now known against its real bookings.
+  if (snapOn !== null && weekLoaded && snapOn === day) {
+    setSnapOn(null);
+    if (!offered && times[0] !== undefined) setStartMinute(times[0]);
+  }
+  const dayDate = new Date(day);
+  const caption = `${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dayDate.getDay()]} ${dayDate.getDate()} ${MONTHS_LONG[dayDate.getMonth()].slice(0, 3)} · ${
+    times.length === 1 ? '1 open time' : `${times.length} open times`}`;
+  const emptyLine = day < today
+    ? 'This day has passed. Type a time below to back-date a session.'
+    : hours && hours.length === 0
+      ? 'No working hours set, so nothing is offered. Type a time below.'
+      : dayWindows.length === 0
+        ? 'You do not work this day. You can still book — type a time below.'
+        : 'Nothing open at this length. Type a time below to book anyway.';
+
+  const pickDay = (d: number) => {
+    guessed.current = false;
+    setDay(d);
+    // Land on the day's first open time; with none, the typed field takes over.
+    const first = openTimes(windowsFor(d), known, d, length, now)[0];
+    if (first !== undefined) setStartMinute(first);
+    if (loadWeek && !weeks.has(startOfWeek(d))) setSnapOn(d);
+  };
+  const moveWeek = (by: number) => {
+    const next = startOfWeek(weekAt + by * 7 * DAY_MS + DAY_MS / 2);
+    setWeekAt(next);
+    pickDay(next === startOfWeek(today) ? today : next);
+  };
+  const goStep = (n: 1 | 2) => {
+    setStep(n);
+    requestAnimationFrame(() => panelRef.current?.focus());
+  };
   const rate = client ? rates.perSession.get(client.id) ?? null : null;
 
   /*
@@ -264,7 +375,7 @@ export function BookPanel({
         title: <>Booked</>,
         body: (
           <>
-            {client?.name ?? 'Session'} &middot; {dayLong(dayAt)} at {formatMinute(startMinute)}
+            {client?.name ?? 'Session'} &middot; {dayLong(day)} at {formatMinute(startMinute)}
             {/* 10 Nov 2026: a single session is sold when it is booked — owed, due on its day. */}
             {billing === 'single' && price ? <> &mdash; {client?.name.split(' ')[0] ?? 'They'} owes {rupees(Number(price))}, due that day.</> : null}
           </>
@@ -287,6 +398,25 @@ export function BookPanel({
     });
   };
 
+  const pickClient = (id: string) => {
+    if (guessed.current) {
+      guessed.current = false;
+      const len = clients.find((c) => c.id === id)?.minutes ?? 60;
+      const first = openTimes(windowsFor(day), known, day, len, now)[0];
+      if (first !== undefined) setStartMinute(first);
+    }
+    if (id !== clientId) {
+      setClientId(id);
+      // Their length and their mode come back with them. Explicit
+      // rather than left as the previous pick's — see `length`.
+      setMinutes(null);
+      setMode(null);
+      setBilling(null);
+      setPriceText(null);
+    }
+    goStep(2);
+  };
+
   return (
     <>
       <div
@@ -300,13 +430,26 @@ export function BookPanel({
         tabIndex={-1}
         className={`panel sch__panel${closing ? ' panel--out' : ''}`}
         role="region"
-        aria-label={`New session, ${dayLong(dayAt)} at ${formatMinute(startMinute)}`}
+        aria-label={step === 1
+          ? 'New session, choose a client'
+          : `New session, ${dayLong(day)} at ${formatMinute(startMinute)}`}
       >
         <div className="panel__hd">
+          {step === 2 && (
+            <Button
+              variant="ghost"
+              iconOnly
+              label="Back to choosing a client"
+              onClick={() => goStep(1)}
+              icon={<ChevronLeft size={16} />}
+            />
+          )}
           <div style={{ minWidth: 0 }}>
             <p className="panel__t">New session</p>
             <p className="small">
-              {dayLong(dayAt)} · {formatMinuteRange(startMinute, startMinute + length)}
+              {step === 1
+                ? 'Step 1 of 2 · Who is it for?'
+                : `${dayLong(day)} · ${formatMinuteRange(startMinute, startMinute + length)}`}
             </p>
           </div>
           <Button
@@ -321,95 +464,79 @@ export function BookPanel({
         </div>
 
         <div className="panel__body">
-          {/*
-            THE TIME IS A FIELD, NOT A HEADING.
-            The click answered it, and a click can be off by a few minutes — so it
-            is shown as what it is, an answer that can be corrected, at the app's
-            own fifteen-minute step. A read-only heading here is how a booking
-            ends up at 07:15 because the pointer was low.
-          */}
-          <div className="fld">
-            {/* A `<span>`, not a `<label htmlFor>`. `TimeField` is three
-                controls, and `for` names exactly one — it would have pointed at
-                whichever segment happened to carry the id and left the other
-                two anonymous. The group takes the name instead, by id, which is
-                the same fix the two windows in `WeekPicker` needed for the same
-                reason and got in the opposite direction. */}
-            <span className="fld__l" id="bk-time-l">
-              Starts
-            </span>
-            <TimeField
-              /* Both: `labelledBy` ties the group to the visible `Starts`
-                 above it, and `label` is what each segment prefixes its own
-                 name with — "Starts, hour", not "Time, hour". */
-              labelledBy="bk-time-l"
-              label="Starts"
-              value={startMinute}
-              onChange={setStartMinute}
-              /* The arrows land on the quarter-hours the grid snaps a drag to —
-                 this was `step={SNAP_MINUTES * 60}` on the native control, in
-                 seconds because that is the unit `type="time"` counts in. */
-              step={SNAP_MINUTES}
-            />
-          </div>
+          {step === 1 && (
+            <div className="fld">
+              <span className="fld__l">Who</span>
+              <div className="search">
+                <Search size={15} />
+                <input
+                  type="search"
+                  value={query}
+                  placeholder="Search the roster"
+                  aria-label="Search the roster"
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </div>
 
-          <div className="sect fld">
-            <span className="fld__l">Who</span>
-            <div className="search">
-              <Search size={15} />
-              <input
-                type="search"
-                value={query}
-                placeholder="Search the roster"
-                aria-label="Search the roster"
-                onChange={(e) => setQuery(e.target.value)}
-              />
+              <div className="sch__list sch__list--tall" role="listbox" aria-label="Clients">
+                {filtered.length === 0 && (
+                  <p className="small" style={{ padding: '10px 2px' }}>
+                    Nobody on the roster matches “{query.trim()}”.
+                  </p>
+                )}
+                {filtered.slice(0, 40).map(({ client: c, band, because }) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    role="option"
+                    aria-selected={c.id === clientId}
+                    className="rowpick sch__pick"
+                    onClick={() => pickClient(c.id)}
+                  >
+                    <Avatar name={c.name} id={c.id} size="sm" />
+                    <span className="sch__pickt">
+                      <b>{c.name}</b>
+                      {because && <i>{because}</i>}
+                    </span>
+                    {band === 1 && <Tag tone="acc">This hour</Tag>}
+                    {c.id === clientId && <Check size={15} />}
+                  </button>
+                ))}
+              </div>
             </div>
+          )}
 
-            <div className="sch__list" role="listbox" aria-label="Clients">
-              {filtered.length === 0 && (
-                <p className="small" style={{ padding: '10px 2px' }}>
-                  Nobody on the roster matches “{query.trim()}”.
-                </p>
-              )}
-              {filtered.slice(0, 40).map(({ client: c, band, because }) => (
-                <button
-                  key={c.id}
-                  type="button"
-                  role="option"
-                  aria-selected={c.id === clientId}
-                  className="rowpick sch__pick"
-                  onClick={() => {
-                    setClientId(c.id);
-                    // Their length and their mode come back with them. Explicit
-                    // rather than left as the previous pick's — see `length`.
-                    setMinutes(null);
-                    setMode(null);
-                  }}
-                >
-                  <Avatar name={c.name} id={c.id} size="sm" />
-                  <span className="sch__pickt">
-                    <b>{c.name}</b>
-                    {because && <i>{because}</i>}
-                  </span>
-                  {band === 1 && <Tag tone="acc">This hour</Tag>}
-                  {c.id === clientId && <Check size={15} />}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {client && (
+          {step === 2 && client && (
             <>
+              <div className="sch__who">
+                <Avatar name={client.name} id={client.id} size="sm" />
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <b>{client.name}</b>
+                  <i>{client.programName ?? 'No live plan'}</i>
+                </span>
+                <Button variant="ghost" size="sm" onClick={() => goStep(1)}>
+                  Change
+                </Button>
+              </div>
+
+              <div className="sect fld">
+                <span className="fld__l">Delivery</span>
+                <div className="row gap2">
+                  <Chip pressed={delivery === 'floor'} onClick={() => setMode('floor')}>
+                    In Person
+                  </Chip>
+                  <Chip pressed={delivery === 'remote'} onClick={() => setMode('remote')}>
+                    <Remote size={13} />
+                    Online
+                  </Chip>
+                </div>
+              </div>
+
               <div className="sect fld">
                 <span className="fld__l">Length</span>
                 <div className="row gap2 sch__wrap">
                   {lengthChoices(length).map((m) => (
-                    <Chip
-                      pressed={length === m}
-                      key={m}
-                      onClick={() => setMinutes(m)}
-                    >
+                    <Chip pressed={length === m} key={m} onClick={() => setMinutes(m)}>
                       {m} min
                     </Chip>
                   ))}
@@ -421,22 +548,47 @@ export function BookPanel({
                 </p>
               </div>
 
+              {/* WHEN. The open times are an OFFER — working hours minus what is
+                  booked — and *Another time* is always there, because those hours
+                  limit what a client can self-book and never limit the trainer. */}
               <div className="sect fld">
-                <span className="fld__l">Delivery</span>
-                <div className="row gap2">
-                  <Chip
-                    pressed={delivery === 'floor'}
-                    onClick={() => setMode('floor')}
-                  >
-                    In Person
-                  </Chip>
-                  <Chip
-                    pressed={delivery === 'remote'}
-                    onClick={() => setMode('remote')}
-                  >
-                    <Remote size={13} />
-                    Online
-                  </Chip>
+                <SlotPicker
+                  title={weekTitle(weekAt, now)}
+                  hint={`Times in ${zoneLabel(now)}`}
+                  days={stripDays}
+                  dayAt={day}
+                  onDay={pickDay}
+                  onPrevWeek={() => moveWeek(-1)}
+                  onNextWeek={() => moveWeek(1)}
+                  caption={caption}
+                  times={times.map((m) => ({ minute: m, label: formatMinute(m) }))}
+                  minute={offered && !otherOpen ? startMinute : null}
+                  onTime={(m) => {
+                    setStartMinute(m);
+                    setOtherOpen(false);
+                  }}
+                  empty={emptyLine}
+                />
+                <div className="sch__other">
+                  {showOther ? (
+                    <>
+                      <span className="fld__l" id="bk-time-l">Another time</span>
+                      <TimeField
+                        labelledBy="bk-time-l"
+                        label="Starts"
+                        value={startMinute}
+                        onChange={(m) => {
+                          setStartMinute(m);
+                          setOtherOpen(true);
+                        }}
+                        step={SNAP_MINUTES}
+                      />
+                    </>
+                  ) : (
+                    <Button variant="ghost" size="sm" className="bk-other" onClick={() => setOtherOpen(true)}>
+                      Another time
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -453,7 +605,7 @@ export function BookPanel({
               {/* PAID BY (V32). Four answers to one question, and the default is
                   today's: the pack pays when it is marked done. Trial and Free are
                   free on purpose, so they never turn up later as money to chase;
-                  Single is sold on its own when it is delivered. A gym client buys
+                  Single is sold on its own when it is booked. A gym client buys
                   only the gym's packs, so Single is not offered to one. */}
               <div className="sect fld">
                 <span className="fld__l">Paid by</span>
@@ -480,76 +632,80 @@ export function BookPanel({
                 <p className="fld__h">
                   {billing === 'pack' && 'Taken off their pack when you mark it done.'}
                   {billing === 'trial' && (isProspect(client) && billingPicked === null
-                    ? `${client?.name.split(' ')[0] ?? 'They'} hasn’t bought anything yet, so this is booked as a trial — delivered free, never charged.`
+                    ? `${client.name.split(' ')[0]} hasn’t bought anything yet, so this is booked as a trial — delivered free, never charged.`
                     : 'A trial before they buy — delivered free, never charged.')}
                   {billing === 'complimentary' && 'On the house — delivered free, never charged.'}
                   {billing === 'single' && 'Sold on its own when you book it: owed from the session’s day until it’s paid. Their pack is not touched.'}
                 </p>
               </div>
+
+              {/*
+                THE VERDICTS. Every one of them names a fact, and none of them blocks.
+                Three separate notes rather than one combined sentence: a clash is a
+                decision, out-of-hours is a shrug, and an empty pack is a conversation.
+              */}
+              <div className="sect col gap2">
+                {collisions.length > 0 && (
+                  <p className="sch__note sch__note--danger">
+                    <WarnTriangle size={14} />
+                    <span>
+                      {collisions.map((c) => c.clientName).join(', ')}{' '}
+                      {collisions.length === 1 ? 'is' : 'are'} already booked across this slot.{' '}
+                      Booking here draws all {collisions.length + 1} side by side.
+                    </span>
+                  </p>
+                )}
+                {outside && (
+                  <p className="sch__note sch__note--warn">
+                    <WarnTriangle size={14} />
+                    <span>
+                      This falls outside your working hours. That is allowed — your hours only
+                      limit what a client can book themselves.
+                    </span>
+                  </p>
+                )}
+                {moneyLine && (
+                  <p className={moneyLine.warn ? 'sch__note sch__note--warn' : 'sch__note'}>
+                    {moneyLine.warn ? <WarnTriangle size={14} /> : <Check size={14} />}
+                    <span>{moneyLine.text}</span>
+                  </p>
+                )}
+                {error && (
+                  <p className="sch__err" role="alert">
+                    <WarnTriangle size={14} />
+                    {error}
+                  </p>
+                )}
+              </div>
             </>
           )}
-
-          {/*
-            THE VERDICTS. Every one of them names a fact, and none of them blocks.
-            Three separate notes rather than one combined sentence, because they
-            are three unrelated things to know and a trainer acts on them
-            differently: a clash is a decision, out-of-hours is a shrug, and an
-            empty pack is a conversation.
-          */}
-          <div className="sect col gap2">
-            {collisions.length > 0 && (
-              <p className="sch__note sch__note--danger">
-                <WarnTriangle size={14} />
-                <span>
-                  {collisions.map((c) => c.clientName).join(', ')}{' '}
-                  {collisions.length === 1 ? 'is' : 'are'} already booked across this slot.{' '}
-                  {/* "draws both" was written against a fixture where a clash
-                      meant two people. It is five on a real Thursday evening, and
-                      "both" then names a pair that is not there — the reader
-                      counts the names, finds five, and stops trusting the
-                      sentence. The count is stated instead of implied, and it is
-                      the count the grid will actually draw: this booking plus the
-                      ones it lands on. */}
-                  Booking here draws all {collisions.length + 1} side by side.
-                </span>
-              </p>
-            )}
-            {outside && (
-              <p className="sch__note sch__note--warn">
-                <WarnTriangle size={14} />
-                <span>
-                  This falls outside your working hours. That is allowed — your hours only
-                  limit what a client can book themselves.
-                </span>
-              </p>
-            )}
-            {moneyLine && (
-              <p className={moneyLine.warn ? 'sch__note sch__note--warn' : 'sch__note'}>
-                {moneyLine.warn ? <WarnTriangle size={14} /> : <Check size={14} />}
-                <span>{moneyLine.text}</span>
-              </p>
-            )}
-            {error && (
-              <p className="sch__err" role="alert">
-                <WarnTriangle size={14} />
-                {error}
-              </p>
-            )}
-          </div>
         </div>
 
         <div className="panel__foot">
-          <Button variant="ghost" onClick={dismiss}>
-            Cancel
-          </Button>
-          <button
-            className={collisions.length ? 'btn btn--secondary' : 'btn btn--primary'}
-            type="button"
-            disabled={!clientId || pending}
-            onClick={book}
-          >
-            {pending ? 'Booking…' : collisions.length ? 'Book anyway' : 'Book session'}
-          </button>
+          {step === 1 ? (
+            <>
+              <Button variant="ghost" onClick={dismiss}>
+                Cancel
+              </Button>
+              <Button variant="primary" disabled={!clientId} onClick={() => goStep(2)}>
+                Next
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={() => goStep(1)}>
+                Back
+              </Button>
+              <button
+                className={collisions.length ? 'btn btn--secondary' : 'btn btn--primary'}
+                type="button"
+                disabled={!clientId || pending}
+                onClick={book}
+              >
+                {pending ? 'Booking…' : collisions.length ? 'Book anyway' : 'Book session'}
+              </button>
+            </>
+          )}
         </div>
       </aside>
     </>

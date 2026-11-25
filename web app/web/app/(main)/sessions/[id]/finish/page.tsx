@@ -6,6 +6,7 @@ import { requireFinish } from '@/lib/sessionlog/finish-guard';
 
 /** Frame 5b · `/sessions/:id/finish` — four figures, and the pack sentence. */
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Finish the session · InclineYou' };
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

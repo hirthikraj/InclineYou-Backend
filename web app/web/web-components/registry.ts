@@ -209,6 +209,9 @@ export const ENTRIES: Entry[] = [
     desc: 'Pills that shape a list, in two grammars: toggles (aria-pressed, several on) and one-of-a-set (radiogroup, arrow keys). Deliberately NOT a Chip: its resting state is mostly-on, so it is the one control that must stay quiet when everything is selected.' },
   { id: 'c-avatar', name: 'Avatar', group: 'STATUS & IDENTITY', page: 'status', badge: null, impl: 'component', desc: '' , cls: 'av' },
   { id: 'c-avatar-stack', name: 'Avatar stack', group: 'STATUS & IDENTITY', page: 'status', badge: 'NEW', impl: 'component', desc: '' },
+  { id: 'c-brandmark', name: 'Brand mark', group: 'STATUS & IDENTITY', page: 'status', badge: 'NEW', impl: 'component',
+    added: '2026-11-25',
+    desc: 'A payment rail\u2019s mark (UPI, Razorpay) on a white tile, in both themes. Stand-in artwork until the official kits land.' , cls: 'brandmark' },
   { id: 'c-count', name: 'Count badge', group: 'STATUS & IDENTITY', page: 'status', badge: null, impl: 'component', desc: '' , cls: 'rail__n' },
   { id: 'c-meter', name: 'Meter', group: 'STATUS & IDENTITY', page: 'status', badge: null, impl: 'component', desc: '' },
   /* NOT THE DESIGN FILE'S, like `c-balancestrip` below it. It was `.crd-pk` in
@@ -361,6 +364,9 @@ export const ENTRIES: Entry[] = [
      client file's Progress tab needed could only have been added to ONE of
      them. A class with a component belongs here from the day the component
      exists; this is that day. */
+  { id: 'c-ranklist', name: 'Rank list', group: 'DATA', page: 'data', badge: 'NEW', impl: 'component',
+    added: '2026-11-24',
+    desc: 'A ranking on one line a row: name, a bar scaled to the largest, the figure. The leader is the one lime bar.' , cls: 'rank' },
   { id: 'c-vbars', name: 'Volume bars', group: 'DATA', page: 'data', badge: 'NEW', impl: 'component',
     added: '2026-09-20',
     desc: 'A week of work per column, from zero — the one shape reserved for a figure that is a SUM. A labelled axis, and every bar readable.' , cls: 'vb' },
@@ -406,6 +412,9 @@ export const ENTRIES: Entry[] = [
      is the whole of what this one is for. */
   { id: 'c-sessioncalendar', name: 'Session calendar', group: 'DATA', page: 'data', badge: 'NEW', impl: 'component',
     desc: 'One person’s month as outcomes rather than as capacity — a pill per session, toned by what happened to it, and a key that names the tones.' , cls: 'scal' },
+  { id: 'c-slotpicker', name: 'Slot picker', group: 'DATA', page: 'data', badge: 'NEW', impl: 'component',
+    added: '2026-11-23',
+    desc: 'A week of day cards, each saying how many times are open, then the open starts on the picked day. Draws what it is given; the booking panel feeds it working hours minus sessions.' , cls: 'slotp' },
   /* Registered the day the component was written, which is the order this
      file's header asks for. It was checked against what already exists first:
      `c-stat` draws one figure on its own ground and a row of them is a

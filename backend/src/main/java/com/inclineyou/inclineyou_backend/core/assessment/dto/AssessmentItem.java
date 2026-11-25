@@ -8,6 +8,7 @@ package com.inclineyou.inclineyou_backend.core.assessment.dto;
  *                {@code due_on}, never stored
  * @param version opaque; {@code updated_at} as epoch ms, sent back as If-Match
  * @param sentAt  epoch ms it was sent to the client, or null while it is the trainer's alone (api-contract 1.2, tr-a6)
+ * @param reviewedAt epoch ms the trainer marked a done one reviewed, or null: taken → to review → reviewed (23 Nov 2026)
  */
 public record AssessmentItem(
         String id,
@@ -24,5 +25,7 @@ public record AssessmentItem(
         long createdAt,
         String version,
         /* When it was sent to the client, or null: the one thing that makes it visible to them (V12). */
-        Long sentAt
+        Long sentAt,
+        /* When the trainer marked it reviewed (assessment.read_at), or null — only ever set on one that is done. */
+        Long reviewedAt
 ) {}

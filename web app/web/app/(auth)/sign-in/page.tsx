@@ -5,7 +5,7 @@ import { SignInForm } from '@/components/auth/SignInForm';
 import { checkSession } from '@/lib/auth/api';
 import { readClaims } from '@/lib/auth/claims';
 import { sessionNotice } from '@/lib/auth/copy';
-import { getToken } from '@/lib/auth/session';
+import { getToken, getTokenRole } from '@/lib/auth/session';
 
 export const metadata = { title: 'Sign in · InclineYou' };
 
@@ -34,13 +34,14 @@ export default async function SignInPage({
 }) {
   const { why } = await searchParams;
 
-  const claims = readClaims(await getToken());
+  const claims = readClaims(await getToken(), await getTokenRole());
   if (claims) {
     // A new number part-way through: its token opens one screen, and it is not /today.
     if (claims.role === 'pending') redirect('/sign-in/new');
 
     const session = await checkSession();
-    if (session.live) redirect('/today');
+    // A client's session is live too, and its home is the portal, never `/today`.
+    if (session.live) redirect(session.trainer && claims.role !== 'client' ? '/today' : '/me/today');
     redirect(`/sign-in/expired?why=${session.why}`);
   }
 

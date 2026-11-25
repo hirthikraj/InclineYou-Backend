@@ -102,9 +102,16 @@ export function VolumeBars({
      so the 2-session bars stood visibly ABOVE the line labelled 2. Whole numbers stay whole; under 10 the half
      keeps one decimal; at 10 and over the rounding is under a twentieth of the box and not worth a decimal. */
   const tickValue = (v: number) => (Number.isInteger(v) || v >= 10 ? Math.round(v) : Math.round(v * 10) / 10);
+  /* …AND A WHOLE-NUMBER SERIES GETS A WHOLE-NUMBER HALF (25 Nov 2026). *1.5 sessions* is a tick nobody can have.
+     When every week is a whole number and the peak is a small odd one, the box is one taller (3 → 4) so its
+     half is a whole number too (2), and the bars are scaled to that box — the half-way rule still sits at half,
+     and the 2-session bars now meet the line labelled 2. */
+  const integral = weeks.every((w) => Number.isInteger(w.value));
+  const top = integral && peak > 0 && peak < 10 && peak % 2 === 1 ? peak + 1 : peak;
+  const scale = top > 0 ? peak / top : 1;
   const ticks = [
-    { at: 0, v: peak },
-    { at: 50, v: peak / 2 },
+    { at: 0, v: top },
+    { at: 50, v: top / 2 },
     { at: 100, v: 0 },
   ];
 
@@ -173,7 +180,7 @@ export function VolumeBars({
                   /* `Math.max(1, …)` and not `0`: an empty week's bar is a 2px
                      tick on the baseline, which is what "it kept its bar"
                      means. A zero-height element is a week that vanished. */
-                  style={{ height: `${Math.max(1, Math.round(w.fraction * 100))}%` }}
+                  style={{ height: `${Math.max(1, Math.round(w.fraction * scale * 100))}%` }}
                 >
                   <b>
                     {format(w.value)}

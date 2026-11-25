@@ -70,18 +70,18 @@ export function ScheduleStats({ grid, view }: ScheduleStatsProps) {
   return (
     <div className="schs" aria-label={`${VIEW_NOUN[view]} summary`}>
       <span>
-        <b>{totals.sessions}</b>booked
+        <b>{totals.sessions}</b>Booked
       </span>
       <hr aria-hidden="true" />
       <span data-tone={done > 0 ? 'ok' : undefined}>
-        <b>{done}</b>done
+        <b>{done}</b>Done
       </span>
       {totals.utilisation !== null && (
         <>
           <hr aria-hidden="true" />
           <span data-tone={over ? 'crit' : undefined}>
             <b>{totals.utilisation}%</b>
-            {over ? 'over' : 'of hours'}
+            {over ? 'Over' : 'Of hours'}
           </span>
         </>
       )}

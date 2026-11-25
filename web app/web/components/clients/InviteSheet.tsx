@@ -65,6 +65,7 @@ export function InviteSheet({
   return (
     <ModalHost onClose={onClose} cover="frame" initialFocus="textarea">
       <Modal
+        sheet
         title={`Invite ${clientName}`}
         width={520}
         foot={

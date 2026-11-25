@@ -6,6 +6,7 @@ import { issueInvoice } from '@/lib/money/actions';
 import { rupees } from '@/lib/today/time';
 import { useToast } from '@/lib/toast/store';
 import { formatPhone } from '@/lib/auth/policy';
+import { addressLines, type BusinessWire } from '@/lib/practice/types';
 import {
   invoiceFigures,
   invoiceMessage,
@@ -66,10 +67,7 @@ export function InvoiceSheet({
   pkg,
   clientName,
   clientPhone,
-  trainerName,
-  trainerPhone,
-  trainerUpiVpa,
-  trainerHeadline,
+  business,
   onClose,
 }: {
   /** `invoiceNo` / `invoicedAt` are later-schema (R27) — absent on every v1 row. */
@@ -78,12 +76,14 @@ export function InvoiceSheet({
   pkg: ClientPackageWire | null;
   clientName: string;
   clientPhone: string | null;
-  trainerName: string;
-  trainerPhone: string | null;
-  trainerUpiVpa: string | null;
-  trainerHeadline: string | null;
+  /** The workspace's business (V46) — the From block. Null where it could not be read: the sheet then names nobody rather than guess. */
+  business: BusinessWire | null;
   onClose: () => void;
 }) {
+  const trainerName = business?.name ?? '';
+  const trainerPhone = business?.phone ?? null;
+  const trainerUpiVpa = business?.upiVpa ?? null;
+  const trainerHeadline = business?.tagline ?? null;
   const toast = useToast();
   const [busy, startWrite] = useTransition();
   /*
@@ -148,6 +148,7 @@ export function InvoiceSheet({
   return (
     <ModalHost onClose={onClose} cover="frame">
       <Modal
+        sheet
         /* NOT the number. The document says it in 15px mono four lines below,
            and a dialog whose title is the thing inside it has spent the one
            line that could have said WHOSE bill this is. */
@@ -200,6 +201,7 @@ export function InvoiceSheet({
             name: trainerName,
             lines: [
               trainerHeadline,
+              ...addressLines(business?.address),
               /*
                 FORMATTED, AND THE HELPER IS THE ONE THE SIGN-IN SCREENS USE.
                 A bare `9841022119` on a document somebody files is the one

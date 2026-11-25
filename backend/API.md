@@ -2066,7 +2066,7 @@ New error codes: `PACK_NAME_TAKEN` · `PACK_SOLD` · `GYM_PACK_NEEDS_GYM` · `PA
 | `PATCH /v1/sessions/{id}/sets/{setId}` | The hot path. Body is a map; a key's presence is the contract. `{done:true}` = as prescribed (actuals copied from the targets); `{done:true, loadValue, effortValue, rpe}` = what happened (any value not sent is copied from the target); `{loadValue}` on a **done** set = correction, `done_at` unchanged; `{done:false}` = skip / un-log (actuals cleared, row stays). `done_at` is stamped on the first done only, so a retried tap is harmless. **`notes`** (≤ 200 characters, trimmed; empty or `null` clears) may be sent alone or with any of the above: a notes-only PATCH says something *about* the set and changes neither its values nor whether it is done (so it is **not** the "values on a not-done set need `done:true`" 400), and skipping a set keeps its note. Answers `{set, totals, isBest}`. |
 | `POST /v1/sessions/{id}/exercises/{sxId}/sets` `{id?, loadValue, effortValue, rpe, done?, loadKind?, effortKind?, notes?}` | An extra set (`planned: false`, no targets) at the next position; kinds default to the exercise's last set. **201** `{set, totals}`, **200** for a replayed id. An extra set only exists as a logged one (the schema's `set_log_done`), so `done:false` is a 400 and no value is a 422. `notes` (≤ 200) is stored with it. |
 | `DELETE /v1/sessions/{id}/sets/{setId}` | Only an **extra** set. Answers `{totals}`. A planned set is skipped, never deleted. |
-| `POST /v1/sessions/{id}/exercises` `{id?, exerciseId, position?, sets?}` | Add a movement (`source: added`). `position` inserts and moves later ones (default: append); `sets` lays down that many **empty planned** rows (0–50), kinds from the exercise's log type (`reps` → bodyweight × reps, else weight × reps). **201** the exercise entry, **200** on a replayed id. |
+| `POST /v1/sessions/{id}/exercises` `{id?, exerciseId, position?, sets?, scope?}` | Add a movement (`source: added`). `position` inserts and moves later ones (default: append); `sets` lays down that many **empty planned** rows (0–50), kinds from the exercise's log type (`reps` → bodyweight × reps, else weight × reps). `scope` `today` (default) `\|program` (24 Nov 2026): `program` also appends the movement to the client's plan day as the last main row with `sets` (default 3, at most 30) empty-target sets, links today's row to it (`plannedFrom`), and bumps `program.revised_at` **in the same transaction**, as a program-scope swap does; a session not from the client's own program is a 400 and nothing is added. **201** the exercise entry, **200** on a replayed id. |
 | `PATCH /v1/sessions/{id}/exercises/{sxId}` | Any of `removed` (hides it, its sets stay and leave the totals) · `notes` (≤ 500, null clears) · `restSeconds` (0–3600; the sets still to do) · `onPlan:true` (only with `restSeconds`: also rewrites the client's plan rest and bumps `program.revised_at`). Answers the exercise entry. |
 | `POST /v1/sessions/{id}/exercises/{sxId}/swap` `{toExerciseId, planRowId?, reason?, scope?}` | `reason` `unavailable\|difficulty`, `scope` `today` (default) `\|program`. The original is kept in `swappedFrom` across swaps; swapping back to it clears the swap. With a `planRowId` (one of the plan's alternatives) the sets still to do are replaced by its targets and done sets are untouched; with a library pick the old targets stay. `scope: program` also changes the client's plan from the next session on and bumps `program.revised_at` **in the same transaction** (a builder tab then gets `412 PROGRAM_REVISED`). |
 | `POST /v1/sessions/{id}/end` `{endedAt?}` | Close the log. **Idempotent** (an ended log keeps its time), answers the Schedule row. Does not mark the session done or charge the pack. `endedAt` ≥ `started_at`, never in the future. |
@@ -2213,3 +2213,55 @@ accepted or paused, or removed after accepting). Until then:
 
 Reads are never refused. The progress-report download is painted in the browser, so that lock is the web's. The free
 allowance is `ConsentGate.FREE_SESSIONS = 2`, mirrored as `FREE_SESSIONS` in the web's `lib/clients/setup.ts`.
+
+## "I've paid" — the client reports, the trainer confirms (V50, 23 Nov 2026)
+
+`V50__payment_claim.sql`; the plan is `release/business-module-plan.html`, the full routes are in
+`api-contract-v1.2.html` (pm-a1, pm-a2, pm-l3, pc-l1…pc-l4, bz-a4). A **claim** is a client's "I've paid" — amount, the day,
+the UPI reference (UTR, optional) and a note. It changes nothing owed. The trainer **confirms** it, which records an
+ordinary payment through `POST /v1/packages/{id}/payments`' own path (one way money enters the book), or says it was **not
+received**. A claim may name no pack (paid before one was sold); confirming it then needs the pack the trainer sold.
+
+**The client (portal, CLIENT session).** A client has no write policy on any money table; both writes go through
+SECURITY DEFINER doors (`client_claim_payment`, `client_withdraw_payment_claim`).
+
+| Route | Answer |
+| --- | --- |
+| `GET /v1/portal/money` | Gains `owed[]` (`packageId`, `name`, `amountDue`, `dueDate?` — each pack with money left), `claims[]` (open, and decided in the last 30 days, newest first) and `terms` (`partPayments`, `collector`: `trainer`·`gym`, `gymName?`). `payTo` is now **never** sent for a gym client, who pays the gym. |
+| `POST /v1/portal/payment-claims` `{id, packageId?, amount, paidOn, reference?, note?}` | `201` the claim; `200` when `id` is this client's already (a retried tap). `amount` is a decimal string (a number is accepted); `paidOn` `YYYY-MM-DD`, today or up to 90 days back; `reference` ≤ 64; `note` ≤ 280. |
+| `DELETE /v1/portal/payment-claims/{id}` | `204`, again on a repeat. Only an open claim. |
+| `GET /v1/portal/payments/{id}/receipt` | One of the client's own collected payments: `number` (first 8 of the id), `paidAt`, `amount`, `method`, `reference` (the payment's, else the claim's), `collectedBy`, `packageName`, `clientName`, `trainerName`, `gymName?`, `business{name, tagline, phone, email, addressLine1, addressLine2, city, state, pincode}`. `404` for anything else. |
+
+**The trainer.**
+
+| Route | Answer |
+| --- | --- |
+| `GET /v1/payment-claims?status=open&clientId=&limit=50` | `{items}`. `status` open (the default, oldest first) · confirmed · declined · withdrawn (newest first). `limit` 1–100. |
+| `POST /v1/payment-claims/{id}/confirm` `{packageId?, amount?, method?, reference?, paidAt?, note?}` | `{claim, payment, package}`. Every key overrides what the client said; absent keys default to the claim (method `upi`; `reference` the client's UTR unless the method is cash). A gym client's claim records a gym-collected payment (no method, no reference). Confirming a confirmed claim answers the same payment. The payment route's own codes apply (`PAYMENT_OVER_DUE`, `PACKAGE_CLOSED`, …). |
+| `POST /v1/payment-claims/{id}/decline` `{reason?}` | The claim, `declined`; `reason` ≤ 280, shown to the client. |
+| `POST /v1/payment-claims/{id}/reopen` | Undo of a decline. Undo of a confirm is `DELETE /v1/payments/{paymentId}`, which now also puts its claim back to `open`. |
+| `PUT /v1/business/payments` `{upiVpa, partPayments}` | Business → Payment setup; owner-only (`403 BUSINESS_OWNER_ONLY`). `GET /v1/business` gains `partPayments`. `PUT /v1/business`' `upiVpa` is now *absent = leave it* (sent, it still sets or clears). |
+
+| `code` | Status | Meaning |
+| --- | --- | --- |
+| `CLAIM_OVER_DUE` | 422 | More than is left on the pack, counting other open claims on it. |
+| `CLAIM_WHOLE_ONLY` | 422 | Part payments are off (`partPayments: false`) and this is not all of what is left. |
+| `CLAIM_NOTHING_DUE` | 409 | The pack owes nothing (less open claims). |
+| `CLAIM_TOO_MANY` | 409 | Five of the client's claims are already waiting. |
+| `CLAIM_DECIDED` | 409 | The claim is no longer open (withdraw, confirm, decline) or is confirmed (reopen). |
+| `CLAIM_NEEDS_PACKAGE` | 422 | Confirm of a claim made before any pack, without `packageId`. |
+
+STANDARD tier throughout: nothing here sends a message.
+
+## Gym statement — `GET /v1/money/gym` (additive, 23 Nov 2026)
+
+Two keys added (api-contract `money-gym`), "the proof" of `release/business-module-plan.html`, from the trainer's own book:
+
+- `statement` — for the asked span: `clientsCoached` and `sessionsDelivered` (gym clients' trainer-run sessions marked done,
+  on the workspace calendar), `newSales` and `renewals` (gym-pack sales by start month; a renewal is a sale to a client who
+  had any earlier pack), `billedYouBrought` and `billedGymDesk` (billed, split by `client.lead_source = 'gym_desk'`, V48), and
+  `received` (payouts recorded in the span).
+- `lifetime` — since the first gym-pack sale: `since` (yyyy-MM, null when none), `sales`, `billed`, `gymCut`, `yours`, and
+  `received` (every payout ever recorded).
+
+Money is a decimal string, as on every money field. Nothing else in the response changed.

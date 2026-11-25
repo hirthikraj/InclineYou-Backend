@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import type { TodayData } from '@/lib/today/api';
 import { dayMoney, findClash, findGaps, windowsFor } from '@/lib/today/day';
 import { sessions } from '@/lib/today/copy';
-import { dayLong, dayStamp, minuteOfDay, startOfDay } from '@/lib/today/time';
+import { dayLong, minuteOfDay, startOfDay } from '@/lib/today/time';
 import { defaultSlot } from '@/lib/schedule/book';
 import { SNAP_MINUTES } from '@/lib/schedule/result';
 import { BookPanel } from '@/components/schedule/BookPanel';
@@ -181,10 +181,11 @@ export function Today({ data }: { data: TodayData }) {
     : deck.running
       ? `In session with ${deck.running.clientName} · ${sessions(deck.today.length)}, ${deck.todayDone} done`
       : deck.today.length === 0
-        ? `${dayStamp(serverNow)} · nothing booked`
+        ? 'Nothing booked today'
         : deck.todayDone === deck.today.length
           ? `Day done · ${deck.todayDone} of ${deck.today.length} delivered`
-          : `${dayStamp(serverNow)} · ${sessions(deck.today.length)}, ${deck.todayDone} done`;
+          /* The date is the h1 directly above; the line says only what it adds. */
+          : `${sessions(deck.today.length)} · ${deck.todayDone} done`;
 
   return (
     <LastContactProvider map={data.lastContact} now={data.now}>
@@ -341,6 +342,8 @@ export function Today({ data }: { data: TodayData }) {
           clients={book.clients}
           sessions={book.sessions}
           windows={windows}
+          hours={hours}
+          now={now}
           rates={rates}
           onClose={() => setBooking(null)}
           onBooked={() => {

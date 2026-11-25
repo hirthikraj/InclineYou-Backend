@@ -4,6 +4,7 @@ import { requireClients } from '@/lib/clients/guard';
 import { getNewClientData, type NewClientData } from '@/lib/clients/new-api';
 import { listRecentNudges } from '@/lib/nudges/api';
 import { COOLDOWN_DAYS, lastContactMap } from '@/lib/nudges/cooldown';
+import { pendingJoinRequests } from '@/lib/join/api';
 
 export const metadata = { title: 'Clients · InclineYou' };
 export const dynamic = 'force-dynamic';
@@ -18,10 +19,12 @@ export default async function Page() {
    * The cooldown window, not a year: this screen asks "have I already dealt
    * with them", and the history proper is on the client's own file.
    */
-  const [result, newClientData, nudges] = await Promise.all([
+  const [result, newClientData, nudges, joiningCount] = await Promise.all([
     requireClients(),
     (getNewClientData() as Promise<NewClientData>).catch((): null => null),
     listRecentNudges(COOLDOWN_DAYS),
+    // The Joining tab's badge: join requests waiting on an answer. Optional — the roster draws without it.
+    pendingJoinRequests(),
   ]);
 
   if (!result.ok) {
@@ -38,6 +41,7 @@ export default async function Page() {
       now={result.now}
       newClientData={newClientData}
       lastContact={Object.fromEntries(lastContactMap(nudges))}
+      joiningCount={joiningCount}
     />
   );
 }

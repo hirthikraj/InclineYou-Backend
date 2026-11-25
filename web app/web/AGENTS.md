@@ -798,6 +798,25 @@ Four steps: phone check → sell a pack → **pick the days** → **pick a plan*
   answer with the server's refusal, and `validateSchedule`'s wording never reaches
   the browser (trap 31).
 
+### Following up a prospect — V48 (23 Nov 2026)
+
+A prospect carries where they came from, the pack they asked about, the next follow-up date and a log of what they
+said (`lib/clients/lead.ts` is the vocabulary; `lib/clients/lead-actions.ts` the writes). Rules that are decisions:
+
+- **Not consent-gated** (owner's call): the enquiry's business record. The composer's hint keeps the note on the
+  enquiry, never health — notes, health and profile still wait for consent.
+- **Nothing sends, and it is not a nudge.** Call is `tel:` and WhatsApp a plain `wa.me` link, as in the header; pressing
+  either opens the composer with that channel picked. No `nudge_log` row, so no 7-day quiet period.
+- **A logged contact replaces the follow-up date**, none clears it, and the four closing outcomes end it. The toast's
+  Undo puts the old date back (server-side, only while it is still the newest contact).
+- **The date is an ISO day in the workspace calendar**, compared as strings (`todayIso`, `followUpState`) — never an
+  instant, so nothing crosses midnight.
+- Surfaces: `LeadCard` on a prospect's Overview (under the setup checklist, spanning both tracks; the overview read
+  fetches the contacts and the price list for prospects only); the add flow's prospect path (source and interest on
+  step 2, a follow-up preset on step 3, saved by whichever press ends the flow); Today's `follow-up` band (inserted
+  under `quiet`, navigates to the file, no snooze cell — it leaves when a response is logged or the date moves); the
+  roster's line, `Follow up` verb and *Follow-up date* sort. Archive reasons gained *Not interested* and *Never replied*.
+
 ### The client file
 
 Seven tabs, each a real route: **Overview · Progress · Assessments · Sessions ·
@@ -1875,6 +1894,27 @@ page. `components/shell/nav.tsx` carries it.
   `client_id`. An expense needs its own table, and the real net-income figure needs
   it first.
 
+### "I've paid" and Payment setup — V50 (23 Nov 2026)
+
+`release/business-module-plan.html` is the plan; `lib/claims/` the vocabulary and the writes. Rules that are decisions:
+
+- **The client reports, the trainer confirms.** A client taps *I've paid* (portal `/me/payments`, or Home's button →
+  `?report=1`, a one-shot): pack (or none — paid before one was sold), amount, day, UPI reference **optional for both**,
+  note. Nothing owed changes until the trainer confirms on **To confirm** (`ClaimsQueue`, top of the Overview and of
+  Payments). Confirm records an ordinary payment (the server goes through `PackageLedgerService.record`); its Undo is
+  deleting that payment, which puts the report back to waiting. *Not received* takes an optional reason the client reads;
+  its Undo is `reopen`.
+- **A gym client pays the gym's desk** — never shown the trainer's UPI ID or QR; their report is "paid at the gym" and the
+  confirm records a gym-collected payment (no method, no reference).
+- **Today does not chase a client who says they paid**: their money row becomes *Confirm* → `/business` instead of
+  *Remind* (`claimed` in `DeckInput`, read from `/v1/payment-claims?status=open`, fails silently).
+- **Part payments are the owner's switch** on **Business → Payment setup** (`/business/payment-setup`), with the UPI ID
+  (moved off Settings → Business, which now only links to it — `PUT /v1/business` no longer sends `upiVpa`), the ₹1 test
+  QR, *Collect at the gym* (amount → a QR on the trainer's own screen) and *Autopay with Razorpay* shown **Coming soon**
+  (`release/autopay-design.html`).
+- **Every collected payment has a receipt** at `/me/payments/receipt/:id` — a receipt, never called a tax invoice.
+- **Transactions is now *Payments*** (`/business/payments`; `/business/transactions` permanently redirects with its query).
+
 ### Reports
 
 Two audiences on one page and **no shared figure**: the practice report at
@@ -2001,7 +2041,7 @@ section of *Work & hours*.
   is bad. (This is *not* the greyed-out primary `NameForm` argues against: in
   setup, pressing Continue is how a trainer finds out what is missing.)
 - **The pickers are extracted, not copied** — `CertificationPicker`,
-  `ExperiencePicker`, `SpecialityPicker`, `LanguagePicker`, `WeekPicker`, all
+  `ExperiencePicker`, `SpecialityPicker`, `LanguagePicker`, `WeeklyHours`, all
   rendered by both setup and Settings. Two copies of a picker is how one answer
   set ends up with two spellings.
 - **A picker draws every id it was GIVEN, not every id it knows.** In setup a
@@ -2033,10 +2073,13 @@ section of *Work & hours*.
   cities. **Hybrid is not the other three added together** — it means one client's
   week is both.
 - **One Save on that tab, calling only what changed.** Place is a PATCH and the
-  week is a `/v1/sync/push`; `placeDirty` and `weekDirty` gate each. **Only
-  sending the dirty half is a correctness rule** — `WeekPicker` keeps one set of
-  windows for every day picked, so writing the week back when nobody touched it
-  flattens a differing Saturday. A half that failed stays dirty and says so.
+  week is `PATCH /v1/working-hours`; `placeDirty` and `weekDirty` gate each.
+  **Since 23 Nov 2026 the week is edited DAY BY DAY** (`WeeklyHours`: a row per
+  weekday with its own windows, `+` per day, a copy-to-days menu; an empty day
+  is a rest day) and `saveWorkingDays` sends only the weekdays that changed.
+  Setup step 6 draws the same editor (`saveHours(perDay)`); `WeekPicker` has
+  no caller left and is kept with a docstring saying so. A half that
+  failed stays dirty and says so.
 - **Moving to *on my own* clears `gymName` AND `gymSharePercent`.** Said in the
   success message **after**, not as a `.fld__e` before — the app's validation red
   over a perfectly valid answer, beside a section that had just correctly

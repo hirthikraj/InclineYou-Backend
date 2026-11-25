@@ -54,13 +54,10 @@ export function SetupCard({ payload, onEditWeek }: { payload: ClientFilePayload;
     const copy = SETUP_COPY[step.key];
     const primary = view.next?.key === step.key;
     const variant = primary ? 'primary' : 'secondary';
-    if (step.waiting) {
-      return (
-        <Button variant="secondary" size="sm" disabled title="Set how many days a week first">
-          {copy.verb}
-        </Button>
-      );
-    }
+    /* A WAITING STEP HAS NO BUTTON (23 Nov 2026). It was a disabled one, which on a phone is a grey box
+       nobody can press, at the same size as the ones they can, and its hint named the wrong step for the
+       demo. The step's own line says what it waits on (`why`). */
+    if (step.waiting) return null;
     switch (step.key) {
       case 'consent':
         return (
@@ -104,13 +101,15 @@ export function SetupCard({ payload, onEditWeek }: { payload: ClientFilePayload;
       const n = client.schedule.sessionsPerWeek;
       return `${n} day${n === 1 ? '' : 's'} a week. Change it any time from This week.`;
     }
-    if (step.key === 'plan' && step.waiting) return 'Which plan fits depends on days a week.';
+    if (step.key === 'plan' && step.waiting) return 'Which plan fits depends on days a week. Set that first.';
+    if (step.key === 'demo-run' && step.waiting) return 'Once the demo is booked, mark it done here after it happens.';
     if (step.key === 'plan' && !step.done && client.schedule.sessionsPerWeek) {
       return `Plans with ${client.schedule.sessionsPerWeek} days fit. No plan yet? You can still pick exercises as you go when you log.`;
     }
     if (step.key === 'demo-run' && demo && !step.done) {
       return `Booked for ${new Date(demo.scheduledAt).toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })}. Mark it done once it has happened.`;
     }
+    if (step.done) return SETUP_COPY[step.key].doneWhy ?? SETUP_COPY[step.key].why;
     return SETUP_COPY[step.key].why;
   };
 
@@ -137,11 +136,17 @@ export function SetupCard({ payload, onEditWeek }: { payload: ClientFilePayload;
               <span className="cfsetup__txt">
                 <b>
                   {step.done ? SETUP_COPY[step.key].doneTitle : SETUP_COPY[step.key].title}
-                  <span className="vh">{step.done ? ' (done)' : step.waiting ? ' (waiting on step 1)' : ' (to do)'}</span>
+                  <span className="vh">
+                    {step.done
+                      ? ' (done)'
+                      : step.waiting && step.after
+                        ? ` (waiting on step ${view.steps.findIndex((s) => s.key === step.after) + 1})`
+                        : ' (to do)'}
+                  </span>
                 </b>
                 <span className="small">{why(step)}</span>
               </span>
-              {!step.done && <span className="cfsetup__go">{verb(step)}</span>}
+              {!step.done && !step.waiting && <span className="cfsetup__go">{verb(step)}</span>}
             </li>
           ))}
         </ol>

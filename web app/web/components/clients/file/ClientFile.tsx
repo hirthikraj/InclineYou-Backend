@@ -1,5 +1,7 @@
 'use client';
 
+import type { PaymentClaimWire } from '@/lib/claims/types';
+import type { BusinessWire } from '@/lib/practice/types';
 import { hasConsent } from '@/lib/clients/setup';
 import { useState } from 'react';
 import Link from 'next/link';
@@ -82,6 +84,10 @@ export interface ClientFileProps {
   /** This client's cycles and the trainer's forms — `null` where the read failed. */
   schedules?: ScheduleWire[] | null;
   templates?: TemplateWire[] | null;
+  /** The workspace's business (V46) — only the Payments route loads it, for the invoice's From block. */
+  business?: BusinessWire | null;
+  /** V50 · this client's open "I've paid" reports — only the Payments route loads them. */
+  claims?: PaymentClaimWire[] | null;
 }
 
 export function ClientFile({
@@ -93,6 +99,8 @@ export function ClientFile({
   assessments = null,
   schedules = null,
   templates = null,
+  business = null,
+  claims = null,
   options = {},
 }: ClientFileProps) {
   /* ── THE STRIP STANDS DOWN ON THE TAB THAT OWNS ITS CONTENTS ─────────────
@@ -292,6 +300,8 @@ export function ClientFile({
               payments={payload.payments}
               priceList={payload.priceList}
               adjustments={payload.adjustments}
+              business={business}
+              claims={claims}
               now={now}
             />
           )}

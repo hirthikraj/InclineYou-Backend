@@ -145,8 +145,8 @@ class TenantIsolationTest {
                 "erasure_log",   // before client and tenant: it points at both
                 "client_message", "client_notification", "workout_feedback", "milestone", "client_prefs", "client_invite",
                 "set_log", "session_exercise", "workout_set", "workout_exercise", "package_adjustment",
-                "scheduled_session", "payment", "package", "pack", "assessment", "assessment_schedule",
-                "assessment_template", "client_note", "client_schedule_slot", "client_schedule",
+                "scheduled_session", "payment_claim", "payment", "package", "pack", "assessment", "assessment_schedule",
+                "assessment_template", "client_note", "lead_contact", "client_schedule_slot", "client_schedule",
                 "client_assignment", "nudge_log", "nudge_template", "attention_dismissal", "working_hours",
                 "trainer_exercise", "gym_arrangement", "trainer_payout", "workout", "program", "exercise",
                 "tenant_invite", "client")) {
@@ -486,6 +486,91 @@ class TenantIsolationTest {
                 "UPDATE package SET tenant_id = :b::uuid WHERE id = :id::uuid",
                 Map.of("b", tenantB.toString(), "id", packageMeera.toString())))
                 .hasMessageContaining("immutable");
+    }
+
+    @Test
+    @DisplayName("V48 · a lead contact is its workspace's, never widened by the combined view, and never a client's")
+    void leadContactIsStaffOnly() throws SQLException {
+        portalFixtures();
+        for (var row : List.of(List.of(tenantA, meeraPrivate, "private ask"), List.of(tenantB, meeraGym, "gym ask"))) {
+            jdbc.update("""
+                    INSERT INTO lead_contact (tenant_id, client_id, trainer_id, channel, outcome, note)
+                    VALUES (:tid::uuid, :c::uuid, :t::uuid, 'call', 'interested', :n)
+                    """, Map.of("tid", row.get(0).toString(), "c", row.get(1).toString(), "t", trainerPriya.toString(),
+                                "n", row.get(2)));
+        }
+        try (Connection c = asAppRole()) {
+            assertThat(count(c, "SELECT count(*) FROM lead_contact")).as("unset context").isZero();
+        }
+        try (Connection c = asAppRole()) {
+            // Tier 1, like client_note: the workspace she stands in, even when reading both.
+            staff(c, tenantA, List.of(tenantA, tenantB), trainerPriya);
+            assertThat(strings(c, "SELECT note FROM lead_contact")).containsExactly("private ask");
+        }
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            assertThat(count(c, "SELECT count(*) FROM lead_contact")).as("no client policy").isZero();
+        }
+    }
+
+    @Test
+    @DisplayName("V50 · a client reports a payment only through its door, for their own pack, and reads only their own reports; staff read their workspace's")
+    void paymentClaimsAreTheClientsOnlyThroughTheDoor() throws SQLException {
+        accept(meeraPrivate);
+        jdbc.update("UPDATE trainer SET clients_see_money = true WHERE id = :t::uuid", Map.of("t", trainerPriya.toString()));
+        UUID mine = UUID.randomUUID();
+
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            // no INSERT grant at all: a well-formed row of their own is refused before any policy is asked
+            inRolledBackTransaction(c, () -> assertThatThrownBy(() -> update(c,
+                    ("INSERT INTO payment_claim (tenant_id, trainer_id, client_id, package_id, amount, currency, paid_on, collector) "
+                            + "VALUES ('%s', '%s', '%s', '%s', 1000, 'INR', CURRENT_DATE, 'trainer')")
+                            .formatted(tenantA, trainerPriya, meeraPrivate, packageMeera))).hasMessageContaining("permission denied"));
+
+            // the door makes it, in the client's workspace, under the client's trainer
+            try (var ps = c.prepareStatement("SELECT client_claim_payment(?::uuid, ?::uuid, ?::uuid, 1000, CURRENT_DATE, NULL, NULL)::text")) {
+                ps.setString(1, mine.toString()); ps.setString(2, meeraPrivate.toString()); ps.setString(3, packageMeera.toString());
+                try (ResultSet rs = ps.executeQuery()) { rs.next(); assertThat(rs.getString(1)).contains("created"); }
+            }
+            var row = jdbc.queryForMap("SELECT tenant_id::text t, trainer_id::text r, status FROM payment_claim WHERE id = :id::uuid",
+                    Map.of("id", mine.toString()));
+            assertThat(row.get("t")).isEqualTo(tenantA.toString());
+            assertThat(row.get("r")).isEqualTo(trainerPriya.toString());
+            assertThat(row.get("status")).isEqualTo("open");
+
+            // what is left on the pack (6000 − 3000 paid − 1000 waiting) bounds the next one
+            try (var ps = c.prepareStatement("SELECT client_claim_payment(gen_random_uuid(), ?::uuid, ?::uuid, 2500, CURRENT_DATE, NULL, NULL)::text")) {
+                ps.setString(1, meeraPrivate.toString()); ps.setString(2, packageMeera.toString());
+                try (ResultSet rs = ps.executeQuery()) { rs.next(); assertThat(rs.getString(1)).contains("over_due"); }
+            }
+            // someone else's row is not theirs to report for
+            assertThatThrownBy(() -> {
+                try (var ps = c.prepareStatement("SELECT client_claim_payment(gen_random_uuid(), ?::uuid, NULL, 100, CURRENT_DATE, NULL, NULL)")) {
+                    ps.setString(1, sanjay.toString()); ps.executeQuery();
+                }
+            }).hasMessageContaining("your own row");
+
+            // they read their own, and cannot decide it themselves
+            assertThat(strings(c, "SELECT id::text FROM payment_claim")).containsExactly(mine.toString());
+            assertThat(update(c, "UPDATE payment_claim SET status = 'withdrawn', decided_at = now() WHERE id = '" + mine + "'")).isZero();
+        }
+
+        try (Connection c = asAppRole()) {
+            staff(c, tenantA, List.of(tenantA, tenantB), trainerPriya);
+            assertThat(strings(c, "SELECT id::text FROM payment_claim")).containsExactly(mine.toString());
+        }
+        try (Connection c = asAppRole()) {
+            staff(c, tenantB, List.of(tenantB), trainerArun);
+            assertThat(count(c, "SELECT count(*) FROM payment_claim")).as("another workspace").isZero();
+        }
+
+        // with money hidden, the client neither reads nor reports
+        jdbc.update("UPDATE trainer SET clients_see_money = false WHERE id = :t::uuid", Map.of("t", trainerPriya.toString()));
+        try (Connection c = asAppRole()) {
+            clientSession(c);
+            assertThat(count(c, "SELECT count(*) FROM payment_claim")).isZero();
+        }
     }
 
     @Test

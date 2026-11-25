@@ -39,17 +39,24 @@ public record UpdateClientRequest(
         Patch<Boolean> portalShowMoney,
         @Null(message = "use pause, resume, archive or unarchive") Object status,
         /* V43 (22 Nov 2026): the business record, like the date of birth — not consent-locked. Null clears it. */
-        Patch<@Pattern(regexp = "female|male|other|prefer_not_to_say", message = "female, male, other or prefer_not_to_say") String> gender
+        Patch<@Pattern(regexp = "female|male|other|prefer_not_to_say", message = "female, male, other or prefer_not_to_say") String> gender,
+        /* V48 (23 Nov 2026): the lead fields — the business record, not consent-locked. Null clears each. */
+        Patch<@Pattern(regexp = Lead.SOURCES, message = Lead.SOURCES_MESSAGE) String> leadSource,
+        Patch<@Size(max = 80, message = "at most 80 characters") String> leadSourceDetail,
+        Patch<java.util.UUID> interestedPackId,
+        Patch<LocalDate> nextFollowUpOn
 ) {
     public UpdateClientRequest {
         name = Patch.map(name, String::strip);
         phone = Patch.map(phone, Text::orNull);
         goal = Patch.map(goal, Text::orNull);
+        leadSourceDetail = Patch.map(leadSourceDetail, Text::orNull);
     }
 
     public boolean isEmpty() {
         return name == null && phone == null && dateOfBirth == null && clientType == null
                 && goal == null && heightCm == null && activityLevel == null && gender == null
-                && remindersExcluded == null && portalShowMoney == null;
+                && remindersExcluded == null && portalShowMoney == null
+                && leadSource == null && leadSourceDetail == null && interestedPackId == null && nextFollowUpOn == null;
     }
 }

@@ -247,17 +247,23 @@ export async function endSession(): Promise<void> {
  * else, an unreachable server included, is not evidence against the session, and
  * the app's own guards will say what they find.
  */
-export type SessionCheck = { live: true } | { live: false; why: 'expired' | 'revoked' };
+export type SessionCheck =
+  | { live: true; trainer: boolean }
+  | { live: false; why: 'expired' | 'revoked' };
 
 export async function checkSession(): Promise<SessionCheck> {
   try {
     await authed<unknown>('GET', '/v1/me');
-    return { live: true };
+    return { live: true, trainer: true };
   } catch (err) {
     if (err instanceof ApiRefusal && err.refusal.status === 401) {
       return { live: false, why: err.refusal.body.code === 'SESSION_REVOKED' ? 'revoked' : 'expired' };
     }
-    return { live: true };
+    /* 403 is a LIVE session that is not a trainer's — a client's, since the portal
+       gives clients the same opaque `xs_` session (22 Nov 2026). Read as a trainer,
+       it looped `/sign-in` → `/today` (every read 403) → `/sign-in`. */
+    if (err instanceof ApiRefusal && err.refusal.status === 403) return { live: true, trainer: false };
+    return { live: true, trainer: true };
   }
 }
 

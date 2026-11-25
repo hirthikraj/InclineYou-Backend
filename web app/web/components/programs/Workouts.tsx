@@ -488,7 +488,7 @@ function TemplateShelf({
                   showCreated={showCreated}
                   menu={
                     <RowMenu
-                      label={`Actions for ${row.name}`}
+                      label={row.name}
                       items={[
                         { key: 'open', label: 'Open', onSelect: () => onOpen(row.id) },
                         { separator: true, key: 'sep' },

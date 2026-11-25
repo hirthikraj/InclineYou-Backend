@@ -136,6 +136,11 @@ export interface SetDetail {
   reps: number | null;
   durationSeconds: number | null;
   toFailure: boolean;
+  /** THIS SET'S OWN LOAD in kg, when the sets of a row do not share one (a 32 · 27.5 · 27.5 back-off).
+   *  Absent or null means the row's `targetLoad`. Added 25 Nov 2026: the schema stores a load per set
+   *  (`workout_set`), and without this field the flat row kept set 1's load for every set, so a pyramid
+   *  typed in the workout dialog came back flat the next time it was opened. */
+  load?: number | null;
 }
 
 /* ── UIDS: SEEDED ROWS DERIVE THEIRS, NEW ROWS ARE COUNTED ──────────────────
@@ -259,6 +264,7 @@ function fromWireSet(s: SetDetailWire): SetDetail {
     reps: s.reps ?? null,
     durationSeconds: s.durationSeconds ?? null,
     toFailure: s.toFailure === true,
+    load: s.load ?? null,
   };
 }
 
@@ -548,7 +554,14 @@ export function prescribe(entry: Entry, groupRest = false): Part[] {
     else if (entry.reps) parts.push({ text: `${entry.reps} reps` });
   }
 
-  if (entry.targetLoad != null) push(parts, `@ ${trimNumber(entry.targetLoad)} kg`);
+  /* A back-off says its loads (`@ 32 / 27.5 / 27.5 kg`); printing `targetLoad` alone would state set 1's
+     load as the whole row's, which is what the board did before sets carried their own (25 Nov 2026). */
+  const loads = entry.setDetail && entry.setDetail.length > 0
+    ? entry.setDetail.map(d => d.load ?? entry.targetLoad ?? null)
+    : null;
+  if (loads && loads.some(l => l != null) && new Set(loads).size > 1) {
+    push(parts, `@ ${loads.map(l => (l == null ? '—' : trimNumber(l))).join(' / ')} kg`);
+  } else if (entry.targetLoad != null) push(parts, `@ ${trimNumber(entry.targetLoad)} kg`);
   // A superset's rest is after the ROUND, not between the movements, so the
   // block prints it once and the member rows say nothing. Printing it twice is
   // how a superset turns back into two straight sets on the gym floor.
@@ -1433,12 +1446,14 @@ export const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as con
  * the ordinal and the copy gets the weekday. Nothing else about the board
  * changes, because nothing else about a day differs between them.
  */
+/* Sentence case (25 Nov 2026): *Day 1*, *Mon* — the labels across the app moved off mono capitals, and
+   these also land inside sentences and accessible names (*Name for Day 1*). */
 export function ordinalDayWord(day: number): string {
-  return `DAY ${day}`;
+  return `Day ${day}`;
 }
 
 export function weekdayWord(day: number): string {
-  return day >= 1 && day <= 7 ? WEEKDAYS[day - 1].toUpperCase() : `DAY ${day}`;
+  return day >= 1 && day <= 7 ? WEEKDAYS[day - 1] : `Day ${day}`;
 }
 
 /* ────────────────────────────────────────────────── duplicate a week ── */

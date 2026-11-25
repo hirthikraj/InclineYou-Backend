@@ -215,11 +215,11 @@ export function TimelineEntry() {
       <Blk title="Specification" tag="measured">
         <SpecTable
           rows={[
-            { property: 'Spine', value: '1px, inset 7px from the left', token: '--tx-line',
+            { property: 'Spine', value: '1px, inset 7px from the left', token: '--tx-line-strong',
               note: 'Runs from the first dot to the last and no further — a rule past the final entry claims there is more.' },
-            { property: 'Dot', value: '9px, ringed 3px in the canvas', token: '--tx-surface-3',
+            { property: 'Dot', value: '9px, ringed 3px in the ground (canvas, or surface in a card)', token: '--tx-ink-off',
               note: <><code>live</code> fills it <code>--tx-accent</code>. At most one row per list.</> },
-            { property: 'Mark', value: '10.5px mono, +.06em', token: '--tx-ink-3',
+            { property: 'Mark', value: '12px / 500 Inter, tabular', token: '--tx-ink-3',
               note: 'An ordinal, a date, a short label. Omitted entirely rather than drawn empty.' },
             { property: 'Title', value: '13px / 600', token: '--tx-ink',
               note: <><code>mono</code> → 12.5px / 500 in the figure face; <code>dim</code> → 500 in <code>--tx-ink-3</code>.</> },

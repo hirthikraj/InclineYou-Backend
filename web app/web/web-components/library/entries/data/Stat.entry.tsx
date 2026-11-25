@@ -127,10 +127,10 @@ export function StatEntry() {
       <Blk title="Specifications" tag="design-specifications">
         <SpecTable
           rows={[
-            { property: 'Value', value: '26px / 800', token: '--tx-brand', note: 'Tabular figures' },
-            { property: 'Label', value: '11.5px / 600', token: '--tx-ink-3', note: 'Above the figure, not below' },
+            { property: 'Value', value: '27px / 800', token: '--tx-brand', note: 'Tabular figures, in ink. Only warn and danger colour it.' },
+            { property: 'Label', value: '12.5px / 500 Inter, sentence case', token: '--tx-ink-3', note: 'Above the figure, not below. Never mono, never uppercase.' },
             { property: 'Detail', value: '12px', note: 'Where the figure came from — the sessions behind the money' },
-            { property: 'Tones', value: '4', note: 'neutral · acc · warn · danger' },
+            { property: 'Tones', value: '4', note: 'neutral · acc · warn · danger. acc no longer colours the figure: lime is for the next action.' },
             { property: 'Row', value: '2 / 3 / 4 up', token: '.stats--n' },
             { property: 'Delta', value: 'arrow + tone + text', note: 'Never colour alone' },
             { property: 'href', value: '.stat--link', note: 'The whole tile becomes an anchor. Keeps its tone; resets the anchor lime.' },

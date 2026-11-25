@@ -118,13 +118,16 @@ export function CloseOut({ sessions }: { sessions: CloseOutSession[] }) {
                       </Tag>
                     ) : (
                       <span className="cls__btns">
+                        {/* Secondary, not lime: seven stacked lime buttons made this
+                            list louder than the session about to start. The check
+                            mark keeps Done the obvious answer of the two. */}
                         <Button
                           size="sm"
-                          variant="primary"
+                          variant="secondary"
                           disabled={state.kind === 'working'}
                           onClick={() => void answer(s, true)}
                         >
-                          {state.kind === 'working' ? '…' : 'Done'}
+                          {state.kind === 'working' ? '…' : <><Check size={13} />Done</>}
                         </Button>
                         <Button
                           size="sm"

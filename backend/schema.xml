@@ -55,7 +55,7 @@
       </columns>
       <primaryKey name="tenant_pkey" columns="id" />
       <foreignKeys />
-      <referencedBy count="41">
+      <referencedBy count="46">
         <reference table="tenant_member" column="tenant_id" constraint="tenant_member_tenant_kind_fkey" />
         <reference table="trainer" column="home_tenant_id" constraint="trainer_home_tenant_id_fkey" />
         <reference table="web_session" column="active_tenant_id" constraint="web_session_active_tenant_id_fkey" />
@@ -97,6 +97,11 @@
         <reference table="trainer_payout" column="tenant_id" constraint="trainer_payout_tenant_id_fkey" />
         <reference table="workout" column="tenant_id" constraint="workout_tenant_id_fkey" />
         <reference table="workout_set" column="tenant_id" constraint="workout_set_tenant_id_fkey" />
+        <reference table="join_link" column="tenant_id" constraint="join_link_tenant_id_fkey" />
+        <reference table="join_request" column="tenant_id" constraint="join_request_tenant_id_fkey" />
+        <reference table="tenant_business" column="tenant_id" constraint="tenant_business_tenant_fkey" />
+        <reference table="lead_contact" column="tenant_id" constraint="lead_contact_tenant_id_fkey" />
+        <reference table="payment_claim" column="tenant_id" constraint="payment_claim_tenant_id_fkey" />
       </referencedBy>
       <checks>
         <check name="tenant_country_code">(country ~ '^[A-Z]{2}$'::text)</check>
@@ -113,6 +118,7 @@
         <index name="uq_tenant_id_type" columns="id, type" unique="true" />
       </indexes>
       <triggers>
+        <trigger name="trg_tenant_business_row" timing="AFTER" event="INSERT" function="ensure_tenant_business()" />
         <trigger name="trg_tenant_freeze_type" timing="BEFORE" event="UPDATE" function="freeze_tenant_type()" />
         <trigger name="trg_tenant_status_changed_at" timing="BEFORE" event="UPDATE" function="set_tenant_status_changed_at()" />
         <trigger name="trg_tenant_updated_at" timing="BEFORE" event="UPDATE" function="set_updated_at()" />
@@ -344,7 +350,7 @@
         <foreignKey name="trainer_app_user_id_fkey" column="app_user_id" referencesTable="app_user" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
         <foreignKey name="trainer_home_tenant_id_fkey" column="home_tenant_id" referencesTable="tenant" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
       </foreignKeys>
-      <referencedBy count="26">
+      <referencedBy count="30">
         <reference table="subscription" column="trainer_id" constraint="subscription_trainer_id_fkey" />
         <reference table="client" column="trainer_id" constraint="client_trainer_id_fkey" />
         <reference table="assessment_template" column="trainer_id" constraint="assessment_template_trainer_id_fkey" />
@@ -371,6 +377,10 @@
         <reference table="trainer_exercise" column="trainer_id" constraint="trainer_exercise_trainer_id_fkey" />
         <reference table="trainer_payout" column="trainer_id" constraint="trainer_payout_trainer_id_fkey" />
         <reference table="workout" column="trainer_id" constraint="workout_trainer_id_fkey" />
+        <reference table="join_link" column="trainer_id" constraint="join_link_trainer_id_fkey" />
+        <reference table="join_request" column="trainer_id" constraint="join_request_trainer_id_fkey" />
+        <reference table="lead_contact" column="trainer_id" constraint="lead_contact_trainer_id_fkey" />
+        <reference table="payment_claim" column="trainer_id" constraint="payment_claim_trainer_id_fkey" />
       </referencedBy>
       <checks>
         <check name="trainer_erased_scrubbed">(((erased_at IS NULL) AND (name IS NOT NULL)) OR ((erased_at IS NOT NULL) AND (deleted_at IS NOT NULL) AND (name IS NULL) AND (email IS NULL) AND (gender IS NULL) AND (fcm_token IS NULL) AND (metadata = '{}'::jsonb)))</check>
@@ -624,13 +634,38 @@
         <column name="removed_by" type="varchar(8)" nullable="true" />
         <column name="portal_show_money" type="boolean" nullable="true" />
         <column name="reminders_excluded" type="boolean" nullable="false" default="false" />
+        <column name="training_terms_accepted_at" type="timestamptz" nullable="true">
+          <description>When the client ticked "fit to train" on the invite or join page (V42). NULL on everybody who accepted before V42; nothing branches on it — acceptance is the consent.</description>
+        </column>
+        <column name="gender" type="varchar(20)" nullable="true">
+          <description>Asked on the add flow; editable by the trainer and by the client (V43/V44). NULL = not given; cleared on erasure.</description>
+          <allowedValues>
+            <value>female</value>
+            <value>male</value>
+            <value>other</value>
+            <value>prefer_not_to_say</value>
+          </allowedValues>
+        </column>
+        <column name="lead_source" type="varchar(16)" nullable="true">
+          <description>V48: where they came from. walk_in · referral · instagram · whatsapp · phone_call · google · join_link · gym_desk · other.</description>
+        </column>
+        <column name="lead_source_detail" type="varchar(80)" nullable="true">
+          <description>V48: the words the source picklist cannot hold ("referred by Kavya").</description>
+        </column>
+        <column name="interested_pack_id" type="uuid" nullable="true" foreignKey="true">
+          <description>V48: the pack on the trainer's price list they asked about. Interest, not a sale.</description>
+        </column>
+        <column name="next_follow_up_on" type="date" nullable="true">
+          <description>V48: the day to get back to them. Set by a lead_contact or by hand; cleared by a closing outcome.</description>
+        </column>
       </columns>
       <primaryKey name="client_pkey" columns="id" />
       <foreignKeys>
         <foreignKey name="client_tenant_id_fkey" column="tenant_id" referencesTable="tenant" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
         <foreignKey name="client_trainer_id_fkey" column="trainer_id" referencesTable="trainer" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
+        <foreignKey name="client_interested_pack_fkey" column="interested_pack_id" referencesTable="pack" referencesColumn="id" onUpdate="NO ACTION" onDelete="SET NULL" />
       </foreignKeys>
-      <referencedBy count="31">
+      <referencedBy count="34">
         <reference table="assessment" column="client_id" constraint="assessment_client_id_fkey" />
         <reference table="assessment" column="client_id" constraint="assessment_client_same_tenant" />
         <reference table="client_note" column="client_id" constraint="client_note_client_id_fkey" />
@@ -662,15 +697,23 @@
         <reference table="client_schedule" column="client_id" constraint="client_schedule_client_id_fkey" />
         <reference table="client_schedule" column="client_id" constraint="client_schedule_client_same_tenant" />
         <reference table="erasure_log" column="client_id" constraint="erasure_log_client_fkey" />
+        <reference table="join_request" column="client_id" constraint="join_request_client_fkey" />
+        <reference table="lead_contact" column="client_id" constraint="lead_contact_client_same_tenant" />
+        <reference table="payment_claim" column="client_id" constraint="payment_claim_client_same_tenant" />
       </referencedBy>
       <checks>
         <check name="client_accepted_version">((accepted_policy_version IS NULL) OR (accepted_at IS NOT NULL))</check>
         <check name="client_activity_level">((activity_level IS NULL) OR ((activity_level)::text = ANY ((ARRAY['sedentary'::character varying, 'light'::character varying, 'moderate'::character varying, 'active'::character varying, 'very_active'::character varying])::text[])))</check>
         <check name="client_adult">((date_of_birth IS NULL) OR (date_of_birth &lt;= (((updated_at AT TIME ZONE 'UTC'::text) - '18 years'::interval))::date))</check>
         <check name="client_archive">(((archived_at IS NULL) = (archive_reason IS NULL)) AND ((archive_note IS NULL) OR (archived_at IS NOT NULL)))</check>
-        <check name="client_archive_reason">((archive_reason IS NULL) OR ((archive_reason)::text = ANY ((ARRAY['goal_reached'::character varying, 'moved_away'::character varying, 'cost'::character varying, 'no_time'::character varying, 'switched_trainer'::character varying, 'other'::character varying])::text[])))</check>
+        <check name="client_archive_reason">((archive_reason IS NULL) OR ((archive_reason)::text = ANY ((ARRAY['goal_reached'::character varying, 'moved_away'::character varying, 'cost'::character varying, 'no_time'::character varying, 'switched_trainer'::character varying, 'other'::character varying, 'not_interested'::character varying, 'no_response'::character varying])::text[])))</check>
         <check name="client_birth_date_floor">((date_of_birth IS NULL) OR (date_of_birth &gt;= '1900-01-01'::date))</check>
+        <check name="client_erased_gender">((erased_at IS NULL) OR (gender IS NULL))</check>
+        <check name="client_erased_lead">((erased_at IS NULL) OR ((lead_source_detail IS NULL) AND (interested_pack_id IS NULL) AND (next_follow_up_on IS NULL)))</check>
         <check name="client_erased_scrubbed">(((erased_at IS NULL) AND (name IS NOT NULL)) OR ((erased_at IS NOT NULL) AND (deleted_at IS NOT NULL) AND (name IS NULL) AND (phone IS NULL) AND (goal IS NULL) AND (metadata IS NULL) AND (height_cm IS NULL) AND (activity_level IS NULL) AND (date_of_birth IS NULL) AND (timezone IS NULL) AND (archive_note IS NULL)))</check>
+        <check name="client_gender">((gender IS NULL) OR ((gender)::text = ANY ((ARRAY['female'::character varying, 'male'::character varying, 'other'::character varying, 'prefer_not_to_say'::character varying])::text[])))</check>
+        <check name="client_lead_source">((lead_source IS NULL) OR ((lead_source)::text = ANY ((ARRAY['walk_in'::character varying, 'referral'::character varying, 'instagram'::character varying, 'whatsapp'::character varying, 'phone_call'::character varying, 'google'::character varying, 'join_link'::character varying, 'gym_desk'::character varying, 'other'::character varying])::text[])))</check>
+        <check name="client_lead_source_detail">((lead_source_detail IS NULL) OR (btrim((lead_source_detail)::text) &lt;&gt; ''::text))</check>
         <check name="client_membership_dates">((((membership_status)::text = ANY ((ARRAY['not_invited'::character varying, 'removed'::character varying])::text[])) OR (invited_at IS NOT NULL)) AND (((membership_status)::text &lt;&gt; 'accepted'::text) OR (accepted_at IS NOT NULL)) AND (((membership_status)::text &lt;&gt; 'declined'::text) OR (declined_at IS NOT NULL)) AND (((membership_status)::text &lt;&gt; 'removed'::text) OR (removed_at IS NOT NULL)))</check>
         <check name="client_membership_status">((membership_status)::text = ANY ((ARRAY['not_invited'::character varying, 'invited'::character varying, 'accepted'::character varying, 'declined'::character varying, 'paused'::character varying, 'removed'::character varying])::text[]))</check>
         <check name="client_metadata_object">((metadata IS NULL) OR (jsonb_typeof(metadata) = 'object'::text))</check>
@@ -689,6 +732,7 @@
       <indexes>
         <index name="client_pkey" columns="id" unique="true" primary="true" />
         <index name="client_id_tenant_key" columns="id, tenant_id" unique="true" />
+        <index name="idx_client_follow_up" columns="trainer_id, next_follow_up_on" unique="false" where="(next_follow_up_on IS NOT NULL) AND (deleted_at IS NULL)" />
         <index name="idx_client_membership_status" columns="phone, membership_status" unique="false" where="(phone IS NOT NULL) AND (deleted_at IS NULL)" />
         <index name="idx_client_portal_seen" columns="trainer_id, last_portal_seen_at" unique="false" where="((membership_status)::text = 'accepted'::text) AND (deleted_at IS NULL)" />
         <index name="idx_client_stale" columns="tenant_id, stale_at" unique="false" where="(stale_at IS NOT NULL) AND (deleted_at IS NULL)" />
@@ -698,9 +742,12 @@
         <index name="uq_client_phone_live" columns="tenant_id, phone" unique="true" where="(phone IS NOT NULL) AND (deleted_at IS NULL) AND ((status)::text &lt;&gt; 'archived'::text) AND ((membership_status)::text &lt;&gt; ALL ((ARRAY['removed'::character varying, 'declined'::character varying])::text[]))" />
       </indexes>
       <triggers>
-        <trigger name="trg_client_client_guard" timing="BEFORE" event="UPDATE" function="guard_client_columns('name', 'goal', 'height_cm', 'timezone', 'activity_level', 'last_portal_seen_at', 'removed_ack_at', 'updated_at')" />
+        <trigger name="trg_client_client_guard" timing="BEFORE" event="UPDATE" function="guard_client_columns('name', 'goal', 'height_cm', 'timezone', 'activity_level', 'gender', 'last_portal_seen_at', 'removed_ack_at', 'updated_at')" />
         <trigger name="trg_client_freeze_tenant" timing="BEFORE" event="UPDATE" function="freeze_tenant_id()" />
         <trigger name="trg_client_schedule_row" timing="AFTER" event="INSERT" function="ensure_client_schedule()" />
+        <trigger name="trg_client_scrub_erased_claims" timing="BEFORE" event="UPDATE OF erased_at" function="scrub_erased_client_claims()" />
+        <trigger name="trg_client_scrub_erased_gender" timing="BEFORE" event="UPDATE OF erased_at" function="scrub_erased_client_gender()" />
+        <trigger name="trg_client_scrub_erased_lead" timing="BEFORE" event="UPDATE OF erased_at" function="scrub_erased_client_lead()" />
         <trigger name="trg_client_stamp_tenant" timing="BEFORE" event="INSERT" function="stamp_tenant_id()" />
         <trigger name="trg_client_updated_at" timing="BEFORE" event="UPDATE" function="set_updated_at()" />
       </triggers>
@@ -741,11 +788,12 @@
         <foreignKey name="assessment_template_tenant_id_fkey" column="tenant_id" referencesTable="tenant" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
         <foreignKey name="assessment_template_trainer_id_fkey" column="trainer_id" referencesTable="trainer" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
       </foreignKeys>
-      <referencedBy count="4">
+      <referencedBy count="5">
         <reference table="assessment" column="template_id" constraint="assessment_template_id_fkey" />
         <reference table="assessment" column="template_id" constraint="assessment_template_same_tenant" />
         <reference table="assessment_schedule" column="template_id" constraint="assessment_schedule_template_id_fkey" />
         <reference table="assessment_schedule" column="template_id" constraint="assessment_schedule_template_same_tenant" />
+        <reference table="join_link" column="check_in_template_id" constraint="join_link_check_in_fkey" />
       </referencedBy>
       <checks>
         <check name="assessment_template_description_length">((description IS NULL) OR (char_length(description) &lt;= 2000))</check>
@@ -842,6 +890,7 @@
         <index name="idx_assessment_template" columns="template_id" unique="false" />
         <index name="idx_assessment_tenant" columns="tenant_id" unique="false" />
         <index name="idx_assessment_trainer" columns="trainer_id, due_on DESC, id" unique="false" where="deleted_at IS NULL" />
+        <index name="idx_assessment_trainer_work" columns="" unique="false" where="deleted_at IS NULL" />
         <index name="idx_assessment_unsent_due" columns="due_on" unique="false" where="(sent_at IS NULL) AND (completed_at IS NULL) AND (schedule_id IS NOT NULL) AND (deleted_at IS NULL)" />
         <index name="uq_assessment_schedule_open" columns="schedule_id" unique="true" where="(schedule_id IS NOT NULL) AND (completed_at IS NULL) AND (deleted_at IS NULL)" />
       </indexes>
@@ -1428,8 +1477,10 @@
         <foreignKey name="pack_tenant_currency_fkey" column="tenant_id, currency" referencesTable="tenant" referencesColumn="id, currency" onUpdate="NO ACTION" onDelete="NO ACTION" />
         <foreignKey name="pack_tenant_id_fkey" column="tenant_id" referencesTable="tenant" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
       </foreignKeys>
-      <referencedBy count="1">
+      <referencedBy count="3">
+        <reference table="client" column="interested_pack_id" constraint="client_interested_pack_fkey" />
         <reference table="package" column="pack_id" constraint="package_pack_id_fkey" />
+        <reference table="join_request" column="pack_id" constraint="join_request_pack_fkey" />
       </referencedBy>
       <checks>
         <check name="pack_amount_nonnegative">(amount &gt;= (0)::numeric)</check>
@@ -1527,10 +1578,11 @@
         <foreignKey name="package_tenant_id_fkey" column="tenant_id" referencesTable="tenant" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
         <foreignKey name="package_session_id_fkey" column="session_id" referencesTable="scheduled_session" referencesColumn="id" onUpdate="NO ACTION" onDelete="SET NULL" />
       </foreignKeys>
-      <referencedBy count="3">
+      <referencedBy count="4">
         <reference table="package_adjustment" column="package_id" constraint="package_adjustment_package_owner" />
         <reference table="payment" column="package_id" constraint="payment_package_owner" />
         <reference table="nudge_log" column="package_id" constraint="nudge_log_package_owner" />
+        <reference table="payment_claim" column="package_id" constraint="payment_claim_package_fkey" />
       </referencedBy>
       <checks>
         <check name="package_amount_nonnegative">(amount &gt;= (0)::numeric)</check>
@@ -1690,7 +1742,9 @@
         <foreignKey name="payment_trainer_id_fkey" column="trainer_id" referencesTable="trainer" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
         <foreignKey name="payment_package_owner" column="package_id, client_id, tenant_id" referencesTable="package" referencesColumn="id, client_id, tenant_id" onUpdate="NO ACTION" onDelete="NO ACTION" />
       </foreignKeys>
-      <referencedBy count="0" />
+      <referencedBy count="1">
+        <reference table="payment_claim" column="payment_id" constraint="payment_claim_payment_fkey" />
+      </referencedBy>
       <checks>
         <check name="payment_amount">((amount &gt; (0)::numeric) AND ((currency)::text ~ '^[A-Z]{3}$'::text))</check>
         <check name="payment_collected_by">((collected_by)::text = ANY ((ARRAY['trainer'::character varying, 'gym'::character varying])::text[]))</check>
@@ -2775,7 +2829,9 @@
         <column name="service_areas" type="jsonb" nullable="false" default="'[]'" />
         <column name="map_link" type="text" nullable="true" />
         <column name="gym_name" type="varchar(120)" nullable="true" />
-        <column name="upi_vpa" type="varchar(100)" nullable="true" />
+        <column name="upi_vpa" type="varchar(100)" nullable="true">
+          <description>Superseded by tenant_business.upi_vpa (V46): copied there and no longer read. Kept because columns are never dropped.</description>
+        </column>
         <column name="experience_band" type="varchar(20)" nullable="true" />
         <column name="certifications" type="jsonb" nullable="false" default="'[]'" />
         <column name="specialities" type="jsonb" nullable="false" default="'[]'" />
@@ -2985,6 +3041,324 @@
         <trigger name="trg_workout_set_freeze_tenant" timing="BEFORE" event="UPDATE" function="freeze_tenant_id()" />
         <trigger name="trg_workout_set_stamp_tenant" timing="BEFORE" event="INSERT" function="stamp_tenant_id()" />
         <trigger name="trg_workout_set_updated_at" timing="BEFORE" event="UPDATE" function="set_updated_at()" />
+      </triggers>
+    </table>
+
+    <table name="join_link" group="Roster" scope="v1" rowLevelSecurity="enabled">
+      <description>A trainer's public join page, `/join/{slug}` — one per trainer per workspace (V45). People ASK through it; nothing here makes a client. Read by the public page only through join_card().</description>
+      <columns>
+        <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
+        <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
+          <description>The workspace this row belongs to.</description>
+        </column>
+        <column name="trainer_id" type="uuid" nullable="false" foreignKey="true" />
+        <column name="slug" type="varchar(40)" nullable="false">
+          <description>The address after /join/. 3–40 characters, a–z, 0–9 and single hyphens; unique across the product. Changing it breaks the old link.</description>
+        </column>
+        <column name="taking_joins" type="boolean" nullable="false" default="false">
+          <description>Take joins: off, and the page answers "closed" like an unknown slug.</description>
+        </column>
+        <column name="welcome_line" type="varchar(200)" nullable="true">
+          <description>The line at the top of the join page (≤ 200).</description>
+        </column>
+        <column name="questions" type="jsonb" nullable="false" default="'[]'">
+          <description>[{id, label, kind: text|choice, options: [..], required}] — the trainer's own questions, at most 15, never about health.</description>
+        </column>
+        <column name="pack_ids" type="uuid[]" nullable="false" default="'{}'">
+          <description>The packs offered on the page, in order. Read through join_card(), which drops any no longer active.</description>
+        </column>
+        <column name="allow_no_plan" type="boolean" nullable="false" default="true">
+          <description>Whether people may ask without picking a plan. Must be true while no packs are offered (join_link_some_way_in).</description>
+        </column>
+        <column name="welcome_message" type="varchar(1000)" nullable="true">
+          <description>Posted to the new client's portal inbox (client_message) when the trainer approves them (≤ 1000).</description>
+        </column>
+        <column name="check_in_template_id" type="uuid" nullable="true" foreignKey="true">
+          <description>An assessment template sent to the client on approval. Nulled if the template is deleted.</description>
+        </column>
+        <column name="created_at" type="timestamptz" nullable="false" default="now()" />
+        <column name="updated_at" type="timestamptz" nullable="false" default="now()" />
+      </columns>
+      <primaryKey name="join_link_pkey" columns="id" />
+      <foreignKeys>
+        <foreignKey name="join_link_tenant_id_fkey" column="tenant_id" referencesTable="tenant" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
+        <foreignKey name="join_link_trainer_id_fkey" column="trainer_id" referencesTable="trainer" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
+        <foreignKey name="join_link_check_in_fkey" column="check_in_template_id" referencesTable="assessment_template" referencesColumn="id" onUpdate="NO ACTION" onDelete="SET NULL" />
+      </foreignKeys>
+      <referencedBy count="1">
+        <reference table="join_request" column="join_link_id" constraint="join_request_link_fkey" />
+      </referencedBy>
+      <checks>
+        <check name="join_link_packs">(cardinality(pack_ids) &lt;= 12)</check>
+        <check name="join_link_questions">((jsonb_typeof(questions) = 'array'::text) AND (jsonb_array_length(questions) &lt;= 15))</check>
+        <check name="join_link_slug">(((slug)::text ~ '^[a-z0-9](?:[a-z0-9-]{1,38})[a-z0-9]$'::text) AND ((slug)::text !~ '--'::text))</check>
+        <check name="join_link_some_way_in">(allow_no_plan OR (cardinality(pack_ids) &gt; 0))</check>
+        <check name="join_link_texts">(((welcome_line IS NULL) OR (btrim((welcome_line)::text) &lt;&gt; ''::text)) AND ((welcome_message IS NULL) OR (btrim((welcome_message)::text) &lt;&gt; ''::text)))</check>
+      </checks>
+      <indexes>
+        <index name="join_link_pkey" columns="id" unique="true" primary="true" />
+        <index name="uq_join_link_slug" columns="slug" unique="true" />
+        <index name="uq_join_link_trainer" columns="tenant_id, trainer_id" unique="true" />
+      </indexes>
+      <triggers>
+        <trigger name="trg_join_link_freeze_tenant" timing="BEFORE" event="UPDATE" function="freeze_tenant_id()" />
+        <trigger name="trg_join_link_stamp_tenant" timing="BEFORE" event="INSERT" function="stamp_tenant_id()" />
+        <trigger name="trg_join_link_updated_at" timing="BEFORE" event="UPDATE" function="set_updated_at()" />
+      </triggers>
+    </table>
+
+    <table name="join_request" group="Roster" scope="v1" rowLevelSecurity="enabled">
+      <description>Somebody asking to train through a join link (V45). Not a client until the trainer approves; approval moves the person to the client row and scrubs them from here. Declined and unanswered requests are deleted 30 days on (purge_join_requests()).</description>
+      <columns>
+        <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
+        <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
+          <description>The workspace this row belongs to.</description>
+        </column>
+        <column name="trainer_id" type="uuid" nullable="false" foreignKey="true" />
+        <column name="join_link_id" type="uuid" nullable="false" foreignKey="true" />
+        <column name="status" type="varchar(12)" nullable="false" default="'pending'">
+          <description>Waiting, approved (now a client) or declined.</description>
+          <allowedValues>
+            <value>pending</value>
+            <value>approved</value>
+            <value>declined</value>
+          </allowedValues>
+        </column>
+        <column name="name" type="varchar(100)" nullable="true">
+          <description>As they typed it. NULL once approved (moved to the client row).</description>
+        </column>
+        <column name="phone" type="varchar(16)" nullable="true">
+          <description>Proved by a WhatsApp code before the request existed. One pending request per number per workspace. NULL once approved.</description>
+        </column>
+        <column name="email" type="varchar(254)" nullable="true">
+          <description>Optional contact detail; becomes part of the private join-form note on approval. NULL once approved.</description>
+        </column>
+        <column name="date_of_birth" type="date" nullable="true">
+          <description>18 or over (join_request_adult). NULL once approved.</description>
+        </column>
+        <column name="gender" type="varchar(20)" nullable="true">
+          <description>As on client.gender. NULL once approved.</description>
+          <allowedValues>
+            <value>female</value>
+            <value>male</value>
+            <value>other</value>
+            <value>prefer_not_to_say</value>
+          </allowedValues>
+        </column>
+        <column name="pack_id" type="uuid" nullable="true" foreignKey="true">
+          <description>The plan they picked, if any; approval hands the trainer on to selling it.</description>
+        </column>
+        <column name="answers" type="jsonb" nullable="false" default="'[]'">
+          <description>[{questionId, label, answer}] — the label stored with the answer so a later edit of the question cannot change it. Emptied on approval (kept as a private client_note).</description>
+        </column>
+        <column name="policy_version" type="varchar(20)" nullable="false">
+          <description>The privacy notice they accepted on the join page; becomes the client's accepted_policy_version.</description>
+        </column>
+        <column name="training_terms_accepted_at" type="timestamptz" nullable="false">
+          <description>The required "fit to train" tick (V42), given on the join page.</description>
+        </column>
+        <column name="whatsapp_reminders" type="boolean" nullable="false" default="false">
+          <description>Their own WhatsApp-reminder opt-in (D-17); stamped on client_prefs at approval.</description>
+        </column>
+        <column name="phone_verified_at" type="timestamptz" nullable="false">
+          <description>When the code proved the number.</description>
+        </column>
+        <column name="client_id" type="uuid" nullable="true" foreignKey="true">
+          <description>The client approval made.</description>
+        </column>
+        <column name="decided_at" type="timestamptz" nullable="true">
+          <description>When it was approved or declined; NULL while pending.</description>
+        </column>
+        <column name="created_at" type="timestamptz" nullable="false" default="now()" />
+        <column name="updated_at" type="timestamptz" nullable="false" default="now()" />
+      </columns>
+      <primaryKey name="join_request_pkey" columns="id" />
+      <foreignKeys>
+        <foreignKey name="join_request_tenant_id_fkey" column="tenant_id" referencesTable="tenant" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
+        <foreignKey name="join_request_trainer_id_fkey" column="trainer_id" referencesTable="trainer" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
+        <foreignKey name="join_request_link_fkey" column="join_link_id" referencesTable="join_link" referencesColumn="id" onUpdate="NO ACTION" onDelete="CASCADE" />
+        <foreignKey name="join_request_pack_fkey" column="pack_id" referencesTable="pack" referencesColumn="id" onUpdate="NO ACTION" onDelete="SET NULL" />
+        <foreignKey name="join_request_client_fkey" column="client_id" referencesTable="client" referencesColumn="id" onUpdate="NO ACTION" onDelete="SET NULL" />
+      </foreignKeys>
+      <referencedBy count="0" />
+      <checks>
+        <check name="join_request_adult">((date_of_birth IS NULL) OR ((date_of_birth &gt;= '1900-01-01'::date) AND (date_of_birth &lt;= (((created_at AT TIME ZONE 'UTC'::text) - '18 years'::interval))::date)))</check>
+        <check name="join_request_answers">((jsonb_typeof(answers) = 'array'::text) AND (jsonb_array_length(answers) &lt;= 15))</check>
+        <check name="join_request_decided">(((status)::text = 'pending'::text) = (decided_at IS NULL))</check>
+        <check name="join_request_gender">((gender IS NULL) OR ((gender)::text = ANY ((ARRAY['female'::character varying, 'male'::character varying, 'other'::character varying, 'prefer_not_to_say'::character varying])::text[])))</check>
+        <check name="join_request_person">((((status)::text = 'approved'::text) AND (name IS NULL) AND (phone IS NULL) AND (email IS NULL) AND (date_of_birth IS NULL) AND (gender IS NULL) AND (answers = '[]'::jsonb)) OR (((status)::text &lt;&gt; 'approved'::text) AND (name IS NOT NULL) AND (btrim((name)::text) &lt;&gt; ''::text) AND (phone IS NOT NULL) AND (date_of_birth IS NOT NULL)))</check>
+        <check name="join_request_phone_format">((phone IS NULL) OR (((phone)::text ~ '^\+[1-9][0-9]{6,14}$'::text) AND (((phone)::text !~ '^\+91'::text) OR ((phone)::text ~ '^\+91[6-9][0-9]{9}$'::text))))</check>
+        <check name="join_request_status">((status)::text = ANY ((ARRAY['pending'::character varying, 'approved'::character varying, 'declined'::character varying])::text[]))</check>
+      </checks>
+      <indexes>
+        <index name="join_request_pkey" columns="id" unique="true" primary="true" />
+        <index name="idx_join_request_trainer" columns="tenant_id, trainer_id, status, created_at DESC" unique="false" />
+        <index name="uq_join_request_pending" columns="tenant_id, phone" unique="true" where="(status)::text = 'pending'::text" />
+      </indexes>
+      <triggers>
+        <trigger name="trg_join_request_freeze_tenant" timing="BEFORE" event="UPDATE" function="freeze_tenant_id()" />
+        <trigger name="trg_join_request_updated_at" timing="BEFORE" event="UPDATE" function="set_updated_at()" />
+      </triggers>
+    </table>
+
+    <table name="tenant_business" group="Tenancy" scope="v1" rowLevelSecurity="enabled">
+      <description>A workspace's business (V46) — one row per tenant, made with it by trigger. Its NAME is tenant.name. Clients pay its UPI ID (client_pay_to(), the payment reminder's {upi}); it is the invoice's From block. Every member reads it; only the workspace's owner updates it.</description>
+      <columns>
+        <column name="tenant_id" type="uuid" nullable="false" primaryKey="true" foreignKey="true">
+          <description>The workspace this row belongs to.</description>
+        </column>
+        <column name="tagline" type="varchar(120)" nullable="true">
+          <description>One line under the business name (≤ 120).</description>
+        </column>
+        <column name="phone" type="varchar(16)" nullable="true">
+          <description>The number clients should call, if not the owner's login. +91 and ten digits.</description>
+        </column>
+        <column name="email" type="varchar(254)" nullable="true">
+          <description>A contact address for clients. Not a login.</description>
+        </column>
+        <column name="address_line1" type="varchar(120)" nullable="true">
+          <description>Building and street.</description>
+        </column>
+        <column name="address_line2" type="varchar(120)" nullable="true">
+          <description>Area or landmark.</description>
+        </column>
+        <column name="city" type="varchar(80)" nullable="true" />
+        <column name="state" type="varchar(40)" nullable="true">
+          <description>One of India's 36 states and union territories, by name (IndianStates.java / lib/practice/types.ts).</description>
+        </column>
+        <column name="pincode" type="varchar(6)" nullable="true">
+          <description>Six digits, not starting with 0.</description>
+        </column>
+        <column name="upi_vpa" type="varchar(100)" nullable="true">
+          <description>The UPI ID clients pay — moved here from trainer_business.upi_vpa in V46. Shape-checked only; nothing confirms the account.</description>
+        </column>
+        <column name="created_at" type="timestamptz" nullable="false" default="now()" />
+        <column name="updated_at" type="timestamptz" nullable="false" default="now()" />
+        <column name="part_payments" type="boolean" nullable="false" default="true">
+          <description>V50: may a client report paying part of what is left on a pack? Off, a claim against a pack must clear it. Owner-only, like the rest of the row.</description>
+        </column>
+      </columns>
+      <primaryKey name="tenant_business_pkey" columns="tenant_id" />
+      <foreignKeys>
+        <foreignKey name="tenant_business_tenant_fkey" column="tenant_id" referencesTable="tenant" referencesColumn="id" onUpdate="NO ACTION" onDelete="CASCADE" />
+      </foreignKeys>
+      <referencedBy count="0" />
+      <checks>
+        <check name="tenant_business_email_shape">((email IS NULL) OR ((email)::text ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$'::text))</check>
+        <check name="tenant_business_phone_format">((phone IS NULL) OR (((phone)::text ~ '^\+[1-9][0-9]{6,14}$'::text) AND (((phone)::text !~ '^\+91'::text) OR ((phone)::text ~ '^\+91[6-9][0-9]{9}$'::text))))</check>
+        <check name="tenant_business_pincode">((pincode IS NULL) OR ((pincode)::text ~ '^[1-9][0-9]{5}$'::text))</check>
+        <check name="tenant_business_texts">(((tagline IS NULL) OR (btrim((tagline)::text) &lt;&gt; ''::text)) AND ((address_line1 IS NULL) OR (btrim((address_line1)::text) &lt;&gt; ''::text)) AND ((address_line2 IS NULL) OR (btrim((address_line2)::text) &lt;&gt; ''::text)) AND ((city IS NULL) OR (btrim((city)::text) &lt;&gt; ''::text)) AND ((state IS NULL) OR (btrim((state)::text) &lt;&gt; ''::text)))</check>
+        <check name="tenant_business_upi_shape">((upi_vpa IS NULL) OR ((upi_vpa)::text ~ '^[A-Za-z0-9._-]{2,99}@[A-Za-z][A-Za-z0-9.-]{1,63}$'::text))</check>
+      </checks>
+      <indexes>
+        <index name="tenant_business_pkey" columns="tenant_id" unique="true" primary="true" />
+      </indexes>
+      <triggers>
+        <trigger name="trg_tenant_business_updated_at" timing="BEFORE" event="UPDATE" function="set_updated_at()" />
+      </triggers>
+    </table>
+
+    <table name="lead_contact" group="Ungrouped" rowLevelSecurity="enabled">
+      <description />
+      <columns>
+        <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
+        <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
+          <description>The workspace this row belongs to.</description>
+        </column>
+        <column name="client_id" type="uuid" nullable="false" foreignKey="true" />
+        <column name="trainer_id" type="uuid" nullable="false" foreignKey="true" />
+        <column name="channel" type="varchar(12)" nullable="false" />
+        <column name="outcome" type="varchar(16)" nullable="false" />
+        <column name="note" type="varchar(280)" nullable="true" />
+        <column name="follow_up_on" type="date" nullable="true" />
+        <column name="previous_follow_up_on" type="date" nullable="true" />
+        <column name="created_at" type="timestamptz" nullable="false" default="now()" />
+        <column name="updated_at" type="timestamptz" nullable="false" default="now()" />
+        <column name="deleted_at" type="timestamptz" nullable="true" />
+      </columns>
+      <primaryKey name="lead_contact_pkey" columns="id" />
+      <foreignKeys>
+        <foreignKey name="lead_contact_tenant_id_fkey" column="tenant_id" referencesTable="tenant" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
+        <foreignKey name="lead_contact_client_same_tenant" column="client_id, tenant_id" referencesTable="client" referencesColumn="id, tenant_id" onUpdate="NO ACTION" onDelete="CASCADE" />
+        <foreignKey name="lead_contact_trainer_id_fkey" column="trainer_id" referencesTable="trainer" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
+      </foreignKeys>
+      <referencedBy count="0" />
+      <checks>
+        <check name="lead_contact_channel">((channel)::text = ANY ((ARRAY['call'::character varying, 'whatsapp'::character varying, 'in_person'::character varying])::text[]))</check>
+        <check name="lead_contact_closing">((follow_up_on IS NULL) OR ((outcome)::text &lt;&gt; ALL ((ARRAY['too_expensive'::character varying, 'went_elsewhere'::character varying, 'timing_location'::character varying, 'not_interested'::character varying])::text[])))</check>
+        <check name="lead_contact_note">((note IS NULL) OR (btrim((note)::text) &lt;&gt; ''::text))</check>
+        <check name="lead_contact_outcome">((outcome)::text = ANY ((ARRAY['interested'::character varying, 'wants_trial'::character varying, 'sent_price'::character varying, 'call_back'::character varying, 'no_answer'::character varying, 'too_expensive'::character varying, 'went_elsewhere'::character varying, 'timing_location'::character varying, 'not_interested'::character varying])::text[]))</check>
+      </checks>
+      <indexes>
+        <index name="lead_contact_pkey" columns="id" unique="true" primary="true" />
+        <index name="idx_lead_contact_client" columns="client_id, created_at DESC" unique="false" where="deleted_at IS NULL" />
+        <index name="idx_lead_contact_tenant_trainer" columns="tenant_id, trainer_id" unique="false" />
+      </indexes>
+      <triggers>
+        <trigger name="trg_lead_contact_freeze_tenant" timing="BEFORE" event="UPDATE" function="freeze_tenant_id()" />
+        <trigger name="trg_lead_contact_stamp_tenant" timing="BEFORE" event="INSERT" function="stamp_tenant_id()" />
+        <trigger name="trg_lead_contact_updated_at" timing="BEFORE" event="UPDATE" function="set_updated_at()" />
+      </triggers>
+    </table>
+
+    <table name="payment_claim" group="Ungrouped" rowLevelSecurity="enabled">
+      <description />
+      <columns>
+        <column name="id" type="uuid" nullable="false" default="gen_random_uuid()" primaryKey="true" />
+        <column name="tenant_id" type="uuid" nullable="false" foreignKey="true">
+          <description>The workspace this row belongs to.</description>
+        </column>
+        <column name="trainer_id" type="uuid" nullable="false" foreignKey="true" />
+        <column name="client_id" type="uuid" nullable="false" foreignKey="true" />
+        <column name="package_id" type="uuid" nullable="true" foreignKey="true">
+          <description>V50: the pack it pays for; NULL when the client paid before a pack was sold — confirming it sells one.</description>
+        </column>
+        <column name="amount" type="numeric(10,2)" nullable="false" />
+        <column name="currency" type="varchar(3)" nullable="false" />
+        <column name="paid_on" type="date" nullable="false" />
+        <column name="reference" type="varchar(64)" nullable="true" />
+        <column name="note" type="varchar(280)" nullable="true" />
+        <column name="collector" type="varchar(8)" nullable="false">
+          <description>V50: who the client paid — trainer, or the gym's desk for a gym client. Stamped from client.client_type.</description>
+        </column>
+        <column name="status" type="varchar(10)" nullable="false" default="'open'" />
+        <column name="payment_id" type="uuid" nullable="true" foreignKey="true">
+          <description>V50: the payment the trainer's confirm recorded. Set exactly when status = confirmed.</description>
+        </column>
+        <column name="decided_at" type="timestamptz" nullable="true" />
+        <column name="decline_reason" type="varchar(280)" nullable="true" />
+        <column name="created_at" type="timestamptz" nullable="false" default="now()" />
+        <column name="updated_at" type="timestamptz" nullable="false" default="now()" />
+        <column name="deleted_at" type="timestamptz" nullable="true" />
+      </columns>
+      <primaryKey name="payment_claim_pkey" columns="id" />
+      <foreignKeys>
+        <foreignKey name="payment_claim_tenant_id_fkey" column="tenant_id" referencesTable="tenant" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
+        <foreignKey name="payment_claim_trainer_id_fkey" column="trainer_id" referencesTable="trainer" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
+        <foreignKey name="payment_claim_client_same_tenant" column="client_id, tenant_id" referencesTable="client" referencesColumn="id, tenant_id" onUpdate="NO ACTION" onDelete="CASCADE" />
+        <foreignKey name="payment_claim_package_fkey" column="package_id" referencesTable="package" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
+        <foreignKey name="payment_claim_payment_fkey" column="payment_id" referencesTable="payment" referencesColumn="id" onUpdate="NO ACTION" onDelete="NO ACTION" />
+      </foreignKeys>
+      <referencedBy count="0" />
+      <checks>
+        <check name="payment_claim_amount">((amount &gt; (0)::numeric) AND ((currency)::text ~ '^[A-Z]{3}$'::text))</check>
+        <check name="payment_claim_collector">((collector)::text = ANY ((ARRAY['trainer'::character varying, 'gym'::character varying])::text[]))</check>
+        <check name="payment_claim_state_shape">((((status)::text = 'confirmed'::text) = (payment_id IS NOT NULL)) AND ((decline_reason IS NULL) OR ((status)::text = 'declined'::text)) AND (((status)::text = 'open'::text) = (decided_at IS NULL)))</check>
+        <check name="payment_claim_status">((status)::text = ANY ((ARRAY['open'::character varying, 'confirmed'::character varying, 'declined'::character varying, 'withdrawn'::character varying])::text[]))</check>
+        <check name="payment_claim_texts">(((reference IS NULL) OR (btrim((reference)::text) &lt;&gt; ''::text)) AND ((note IS NULL) OR (btrim((note)::text) &lt;&gt; ''::text)) AND ((decline_reason IS NULL) OR (btrim((decline_reason)::text) &lt;&gt; ''::text)))</check>
+      </checks>
+      <indexes>
+        <index name="payment_claim_pkey" columns="id" unique="true" primary="true" />
+        <index name="idx_payment_claim_client" columns="client_id, created_at DESC" unique="false" where="deleted_at IS NULL" />
+        <index name="idx_payment_claim_open" columns="trainer_id, created_at" unique="false" where="((status)::text = 'open'::text) AND (deleted_at IS NULL)" />
+        <index name="idx_payment_claim_package" columns="package_id" unique="false" where="(package_id IS NOT NULL) AND ((status)::text = 'open'::text) AND (deleted_at IS NULL)" />
+        <index name="idx_payment_claim_tenant_trainer" columns="tenant_id, trainer_id" unique="false" />
+        <index name="uq_payment_claim_payment" columns="payment_id" unique="true" where="payment_id IS NOT NULL" />
+      </indexes>
+      <triggers>
+        <trigger name="trg_payment_claim_freeze_tenant" timing="BEFORE" event="UPDATE" function="freeze_tenant_id()" />
+        <trigger name="trg_payment_claim_stamp_tenant" timing="BEFORE" event="INSERT" function="stamp_tenant_id()" />
+        <trigger name="trg_payment_claim_updated_at" timing="BEFORE" event="UPDATE" function="set_updated_at()" />
       </triggers>
     </table>
   </tables>

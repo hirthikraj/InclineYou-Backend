@@ -131,7 +131,7 @@ export function PacksForm({ state, packs }: { state: SetupState; packs: Pack[] }
         sub="A price list set now is what makes every later screen work: selling a pack becomes picking one, and “₹750 a session” gets computed instead of guessed."
       />
 
-      <GroupLabel top={22}>FIRST, HOW YOU WORK — IT DECIDES WHICH PRICE LISTS EXIST</GroupLabel>
+      <GroupLabel top={22}>First, how you work — it decides which price lists exist</GroupLabel>
       {/* MEASURED BUG, FIXED. These three set `border` inline — which is the
           exact defect `app.css` documents for frame 3a's two exits: an inline
           `border` outranks every selector, so `button.card:hover`'s border
@@ -176,7 +176,7 @@ export function PacksForm({ state, packs }: { state: SetupState; packs: Pack[] }
 
       {sellsOwn ? (
         <>
-          <GroupLabel>YOUR OWN PACKS</GroupLabel>
+          <GroupLabel>Your own packs</GroupLabel>
           <PackTable packs={mine} pending={pending} onRemove={(id) => run(() => removePack(id))} />
           {adding === 'trainer' ? (
             <PackSheet
@@ -207,7 +207,7 @@ export function PacksForm({ state, packs }: { state: SetupState; packs: Pack[] }
 
       {sellsGym ? (
         <>
-          <GroupLabel>THE GYM YOU WORK AT</GroupLabel>
+          <GroupLabel>The gym you work at</GroupLabel>
           <div style={{ maxWidth: 420 }}>
             <GymPicker
               id="gym"
@@ -229,7 +229,7 @@ export function PacksForm({ state, packs }: { state: SetupState; packs: Pack[] }
 
           {gym ? (
             <>
-              <GroupLabel>WHAT {gym.toUpperCase()} SELLS</GroupLabel>
+              <GroupLabel>What {gym} sells</GroupLabel>
               <PackTable
                 packs={theirs}
                 pending={pending}

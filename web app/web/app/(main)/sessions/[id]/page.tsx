@@ -5,6 +5,7 @@ import { Unavailable } from '@/components/today/Unavailable';
 import { requireSessionDetail } from '@/lib/sessionlog/detail';
 
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Session · InclineYou' };
 
 export default async function Page({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;

@@ -26,6 +26,7 @@ import { Tag } from '@/web-components/ui/Tag';
 import { Avatar } from '@/web-components/ui/Avatar';
 import { InlineLink } from '@/web-components/ui/InlineLink';
 import { Slab } from '@/web-components/ui/Slab';
+import { useFlipRows } from '@/lib/ui/flip-rows';
 
 /**
  * NEEDS YOU TODAY — the ranked queue, and the three things it can do to a row.
@@ -142,6 +143,8 @@ export function AttentionQueue({
   const [showSilenced, setShowSilenced] = useState(false);
   /** clientId → that client's other rows are open under their lead row. */
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+  /* Opening and closing slide the rows rather than snapping them — `lib/ui/flip-rows.ts`. */
+  const { ref: bodyRef, flip } = useFlipRows<HTMLTableSectionElement>();
   const pending = useRef<Map<string, Pending>>(new Map());
   /*
    * row key → the id this row's current attempt is written under (1.1: every
@@ -459,7 +462,7 @@ export function AttentionQueue({
             <col className="atn__c-act" />
             <col className="atn__c-x" />
           </colgroup>
-          <tbody>
+          <tbody ref={bodyRef}>
             {visible.flatMap((group) => {
               const open = openGroups[group.clientId] === true;
               const lead = rowFor(group.lead, {
@@ -469,7 +472,10 @@ export function AttentionQueue({
                     summary: foldedSummary(group.rest.map((i) => i.kind)),
                     open,
                     onToggle: () =>
-                      setOpenGroups((prev) => ({ ...prev, [group.clientId]: !open })),
+                      flip(
+                        () => setOpenGroups((prev) => ({ ...prev, [group.clientId]: !open })),
+                        open ? group.rest.map((i) => i.key) : [],
+                      ),
                   }
                   : undefined,
               });
@@ -489,7 +495,7 @@ export function AttentionQueue({
           wants the six back.
         */}
         {folded > 0 && (
-          <button className="atn__more" type="button" onClick={() => setExpanded(true)}>
+          <button className="atn__more" type="button" onClick={() => flip(() => setExpanded(true))}>
             Show {folded} more {folded === 1 ? 'client' : 'clients'}
             <span className="atn__more-k">
               {foldedSummary(
@@ -499,7 +505,15 @@ export function AttentionQueue({
           </button>
         )}
         {expanded && groups.length > QUEUE_CAP && (
-          <button className="atn__more" type="button" onClick={() => setExpanded(false)}>
+          <button
+            className="atn__more"
+            type="button"
+            onClick={() =>
+              flip(
+                () => setExpanded(false),
+                groups.slice(QUEUE_CAP).flatMap((g) => [g.lead, ...g.rest].map((i) => i.key)),
+              )}
+          >
             Show the top {QUEUE_CAP} only
           </button>
         )}
@@ -685,7 +699,7 @@ function Row({
   if (state.kind === 'held') {
     const percent = Math.round((100 * state.secondsLeft) / HOLD_SECONDS);
     return (
-      <tr className={rowClass}>
+      <tr className={rowClass} data-flip={item.key}>
         {who}
         <td className="q__why">
           {/*
@@ -747,7 +761,7 @@ function Row({
     const days = state.sessions.slice(0, 3).map((s) => shortDay(s.at)).join(', ') + (n > 3 ? ` and ${n - 3} more` : '');
     const taken = state.sessions.slice(0, state.take).map((s) => s.id);
     return (
-      <tr className={rowClass}>
+      <tr className={rowClass} data-flip={item.key}>
         {who}
         <td className="q__why" colSpan={3}>
           <div className="q__ask">
@@ -773,7 +787,7 @@ function Row({
 
   if (state.kind === 'choosing') {
     return (
-      <tr className={rowClass}>
+      <tr className={rowClass} data-flip={item.key}>
         {who}
         <td className="q__why" colSpan={3}>
           <div className="q__ask">
@@ -795,7 +809,7 @@ function Row({
 
   if (state.kind === 'silenced') {
     return (
-      <tr className={rowClass}>
+      <tr className={rowClass} data-flip={item.key}>
         {who}
         <td className="q__why" aria-live="polite">
           <span className="acc">{state.permanent ? 'Dismissed' : 'Snoozed'}</span>:{' '}
@@ -837,7 +851,7 @@ function Row({
      * and hands over the one click that finishes it.
      */
     return (
-      <tr className={rowClass}>
+      <tr className={rowClass} data-flip={item.key}>
         {who}
         <td className="q__why" aria-live="polite">
           {state.whatsappUrl ? (
@@ -877,7 +891,7 @@ function Row({
 
   if (state.kind === 'failed') {
     return (
-      <tr className={rowClass}>
+      <tr className={rowClass} data-flip={item.key}>
         {who}
         <td className="q__why q__why--bad" aria-live="polite">
           {state.message}
@@ -892,7 +906,7 @@ function Row({
   }
 
   return (
-    <tr className={rowClass}>
+    <tr className={rowClass} data-flip={item.key}>
       {who}
       <td className="q__why">
         {/* THE KIND, FIRST, in the same place on every row — see `KIND_LEAD`. It is
@@ -1016,7 +1030,8 @@ function Row({
             "change the date". The cell stays so the verbs down the list align. */}
         {/* Nor on a setup row (22 Nov 2026): it is the soft block, and it goes
             away when the step is done, never because it was waved off. */}
-        {item.kind !== 'assess' && item.kind !== 'setup' && (
+        {/* Nor on a follow-up (V48): it leaves when a response is logged or the date moves. */}
+        {item.kind !== 'assess' && item.kind !== 'setup' && item.kind !== 'follow-up' && (
           <button
             className="q__x-b"
             type="button"

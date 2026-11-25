@@ -195,7 +195,7 @@ export function NameForm({ state }: { state: SetupState }) {
           no "1 of 4" and arrowing does not move between them. The role goes on
           the container, where it costs nothing and says the true thing.
         */}
-        <GroupLabel top={22}>HOW CLIENTS SEE YOU</GroupLabel>
+        <GroupLabel top={22}>How clients see you</GroupLabel>
         <p className="small" style={{ maxWidth: '62ch', marginTop: -2 }}>
           Clients filter on this — a great many are looking for a woman trainer specifically, and
           no other app lets them ask.

@@ -49,7 +49,12 @@ function payOf(money: MoneyWire | null): HomePay | null {
   if (!money?.visible || !money.amountDue) return null;
   const due = Number(money.amountDue);
   if (!(due > 0)) return null;
-  return { amountDue: due, currency: money.currency ?? 'INR', payTo: money.payTo ?? null };
+  return {
+    amountDue: due, currency: money.currency ?? 'INR', payTo: money.payTo ?? null,
+    // V50: a gym client pays the gym's desk, and a report already waiting changes what the card asks for.
+    gymName: money.terms?.collector === 'gym' ? (money.terms.gymName ?? 'the gym') : null,
+    waiting: (money.claims ?? []).filter((c) => c.status === 'open').reduce((s, c) => s + Number(c.amount), 0),
+  };
 }
 
 export default async function Page() {
@@ -103,7 +108,7 @@ export default async function Page() {
         {/* The date alone: the trainer is named by their own note a few lines down, and in the hero. */}
         <PageHeader className="ph--portal" title={`Hi ${first}`} sub={today} />
         <div className="body">
-          <HomeView home={home} week={weekOf(plan)} pay={payOf(money)} whatsappUrl={session.me.trainer?.whatsappUrl ?? null} />
+          <HomeView home={home} week={weekOf(plan)} pay={payOf(money)} moneyVisible={money?.visible === true} whatsappUrl={session.me.trainer?.whatsappUrl ?? null} />
         </div>
       </main>
     </>

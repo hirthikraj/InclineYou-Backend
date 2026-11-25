@@ -553,7 +553,7 @@ export function ProgressBody({
                           describe={false}
                           label={`${m.name}: ${inr(m.volumeKg)} of ${inr(volumeTotal)} kg moved`}
                           total={peakVolume}
-                          segments={[{ tone: 'acc', value: m.volumeKg }]}
+                          segments={[{ tone: m.volumeKg === peakVolume ? 'acc' : 'data', value: m.volumeKg }]}
                         />
                       </>
                     ) : (

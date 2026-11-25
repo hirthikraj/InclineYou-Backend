@@ -3,7 +3,7 @@
 import { useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
-import { deleteAssessment, moveAssessment, sendAssessment } from '@/lib/assessments/actions';
+import { deleteAssessment, markReviewed, moveAssessment, sendAssessment } from '@/lib/assessments/actions';
 import { assessmentHref, assessmentTabs, type AssessmentTab } from '@/lib/assessments/address';
 import {
   answerText,
@@ -13,7 +13,7 @@ import {
   type AnswerWire,
   type ReadingWire,
 } from '@/lib/assessments/detail';
-import { STATUS_LABEL, STATUS_TONE } from '@/lib/assessments/vocab';
+import { STATUS_LABEL, STATUS_TONE, assessmentTag } from '@/lib/assessments/vocab';
 import { Calendar, Warn } from '@/components/shell/Icons';
 import { TopBar } from '@/components/shell/TopBar';
 import { PageTabs } from '@/components/shell/PageTabs';
@@ -27,6 +27,7 @@ import { InlineLink } from '@/web-components/ui/InlineLink';
 import { Message } from '@/web-components/ui/Message';
 import { Meter } from '@/web-components/ui/Meter';
 import { PageHeader } from '@/web-components/ui/PageHeader';
+import { RowMenu, type RowMenuItem } from '@/web-components/ui/RowMenu';
 import { Tag } from '@/web-components/ui/Tag';
 import { TextField } from '@/web-components/ui/Field';
 import { CompareSelect } from './CompareSelect';
@@ -182,6 +183,18 @@ export function Assessment({
     });
   }
 
+  /* TAKEN → REVIEWED (23 Nov 2026). This is the screen the answers are on, so it is where the mark lives; the list's
+     *Review* button lands here. */
+  const reviewed = data.reviewedAt != null;
+  function review(next: boolean) {
+    setError(null);
+    startWrite(async () => {
+      const res = await markReviewed(data.id, next, data.clientId);
+      if (!res.ok) return setError(res.message ?? 'That did not save.');
+      router.refresh();
+    });
+  }
+
   function remove() {
     setError(null);
     startWrite(async () => {
@@ -190,6 +203,17 @@ export function Assessment({
       router.push(back);
     });
   }
+
+  /* What the phone's ⋯ holds: every verb the row drops below 900px (`.asmv__desk`), Delete last. */
+  const moreItems: RowMenuItem[] = [
+    ...(done && !reviewed
+      ? [{ key: 'correct', label: 'Correct readings', href: `/clients/assessments/${data.id}/take` }]
+      : []),
+    ...(done && reviewed ? [{ key: 'unreview', label: 'Mark as not reviewed', onSelect: () => review(false) }] : []),
+    ...(!done ? [{ key: 'date', label: 'Change date', onSelect: () => setMoving((v) => !v) }] : []),
+    { separator: true as const, key: 'sep' },
+    { key: 'delete', label: 'Delete', danger: true, onSelect: () => setConfirmDelete(true) },
+  ];
 
   return (
     <>
@@ -207,7 +231,10 @@ export function Assessment({
           titleHref={`/clients/${within}/assessments`}
         />
       ) : (
-        <TopBar crumb="Clients · Assessments" title={data.name} titleHref="/clients/assessments" />
+        /* LABELLED WITH WHERE IT GOES (23 Nov 2026): it said the check-in's own name, so a phone drew
+           *Weekly check-in* three times down the header — the bar, the crumb and the `<h1>` — and the one
+           control that leaves did not say where to. */
+        <TopBar crumb="Clients · Assessments" title="Assessments" titleHref="/clients/assessments" />
       )}
 
       <main className="main body--flush asmv" id="main-content">
@@ -266,11 +293,21 @@ export function Assessment({
               <span className="asmv__when">
                 {done ? 'Answered' : 'Due'} {DATE.format(when)}
               </span>
-              <Tag tone={STATUS_TONE[data.state]}>{STATUS_LABEL[data.state]}</Tag>
+              {/* THE TAGS WRAP AS ONE GROUP (23 Nov 2026): loose in the line, *Every 7 days* fell onto a row of
+                  its own under the date on a phone, parted from the status it qualifies. */}
+              <span className="asmv__tags">
+              {done ? (
+                <Tag tone={assessmentTag(data.state, data.sentAt, data.reviewedAt).tone}>
+                  {assessmentTag(data.state, data.sentAt, data.reviewedAt).label}
+                </Tag>
+              ) : (
+                <Tag tone={STATUS_TONE[data.state]}>{STATUS_LABEL[data.state]}</Tag>
+              )}
               {sent && !done && <Tag>With {client ? client.name.split(' ')[0] : 'the client'}</Tag>}
               {data.schedule && !data.schedule.endedAt && (
                 <Tag>Every {data.schedule.intervalDays} days</Tag>
               )}
+              </span>
             </span>
           }
           actions={
@@ -289,9 +326,23 @@ export function Assessment({
                   Take it
                 </Button>
               )}
+              {done && !reviewed && (
+                <Button variant="primary" disabled={busy} onClick={() => review(true)}>
+                  Mark as reviewed
+                </Button>
+              )}
               {done && (
-                <Button variant="secondary" href={`/clients/assessments/${data.id}/take`}>
+                <Button
+                  variant="secondary"
+                  className={reviewed ? undefined : 'asmv__desk'}
+                  href={`/clients/assessments/${data.id}/take`}
+                >
                   Correct readings
+                </Button>
+              )}
+              {done && reviewed && (
+                <Button variant="ghost" className="asmv__desk" disabled={busy} onClick={() => review(false)}>
+                  Mark as not reviewed
                 </Button>
               )}
               {canSend && (
@@ -300,23 +351,35 @@ export function Assessment({
                 </Button>
               )}
               {!done && (
-                <Button variant="secondary" disabled={busy} onClick={() => setMoving((v) => !v)}>
+                <Button variant="secondary" className="asmv__desk" disabled={busy} onClick={() => setMoving((v) => !v)}>
                   Change date
                 </Button>
               )}
               {confirmDelete ? (
                 <>
-                  <Button variant="danger" disabled={busy} onClick={remove}>
+                  <Button variant="danger" className="asmv__confirm" disabled={busy} onClick={remove}>
                     Delete for good
                   </Button>
-                  <Button variant="ghost" disabled={busy} onClick={() => setConfirmDelete(false)}>
+                  <Button variant="ghost" className="asmv__confirm" disabled={busy} onClick={() => setConfirmDelete(false)}>
                     Keep it
                   </Button>
                 </>
               ) : (
-                <Button variant="ghost" className="asmv__del" disabled={busy} onClick={() => setConfirmDelete(true)}>
-                  Delete
-                </Button>
+                <>
+                  <Button variant="ghost" className="asmv__del asmv__desk" disabled={busy} onClick={() => setConfirmDelete(true)}>
+                    Delete
+                  </Button>
+                  {/* THE PHONE'S HOUSEKEEPING, behind ⋯ (23 Nov 2026). Three or four labelled buttons wrapped into
+                      ragged rows — a lone *Delete* stranded on a line of its own under a ghost button that read as
+                      text. On a phone the row keeps the verb that moves this check-in on and the ⋯ holds the rest;
+                      *Delete* still asks twice, in the row, as on the desk. */}
+                  <RowMenu
+                    label={data.name}
+                    menuLabel="More for this check-in"
+                    className="asmv__more"
+                    items={moreItems}
+                  />
+                </>
               )}
             </>
           }

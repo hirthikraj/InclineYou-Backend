@@ -123,6 +123,7 @@ export function ScheduleSheet({
       <Modal
         title="Schedule an assessment"
         width={460}
+        sheet
         foot={
           <>
             <Button variant="ghost" onClick={() => onClose(false)} disabled={busy}>Cancel</Button>

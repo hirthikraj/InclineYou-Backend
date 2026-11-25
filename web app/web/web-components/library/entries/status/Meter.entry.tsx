@@ -15,6 +15,7 @@ export function MeterEntry() {
         { k: 'Component', v: <code>ui/Meter.tsx</code> },
         { k: 'Class', v: <code>.meter</code> },
         { k: 'Sizes', v: '2' },
+        { k: 'Tones', v: 'acc · data · ok · warn · danger · dim' },
         { k: 'Segments', v: '2–3' },
         { k: 'Input', v: 'amounts, not percentages' },
       ]}
@@ -33,6 +34,32 @@ export function MeterEntry() {
                 ]}
               />
             </Cell>
+          </div>
+        </Bench>
+      </Blk>
+
+      <Blk
+        title="A list of bars: one lime, the rest neutral"
+        lede={
+          <>
+            When several meters stand in a column &mdash; a ranking of clients, the volume per movement &mdash;
+            every bar in lime makes the list the loudest thing on the page and says nothing about any one row.
+            The leader (or the current item) takes <code>acc</code>; the rest take <code>data</code>, a neutral
+            fill at the 3:1 shape step. A single progress bar on its own keeps <code>acc</code>.
+          </>
+        }
+      >
+        <Bench pad={false} style={{ padding: '18px 20px' }}>
+          <div className="col gap3" style={{ width: 420 }}>
+            {[33_600, 32_400, 27_000, 26_500].map((v, i) => (
+              <Cell key={v} label={i === 0 ? 'THE LEADER · acc' : 'THE REST · data'}>
+                <Meter
+                  label={`Client ${i + 1}`}
+                  total={33_600}
+                  segments={[{ tone: i === 0 ? 'acc' : 'data', value: v }]}
+                />
+              </Cell>
+            ))}
           </div>
         </Bench>
       </Blk>

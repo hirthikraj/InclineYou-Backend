@@ -1,6 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { ClaimsQueue } from '@/components/business/ClaimsQueue';
+import type { PaymentClaimWire } from '@/lib/claims/types';
+import { useEffect, useState } from 'react';
+import type { BusinessWire } from '@/lib/practice/types';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import { Plus } from '@/components/shell/Icons';
 import { rupees } from '@/lib/today/time';
@@ -219,6 +223,8 @@ export function PaymentsTab({
   payments,
   priceList,
   adjustments,
+  business = null,
+  claims = null,
   now,
 }: {
   client: ClientDetailWire;
@@ -230,6 +236,10 @@ export function PaymentsTab({
   priceList: PriceListPackWire[];
   /** The live pack's life — pauses, extensions, corrections. `PackLife` draws it. */
   adjustments: PackageAdjustmentWire[];
+  /** The workspace's business (V46): the invoice's From block. Null where it could not be read. */
+  business?: BusinessWire | null;
+  /** V50 · this client's open "I've paid" reports; drawn first, as on Business. */
+  claims?: PaymentClaimWire[] | null;
   /** The page's clock. */
   now: number;
 }) {
@@ -237,8 +247,18 @@ export function PaymentsTab({
   const clientName = client.name;
   const toast = useToast();
 
+  /* `?sell={packId}` — a join request approved with a plan picked (V45) lands here with the sale open on that plan. A
+     one-shot: read once into state, then stripped (AGENTS trap 26). */
+  const search = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const [sellPack] = useState<string | null>(() => search.get('sell'));
+  useEffect(() => {
+    if (search.get('sell')) router.replace(pathname, { scroll: false });
+  }, [search, router, pathname]);
+
   /** null = shut, 'sell' = a fresh pack, or the pack being renewed with changes. */
-  const [panel, setPanel] = useState<null | 'sell' | ClientPackageWire>(null);
+  const [panel, setPanel] = useState<null | 'sell' | ClientPackageWire>(() => (sellPack ? 'sell' : null));
   /** Which pack money is being recorded against, and the row it settles if any. */
   const [collecting, setCollecting] = useState<null | {
     pkg: ClientPackageWire;
@@ -399,6 +419,7 @@ export function PaymentsTab({
           clientType={client.clientType}
           priceList={priceList}
           renewing={panel === 'sell' ? null : panel}
+          initialPackId={panel === 'sell' ? sellPack : null}
           onClose={() => setPanel(null)}
         />
       )}
@@ -426,18 +447,14 @@ export function PaymentsTab({
         <DeletePaymentSheet clientId={clientId} payment={deleting} onClose={() => setDeleting(null)} />
       )}
       {/* R27: unreachable while INVOICES_ENABLED is off — nothing sets `invoicing`.
-          The trainer's From block: name from /v1/me; UPI and headline are not on /v1/me —
-          they are /v1/trainers/me's (trainer_business), so read them there when it returns. */}
+          The From block is the workspace's BUSINESS (V46): its name, tagline, address, phone and UPI ID. */}
       {INVOICES_ENABLED && invoicing && (
         <InvoiceSheet
           payment={invoicing}
           pkg={byPackage.get(invoicing.packageId) ?? null}
           clientName={clientName}
           clientPhone={client.phone}
-          trainerName=""
-          trainerPhone={null}
-          trainerUpiVpa={null}
-          trainerHeadline={null}
+          business={business}
           onClose={() => setInvoicing(null)}
         />
       )}
@@ -464,6 +481,7 @@ export function PaymentsTab({
   if (packages.length === 0) {
     return (
       <>
+        <ClaimsQueue claims={claims} now={now} />
         <Card bare>
           <EmptyState
             kind="first-run"
@@ -569,6 +587,8 @@ export function PaymentsTab({
 
   return (
     <>
+      {/* V50 · what this client says they've paid — confirm it here or on Business; nothing counts until you do. */}
+      <ClaimsQueue claims={claims} now={now} />
       {/*
         THE FOUR FIGURES, AND THE ORDER CHANGED.
 
@@ -931,7 +951,7 @@ export function PaymentsTab({
                       content:
                         items.length > 0 ? (
                           <RowMenu
-                            label={`Actions for ${rupees(num(p.amount))} on ${longDateStr(p.bookAt)}`}
+                            label={`${rupees(num(p.amount))} on ${longDateStr(p.bookAt)}`}
                             items={items}
                           />
                         ) : null,
@@ -1092,7 +1112,7 @@ export function PaymentsTab({
                       className: 'cftx__act',
                       content:
                         menu.length > 0 ? (
-                          <RowMenu label={`Actions for ${packName(pkg)}`} items={menu} />
+                          <RowMenu label={packName(pkg)} items={menu} />
                         ) : null,
                     },
                   ]}

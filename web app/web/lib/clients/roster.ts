@@ -57,6 +57,7 @@ import { DAY_MS, WEEKDAYS_LONG, daysBetween, isoWeekday, startOfDay } from '@/li
 import { readMode, type DeliveryMode } from '@/lib/today/mode';
 import type { ClientWire, PackageWire } from './api';
 import { asGender, type Gender } from './gender';
+import { followUpDue, followUpLine, followUpPhrase, followUpState, sourceLabel } from './lead';
 
 /** Money is a decimal string on the wire. (Not imported from `./api`, which is server-only.) */
 const num = (v: string | number | null | undefined): number => {
@@ -116,7 +117,9 @@ export type AttentionKind =
   | 'pack'
   | 'missed'
   | 'invite'
-  | 'unavailable';
+  | 'unavailable'
+  /** V48 — a prospect's follow-up is today or has passed. */
+  | 'follow-up';
 export type Batch = 'morning' | 'evening' | 'night' | 'none';
 
 /**
@@ -136,7 +139,7 @@ export type ClientTag = 'at-risk' | 'expiring' | 'lapsed' | 'prospect' | 'paused
 
 /** A tag, or `all`. The filters across the top of the screen are exactly these. */
 export type Segment = 'all' | ClientTag;
-export type SortKey = 'attention' | 'name' | 'recent' | 'left' | 'owed';
+export type SortKey = 'attention' | 'name' | 'recent' | 'left' | 'owed' | 'follow-up';
 
 export interface RosterRow {
   id: string;
@@ -152,7 +155,12 @@ export interface RosterRow {
   /** `packageId` on a `pack` row: the one Renew repeats (Today A3). */
   attention?: { kind: AttentionKind; action: string; weight: number; packageId?: string };
   setupStep?: 'schedule' | 'plan';
-  pack?: { remaining: number; total?: number };
+  /**
+   * The pack the Sessions-left figure reads. `ended`: it ran past its end date and its sessions are lost (22 Nov 2026 —
+   * it drew as a healthy green bar). `daysLeft`: to its end date, so a pack ending this week is flagged by DATE as well as
+   * by count, the same `PACK_EXPIRING_DAYS` the tag and the line use.
+   */
+  pack?: { remaining: number; total?: number; ended?: boolean; daysLeft?: number | null };
   owed: number;
   /**
    * Money owed past `OVERDUE_DAYS` — the same `moneyBand` split Today uses.
@@ -188,6 +196,8 @@ export interface RosterRow {
   batch: Batch;
   /** V43: the stated answer, or `unset` when the client has not given one. Never inferred from a name. */
   gender: GenderFilter;
+  /** V48: the prospect's next follow-up (ISO date), for the *Follow-up date* sort. Null when none. */
+  followUpOn: string | null;
 }
 
 export interface Tally {
@@ -349,6 +359,7 @@ export const SORTS: { key: SortKey; label: string; hint?: string }[] = [
   { key: 'recent', label: 'Last attended', hint: 'Most recent first' },
   { key: 'left', label: 'Sessions left', hint: 'Fewest first' },
   { key: 'owed', label: 'Amount pending', hint: 'Highest first' },
+  { key: 'follow-up', label: 'Follow-up date', hint: 'Prospects, soonest first' },
 ];
 
 /* -------------------------------------------------------------------- input */
@@ -618,6 +629,20 @@ export function buildRow(
     });
   }
 
+  /* V48 — a prospect's follow-up, due today or missed. The same band, line and verb as Today's row, so the two
+     screens say one thing; it navigates to the file, where the Lead card has Call, WhatsApp and Log. */
+  const lead = client.lead;
+  if (status === 'prospect' && lead?.nextFollowUpOn && followUpDue(lead.nextFollowUpOn, now)) {
+    const s = followUpState(lead.nextFollowUpOn, now);
+    candidates.push({
+      band: 'follow-up',
+      kind: 'follow-up',
+      action: 'Follow up',
+      magnitude: s.kind === 'late' ? s.days : 0,
+      line: followUpLine(lead, now),
+    });
+  }
+
   if (setupStep) {
     candidates.push({
       band: 'setup',
@@ -760,6 +785,12 @@ export function buildRow(
     line = `Invited ${inviteDays === 0 ? 'today' : `${inviteDays} days ago`}`;
   }
 
+  /* A prospect with nothing due says what the enquiry is: when to get back to them, else where they came from. */
+  if (!line && status === 'prospect' && lead) {
+    if (lead.nextFollowUpOn) line = followUpPhrase(lead.nextFollowUpOn, now);
+    else if (lead.source) line = `Enquiry · ${sourceLabel(lead.source)}${lead.interestedPackName ? ` · ${lead.interestedPackName}` : ''}`;
+  }
+
   if (!line) {
     line =
       programLine(client.program, now) ??
@@ -801,6 +832,11 @@ export function buildRow(
       ? {
           remaining: leanest.sessionsRemaining ?? 0,
           total: leanest.sessionsTotal ?? undefined,
+          ended: packStanding({ ...leanest, updatedAt: leanest.createdAt }, now)?.kind === 'ended',
+          daysLeft: (() => {
+            const ends = parseDay(leanest.endDate);
+            return ends === null ? null : Math.max(0, daysBetween(now, ends));
+          })(),
         }
       : undefined,
     owed,
@@ -813,6 +849,7 @@ export function buildRow(
     sessionsLeft,
     batch: readBatch(client.slots),
     gender: asGender(client.gender) ?? 'unset',
+    followUpOn: status === 'prospect' ? lead?.nextFollowUpOn ?? null : null,
   };
 }
 
@@ -940,6 +977,12 @@ export function sortRows(rows: RosterRow[], key: SortKey): RosterRow[] {
       return la - lb;
     }
     if (key === 'owed') return b.owed - a.owed;
+    if (key === 'follow-up') {
+      /* ISO dates sort as strings; a row with none goes last, then by name so two ties never swap (trap 29). */
+      const fa = a.followUpOn ?? '9999-12-31';
+      const fb = b.followUpOn ?? '9999-12-31';
+      return fa < fb ? -1 : fa > fb ? 1 : a.name.localeCompare(b.name);
+    }
     return 0;
   });
 }

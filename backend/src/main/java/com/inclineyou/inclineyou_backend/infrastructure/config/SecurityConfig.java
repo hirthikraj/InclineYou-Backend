@@ -115,6 +115,8 @@ public class SecurityConfig {
                         .requestMatchers("/v1/portal/**").hasRole("CLIENT")
                         // The invite link is the credential: a client has no account to sign in with until they accept it.
                         .requestMatchers("/v1/invites/**").permitAll()
+                        // The join page (V45): anybody may read it and ask to join; asking makes a request, never an account.
+                        .requestMatchers("/v1/join/**").permitAll()
                         // The provider's status callbacks: no session, authenticated by the HMAC the controller checks over the raw body.
                         .requestMatchers("/v1/webhooks/**").permitAll()
                         // Everything else is a trainer's — GET /v1/me included: it has exactly one meaning, the trainer

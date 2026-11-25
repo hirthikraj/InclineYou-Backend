@@ -3,6 +3,9 @@ import { permanentRedirect, redirect } from 'next/navigation';
 import { Overview } from '@/components/business/Overview';
 import { Unavailable } from '@/components/today/Unavailable';
 import { requireOverview } from '@/lib/business/guard';
+import { loadClaims } from '@/lib/claims/actions';
+import { getGymMoney } from '@/lib/business/api';
+import { currentMonth } from '@/lib/money/period';
 
 /**
  * BUSINESS — the section's front page, and it is no longer a seven-tab screen.
@@ -43,7 +46,7 @@ export const metadata = { title: 'Business · InclineYou' };
 
 /** The four old tabs that became pages. */
 const MOVED: Record<string, string> = {
-  ledger: '/business/transactions',
+  ledger: '/business/payments',
   packages: '/business/packages',
   gst: '/business',
   reports: '/business/reports',
@@ -51,9 +54,9 @@ const MOVED: Record<string, string> = {
 
 /** The three that became chips on the ledger. `LedgerFilter`'s own spellings. */
 const FOLDED: Record<string, string> = {
-  owed: '/business/transactions?filter=owed',
-  writeoffs: '/business/transactions?filter=writeoff',
-  gymshare: '/business/transactions?filter=gymshare',
+  owed: '/business/payments?filter=owed',
+  writeoffs: '/business/payments?filter=writeoff',
+  gymshare: '/business/payments?filter=gymshare',
 };
 
 export default async function Page(props: {
@@ -74,10 +77,11 @@ export default async function Page(props: {
   /* The tab bar's + and the client file's *Sell a pack* both point at
      `/business?record=<id>`. The panel is on Transactions now. */
   if (typeof q.record === 'string') {
-    redirect(`/business/transactions?record=${encodeURIComponent(q.record)}`);
+    redirect(`/business/payments?record=${encodeURIComponent(q.record)}`);
   }
 
-  const money = await requireOverview();
+  // V50 · the To confirm queue rides beside the overview's own read; `null` (it failed) draws nothing rather than "none".
+  const [money, claims] = await Promise.all([requireOverview(), loadClaims('open')]);
 
   if (!money.ok) {
     return (
@@ -88,5 +92,17 @@ export default async function Page(props: {
     );
   }
 
-  return <Overview data={money.data} />;
+  // The headline's *Gym owes you*: the settlement's balance as of the last closed month, only for a trainer with a gym.
+  // A failed read drops the one tile rather than the page.
+  let gymOwes: number | null = null;
+  if (money.data.hasGym) {
+    try {
+      const gym = await getGymMoney(currentMonth(money.data.now), money.data.now);
+      gymOwes = gym.settlement ? gym.settlement.balanceDue : null;
+    } catch {
+      gymOwes = null;
+    }
+  }
+
+  return <Overview data={money.data} claims={claims} gymOwes={gymOwes} />;
 }

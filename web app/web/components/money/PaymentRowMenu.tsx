@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { editPayment, markPaid, removePayment, writeOffPayment } from '@/lib/money/actions';
@@ -137,7 +137,7 @@ export function PaymentRowMenu({
 
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<'actions' | 'writeoff' | 'delete' | 'edit'>('actions');
-  const [at, setAt] = useState<{ top: number; left: number; right: number } | null>(null);
+  const [at, setAt] = useState<{ top: number; left: number; right: number; btop: number; bbot: number } | null>(null);
 
   /* The edit form's own state, seeded when the view opens so a second opening
      starts from the row as it is NOW and not from a half-typed earlier attempt. */
@@ -208,7 +208,7 @@ export function PaymentRowMenu({
       : roomAbove > roomBelow && roomAbove >= H_ACTIONS ? box.top - H_ACTIONS - 4
       : Math.max(GUTTER, vh - GUTTER - H_ACTIONS);
 
-    setAt({ top: Math.round(top), left: Math.round(left), right: Math.round(box.right) });
+    setAt({ top: Math.round(top), left: Math.round(left), right: Math.round(box.right), btop: box.top, bbot: box.bottom });
     setView('actions');
     setOpen(true);
   }, []);
@@ -339,6 +339,27 @@ export function PaymentRowMenu({
     ? { top: Math.max(12, Math.min(at.top, document.documentElement.clientHeight - tall - 12)), left: at.left,
         ...(view === 'edit' ? { width: W_EDIT } : null) }
     : undefined;
+
+  /* The estimate above only seeds the first paint's guess. The panel's real
+     height differs a lot by row — a settled payment's menu is ~130px against the
+     300 a pending one needs — and placing a short menu from the tall estimate
+     flipped it above and left it hanging ~170px clear of its row on a phone,
+     where no mid-list row has 300px under it. So the panel is measured before
+     paint and placed against the trigger's own edges: below if it fits, else
+     directly above, else pinned to the gutter it fits in. Runs again on every
+     view change, so the confirm and edit views stay attached too. */
+  useLayoutEffect(() => {
+    const el = panel.current;
+    if (!open || !at || !el) return;
+    const G = 12;
+    const vh = document.documentElement.clientHeight;
+    const h = el.offsetHeight;
+    const below = at.bbot + 4;
+    const top = vh - G - below >= h ? below
+      : at.btop - 4 - G >= h ? at.btop - 4 - h
+      : Math.max(G, vh - G - h);
+    el.style.top = `${Math.round(top)}px`;
+  }, [open, at, view]);
 
   /* A refund cannot be changed or removed (the database refuses both), so its row
      has no menu at all. Every other row can be corrected: a settled row used to

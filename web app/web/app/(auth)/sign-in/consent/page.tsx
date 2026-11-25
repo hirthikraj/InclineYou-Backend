@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { AuthShell } from '@/components/auth/AuthShell';
 import { Consent } from '@/components/auth/Consent';
 import { readClaims } from '@/lib/auth/claims';
-import { getPolicyVersion, getToken } from '@/lib/auth/session';
+import { getPolicyVersion, getToken, getTokenRole } from '@/lib/auth/session';
 
 export const metadata = { title: 'Privacy notice · InclineYou' };
 
@@ -19,7 +19,7 @@ export const metadata = { title: 'Privacy notice · InclineYou' };
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
-  const claims = readClaims(await getToken());
+  const claims = readClaims(await getToken(), await getTokenRole());
   if (!claims || claims.role !== 'trainer') redirect('/sign-in');
 
   const version = await getPolicyVersion();

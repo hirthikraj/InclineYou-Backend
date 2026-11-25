@@ -8,7 +8,9 @@ import { useDismiss } from '@/lib/ui/dismiss';
 import { usePhone } from '@/lib/ui/phone';
 import { ScreenSheet } from '@/web-components/ui/ScreenSheet';
 import { Button } from '@/web-components/ui/Button';
-import { Chip } from '@/web-components/ui/Chip';
+import { Segment as SegmentGroup, SegmentButton } from '@/web-components/ui/Segment';
+
+export type AddScope = 'today' | 'program';
 
 /**
  * FRAME 3a — THE RACK WAS BUSY.
@@ -45,6 +47,8 @@ export function AddPanel({
   already,
   complete = true,
   search,
+  hasProgram = false,
+  message = null,
   onPick,
   onClose,
 }: {
@@ -54,7 +58,12 @@ export function AddPanel({
   /** False until the whole library has arrived; until then typing also asks the server (typed-ahead). */
   complete?: boolean;
   search?: (q: string) => Promise<{ id: string; name: string; muscleGroup: string | null; isCustom: boolean }[]>;
-  onPick: (exerciseId: string) => void;
+  /** The session is from the client's own program, so an addition can go on it too. */
+  hasProgram?: boolean;
+  /** A failed add, in the trainer's words. */
+  message?: string | null;
+  /** Resolves true once the server has the card; false when it refused. */
+  onPick: (exerciseId: string, scope: AddScope) => Promise<boolean> | void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState('');
@@ -66,14 +75,51 @@ export function AddPanel({
      on the first card added. A second press on an added row does nothing — the
      card is already written, and removing it is the card's own job. */
   const [picked, setPicked] = useState<string[]>([]);
+  /* TODAY, OR THE PLAN TOO (24 Nov 2026) — the question a swap already asks. Today stays the
+     default; a pick takes the choice standing when it is pressed, and its row says where it went. */
+  const [scope, setScope] = useState<AddScope>('today');
+  const [onPlan, setOnPlan] = useState<string[]>([]);
   const pick = (exerciseId: string) => {
     if (picked.includes(exerciseId)) return;
     setPicked((p) => [...p, exerciseId]);
-    onPick(exerciseId);
+    if (scope === 'program') setOnPlan((p) => [...p, exerciseId]);
+    /* Marked at once so a double tap is a no-op, and taken back if the server refuses: a row
+       said *Added* for an exercise that never reached the card (24 Nov 2026). */
+    void Promise.resolve(onPick(exerciseId, scope)).then((ok) => {
+      if (ok !== false) return;
+      setPicked((p) => p.filter((id) => id !== exerciseId));
+      setOnPlan((p) => p.filter((id) => id !== exerciseId));
+    });
   };
   const addedMark = (id: string) => (picked.includes(id)
-    ? <span className="small ink3" style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}><Check size={14} />Added</span>
+    ? <span className="small ink3" style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}><Check size={14} />{onPlan.includes(id) ? 'Added · on the plan' : 'Added'}</span>
     : <Plus size={16} />);
+  const scopeLine = scope === 'program'
+    ? 'Goes into today’s log and onto their plan from the next session.'
+    : 'Goes into today’s log only. The program does not change.';
+  const scopeEl = (
+    <div className="addx__scope">
+      <p className="micro" style={{ margin: '0 0 7px' }}>Where does it go?</p>
+      <SegmentGroup label="Where the exercise goes" mode="single">
+        <SegmentButton mode="single" pressed={scope === 'today'} onClick={() => setScope('today')}>
+          Today only
+        </SegmentButton>
+        <SegmentButton
+          mode="single"
+          pressed={scope === 'program'}
+          disabled={!hasProgram}
+          onClick={() => setScope('program')}
+          title={hasProgram ? undefined : 'This session is not from a program, so there is no plan to add it to.'}
+        >
+          Today and the plan
+        </SegmentButton>
+      </SegmentGroup>
+      <p className="small ink3" style={{ margin: '7px 0 0' }}>
+        {hasProgram ? scopeLine : 'Goes into today’s log only. This session is not from a program, so there is no plan to add it to.'}
+      </p>
+      {message ? <p className="msg msg--err" role="alert" style={{ marginTop: 8 }}>{message}</p> : null}
+    </div>
+  );
 
   /* `dismiss`, not `onClose`, on all three ways out. `lib/ui/dismiss.ts` has
      the argument: `onClose` unmounts this box, and a panel that is already gone
@@ -140,21 +186,24 @@ export function AddPanel({
             />
           </label>
 
-          <div className="wk" style={{ marginTop: 10 }} role="group" aria-label="Filter">
-            <Chip pressed={filter === 'recent' && !query} onClick={() => { setFilter('recent'); setQuery(''); }}>
-              Recent
-            </Chip>
-            <Chip pressed={filter === 'yours'} onClick={() => { setFilter('yours'); setQuery(''); }}>
-              Yours<span className="rail__n">{mine.length}</span>
-            </Chip>
-            {groups.map((g) => (
-              <Chip pressed={filter === g} key={g} onClick={() => { setFilter(g); setQuery(''); }}>
-                {g}
-              </Chip>
-            ))}
-            <Chip pressed={filter === 'all'} onClick={() => { setFilter('all'); setQuery(''); }}>
-              All
-            </Chip>
+          <div style={{ marginTop: 10 }}>
+            {/* A pick-one filter: the shared neutral pills, not lime chips (24 Nov 2026). */}
+            <SegmentGroup label="Filter the library" mode="single">
+              <SegmentButton mode="single" pressed={filter === 'recent' && !query} onClick={() => { setFilter('recent'); setQuery(''); }}>
+                Recent
+              </SegmentButton>
+              <SegmentButton mode="single" pressed={filter === 'yours'} count={mine.length} onClick={() => { setFilter('yours'); setQuery(''); }}>
+                Yours
+              </SegmentButton>
+              {groups.map((g) => (
+                <SegmentButton mode="single" pressed={filter === g} key={g} onClick={() => { setFilter(g); setQuery(''); }}>
+                  {g}
+                </SegmentButton>
+              ))}
+              <SegmentButton mode="single" pressed={filter === 'all'} onClick={() => { setFilter('all'); setQuery(''); }}>
+                All
+              </SegmentButton>
+            </SegmentGroup>
           </div>
 
           {results === null ? (
@@ -238,7 +287,7 @@ export function AddPanel({
         closing={closing}
         surfaceRef={panelRef}
       >
-        <p className="small ink3 addx__note">Goes into today&rsquo;s log only. The program does not change.</p>
+        {scopeEl}
         {body}
       </ScreenSheet>
     );
@@ -260,14 +309,19 @@ export function AddPanel({
       >
         <div className="panel__hd">
           <span className="panel__t">Add an exercise</span>
-          <span className="small mono" style={{ marginLeft: 'auto' }}>today only</span>
         </div>
 
-        <div className="panel__body">{body}</div>
+        <div className="panel__body">{scopeEl}{body}</div>
 
         <div className="panel__foot">
           <span className="small" style={{ marginRight: 'auto', maxWidth: '26ch' }}>
-            Goes into today&rsquo;s log only. The program does not change.
+            {picked.length === 0
+              ? 'Pick as many as you need.'
+              : onPlan.length === 0
+                ? 'In today’s log only.'
+                : onPlan.length === picked.length
+                  ? 'In today’s log and on the plan.'
+                  : `${onPlan.length} of ${picked.length} also on the plan.`}
           </span>
           {picked.length > 0
             ? <Button variant="primary" onClick={dismiss}>Done · {picked.length} added</Button>

@@ -152,6 +152,14 @@ export function Schedule({ data }: { data: ScheduleData }) {
 
   const now = useNow(serverNow);
   const refresh = useCallback(() => router.refresh(), [router]);
+  /* The booking panel's week strip asks for one week of the diary at a time,
+     so a day outside the window on screen is counted against its real rows. */
+  const loadBookWeek = useCallback(async (weekStart: number) => {
+    const res = await loadWindow('week', weekStart);
+    if (!res.ok) return null;
+    const at = Date.now();
+    return res.rows.map((r) => toSession(r, people[r.clientId], at));
+  }, [people]);
   useHeartbeat(refresh);
 
   /* ------------------------------------------------------------ view state */
@@ -212,7 +220,7 @@ export function Schedule({ data }: { data: ScheduleData }) {
      click on a client's row knows who and has to be told the minute. See
      `onCell` below and `usualMinuteFor`. */
   const [booking, setBooking] = useState<
-    { dayAt: number; minute: number; clientId?: string } | null
+    { dayAt: number; minute: number; clientId?: string; exact?: boolean } | null
   >(() => slotAsked(serverNow));
 
   /*
@@ -419,7 +427,8 @@ export function Schedule({ data }: { data: ScheduleData }) {
   const onSlot = useCallback(
     (dayAt: number, minute: number) => {
       if (moving) placeAt(dayAt, minute);
-      else setBooking({ dayAt, minute });
+      // A click on the track names the minute: kept as clicked, never snapped.
+      else setBooking({ dayAt, minute, exact: true });
     },
     [moving, placeAt],
   );
@@ -920,6 +929,7 @@ export function Schedule({ data }: { data: ScheduleData }) {
             gaps={showGaps && !pivoting}
             gapSlots={grid.totals.gapSlots}
             pivoting={pivoting}
+            late={view !== 'month' && drawn.some((s) => s.late)}
             hoursHref="/settings/hours"
             onView={(v) => goTo(v, anchor)}
             onLayout={setLayout}
@@ -1176,8 +1186,12 @@ export function Schedule({ data }: { data: ScheduleData }) {
           windows={
             grid.days.find((d) => d.at === booking.dayAt)?.windows ?? []
           }
+          hours={hours}
+          loadWeek={loadBookWeek}
+          now={now}
           rates={rates}
           clientId={booking.clientId ?? null}
+          exact={booking.exact ?? false}
           onClose={() => setBooking(null)}
           onBooked={() => {
             setBooking(null);

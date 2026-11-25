@@ -204,6 +204,20 @@ public class AssessmentService {
         return AssessmentForms.item(assessments.find(trainerId, id).orElseThrow(), today());
     }
 
+    /**
+     * Taken → to review → reviewed (23 Nov 2026). Only a done assessment can be reviewed — the database says so too
+     * ({@code assessment_read_after_return}). Both directions are idempotent.
+     */
+    @Transactional
+    public AssessmentItem review(UUID trainerId, UUID id, boolean reviewed) {
+        var row = assessments.lock(trainerId, id).filter(r -> !r.deleted()).orElseThrow(AssessmentService::notFound);
+        if (reviewed && !row.done()) {
+            throw ApiException.conflict("ASSESSMENT_NOT_DONE", "That assessment hasn't been taken yet, so there is nothing to review.");
+        }
+        assessments.setReviewed(id, reviewed);
+        return AssessmentForms.item(assessments.find(trainerId, id).orElseThrow(), today());
+    }
+
     /** {@code sent_at}, then the notice. The notice is the client being told; the row is what makes it theirs to open. */
     private void deliver(UUID id, UUID clientId, String name) {
         assessments.markSent(id);

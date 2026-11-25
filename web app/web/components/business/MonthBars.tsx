@@ -75,7 +75,6 @@ export function MonthBars({
   /** Drawn as a dashed rule across the bars. Dashed so it cannot be mistaken
    *  for a thirteenth month or a grid line. */
   average = null,
-  tone = 'accent',
 }: {
   months: ReportMonth[];
   values: number[];
@@ -85,7 +84,6 @@ export function MonthBars({
   title: (month: ReportMonth, value: number) => string;
   height?: number;
   average?: number | null;
-  tone?: 'accent' | 'quiet';
 }) {
   /* A flat year is a chart of zeroes, not a chart of nothing — a divisor of 1
      keeps every bar on the floor instead of dividing by it. */
@@ -126,8 +124,7 @@ export function MonthBars({
             right: 12,
             bottom: above(avgFrac),
             height: 0,
-            borderTop: '1px dashed var(--tx-accent)',
-            opacity: 0.55,
+            borderTop: '1px dashed var(--tx-ink-off)',
           }}
         />
       )}
@@ -135,13 +132,14 @@ export function MonthBars({
       {months.map((m, i) => (
         <i
           key={`${m.year}-${m.month}`}
-          className="chart__b"
+          className={m.isCurrent ? 'chart__b chart__b--now' : 'chart__b'}
+          /* Centred in its month and capped, sharing its label's centre — see `TrendChart`. */
           style={{
-            left: `calc(${(i / n) * 100}% + 16px)`,
-            width: `calc(${(1 / n) * 100}% - 6px)`,
+            left: `calc(12px + (100% - 24px) * ${(i + 0.5) / n})`,
+            width: `min(40px, calc((100% - 24px) / ${n} - 8px))`,
+            transform: 'translateX(-50%)',
             bottom: FLOOR,
             height: barHeight(values[i] ?? 0),
-            ...(tone === 'quiet' && !m.isCurrent ? { background: 'var(--tx-ink-off)' } : {}),
           }}
           /* The caller's own sentence on every month, including the empty
              ones. A pre-history override was tried and was WRONG on the clients
@@ -169,10 +167,7 @@ export function MonthBars({
           key={`x-${m.year}-${m.month}`}
           className="chart__x"
           style={{
-            left: `calc(${(i / n) * 100}% + 16px)`,
-            width: `calc(${(1 / n) * 100}% - 6px)`,
-            transform: 'none',
-            textAlign: 'center',
+            left: `calc(12px + (100% - 24px) * ${(i + 0.5) / n})`,
             ...(m.isCurrent ? { color: 'var(--tx-accent-text)' } : {}),
           }}
         >

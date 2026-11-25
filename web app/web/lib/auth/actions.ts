@@ -123,7 +123,7 @@ export async function verifyCode(otp: string): Promise<VerifyResult> {
     return { ok: false, failure: readVerifyFailure(err) };
   }
 
-  await setToken(session.token, session.expiresAt);
+  await setToken(session.token, session.expiresAt, session.role);
   await clearPendingPhone();
   await clearRequestId();
 
@@ -216,7 +216,7 @@ export async function claimTrainer(): Promise<ClaimResult> {
 
   // The session replaces the pending token in the cookie, which is what turns
   // "verified" into "signed in".
-  await setToken(session.token, session.expiresAt);
+  await setToken(session.token, session.expiresAt, session.role);
   await clearPendingPhone();
   await clearPolicyVersion();
 

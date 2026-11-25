@@ -31,6 +31,7 @@ import {
 } from './WeekFields';
 import { InviteButton } from './InviteButton';
 import { GENDERS, asGender, type Gender } from '@/lib/clients/gender';
+import { addDaysIso, LEAD_SOURCES, shortDay, todayIso, type LeadSource } from '@/lib/clients/lead';
 
 /* ─────────────────────────────────────────────────── icons ── */
 
@@ -545,6 +546,10 @@ export function AddClientFlow({
   const [phoneCheck, setPhoneCheck] = useState<'idle' | 'checking' | 'ok' | 'on-roster' | 'blocked'>('idle');
   const [rosterMatch, setRosterMatch] = useState<{ id: string; name: string } | null>(null);
   const [dismissedRosterWarn, setDismissedRosterWarn] = useState(false);
+  /* The number asked to join through the trainer's join link and is waiting (23 Nov 2026). A caution, not a
+     refusal: adding by hand closes the request, approving it keeps the consent they already gave. */
+  const [joinMatch, setJoinMatch] = useState<{ id: string; name: string } | null>(null);
+  const [dismissedJoinWarn, setDismissedJoinWarn] = useState(false);
   const [deliveryMode, setDeliveryMode] = useState<'floor' | 'remote'>('floor');
   /* Prospect or active — step 2's first question. Never sent to the server:
      it only decides which steps this drawer shows next (Demo, or Money → Week
@@ -565,6 +570,13 @@ export function AddClientFlow({
   /* The demo slot picked on step 3 of the prospect path — an instant, or none
      if they mean to skip it. */
   const [demoAt, setDemoAt] = useState<number | null>(null);
+  /* V48 · the prospect path's lead: where they came from and what they asked about (step 2, optional), and when to
+     get back to them (step 3, optional, beside the demo). Never sent for an active client. */
+  const [leadSource, setLeadSource] = useState<LeadSource | null>(null);
+  const [leadPack, setLeadPack] = useState<string | null>(null);
+  const [followUp, setFollowUp] = useState<string | null>(null);
+  /* The day the flow opened, read once (no `Date.now()` in render, trap 20); the presets count from it. */
+  const [openedOn] = useState(() => todayIso(Date.now()));
   const [createdClientId, setCreatedClientId] = useState<string | null>(null);
   /* Minted when the flow opens (api-contract Clients A5, A7, Programs A5, Today
      A1): a retried Continue, Sell, Apply or Book replays the same id and the
@@ -611,6 +623,9 @@ export function AddClientFlow({
     deliveryMode: 'floor' | 'remote';
     clientType: 'independent' | 'gym';
     packId: string | null;
+    /** V48 — the prospect's source and interest as saved, so a Back-then-Continue patches only a change. */
+    leadSource?: LeadSource | null;
+    leadPack?: string | null;
   } | null>(null);
   /** The furthest rung reached. Rungs and Back walk anywhere at or below it. */
   const [maxStep, setMaxStep] = useState<Step>(1);
@@ -741,6 +756,7 @@ export function AddClientFlow({
     }
     setPhoneCheck('checking');
     setRosterMatch(null);
+    setJoinMatch(null);
     try {
       const result = await checkPhone(digits);
       if (!result.available) {
@@ -753,6 +769,7 @@ export function AddClientFlow({
       } else {
         setPhoneCheck('ok');
         setRosterMatch(null);
+        setJoinMatch(result.joinRequestId ? { id: result.joinRequestId, name: result.joinRequestName ?? 'They' } : null);
       }
     } catch {
       setPhoneCheck('idle');
@@ -1001,6 +1018,9 @@ export function AddClientFlow({
     if (!status) { setError('Choose prospect or active client.'); return; }
     if (!clientType) { setError('Choose independent or gym.'); return; }
     setError(null);
+    /* A pack picked from the other list before the type changed is not what they asked about now. */
+    const packList = clientType === 'gym' ? gymPacks : ownPacks;
+    const leadPackNow = leadPack && packList.some(p => p.id === leadPack) ? leadPack : null;
 
     if (!createdClientId || !committed) {
       if (submitting) return;
@@ -1015,10 +1035,16 @@ export function AddClientFlow({
           clientType,
           status,
           deliveryMode,
+          leadSource: status === 'prospect' ? leadSource : null,
+          interestedPackId: status === 'prospect' ? leadPackNow : null,
         });
         setCreatedClientId(created.id);
         setScheduleVersion(created.scheduleVersion);
-        setCommitted({ name: trimmed, phone: digits, dob, gender: gender!, deliveryMode, clientType, packId: null });
+        setCommitted({
+          name: trimmed, phone: digits, dob, gender: gender!, deliveryMode, clientType, packId: null,
+          leadSource: status === 'prospect' ? leadSource : null,
+          leadPack: status === 'prospect' ? leadPackNow : null,
+        });
         goTo(3);
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Something went wrong.');
@@ -1031,12 +1057,18 @@ export function AddClientFlow({
     /* A return visit — `status` never left the browser, so the only field
        that could have changed is `clientType`, and only that is worth a
        write. */
-    if (clientType === committed.clientType) { goTo(3); return; }
+    const sourceMoved = status === 'prospect' && leadSource !== (committed.leadSource ?? null);
+    const packMoved = status === 'prospect' && leadPackNow !== (committed.leadPack ?? null);
+    if (clientType === committed.clientType && !sourceMoved && !packMoved) { goTo(3); return; }
     if (submitting) return;
     setSubmitting(true);
     try {
-      await updateClientDetails(createdClientId, { clientType });
-      setCommitted(prev => (prev ? { ...prev, clientType } : prev));
+      await updateClientDetails(createdClientId, {
+        ...(clientType !== committed.clientType ? { clientType } : {}),
+        ...(sourceMoved ? { leadSource } : {}),
+        ...(packMoved ? { interestedPackId: leadPackNow } : {}),
+      });
+      setCommitted(prev => (prev ? { ...prev, clientType, leadSource, leadPack: leadPackNow } : prev));
       goTo(3);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'That did not save. Nothing changed.');
@@ -1098,7 +1130,7 @@ export function AddClientFlow({
         billing: 'trial',
       });
       if (!result.ok) { setError(result.message ?? 'The booking did not go through. Nothing changed.'); return; }
-      goToClient();
+      await finishProspect();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
@@ -1171,6 +1203,21 @@ export function AddClientFlow({
   const goToClient = () => {
     onClose?.();
     if (createdClientId) router.push(`/clients/${createdClientId}`);
+  };
+
+  /* The prospect path's last press, whichever it is (V48): a follow-up picked on step 3 is saved first, so the
+     client lands on Today on the right day. A failed save keeps the trainer here with the reason rather than
+     dropping a date they chose. */
+  const finishProspect = async () => {
+    if (createdClientId && followUp) {
+      try {
+        await updateClientDetails(createdClientId, { nextFollowUpOn: followUp });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'The follow-up did not save.');
+        return;
+      }
+    }
+    goToClient();
   };
 
   /* ── render ──
@@ -1418,6 +1465,25 @@ export function AddClientFlow({
                   </div>
                 )}
 
+                {phoneCheck === 'ok' && joinMatch && !dismissedJoinWarn && !phoneIsOwn && (
+                  <div className="why why--warn" style={{ padding: '12px 14px', ['--i' as string]: 2 }}>
+                    <p className="why__k" style={{ marginBottom: 4 }}>They asked to join</p>
+                    <p>
+                      <b>{joinMatch.name}</b> sent a request from your join link with this number. Approving it
+                      keeps what they told you and the consent they gave, and opens their portal. Adding them here
+                      closes that request, and they will need your invite link instead.
+                    </p>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                      <Button href="/clients/joining" variant="secondary" size="sm" onClick={onClose}>
+                        Open their request
+                      </Button>
+                      <Button variant="ghost" size="sm" onClick={() => setDismissedJoinWarn(true)}>
+                        Add them here instead
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 {phoneCheck === 'blocked' && !phoneIsOwn && (
                   <div className="why why--warn" style={{ padding: '12px 14px', ['--i' as string]: 2 }}>
                     <p className="why__k" style={{ marginBottom: 4 }}>This number cannot be added</p>
@@ -1556,7 +1622,36 @@ export function AddClientFlow({
                   </p>
                 </div>
 
-                <div className="why" style={{ padding: '10px 14px', ['--i' as string]: 2 }}>
+                {/* ── WHERE THEY CAME FROM, WHAT THEY ASKED ABOUT (V48) — a prospect only, both optional, one tap
+                    each. The source is what the funnel will count; the pack is what the follow-up call opens with. */}
+                {status === 'prospect' && (
+                  <>
+                    <div style={{ ['--i' as string]: 2 }}>
+                      <Sec k="Where did they hear about you" n={leadSource ? LEAD_SOURCES.find(x => x.id === leadSource)?.label : 'optional'} />
+                      <div className="cflead__chips" role="group" aria-label="Where did they hear about you">
+                        {LEAD_SOURCES.filter(x => x.id !== 'join_link').map(x => (
+                          <Chip key={x.id} pressed={leadSource === x.id} onClick={() => setLeadSource(leadSource === x.id ? null : x.id)}>
+                            {x.label}
+                          </Chip>
+                        ))}
+                      </div>
+                    </div>
+                    {(clientType === 'gym' ? gymPacks : ownPacks).length > 0 && (
+                      <div style={{ ['--i' as string]: 3 }}>
+                        <Sec k="Interested in" n={leadPack ? data.packs.find(p => p.id === leadPack)?.name : 'optional'} />
+                        <div className="cflead__chips" role="group" aria-label="Interested in">
+                          {(clientType === 'gym' ? gymPacks : ownPacks).map(p => (
+                            <Chip key={p.id} pressed={leadPack === p.id} onClick={() => setLeadPack(leadPack === p.id ? null : p.id)}>
+                              {p.name}
+                            </Chip>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                <div className="why" style={{ padding: '10px 14px', ['--i' as string]: 4 }}>
                   <p className="why__k" style={{ marginBottom: 2 }}>
                     {createdClientId ? 'Continue saves what you changed' : 'Continue creates the client'}
                   </p>
@@ -1635,6 +1730,29 @@ export function AddClientFlow({
                     </div>
                   );
                 })}
+                {/* ── OR WHEN TO GET BACK TO THEM (V48) — for the prospect who is not ready for a demo, and for the
+                    one who is: the day they land on Today's queue. Optional; saved with whichever press ends the
+                    flow. */}
+                <div style={{ ['--i' as string]: demoDates.length + 1 }}>
+                  <Sec k="When to follow up" n={followUp ? shortDay(followUp) : 'optional'} />
+                  <div className="cflead__chips" role="group" aria-label="When to follow up">
+                    {[
+                      { label: 'Tomorrow', days: 1 },
+                      { label: 'In 3 days', days: 3 },
+                      { label: 'In a week', days: 7 },
+                    ].map(p => {
+                      const on = addDaysIso(openedOn, p.days);
+                      return (
+                        <Chip key={p.days} pressed={followUp === on} onClick={() => setFollowUp(followUp === on ? null : on)}>
+                          {p.label}
+                        </Chip>
+                      );
+                    })}
+                  </div>
+                  <p className="small" style={{ marginTop: 6 }}>
+                    They show on Today that day, with Call and WhatsApp a tap away.
+                  </p>
+                </div>
                 {createdClientId && (
                   <InviteNow clientId={createdClientId} name={trimmed} phone={`+91${digits}`} />
                 )}
@@ -1955,9 +2073,13 @@ export function AddClientFlow({
               <Button
                 variant="ghost"
                 disabled={submitting}
-                onClick={goToClient}
+                onClick={() => {
+                  if (submitting) return;
+                  setSubmitting(true);
+                  void finishProspect().finally(() => setSubmitting(false));
+                }}
               >
-                {demoAt !== null ? 'Skip for now' : 'Finish'}
+                {demoAt !== null ? 'Skip the demo' : 'Finish'}
               </Button>
             </>
           )}

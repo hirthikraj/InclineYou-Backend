@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation';
 import { AuthShell } from '@/components/auth/AuthShell';
 import { Unattached } from '@/components/auth/Unattached';
 import { formatPhone, readClaims } from '@/lib/auth/claims';
-import { getPendingPhone, getToken, getWall } from '@/lib/auth/session';
+import { getPendingPhone, getToken, getTokenRole, getWall } from '@/lib/auth/session';
 
 export const metadata = { title: 'Nobody is coaching you · InclineYou' };
 
@@ -36,7 +36,7 @@ export const metadata = { title: 'Nobody is coaching you · InclineYou' };
 export const dynamic = 'force-dynamic';
 
 export default async function Page() {
-  const claims = readClaims(await getToken());
+  const claims = readClaims(await getToken(), await getTokenRole());
   if (!claims) redirect('/sign-in');
   if (claims.role === 'trainer') redirect('/today');
 

@@ -390,6 +390,7 @@ export function patchOf(
             reps: s.reps,
             durationSeconds: s.durationSeconds,
             toFailure: s.toFailure,
+            load: s.load ?? null,
           }))
         : null,
     })),

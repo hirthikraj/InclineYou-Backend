@@ -36,7 +36,7 @@ public class AssessmentJdbcRepository {
             a.id::text AS id, a.client_id::text AS client_id, a.template_id::text AS template_id,
             a.schedule_id::text AS schedule_id, a.name, a.due_on, a.completed_at, a.entered_by,
             a.form::text AS form, a.readings::text AS readings, a.answers::text AS answers,
-            a.created_at, a.updated_at, (a.deleted_at IS NOT NULL) AS deleted, a.sent_at""" + " ";
+            a.created_at, a.updated_at, (a.deleted_at IS NOT NULL) AS deleted, a.sent_at, a.read_at""" + " ";
 
     private static AssessmentRow row(ResultSet rs, int i) throws SQLException {
         Timestamp completed = rs.getTimestamp("completed_at");
@@ -48,7 +48,8 @@ public class AssessmentJdbcRepository {
                 rs.getString("form"), rs.getString("readings"), rs.getString("answers"),
                 rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant(),
                 rs.getBoolean("deleted"),
-                rs.getTimestamp("sent_at") == null ? null : rs.getTimestamp("sent_at").toInstant());
+                rs.getTimestamp("sent_at") == null ? null : rs.getTimestamp("sent_at").toInstant(),
+                rs.getTimestamp("read_at") == null ? null : rs.getTimestamp("read_at").toInstant());
     }
 
     private static HashMap<String, Object> params(UUID trainerId, UUID id) {
@@ -236,6 +237,19 @@ public class AssessmentJdbcRepository {
                  WHERE id = :cid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL AND erased_at IS NULL""",
                 java.util.Map.of("cid", clientId.toString(), "tid", trainerId.toString()), String.class)
                 .stream().findFirst();
+    }
+
+    /**
+     * Mark a done assessment reviewed, or take the mark off. {@code read_at} has been on the table since V1 (with
+     * {@code assessment_read_after_return}: only a completed row may carry it) and nothing wrote it until this.
+     * Deliberately leaves {@code updated_at} alone: reviewing is not an edit, and moving the version would turn an open
+     * Correct-readings screen's If-Match into a 412 for nothing.
+     */
+    public void setReviewed(UUID id, boolean reviewed) {
+        jdbc.update(reviewed
+                        ? "UPDATE assessment SET read_at = now() WHERE id = :id::uuid AND read_at IS NULL AND completed_at IS NOT NULL"
+                        : "UPDATE assessment SET read_at = NULL WHERE id = :id::uuid",
+                java.util.Map.of("id", id.toString()));
     }
 
     /** The one thing that makes an assessment visible to the client. Only ever set once. */

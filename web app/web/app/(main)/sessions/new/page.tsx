@@ -5,6 +5,7 @@ import { requirePicker } from '@/lib/sessionlog/guard';
 /** Frame 5a · `/sessions/new` — who is this for. Three groups, and the third
     needs no booking. */
 export const dynamic = 'force-dynamic';
+export const metadata = { title: 'Log a workout · InclineYou' };
 
 export default async function Page() {
   const result = await requirePicker();

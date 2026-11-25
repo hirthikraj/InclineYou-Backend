@@ -50,7 +50,15 @@ export type HomeWeek = {
 };
 
 /** What the client owes and where to pay it — `/v1/portal/money`, only when visible and positive. */
-export type HomePay = { amountDue: number; currency: string; payTo: string | null };
+export type HomePay = {
+  amountDue: number;
+  currency: string;
+  payTo: string | null;
+  /** V50 · set for a gym client, who pays the gym's desk — never the trainer's UPI ID. */
+  gymName?: string | null;
+  /** V50 · the total of their "I've paid" reports still waiting for the trainer. */
+  waiting?: number;
+};
 
 const DAY_MS = 86_400_000;
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -231,7 +239,11 @@ function WeekCard({ week, now, zone }: { week: HomeWeek; now: number; zone: stri
       ? `Done${d.at != null ? ` · ${dayWord(d.at, now, zone)}` : ''}`
       : d.state === 'booked'
         ? d.at != null ? `${dayWord(d.at, now, zone)} at ${when(d.at, zone).time}` : 'Booked'
-        : d.state === 'next' ? 'Up next' : 'To do';
+        /* WHICH *NEXT* (25 Nov 2026). `next` is the next workout in the PLAN's order; the card above says *Next*
+           for the next BOOKED session. With Friday booked as Full body, *Lower body · Up next* told a client two
+           different things were next. So a workout says whether it is booked: the plan's next one, unbooked,
+           is *Next in your plan · not booked*; the rest are *Not booked yet*. A booked one keeps its date. */
+        : d.state === 'next' ? 'Next in your plan · not booked' : 'Not booked yet';
 
   return (
     <Card>
@@ -280,10 +292,16 @@ function PayCard({ pay, first }: { pay: HomePay; first: string }) {
       </CardHead>
       <CardBody>
         <p className="phpay__amt">{amount}</p>
+        {pay.waiting ? (
+          <p className="small ink2 mt2">
+            You told {first} you paid {new Intl.NumberFormat('en-IN', { style: 'currency', currency: pay.currency, maximumFractionDigits: 0 }).format(pay.waiting)} —
+            waiting for them to confirm it.
+          </p>
+        ) : null}
         {link ? (
           <>
             <p className="small ink2 mt2">
-              Left on your package. {first} marks it paid once it arrives.
+              Left on your package. Paid? Tap <b>I’ve paid</b> so {first} can confirm it.
             </p>
             <div className="phpay__phone mt3">
               <Button variant="primary" href={link}>Pay {amount} with UPI</Button>
@@ -297,11 +315,13 @@ function PayCard({ pay, first }: { pay: HomePay; first: string }) {
               </p>
             </div>
           </>
+        ) : pay.gymName ? (
+          <p className="small ink2 mt2">Left on your package. Pay at {pay.gymName}’s desk, then tap <b>I’ve paid</b> so {first} can confirm it.</p>
         ) : (
-          <p className="small ink2 mt2">Left on your package. Settle it with {first} directly.</p>
+          <p className="small ink2 mt2">Left on your package. Settle it with {first} directly, then tap <b>I’ve paid</b>.</p>
         )}
-        <p className="small mt3">
-          <InlineLink href="/me/payments">Payments</InlineLink>
+        <p className="mt3">
+          <Button variant="secondary" href="/me/payments?report=1">I’ve paid</Button>
         </p>
       </CardBody>
     </Card>
@@ -336,6 +356,7 @@ export function HomeView({
   home,
   week,
   pay,
+  moneyVisible = false,
   whatsappUrl,
 }: {
   home: PortalHomeWire;
@@ -343,6 +364,8 @@ export function HomeView({
   week: HomeWeek | null;
   /** What is owed and where to pay it, or null. */
   pay: HomePay | null;
+  /** V50 · whether this client sees money at all — the pack card offers *I've paid* only then. */
+  moneyVisible?: boolean;
   /** The trainer's bare `wa.me` link, from `/v1/portal/me`. Logs nothing. */
   whatsappUrl: string | null;
 }) {
@@ -483,8 +506,19 @@ export function HomeView({
                     />
                   </div>
                 )}
+                {/* "2 sessions left · renew" (23 Nov 2026): the client hears it before the pack runs out, not only the
+                    trainer — the softest way to ask, and where autopay's top-up will later hook in. Paying ahead is
+                    reported like any payment, and lands as an advance the trainer confirms into the next pack. */}
                 {!pack.paused && pack.sessionsLeft <= 2 && (
-                  <p className="small mt2">Worth mentioning to {first} next time you see them.</p>
+                  <>
+                    <p className="small mt2">
+                      <b>{pack.sessionsLeft === 0 ? 'No sessions left' : `${pack.sessionsLeft} session${pack.sessionsLeft === 1 ? '' : 's'} left`} · time to renew.</b>{' '}
+                      Talk to {first} about your next pack{moneyVisible ? ' — paid ahead already? Tell them.' : '.'}
+                    </p>
+                    {moneyVisible && !pay && (
+                      <p className="mt2"><Button variant="secondary" size="sm" href="/me/payments?report=1">I’ve paid</Button></p>
+                    )}
+                  </>
                 )}
                 <p className="small mt3">
                   <InlineLink href="/me/package">Pack and payments</InlineLink>

@@ -74,6 +74,7 @@ export const KIND_LEAD: Record<AttentionKind, string> = {
   unmarked: 'Diary',
   log: 'Diary',
   milestone: 'Milestone',
+  'follow-up': 'Lead',
 };
 
 /**

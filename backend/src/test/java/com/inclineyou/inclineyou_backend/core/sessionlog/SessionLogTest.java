@@ -757,6 +757,49 @@ class SessionLogTest {
         doPost("/v1/sessions/" + s2 + "/exercises/" + sx2 + "/swap", "{\"toExerciseId\":\"" + curl + "\",\"scope\":\"program\"}").andExpect(status().isBadRequest());
     }
 
+    @Test
+    @DisplayName("an exercise added with program scope is also appended to the client's plan day, linked, and bumps its version")
+    void addProgramScope() throws Exception {
+        start();
+        sleep();
+        long before = revisedAt();
+        int mains = jdbc.queryForObject("SELECT count(*) FROM workout_exercise WHERE workout_id = :w::uuid AND alternative_of IS NULL",
+                Map.of("w", workout.toString()), Integer.class);
+        UUID sx = UUID.randomUUID();
+        doPost("/v1/sessions/" + session + "/exercises", "{\"id\":\"" + sx + "\",\"exerciseId\":\"" + curl + "\",\"scope\":\"program\"}")
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.exerciseId").value(curl.toString()));
+        UUID planRow = jdbc.queryForObject("SELECT planned_from FROM session_exercise WHERE id = :s::uuid", Map.of("s", sx.toString()), UUID.class);
+        assertNotNull(planRow);                                                                  // today's row points at the new plan row
+        assertEquals(curl, jdbc.queryForObject("SELECT exercise_id FROM workout_exercise WHERE id = :w::uuid", Map.of("w", planRow.toString()), UUID.class));
+        assertEquals(mains, jdbc.queryForObject("SELECT position FROM workout_exercise WHERE id = :w::uuid", Map.of("w", planRow.toString()), Integer.class));   // last
+        assertEquals(workout, jdbc.queryForObject("SELECT workout_id FROM workout_exercise WHERE id = :w::uuid", Map.of("w", planRow.toString()), UUID.class));
+        assertEquals(tenant, jdbc.queryForObject("SELECT tenant_id FROM workout_exercise WHERE id = :w::uuid", Map.of("w", planRow.toString()), UUID.class));
+        assertEquals(3, jdbc.queryForObject("SELECT count(*) FROM workout_set WHERE workout_exercise_id = :w::uuid AND load_value IS NULL",
+                Map.of("w", planRow.toString()), Integer.class));                                 // three sets, no targets
+        assertTrue(revisedAt() > before);
+
+        // Today scope (the default) leaves the plan alone.
+        int mainsAfter = mains + 1;
+        doPost("/v1/sessions/" + session + "/exercises", "{\"exerciseId\":\"" + bench + "\"}").andExpect(status().isCreated());
+        assertEquals(mainsAfter, jdbc.queryForObject("SELECT count(*) FROM workout_exercise WHERE workout_id = :w::uuid AND alternative_of IS NULL",
+                Map.of("w", workout.toString()), Integer.class));
+
+        doPost("/v1/sessions/" + session + "/exercises", "{\"exerciseId\":\"" + bench + "\",\"scope\":\"template\"}").andExpect(status().isBadRequest());
+        doPost("/v1/sessions/" + session + "/exercises", "{\"exerciseId\":\"" + bench + "\",\"scope\":\"program\",\"sets\":31}").andExpect(status().isBadRequest());
+
+        // A session not from the client's own program refuses, and nothing is added to it.
+        UUID standalone = UUID.randomUUID();
+        jdbc.update("INSERT INTO workout (id, origin, trainer_id, tenant_id, name) VALUES (:id::uuid, 'trainer', :t::uuid, :ten::uuid, 'Standalone')",
+                Map.of("id", standalone.toString(), "t", me.toString(), "ten", tenant.toString()));
+        UUID wRow = planRow(standalone, squat, 0, null);
+        planSet(wRow, 1, "weight", 50, "reps", 10, null, null);
+        UUID s2 = booked(client, "now() + interval '10 hours'", standalone);
+        doPost("/v1/sessions/" + s2 + "/start", "{}").andExpect(status().isOk());
+        int rows = count("session_exercise", s2);
+        doPost("/v1/sessions/" + s2 + "/exercises", "{\"exerciseId\":\"" + curl + "\",\"scope\":\"program\"}").andExpect(status().isBadRequest());
+        assertEquals(rows, count("session_exercise", s2));
+    }
+
     /* -------------------------------------------------------------------------------------- end */
 
     @Test

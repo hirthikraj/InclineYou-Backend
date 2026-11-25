@@ -510,24 +510,24 @@ function OverviewTab({
         {/* Stats row */}
         <div className="stat-row">
           <div className="stat">
-            <div className="stat__k">MEMBERS</div>
+            <div className="stat__k">Members</div>
             <div className="stat__v">{team.activeMembers}</div>
             <div className="stat__d">of {team.seatLimit} seats</div>
           </div>
           <div className="stat">
-            <div className="stat__k">PENDING</div>
+            <div className="stat__k">Pending</div>
             <div className="stat__v">{team.pendingInvites}</div>
             <div className="stat__d">invitations</div>
           </div>
           <div className="stat">
-            <div className="stat__k">COACHES</div>
+            <div className="stat__k">Coaches</div>
             <div className="stat__v">
               {active.filter((m) => m.role === 'coach').length}
             </div>
             <div className="stat__d">no admin access</div>
           </div>
           <div className="stat">
-            <div className="stat__k">ADMINS</div>
+            <div className="stat__k">Admins</div>
             <div className="stat__v">
               {active.filter((m) => m.role === 'admin').length}
             </div>
@@ -1554,12 +1554,12 @@ function RevenueTab({ team: _team }: { team: TeamResponse }) {
         <>
           <div className="stat-row">
             <div className="stat stat--acc">
-              <div className="stat__k">TEAM TOTAL</div>
+              <div className="stat__k">Team total</div>
               <div className="stat__v">{toRs(data.teamCollected)}</div>
               <div className="stat__d">collected</div>
             </div>
             <div className="stat">
-              <div className="stat__k">GYM SHARE</div>
+              <div className="stat__k">Gym share</div>
               <div className="stat__v">{toRs(data.teamGymShare)}</div>
               <div className="stat__d">gym&rsquo;s cut</div>
             </div>

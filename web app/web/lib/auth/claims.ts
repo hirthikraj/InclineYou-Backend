@@ -61,7 +61,7 @@ const ROLES = new Set<string>([
  * out*, which is the safe reading in both directions: it never grants a screen,
  * and the server would have refused the token anyway.
  */
-export function readClaims(token: string | null): SessionClaims | null {
+export function readClaims(token: string | null, roleHint?: string | null): SessionClaims | null {
   if (!token) return null;
 
   // An opaque session token (`xs_…`) says nothing about itself — that is its
@@ -69,7 +69,16 @@ export function readClaims(token: string | null): SessionClaims | null {
   // refused at verify and a new number gets the pending JWT below), so the
   // prefix is the whole answer. Whether the SESSION is still alive is the
   // server's, asked on `/sign-in` and by every guarded read.
-  if (token.startsWith('xs_')) return { sub: null, phone: null, role: 'trainer', exp: null };
+  //
+  // NO LONGER TRUE since the portal (22 Nov 2026): a client signs in on the web
+  // and gets an `xs_` session too. So the role the sign-in answered rides in its
+  // own cookie (`getTokenRole`) and is passed here as `roleHint`; a cookie set
+  // before that existed has none and still reads as a trainer, which `/sign-in`
+  // corrects when `/v1/me` answers 403.
+  if (token.startsWith('xs_')) {
+    const role = roleHint && ROLES.has(roleHint) ? (roleHint as Role) : 'trainer';
+    return { sub: null, phone: null, role, exp: null };
+  }
 
   const parts = token.split('.');
   if (parts.length !== 3) return null;

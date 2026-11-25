@@ -42,6 +42,7 @@
    backend's `NudgeService`, `lib/nudges/cooldown.ts` — and a fifth living inside
    the ranking would be the one that silently disagrees. */
 import { packCountsForSetup, setupFor, setupLine, SETUP_COPY } from '@/lib/clients/setup';
+import { followUpDue, followUpLine, followUpState, type LeadWire } from '@/lib/clients/lead';
 import { asBilling, type Billing } from '@/lib/schedule/billing';
 import { COOLDOWN_DAYS } from '@/lib/nudges/cooldown';
 
@@ -280,6 +281,22 @@ export const ATTENTION_BANDS = [
   /* ── 4 · gone quiet — no workout logged in QUIET_DAYS. ─────────────────── */
   'quiet',
 
+  /* ── 4a · a prospect to get back to (V48, 23 Nov 2026). ─────────────────── */
+  /*
+   * The follow-up date the trainer set is today, or has passed. INSERTED here
+   * rather than appended, and that is a decision, not an accident: appended it
+   * would rank under an open log, and a lead not rung back on the day they were
+   * promised a call is the cheapest revenue on the whole queue to lose. It sits
+   * under the four bands where a paying client is at risk (a client in hand
+   * first) and above every row of housekeeping. Every band below moves down one
+   * value; the order among them is unchanged, so roster and Today still agree.
+   * Not in `RISK_BANDS` (a prospect is not a client on the way out) and not
+   * snoozable: it leaves when a response is logged or the date is moved, which is
+   * the soft rule `setup` follows — "not now" on it would mean "change the date",
+   * which the file does in one tap.
+   */
+  'follow-up',
+
   /* ── 5 · a pack sold and the client not set up (22 Nov 2026). ─────────── */
   /*
    * Days a week, a plan, a session booked — `lib/clients/setup.ts` is the rule
@@ -354,6 +371,7 @@ export const DECK_BANDS: AttentionBand[] = [
   'due-soon',
   'missed',
   'quiet',
+  'follow-up',
   'setup',
   'no-program',
   'assessment-due',
@@ -668,6 +686,8 @@ export interface DeckClient {
   nextSessionAt?: number | null;
   /** `membershipStatus` — accepted (or paused) is consent, the setup row's first step (22 Nov 2026). */
   membershipStatus?: string | null;
+  /** V48 · `lead` — the follow-up date, and the source and interest its row names. */
+  lead?: LeadWire;
 }
 export interface DeckScheduled {
   id: string;
@@ -835,6 +855,11 @@ export interface DeckInput {
    */
   nudges?: DeckNudge[];
   /**
+   * V50 · what each client has told the trainer they paid and the trainer has not yet confirmed (open "I've paid"
+   * reports), by client id. Optional like `nudges`: a failed read means rows say Remind, as they did before V50.
+   */
+  claimed?: Record<string, number>;
+  /**
    * v1 · `GET /v1/money/summary?months=2`, newest month first. When present the
    * money card reads it rather than summing payment rows (api-contract R4).
    */
@@ -936,7 +961,9 @@ export type AttentionKind =
   | 'setup'
   | 'unmarked'
   | 'milestone'
-  | 'assess';
+  | 'assess'
+  /** V48 — a prospect's follow-up is due. Navigates to their file, where Call, WhatsApp and Log are. */
+  | 'follow-up';
 
 export interface AttentionItem {
   key: string;
@@ -1366,9 +1393,35 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
       dueByClient.set(p.clientId, { total: owed, oldest: at, overdue: false });
     }
   }
+  /* V50 · a client who says they've paid is not chased. Their row asks the trainer to CONFIRM instead — a navigation to
+     the To confirm card, since checking a UPI app is not a one-click commit — and a reminder to somebody who has just
+     said "paid" is the fastest way to annoy them. A report with nothing owed (paid before a pack was sold) gets the
+     same row. */
+  const claimed = input.claimed ?? {};
+  for (const [clientId, amount] of Object.entries(claimed)) {
+    const client = byId.get(clientId);
+    if (!client || !(amount > 0)) continue;
+    const owed = dueByClient.get(clientId);
+    const days = owed ? Math.max(0, daysBetween(owed.oldest, now)) : 0;
+    const band = moneyBand(days, false);
+    items.push({
+      key: `overdue:${clientId}`,
+      kind: 'overdue',
+      band,
+      clientId,
+      clientName: client.name?.trim() || 'Client',
+      line: `Says they paid ${rupees(amount)} · confirm it`,
+      severity: attentionSeverity(band),
+      action: 'Confirm',
+      href: '/business',
+      weight: attentionWeight(band, moneyMagnitude(amount)),
+      at: owed?.oldest ?? now,
+    });
+  }
   for (const [clientId, due] of dueByClient) {
     const client = byId.get(clientId);
     if (!client) continue;
+    if ((claimed[clientId] ?? 0) > 0) continue;
     const days = Math.max(0, daysBetween(due.oldest, now));
     // Two bands, not a boolean: money owed is always worth seeing, and past
     // OVERDUE_DAYS it stops being a reminder.
@@ -1694,6 +1747,32 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
          earlier the missing step, the higher the row. */
       weight: attentionWeight('setup', next === 'consent' ? 4 : next === 'rhythm' ? 3 : next === 'plan' ? 2 : 1),
       at: now,
+    });
+  }
+
+  /* --- a prospect's follow-up is due (V48) ---
+   *
+   * Prospects only: the date is the trainer's promise to get back to an enquiry, and once they buy a pack the setup
+   * row and the pack's own rows take over. The verb navigates — Call, WhatsApp and Log a response are on the file's
+   * Lead card, and logging there is what clears this row. The longer it has been missed, the higher in its band. */
+  for (const client of input.clients) {
+    if (lower(client.status) !== 'prospect') continue;
+    const on = client.lead?.nextFollowUpOn;
+    if (!on || !followUpDue(on, now)) continue;
+    const state = followUpState(on, now);
+    const daysLate = state.kind === 'late' ? state.days : 0;
+    items.push({
+      key: `follow-up:${client.id}`,
+      kind: 'follow-up',
+      band: 'follow-up',
+      clientId: client.id,
+      clientName: client.name?.trim() || 'Client',
+      line: followUpLine(client.lead ?? {}, now),
+      severity: attentionSeverity('follow-up'),
+      action: 'Follow up',
+      href: `/clients/${client.id}`,
+      weight: attentionWeight('follow-up', daysLate),
+      at: Date.parse(`${on}T00:00:00+05:30`),
     });
   }
 

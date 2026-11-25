@@ -3,6 +3,7 @@ package com.inclineyou.inclineyou_backend.core.client;
 import com.inclineyou.inclineyou_backend.core.client.dto.ClientSummary;
 import com.inclineyou.inclineyou_backend.core.client.dto.Portal;
 import com.inclineyou.inclineyou_backend.core.client.dto.CreateClientRequest;
+import com.inclineyou.inclineyou_backend.core.client.dto.Lead;
 import com.inclineyou.inclineyou_backend.core.client.dto.UpdateClientRequest;
 import com.inclineyou.inclineyou_backend.shared.wire.Patch;
 import lombok.RequiredArgsConstructor;
@@ -87,9 +88,15 @@ public class ClientJdbcRepository {
         p.put("type", req.clientType());
         p.put("status", req.status());
         p.put("gender", req.gender());
+        p.put("source", req.leadSource());
+        p.put("sourceDetail", req.leadSourceDetail());
+        p.put("pack", req.interestedPackId() == null ? null : req.interestedPackId().toString());
+        p.put("followUp", req.nextFollowUpOn() == null ? null : Date.valueOf(req.nextFollowUpOn()));
         return jdbc.update("""
-                INSERT INTO client (id, trainer_id, name, phone, date_of_birth, client_type, status, gender)
-                VALUES (:cid::uuid, :tid::uuid, :name, :phone, :dob, :type, :status, :gender)
+                INSERT INTO client (id, trainer_id, name, phone, date_of_birth, client_type, status, gender,
+                                    lead_source, lead_source_detail, interested_pack_id, next_follow_up_on)
+                VALUES (:cid::uuid, :tid::uuid, :name, :phone, :dob, :type, :status, :gender,
+                        :source, :sourceDetail, CAST(:pack AS uuid), :followUp)
                 ON CONFLICT DO NOTHING
                 """, p) == 1;
     }
@@ -163,6 +170,18 @@ public class ClientJdbcRepository {
             sets.append(", reminders_excluded = :excluded");
         }
         set(sets, p, "portal_show_money", "showMoney", req.portalShowMoney());
+        set(sets, p, "lead_source", "source", req.leadSource());
+        set(sets, p, "lead_source_detail", "sourceDetail", req.leadSourceDetail());
+        if (req.interestedPackId() != null) {
+            var pack = req.interestedPackId().value();
+            p.put("pack", pack == null ? null : pack.toString());
+            sets.append(", interested_pack_id = CAST(:pack AS uuid)");
+        }
+        if (req.nextFollowUpOn() != null) {
+            LocalDate on = req.nextFollowUpOn().value();
+            p.put("followUp", on == null ? null : Date.valueOf(on));
+            sets.append(", next_follow_up_on = :followUp");
+        }
         jdbc.update("UPDATE client SET " + sets.substring(2) + " WHERE id = :cid::uuid", p);
     }
 
@@ -275,6 +294,7 @@ public class ClientJdbcRepository {
         jdbc.update("""
                 UPDATE client SET deleted_at = now(), phone = NULL, date_of_birth = NULL, goal = NULL,
                        height_cm = NULL, activity_level = NULL, gender = NULL, metadata = NULL,
+                       lead_source_detail = NULL, interested_pack_id = NULL, next_follow_up_on = NULL,
                        membership_status = 'removed', removed_at = now(), removed_by = 'trainer'
                 WHERE id = :cid::uuid
                 """, Map.of("cid", clientId.toString()));
@@ -307,6 +327,46 @@ public class ClientJdbcRepository {
                        removed_ack_at = NULL
                 WHERE id = :cid::uuid
                 """, Map.of("cid", clientId.toString()));
+    }
+
+    // ── the lead (V48) ─────────────────────────────────────────────────────────
+
+    /**
+     * Whether a pack may be named as what this trainer's lead is interested in: one of their own price-list packs, not
+     * removed. A retired pack is allowed — they may have asked about it before it was retired.
+     */
+    public boolean ownsPack(UUID trainerId, UUID packId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM pack WHERE id = :pid::uuid AND trainer_id = :tid::uuid AND deleted_at IS NULL)
+                """, Map.of("pid", packId.toString(), "tid", trainerId.toString()), Boolean.class));
+    }
+
+    /** The client's follow-up date, read under the lock a contact write holds. */
+    public LocalDate nextFollowUpOn(UUID clientId) {
+        return jdbc.queryForObject("SELECT next_follow_up_on FROM client WHERE id = :cid::uuid",
+                Map.of("cid", clientId.toString()), LocalDate.class);
+    }
+
+    public void setNextFollowUpOn(UUID clientId, LocalDate on) {
+        var p = new HashMap<String, Object>();
+        p.put("cid", clientId.toString());
+        p.put("on", on == null ? null : Date.valueOf(on));
+        jdbc.update("UPDATE client SET next_follow_up_on = :on WHERE id = :cid::uuid", p);
+    }
+
+    /**
+     * A client made by approving a join request came through the join link, and asked about the pack they picked on the
+     * page. Only what is still empty: an approval replayed later must not undo a trainer's correction.
+     */
+    public void stampJoinLead(UUID clientId, UUID packId) {
+        var p = new HashMap<String, Object>();
+        p.put("cid", clientId.toString());
+        p.put("pack", packId == null ? null : packId.toString());
+        jdbc.update("""
+                UPDATE client SET lead_source = coalesce(lead_source, 'join_link'),
+                                  interested_pack_id = coalesce(interested_pack_id, CAST(:pack AS uuid))
+                WHERE id = :cid::uuid AND (lead_source IS NULL OR interested_pack_id IS NULL)
+                """, p);
     }
 
     // ── the client file ────────────────────────────────────────────────────────
@@ -355,11 +415,19 @@ public class ClientJdbcRepository {
                        cs.sessions_per_week, cs.session_duration_minutes, cs.delivery_mode,
                        cs.updated_at AS schedule_updated_at,
                        p.id::text AS program_id, p.name AS program_name, p.weeks, p.days,
-                       p.start_date::text AS start_date, p.end_date::text AS end_date
+                       p.start_date::text AS start_date, p.end_date::text AS end_date,
+                       c.lead_source, c.lead_source_detail, c.interested_pack_id::text AS interested_pack_id,
+                       ip.name AS interested_pack_name, c.next_follow_up_on::text AS next_follow_up_on,
+                       lc.created_at AS last_contact_at, lc.outcome AS last_outcome
                 FROM client c
                 LEFT JOIN client_schedule cs ON cs.client_id = c.id
                 -- uq_program_client_active guarantees at most one row here.
                 LEFT JOIN program p ON p.client_id = c.id AND p.status = 'active' AND p.deleted_at IS NULL
+                LEFT JOIN pack ip ON ip.id = c.interested_pack_id AND ip.deleted_at IS NULL
+                -- the newest contact, on idx_lead_contact_client: one index probe per client
+                LEFT JOIN LATERAL (SELECT x.created_at, x.outcome FROM lead_contact x
+                                   WHERE x.client_id = c.id AND x.deleted_at IS NULL
+                                   ORDER BY x.created_at DESC, x.id DESC LIMIT 1) lc ON true
                 WHERE c.trainer_id = :tid::uuid AND c.deleted_at IS NULL AND c.status IN (:statuses)
                   AND (CAST(:cid AS uuid) IS NULL OR c.id = CAST(:cid AS uuid))
                 ORDER BY lower(c.name), c.id
@@ -396,7 +464,11 @@ public class ClientJdbcRepository {
                     rs.getTimestamp("created_at").getTime(),
                     String.valueOf(rs.getTimestamp("updated_at").getTime()),
                     portal(rs, selfRuns.get(id)),
-                    rs.getString("gender"));
+                    rs.getString("gender"),
+                    new Lead(rs.getString("lead_source"), rs.getString("lead_source_detail"),
+                             rs.getString("interested_pack_name") == null ? null : rs.getString("interested_pack_id"),
+                             rs.getString("interested_pack_name"), rs.getString("next_follow_up_on"),
+                             epochOrNull(rs.getTimestamp("last_contact_at")), rs.getString("last_outcome")));
         });
     }
 

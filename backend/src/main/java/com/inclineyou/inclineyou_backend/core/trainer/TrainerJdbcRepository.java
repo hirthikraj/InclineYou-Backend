@@ -110,4 +110,36 @@ public class TrainerJdbcRepository {
                 VALUES (:tid::uuid, :day, CAST(:start AS time), CAST(:end AS time))
                 """, Map.of("tid", trainerId.toString(), "day", weekday, "start", start, "end", end));
     }
+
+    /**
+     * V46: the UPI ID now belongs to the trainer's home WORKSPACE's business. Null when unset. The trainer's own
+     * {@code trainer_business.upi_vpa} is no longer read.
+     */
+    public String homeUpi(UUID trainerId) {
+        return jdbc.query("""
+                SELECT b.upi_vpa FROM trainer t JOIN tenant_business b ON b.tenant_id = t.home_tenant_id
+                 WHERE t.id = :tid::uuid
+                """, Map.of("tid", trainerId.toString()), (rs, i) -> rs.getString(1))
+                // NOT stream().findFirst(): an unset UPI ID is a row holding null, and findFirst() throws on a null element.
+                .stream().filter(java.util.Objects::nonNull).findFirst().orElse(null);
+    }
+
+    /**
+     * Writes the UPI ID through to the business of the workspace the trainer OWNS as their home (V46) — `PATCH
+     * /v1/trainers/me`'s {@code upiVpa}, which the setup flow and older builds still send. Nothing is written for a
+     * trainer who does not own their home workspace. True when a row changed.
+     */
+    public boolean setHomeUpi(UUID trainerId, String upi) {
+        var p = new java.util.HashMap<String, Object>();
+        p.put("tid", trainerId.toString());
+        p.put("upi", upi);
+        return jdbc.update("""
+                UPDATE tenant_business b SET upi_vpa = :upi
+                  FROM trainer t
+                 WHERE t.id = :tid::uuid AND b.tenant_id = t.home_tenant_id
+                   AND EXISTS (SELECT 1 FROM tenant_member tm
+                                WHERE tm.tenant_id = t.home_tenant_id AND tm.app_user_id = t.app_user_id
+                                  AND tm.role = 'owner' AND tm.status = 'active' AND tm.deleted_at IS NULL)
+                """, p) == 1;
+    }
 }

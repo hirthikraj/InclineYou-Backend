@@ -10,6 +10,7 @@ import { ResumeButton } from './ResumeButton';
 import { NudgeButton } from '@/components/nudge/NudgeButton';
 
 import { FollowUps } from './FollowUps';
+import { LeadCard } from './LeadCard';
 import { SetupCard } from './SetupCard';
 import { EditWeekButton } from './WeekEditor';
 import { CalendarIcon, ListIcon, dateStr, isoDateStr, num, shortTime } from './shared';
@@ -270,6 +271,13 @@ export function OverviewTab({
 
   /* A PAUSED CLIENT'S FILE ASKS ONE QUESTION: ARE THEY COMING BACK. */
   const paused = client.status === 'paused';
+  /* A PROSPECT'S OVERVIEW IS THE CHECKLIST (23 Nov 2026). Under *Turn Ritu into a client* sat six cards, and
+     on a phone they were a screen and a half of the checklist said again, emptier: *Nothing booked* with a
+     lime *Book a session* (step 2, and a second primary beside the checklist's), *No live pack* with *Sell a
+     pack* (step 4), *Turning up* against a week nobody agreed, and empty records. So for a prospect those
+     stand down until they hold something — a booked demo still draws its hero, a pack its card, a logged
+     set its records — and the notes and follow-ups stay. */
+  const prospect = (client.status ?? '').toLowerCase() === 'prospect';
   const backAt = client.pausedUntil ? new Date(client.pausedUntil).getTime() : null;
 
   const nextSession =
@@ -359,6 +367,13 @@ export function OverviewTab({
              booking, or a prospect's demo. Spans the grid and leaves by itself. */}
       <SetupCard payload={payload} />
 
+      {/* ── 0a · FOLLOWING UP (V48) — a prospect's enquiry: where from, what they asked about, when to get back
+             to them, and what they said each time. Under the checklist because the checklist is what turns them
+             into a client and this is the conversation that gets them there. */}
+      {prospect && (
+        <LeadCard client={client} contacts={payload.leadContacts} packs={payload.priceList} now={now} />
+      )}
+
       {/* ── 1 · WHEN AM I SEEING THEM ─────────────────────────────────────── */}
       {nextSession ? (
         <HeroCard
@@ -383,7 +398,7 @@ export function OverviewTab({
              only mean something together, and drawn 200px apart they were two
              things to read instead of one. */
           chips={
-            activeProgram ? (
+            prospect ? undefined : activeProgram ? (
               <Tag tone="acc" href={`/clients/${client.id}/program`}>
                 {activeProgram.name}
               </Tag>
@@ -401,7 +416,9 @@ export function OverviewTab({
              is a real answer and a blank band is not. */
           band={{
             icon: <Clock size={15} />,
-            text: arrangement ? (
+            text: prospect ? (
+              'Their demo. Mark it done once it has happened, then sell them a pack.'
+            ) : arrangement ? (
               <>
                 Standing slot: <b>{arrangement}</b>
               </>
@@ -414,30 +431,44 @@ export function OverviewTab({
               <Button href="/schedule" variant="secondary" size="sm" icon={<CalendarIcon />}>
                 Reschedule
               </Button>
-              <Button
-                href={`/clients/${client.id}/program`}
-                variant="ghost"
-                size="sm"
-                icon={<ListIcon />}
-              >
-                {activeProgram ? 'Change the plan' : 'Assign a plan'}
-              </Button>
+              {!prospect && (
+                <Button
+                  href={`/clients/${client.id}/program`}
+                  variant="ghost"
+                  size="sm"
+                  icon={<ListIcon />}
+                >
+                  {activeProgram ? 'Change the plan' : 'Assign a plan'}
+                </Button>
+              )}
             </>
           }
         />
-      ) : (
+      ) : prospect ? null : (
         <HeroCard
           quiet
           label={paused ? `${client.name} is paused` : `No session booked with ${client.name}`}
           kicker={paused ? 'Paused' : 'Next session'}
-          name={paused ? 'On hold' : 'Nothing booked'}
+          /* The headline is the answer a trainer opens a paused file for — WHEN are
+             they back. It said "On hold" under a "Paused" kicker, beside a header
+             that already says Paused twice, and put the date in the small line. */
+          name={paused
+            ? backAt === null
+              ? 'No return date'
+              : backAt < now
+                ? `Was due ${isoDateStr(client.pausedUntil as string)}`
+                : `Back ${isoDateStr(client.pausedUntil as string)}`
+            : 'Nothing booked'}
           detail={
             paused
               ? backAt === null
-                ? 'Paused with no return date.'
+                ? 'Set one when they tell you.'
                 : backAt < now
-                  ? `Was due back ${isoDateStr(client.pausedUntil as string)}.`
-                  : `Due back ${isoDateStr(client.pausedUntil as string)}.`
+                  ? 'Their date has passed. Worth a message.'
+                  : (() => {
+                      const d = Math.max(1, Math.ceil((startOfDay(backAt) - startOfDay(now)) / DAY_MS));
+                      return d === 1 ? 'Tomorrow.' : `In ${d} days.`;
+                    })()
               : activeProgram
                 ? `${activeProgram.name} is assigned and nothing is on the calendar.`
                 : 'No plan assigned and nothing on the calendar.'
@@ -490,6 +521,7 @@ export function OverviewTab({
       )}
 
       {/* ── 2 · DO THEY OWE ME ────────────────────────────────────────────── */}
+      {!(prospect && packages.length === 0) && (
       <Card tone={overdue ? 'danger' : undefined} className="cfov__pack">
         <Card.Head
           className="card__hd--wrap"
@@ -645,8 +677,10 @@ export function OverviewTab({
           </Card.Body>
         )}
       </Card>
+      )}
 
       {/* ── 3 · ARE THEY TURNING UP ───────────────────────────────────────── */}
+      {!prospect && (
       <Card className="cfov__week">
         <Card.Head
           className="card__hd--wrap"
@@ -687,7 +721,14 @@ export function OverviewTab({
               *the plan asked for nothing*, which is true of the diary and
               false about the person. So the row is not drawn at all and the
               card says which of the two it is. */}
-          {plannedThisWeek === 0 && doneThisWeek === 0 ? (
+          {/* A PAUSED CLIENT OWES THIS WEEK NOTHING. The agreed days were drawn as
+              slots to keep, so a client on holiday read "0 of 3 this week" beside
+              the card that says they are away. */}
+          {paused && doneThisWeek === 0 ? (
+            <p className="small">
+              Paused this week, so nothing is expected. Their agreed week picks up when they are back.
+            </p>
+          ) : plannedThisWeek === 0 && doneThisWeek === 0 ? (
             <p className="small">
               {agreedDays.size === 0
                 ? 'No standing week agreed and nothing booked, so there is nothing to keep this week.'
@@ -741,6 +782,7 @@ export function OverviewTab({
           </span>
         </Card.Band>
       </Card>
+      )}
 
       {/* ── 4 · IS IT WORKING ─────────────────────────────────────────────── */}
       {/* EXERCISE RECORDS, NOT THE BODY. A body is measured in an assessment and nowhere
@@ -748,6 +790,7 @@ export function OverviewTab({
           could neither take nor correct from this screen. What a trainer CAN see move from
           here is the lift, and a personal best is the figure a client is told first.
           Nothing on it carries a tone: a held lift is a state, not a failure. */}
+      {!(prospect && progress && top.length === 0) && (
       <Card className="cfov__rec">
         <Card.Head
           className="card__hd--wrap"
@@ -797,6 +840,7 @@ export function OverviewTab({
           </Card.Band>
         )}
       </Card>
+      )}
 
       {/* ── 5 · WHAT HAVE I SAID TO THEM ──────────────────────────────────── */}
       <FollowUps

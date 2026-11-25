@@ -5,6 +5,9 @@ import { useState, useTransition } from 'react';
 import { saveMyDetails, type DetailsChange, type MyDetailsWire } from '@/lib/portal/profile-actions';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
+import { AffixField } from '@/web-components/ui/AffixField';
+import { FactList } from '@/web-components/ui/FactList';
+import { formatPhone } from '@/lib/auth/policy';
 import { TextField } from '@/web-components/ui/Field';
 import { Message } from '@/web-components/ui/Message';
 import { Select } from '@/web-components/ui/Select';
@@ -68,33 +71,64 @@ export function MyDetailsForm({ details, trainerName }: { details: MyDetailsWire
     });
   }
 
+  /* A date of birth as a person reads it, never the stored `1990-12-05`. */
+  const born = saved.dateOfBirth
+    ? new Date(`${saved.dateOfBirth}T00:00:00`).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+    : null;
+
+  /* THREE CARDS, NOT ONE COLUMN OF SEVEN (25 Nov 2026) — who you are, your body, your account — and what cannot be
+     changed here (the number, the date of birth) is drawn as facts, not as read-only boxes that look editable. */
   return (
-    <Card>
-      <Card.Body>
+    <div className="col gap4">
+      <Card title="About you">
         <TextField label="Name" value={name} maxLength={100} onChange={(e) => setName(e.target.value)} error={failure?.field === 'name' ? failure.message : undefined} />
-        <Textarea label="Your goal" hint={`${trainerName} sees this. Leave it empty if you’d rather not say.`} value={goal} limit={1000} rows={3} onChange={(e) => setGoal(e.target.value)} />
-        <TextField label="Height (cm)" inputMode="decimal" numeric width={160} value={height} onChange={(e) => setHeight(e.target.value)} error={failure?.field === 'height' ? failure.message : undefined} />
         <Select
           label="Gender"
-          hint={`${trainerName} added this. If it isn’t right, change it — or choose “Prefer not to say”.`}
+          /* Said only when it is true (25 Nov 2026): *added this* sat over *Not given*. */
+          hint={saved.gender
+            ? `${trainerName} added this. If it isn’t right, change it — or choose “Prefer not to say”.`
+            : 'Optional. Choose “Prefer not to say” if you’d rather not.'}
           value={gender}
           options={[{ value: '', label: 'Not given' }, ...GENDERS]}
           onChange={(e) => setGender(e.target.value)}
         />
+        <Textarea label="Your goal" hint={`${trainerName} sees this. Leave it empty if you’d rather not say.`} value={goal} limit={1000} rows={3} onChange={(e) => setGoal(e.target.value)} />
+      </Card>
+
+      <Card title="Your body">
+        <AffixField
+          label="Height"
+          unit="centimetres"
+          affix="cm"
+          side="trailing"
+          id="me-height"
+          inputMode="decimal"
+          value={height}
+          onChange={(e) => setHeight(e.target.value)}
+          error={failure?.field === 'height' ? failure.message : undefined}
+        />
         <Select label="How active are you now" value={activity} options={ACTIVITY} onChange={(e) => setActivity(e.target.value)} />
+      </Card>
+
+      <Card title="Your account">
         <Select label="Time zone" hint="Your sessions and reminders are shown in this." value={timezone} options={zones.map((z) => ({ value: z, label: z.replace('_', ' ') }))} onChange={(e) => setTimezone(e.target.value)} />
+        <FactList className="mt3 pdet__facts">
+          <FactList.Row k="Mobile number" note={`How you sign in. To change it, ask ${trainerName}.`}>
+            {saved.phone ? formatPhone(saved.phone) : '—'}
+          </FactList.Row>
+          <FactList.Row k="Date of birth" note="Set when you joined.">{born ?? '—'}</FactList.Row>
+        </FactList>
+      </Card>
 
-        <TextField label="Mobile number" value={saved.phone ?? ''} readOnly hint={`This is how you sign in. To change it, ask ${trainerName}.`} />
-        <TextField label="Date of birth" value={saved.dateOfBirth ?? ''} readOnly hint="Set when you joined." />
-
-        <div aria-live="polite">
-          {failure && !failure.field ? <Message tone="err" className="mt3">{failure.message}</Message> : null}
-          {done ? <Message tone="ok" className="mt3">Saved.</Message> : null}
-        </div>
-        <Button variant="primary" size="lg" style={{ marginTop: 16 }} disabled={pending} onClick={save}>
+      <div aria-live="polite">
+        {failure && !failure.field ? <Message tone="err">{failure.message}</Message> : null}
+        {done ? <Message tone="ok">Saved.</Message> : null}
+      </div>
+      <div>
+        <Button variant="primary" size="lg" disabled={pending} onClick={save}>
           {pending ? 'Saving…' : 'Save'}
         </Button>
-      </Card.Body>
-    </Card>
+      </div>
+    </div>
   );
 }

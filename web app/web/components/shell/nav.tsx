@@ -275,12 +275,16 @@ export const PRIMARY: Destination[] = [
        yearly in that order. */
     pages: [
       { key: 'overview', icon: <Grid size={17} />, label: 'Overview', href: '/business' },
-      { key: 'transactions', icon: <Rupee size={17} />, label: 'Transactions', href: '/business/transactions' },
+      /* *Transactions* until 23 Nov 2026; renamed for what it answers — every rupee by state, starting with what clients
+         say they have paid (V50). `/business/transactions` redirects. */
+      { key: 'transactions', icon: <Rupee size={17} />, label: 'Payments', href: '/business/payments' },
       { key: 'packages', icon: <Stack size={17} />, label: 'Packages', href: '/business/packages' },
       /* Only for a trainer with a gym: the split on the gym's money and what the gym
          owes them. `NavFlags.tsx` hides the row; the route stays reachable. */
       { key: 'gym', icon: <Wallet size={17} />, label: 'Gym share', href: '/business/gym', needs: 'gym' },
       { key: 'reports', icon: <Chart size={17} />, label: 'Reports', href: '/business/reports' },
+      /* V50 · how clients pay: the UPI ID, its QR, part payments and (coming) Razorpay autopay. Last — set once, read rarely. */
+      { key: 'payment-setup', icon: <Gear size={17} />, label: 'Payment setup', href: '/business/payment-setup' },
     ],
   },
 ];

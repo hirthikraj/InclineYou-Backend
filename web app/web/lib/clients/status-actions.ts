@@ -18,7 +18,10 @@ import { api, ApiError } from '@/lib/http/client';
  * what a pause cancelled, never a session somebody called off by hand (R70).
  */
 
-export type ArchiveReason = 'goal_reached' | 'moved_away' | 'cost' | 'no_time' | 'switched_trainer' | 'other';
+export type ArchiveReason =
+  | 'goal_reached' | 'moved_away' | 'cost' | 'no_time' | 'switched_trainer' | 'other'
+  /* V48: the two a prospect ends on. */
+  | 'not_interested' | 'no_response';
 
 export interface StatusWriteResult {
   ok: boolean;

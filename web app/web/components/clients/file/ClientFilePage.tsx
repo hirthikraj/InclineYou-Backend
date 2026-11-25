@@ -20,7 +20,7 @@ export async function ClientFilePage({
   clientId: string;
   tab: ClientTab;
   options?: TabOptions;
-  extra?: Promise<Partial<Pick<ClientFileProps, 'progress' | 'progressFailed' | 'assessments' | 'schedules' | 'templates'>>>;
+  extra?: Promise<Partial<Pick<ClientFileProps, 'progress' | 'progressFailed' | 'assessments' | 'schedules' | 'templates' | 'business' | 'claims'>>>;
 }) {
   const [file, more] = await Promise.all([requireClientFile(clientId, tab, options), extra ?? {}]);
   if (!file.ok) {
@@ -29,7 +29,7 @@ export async function ClientFilePage({
       <Unavailable
         kind={file.kind}
         status={file.kind === 'refused' ? file.status : undefined}
-        kicker="CLIENT FILE"
+        kicker="Client file"
         what="this client's file"
         back={{ href: '/clients', label: 'Back to clients' }}
       />

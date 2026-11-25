@@ -29,14 +29,11 @@ export type ExercisesResult =
   | { ok: false; kind: 'unreachable' }
   | { ok: false; kind: 'refused'; status: number };
 
-/** What the server is asked, from a state of the page. The three views name the same filters differently. */
+/** What the server is asked, from a state of the page. The two views name the same filters differently. */
 function searchOf(q: LibraryQuery) {
   const base = { size: EXERCISES_PAGE_SIZE, page: q.page };
   if (q.view === 'categories') {
     return { ...base, bodyPart: q.group ? [q.group] : [], target: q.muscle ? [q.muscle] : [] };
-  }
-  if (q.view === 'equipment') {
-    return { ...base, equipmentCategory: q.ecat ? [q.ecat] : [], equipmentKey: q.ekey ? [q.ekey] : [] };
   }
   return {
     ...base,
@@ -57,7 +54,7 @@ export async function requireExercises(query: LibraryQuery): Promise<ExercisesRe
   if (!(await getToken())) redirect('/sign-in');
 
   try {
-    /* The facets first: whether an opened equipment category lists or shows tiles depends on how many kinds it holds.
+    /* The facets first: whether an opened body part lists or shows tiles depends on how many muscles it holds.
        `getLibraryMeta` is cached for the request and the server answers it from an ETag. */
     const [meta, createMeta] = await Promise.all([getLibraryMeta(), getExercisesMeta()]);
     const initial = wantsList(query, meta) ? await getExercises(searchOf(query)) : null;

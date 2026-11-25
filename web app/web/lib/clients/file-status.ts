@@ -42,6 +42,8 @@ export function fileStatus(
   );
   return {
     tag: row.tag,
-    reason: row.attention || row.tag !== 'active' ? row.line : null,
+    /* A prospect's line is the roster's fallback (*No plan yet*), which says nothing about a person who
+       has not bought anything — the *Prospect* tag beside the name and the checklist under it do (23 Nov 2026). */
+    reason: row.tag === 'prospect' && !row.attention ? null : row.attention || row.tag !== 'active' ? row.line : null,
   };
 }

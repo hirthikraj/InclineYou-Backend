@@ -16,6 +16,7 @@ import { Tag } from '@/web-components/ui/Tag';
 import { KeyValueRow } from '@/web-components/ui/KeyValue';
 import { Stat } from '@/web-components/ui/Stat';
 import { EmptyState } from '@/web-components/ui/EmptyState';
+import { Meter } from '@/web-components/ui/Meter';
 
 /**
  * REPORTS — *how is the practice doing*.
@@ -112,6 +113,16 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
   const totalDelivered = report.delivered.reduce((s, v) => s + v, 0);
   const net = totalJoined - totalLost;
   const total = (xs: number[]) => xs.reduce((s, v) => s + v, 0);
+  const incomeTotal = total(report.takeHome);
+  /* Ranked by what reached the TRAINER, which is what "who the income comes from" asks —
+     by what was paid, a gym client's share bar broke the order (₹20,000 paid, ₹12,000 yours). */
+  const byYours = [...report.topClients].sort((a, b) => b.yours - a.yours || b.collected - a.collected);
+  const topYours = Math.max(1, ...byYours.map((c) => c.yours));
+  const pct = (v: number) => {
+    if (incomeTotal <= 0) return '—';
+    const p = (v / incomeTotal) * 100;
+    return p > 0 && p < 1 ? '<1%' : `${Math.round(p)}%`;
+  };
 
   return (
     <>
@@ -151,7 +162,7 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
             painting the truth red every month is how a figure stops being read. */}
         <Stat
           label="Retention · 12 months"
-          value={h.retention === null ? '—' : `${h.retention}%`}
+          value={h.retention === null ? 'Too early' : `${h.retention}%`}
           detail={h.retention === null
             ? 'Nobody was on your books a year ago'
             : 'Of the clients you had a year ago, still on your books'}
@@ -159,7 +170,7 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
 
         <Stat
           label="Attendance · 3 months"
-          value={h.attendance === null ? '—' : `${h.attendance}%`}
+          value={h.attendance === null ? 'Not yet' : `${h.attendance}%`}
           detail={h.attendance === null
             ? 'Nothing settled yet'
             : <><b>{h.attendanceDone}</b> kept of {h.attendanceSettled} that settled</>}
@@ -265,7 +276,6 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
                 const i = months.indexOf(m);
                 return `${m.label} ${m.year}: ${v} client${v === 1 ? '' : 's'} · ${joined[i]} new, ${archived[i]} archived`;
               }}
-              tone="quiet"
             />
             {/* Who came and who left, under the bars they explain rather than as
                 a second chart. A month with neither is a quiet dot. */}
@@ -291,6 +301,7 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
                 );
               })}
             </ul>
+            <p className="rpt-cap">Under each bar: clients who joined (+) and who were archived (−) that month.</p>
           </Card.Body>
         </Card>
       </div>
@@ -306,18 +317,37 @@ export function ReportsTab({ report }: { report: PracticeReport }) {
                 <thead>
                   <tr>
                     <th>Client</th>
+                    <th className="rpt-top__sh">Share of your income</th>
                     <th className="num">Sessions</th>
                     <th className="num">Paid</th>
                     {report.hasGym && <th className="num">Yours</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {report.topClients.map((c) => (
+                  {byYours.map((c) => (
                     <tr key={c.clientId}>
-                      <td data-l="">{c.deleted ? <span className="who"><b>{c.name}</b></span> : <Link className="who" href={`/clients/${c.clientId}`}><b>{c.name}</b></Link>}</td>
-                      <td className="num" data-l="Sessions">{c.sessions}</td>
-                      <td className="num" data-l="Paid">{rupees(c.collected)}</td>
-                      {report.hasGym && <td className="num" data-l="Yours">{rupees(c.yours)}</td>}
+                      <td data-l="" className="rpt-top__n">{c.deleted ? <span className="who"><b>{c.name}</b></span> : <Link className="who" href={`/clients/${c.clientId}`}><b>{c.name}</b></Link>}</td>
+                      {/* The bar fills the gap between the name and the figures with the one thing
+                          the figures do not say at a glance: how much of the year this person is.
+                          The PERCENT is the true share of the year's take-home; the BAR is scaled to
+                          the top row (`RankList`'s rule), or every bar is a sliver and ten people
+                          cannot be told apart. */}
+                      <td className="rpt-top__sh" data-l="">
+                        <span className="rpt-top__bar">
+                          <Meter
+                            segments={[{ tone: 'data', value: c.yours, label: c.name }]}
+                            total={topYours}
+                            label={`${c.name}'s share of your income`}
+                            /* The bar is scaled to the top row, so its own percent would
+                               read 100% for the first client; the figure beside it is the fact. */
+                            describe={false}
+                          />
+                          <span className="rpt-top__pct">{pct(c.yours)}</span>
+                        </span>
+                      </td>
+                      <td className="num rpt-top__s" data-l="Sessions">{c.sessions}</td>
+                      <td className={report.hasGym ? 'num rpt-top__p' : 'num rpt-top__fig'} data-l={report.hasGym ? 'Paid' : ''}>{rupees(c.collected)}</td>
+                      {report.hasGym && <td className="num rpt-top__fig" data-l="">{rupees(c.yours)}</td>}
                     </tr>
                   ))}
                 </tbody>

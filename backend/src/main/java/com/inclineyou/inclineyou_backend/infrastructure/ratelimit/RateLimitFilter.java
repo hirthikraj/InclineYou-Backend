@@ -176,6 +176,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
         // The invite link is a bearer secret opened with no session: it is counted as a sign-in attempt (api-contract 1.2),
         // by address here and by the link itself in doFilterInternal.
         if (path.startsWith("/v1/invites/")) return Tier.AUTH;
+        // The public join page (V45): no session, and it can send a code, so it is counted like sign-in.
+        if (path.startsWith("/v1/join/")) return Tier.AUTH;
         // The provider's status callbacks come from Meta's addresses in bursts and are retried: their own generous bucket, by IP,
         // so a flood of forged posts cannot spend a trainer's or a sign-in's budget (the HMAC is the gate, this is the ceiling).
         if (path.startsWith("/v1/webhooks/")) return Tier.WEBHOOK;

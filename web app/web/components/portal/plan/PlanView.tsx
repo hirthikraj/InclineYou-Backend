@@ -83,8 +83,10 @@ export function PlanView({
                   ? `Done${at !== null ? ` · ${dayWord(at, now, zone)}` : ''}`
                   : d.state === 'booked'
                     ? at !== null ? `${dayWord(at, now, zone)} at ${when(at, zone).time}` : 'Booked'
+                    /* Home's wording (25 Nov 2026): *Next session* at the top is the next BOOKED one, so the plan's
+                       next workout, when it is not booked, does not also call itself *Up next*. */
                     : d.state === 'next'
-                      ? 'Up next'
+                      ? 'Next in your plan · not booked'
                       : d.day ? `Day ${d.day}` : 'To do';
               return (
                 <ListRow
@@ -197,7 +199,8 @@ export function PlanView({
                   <Meter
                     label={`Week ${Math.min(cur, prog.weeks)} of ${prog.weeks}`}
                     total={prog.weeks}
-                    segments={[{ tone: 'acc', value: Math.min(Math.max(cur, 0), prog.weeks), label: 'weeks in' }]}
+                    /* A quantity, in the data tone — not lime, which is for what a client can press (25 Nov 2026). */
+                    segments={[{ tone: 'data', value: Math.min(Math.max(cur, 0), prog.weeks), label: 'weeks in' }]}
                   />
                 </div>
               )}

@@ -31,7 +31,9 @@
  * It emits no modifier class, so the base rule applies and `webapp.css` is
  * untouched.
  */
-export type MeterTone = 'acc' | 'ok' | 'warn' | 'danger' | 'dim';
+/** `data` is a neutral magnitude for a LIST of bars (a ranking): the one lime
+ *  bar in such a list is the one that means something. */
+export type MeterTone = 'acc' | 'data' | 'ok' | 'warn' | 'danger' | 'dim';
 
 export function Meter({
   segments,

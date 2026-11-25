@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useTransition } from 'react';
+import Link from 'next/link';
 
 import { MessageSlot } from '@/components/auth/MessageSlot';
 import { AccountAside } from '@/components/settings/AccountAside';
@@ -21,7 +22,6 @@ import type { Account } from '@/lib/account/api';
 import type { Device } from '@/lib/devices/api';
 import { MAX_EMAIL, MAX_NAME, looksLikeEmail } from '@/lib/account/rules';
 import { Card } from '@/web-components/ui/Card';
-import { isUpiFormat } from '@/lib/setup/upi';
 import { Tag } from '@/web-components/ui/Tag';
 import { Field, TextField } from '@/web-components/ui/Field';
 
@@ -74,7 +74,6 @@ export function AccountPanel({
   const [saved, setSaved] = useState(initial);
   const [name, setName] = useState(initial.name);
   const [email, setEmail] = useState(initial.email);
-  const [upi, setUpi] = useState(initial.upiVpa);
   // Only checked once the field has been left, so a half-typed address is never
   // called wrong while it is still being typed. The same `onBlur` gate the map
   // link and the two social fields use.
@@ -84,14 +83,12 @@ export function AccountPanel({
 
   const trimmed = email.trim();
   const emailBroken = touched && trimmed.length > 0 && !looksLikeEmail(trimmed);
-  const upiTrimmed = upi.trim();
-  const upiBroken = touched && upiTrimmed.length > 0 && !isUpiFormat(upiTrimmed);
-  const dirty = name !== saved.name || email !== saved.email || upi !== saved.upiVpa;
+  const dirty = name !== saved.name || email !== saved.email;
 
   function submit() {
     setMessage(null);
     start(async () => {
-      const result = await saveAccount({ name, email, upiVpa: upi });
+      const result = await saveAccount({ name, email });
       if (!result.ok) {
         setMessage({ tone: 'err', icon: 'warn', lead: result.message });
         return;
@@ -99,7 +96,6 @@ export function AccountPanel({
       setSaved(result.account);
       setName(result.account.name);
       setEmail(result.account.email);
-      setUpi(result.account.upiVpa);
       setTouched(false);
       setMessage({
         tone: 'ok',
@@ -234,40 +230,13 @@ export function AccountPanel({
             Nothing on screen moves that was not already moving.
           */}
           {/*
-            THE UPI ID, editable after setup (6 Nov 2026). It used to be written by
-            setup's last step and nowhere else, so a trainer who changed bank could
-            not change it — and it now reaches clients: the Payment reminder's
-            `{pay_by_upi}` and the portal's *Pay with UPI* both use it. Checked for
-            shape only, and the hint says so: nothing here confirms the account.
+            THE UPI ID MOVED TO SETTINGS → BUSINESS (22 Nov 2026, V46). It belongs to the workspace clients pay — a gym's
+            clients pay the gym — so it is edited with the rest of the business, by the workspace's owner.
           */}
-          <Field
-            id="ac-upi"
-            className="mt3"
-            label={<>UPI ID <Optional /></>}
-            error={upiBroken ? 'That doesn’t look like a UPI ID — it should look like name@bank.' : undefined}
-            hint="Clients see it on what they owe and in your payment reminders. Check it letter by letter — we can’t confirm the account is yours."
-          >
-            {(props) => (
-              <input
-                {...props}
-                className="ctl"
-                type="text"
-                value={upi}
-                maxLength={100}
-                autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                placeholder="98xxxxxx10@okaxis"
-                disabled={pending}
-                onBlur={() => setTouched(true)}
-                onChange={(e) => {
-                  setUpi(e.target.value);
-                  if (message) setMessage(null);
-                }}
-              />
-            )}
-          </Field>
+          <p className="small mt3">
+            Your UPI ID is in <Link className="inv-link" href="/business/payment-setup">Business → Payment setup</Link>, with the
+            rest of how clients pay you.
+          </p>
 
           {dirty || pending || message ? <MessageSlot message={message} /> : null}
 
@@ -281,7 +250,7 @@ export function AccountPanel({
           <SaveRow
             pending={pending}
             dirty={dirty}
-            note="Your email is never shown to a client. Your UPI ID is, so they can pay you."
+            note="Your email is never shown to a client."
           />
         </form>
       </Card>

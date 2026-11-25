@@ -4,6 +4,7 @@ import { requirePortalSession } from '@/lib/portal/session';
 import { portalGet, settle } from '@/lib/portal/plan-api';
 import { Message } from '@/web-components/ui/Message';
 import { PageHeader } from '@/web-components/ui/PageHeader';
+import { Crumbs } from '@/web-components/ui/Crumbs';
 
 export const metadata = { title: 'Your package · InclineYou' };
 
@@ -18,7 +19,12 @@ export default async function Page() {
     <>
       <TopBar crumb="Your package" title="Me" titleHref="/me/account" />
       <main className="main" id="main-content">
-        <PageHeader className="ph--portal" title="Your package" />
+        {/* Every page under *Me* opens with the way back to it (25 Nov 2026). */}
+        <PageHeader
+          className="ph--portal"
+          title="Your package"
+          crumbs={<Crumbs items={[{ label: 'Me', href: '/me/account' }, { label: 'Your package' }]} />}
+        />
         <div className="body">
           {/* In the portal's centred column (22 Nov 2026): without `.portal` this screen sat flush left on a desk while its title, which reads the column, sat centred — measured at 1568px, the content began 238px left of the heading. */}
           <div className="portal">

@@ -87,7 +87,7 @@ export function SlabEntry() {
       <SpecTable
         rows={[
           { property: 'Heading', value: '17px / 650 / -0.011em', token: '--tx-head', note: 'Inter, variable axis. 16px under 900px.' },
-          { property: 'Count', value: '12.25px Archivo, tabular', token: '--tx-meta', note: 'A figure, not a coloured badge' },
+          { property: 'Count', value: '20px neutral chip, 11.5px / 700 tabular', token: '--tx-surface-3', note: 'Neutral, never lime — the same shape as a tab count' },
           { property: 'Header band', value: '24px', token: undefined, note: 'min-height, so a section with no action matches one with' },
           { property: 'Rule above', value: '1px', token: '--tx-line', note: 'Dropped by `first`' },
           { property: 'Controls slot', value: '12px foot', token: undefined, note: '`.slab__ctl` owns the gap to the body, so a control never has to remember it' },

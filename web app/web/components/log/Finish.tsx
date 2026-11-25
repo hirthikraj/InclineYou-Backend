@@ -14,9 +14,7 @@ import { Back, Send, Tick, Warn } from './Icons';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
 import { Stat } from '@/web-components/ui/Stat';
-import { Message } from '@/web-components/ui/Message';
 import { PageHeader } from '@/web-components/ui/PageHeader';
-import { Why } from '@/web-components/ui/Why';
 
 /**
  * FRAME 5b — LOGGED, AND THE PACK HAS NOT MOVED.
@@ -76,7 +74,6 @@ export function Finish({ data }: { data: FinishDataX }) {
     .map((e) => ({ key: e.sxId || e.exerciseId, name: e.name, sets: e.sets.filter((x) => x.planned && !x.done).map((x) => x.number) }))
     .filter((e) => e.sets.length > 0);
   const [, startTransition] = useTransition();
-  const [send, setSend] = useState(finish.announced > 0);
   const [notTrained, setNotTrained] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -133,9 +130,11 @@ export function Finish({ data }: { data: FinishDataX }) {
         />
 
         <div className="body">
-          <div className="wk2 wk2--even" style={{ maxWidth: 1100 }}>
-            <div>
-              <div className="stats stats--4">
+          {/* ONE SHAPE WITH THE SESSION PAGE (24 Nov 2026): the main column takes the width, the rail
+              is capped. It was a 1100px box that left a third of a wide window empty. */}
+          <div className="fin">
+            <div className="fin__main">
+              <div className="stats stats--4 fin__stats">
                 <Stat
                   label="Sets"
                   value={finish.sets}
@@ -159,56 +158,35 @@ export function Finish({ data }: { data: FinishDataX }) {
                 />
               </div>
 
-              {/* WHAT WAS NOT LOGGED, NAMED (21 Nov 2026). The *Sets* figure says "18 of 22 planned";
-                  this says which four, so a set skipped on purpose and one simply missed can both be
-                  seen before the log is closed — and fixed, from the log, if it was the second. */}
-              {unlogged.length > 0 && (
-                <Message tone="warn" className="fin__unlogged">
-                  <b>Not logged:</b>{' '}
-                  {unlogged.map((u, i) => (
-                    <span key={u.key}>
-                      {i > 0 ? '; ' : ''}
-                      {u.name} · {u.sets.length === 1 ? 'set' : 'sets'} {u.sets.join(', ')}
-                    </span>
-                  ))}
-                  . They stay as not done.{' '}
-                  <Link href={`/sessions/${data.routeId}/log`}>Back to the log</Link>
-                </Message>
-              )}
-
-              <Why
-                heading={<>This did not touch {first}&rsquo;s pack</>}
-                tone="warn"
-                style={{ marginTop: 14 }}
-              >
-                <p>
-                  The sets happened. Whether the session counts against {first}&rsquo;s money is a{' '}
-                  <b>second, separate tap</b> — and a pack moves on <i>done</i> or <i>no-show</i>,
-                  never on <i>booked</i>. {finish.pack}
-                </p>
-              </Why>
-
+              {/* ── THE ONE DECISION THIS PAGE EXISTS FOR, FIRST ──────────────────────────────
+                  It was an amber warning — "This did not touch the pack" — then the buttons, then a
+                  paragraph explaining them again. Closing out is the ordinary end of every session,
+                  not a fault, so it is a neutral card that holds the fact, the two answers and one
+                  line of help, above everything else on a phone. */}
               {finish.closed ? (
-                <div className="msg msg--ok" style={{ marginTop: 16 }}>
-                  <Tick />
-                  <span>
-                    Already marked <b>{finish.closedAs === 'done' ? 'done' : finish.closedAs?.replace('_', '-')}</b>.
-                    The money side of this session is settled; the log stays editable.
-                  </span>
-                </div>
-              ) : null}
-              {finish.closed ? (
-                chargeNote ? (
-                  <p className={/delivered free/.test(chargeNote) ? 'msg' : 'msg msg--warn'} role="status" style={{ marginTop: 8 }}>
-                    {chargeNote}
-                    {/delivered free/.test(chargeNote)
-                      ? null
-                      : ' Settle it from the session in the Schedule, or take it from the next pack when you renew.'}
-                  </p>
-                ) : null
-              ) : session ? (
                 <>
-                  <div className="row" style={{ marginTop: 16, gap: 9, flexWrap: 'wrap' }}>
+                  <div className="msg msg--ok fin__block">
+                    <Tick />
+                    <span>
+                      Marked <b>{finish.closedAs === 'done' ? 'done' : finish.closedAs?.replace('_', '-')}</b>.
+                      The money side of this session is settled; the log stays editable.
+                    </span>
+                  </div>
+                  {chargeNote ? (
+                    <p className={/delivered free/.test(chargeNote) ? 'msg' : 'msg msg--warn'} role="status" style={{ marginTop: 8 }}>
+                      {chargeNote}
+                      {/delivered free/.test(chargeNote)
+                        ? null
+                        : ' Settle it from the session in the Schedule, or take it from the next pack when you renew.'}
+                    </p>
+                  ) : null}
+                </>
+              ) : session ? (
+                <Card className="fin__block" title={<>Close out {first}&rsquo;s session</>}>
+                  <p className="fin__fact">
+                    Logging the sets did not move the pack; marking the session does. {finish.pack}
+                  </p>
+                  <div className="fin__acts">
                     <Button
                       variant="primary"
                       size="lg"
@@ -226,31 +204,42 @@ export function Finish({ data }: { data: FinishDataX }) {
                       They didn&rsquo;t train
                     </Button>
                   </div>
-                  <p className="small" style={{ marginTop: 8 }}>
-                    <b className="ink">One of these two has to happen.</b> The mark is what moves
-                    {' '}{first}&rsquo;s balance, and the balance is what warns you before the pack
-                    runs out — a session nobody closed is money the product cannot see. Not sure
-                    which? <b className="ink">They didn&rsquo;t train</b> carries cancel, and a
-                    cancel costs {first} nothing.
+                  <p className="small" style={{ marginTop: 10 }}>
+                    Not sure? <b className="ink">They didn&rsquo;t train</b> lets you cancel it, which costs {first} nothing.
                   </p>
-                </>
+                  {message ? (
+                    <p className="msg msg--err" role="alert" style={{ marginTop: 12 }}>{message}</p>
+                  ) : null}
+                </Card>
               ) : (
-                <div className="msg" style={{ marginTop: 16 }}>
+                <div className="msg fin__block">
                   <Warn />
                   <span>
                     This log has no booking behind it, so there is no session to mark done and no
-                    pack to move. That is the third group on <Link href="/sessions/new">who is this
-                    for</Link> working as designed: logging is allowed to happen before booking.
+                    pack to move. Logging is allowed to happen before booking.
                   </span>
                 </div>
               )}
 
-              {message ? (
-                <p className="msg msg--err" role="alert" style={{ marginTop: 12 }}>{message}</p>
-              ) : null}
+              {/* WHAT WAS NOT LOGGED, NAMED (21 Nov 2026), as a list now rather than one amber run-on
+                  sentence: a set skipped on purpose and one simply missed can both be seen, and the
+                  way back to fix the second is a button, not the last words of a paragraph. */}
+              {unlogged.length > 0 && (
+                <Card className="fin__block" title="Not logged">
+                  <ul className="fin__unl">
+                    {unlogged.map((u) => (
+                      <li key={u.key}>
+                        <b>{u.name}</b>
+                        <span>{u.sets.length === 1 ? 'Set' : 'Sets'} {u.sets.join(', ')}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="small" style={{ marginTop: 8 }}>They stay as not done. <b className="ink">Back to the log</b>, at the top, to fill one in.</p>
+                </Card>
+              )}
             </div>
 
-            <div>
+            <div className="fin__side">
               {finish.records.length ? <RecordCard card={finish.records[0]} /> : (
                 <Card>
                   <p className="small">
@@ -262,19 +251,9 @@ export function Finish({ data }: { data: FinishDataX }) {
                 </Card>
               )}
 
-              <Card
-                title={<>Send {view.clientName.split(' ')[0]} the {finish.announced > 1 ? 'records' : 'record'}</>}
-                aside={<><button
-                    className="switch"
-                    type="button"
-                    role="switch"
-                    aria-checked={send}
-                    aria-label="Open WhatsApp with this message"
-                    style={{ marginLeft: 'auto' }}
-                    onClick={() => setSend(!send)}
-                  /></>}
-                style={{ marginTop: 12 }}
-              >
+              {/* The switch only revealed a second button (24 Nov 2026) — two controls for one act.
+                  The message and the one way to send it are shown together. */}
+              <Card title={<>Send {first} the {finish.announced > 1 ? 'records' : finish.announced === 1 ? 'record' : 'session'}</>}>
                 <p
                   className="ctl ctl--said"
                   style={{
@@ -285,27 +264,21 @@ export function Finish({ data }: { data: FinishDataX }) {
                   {finish.message}
                 </p>
                 <p className="small" style={{ marginTop: 9 }}>
-                  One WhatsApp, <b className="ink">opened for you to send</b> and never sent on
-                  your behalf. {first}&rsquo;s number belongs to your relationship with them,
-                  and an app that posts to it unasked has taken a liberty.
-                </p>
-                <p className="small" style={{ marginTop: 9 }}>
                   {finish.announced > 0
-                    ? `Only the ${finish.announced} loud record${finish.announced === 1 ? '' : 's'} ${finish.announced === 1 ? 'is' : 'are'} in it — a quiet one stays in the history.`
-                    : 'No record loud enough to send, so this is the session, not a boast.'}
+                    ? `Only the ${finish.announced} loud record${finish.announced === 1 ? '' : 's'} ${finish.announced === 1 ? 'is' : 'are'} in it — a quiet one stays in the history. `
+                    : 'No record loud enough to send, so this is the session, not a boast. '}
+                  It opens in WhatsApp for you to send from your own number; nothing is sent for you.
                 </p>
-                {send ? (
-                  <Button
-                    href={WA(finish.message)}
-                    variant="secondary"
-                    size="sm"
-                    style={{ marginTop: 10 }}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <Send /> Open WhatsApp
-                  </Button>
-                ) : null}
+                <Button
+                  href={WA(finish.message)}
+                  variant="secondary"
+                  size="sm"
+                  style={{ marginTop: 10 }}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Send /> Open WhatsApp
+                </Button>
               </Card>
             </div>
           </div>

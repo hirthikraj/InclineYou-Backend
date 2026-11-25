@@ -1,10 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
 import type { AssessmentsData } from '@/lib/assessments/api';
+import { markReviewed } from '@/lib/assessments/actions';
 import {
   PAGE_SIZE,
   assessmentsHref,
@@ -16,6 +17,7 @@ import {
   STATUS_FILTERS,
   assessmentTag,
   blockCount,
+  toReview,
   type AssessmentStatus,
   type StatusFilter,
 } from '@/lib/assessments/vocab';
@@ -66,6 +68,18 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
   const router = useRouter();
   const [search, setSearch] = useState(query.q);
   const [scheduling, setScheduling] = useState(false);
+  const [busy, startWrite] = useTransition();
+  const [writeError, setWriteError] = useState<string | null>(null);
+
+  /** Taken → reviewed, or back. The row moves section on the refresh, which is the receipt. */
+  const review = (id: string, clientId: string, reviewed: boolean) => {
+    setWriteError(null);
+    startWrite(async () => {
+      const res = await markReviewed(id, reviewed, clientId);
+      if (!res.ok) return setWriteError(res.message ?? 'That did not save.');
+      router.refresh();
+    });
+  };
 
   const names = useMemo(
     () => new Map(data.clients.map((c) => [c.id, c.name])),
@@ -87,9 +101,10 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
     go({ q: search });
   };
 
-  /* WHAT NEEDS DOING FIRST, within the page: not taken (oldest first), then to take (soonest first), then
-     what is done, newest first as the server sent it. The server pages by date, so across pages the order
-     is still the date's; the caption says which. */
+  /* WHAT NEEDS DOING FIRST, ACROSS EVERY PAGE (23 Nov 2026): the list is read with `order=work`, so the server
+     already sends *To take* (oldest owed first) · *To review* · *Reviewed* (newest first) and the pages run
+     through the sections in that order. The split below only draws the rule between sections; it keeps the
+     server's order and never re-sorts, or a page would disagree with the one after it. */
   /* TWO LISTS, DRAWN AS TWO (21 Nov 2026). They were concatenated into one table, so the dates ran
      forward (11 Nov → 6 Dec) and then jumped BACK to 9 Nov and ran backwards, halfway down, with nothing
      to say a second list had started. Each now sits under its own rule — *To take* · *Taken* — the
@@ -97,12 +112,23 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
      than a spanning row: below 1200 the count columns are hidden, and a `GroupRow`'s span has to equal
      the VISIBLE column count or `table-layout:fixed` rewrites every track (`GroupRow`'s own warning). */
   const need = useMemo(
-    () => data.rows.filter((r) => r.state !== 'done').sort((a, b) => a.dueOn.localeCompare(b.dueOn)),
+    () => data.rows.filter((r) => r.state !== 'done'),
     [data.rows],
   );
-  const taken = useMemo(() => data.rows.filter((r) => r.state === 'done'), [data.rows]);
-  const rows = useMemo(() => [...need, ...taken], [need, taken]);
-  const split = need.length > 0 && taken.length > 0;
+  /* AND TAKEN IS TWO (23 Nov 2026): what came back still has to be read. *To review* sits above *Reviewed*
+     because it is the half that asks the trainer for something. */
+  const review_ = useMemo(() => data.rows.filter(toReview), [data.rows]);
+  const reviewed = useMemo(
+    () => data.rows.filter((r) => r.state === 'done' && !toReview(r)),
+    [data.rows],
+  );
+  const rows = useMemo(() => [...need, ...review_, ...reviewed], [need, review_, reviewed]);
+  const groups = [
+    { key: 'need', title: 'To take', list: need, order: 'earliest due first' },
+    { key: 'review', title: 'To review', list: review_, order: 'newest first' },
+    { key: 'reviewed', title: 'Reviewed', list: reviewed, order: 'newest first' },
+  ].filter((g) => g.list.length > 0);
+  const split = groups.length > 1;
 
   return (
     <>
@@ -165,6 +191,11 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
               Everything else here is current; try again in a moment.
             </Message>
           )}
+          {writeError && (
+            <Message tone="warn" style={{ marginBottom: 12 }}>
+              {writeError}
+            </Message>
+          )}
           {/* The filtered result, said to a reader who cannot see the table change. */}
           <p className="vh" role="status">
             {rows.length} of {data.total} {data.total === 1 ? 'assessment' : 'assessments'}
@@ -214,12 +245,7 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
             <Empty query={query} onClear={() => { setSearch(''); router.push('/clients/assessments'); }} />
           ) : (
             <div className="asm__t">
-              {[
-                { key: 'need', title: 'To take', list: need },
-                { key: 'taken', title: 'Taken', list: taken },
-              ]
-                .filter((g) => g.list.length > 0)
-                .map((g, gi) => (
+              {groups.map((g, gi) => (
               <div key={g.key} className="asm__grp">
               {split && (
                 <DayRule
@@ -232,7 +258,7 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
               <Table
                 caption={
                   split
-                    ? `${g.title}: ${g.list.length} assessments, ${g.key === 'need' ? 'soonest first' : 'newest first'}`
+                    ? `${g.title}: ${g.list.length} assessments, ${g.order}`
                     : `${rows.length} of ${data.total} assessments, the ones to take first`
                 }
                 className={gi > 0 ? 'asm__cont' : undefined}
@@ -314,8 +340,8 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                           className: 'asm-c-status',
                           label: 'Status',
                           content: (
-                            <Tag tone={assessmentTag(r.state, r.sentAt).tone}>
-                              {assessmentTag(r.state, r.sentAt).label}
+                            <Tag tone={assessmentTag(r.state, r.sentAt, r.reviewedAt).tone}>
+                              {assessmentTag(r.state, r.sentAt, r.reviewedAt).label}
                             </Tag>
                           ),
                         },
@@ -334,6 +360,18 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                                   Take it
                                 </Button>
                               )}
+                              {/* THE REVIEW VERB OPENS THE ASSESSMENT, it does not mark it: reviewing is reading,
+                                  and the mark is on the screen where the answers are. The menu keeps a quick
+                                  mark for a trainer who already read it elsewhere. */}
+                              {toReview(r) && (
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  href={`/clients/assessments/${r.id}`}
+                                >
+                                  Review
+                                </Button>
+                              )}
                               <RowMenu
                                 label={`${client}'s ${r.name}`}
                                 items={[
@@ -342,6 +380,16 @@ export function Assessments({ data, query }: { data: AssessmentsData; query: Que
                                     label: 'Open the assessment',
                                     href: `/clients/assessments/${r.id}`,
                                   },
+                                  ...(r.state === 'done'
+                                    ? [
+                                        {
+                                          key: 'review',
+                                          label: r.reviewedAt == null ? 'Mark as reviewed' : 'Mark as not reviewed',
+                                          disabled: busy,
+                                          onSelect: () => review(r.id, r.clientId, r.reviewedAt == null),
+                                        },
+                                      ]
+                                    : []),
                                   {
                                     key: 'open',
                                     label: 'Open the client file',

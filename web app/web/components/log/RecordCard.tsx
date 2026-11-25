@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Fragment } from 'react';
 
 import type { HistorySession, PrCard } from '@/lib/log/log';
 import { Trophy } from './Icons';
@@ -33,10 +34,14 @@ function SetHistory({ name, sessions }: { name: string; sessions: HistorySession
           key={s.workoutId}
           live={s.today}
           mono
-          mark={s.label.toUpperCase()}
+          mark={s.label}
           title={s.sets.map((set, i) => (
-            <span key={set.setId}>
-              {i > 0 ? ' · ' : ''}
+            /* The separator sits OUTSIDE the set and the set is one token, so a line
+               breaks between "25 kg × 9" and the next, never inside one ("22.5 kg ×" / "10"). */
+            <Fragment key={set.setId}>
+              {/* no-break before the dot: a wrapped line ends on "·" rather than starting with one */}
+              {i > 0 ? '\u00a0· ' : ''}
+              <span className="nowrap">
               {set.pr ? (
                 <b className="acc">
                   {set.said ?? (set.load === '—' ? `${set.reps} reps` : `${set.load} kg × ${set.reps}`)}
@@ -48,7 +53,8 @@ function SetHistory({ name, sessions }: { name: string; sessions: HistorySession
               ) : (
                 `${set.load} kg × ${set.reps}`
               )}
-            </span>
+              </span>
+            </Fragment>
           ))}
           meta={
             <>
@@ -85,7 +91,7 @@ export function RecordCard({ card }: { card: PrCard }) {
     >
       <div className="row" style={{ gap: 9 }}>
         <span style={{ color: 'var(--tx-pr)', display: 'flex' }}><Trophy /></span>
-        <span className="micro" style={{ color: 'var(--tx-pr)' }}>NEW TOP SET</span>
+        <span className="micro" style={{ color: 'var(--tx-pr)' }}>New top set</span>
         <Tag tone="pr" style={{ marginLeft: 'auto' }}>{card.setLabel}</Tag>
       </div>
       <p

@@ -40,7 +40,7 @@ import { Calendar, Dumbbell, Grid, Rupee, Users } from './Icons';
  * | Book a session | `/schedule?new=1` | already read by `Schedule.tsx` |
  * | Log a workout | `/sessions/new` | already live |
  * | Add an exercise | `/programs/exercises?new=1` | `ExerciseLibrary` reads it now |
- * | Record a payment | `/business/transactions?record=` | Transactions already reads `?record=<id>` |
+ * | Record a payment | `/business/payments?record=` | Transactions already reads `?record=<id>` |
  *
  * The last one is the one worth knowing: `?record=` with nothing after it is a
  * STRING, not a missing parameter, so `recordFor` is `''` — truthy enough to open
@@ -138,7 +138,7 @@ export const ADD_ACTIONS: AddAction[] = [
     // opens the panel with nothing seeded, which is what the + wants: pressed
     // from the bar there is no client in context, and `RecordPanel` asks for one
     // as its first field.
-    href: '/business/transactions?record=',
+    href: '/business/payments?record=',
   },
 ];
 

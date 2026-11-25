@@ -26,9 +26,20 @@ export function ExerciseProgress({ data }: { data: ExerciseSeriesWire }) {
   const { exercise, series, bests } = data;
   const estimated = series.some((p) => p.e1rm !== null);
   const values = series.map((p) => (estimated ? p.e1rm ?? 0 : p.effortValue ?? p.loadValue ?? 0));
-  const best = bests.e1rm ?? bests.load;
+  /* THE EFFORT HAS A UNIT (25 Nov 2026). A push-up's sessions read a bare *12* on the row and the chart's axis, and
+     *reps* was only written after a load — so a bodyweight, timed or distance movement never said what its number
+     was. The unit comes from the movement's own log type. */
+  const unit = /time/.test(exercise.logType) ? 'sec' : /distance/.test(exercise.logType) ? 'm' : 'reps';
+  /* …AND A BEST WITHOUT A LOAD (25 Nov 2026). `bests` is load-based (an estimated max, or the heaviest set), so a
+     push-up's *Best set* read *—* above ten sessions of 12. With no load-based best, it is the session with the
+     most reps (seconds, metres) — the earliest one to reach it, so the date is when it was first done. */
+  const topEffort = series.reduce<(typeof series)[number] | null>(
+    (top, p) => (p.effortValue !== null && (top === null || p.effortValue > (top.effortValue ?? -1)) ? p : top), null);
+  const best = bests.e1rm ?? bests.load ?? (topEffort
+    ? { loadValue: null, effortValue: topEffort.effortValue, on: topEffort.on }
+    : null);
   const setText = (load: number | null, effort: number | null) =>
-    [load !== null ? `${num(load)} kg` : null, effort !== null ? `${num(effort)}${load !== null ? ' reps' : ''}` : null].filter(Boolean).join(' × ');
+    [load !== null ? `${num(load)} kg` : null, effort !== null ? `${num(effort)} ${unit}` : null].filter(Boolean).join(' × ');
 
   return (
     <div className="portal col gap4">
@@ -69,7 +80,7 @@ export function ExerciseProgress({ data }: { data: ExerciseSeriesWire }) {
                   from={day(series[0].on)}
                   to={day(series[series.length - 1].on)}
                   markIndex="last"
-                  unit={estimated ? 'kg' : undefined}
+                  unit={estimated ? 'kg' : unit}
                   /* NUMBERS ON THE SIDE (22 Nov 2026): the line rose and fell between two dates with no figure anywhere,
                      so a client could see a change and not its size. The axis names the top, middle and bottom. */
                   yAxis

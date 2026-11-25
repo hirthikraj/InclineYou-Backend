@@ -59,11 +59,11 @@ export function StepHead({ title, sub }: { title: string; sub: React.ReactNode }
   );
 }
 
-/** A `.micro` group header — "FIRST, HOW YOU WORK", "YOUR OWN PACKS". */
+/** A `.micro` group header — "First, how you work", "Your own packs". Sentence case. */
 export function GroupLabel({ children, top = 24 }: { children: React.ReactNode; top?: number }) {
   return (
-    /* No colour. §17's `.micro` already sets `--tx-ink-3` (and the mono
-       family, the size, the tracking and the uppercase). The margin stays
+    /* No colour. `.micro` already sets `--tx-ink-3`, the size and the
+       weight; the text is written in sentence case. The margin stays
        inline because it is the one value that varies per caller. */
     <p className="micro" style={{ margin: `${top}px 0 9px` }}>
       {children}

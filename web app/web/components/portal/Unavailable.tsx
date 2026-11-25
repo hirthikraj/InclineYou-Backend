@@ -58,7 +58,7 @@ export function Unavailable({
         }}
       >
         <div className="midcol" style={{ textAlign: 'center' }}>
-          <p className="micro">{unreachable ? 'NO CONNECTION' : 'SOMETHING WENT WRONG'}</p>
+          <p className="micro">{unreachable ? 'No connection' : 'Something went wrong'}</p>
           <h1 className="stp__hd" style={{ marginTop: 12, marginInline: 'auto' }}>
             {unreachable ? 'We cannot reach the server' : 'We could not load your training'}
           </h1>

@@ -82,7 +82,10 @@ export function Stat({
   const body = (
     <>
       <p className="stat__k">{label}</p>
-      <p className="stat__v">{value}</p>
+      {/* A value that is WORDS ("Nothing due") is an answer, not a figure: set at
+          the 27px figure size it wrapped to two huge lines on a phone and became
+          the loudest thing on the tab. Detected, so no call-site has to opt in. */}
+      <p className={typeof value === 'string' && !/\d/.test(value) ? 'stat__v stat__v--word' : 'stat__v'}>{value}</p>
       {detail || delta ? (
         <p className="stat__d">
           {detail}

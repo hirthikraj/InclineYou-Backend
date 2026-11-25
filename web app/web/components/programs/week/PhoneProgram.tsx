@@ -472,13 +472,18 @@ function Tile({
                 name it with. An unnamed day on somebody else's program prints
                 the slot number and stops — the same call the desk card's own
                 name field makes. */}
-            {(label || !readOnly) && (
+            {/* AN EMPTY DAY SAYS WHAT A TAP DOES (25 Nov 2026). It read *Name this day · 0 ex*, which is
+                a rename prompt, while the tap opens the workout editor — and creating that workout is the
+                one thing an empty training day is waiting for. */}
+            {rows.length === 0 && !label && !readOnly ? (
+              <span className="wsmt__nm wsmt__nm--add">+ Create workout</span>
+            ) : (label || !readOnly) && (
               <span className={`wsmt__nm${label ? '' : ' wsmt__nm--none'}`}>
                 {label || 'Name this day'}
               </span>
             )}
           </span>
-          <span className="wsmt__fig">{figures(rows)}</span>
+          {rows.length > 0 && <span className="wsmt__fig">{figures(rows)}</span>}
           {sets > 0 && (
             <>
               <span className="wsmt__bar">

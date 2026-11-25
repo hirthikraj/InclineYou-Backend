@@ -1,5 +1,6 @@
 'use client';
 
+import { rankForTrainer } from '@/lib/exercises/rank';
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 
 import { openExerciseLibrary, searchExercises } from '@/lib/exercises/actions';
@@ -227,7 +228,11 @@ export function LibraryPane({
      reading a trainer gives a set of chips without being told: *chest or
      shoulders* narrows to two muscles, and adding *machine* narrows those two
      to the machines. A group with nothing picked is not a filter at all. */
+  /* Re-ranked for a trainer — `lib/exercises/rank.ts` says how and why; the library page uses the same order. */
+  const ranked = useMemo(() => rankForTrainer(rows, query), [rows, query]);
+
   const shown = useMemo(() => {
+    const rows = ranked;
     const { categories, equipment, library } = filters;
     if (categories.length === 0 && equipment.length === 0 && library.length === 0) return rows;
     return rows.filter(row => {
@@ -245,7 +250,7 @@ export function LibraryPane({
       }
       return true;
     });
-  }, [rows, filters]);
+  }, [ranked, filters]);
 
   const active = filters.categories.length + filters.equipment.length + filters.library.length;
 

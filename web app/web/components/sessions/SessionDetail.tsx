@@ -1,7 +1,10 @@
 'use client';
 
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+
+import { markDone, markNoShow } from '@/lib/schedule/actions';
 
 import type {
   SessionDetailData,
@@ -1183,6 +1186,40 @@ function UpcomingView({ data }: { data: SessionDetailData }) {
 
 /* ────────────────────────────────────────── workout log view ── */
 
+/**
+ * DONE OR NO-SHOW, FROM THE PAGE THAT SAYS IT IS NOT MARKED (24 Nov 2026).
+ *
+ * The alarm named the one thing wrong and offered only a link to the console — a
+ * trainer who knew Kavya came had to open a logging grid to say so. The two answers
+ * Today's close-out and the Sessions tab already give are here too, with the same
+ * actions and the same `−1` on the no-show.
+ */
+function MarkButtons({ bookingId }: { bookingId: string }) {
+  const router = useRouter();
+  const [state, setState] = useState<'idle' | 'working' | string>('idle');
+  const answer = async (came: boolean) => {
+    setState('working');
+    const r = came ? await markDone(bookingId) : await markNoShow({ id: bookingId, costsASession: true });
+    if (!r.ok) {
+      setState(r.message ?? 'That did not go through.');
+      return;
+    }
+    router.refresh();
+  };
+  const busy = state === 'working';
+  return (
+    <div className="sesh__mark">
+      <Button variant="primary" size="sm" loading={busy} disabled={busy} onClick={() => void answer(true)}>
+        They came · Done
+      </Button>
+      <Button variant="secondary" size="sm" disabled={busy} onClick={() => void answer(false)}>
+        No-show · −1
+      </Button>
+      {state !== 'idle' && !busy && <p className="small sesh__markerr" role="alert">{state}</p>}
+    </div>
+  );
+}
+
 function WorkoutLogView({ data }: { data: SessionDetailData }) {
   const { session, workout, plan } = data;
   const isDone = DONE.has(session.status);
@@ -1300,6 +1337,7 @@ function WorkoutLogView({ data }: { data: SessionDetailData }) {
             </Link>
             .
           </p>
+          {session.bookingId && <MarkButtons bookingId={session.bookingId} />}
         </Why>
       )}
 
@@ -1365,6 +1403,20 @@ function WorkoutLogView({ data }: { data: SessionDetailData }) {
               full-width things (the no-show card above), so the grid has to
               be a box around the cards rather than a rule on the column. See
               `.sesh__ex` in app.css for the measurements. */}
+          {/* NOTHING LOGGED: THE PLAN, ONCE, AS A PLAN (24 Nov 2026). A no-show or an
+              unmarked session with no log drew every movement as a "Not logged" card
+              saying "a swap or a call made on the floor" — the explanation for a skipped
+              movement in a session that HAPPENED, five times over one that did not. The
+              upcoming view's table says what was planned in one block. */}
+          {!workout && plan && (isNoShow || unmarked) ? (
+            <PlanTable
+              plan={plan}
+              clientId={session.clientId}
+              clientName={session.clientName}
+              now={data.now}
+              done={false}
+            />
+          ) : (
           <div className="sesh__ex">
             {cards.map((item, i) =>
               item.kind === 'logged' ? (
@@ -1379,6 +1431,7 @@ function WorkoutLogView({ data }: { data: SessionDetailData }) {
               ),
             )}
           </div>
+          )}
         </div>
 
         <div className="sesh__side">
@@ -1482,7 +1535,14 @@ export function SessionDetail({ data }: { data: SessionDetailData }) {
                   the write is a grid with a keyboard model — and the same id
                   addresses both, which is why `/sessions/:id/log` keys off the
                   booking wherever there is one. */}
-              <Button href={`/sessions/${data.routeId}/log`} variant="primary" size="sm">
+              {/* Lime only where logging IS the next thing: a session still to come. A
+                  finished one has no next step, a no-show's is the message to the
+                  client, and an unmarked one's is *Done* in the alarm below. */}
+              <Button
+                href={`/sessions/${data.routeId}/log`}
+                variant={isUpcoming ? 'primary' : 'secondary'}
+                size="sm"
+              >
                 {session.hasLog ? 'Open the log' : 'Log this session'}
               </Button>
             </div>

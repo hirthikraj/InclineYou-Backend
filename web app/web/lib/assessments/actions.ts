@@ -220,6 +220,24 @@ export async function sendAssessment(id: string, clientId?: string): Promise<Wri
   }
 }
 
+/**
+ * Taken → reviewed, or back (23 Nov 2026). `POST`/`DELETE /v1/assessments/{id}/review`, both idempotent; the server
+ * refuses a review of one not yet taken (`ASSESSMENT_NOT_DONE`).
+ */
+export async function markReviewed(
+  id: string,
+  reviewed: boolean,
+  clientId?: string,
+): Promise<WriteResult<AssessmentWire>> {
+  try {
+    const row = await api<AssessmentWire>(`/v1/assessments/${id}/review`, reviewed ? { method: 'POST', body: {} } : { method: 'DELETE' });
+    refresh(clientId);
+    return { ok: true, data: row };
+  } catch (error) {
+    return fail(error, 'That assessment');
+  }
+}
+
 /** Put a client on a cycle — every `intervalDays`, the first one booked now. `sendToClient` is the cycle's own switch. */
 export async function startCycle(input: {
   /** The sheet's, so a retry after a lost answer replays instead of starting a second cycle (19 Nov 2026). */

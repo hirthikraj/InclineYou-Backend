@@ -91,14 +91,14 @@ class NudgeDraftTest {
     @DisplayName("the default Payment reminder carries the trainer's UPI ID as a sentence, and closes up when there is none")
     void paymentReminderUpi() throws Exception {
         UUID pkg = packageFor(client, "9000");
-        jdbc.update("UPDATE trainer_business SET upi_vpa = 'anbu@okaxis' WHERE trainer_id = :t::uuid",
+        jdbc.update("UPDATE tenant_business SET upi_vpa = 'anbu@okaxis' WHERE tenant_id = (SELECT home_tenant_id FROM trainer WHERE id = :t::uuid)",
                 java.util.Map.of("t", owner.toString()));
         draft(client, "{\"template\":\"payment_reminder\",\"packageId\":\"" + pkg + "\"}")
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.message").value(
                         "Hi Rajalakshmi, gentle reminder on the pending ₹9,000 for your 12 sessions. Pay by UPI to anbu@okaxis. Thanks!"));
 
-        jdbc.update("UPDATE trainer_business SET upi_vpa = NULL WHERE trainer_id = :t::uuid",
+        jdbc.update("UPDATE tenant_business SET upi_vpa = NULL WHERE tenant_id = (SELECT home_tenant_id FROM trainer WHERE id = :t::uuid)",
                 java.util.Map.of("t", owner.toString()));
         draft(client, "{\"template\":\"payment_reminder\",\"packageId\":\"" + pkg + "\"}")
                 .andExpect(status().isCreated())

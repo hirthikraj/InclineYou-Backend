@@ -107,7 +107,8 @@ public class TrainerService {
             t.setGender(req.gender().isBlank() ? null : gender(req.gender()));
         }
 
-        if (req.upiVpa() != null) b.setUpiVpa(req.upiVpa().isBlank() ? null : trim(req.upiVpa(), 100));
+        // V46: the UPI ID is the home workspace's business's, written through; trainer_business.upi_vpa is no longer read.
+        if (req.upiVpa() != null) sql.setHomeUpi(trainerId, req.upiVpa().isBlank() ? null : com.inclineyou.inclineyou_backend.core.business.Upi.check("upiVpa", req.upiVpa()));
         if (req.experienceBand() != null) {
             b.setExperienceBand(req.experienceBand().isBlank() ? null : trim(req.experienceBand(), 20));
         }
@@ -401,7 +402,7 @@ public class TrainerService {
                 t.getId().toString(),
                 user.getPhone(),
                 t.getName(),
-                b.getUpiVpa(),
+                sql.homeUpi(t.getId()),
                 b.getExperienceBand(),
                 orEmpty(b.getSpecialities()),
                 orEmpty(b.getCertifications()),

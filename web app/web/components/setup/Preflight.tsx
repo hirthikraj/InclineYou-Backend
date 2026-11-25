@@ -170,7 +170,7 @@ function FirstRunBody() {
         sub="8 questions. Mostly clicking — you type twice. About a minute."
       />
 
-      <GroupLabel top={26}>WHAT WE’LL ASK</GroupLabel>
+      <GroupLabel top={26}>What we’ll ask</GroupLabel>
 
       {/* `.stp__row` rather than the `maxWidth: '64ch'` this carried: 64ch is a
           ninth measure on a flow that already has one, and it put the list at

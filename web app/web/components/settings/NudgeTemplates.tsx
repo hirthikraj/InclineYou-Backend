@@ -4,12 +4,15 @@ import { useRef, useState, useTransition } from 'react';
 
 import { resetNudgeTemplate, saveNudgeTemplate } from '@/lib/nudges/actions';
 import { previewOf, unknownTokens } from '@/lib/nudges/preview';
+import { whatsappPlain } from '@/lib/text/whatsapp';
 import type { NudgeTemplate } from '@/lib/nudges/types';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
 import { Fold } from '@/web-components/ui/Fold';
 import { Tag } from '@/web-components/ui/Tag';
 import { Chip } from '@/web-components/ui/Chip';
+import { Markup } from '@/web-components/ui/Markup';
+import { MarkupField } from '@/web-components/ui/MarkupField';
 
 /**
  * THE TEMPLATE LIBRARY — the only nudge screen in the product.
@@ -109,7 +112,7 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
      comparing two sentences, and an accordion would take one away. */
   const [open, setOpen] = useState(false);
   const [pending, startTransition] = useTransition();
-  const boxRef = useRef<HTMLTextAreaElement>(null);
+  const editor = useRef<{ insert: (text: string) => void }>(null);
 
   const dirty = body.trim() !== template.body.trim();
   const strays = unknownTokens(body, template.variables.map((v) => v.token));
@@ -125,20 +128,9 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
    * keep typing.
    */
   const insert = (token: string) => {
-    const box = boxRef.current;
-    if (!box) {
-      setBody((b) => b + token);
-      return;
-    }
-    const start = box.selectionStart ?? body.length;
-    const end = box.selectionEnd ?? body.length;
-    const next = body.slice(0, start) + token + body.slice(end);
-    setBody(next);
+    if (editor.current) editor.current.insert(token);
+    else setBody((b) => b + token);
     setSaved(false);
-    requestAnimationFrame(() => {
-      box.focus();
-      box.setSelectionRange(start + token.length, start + token.length);
-    });
   };
 
   const save = () => {
@@ -176,7 +168,16 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
 
   return (
     <Fold
-      title={template.label}
+      /* THE STATUS TAGS RIDE ON THE NAME (25 Nov 2026), not in the head's control slot: that slot sits after
+         the chevron, so a customised row pushed its chevron left and the column of chevrons broke on exactly
+         the rows a trainer had edited. A tag is not a control; next to the name is where it is read. */
+      title={
+        <>
+          {template.label}
+          {dirty && <> <Tag tone="warn">Unsaved</Tag></>}
+          {!template.isDefault && <> <Tag>Yours</Tag></>}
+        </>
+      }
       /*
         ── THE HEAD CARRIES THE WORDING, NOT THE PURPOSE ────────────────────
 
@@ -195,26 +196,9 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
         purpose is the one thing the body no longer has to spend a line on.
         Both are a single line, so the head does not change height on a press.
       */
-      sub={open ? template.purpose : <TokenLine text={body} />}
+      sub={open ? template.purpose : <TokenLine text={whatsappPlain(body)} />}
       open={open}
       onOpenChange={setOpen}
-      control={
-        <>
-          {/*
-            Status only, and no control — the head is the fold's own target and
-            a button in it is a second thing to aim at in a 56px band. Save
-            lives at the foot of the body, beside what it saves.
-
-            `Unsaved` is here because the body UNMOUNTS when this closes (see
-            `ui/Fold.tsx`). The draft survives — it is held in this component,
-            above the fold, deliberately — but with nothing in the head a
-            trainer who typed and collapsed would have an invisible edit and no
-            sign that reopening was worth it.
-          */}
-          {dirty && <Tag tone="warn">Unsaved</Tag>}
-          {!template.isDefault && <Tag>Yours</Tag>}
-        </>
-      }
     >
       {/*
         Two tracks: what the message IS on the left, what it comes out as on
@@ -225,20 +209,20 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
       <div className="ndgt__ed">
         <div className="ndgt__w">
           {/* The purpose is in the head while this is open — see `sub`. */}
-          <label className="fld__l" htmlFor={boxId} style={{ display: 'block', marginBottom: 6 }}>
-            The message
-          </label>
-          <textarea
-            id={boxId}
-            ref={boxRef}
-            className="ctl ndgt__box"
-            rows={3}
+          {/* THE SAME EDITOR AS AN ASSESSMENT'S QUESTIONS (25 Nov 2026) — bold, italic and emoji — in WhatsApp's
+              own markers, because this text is sent as a WhatsApp message: `*bold*` and `_italic_` arrive
+              formatted, where the app's `**bold**` would arrive as asterisks. */}
+          <MarkupField
+            label="The message"
+            hideLabel={false}
+            dialect="whatsapp"
+            apiRef={editor}
+            className="ndgt__box"
             value={body}
-            onChange={(e) => {
-              setBody(e.target.value);
+            onChange={(next) => {
+              setBody(next);
               setSaved(false);
             }}
-            aria-describedby={`${boxId}-count`}
           />
           {/* A counter rather than `maxLength`: maxLength cuts a paste without saying so, and a wording saved before
               the 750 limit must stay visible in full so it can be shortened. */}
@@ -253,6 +237,8 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
             {template.variables.map((v) => (
               <Chip
                 key={v.token}
+                /* Focus stays in the message, so the token lands at the caret rather than at the end. */
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => insert(v.token)}
                 title={`Insert — ${v.meaning}`}
               >
@@ -293,9 +279,14 @@ function NudgeCard({ initial }: { initial: NudgeTemplate }) {
           </div>
         </div>
 
+        {/* THE SAME SHAPE AS THE EDITOR BESIDE IT (25 Nov 2026): a label above, then the box. The label used to
+            sit INSIDE the preview's box, so the box started ~28px above the message box and the two first lines
+            never met; now both labels share a line and both texts start on the same baseline. */}
         <div className="ndgt__prev">
-          <p className="ndgt__prevk">For example</p>
-          <p className="ndgt__prevb">{previewOf(body)}</p>
+          <p className="fld__l ndgt__prevk">For example</p>
+          <div className="ndgt__prevbox">
+            <p className="ndgt__prevb"><Markup value={previewOf(body)} dialect="whatsapp" /></p>
+          </div>
         </div>
       </div>
     </Fold>

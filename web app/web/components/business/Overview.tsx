@@ -1,7 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+
+import { useFlipRows } from '@/lib/ui/flip-rows';
+import { clientsNeedYou } from '@/lib/today/copy';
 
 import { loadSummary } from '@/lib/business/actions';
 import {
@@ -14,6 +16,7 @@ import {
   RENEWAL_WINDOW_DAYS,
   trendBars,
   type ActionItem,
+  type ActionKind,
   type ActivityLine,
   type Concentration,
   type RenewalItem,
@@ -28,14 +31,16 @@ import { Avatar } from '@/web-components/ui/Avatar';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
 import { EmptyState } from '@/web-components/ui/EmptyState';
-import { KeyValueRow } from '@/web-components/ui/KeyValue';
 import { ListRow, ListRowNumber, ListRows } from '@/web-components/ui/ListRow';
-import { Meter } from '@/web-components/ui/Meter';
+import { RankList } from '@/web-components/ui/RankList';
 import { Slab } from '@/web-components/ui/Slab';
 import { Stat } from '@/web-components/ui/Stat';
 import { Tag } from '@/web-components/ui/Tag';
 import { Timeline } from '@/web-components/ui/Timeline';
 import { BizHeader } from './BizHeader';
+import { ClaimsQueue } from './ClaimsQueue';
+import { MoneyHeadline } from './MoneyHeadline';
+import type { PaymentClaimWire } from '@/lib/claims/types';
 import { usePeriodScope } from './PeriodScope';
 
 /**
@@ -95,7 +100,7 @@ import { usePeriodScope } from './PeriodScope';
  * is the line between a summary and a second copy of a table, and it is the line
  * the deleted *Pending* tab was on the wrong side of.
  */
-export function Overview({ data }: { data: OverviewData }) {
+export function Overview({ data, claims = null, gymOwes = null }: { data: OverviewData; claims?: PaymentClaimWire[] | null; gymOwes?: number | null }) {
   const { period } = usePeriodScope();
 
   /* The period is state in a layout, so the server rendered the CURRENT month and
@@ -123,7 +128,11 @@ export function Overview({ data }: { data: OverviewData }) {
   const summary = loaded.summary;
   const stale = wanted !== loaded.key && !failed;
 
-  const actions = computeActions(data.packages, data.names, data.today, data.now);
+  /* A client who says they've paid is asked about in *To confirm*, not chased in *Needs you* (V50). */
+  const claimants = new Set((claims ?? []).map((c) => c.clientId));
+  const allActions = computeActions(data.packages, data.names, data.today, data.now);
+  const keptItems = allActions.items.filter((i) => !(i.kind === 'overdue' && claimants.has(i.clientId)));
+  const actions = { items: keptItems, count: keptItems.length, overdueCount: keptItems.filter((i) => i.kind === 'overdue').length };
   const activity = activityLines(data.activity);
   const renewals = computeRenewals(data.packages, data.names, data.today);
   const upcoming = computeUpcoming(data.packages);
@@ -138,6 +147,8 @@ export function Overview({ data }: { data: OverviewData }) {
   const nothingAtAll = data.year.total.packagesSold === 0 && data.year.total.paymentsCount === 0
     && data.packages.length === 0;
 
+  const needCount = new Set(actions.items.map((i) => i.clientId)).size;
+
   return (
     <>
       <TopBar crumb="Business" title="Business" />
@@ -146,15 +157,19 @@ export function Overview({ data }: { data: OverviewData }) {
           title="Business overview"
           subtitle={
             <>
-              {actions.count > 0
-                ? <>{actions.count} thing{actions.count === 1 ? '' : 's'} need{actions.count === 1 ? 's' : ''} you</>
-                : <>Nothing outstanding</>}
+              {/* Clients, not things: *Needs you* is one row per client now, and the line above it
+                  should count what the list shows — Today's header does the same (24 Nov 2026). */}
+              {needCount > 0 ? <>{clientsNeedYou(needCount)}</> : <>Nothing outstanding</>}
               {' · '}{rupees(summary.total.takeHome)} {data.hasGym ? 'to you' : 'collected'} in {periodProse(period)}
             </>
           }
         />
 
         <div className="body" aria-busy={stale}>
+          {/* The eagle view's first line (23 Nov 2026): five facts about NOW that the picker does not move. */}
+          <MoneyHeadline claims={claims} month={data.period} packages={data.packages} today={data.today} gymOwes={gymOwes} />
+          {/* V50 · what clients say they've paid, first: it is the one list on this page waiting on the trainer alone. */}
+          <ClaimsQueue claims={claims} now={data.now} />
           {nothingAtAll ? (
             <EmptyState
               icon={<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -231,17 +246,32 @@ function NeedsYou({
   actions: ReturnType<typeof computeActions>;
   now: number;
 }) {
-  const shown = actions.items.slice(0, SHOWN);
+  /* ONE ROW PER CLIENT, AS TODAY'S QUEUE (24 Nov 2026). A client who owed money AND had a pack
+     run out was two rows with the same name. The items arrive ranked, so the first one met is
+     the client's lead; the rest open in place under it. */
+  const groups = useMemo(() => {
+    const byClient = new Map<string, ActionItem[]>();
+    for (const item of actions.items) {
+      const list = byClient.get(item.clientId);
+      if (list) list.push(item);
+      else byClient.set(item.clientId, [item]);
+    }
+    return [...byClient.values()];
+  }, [actions.items]);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const { ref: listRef, flip } = useFlipRows<HTMLDivElement>();
+  const shown = groups.slice(0, SHOWN);
 
   return (
     <Slab
-      first
+      /* Not `first`: the money-at-a-glance tiles sit above it now, so it takes the rule and the
+         air every other section gets — it was 10px under the tiles with neither (24 Nov 2026). */
       title="Needs you"
-      count={actions.count > 0 ? actions.count : undefined}
+      count={groups.length > 0 ? groups.length : undefined}
       /* The chase total is NOT printed here. It is on the page this link goes
          to, whose *Pending* chip states it over the rows it totals. */
       action={actions.overdueCount > 0
-        ? { label: 'The pending rows', href: '/business/transactions' }
+        ? { label: 'The pending rows', href: '/business/payments' }
         : undefined}
     >
       {actions.count === 0 ? (
@@ -251,13 +281,39 @@ function NeedsYou({
         </p>
       ) : (
         <>
-          <ListRows label="Things that need you">
-            {shown.map((item) => <ActionRow key={item.id} item={item} now={now} />)}
+          <div className="biz-needs" ref={listRef}>
+          <ListRows label="Clients who need you">
+            {shown.flatMap((group) => {
+              const [lead, ...rest] = group;
+              const isOpen = open[lead.clientId] === true;
+              const toggle = () =>
+                flip(
+                  () => setOpen((o) => ({ ...o, [lead.clientId]: !isOpen })),
+                  isOpen ? rest.map((r) => r.id) : [],
+                );
+              return [
+                <div key={lead.id} data-flip={lead.id} role="presentation">
+                  <ActionRow
+                    item={lead}
+                    now={now}
+                    more={rest.length ? { items: rest, open: isOpen, onToggle: toggle } : undefined}
+                  />
+                </div>,
+                ...(isOpen
+                  ? rest.map((item) => (
+                      <div key={item.id} data-flip={item.id} role="presentation" className="biz-cont">
+                        <ActionRow item={item} now={now} continuation />
+                      </div>
+                    ))
+                  : []),
+              ];
+            })}
           </ListRows>
-          {actions.count > SHOWN && (
+          </div>
+          {groups.length > SHOWN && (
             <p className="small" style={{ marginTop: 10 }}>
-              {actions.count - SHOWN} more, ranked below these — the oldest debts
-              and the longest-empty packs are the {SHOWN} above.
+              {groups.length - SHOWN} more {groups.length - SHOWN === 1 ? 'client' : 'clients'}, ranked below these — the
+              oldest debts and the longest-empty packs are the {SHOWN} above.
             </p>
           )}
         </>
@@ -266,17 +322,41 @@ function NeedsYou({
   );
 }
 
-function ActionRow({ item, now }: { item: ActionItem; now: number }) {
+/** What each kind of item is, said as the label of a continuation row (the name is on the lead). */
+const KIND_WORD: Record<ActionKind, string> = { overdue: 'Money', exhausted: 'Pack used up', lapsed: 'Pack ended' };
+
+function ActionRow({
+  item,
+  now,
+  more,
+  continuation = false,
+}: {
+  item: ActionItem;
+  now: number;
+  /** The client's other items, behind a "+N more" on the lead row. */
+  more?: { items: ActionItem[]; open: boolean; onToggle: () => void };
+  /** Another item about the client named on the row above: no avatar, the kind as its title. */
+  continuation?: boolean;
+}) {
+  const sub = more ? (
+    <>
+      {item.detail}{' · '}
+      <button type="button" className="biz-more" aria-expanded={more.open} onClick={more.onToggle}>
+        {more.open ? 'Hide' : `+${more.items.length} more`}
+      </button>{' '}
+      <span className="biz-more__k">{more.items.map((i) => KIND_WORD[i.kind].toLowerCase()).join(' · ')}</span>
+    </>
+  ) : item.detail;
   return (
     <ListRow
-      avatar={<Avatar name={item.clientName} id={item.clientId} size="sm" />}
+      avatar={continuation ? undefined : <Avatar name={item.clientName} id={item.clientId} size="sm" />}
       /* The NAME is the title and the fact is the second line, which is the
          shape `.lrow` is built for — `.lrow__t` is `nowrap` with an ellipsis, so
          a title like *"Priya has finished their pack"* would have been truncated
          in the half-width case and the person's name lost with it. The fact
          survives truncation; a name does not. */
-      title={item.clientName}
-      sub={item.detail}
+      title={continuation ? KIND_WORD[item.kind] : item.clientName}
+      sub={sub}
       /* One line, not a stack — `ListRow`'s own prop note carries the
          measurement. A row whose right group holds a verb cannot column. */
       rightInline
@@ -369,7 +449,7 @@ function WhatHappened({ items: all, now }: { items: ActivityLine[]; now: number 
   return (
     <Slab
       title="What happened"
-      action={{ label: 'All transactions', href: '/business/transactions' }}
+      action={{ label: 'All transactions', href: '/business/payments' }}
     >
       {items.length === 0 ? (
         <p className="small">Nothing recorded yet.</p>
@@ -526,7 +606,7 @@ function WhereFrom({
   const rate = t.billed > 0 ? Math.min(100, Math.round((t.collected / t.billed) * 100)) : null;
   const trend = t.trendPercent;
   const showGym = hasGym && t.gymCut > 0;
-  const tileCount = showGym ? 4 : 3;
+  const tileCount = showGym ? 3 : 2;
 
   return (
     <Slab title={`Where the money comes from · ${tag}`}>
@@ -566,15 +646,8 @@ function WhereFrom({
                 </span>
               </>}
         />
-        <Stat
-          label="Overdue now"
-          value={summary.now.overdue > 0 ? rupees(summary.now.overdue) : '—'}
-          tone={summary.now.overdue > 0 ? 'warn' : 'neutral'}
-          detail={summary.now.overdue > 0
-            ? `${summary.now.clientsOverdue} client${summary.now.clientsOverdue === 1 ? '' : 's'} · ${summary.now.clientsOwing} owe something in all`
-            : 'Nobody is past their due date'}
-          href={summary.now.overdue > 0 ? '/business/transactions?filter=owed' : undefined}
-        />
+        {/* *Overdue now* is gone from this row (24 Nov 2026): the same figure is the second tile of the
+            money-at-a-glance row at the top of the page, and this row is the PERIOD's reading. */}
         <Stat
           /* A MONTH IN PROGRESS IS NOT COMPARED WITH A FINISHED ONE. This tile said −97.3% in warning amber on the 5th, because
              ₹3,000 so far was set against all of September. The picker's range ends after today when the period is still
@@ -604,41 +677,18 @@ function WhereFrom({
 
       {concentration && concentration.top.length > 0 && (
         <Card as="section" title="Top clients · last 12 months" className="mt3">
-          <div className="col" style={{ gap: 12 }}>
-            {concentration.top.map((c) => (
-              <div key={c.clientId}>
-                <KeyValueRow
-                  k={
-                    c.deleted ? (
-                      <span className="who">
-                        <Avatar name={c.name} id={c.clientId} size="sm" />
-                        <b>{c.name}</b>
-                      </span>
-                    ) : (
-                      <Link className="who" href={`/clients/${c.clientId}`}>
-                        <Avatar name={c.name} id={c.clientId} size="sm" />
-                        <b>{c.name}</b>
-                      </Link>
-                    )
-                  }
-                  style={{ border: 0, marginBottom: 5 }}
-                >
-                  {rupees(c.yours)}
-                </KeyValueRow>
-                {/* The bar is the SHARE, there to make the ranking readable at a
-                    glance. `describe={false}` and a label naming the person: the
-                    default announcement would repeat what the row just said. */}
-                {/* SCALED TO THE LARGEST, not to the year's total: against the total every bar was 10–13% wide and the
-                    difference between the first client and the fifth could not be seen. The share is still in the label. */}
-                <Meter
-                  label={`${c.name}’s share of the last twelve months — ${c.share}%`}
-                  describe={false}
-                  segments={[{ tone: 'acc', value: Math.max(2, c.yours) }]}
-                  total={Math.max(1, ...concentration.top.map((x) => x.yours))}
-                />
-              </div>
-            ))}
-          </div>
+          <RankList
+            label="Top clients over the last twelve months"
+            items={concentration.top.map((c) => ({
+              id: c.clientId,
+              name: c.name,
+              avatarId: c.clientId,
+              value: c.yours,
+              display: rupees(c.yours),
+              share: `${c.share}%`,
+              href: c.deleted ? undefined : `/clients/${c.clientId}`,
+            }))}
+          />
           <p className="small" style={{ marginTop: 12 }}>
             {concentration.topThreeShare >= 60
               ? `Your top three are ${concentration.topThreeShare}% of the year — most of your income rests on three people.`

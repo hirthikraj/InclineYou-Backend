@@ -122,7 +122,7 @@ export function WorkPlaceFields({
         coach. A trainer at a gym can still take home visits, so neither answers the other.
       </p>
 
-      <GroupLabel top={22}>HOW YOU ARE PAID</GroupLabel>
+      <GroupLabel top={22}>How you are paid</GroupLabel>
       {/* `.card--pick` / `.card--pick-accent`, the same pair the packs step
           uses for the same three options. Not chips: each carries a second
           line, and the second line is what stops "Both" being guessed at. */}
@@ -159,7 +159,7 @@ export function WorkPlaceFields({
 
       {atGym(value) ? (
         <>
-          <GroupLabel>THE GYM OR STUDIO</GroupLabel>
+          <GroupLabel>The gym or studio</GroupLabel>
           <div className="fldrow">
             <div style={{ flex: '1 1 260px' }}>
               {/* Search first, text second: see `GymPicker`. Most gyms in India are
@@ -223,7 +223,7 @@ export function WorkPlaceFields({
         </>
       ) : null}
 
-      <GroupLabel>HOW YOU COACH</GroupLabel>
+      <GroupLabel>How you coach</GroupLabel>
       <div className="row" style={{ gap: 10, alignItems: 'stretch', flexWrap: 'wrap' }}>
         {TRAINING_MODES.map((option) => {
           const on = modes.includes(option.id);
@@ -270,7 +270,7 @@ export function WorkPlaceFields({
         </ChipRow>
       ) : null}
 
-      <GroupLabel>AREAS YOU COVER</GroupLabel>
+      <GroupLabel>Areas you cover</GroupLabel>
       <p className="small" style={{ maxWidth: 620, marginTop: -4 }}>
         {modes.includes('home_visit')
           ? 'You said you take home visits — this is the answer to “how far”, and without it that is not something a client can act on.'

@@ -308,6 +308,62 @@ export async function getOverview(): Promise<{ data: OverviewData; setupComplete
 }
 
 /**
+ * WHO OWES YOU, BY HOW LATE (23 Nov 2026) — the Payments page's *Owed* card. One row per client with money left on any
+ * pack: the total, the oldest due date, and which of the four ages it is (not due yet · 1–7 · 8–30 · 30+ days late). Off
+ * the same `scope=current` packages *Needs you* reads, so the two can never disagree about who owes what. Gym clients'
+ * money is the gym's to collect and is kept apart (`gym`), never chased with the trainer's UPI ID.
+ */
+export interface OwedClient {
+  clientId: string;
+  clientName: string;
+  clientDeleted: boolean;
+  total: number;
+  /** yyyy-MM-dd of the oldest due date among the packs that owe; null when none has a due date. */
+  oldestDue: string | null;
+  /** Days past that date; 0 or less is not due yet. */
+  daysLate: number;
+  age: 'not-due' | 'late-7' | 'late-30' | 'late-more';
+  gym: boolean;
+}
+
+export async function getOwed(): Promise<OwedClient[]> {
+  const now = Date.now();
+  const [me, packages, clients] = await Promise.all([
+    get<MeWire>('/v1/me'),
+    listAll<PackageWire>('/v1/packages?scope=current', (p) => get<ListEnvelope<PackageWire>>(p)),
+    listAll<ClientWire>('/v1/clients?view=summary&status=all', (p) => get<ListEnvelope<ClientWire>>(p)),
+  ]);
+  const today = todayIn(me.workspace.timezone, now);
+  const names = new Map<string, string>();
+  const gymClient = new Set<string>();
+  for (const c of clients) {
+    names.set(c.id, c.name ?? 'Unnamed');
+    if (c.clientType === 'gym') gymClient.add(c.id);
+  }
+  const by = new Map<string, OwedClient>();
+  for (const p of packages) {
+    const due = n(p.amountDue);
+    if (due <= 0) continue;
+    const gym = gymClient.has(p.clientId);
+    const row = by.get(p.clientId) ?? {
+      clientId: p.clientId, clientName: names.get(p.clientId) ?? clientLabel(null), clientDeleted: !names.has(p.clientId),
+      total: 0, oldestDue: null, daysLate: 0, age: 'not-due' as const, gym,
+    };
+    row.total += due;
+    if (p.dueDate && (row.oldestDue === null || p.dueDate < row.oldestDue)) row.oldestDue = p.dueDate;
+    by.set(p.clientId, row);
+  }
+  const day = (iso: string) => Date.UTC(Number(iso.slice(0, 4)), Number(iso.slice(5, 7)) - 1, Number(iso.slice(8, 10)));
+  const out = [...by.values()].map((r) => {
+    const late = r.oldestDue ? Math.round((day(today) - day(r.oldestDue)) / 86_400_000) : 0;
+    const age: OwedClient['age'] = late <= 0 ? 'not-due' : late <= 7 ? 'late-7' : late <= 30 ? 'late-30' : 'late-more';
+    return { ...r, daysLate: late, age };
+  });
+  // Latest first, then the most owed: who to talk to first. Total-sorted so the list never reshuffles (trap 29).
+  return out.sort((a, b) => b.daysLate - a.daysLate || b.total - a.total || a.clientId.localeCompare(b.clientId));
+}
+
+/**
  * What the ledger page opens on: the current month, all rows, with the count.
  *
  * Two one-row reads ride along, both on indexes, for two things a page of THIS
@@ -369,6 +425,12 @@ interface GymWire {
     balanceDue: string;
     recentPayouts: PayoutWire[];
   } | null;
+  /** 23 Nov 2026 — the statement; absent from an older backend. */
+  statement?: {
+    clientsCoached: number; sessionsDelivered: number; newSales: number; renewals: number;
+    billedYouBrought: string; billedGymDesk: string; received: string;
+  };
+  lifetime?: { since: string | null; sales: number; billed: string; gymCut: string; yours: string; received: string };
 }
 
 export interface ArrangementWire {
@@ -423,6 +485,20 @@ function gymMoney(w: GymWire): GymMoney {
       sold: s.sold, billed: n(s.billed), trainerTake: n(s.trainerTake), gymCut: n(s.gymCut),
     })),
     settlement,
+    statement: w.statement
+      ? {
+          clientsCoached: w.statement.clientsCoached, sessionsDelivered: w.statement.sessionsDelivered,
+          newSales: w.statement.newSales, renewals: w.statement.renewals,
+          billedYouBrought: n(w.statement.billedYouBrought), billedGymDesk: n(w.statement.billedGymDesk),
+          received: n(w.statement.received),
+        }
+      : null,
+    lifetime: w.lifetime
+      ? {
+          since: w.lifetime.since, sales: w.lifetime.sales, billed: n(w.lifetime.billed), gymCut: n(w.lifetime.gymCut),
+          yours: n(w.lifetime.yours), received: n(w.lifetime.received),
+        }
+      : null,
   };
 }
 

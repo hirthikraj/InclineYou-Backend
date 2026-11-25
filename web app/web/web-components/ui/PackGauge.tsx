@@ -1,3 +1,5 @@
+import { PACK_EXPIRING_DAYS } from '@/lib/today/deck';
+
 /**
  * Pack gauge — how much of what they bought is left.
  *
@@ -40,32 +42,55 @@
 export function PackGauge({
   remaining,
   total,
+  ended = false,
+  daysLeft = null,
+  inline = false,
   className,
 }: {
   remaining: number;
   /** The pack's size. Without it there is a count and no bar — see above. */
   total?: number;
+  /**
+   * The pack ran past its end date (22 Nov 2026). Its sessions are LOST, so it draws no bar — a 9/12 bar on an ended pack
+   * read as a healthy one — and says *Ended* with what went unused.
+   */
+  ended?: boolean;
+  /** Days to the pack's end date. Within `PACK_EXPIRING_DAYS` it is toned as low whatever the count says. */
+  daysLeft?: number | null;
+  /** One line, "6 of 12 left", for a card's text column — the phone roster, where no column header names the figure. */
+  inline?: boolean;
   className?: string;
 }) {
-  /*
-   * `low` at two or fewer and `out` at none, which are `roster.ts`'s own
-   * thresholds for the *Pack ends in 2 sessions* and *Pack is empty* lines. The
-   * gauge and the sentence beside it are one reading, so the numbers live in
-   * one place — if they drift, a row says a pack is ending in amber next to a
-   * bar that is still green.
-   */
-  const low = remaining <= 0 ? 'out' : remaining <= 2 ? 'low' : undefined;
+  const dateNear = daysLeft != null && daysLeft <= PACK_EXPIRING_DAYS;
+  const low = ended ? 'ended' : remaining <= 0 ? 'out' : remaining <= 2 || dateNear ? 'low' : undefined;
+  const cls = ['pk', inline ? 'pk--inline' : null, className].filter(Boolean).join(' ');
+
+  if (ended) {
+    return (
+      <span className={cls} data-low={low}>
+        <b>Ended</b>
+        {remaining > 0 && <span className="pk__note">{remaining} unused</span>}
+      </span>
+    );
+  }
   const pct =
     total != null && total > 0
       ? Math.max(0, Math.min(100, Math.round((remaining / total) * 100)))
       : null;
 
   return (
-    <span className={['pk', className].filter(Boolean).join(' ')} data-low={low}>
-      <b>
-        {remaining}
-        {total != null && <i>/{total}</i>}
-      </b>
+    <span className={cls} data-low={low}>
+      {inline ? (
+        <b>
+          {remaining}
+          {total != null && <i> of {total}</i>} left
+        </b>
+      ) : (
+        <b>
+          {remaining}
+          {total != null && <i>/{total}</i>}
+        </b>
+      )}
       {pct != null && (
         /*
          * `<s>`, which the phone card chose and this keeps: it is the one

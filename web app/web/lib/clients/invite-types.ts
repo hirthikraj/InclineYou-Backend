@@ -55,23 +55,6 @@ export interface InviteCreatedWire {
   waUrl: string;
 }
 
-/** One result of `POST /v1/client-invites`, in the order sent. */
-export interface BulkInviteItemWire {
-  clientId: string;
-  outcome: 'created' | 'skipped';
-  /** `NO_PHONE | ALREADY_ACCEPTED | ARCHIVED | PHONE_IS_TRAINER | NOT_FOUND`, only when skipped. */
-  reason?: string;
-  invite?: InviteWire;
-  link?: string;
-  draft?: string;
-  waUrl?: string;
-}
-
-export interface BulkInviteWire {
-  results: BulkInviteItemWire[];
-  summary: { created: number; skipped: number };
-}
-
 /** The filters the screen offers, in tab order. The default is what needs the trainer. */
 export const INVITE_TABS: { key: string; label: string; states: string }[] = [
   { key: 'waiting', label: 'Waiting', states: 'pending,expired' },
@@ -79,15 +62,6 @@ export const INVITE_TABS: { key: string; label: string; states: string }[] = [
   { key: 'declined', label: 'Declined', states: 'declined' },
   { key: 'withdrawn', label: 'Withdrawn', states: 'revoked' },
 ];
-
-/** What a skipped reason says to a trainer, in the words they use. */
-export const SKIP_REASON: Record<string, string> = {
-  NO_PHONE: 'No number on file — add one first.',
-  ALREADY_ACCEPTED: 'Already on the portal.',
-  ARCHIVED: 'Archived — bring them back first.',
-  PHONE_IS_TRAINER: 'That number can’t be invited.',
-  NOT_FOUND: 'No longer on your roster.',
-};
 
 /**
  * The `wa.me` link for a message the trainer may have edited. Digits only for the number and `%20` for a space, which

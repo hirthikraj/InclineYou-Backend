@@ -4,25 +4,14 @@ import { useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-import { inviteClient, inviteClients, revokeInvite } from '@/lib/clients/invite-actions';
+import { inviteClient, revokeInvite } from '@/lib/clients/invite-actions';
 import type { InvitationsData } from '@/lib/clients/invite-api';
-import {
-  INVITE_TABS,
-  SKIP_REASON,
-  type BulkInviteWire,
-  type InviteCreatedWire,
-  type InviteRowWire,
-} from '@/lib/clients/invite-types';
+import type { InviteCreatedWire, InviteRowWire } from '@/lib/clients/invite-types';
 import { formatPhone } from '@/lib/auth/policy';
-import { TopBar } from '@/components/shell/TopBar';
-import { PageTabs } from '@/components/shell/PageTabs';
 import { Avatar } from '@/web-components/ui/Avatar';
-import { BulkBar } from '@/web-components/ui/BulkBar';
 import { Button } from '@/web-components/ui/Button';
-import { CheckboxCell } from '@/web-components/ui/Checkbox';
 import { EmptyState } from '@/web-components/ui/EmptyState';
 import { Message } from '@/web-components/ui/Message';
-import { PageHeader } from '@/web-components/ui/PageHeader';
 import { RowMenu } from '@/web-components/ui/RowMenu';
 import { Table, Row, type Column } from '@/web-components/ui/Table';
 import { Tag, type TagTone } from '@/web-components/ui/Tag';
@@ -37,79 +26,89 @@ import { InviteSheet } from './InviteSheet';
  * already in the browser.
  *
  * ── THE ORDER IS THE ORDER OF THE WORK ──────────────────────────────────────
- * 1. **A bulk invite's drafts**, while there are any. Each is a message the trainer still has to send from their own
- *    number, so they stay at the top until the list is closed, and the next one to open is the one primary button on
- *    the page: lime is spent on *the next thing to press*, and here that is a single answer.
- * 2. **Not invited yet**: a table with a tick per row and the system's `BulkBar` when anything is ticked — the same
- *    selection grammar the programs list uses — and a per-row *Invite* so one person never needs a selection.
- * 3. **Waiting for an answer**: the invitations that are out. *Send again* is the visible verb and *Withdraw* lives in the
+ * 1. **Not invited yet**: one row per client with its own *Invite*, which opens that client's send sheet. There is no
+ *    selection and no bulk invite (removed 23 Nov 2026, product owner): every invite is a message the trainer reads and
+ *    sends from their own number, one at a time anyway, so ticking a list first only added a second way to do one thing.
+ * 2. **Waiting for an answer**: the invitations that are out. *Send again* is the visible verb and *Withdraw* lives in the
  *    row's menu, because the first is what a trainer does a dozen times and the second is rare.
  *
  * ── RULES THE CONTRACT GIVES IT ─────────────────────────────────────────────
  * · **Expired is not a state the trainer manages.** The server derives it from the date. The screen says *Expired* where
  *   it says *Invited*, under the same tab, with the same single action, because a lapsed link and a link nobody has
  *   opened are the same problem with the same answer.
- * · **A bulk invite is a to-do list, not a send.** The panel never claims anything was sent, because the server cannot
- *   know. It ticks each draft off as its sheet is opened, so *which ones have I done* is visible.
  * · **Withdrawing asks nothing first.** It is reversible by inviting again, and a confirmation on a reversible act is
  *   friction the trainer learns to click through.
  */
 
-const DATE = new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short' });
+/* The app's own month spelling. `Intl` in en-IN writes "Sept", and every other date in the
+   product says "Sep" (24 Nov 2026). Same `.format()` shape, so the call-sites are unchanged. */
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DATE = { format: (d: Date) => `${d.getDate()} ${MON[d.getMonth()]}` };
 const DAY = 86_400_000;
 
 type Sheet = { clientId: string; clientName: string; phone: string; created: InviteCreatedWire };
 
-const PICK_COLUMNS = (all: React.ReactNode): Column[] => [
-  { key: 'sel', label: all, className: 'sel ivn-c-sel' },
+const PICK_COLUMNS: Column[] = [
   { key: 'client', label: 'Client' },
   { key: 'status', label: 'Status', className: 'ivn-c-status' },
   { key: 'act', label: <span className="vh">Actions</span>, className: 'ivn-c-act' },
 ];
 
-const SENT_COLUMNS: Column[] = [
-  { key: 'client', label: 'Client' },
-  { key: 'status', label: 'Status', className: 'ivn-c-status' },
-  { key: 'date', label: 'Sent', className: 'ivn-c-date' },
-  { key: 'act', label: <span className="vh">Actions</span>, className: 'ivn-c-act' },
-];
+/** The invitations table's columns for a view: Joined has no Status (it would be "Joined" on every row) and dates by joining. */
+function sentColumns(tab: string): Column[] {
+  return [
+    { key: 'client', label: 'Client' },
+    ...(tab === 'joined' ? [] : [{ key: 'status', label: 'Status', className: 'ivn-c-status' }]),
+    { key: 'date', label: tab === 'joined' ? 'Joined' : 'Sent', className: 'ivn-c-date' },
+    { key: 'act', label: <span className="vh">Actions</span>, className: 'ivn-c-act' },
+  ];
+}
 
-const RESULT_COLUMNS: Column[] = [
-  { key: 'client', label: 'Client' },
-  { key: 'status', label: 'Link', className: 'ivn-c-status' },
-  { key: 'act', label: <span className="vh">Action</span>, className: 'ivn-c-act' },
-];
+const SENT_HEADING: Record<string, string> = {
+  waiting: 'Waiting for an answer',
+  joined: 'Accepted your invitation',
+  declined: 'Declined or withdrawn',
+};
 
-export function Invitations({ data, now, tab }: { data: InvitationsData; now: number; tab: string }) {
+/**
+ * THE INVITATIONS, WITHOUT A PAGE AROUND THEM (22 Nov 2026). The body of what was `/clients/invitations` —
+ * *Not invited yet* and the invitations out there — drawn inside Clients → Joining beside the join
+ * requests. Every behaviour above is unchanged; only the TopBar, the header and the tab strip moved to the Joining page.
+ * `hideEmpty`: Joining draws one empty state for both lists, so this one stays quiet when it has nothing.
+ */
+export function InvitationsBody({
+  data,
+  now,
+  tab,
+  hideEmpty = false,
+}: {
+  data: InvitationsData;
+  now: number;
+  tab: string;
+  hideEmpty?: boolean;
+}) {
   const router = useRouter();
   const [busy, start] = useTransition();
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<Sheet | null>(null);
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  // `people` is who was ticked, captured at the press: the refresh that follows moves them out of `candidates`, and the
-  // results list still has to say whose message is whose, and to whom the WhatsApp link goes.
-  const [bulk, setBulk] = useState<{
-    result: BulkInviteWire;
-    done: Set<string>;
-    people: Map<string, { name: string; phone: string }>;
-  } | null>(null);
 
   const { list, candidates, withoutNumber } = data;
   const counts = list.counts;
   const waiting = counts ? counts.pending + counts.expired : null;
 
-  const tabs = INVITE_TABS.map((t) => ({
-    key: t.key,
-    label: t.label,
-    href: `/clients/invitations?tab=${t.key}`,
-    count: counts
-      ? t.key === 'waiting' ? waiting
-        : t.key === 'joined' ? counts.accepted
-          : t.key === 'declined' ? counts.declined
-            : counts.revoked
-      : null,
-  }));
+  /* ONE ROW PER PERSON ON DECLINED (24 Nov 2026). Every withdrawn or replaced link was its own
+     row, so a client re-invited four times read as four people. The newest stays (the list is
+     newest first) and says how many came before it. */
+  const earlier = new Map<string, number>();
+  const rows = tab === 'declined'
+    ? list.items.filter((i) => {
+        const seen = earlier.has(i.client.id);
+        earlier.set(i.client.id, (earlier.get(i.client.id) ?? -1) + 1);
+        return !seen;
+      })
+    : list.items;
+
 
   function openFor(clientId: string, clientName: string, phone: string) {
     setError(null);
@@ -135,180 +134,26 @@ export function Invitations({ data, now, tab }: { data: InvitationsData; now: nu
     });
   }
 
-  function inviteSelected() {
-    setError(null);
-    const people = new Map(
-      candidates.filter((c) => picked.has(c.id)).map((c) => [c.id, { name: c.name ?? 'This client', phone: c.phone ?? '' }]),
-    );
-    setWorking('bulk');
-    start(async () => {
-      const r = await inviteClients([...picked]);
-      setWorking(null);
-      if (!r.ok) {
-        setError(r.message);
-        return;
-      }
-      setBulk({ result: r.result, done: new Set(), people });
-      setPicked(new Set());
-      router.refresh();
-    });
-  }
-
-  function toggle(id: string) {
-    setPicked((s) => {
-      const next = new Set(s);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
-
-  const allPicked = candidates.length > 0 && picked.size === candidates.length;
-  const selectAll = () => setPicked(allPicked ? new Set() : new Set(candidates.map((c) => c.id)));
-  const nextDraft = bulk?.result.results.find((r) => r.outcome === 'created' && !bulk.done.has(r.clientId))?.clientId;
-
   return (
     <>
-      <TopBar crumb="Clients" title="Invitations" />
-
-      <main className="main body--flush ivn" id="main-content">
-        <PageHeader
-          className="ph--pglist"
-          title="Invitations"
-          sub={
-            waiting === null ? undefined : waiting === 0 ? 'Nobody is waiting on an answer' : `${waiting} waiting for an answer`
-          }
-          actions={
-            <Button variant="secondary" href="/clients">
-              All clients
-            </Button>
-          }
-        >
-          <PageTabs label="Invitations view" current={tab} tabs={tabs} />
-        </PageHeader>
-
-        <div className="ivn__body">
+        <div className="ivn__in">
           {error && <Message tone="err" alert>{error}</Message>}
 
-          {bulk && (
-            <section className="ivn__sec" aria-labelledby="inv-results">
-              <div className="ivn__t ivn__t--pick">
-                <div className="ivn__hd">
-                  <div className="ivn__hd-t">
-                    <b id="inv-results">
-                      {bulk.result.summary.created === 1 ? '1 link ready' : `${bulk.result.summary.created} links ready`}
-                      {bulk.result.summary.skipped > 0 && ` · ${bulk.result.summary.skipped} skipped`}
-                    </b>
-                    <span>Nothing has been sent. Open each message, read it, and send it from your own WhatsApp.</span>
-                  </div>
-                  <Button size="sm" variant="ghost" onClick={() => setBulk(null)}>
-                    Close
-                  </Button>
-                </div>
-                <Table caption="Drafted invitations" columns={RESULT_COLUMNS}>
-                  {bulk.result.results.map((r) => {
-                    const who = bulk.people.get(r.clientId) ?? { name: 'Client', phone: '' };
-                    const ready = r.outcome === 'created' && r.draft && r.link;
-                    const done = bulk.done.has(r.clientId);
-                    return (
-                      <Row
-                        key={r.clientId}
-                        cells={[
-                          { key: 'client', label: 'Client', content: <Who id={r.clientId} name={who.name} phone={who.phone} /> },
-                          {
-                            key: 'status',
-                            label: 'Link',
-                            className: 'ivn-c-status',
-                            content: ready
-                              ? <Tag tone={done ? 'ok' : 'neutral'}>{done ? 'Opened' : 'Ready'}</Tag>
-                              : <Tag tone="warn">Skipped</Tag>,
-                          },
-                          {
-                            key: 'act',
-                            label: '',
-                            className: 'ivn-c-act',
-                            content: ready ? (
-                              <span className="ivn__acts">
-                                <Button
-                                  size="sm"
-                                  variant={r.clientId === nextDraft ? 'primary' : 'secondary'}
-                                  onClick={() => {
-                                    setSheet({
-                                      clientId: r.clientId,
-                                      clientName: who.name,
-                                      phone: who.phone,
-                                      created: {
-                                        invite: r.invite!,
-                                        client: { id: r.clientId, name: who.name, membershipStatus: 'invited' },
-                                        link: r.link!,
-                                        draft: r.draft!,
-                                        waUrl: r.waUrl!,
-                                      },
-                                    });
-                                    setBulk((b) => b && { ...b, done: new Set(b.done).add(r.clientId) });
-                                  }}
-                                >
-                                  {done ? 'Open again' : 'Open message'}
-                                </Button>
-                              </span>
-                            ) : (
-                              <span className="ivn__why">{SKIP_REASON[r.reason ?? ''] ?? 'Skipped.'}</span>
-                            ),
-                          },
-                        ]}
-                      />
-                    );
-                  })}
-                </Table>
-              </div>
-            </section>
-          )}
-
-          {tab === 'waiting' && (candidates.length > 0 || withoutNumber > 0) && (
+          {tab === 'invite' && (candidates.length > 0 || withoutNumber > 0) && (
             <section className="ivn__sec" aria-labelledby="inv-new">
               <h2 id="inv-new" className="ivn__h">
                 Not invited yet
                 <span className="ivn__n">{candidates.length}</span>
               </h2>
               {candidates.length > 0 && (
-                <div className={`ivn__t ivn__t--pick${picked.size > 0 ? ' ivn__t--sel' : ''}`}>
-                  {picked.size > 0 && (
-                    <BulkBar
-                      inline
-                      count={picked.size}
-                      total={candidates.length}
-                      noun="clients"
-                      one="client"
-                      onSelectAll={selectAll}
-                      actions={
-                        <Button size="sm" variant="primary" loading={working === 'bulk'} onClick={inviteSelected}>
-                          {picked.size === 1 ? 'Invite 1 client' : `Invite ${picked.size} clients`}
-                        </Button>
-                      }
-                    />
-                  )}
+                <div className="ivn__t ivn__t--pick">
                   <Table
                     caption="Clients who have not been invited"
-                    columns={PICK_COLUMNS(
-                      <CheckboxCell
-                        label={allPicked ? 'Clear the selection' : `Select all ${candidates.length} clients`}
-                        checked={allPicked}
-                        indeterminate={picked.size > 0 && !allPicked}
-                        onChange={selectAll}
-                      />,
-                    )}
+                    columns={PICK_COLUMNS}
                   >
                     {candidates.map((c) => (
                       <Row
                         key={c.id}
-                        selected={picked.has(c.id)}
-                        select={
-                          <CheckboxCell
-                            label={`Select ${c.name ?? 'this client'}`}
-                            checked={picked.has(c.id)}
-                            onChange={() => toggle(c.id)}
-                          />
-                        }
                         cells={[
                           { key: 'client', label: 'Client', content: <Who id={c.id} name={c.name ?? 'Unnamed'} phone={c.phone ?? ''} link /> },
                           {
@@ -353,23 +198,28 @@ export function Invitations({ data, now, tab }: { data: InvitationsData; now: nu
             </section>
           )}
 
+          {tab !== 'invite' && (
           <section className="ivn__sec" aria-labelledby="inv-sent">
-            {tab === 'waiting' && (
+            {/* Every view names its list here, in the list's own section, so the heading sits on its table rather than a
+                section's gap above it (22 Nov 2026 — Joined and Declined had theirs drawn outside, 28px off). */}
+            {list.items.length > 0 && (
               <h2 id="inv-sent" className="ivn__h">
-                Waiting for an answer
-                <span className="ivn__n">{waiting ?? list.items.length}</span>
+                {SENT_HEADING[tab] ?? 'Invitations'}
+                {/* Invitations, not people, so it matches the tab's own count; the grouped rows still sum
+                    to it through their "N earlier". */}
+                <span className="ivn__n">{tab === 'waiting' ? (waiting ?? list.items.length) : list.items.length}</span>
               </h2>
             )}
             {list.items.length === 0 ? (
-              <EmptyState
+              hideEmpty ? null : <EmptyState
                 kind={tab === 'waiting' ? 'done' : 'first-run'}
                 title={EMPTY[tab]?.title ?? 'Nothing here'}
                 body={EMPTY[tab]?.body ?? ''}
               />
             ) : (
               <div className="ivn__t">
-                <Table caption={`${list.items.length} invitations`} columns={SENT_COLUMNS}>
-                  {list.items.map((i) => {
+                <Table caption={`${list.items.length} invitations`} columns={sentColumns(tab)}>
+                  {rows.map((i) => {
                     const open = i.state === 'pending' || i.state === 'expired';
                     return (
                       <Row
@@ -380,15 +230,27 @@ export function Invitations({ data, now, tab }: { data: InvitationsData; now: nu
                             label: 'Client',
                             content: <Who id={i.client.id} name={i.client.name ?? 'Unnamed'} phone={i.client.phone ?? ''} link />,
                           },
-                          { key: 'status', label: 'Status', className: 'ivn-c-status', content: <StateTag state={i.state} /> },
+                          /* On Joined every row would say "Joined": the column is dropped there (22 Nov 2026). */
+                          ...(tab === 'joined'
+                            ? []
+                            : [{ key: 'status', label: 'Status', className: 'ivn-c-status', content: <StateTag state={i.state} /> }]),
                           {
                             key: 'date',
-                            label: 'Sent',
+                            label: tab === 'joined' ? 'Joined' : 'Sent',
                             className: 'ivn-c-date',
-                            content: (
+                            /* On Joined the date that matters is when they joined; when they were invited is the second line. */
+                            content: tab === 'joined' ? (
+                              <span className="ivn__d">
+                                <b>{DATE.format(new Date(i.acceptedAt ?? i.createdAt))}</b>
+                                <em>Invited {DATE.format(new Date(i.createdAt))}</em>
+                              </span>
+                            ) : (
                               <span className="ivn__d">
                                 <b>{DATE.format(new Date(i.createdAt))}</b>
-                                <em>{detail(i, now)}</em>
+                                <em>
+                                  {detail(i, now)}
+                                  {(earlier.get(i.client.id) ?? 0) > 0 && ` · ${earlier.get(i.client.id)} earlier`}
+                                </em>
                               </span>
                             ),
                           },
@@ -430,8 +292,8 @@ export function Invitations({ data, now, tab }: { data: InvitationsData; now: nu
               <p className="ivn__note">Showing the newest {list.items.length}. Older invitations are not listed here.</p>
             )}
           </section>
+          )}
         </div>
-      </main>
 
       {sheet && (
         <InviteSheet
@@ -485,7 +347,8 @@ function detail(i: InviteRowWire, now: number): string {
   switch (i.state) {
     case 'pending': {
       const days = Math.max(1, Math.ceil((i.expiresAt - now) / DAY));
-      return days === 1 ? 'Last day' : `${days} days left`;
+      /* It said "13 days left" — of what? It is the link that runs out. */
+      return days === 1 ? 'Link expires today' : `Link expires in ${days} days`;
     }
     case 'expired':
       return `Ended ${DATE.format(new Date(i.expiresAt))}`;

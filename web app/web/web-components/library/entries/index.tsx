@@ -35,6 +35,7 @@ import { TimelineEntry } from './data/Timeline.entry';
 import { TrendChartEntry } from './data/TrendChart.entry';
 import { VolumeBarsEntry } from './data/VolumeBars.entry';
 import { StatEntry } from './data/Stat.entry';
+import { RankListEntry } from './data/RankList.entry';
 import { FiguresEntry } from './data/Figures.entry';
 import { StripEntry } from './data/Strip.entry';
 import { TableEntry } from './data/Table.entry';
@@ -75,6 +76,7 @@ import { SubTabsEntry } from './nav/SubTabs.entry';
 import { TabsEntry } from './nav/Tabs.entry';
 import { TopBarEntry } from './nav/TopBar.entry';
 import { AvatarEntry } from './status/Avatar.entry';
+import { BrandMarkEntry } from './status/BrandMark.entry';
 import { AvatarStackEntry } from './status/AvatarStack.entry';
 import { BalanceStripEntry } from './status/BalanceStrip.entry';
 import { ChipEntry } from './status/Chip.entry';
@@ -142,6 +144,7 @@ export const ENTRY_VIEWS: Record<string, () => ReactNode> = {
   'c-clamptext': ClampTextEntry,
   'c-orderrow': OrderRowEntry,
   'c-stat': StatEntry,
+  'c-ranklist': RankListEntry,
   'c-figures': FiguresEntry,
   'c-strip': StripEntry,
   'c-kv': KeyValueEntry,
@@ -163,6 +166,7 @@ export const ENTRY_VIEWS: Record<string, () => ReactNode> = {
   'c-segment': SegmentEntry,
   'c-facet': FacetEntry,
   'c-avatar': AvatarEntry,
+  'c-brandmark': BrandMarkEntry,
   'c-avatar-stack': AvatarStackEntry,
   'c-count': CountBadgeEntry,
   'c-meter': MeterEntry,

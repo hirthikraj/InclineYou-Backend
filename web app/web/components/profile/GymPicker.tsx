@@ -249,7 +249,7 @@ export function GymPicker({
                 padding: '8px 10px',
                 borderRadius: 6,
                 cursor: 'pointer',
-                background: active === i ? 'var(--bg-sunk, rgba(0,0,0,.05))' : 'transparent',
+                background: active === i ? 'var(--w-hover)' : 'transparent',
               }}
             >
               <b style={{ display: 'block' }}>{hit.name}</b>
@@ -269,7 +269,7 @@ export function GymPicker({
               padding: '8px 10px',
               borderRadius: 6,
               cursor: 'pointer',
-              background: active === results.length ? 'var(--bg-sunk, rgba(0,0,0,.05))' : 'transparent',
+              background: active === results.length ? 'var(--w-hover)' : 'transparent',
             }}
           >
             Not listed? Use “{typed}”

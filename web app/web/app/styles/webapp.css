@@ -100,19 +100,26 @@
 
 [data-theme="dark"]{
   color-scheme:dark;
-  --tx-canvas:#08090B;
-  --tx-surface:#101216;
-  --tx-surface-2:#171A20;
-  --tx-surface-3:#1F232B;
-  --tx-line:#1E222A;
-  --tx-line-strong:#2A2F39;
+  /* ── LIFTED GRAPHITE · 23 Nov 2026 ─────────────────────────────────────
+     The ramp was #08090B → #101216 → #171A20, and a card sat on the canvas at
+     1.06:1: on a real panel the steps vanished and the theme read as one black
+     sheet with hairlines ruled across it. Lifted to graphite on the same cool
+     220° hue, with each step roughly twice as far from the last, so a card is
+     found by its tone before its border. Inks are unchanged and re-measured:
+     ink-3 holds 4.8:1 on surface-3, the deepest ground it is painted on. */
+  --tx-canvas:#0D0E11;
+  --tx-surface:#16181C;
+  --tx-surface-2:#1D2025;
+  --tx-surface-3:#262A30;
+  --tx-line:#272B32;
+  --tx-line-strong:#363B44;
   --tx-scrim:rgba(0,0,0,.66);
   --tx-scrim-soft:rgba(0,0,0,.26);   /* behind a PANEL, not a modal */
 
   --tx-ink:#F2F4F6;
   --tx-ink-2:#A2A9B4;
   --tx-ink-3:#8B939F;
-  --tx-ink-off:#5C6470;   /* 3.3:1 on the canvas — see the light block */
+  --tx-ink-off:#6B7380;   /* 3:1 on surface-3, 4:1 on the canvas — see the light block */
   --tx-ink-inverse:#0A0B0D;
 
   --tx-accent:#C6F24E;
@@ -175,7 +182,7 @@
 
   /* web-only: the rail sits one step below the canvas so the content plane
      reads as the thing in front */
-  --w-rail-bg:#060709;
+  --w-rail-bg:#0A0B0D;
   /* PANE AND TOP SHARE A STEP IN DARK TOO — light says so in its own block below
      ("they are the same distance from the content: both touch it"), and dark did
      not do it: the pane was `--tx-canvas`, so MEASURED it sat at 1.00:1 against
@@ -183,15 +190,18 @@
      beside its header was a full step lighter — three tones across one 56px band
      where light draws two. The pane is `--tx-surface` now, the value the glass
      bar composites to over the canvas (#111418, one unit off). */
-  --w-pane-bg:#101216;
+  --w-pane-bg:#16181C;
   /* The bar's own fill when glass is off, and it has to land where glass does:
      `.top__n` punches its 2px ring out of THIS token, so a bar that is #111418
      under glass and #08090B without it shows a dark halo round the bell count on
      one of the two paths — light's block says the same about its own pair.
      .90 over #08090B composites to #101216. */
-  --w-top-bg:rgba(17,19,23,.90);
-  --w-hover:rgba(255,255,255,.038);
+  --w-top-bg:rgba(23,25,29,.90);   /* .90 over #0D0E11 composites to #16181C */
+  --w-hover:rgba(255,255,255,.045);
   --w-selected:rgba(198,242,78,.10);
+  /* today's column on the calendars. Half the selected row's strength: a
+     selection is one row, today is a whole column of the screen. */
+  --w-today:rgba(198,242,78,.045);
   --w-grid:rgba(255,255,255,.045);
 }
 
@@ -328,6 +338,7 @@
   --w-top-bg:rgba(246,245,241,.90);
   --w-hover:rgba(23,21,18,.04);
   --w-selected:#EDF6D6;
+  --w-today:#F7FAEE;   /* see the dark block */
   --w-grid:rgba(23,21,18,.06);
 }
 
@@ -1069,6 +1080,11 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
 /* ── main ────────────────────────────────────────────────────────────────── */
 .main{grid-area:main;min-width:0;min-height:0;display:flex;flex-direction:column;
   overflow:hidden;position:relative}
+/* `clip`, not only `hidden` (24 Nov 2026): a hidden box can still be scrolled BY CODE —
+   a focus() or scrollIntoView() on something near the foot moved `.main` itself, the
+   page header slid off the top and the scroller ended 146px above the tab bar, a blank
+   band on a phone. A clipped box cannot scroll at all; `.body` remains the scroller. */
+@supports (overflow:clip){.main{overflow:clip}}
 
 /* the page header inside main: title, meta, actions, then optional tabs */
 .ph{
@@ -1086,6 +1102,16 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
   background:var(--tx-canvas);
 }
 .ph__row{display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap}
+/* A HEADER WITH NO TAB STRIP NEEDS A FOOT (24 Nov 2026). `.ph` has no bottom padding because
+   a tab's underline must land ON the rule below it; a header with no tabs then ended 0-1px
+   above that rule — measured on the finish page, the session page, Business and Today — so
+   its last line, or its buttons on a phone, sat on the hairline. Only tab-less headers get
+   it; `.sch__ph` pads itself, and Today's phone header draws nothing at all. */
+.ph:not(:has(.tab)):not(.sch__ph){padding-bottom:14px}
+@media (max-width:900px){
+  .ph:not(:has(.tab)):not(.sch__ph){padding-bottom:12px}
+  .ph:not(:has(.tab)):not(.sch__ph).ph--today{padding-bottom:0}
+}
 .ph__t{font-family:var(--tx-brand);font-weight:800;font-size:22px;letter-spacing:-.025em;
   text-wrap:nowrap;white-space:nowrap}
 .ph__sub{font-size:13px;color:var(--tx-ink-3);margin-top:4px}
@@ -1158,10 +1184,19 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
   box-shadow:var(--tx-e3);display:flex;flex-direction:column;z-index:30;
 }
 .panel__hd{
-  flex:0 0 auto;height:52px;display:flex;align-items:center;gap:12px;
-  padding:0 14px 0 18px;border-bottom:1px solid var(--tx-line);
+  /* `min-height`, not `height` (24 Nov 2026): a subtitle that wraps on a phone
+     ("Tuesday 24 November · 11:00 PM–12:00 AM") overflowed a fixed 52px box and
+     pushed the title into the sheet's top edge. One line still measures 52. */
+  flex:0 0 auto;min-height:52px;display:flex;align-items:center;gap:12px;
+  padding:8px 14px 8px 18px;border-bottom:1px solid var(--tx-line);
 }
 .panel__t{font-family:var(--tx-brand);font-weight:800;font-size:15px;letter-spacing:-.01em}
+/* A panel takes focus on open (`tabindex=-1`) so a reader starts inside it; a ring round
+   the whole sheet marks nothing a person can act on. Controls inside keep theirs. */
+.panel[tabindex="-1"]:focus-visible,.modal[tabindex="-1"]:focus-visible,.mhost:focus-visible,
+[tabindex="-1"]:is(h1,h2,h3):focus-visible{outline:none}
+/* ...and a heading given focus on open (a screen sheet's title) so a reader starts there: no
+   ring round a title nobody can act on. */
 .panel__body{flex:1;min-height:0;overflow-y:auto;padding:18px}
 .panel__foot{
   flex:0 0 auto;padding:14px 18px;border-top:1px solid var(--tx-line);
@@ -1257,6 +1292,59 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
 .modal__body{padding:12px 22px 20px;font-size:14px;line-height:1.6;color:var(--tx-ink-2)}
 .modal__foot{padding:14px 22px;border-top:1px solid var(--tx-line);
   display:flex;gap:9px;justify-content:flex-end;background:var(--tx-surface-2)}
+
+/* ── `modal--sheet` · A FORM DIALOG RISES FROM THE BOTTOM ON A PHONE ──────────
+   24 Nov 2026. The panels already become bottom sheets under 900px (the Filter
+   sheet, Sell a pack); a form modal stayed a centred card floating mid-screen,
+   its foot a thumb's stretch away. Opt-in (`<Modal sheet>`): a two-button
+   confirm is still a centred question. A transition with `@starting-style`,
+   not a keyframe — the eight-name vocabulary has none that rises — and
+   `animation:none` because `tx-pop-c` would fight the travel. No exit: the
+   dialog unmounts on close, the trade `.pgsheet` already records. */
+@media (max-width:900px){
+  .modal.modal--sheet{
+    left:0;right:0;top:auto;bottom:0;
+    /* !important against the `width` the component sets inline for desks */
+    width:100% !important;max-width:none;
+    max-height:calc(100dvh - 40px);display:flex;flex-direction:column;
+    border-width:1px 0 0;border-radius:var(--tx-r4) var(--tx-r4) 0 0;
+    box-shadow:var(--tx-e4);
+    transform:translateY(0);animation:none;
+    transition:transform var(--tx-t-slow) var(--tx-ease);
+  }
+  @starting-style{ .modal.modal--sheet{transform:translateY(100%)} }
+  /* A dialog whose scrim covers the whole frame sits on the SCREEN's floor, over
+     the tab bar its scrim already dims; anchored to `.main` it stopped 55px short
+     and the dimmed tab bar showed beneath it. A `main`-cover dialog keeps `.main`'s
+     floor, where its own scrim ends. */
+  .mhost--frame > .modal.modal--sheet{position:fixed}
+  .modal--sheet .modal__body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
+  .modal--sheet .modal__foot{flex:0 0 auto;padding-bottom:calc(14px + env(safe-area-inset-bottom))}
+}
+@media (max-width:900px) and (prefers-reduced-motion:reduce){
+  .modal.modal--sheet{transition:none}
+}
+
+/* ── THE EXIT · the copy `ModalHost` plays out when a dialog unmounts ────────
+   `ui/Modal.tsx` (`playExit`) carries the argument. The children fade — never the
+   host itself: opacity on `.mhost` would make it a stacking context and drop a
+   z-61 dialog under the tab bar for the length of the exit. The entrance keyframes
+   are switched off on the copy, or it would pop in again on the way out. */
+.scrim--ghost,.mhost--ghost > *{animation:none !important;pointer-events:none}
+.scrim--ghost{transition:opacity var(--tx-t-base) var(--tx-ease-exit)}
+.scrim--ghost.is-out{opacity:0}
+.mhost--ghost > *{transition:opacity var(--tx-t-fast) var(--tx-ease-exit),
+  transform var(--tx-t-fast) var(--tx-ease-exit)}
+.mhost--ghost.is-out > *{opacity:0}
+.mhost--ghost.is-out > .modal{transform:translate(-50%,-50%) scale(.97)}
+@media (max-width:900px){
+  /* a sheet goes back the way it came: down, at full opacity */
+  .mhost--ghost > .modal.modal--sheet{transition:transform var(--tx-t-base) var(--tx-ease-exit)}
+  .mhost--ghost.is-out > .modal.modal--sheet{opacity:1;transform:translateY(100%)}
+  /* the copy is a new element, so the sheet's own @starting-style would slide it
+     UP first; it starts where the real one was */
+  @starting-style{ .mhost--ghost > .modal.modal--sheet{transform:translateY(0)} }
+}
 
 /* ── the command palette ─────────────────────────────────────────────────
    ⌘K. There is no phone equivalent, and its absence is the loudest tell
@@ -1374,9 +1462,8 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
 .ntf__day{
   position:sticky;top:0;z-index:1;
   padding:10px 16px 6px;background:var(--tx-surface);
-  font-family:var(--tx-mono);font-size:10px;letter-spacing:.13em;
-  text-transform:uppercase;color:var(--tx-ink-3);
-}
+  font-size:12px;
+  color:var(--tx-ink-3);font-weight:600;}
 
 /* ── one event ────────────────────────────────────────────────────────────
    A four-column grid, and the FIRST column is the whole trick: a 14px gutter
@@ -1542,7 +1629,9 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
   box-shadow:inset 0 1px 0 rgba(255,255,255,.28),var(--tx-accent-glow)}
 .btn--primary:active{box-shadow:inset 0 1px 2px rgba(0,0,0,.20)}
 .btn--secondary{border-color:var(--tx-line-strong);color:var(--tx-ink)}
-.btn--secondary:hover{background:var(--tx-surface-2)}
+/* A translucent hover and a firmer edge, so it shows on whatever ground the
+   button sits on: the old surface-2 fill was 1.06:1 on a light card. */
+.btn--secondary:hover{background-color:var(--w-hover);border-color:var(--tx-ink-off)}
 .btn--ghost{color:var(--tx-ink-2)}
 .btn--ghost:hover{background:var(--w-hover);color:var(--tx-ink)}
 .btn--danger{background:var(--tx-danger-fill);color:var(--tx-danger-fill-ink);font-weight:700}
@@ -1702,7 +1791,12 @@ select.ctl{appearance:none;cursor:pointer;
     select.ctl::picker(select){transition:none}
   }
 }
-.fld--err .ctl{border-color:var(--tx-danger);box-shadow:0 0 0 3px var(--tx-danger-soft)}
+.fld--err .ctl,.ctl[aria-invalid="true"]{border-color:var(--tx-danger);box-shadow:0 0 0 3px var(--tx-danger-soft)}
+/* A field that cannot be typed in says so in its fill as well as its dimming,
+   and does not answer the hover that promises it can. */
+.ctl:disabled,.ctl[aria-disabled="true"]{opacity:.55;cursor:not-allowed;
+  background-color:var(--tx-surface-2);box-shadow:none}
+.ctl:disabled:hover,.ctl[aria-disabled="true"]:hover{border-color:var(--tx-field-line)}
 .fld__e{font-size:12px;font-weight:600;color:var(--tx-danger);display:flex;gap:5px}
 .ctl--num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--tx-mono)}
 
@@ -1889,8 +1983,12 @@ select.ctl{appearance:none;cursor:pointer;
   transform var(--tx-t-instant) var(--tx-ease)}
 .chip:hover{border-color:var(--tx-line-strong);color:var(--tx-ink)}
 .chip:active{transform:scale(.96)}
-.chip[aria-pressed="true"]{background:var(--tx-accent);border-color:var(--tx-accent);
-  color:var(--tx-accent-ink)}
+/* A PRESSED CHIP IS A STATE, NOT AN ACTION (25 Nov 2026). It was a solid lime fill, so a profile with five
+   picked answers, a builder toolbar or a New template dialog each carried three to eight lime marks against
+   the one lime action. Picked is now a raised fill with an ink edge and ink text — the shared segment's
+   selection, readable in both themes. Screens that need a primary still have `.btn--primary`. */
+.chip[aria-pressed="true"]{background-color:var(--tx-surface-3);border-color:var(--tx-ink-3);
+  color:var(--tx-ink);font-weight:650}
 .chip__x{width:14px;height:14px;display:grid;place-items:center;opacity:.7}
 
 
@@ -2142,13 +2240,23 @@ select.ctl{appearance:none;cursor:pointer;
 .stats--2{grid-template-columns:repeat(2,minmax(0,1fr))}
 .stat{background:var(--tx-surface);border:1px solid var(--tx-line);border-radius:var(--tx-r3);
   padding:14px 16px}
-.stat__k{font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.11em;
-  text-transform:uppercase;color:var(--tx-ink-3)}
+/* THE KEY IS A LABEL, NOT AN EYEBROW · 24 Nov 2026. It was 10.5px mono,
+   uppercase, tracked out to .11em — the dashboard-template voice, and the
+   smallest type on a tile whose job is to say what the figure IS. Sentence
+   case Inter at the meta step reads as the trainer's own words. */
+.stat__k{font-size:12.5px;font-weight:500;line-height:1.35;color:var(--tx-ink-3)}
 .stat__v{font-family:var(--tx-brand);font-weight:800;font-size:27px;letter-spacing:-.03em;
   line-height:1.05;margin-top:8px;font-variant-numeric:tabular-nums}
 .stat__d{font-size:12.5px;color:var(--tx-ink-3);margin-top:5px}
 .stat__d b{font-weight:600}
-.stat--acc .stat__v{color:var(--tx-accent-text)}
+/* `acc` no longer colours the figure: lime is spent on the next action, and a
+   lime number read as a status. The tone is kept so call-sites still compile;
+   warn and danger keep theirs, because those ARE statuses. */
+.stat--acc .stat__v{color:var(--tx-ink)}
+/* see `ui/Stat.tsx`: a value with no digits is a sentence, set as one. */
+.stat__v.stat__v--word{font-family:var(--tx-font);font-size:17px;font-weight:650;
+  letter-spacing:-.01em;line-height:1.3;margin-top:10px}
+.stat:not(.stat--warn):not(.stat--danger) .stat__v--word{color:var(--tx-ink-2)}
 .stat--warn .stat__v{color:var(--tx-warn)}
 .stat--danger .stat__v{color:var(--tx-danger)}
 /* ── .stat--link · a tile that is also a door ────────────────────────────────
@@ -2230,8 +2338,8 @@ select.ctl{appearance:none;cursor:pointer;
   letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .subbar__c{flex:1 1 128px;min-width:0;padding:11px 15px;
   border-left:1px solid var(--tx-line)}
-.subbar__k{display:block;font-family:var(--tx-mono);font-size:10px;font-weight:500;
-  letter-spacing:.11em;text-transform:uppercase;color:var(--tx-ink-3)}
+.subbar__k{display:block;font-size:12px;font-weight:600;
+  color:var(--tx-ink-3)}
 .subbar__v{display:block;margin-top:4px;font-size:14.5px;font-weight:600;
   color:var(--tx-ink);font-variant-numeric:tabular-nums;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2333,7 +2441,7 @@ select.ctl{appearance:none;cursor:pointer;
   border-bottom:1px solid var(--tx-line);color:var(--tx-ink-2);vertical-align:middle}
 .tbl tbody th{text-align:left;font-weight:500;color:var(--tx-ink)}
 .tbl tbody tr:hover td,.tbl tbody tr:hover th{background:var(--w-hover)}
-.tbl tbody tr[aria-selected="true"] td{background:var(--w-selected)}
+.tbl tbody tr[aria-selected="true"] td,.tbl tbody tr[aria-selected="true"] th{background:var(--w-selected)}
 .tbl .num{text-align:right;font-variant-numeric:tabular-nums;font-family:var(--tx-mono);
   color:var(--tx-ink);white-space:nowrap}
 .tbl .strong{color:var(--tx-ink);font-weight:600}
@@ -2637,7 +2745,39 @@ select.ctl{appearance:none;cursor:pointer;
    rate a reviewer scans down, so the missing colour inverted the finding. */
 .meter i.danger{background:var(--tx-danger)}
 .meter i.dim{background:var(--tx-surface-3)}
+/* `data` · a magnitude in a LIST of magnitudes (a ranking, a per-row volume).
+   Neutral, at the 3:1 shape step, so the one lime bar in the list is the one
+   that means something. A single progress bar keeps the lime base fill. */
+.meter i.data{background:var(--tx-ink-off)}
 .meter--lg{height:9px}
+
+/* ── rank list · name, bar, figure on ONE line (`ui/RankList.tsx`) ─────────
+   24 Nov 2026. A ranking was a key-value row with a full-width meter under it:
+   two lines a person and a bar that ran under the name it belonged beside.
+   The name track is capped so every bar starts on the same x. */
+.rank{list-style:none;margin:0;padding:0;display:grid;
+  grid-template-columns:minmax(0,220px) minmax(0,1fr) auto;column-gap:16px}
+.rank__r{display:grid;grid-column:1 / -1;grid-template-columns:subgrid;align-items:center;
+  min-height:var(--w-row);border-top:1px solid var(--tx-line)}
+.rank__r:first-child{border-top:0}
+.rank__who{display:flex;align-items:center;gap:10px;min-width:0;
+  color:var(--tx-ink);text-decoration:none;font-size:13.5px;font-weight:600}
+a.rank__who:hover .rank__n{text-decoration:underline;text-underline-offset:3px}
+a.rank__who:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px;border-radius:var(--tx-r1)}
+.rank__n{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rank__bar{height:6px;border-radius:var(--tx-rfull);background:var(--tx-surface-3);overflow:hidden}
+.rank__f{display:block;height:100%;border-radius:var(--tx-rfull);background:var(--tx-ink-off)}
+.rank__f--top{background:var(--tx-accent)}
+[data-theme="light"] .rank__f--top{box-shadow:inset 0 0 0 1px var(--tx-accent-text)}
+.rank__v{font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums;text-align:right;
+  min-width:72px}
+/* a phone: the name and the figure share a line and the bar runs under both */
+@media (max-width:620px){
+  .rank{grid-template-columns:minmax(0,1fr) auto}
+  .rank__r{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"w v" "b b";
+    row-gap:6px;padding:10px 0}
+  .rank__who{grid-area:w}.rank__v{grid-area:v}.rank__bar{grid-area:b}
+}
 
 /* ── the calendar grid · FIRST PASS, SUPERSEDED ──────────────────────────
    Seven columns × the working day, as a matrix of hour cells. Kept because
@@ -2722,6 +2862,8 @@ select.ctl{appearance:none;cursor:pointer;
 .ev b{display:block;color:var(--tx-ink);font-weight:600;white-space:nowrap;
   overflow:hidden;text-overflow:ellipsis}
 .ev span{color:var(--tx-ink-3);font-family:var(--tx-mono);font-size:10.5px}
+/* the plan line is words ("Lower body · Week 6/10"), not data: Inter. The time stays mono. */
+.ev .ev__p{font-family:var(--tx-font);font-size:11px}
 /* ── TWO AXES, TWO CHANNELS, AND THEY USED TO SHARE ONE ──────────────────
    A block says two independent things: HOW it is delivered (floor / online)
    and WHERE it is in its lifecycle (done / no-show / clashing). Both were
@@ -2793,7 +2935,7 @@ select.ctl{appearance:none;cursor:pointer;
    one thing on the screen that must not be clipped — a real implementation
    renders it in the top layer, and this is the static equivalent. */
 .cw__seg--drag{overflow:visible;z-index:10}
-.cw__seg--today{background:var(--w-selected)}
+.cw__seg--today{background:var(--w-today)}
 
 /* the rulings. An hour is a line, not a row. */
 .cw__l{position:absolute;left:0;right:0;height:0;border-top:1px solid var(--tx-line)}
@@ -2837,8 +2979,7 @@ select.ctl{appearance:none;cursor:pointer;
 .cw__band b{font-family:var(--tx-mono);font-weight:500;color:var(--tx-ink-2);
   font-variant-numeric:tabular-nums}
 .cw__band em{font-style:normal;margin-left:auto;color:var(--tx-ink-3);
-  font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.06em;
-  text-transform:uppercase}
+  font-size:12px;font-weight:600;}
 .cw__band svg{flex:0 0 auto;color:var(--tx-ink-3)}
 
 /* now. The line is --tx-ink because red is taken by the clash and by the
@@ -3074,7 +3215,7 @@ button.ev--late{border-left-color:var(--tx-warn)}
   background:none;cursor:pointer;position:relative}
 .mo__c:hover{background:var(--w-hover)}
 .mo__c:focus-visible{outline:2px solid var(--tx-focus);outline-offset:-2px;z-index:4}
-.mo__c--today{background:var(--w-selected);box-shadow:inset 0 0 0 1px var(--tx-accent-line)}
+.mo__c--today{background:var(--w-today);box-shadow:inset 0 0 0 1px var(--tx-accent-line)}
 /* a day inside an all-day block. Same hatch the week uses for out-of-hours,
    because it means the same thing: not available, not merely empty. */
 .mo__c--off{background:repeating-linear-gradient(45deg,transparent 0 6px,var(--w-grid) 6px 7px)}
@@ -3328,8 +3469,8 @@ button.ev--late{border-left-color:var(--tx-warn)}
    left, which is 232px inside a 420px panel. */
 .setlist{display:grid;grid-template-columns:34px minmax(0,1fr) 64px 30px;
   align-items:center;gap:7px 8px}
-.setlist__k{font-family:var(--tx-mono);font-size:10px;font-weight:500;
-  letter-spacing:.1em;text-transform:uppercase;color:var(--tx-ink-3);
+.setlist__k{font-size:12px;font-weight:600;
+  color:var(--tx-ink-3);
   padding-bottom:2px;white-space:nowrap}
 .setlist__k--c{justify-self:center}
 .setlist__n{font-family:var(--tx-mono);font-size:12px;color:var(--tx-ink-3);
@@ -3397,8 +3538,8 @@ button.ev--late{border-left-color:var(--tx-warn)}
    a week somebody authored, a ghost chip is a week that repeats. Twelve empty
    chips would be the blank twelve-week grid the app deliberately refuses. */
 .wk{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
-.wk__k{font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.12em;
-  text-transform:uppercase;color:var(--tx-ink-3);margin-right:2px}
+.wk__k{font-size:12px;font-weight:600;
+  color:var(--tx-ink-3);margin-right:2px}
 .chip--ghost{background:transparent;border-style:dashed;color:var(--tx-ink-3)}
 .chip--ghost:hover{color:var(--tx-ink-2)}
 .chip--ghost[aria-pressed="true"]{background:var(--tx-accent-soft);
@@ -3509,11 +3650,14 @@ button.ev--late{border-left-color:var(--tx-warn)}
 /* ── timeline (client history, audit trail) ───────────────────────────────── */
 .tl{position-area:none;padding-left:26px;position:relative}
 .tl::before{content:'';position:absolute;left:7px;top:5px;bottom:5px;width:1px;
-  background:var(--tx-line)}
+  background:var(--tx-line-strong)}
 .tl__i{position:relative;padding:0 0 18px}
 .tl__i::before{content:'';position:absolute;left:-23px;top:4px;width:9px;height:9px;
-  border-radius:50%;background:var(--tx-surface-3);
-  box-shadow:0 0 0 3px var(--tx-canvas)}
+  /* ink-off, not surface-3: the dot measured 1.16:1 on the page and could not
+     be found. The ring is cut from whatever ground the list sits on. */
+  border-radius:50%;background:var(--tx-ink-off);
+  box-shadow:0 0 0 3px var(--tl-ground,var(--tx-canvas))}
+.card .tl,.stat .tl{--tl-ground:var(--tx-surface)}
 .tl__i--acc::before{background:var(--tx-accent)}
 /* THE LAST ROW WAS PAYING FOR A ROW UNDER IT THAT DOES NOT EXIST. The 18px is
    the gap BETWEEN entries, and on the last one it is 18px of card floor with
@@ -3547,7 +3691,7 @@ button.ev--late{border-left-color:var(--tx-warn)}
 .tl__a:hover .tl__t{text-decoration:underline;text-underline-offset:3px;
   text-decoration-color:var(--tx-ink-3)}
 .tl__a:focus-visible{outline:2px solid var(--tx-focus);outline-offset:3px}
-.tl__d{font-family:var(--tx-mono);font-size:10.5px;color:var(--tx-ink-3);letter-spacing:.06em}
+.tl__d{font-size:12px;font-weight:500;color:var(--tx-ink-3);font-variant-numeric:tabular-nums}
 .tl__t{font-size:13px;font-weight:600;color:var(--tx-ink);margin-top:2px}
 /* A TITLE THAT IS A READING, NOT A NAME. The workout console's history draws
    `60 kg × 8 · 62.5 kg × 6` in this slot — figures, which want the mono face
@@ -4670,6 +4814,8 @@ button.ev--late{border-left-color:var(--tx-warn)}
    touch. The gap stays the row's own 10px; a token row that wants 6 says so
    with `--gap` on itself or reaches for its component's family. */
 .row--wrap{flex-wrap:wrap}
+/* one token that may not break inside: a set ("22.5 kg × 10"), a figure with its unit */
+.nowrap{white-space:nowrap}
 .row--top{align-items:flex-start}
 .col{display:flex;flex-direction:column}
 .gap2{gap:8px}.gap3{gap:12px}.gap4{gap:16px}.gap6{gap:24px}
@@ -4682,8 +4828,9 @@ button.ev--late{border-left-color:var(--tx-warn)}
 .ok{color:var(--tx-ok)}.warn{color:var(--tx-warn)}.danger{color:var(--tx-danger)}
 .h4{font-family:var(--tx-brand);font-weight:800;font-size:15px;letter-spacing:-.015em}
 .h5{font-size:13px;font-weight:700;color:var(--tx-ink)}
-.micro{font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.11em;
-  text-transform:uppercase;color:var(--tx-ink-3)}
+/* a short label over a group or a figure. Sentence-case Inter since 24 Nov 2026
+   — it was the uppercase mono eyebrow; see `.stat__k`. */
+.micro{font-size:12px;font-weight:600;line-height:1.4;color:var(--tx-ink-3)}
 .small{font-size:12.5px;color:var(--tx-ink-3);line-height:1.55}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
@@ -5162,8 +5309,8 @@ button.ev--late{border-left-color:var(--tx-warn)}
    ═══════════════════════════════════════════════════════════════════════════ */
 
 [data-theme="dark"]{
-  --g-fill:rgba(22,26,32,.64);
-  --g-fill-strong:rgba(22,26,32,.70);
+  --g-fill:rgba(28,31,36,.64);
+  --g-fill-strong:rgba(28,31,36,.70);
   --g-line:rgba(255,255,255,.10);
   --g-edge:rgba(255,255,255,.22);      /* the lit top edge */
   --g-inset:inset 0 1px 0 rgba(255,255,255,.07);
@@ -5884,9 +6031,9 @@ button.lrow,label.lrow{
 .wiz__a{display:block;font-size:11.5px;color:var(--tx-accent-text);
   margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* (.wiz__i--now .wiz__t is already set where .wiz is defined — not repeated.) */
-.wiz__opt{font-family:var(--tx-mono);font-size:9.5px;letter-spacing:.09em;
-  text-transform:uppercase;color:var(--tx-ink-3);margin-left:auto;
-  flex:0 0 auto;padding-top:3px}
+.wiz__opt{font-size:12px;
+  color:var(--tx-ink-3);margin-left:auto;
+  flex:0 0 auto;padding-top:3px;font-weight:600;}
 /* THE SAME SLOT, MARKING THE OTHER CASE — and which one a flow draws depends on
    which is the exception.
 
@@ -5901,9 +6048,9 @@ button.lrow,label.lrow{
    step, not a warning about the trainer, and a lime or a danger tone on the
    first row of a flow that has not been used yet reads as something already
    going wrong. */
-.wiz__req{font-family:var(--tx-mono);font-size:9.5px;letter-spacing:.09em;
-  text-transform:uppercase;color:var(--tx-ink-2);margin-left:auto;
-  flex:0 0 auto;padding-top:3px}
+.wiz__req{font-size:12px;
+  color:var(--tx-ink-2);margin-left:auto;
+  flex:0 0 auto;padding-top:3px;font-weight:600;}
 
 /* ══════════════════════════════════════════════════════════════════════════
    11 · THE ROSTER, AS A TABLE
@@ -6357,8 +6504,8 @@ button.lrow,label.lrow{
 .strip>div:first-child{border-left:0}
 .strip b{display:block;font-family:var(--tx-brand);font-weight:800;font-size:19px;
   letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
-.strip i{font-style:normal;display:block;font-family:var(--tx-mono);font-size:10px;
-  letter-spacing:.11em;text-transform:uppercase;color:var(--tx-ink-3);margin-top:4px}
+.strip i{font-style:normal;display:block;font-size:12px;font-weight:500;
+  color:var(--tx-ink-3);margin-top:3px}
 /* ── THE DENOMINATOR AND THE UNIT, NAMED · 21 Sep 2026 ────────────────────
    Both were an inline `<span className="ink3">` at five call-sites, and two
    of them added `style={{ fontSize: 14 }}` while a third did not — so `6/8`
@@ -6560,8 +6707,9 @@ button.lrow,label.lrow{
 
 /* ── the metric chart. Bars, not a line: seven readings six weeks apart are
       not a continuous series, and joining them draws a slope nobody measured. */
-.chart{position:relative;height:132px;border:1px solid var(--tx-line);
-  border-radius:var(--tx-r2);background:var(--tx-surface);padding:10px 12px 22px}
+.chart{position:relative;height:132px;padding:10px 12px 22px}
+/* No frame of its own (24 Nov 2026): every chart sits in a card, and a bordered box inside
+   one is a frame inside a frame. The gridlines carry the plot's edges. */
 .chart__g{position:absolute;left:12px;right:12px;height:1px;background:var(--tx-line)}
 .chart__y{position:absolute;left:12px;font-family:var(--tx-mono);font-size:9.5px;
   color:var(--tx-ink-3);transform:translateY(-50%);background:var(--tx-surface);
@@ -6571,13 +6719,24 @@ button.lrow,label.lrow{
    than being the only encoding of it. The outlined version measured 2.6:1 dark
    and 1.1:1 light against the card: no perceptible edge at all in light. */
 .chart__b{position:absolute;bottom:22px;width:26px;border-radius:2px 2px 0 0;
-  background:var(--tx-accent)}
+  background:var(--tx-ink-off)}
+/* Twelve lime bars made the chart the loudest thing on the page and the
+   current month indistinguishable from the rest. Bars are neutral; the month
+   in progress is the one lime fill, ringed on light where lime has no edge. */
+/* On paper `--tx-ink-off` is a warm taupe, and at chart size twelve of them were
+   the heaviest blocks on the page. The figure printed above each column carries
+   the number, so the column steps back to the strong hairline tone. */
+[data-theme="light"] .chart__b{background:var(--tx-line-strong)}
+.chart__b--now{background:var(--tx-accent)}
+/* (0,2,0) to outrank the light column rule above: specificity, not order */
+[data-theme="light"] .chart__b--now{background:var(--tx-accent);box-shadow:inset 0 0 0 1px var(--tx-accent-text)}
 .chart__b--bad{background:var(--tx-danger)}
 .chart__b--bad b{color:var(--tx-danger);font-weight:700}
 .chart__b b{position:absolute;left:50%;transform:translateX(-50%);bottom:100%;
-  font-family:var(--tx-mono);font-size:9.5px;color:var(--tx-ink-2);
-  margin-bottom:3px;white-space:nowrap;font-weight:500}
-.chart__x{position:absolute;bottom:4px;font-family:var(--tx-mono);font-size:9px;
+  font-family:var(--tx-mono);font-size:10.5px;color:var(--tx-ink-2);font-style:normal;
+  margin-bottom:4px;white-space:nowrap;font-weight:500}
+/* `font-style:normal`: the bar is an `<i>`, so its figure was quietly italic. */
+.chart__x{position:absolute;bottom:4px;font-family:var(--tx-mono);font-size:10.5px;
   color:var(--tx-ink-3);transform:translateX(-50%);white-space:nowrap}
 
 /* ── the intake step bar. Four, and the record is written on the second. ─── */
@@ -6692,6 +6851,15 @@ button.lrow,label.lrow{
   padding:0;font:inherit;appearance:none}
 .sets .tk:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
 .sets .tk:hover{border-color:var(--tx-line-strong);color:var(--tx-ink)}
+/* THE ACTIVE ROW'S TICK IS THE ONE LIME ON A DESK (24 Nov 2026) — the press a trainer makes
+   for every set. On a phone the dock's *Log set* bar is that button, so the row tick there
+   stays outlined rather than putting two of the same verb on one screen. */
+@media (min-width:901px){
+  .sets--entry tbody tr[data-state="active"] .tk:not(.tk--on):not(.tk--skip){
+    background-color:var(--tx-accent);border-color:var(--tx-accent);color:var(--tx-accent-ink)}
+  .sets--entry tbody tr[data-state="active"] .tk:not(.tk--on):not(.tk--skip):hover{
+    background-color:var(--tx-accent-press);border-color:var(--tx-accent-press);color:var(--tx-accent-ink)}
+}
 .sets .tk--on{background:var(--tx-ok-soft);border-color:var(--tx-ok);
   color:var(--tx-ok)}
 /* A completed exercise never fades inside a running session (§09): a done
@@ -6975,8 +7143,8 @@ button.lrow,label.lrow{
   flex-direction:column;gap:6px;min-height:150px}
 /* 11px: this is the verdict — the one word each of these four cards exists to
    say — and it was the smallest type on the screen. */
-.vrd__k{font-family:var(--tx-mono);font-size:11px;font-weight:500;
-  letter-spacing:.1em;text-transform:uppercase}
+.vrd__k{font-size:12px;font-weight:600;
+  }
 .vrd__v{font-family:var(--tx-brand);font-weight:800;font-size:22px;
   letter-spacing:-.02em;line-height:1.05;font-variant-numeric:tabular-nums}
 .vrd__b{font-size:12px;line-height:1.5;color:var(--tx-ink-3);margin-top:auto}
@@ -7030,7 +7198,10 @@ button.lrow,label.lrow{
   color:var(--tx-ink-3);white-space:nowrap}
 .vb__y span{position:absolute;right:0;transform:translateY(-50%)}
 .vb__plot{flex:1 1 auto;min-width:0}
-.vb__cols{display:flex;align-items:flex-end;gap:6px;height:var(--vb-h,190px);
+/* SPREAD ACROSS THE PLOT (25 Nov 2026). The bars keep their 96px cap — a one-week series must not be a slab —
+   but the slots are spaced around the width, so five weeks fill the chart instead of crowding its left half
+   with the right half empty. The label row takes the same spacing, so each label stays under its bar. */
+.vb__cols{display:flex;align-items:flex-end;justify-content:space-around;gap:6px;height:var(--vb-h,190px);
   border-bottom:1px solid var(--tx-line-strong);padding-bottom:0;
   background-image:linear-gradient(var(--tx-line) 1px,transparent 1px),
     linear-gradient(var(--tx-line) 1px,transparent 1px);
@@ -7091,7 +7262,7 @@ button.lrow,label.lrow{
    with the figure written on the bar it belongs to: a chart with no scale
    anywhere on it can only say "up a bit". */
 .vb__c b{position:absolute;left:50%;transform:translateX(-50%);bottom:calc(100% + 5px);
-  font-family:var(--tx-mono);font-size:11px;font-weight:500;color:var(--tx-ink);
+  font-family:var(--tx-mono);font-size:11px;font-weight:500;font-style:normal;color:var(--tx-ink);
   white-space:nowrap;opacity:0;pointer-events:none}
 .vb__c--pin b,.vb__c:hover b{opacity:1}
 /* The date under the figure, on hover only — `w4` is an index and a reader
@@ -7105,7 +7276,7 @@ button.lrow,label.lrow{
 .vb--all .vb__c b{opacity:1}
 .vb--all .vb__c:not(:hover) b em{display:none}
 @media (prefers-reduced-motion:reduce){.vb__c{transition:none}}
-.vb__x{display:flex;gap:6px;margin-top:6px}
+.vb__x{display:flex;justify-content:space-around;gap:6px;margin-top:6px}
 .vb__x span{flex:1;min-width:0;max-width:96px;text-align:center;font-family:var(--tx-mono);font-size:10.5px;
   color:var(--tx-ink-3)}
 /* How to READ the chart, never why it is drawn this way. The argument travels
@@ -7171,10 +7342,12 @@ button.lrow,label.lrow{
 /* ── the rest clock. Per exercise, not global: 90 s after a bench set and 20
       after a curl is one trainer, not two preferences. Straight from Strong. */
 .rst2{display:flex;align-items:center;gap:10px;padding:9px 12px;
-  border:1px solid var(--tx-accent-line);border-radius:var(--tx-r2);
-  background:var(--tx-accent-soft)}
+  border:1px solid var(--tx-line);border-radius:var(--tx-r2);
+  background:var(--tx-surface-2)}
+/* The rest LABEL is reference, not a live clock, so it is neutral (24 Nov 2026); the
+   running timer (`.rst2--run`) keeps its accent edge, because then it IS happening. */
 .rst2 b{font-family:var(--tx-mono);font-size:17px;font-weight:600;
-  color:var(--tx-accent-text);font-variant-numeric:tabular-nums}
+  color:var(--tx-ink);font-variant-numeric:tabular-nums}
 .rst2 span{font-size:12.5px;color:var(--tx-ink-2)}
 /* ── THE CLOCK GLYPH WAS BEING SQUASHED, NOT CLIPPED · 21 Sep 2026 ────────
    MEASURED on the console at 1536: the leading icon rendered **13.2 x 15**
@@ -7190,6 +7363,14 @@ button.lrow,label.lrow{
 .rst2>svg{flex:0 0 auto}
 /* The exercise name inside the sentence. Not <b>, which is the clock. */
 .rst2 span u{text-decoration:none;font-weight:600;color:var(--tx-ink)}
+/* On a phone the sentence was squeezed into a ~110px middle column ("rest after a /
+   barbell bench / press set.") between the clock and the scope. It takes the line;
+   the scope and *Change* take the next, ranged apart. */
+@media (max-width:620px){
+  .rst2:not(.rst2--run){flex-wrap:wrap;row-gap:4px}
+  .rst2:not(.rst2--run) > span:nth-of-type(1){flex:1 1 0;min-width:0}
+  .rst2:not(.rst2--run) > span:last-child{flex-basis:100%;justify-content:space-between;margin-left:0 !important}
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    WHO · an avatar and a name, inside a table cell
@@ -7232,8 +7413,8 @@ button.lrow,label.lrow{
    pointer. "Everything clear" turns it green, which is the only time a divider
    in this table is allowed to say something cheerful. */
 .balm td{background:var(--tx-surface-2);padding:7px 12px!important}
-.balm__k{font-family:var(--tx-mono);font-size:10px;font-weight:500;letter-spacing:.13em;
-  text-transform:uppercase;color:var(--tx-ink-3)}
+.balm__k{font-size:12px;font-weight:600;
+  color:var(--tx-ink-3)}
 .balm__v{font-family:var(--tx-mono);font-size:12.5px;font-weight:500;color:var(--tx-ink)}
 .balm--clear .balm__k,.balm--clear .balm__v{color:var(--tx-ok)}
 
@@ -8133,9 +8314,11 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
   --tx-track-fig:-.04em;
   --tx-track-head:-.011em;
 
-  /* the queue's name track. 164px clears the longest seeded client name with
-     room, and CAPS it so the reason never starts further right than this. */
-  --tx-who:164px;
+  /* the queue's name track. It was a flat 164px, which left 106px for the name
+     after the avatar and padding and cut "Kavya Subra…" in a 1,400px row. It
+     grows with the window now and is still CAPPED, so the reason never starts
+     further right than 220px. */
+  --tx-who:clamp(164px,17vw,220px);
   /* The agenda's time gutter. 62px, and the number is arithmetic rather than
      taste: the widest time this list draws is "10:00 AM", which is 5 characters
      of 13.5px JetBrains Mono at ~8.1px (40.5px), a 4px gap and a 15px meridiem
@@ -8176,9 +8359,13 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
 }
 /* the count beside a heading. a figure, not a badge: a coloured pill here
    would be a fifth accent on a screen that already has one. */
+/* A neutral count chip, the shape `.tab .rail__n` already uses — a bare figure
+   floating after the heading read as a stray character. Neutral, never lime. */
 .slab__n{
-  font-family:var(--tx-brand);font-weight:700;font-variant-numeric:tabular-nums;
-  font-size:var(--tx-meta);color:var(--tx-ink-3);
+  align-self:center;display:inline-grid;place-items:center;
+  min-width:20px;height:20px;padding:0 6px;border-radius:var(--tx-rfull);
+  background:var(--tx-surface-3);color:var(--tx-ink-2);
+  font-size:11.5px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums;
 }
 .slab__a{margin-left:auto;display:flex;align-items:center;gap:8px}
 
@@ -8245,15 +8432,14 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
 
 .hro__k{
   display:flex;align-items:center;gap:7px;
-  font-family:var(--tx-mono);font-size:var(--tx-micro);line-height:var(--tx-micro-lh);
-  font-weight:500;text-transform:uppercase;letter-spacing:.08em;
-  color:var(--tx-ink-3);
+  font-size:var(--tx-meta);line-height:var(--tx-meta-lh);font-weight:600;
+  color:var(--tx-ink-2);
 }
 /* the live dot is the one decorative dot the screen keeps, and it is not
    decorative: it is the difference between a session running and a session
    about to. It pulses only while the tab is visible and never under
    prefers-reduced-motion. */
-.hro__k{color:var(--tx-accent-text)}
+/* the label stays ink: the live dot is the one lime mark on it */
 .hro__k i{
   width:7px;height:7px;border-radius:50%;background:var(--tx-accent);
   flex:0 0 auto;
@@ -8544,8 +8730,8 @@ a.agn__r:active{background:var(--tx-surface-3)}
    clause and not as part of the verb. */
 .q__k{
   display:inline-block;min-width:80px;margin-right:10px;
-  font-family:var(--tx-mono);font-size:10.5px;font-weight:500;letter-spacing:.08em;
-  text-transform:uppercase;color:var(--tx-ink-3);
+  font-size:12px;font-weight:600;
+  color:var(--tx-ink-3);
 }
 .atn__more-k{
   margin-left:2px;padding-left:8px;border-left:1px solid var(--tx-line-strong);
@@ -8698,6 +8884,14 @@ a.figs__i:hover{background:var(--w-hover)}
   background-color:var(--tx-surface-3);
   border-color:var(--tx-line-strong);
   color:var(--tx-ink);font-weight:650;
+}
+/* A TOGGLE THAT IS ON SAYS SO WITH A MARK, not only a fill: in a row of
+   independent filters the fill alone was too close to the resting pill to read
+   as a state. Toggle mode only; a single-choice group needs no tick. */
+.seg__b[aria-pressed="true"]::before{
+  content:'';width:12px;height:12px;flex:0 0 auto;margin-left:-2px;background-color:currentColor;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center/contain no-repeat;
 }
 .seg__b[aria-pressed="true"] .seg__n,
 .seg__b[aria-checked="true"] .seg__n{color:var(--tx-ink-2)}
@@ -8911,6 +9105,18 @@ a.figs__i:hover{background:var(--w-hover)}
    surface under them. `--flush` is for a body whose first child already has a
    border of its own, where 12px of padding is a double frame. */
 .fold__b--flush{padding:0}
+/* OPENING AND CLOSING (25 Nov 2026): the body's row grows from 0 to its height and back, with a fade, over
+   ~220ms — a grid-row transition, because a height of `auto` cannot be transitioned and a max-height guess
+   is wrong for every body but one. `@starting-style` is the entrance; `data-phase="out"` the exit `Fold`
+   holds the body mounted for. Clipped only while moving. */
+.fold__bw{display:grid;grid-template-rows:minmax(0,1fr);opacity:1;
+  transition:grid-template-rows 220ms var(--tx-ease),opacity 180ms var(--tx-ease)}
+/* `minmax(0,…)`, not a bare `0fr`: a bare fr row keeps its child's minimum (the body's 25px of padding), so
+   closing stopped at 25px and then jumped. */
+@starting-style{.fold__bw{grid-template-rows:minmax(0,0fr);opacity:0}}
+.fold__bw[data-phase="out"]{grid-template-rows:minmax(0,0fr);opacity:0}
+.fold__bw:not([data-phase="idle"]){overflow:hidden}
+.fold__bw > .fold__b{min-height:0}
 
 /* OFF. The head keeps its count — see the header — and everything in it steps
    back one ink. Not `opacity`, which would take the border and the switch down
@@ -8924,6 +9130,9 @@ a.figs__i:hover{background:var(--w-hover)}
 }
 @media (prefers-reduced-motion:reduce){
   .fold__v{transition:none}
+  .fold__bw{transition:none}
+  /* restate the resting values inside the starting style, or a reader who turned motion down gets a flash */
+  @starting-style{.fold__bw{grid-template-rows:minmax(0,1fr);opacity:1}}
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

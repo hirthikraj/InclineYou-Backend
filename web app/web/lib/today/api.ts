@@ -4,6 +4,7 @@ import 'server-only';
 import { cache } from 'react';
 
 import { api, ApiError, listAll, type ListEnvelope } from '@/lib/http/client';
+import type { LeadWire } from '@/lib/clients/lead';
 import { listRecentNudges } from '@/lib/nudges/api';
 import { COOLDOWN_DAYS, lastContactMap } from '@/lib/nudges/cooldown';
 
@@ -135,6 +136,8 @@ interface ClientWire {
   slots: { id: string; weekday: number; start: string; durationMinutes: number | null; deliveryMode: string | null }[];
   program: { id: string; name: string; weeks: number; days: number; startDate: string | null; endDate: string | null } | null;
   stats: { sessionsDone: number; lastDoneAt: number | null; nextSessionAt: number | null; missedStreak: number };
+  /** V48 — the follow-up date that puts a prospect on the queue. Absent on an older server. */
+  lead?: LeadWire;
 }
 
 /** L4 · `SessionReadService.SessionRow`. */
@@ -366,6 +369,7 @@ export const getToday = cache(async (): Promise<TodayData> => {
     dismissals,
     nudges,
     assessments,
+    claims,
   ] = await Promise.all([
     get<MeWire>('/v1/me'),
     items<WorkingHourWire>('/v1/working-hours'),
@@ -381,6 +385,8 @@ export const getToday = cache(async (): Promise<TodayData> => {
     // degrades the queue's ranking or a chip, never the screen.
     listRecentNudges(COOLDOWN_DAYS),
     itemsOr<AssessmentWire>(`/v1/assessments?state=booked,missed&dueBy=${today}&limit=500`),
+    // V50 · open "I've paid" reports: a client who says they paid is asked about, not chased. Fails silently like L9/L10.
+    itemsOr<{ clientId: string; amount: string }>('/v1/payment-claims?status=open&limit=100'),
   ]);
 
   const clientRows = clients ?? [];
@@ -422,6 +428,7 @@ export const getToday = cache(async (): Promise<TodayData> => {
       sessionsPerWeek: c.schedule?.sessionsPerWeek ?? null,
       nextSessionAt: c.stats.nextSessionAt,
       membershipStatus: c.membershipStatus,
+      lead: c.lead,
     })),
     sessions: sessionRows.map((s) => ({
       id: s.id,
@@ -487,6 +494,7 @@ export const getToday = cache(async (): Promise<TodayData> => {
       subjectAt: d.subjectAt ?? null,
     })),
     nudges: (nudges ?? []).map((n) => ({ clientId: n.clientId, sentAt: n.sentAt })),
+    claimed: claims.reduce<Record<string, number>>((m, c) => ({ ...m, [c.clientId]: (m[c.clientId] ?? 0) + Number(c.amount) }), {}),
     // The deck reads newest month first; 1.1 sends oldest first. Pending and
     // clients owing are "right now" figures (`now`), the same on every month.
     moneySummary: [...(money?.months ?? [])].reverse().map((m) => ({

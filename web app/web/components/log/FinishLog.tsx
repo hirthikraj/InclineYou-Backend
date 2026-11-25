@@ -32,7 +32,17 @@ import { Button } from '@/web-components/ui/Button';
  * the same words that did different things is exactly the drift worth spending a
  * file to prevent.
  */
-export function FinishLog({ routeId, workoutId }: { routeId: string; workoutId: string }) {
+export function FinishLog({
+  routeId,
+  workoutId,
+  ready = true,
+}: {
+  routeId: string;
+  workoutId: string;
+  /** Every planned set is in. Until then the button is secondary: lime is the set in front
+   *  of the trainer, not the door out (24 Nov 2026). It always works — a short session ends. */
+  ready?: boolean;
+}) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
@@ -44,7 +54,7 @@ export function FinishLog({ routeId, workoutId }: { routeId: string; workoutId: 
   }, [routeId, workoutId, router, startTransition]);
 
   return (
-    <Button variant="primary" onClick={finish}>
+    <Button variant={ready ? 'primary' : 'secondary'} onClick={finish}>
       Finish the log
     </Button>
   );

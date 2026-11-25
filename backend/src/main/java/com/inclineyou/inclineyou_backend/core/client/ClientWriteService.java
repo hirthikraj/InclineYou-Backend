@@ -5,6 +5,8 @@ import com.inclineyou.inclineyou_backend.core.client.dto.ClientSummary;
 import com.inclineyou.inclineyou_backend.core.client.dto.CreateClientRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.PhoneCheckRequest;
 import com.inclineyou.inclineyou_backend.core.client.dto.UpdateClientRequest;
+import com.inclineyou.inclineyou_backend.core.join.JoinJdbcRepository;
+import com.inclineyou.inclineyou_backend.core.tenant.CurrentScope;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
 import com.inclineyou.inclineyou_backend.shared.exception.ApiException;
 import lombok.RequiredArgsConstructor;
@@ -37,14 +39,24 @@ public class ClientWriteService {
     private final ClientSummaryService summaries;
     private final WorkspaceClock clock;
     private final ConsentGate consent;
+    private final LeadRules leads;
+    private final JoinJdbcRepository joins;
 
     public ClientPhoneGuard.Verdict phoneCheck(UUID trainerId, PhoneCheckRequest req) {
-        return phoneGuard.check(trainerId.toString(), req.phone(), true);
+        var verdict = phoneGuard.check(trainerId.toString(), req.phone(), true);
+        if (!verdict.available() || req.phone() == null || req.phone().isBlank()) return verdict;
+        var scope = CurrentScope.get();
+        if (scope == null) return verdict;
+        return joins.waitingFor(trainerId, scope.activeTenantId(), req.phone())
+                .map(w -> verdict.withJoinRequest(w.id().toString(), w.name()))
+                .orElse(verdict);
     }
 
     @Transactional
     public ClientCreated create(UUID trainerId, CreateClientRequest req) {
         requireAdult(req.dateOfBirth());
+        leads.requirePack(trainerId, req.interestedPackId());
+        leads.requireFollowUp("nextFollowUpOn", req.nextFollowUpOn());
         UUID id = req.id() == null ? UUID.randomUUID() : req.id();
         if (req.id() != null) {
             var replay = replay(trainerId, id);
@@ -65,6 +77,12 @@ public class ClientWriteService {
             throw ApiException.idConflict();
         }
         if (req.schedule() != null) schedules.setDefaults(id, req.schedule());
+        // A join request from this number can no longer be approved (it would answer already_client): close it.
+        var scope = CurrentScope.get();
+        if (scope != null && req.phone() != null && !req.phone().isBlank()) {
+            int closed = joins.closeForAdded(trainerId, scope.activeTenantId(), req.phone());
+            if (closed > 0) log.info("join request closed by a hand add trainer={} client={}", trainerId, id);
+        }
         log.info("client created trainer={} client={} type={}", trainerId, id, req.clientType());
         return new ClientCreated(summaries.one(trainerId, id).orElseThrow(), true);
     }
@@ -79,6 +97,8 @@ public class ClientWriteService {
                     "This client changed since you opened it.");
         }
         if (req.dateOfBirth() != null) requireAdult(req.dateOfBirth().value());
+        if (req.interestedPackId() != null) leads.requirePack(trainerId, req.interestedPackId().value());
+        if (req.nextFollowUpOn() != null) leads.requireFollowUp("nextFollowUpOn", req.nextFollowUpOn().value());
         // The personal profile — goal, height, activity — waits for consent (22 Nov 2026). Name, number, date of birth
         // and type are the business record a client is added with, and stay editable.
         // Clearing one is taking data away and stays open.

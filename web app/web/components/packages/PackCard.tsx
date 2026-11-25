@@ -4,6 +4,7 @@ import type { PackRow } from '@/lib/packs/compute';
 import { periodLabel } from '@/lib/packs/vocab';
 import { rupees } from '@/lib/today/time';
 import { Button } from '@/web-components/ui/Button';
+import { RowMenu } from '@/web-components/ui/RowMenu';
 
 /**
  * ONE PACK, AS A CARD.
@@ -18,22 +19,22 @@ import { Button } from '@/web-components/ui/Button';
  * **On a gym pack the figure is still the gym's price**, and the line under it is
  * the trainer's own number, because it is the one they will ask the card for.
  *
- * Two controls only on the face — *Edit* and a *More* — so the card stays a
- * card. Reordering and removing live behind *More*, in a tray that opens inside
- * the card and not in a floating menu, because a floating menu on a phone is a
- * second thing to dismiss and this row sits in a scroller.
+ * Two controls only on the face — *Edit* and a ⋯ — so the card stays a card.
+ * Reordering and removing live behind the ⋯ (the shared `RowMenu`, 25 Nov 2026).
+ * It was a *More* text button opening a tray inside the card, which read as a
+ * link rather than a menu and hid *Remove* two presses deep under a word that
+ * did not say it was there. Removing still confirms INSIDE the card, because
+ * the answer depends on whether the pack was ever sold.
  */
 export function PackCard({
   row,
   first,
   last,
-  trayOpen,
   confirming,
   sold,
   pending,
   gym,
   onEdit,
-  onTray,
   onMove,
   onAskRemove,
   onCancelRemove,
@@ -43,14 +44,12 @@ export function PackCard({
   row: PackRow;
   first: boolean;
   last: boolean;
-  trayOpen: boolean;
   confirming: boolean;
   /** The server said it was sold after all: Delete is withdrawn. */
   sold: boolean;
   pending: boolean;
   gym: string | null;
   onEdit: () => void;
-  onTray: () => void;
   onMove: (dir: -1 | 1) => void;
   onAskRemove: () => void;
   onCancelRemove: () => void;
@@ -105,38 +104,32 @@ export function PackCard({
               : 'Never sold, so it can be removed for good.'}
           </p>
           <div className="pkx-c__acts">
-            <Button variant="secondary" size="sm" disabled={pending} onClick={onRetire}>Retire it</Button>
-            {!wasSold && <Button variant="ghost" size="sm" disabled={pending} onClick={onDelete}>Delete it</Button>}
-            <Button variant="ghost" size="sm" onClick={onCancelRemove}>Keep selling it</Button>
+            {/* Never sold: deleting is what *Remove* meant, so it leads and reads as
+                the destructive act it is. Sold: retiring is the only way off the list. */}
+            {wasSold
+              ? <Button variant="secondary" size="sm" disabled={pending} onClick={onRetire}>Retire it</Button>
+              : <Button variant="danger" size="sm" disabled={pending} onClick={onDelete}>Delete it</Button>}
+            {!wasSold && <Button variant="ghost" size="sm" disabled={pending} onClick={onRetire}>Retire instead</Button>}
+            <Button variant="ghost" size="sm" onClick={onCancelRemove}>Keep it</Button>
           </div>
         </div>
       ) : (
-        <>
-          <footer className="pkx-c__ft">
-            <span className="pkx-c__use">
-              <b>{row.clients}</b> on it · {row.sold} sold
-            </span>
-            <span className="pkx-c__acts">
-              <Button variant="secondary" size="sm" onClick={onEdit} aria-label={`Edit ${row.name}`}>Edit</Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                aria-expanded={trayOpen}
-                aria-label={`More for ${row.name}`}
-                onClick={onTray}
-              >
-                More
-              </Button>
-            </span>
-          </footer>
-          {trayOpen && (
-            <div className="pkx-c__tray" role="group" aria-label={`More for ${row.name}`}>
-              <Button variant="ghost" size="sm" disabled={pending || first} onClick={() => onMove(-1)}>Move earlier</Button>
-              <Button variant="ghost" size="sm" disabled={pending || last} onClick={() => onMove(1)}>Move later</Button>
-              <Button variant="ghost" size="sm" onClick={onAskRemove}>Remove</Button>
-            </div>
-          )}
-        </>
+        <footer className="pkx-c__ft">
+          <span className="pkx-c__use">
+            <b>{row.clients}</b> on it · {row.sold} sold
+          </span>
+          <span className="pkx-c__acts">
+            <Button variant="secondary" size="sm" onClick={onEdit} aria-label={`Edit ${row.name}`}>Edit</Button>
+            <RowMenu
+              label={`More for ${row.name}`}
+              items={[
+                { label: 'Move earlier', onSelect: () => onMove(-1), disabled: pending || first },
+                { label: 'Move later', onSelect: () => onMove(1), disabled: pending || last },
+                { label: 'Remove…', onSelect: onAskRemove, danger: true, disabled: pending },
+              ]}
+            />
+          </span>
+        </footer>
       )}
     </article>
   );

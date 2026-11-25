@@ -149,6 +149,35 @@ public class LogExerciseJdbcRepository {
     }
 
     /** A program's version is its revised_at: bumping it makes a builder tab open on the plan fail its next save with 412. */
+    /** A new main row at the end of a plan day. Its tenant is stamped from the workout. */
+    public UUID planAppend(UUID workoutId, UUID exerciseId) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("""
+                INSERT INTO workout_exercise (id, workout_id, exercise_id, position)
+                SELECT :id::uuid, :wid::uuid, :ex::uuid, coalesce(max(position) + 1, 0)
+                FROM workout_exercise WHERE workout_id = :wid::uuid AND alternative_of IS NULL
+                """, Map.of("id", id.toString(), "wid", workoutId.toString(), "ex", exerciseId.toString()));
+        return id;
+    }
+
+    /** {@code count} sets with no targets on a plan row. */
+    public void planEmptySets(UUID planRowId, int count, String loadKind, String effortKind) {
+        var p = new HashMap<String, Object>();
+        p.put("we", planRowId.toString());
+        p.put("n", count);
+        p.put("lk", loadKind);
+        p.put("ek", effortKind);
+        jdbc.update("""
+                INSERT INTO workout_set (id, workout_exercise_id, position, load_kind, effort_kind)
+                SELECT gen_random_uuid(), :we::uuid, g, :lk, :ek FROM generate_series(1, :n) AS g
+                """, p);
+    }
+
+    public void linkPlanned(UUID sxId, UUID planRowId) {
+        jdbc.update("UPDATE session_exercise SET planned_from = :pf::uuid WHERE id = :sx::uuid",
+                Map.of("pf", planRowId.toString(), "sx", sxId.toString()));
+    }
+
     public void touchProgram(UUID programId) {
         jdbc.update("UPDATE program SET revised_at = now() WHERE id = :pid::uuid", Map.of("pid", programId.toString()));
     }

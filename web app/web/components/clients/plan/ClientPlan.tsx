@@ -69,7 +69,7 @@ import { Modal, ModalHost } from '@/web-components/ui/Modal';
 
 import { ChangePanel, ChangeSide, type ChangeState } from './ChangePanel';
 import { OriginPanel } from './OriginPanel';
-import { PlanRail, firstName } from './PlanRail';
+import { PlanRail, firstName, weekOf } from './PlanRail';
 
 /**
  * `/clients/:id/program/:pid` — ONE CLIENT'S OWN COPY OF A PLAN, EDITABLE.
@@ -190,7 +190,15 @@ export function ClientPlan({
         ];
 
   /* ── the view ── */
-  const [week, setWeek] = useState(1);
+  /* OPEN ON THE WEEK THE CLIENT IS IN (25 Nov 2026). The rail said *Week 6 of 10* beside a board on week 1,
+     so the trainer opening Meera's plan to see what she does this week had to find and press 6 first. A
+     running plan opens on its current week (the rail's own `weekOf`, clamped to the plan's length);
+     one not yet started, or over, opens on week 1. */
+  const [week, setWeek] = useState(() => {
+    const block = program.status === 'active' ? weekOf(program, now) : null;
+    const cap = program.weeks ?? block?.total ?? 1;
+    return block ? Math.max(1, Math.min(block.current, cap)) : 1;
+  });
   /** WHICH AXIS THE BOARD IS LAID ON — week, or one day across every week.
    *  `Builder`'s own `axis` state carries the argument; it is wired here for
    *  the reason everything else on this screen is: the client's copy is the
@@ -1116,6 +1124,10 @@ export function ClientPlan({
                   {/* THE ONE FACT THIS SCREEN HAS THAT NO OTHER SCREEN DOES, and
                       it is a control rather than a tag because the interesting
                       half is always the next question: *what is different?* */}
+                  {/* ONLY WHEN THERE IS A TEMPLATE TO COMPARE WITH (25 Nov 2026). With the blueprint deleted
+                      it still said *Matches the plan* — a claim about a comparison that cannot be made — and
+                      opened a panel saying so. The rail already says the source is gone. */}
+                  {origin && (
                   <Button
                     variant="secondary"
                     className="pg__act--desk"
@@ -1127,6 +1139,7 @@ export function ClientPlan({
                         ? 'The plan has moved'
                         : 'Matches the plan'}
                   </Button>
+                  )}
                   {origin && (
                     <Button
                       variant="secondary"

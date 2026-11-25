@@ -18,13 +18,13 @@ colors:
   paper-ink: "#171512"
   paper-ink-2: "#59544A"
   paper-ink-3: "#676156"
-  slate-rail: "#060709"
-  slate-canvas: "#08090B"
-  slate-surface: "#101216"
-  slate-surface-2: "#171A20"
-  slate-surface-3: "#1F232B"
-  slate-rule: "#1E222A"
-  slate-rule-strong: "#2A2F39"
+  slate-rail: "#0A0B0D"
+  slate-canvas: "#0D0E11"
+  slate-surface: "#16181C"
+  slate-surface-2: "#1D2025"
+  slate-surface-3: "#262A30"
+  slate-rule: "#272B32"
+  slate-rule-strong: "#363B44"
   slate-ink: "#F2F4F6"
   slate-ink-2: "#A2A9B4"
   slate-ink-3: "#8B939F"
@@ -95,7 +95,12 @@ typography:
     fontWeight: 700
     lineHeight: 1.4
     letterSpacing: "0.02em"
-  eyebrow:
+  stat-label:
+    fontFamily: "Inter, 'SF Pro Text', -apple-system, 'Segoe UI', Roboto, sans-serif"
+    fontSize: "12.5px"
+    fontWeight: 500
+    lineHeight: 1.35
+  data-mono:
     fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace"
     fontSize: "10.5px"
     fontWeight: 500
@@ -221,10 +226,11 @@ It rejects, explicitly, three looks: **generic fitness-app neon** (gradient hero
 Warm paper and cool slate for the ground, one lime for the mark, and four earned semantic hues that each step darker on paper and lighter on slate so contrast holds in both themes.
 
 ### Primary
-- **Highlighter Lime** (#C6F24E): the fill for the primary action, the pressed chip, the current-rail bar and the meter. The same value in both themes. Press state is **Lime Press** (#B2DE3A). Anything laid on it is **Lime Ink** (#0A0B0D, 15.2:1).
+- **Highlighter Lime** (#C6F24E): the fill for the primary action, the pressed chip, the current-rail bar, a single progress meter, and the one highlighted bar in a list or chart (the leader, or the month in progress). The same value in both themes. Press state is **Lime Press** (#B2DE3A). Anything laid on it is **Lime Ink** (#0A0B0D, 15.2:1).
 - **Dark Lime** (#4F6B0A): the *stroke and text* form of the accent on paper. Used for the current rail label, accent tags, accent figures and the focus ring on light. On slate the accent text is the lime itself.
 - **Wordmark Dark Lime** (#64850A): the *You* in the wordmark on paper. Same hue and saturation as the lime at lower lightness; one colour lit two ways, not two colours.
 - **Lime Wash** (#EDF6D6) and **Lime Wash Line** (#CFE39A): the soft ground and edge for accent tags and the selected row on paper. On slate the equivalents are the lime at 12% and 34% alpha.
+- **Today Wash** (`--w-today`: #F7FAEE on paper, lime at 4.5% on slate): today's column on the calendars, half the strength of a selected row, because a selection is one row and today is a whole column.
 
 ### Neutral
 - **Paper White** (#FFFFFF): the content plane on light; the only white thing on screen.
@@ -233,8 +239,8 @@ Warm paper and cool slate for the ground, one lime for the mark, and four earned
 - **Paper Deepest** (#E9E5DD): tags, meter tracks and the deepest surface step.
 - **Paper Rule** (#E2DDD5) and **Paper Rule Strong** (#CDC7BC): hairlines and control borders.
 - **Paper Ink** (#171512), **Paper Ink 2** (#59544A), **Paper Ink 3** (#676156): body, secondary and quiet text, all warmed onto the ground's hue (7.5:1 and 6.1:1 on the surface for the last two).
-- **Slate Canvas** (#08090B), **Slate Rail** (#060709, one step below the canvas), **Slate Surface** (#101216), **Slate Surface 2** (#171A20), **Slate Surface 3** (#1F232B): the dark ramp.
-- **Slate Rule** (#1E222A) and **Slate Rule Strong** (#2A2F39): dark hairlines.
+- **Slate Canvas** (#0D0E11), **Slate Rail** (#0A0B0D, one step below the canvas), **Slate Surface** (#16181C), **Slate Surface 2** (#1D2025), **Slate Surface 3** (#262A30): a lifted graphite, each step roughly twice the last (23 Nov 2026): the dark ramp.
+- **Slate Rule** (#272B32) and **Slate Rule Strong** (#363B44): dark hairlines.
 - **Slate Ink** (#F2F4F6), **Slate Ink 2** (#A2A9B4), **Slate Ink 3** (#8B939F): dark-theme text.
 
 ### Semantic and domain
@@ -249,15 +255,17 @@ Warm paper and cool slate for the ground, one lime for the mark, and four earned
 
 **The No-New-Colour Rule.** The library prints `New colours: 0` on purpose. A screen that needs a colour the system does not have adds it to the system first.
 
+**The One-Lime-Bar Rule.** In a list of bars or a chart, every bar is neutral (`--tx-ink-off`, the 3:1 shape step) and one is lime: the leader, or the period in progress. Twelve lime bars say nothing about any one of them. Reference lines (averages) are dashed `--tx-ink-off`, never lime: lime is never a stroke.
+
 **The Meaning-Is-Words Rule.** Tone is never the only carrier: a tag says *Pending*, not just amber. A body measurement carries no tone at all.
 
 ## Typography
 
 **Display Font:** Archivo (Inter fallback), 800, for page titles and figures.
 **Body Font:** Inter (SF Pro Text, system fallbacks), 400 to 700, for all interface text.
-**Label/Mono Font:** JetBrains Mono, for eyebrows, `.stat` keys and number entry.
+**Mono Font:** JetBrains Mono, for data only: number entry, table column heads, chart figures and menu group keys. Never for a label that names something.
 
-**Character:** Archivo's heavy, tightly tracked display sets the headline numbers apart the way a scoreboard does; Inter carries everything a trainer reads at a glance. Mono is a labelling voice, not decoration. The wordmark itself is Inter 800 at −0.038em, not Archivo.
+**Character:** Archivo's heavy, tightly tracked display sets the headline numbers apart the way a scoreboard does; Inter carries everything a trainer reads at a glance. Mono is for data a trainer lines up and compares, not for labels or decoration. The wordmark itself is Inter 800 at −0.038em, not Archivo.
 
 ### Hierarchy
 - **Figure** (Archivo 800, 44px, 1.0, −0.04em, tabular): the one number a hero card exists to state.
@@ -268,7 +276,8 @@ Warm paper and cool slate for the ground, one lime for the mark, and four earned
 - **Body** (Inter 400, 13.5px, 1.5): everything else; prose is capped at 72ch.
 - **Label** (Inter 600, 12.5px): field labels, buttons and menu items.
 - **Meta / Micro** (Inter 12.25px and 11px): secondary lines and tags.
-- **Eyebrow** (JetBrains Mono 500, 10.5px, +0.11em, uppercase): stat keys and `why` heads.
+- **Stat label** (Inter 500, 12.5px, sentence case, ink-3): stat keys, `Strip` captions, the `.micro` utility, the hero card's key, section labels (`.sh__l`, 600 in ink-2) and callout heads (`.why__k`, 700 in accent text). Replaced the uppercase mono eyebrow on 24 Nov 2026, along with 48 screen-level captions (fact-list `dt`s, group heads, step counters, the setup flow's `GroupLabel`). Label text is written in sentence case in the source too, never typed in capitals. A label is never painted in `--tx-ink-off`, which is a 3:1 shape colour, not a text colour.
+- **Data mono** (JetBrains Mono 500, 10.5px, +0.11em, uppercase): table column heads and group keys only.
 
 ### Named Rules
 **The Tabular Rule.** Every figure that can change is tabular; a running clock whose digits change width makes the card twitch once a second.
@@ -279,7 +288,7 @@ Warm paper and cool slate for the ground, one lime for the mark, and four earned
 
 ## Layout
 
-An application shell, not a page. Under it: a rail (248px expanded, 64px icon-only) with up to five destinations, an optional 212px section pane for the three sections that have pages (Clients, Fitness, Business), a 56px top bar (46px under 900px), and a scrolling `.body` between them. Nothing in the shell is `position:fixed`; it is a grid of `100dvh` with `overflow:hidden`.
+An application shell, not a page. Under it: a rail (248px expanded, 64px icon-only) with up to five destinations, an optional 212px section pane for the three sections that have pages (Clients, Fitness, Business), a 56px top bar (46px under 900px), and a scrolling `.body` between them. Nothing in the shell is `position:fixed`; it is a grid of `100dvh` with `overflow:hidden`. The page header (`.ph`) has no bottom padding when it carries a tab strip, so the active tab's underline lands on the rule; **a header with no tabs gets 14px (12px on a phone)** so its last line or buttons never sit on the hairline. `.main` is `overflow:clip` where supported, not only `hidden`, so no `focus()` or `scrollIntoView()` can scroll it and slide the page header away: `.body` is the only scroller. Content in the client file's Overview grid fills the width like every other tab; there is no max-width ceiling above 1240px.
 
 Density is a dial: `--w-row` 44px (56px for two-line rows), `--w-tap` 32px for pointer-only controls and 40px for anything plausibly touched on a convertible laptop. The base spacing is a 4pt scale (4, 8, 12, 16, 20, 24, 32, 40, 48, 64); a card's internal gutter is one inherited value (16px) so every band inside stands on the same left edge.
 
@@ -319,13 +328,76 @@ Every component passes the same nine-point gate: states (hover, active, focus-vi
 Compact, tactile, confident.
 - **Shape:** 8px radius, 34px tall (32px pointer floor; 40px `lg`; 28px `sm`), Inter 600 at 13px, 7px gap to an icon that never deforms.
 - **Primary:** Highlighter Lime fill with Lime Ink text at 700 weight, with a 1px lit top edge. Hover steps to Lime Press and adds the lime glow; active drops the glow for an inner shadow.
-- **Secondary:** transparent, with a strong hairline border and ink text; hover fills with the surface step.
+- **Secondary:** transparent, with a strong hairline border and ink text; hover lays the translucent hover tint and firms the border to `--tx-ink-off`, so it shows on a white page and on a card alike.
 - **Ghost:** transparent and borderless in ink-2; hover fills with the quiet hover tint.
 - **Danger:** solid danger fill with white text.
 - **Press physics:** every button moves 1px and scales to 98.5% on `:active`; "felt, not watched". Loading replaces the label with a ring and holds the width; the button refuses a second press without greying to disabled.
 
 ### Chips
 28px pill, hairline border on Paper Deep with ink-2 text. Pressed state is a solid Highlighter Lime fill with Lime Ink text, never a tint. The visual stays 28px; a `::before` hit-slop brings the target above the floor.
+
+### Segment (filter pills)
+30px pills with a hairline and ink-3 text. In toggle mode (`aria-pressed`, several can be on) a pressed pill takes a surface-3 fill, ink text **and a check mark**, because the fill alone was too close to rest to read as a state. In single-choice mode (`aria-checked`) the fill alone is enough. Never lime: a filter takes no action. Every filter row uses it, including the Clients status row (pick-one) and the Filter panel's groups: Today's day filters and the Schedule's *In Person · Online · Show gaps* (which were lime chips until 24 Nov 2026). A view switcher (Day · Week · Month) is not lime either: on desktop the chosen button takes the surface-3 fill, and on a phone the chosen segment is raised (canvas on paper, surface-3 on slate, with the ambient shadow).
+
+**View links that act as filters** (Joining's *In progress · To invite · Joined · Declined*) take the same look as link chips (`.jn-views .chip`), and a sideways-scrolling row brings the chosen one into view on load. **The logging console spends its one lime on the next set.** On a desk that is the active row's tick (`tr[data-state="active"] .tk`); on a phone it is the dock's *Log set N · 25 kg × 9* bar, and the row tick stays outlined. *Take last time's numbers* is a secondary shortcut, the rest label is neutral (only the running timer keeps its accent edge), and *Finish the log* turns lime only once every planned set is in. On a desk with a fine pointer the cursor starts in the first open set, **selected**, and moves there again when another movement is picked; it never takes focus from anything else, and never on a phone. Every programmatic focus into a set field selects it. A run of sets is joined with `\u00a0· ` and each set is `.nowrap`, so lines break between sets, not inside one.
+
+**A queue of things a trainer must act on is one row per client.** Today's attention queue and Business → *Needs you* both lead with the client's most urgent item, put the rest behind *+N more* with their kinds named, and open them in place as indented rows with their own verb (`useFlipRows`). Counts and headings count clients, not items.
+
+**Two owners, two lists.** Where rows belong to two owners the trainer treats differently (their own packs and a gym's counter prices), the owner is the top level: a single-select segment with counts picks the list, and any further grouping (service) is a sub-heading inside it. One add button adds to the list on screen and its form shows the owner pre-answered. A card carries *Edit* and a ⋯ `RowMenu`; removing confirms inside the card, leading with a red *Delete it* when nothing was sold and *Retire it* when something was (`/business/packages`, 25 Nov 2026).
+
+**A page's *yours* is about that page's subject.** On Gym share, *your share* is the other half of the gym's sales (sold minus the gym's cut), never the trainer's whole income, which is the Overview's figure. A split, such as the gym's cut, is never toned amber: tone is for something to act on. A printable statement that repeats figures shown in the tiles above it keeps them for print only (`.gstm__split`), and lays its facts out in two columns at a desk so a label sits near its figure. Rarely-changed set-up (pack-by-pack terms) comes after the money history, with a door to where it is edited (25 Nov 2026).
+
+**A ranking table earns its width with the ranking.** *Who the income comes from* (Reports) is sorted by what reached the trainer and carries a neutral share bar: the percentage is the true share of the year, and the bar is scaled to the top row (`RankList`'s rule), so ten people can be told apart. Its spoken label is the name, not the bar's geometry. A tile with nothing to show says so in words (*Too early*, *Not yet*), never a bare dash. Counts of joins and archives are neutral ink: a join is not a lime win and an archive is a decision, not a red loss. Phone reflows key cells by class, never `nth-child`, because a column added later shifts every position (25 Nov 2026).
+
+**A payment method is a card led by its mark.** Payment setup lists *Ways clients pay you* one card a method: the rail's mark (`c-brandmark`, always on a white tile in both themes), its name, one line on what it does, and its state as a tag on the same row (*On*, *Not set up*, *Coming soon*). A tool that belongs to a method lives inside its card (the gym till is UPI's), and a rule about payments sits apart under *Rules*. A method not built yet shows its steps and a disabled connect button, never a paragraph alone. **One payment code on screen at a time:** UPI's ₹1 test code shows by itself only for a new or changed ID; a saved ID keeps it behind *Test with ₹1*, and typing an amount for the gym till closes it. Nothing records that a test was done, so the screen never says *verified*. The marks are stand-ins until the official NPCI and Razorpay artwork replaces the SVG bodies (25 Nov 2026).
+
+**The day strip is neutral, and on a client's plan it is their real week.** `.shape` cells are ink on the off cell, never lime, wherever they appear (program list, template shelf, builder): a lit day is a fact, and a list of lime strips buries the one lime action. On `/programs` the strip draws the client's actual weekdays (Mon…Sun, column *Week*); a template's slots stay ordinal (*Shape*). Templates have no strip at all (their slots are ordinal, so it only repeated *Days*), and a template's second line shows its day names only when a day is named, never *Day 1 · Day 2 · Day 3*. A grid of cards never carries a lime button per card: the catalogue's *Copy* is secondary and *Preview* ghost, so the page's one primary stays *New template*. A row's last column is the same control on every row: a ⋯ `RowMenu`, which leaves out an item it cannot offer rather than swapping to a different control (25 Nov 2026).
+
+**The builder (25 Nov 2026), found by building a program from scratch.**
+- *Set values carry forward.* Typing into set *n* fills the later sets that still held its old value and stops at the first that differs, so *3 × 10 @ 40* is typed once and a pyramid survives (`carryForward` in `lib/workouts/draft.ts`). Notes are scoped by their own dialog and do not carry.
+- *A load is per set all the way through.* The flat row's set detail carries an optional `load`, so a back-off (32 / 27.5 / 27.5) survives saving onto a program day and reopening; the board prints `@ 32 / 27.5 / 27.5 kg` instead of set 1's load as the row's.
+- *A shut exercise card shows its prescription* (`3 × 8 · 30 kg · 1m 30s rest`) in place of the library line, at every width.
+- *Library search is re-ranked for trainers:* names that end with the typed phrase (the movement is the last word), then gym-floor kit, then the plainer name. One helper (`lib/exercises/rank.ts`) serves the builder and `/programs/exercises`, so the two searches cannot disagree.
+- *The next thing to press is the strongest thing on the board:* an empty training day's *Create workout* is a real button; a rest day's *Make it a workout* is ghost. On a phone, an empty day reads *+ Create workout*, not *Name this day · 0 ex*.
+- *No lime on states:* View, Week, Day and Detail chips, the phone's week chips, the New template dialog's goal and day count, and the per-day volume bars are neutral. Labels are sentence case (*Day 1*, *Week*, *Sets per muscle group*).
+- *The balance panel tells the truth:* push : pull folds patterns case-blind (it always read 0 : 0), and an exercise with no load is *with no load*, never *bodyweight*.
+
+**A client's plan opens where the client is.** A running plan's board opens on the client's current week (the rail's `weekOf`, clamped), not week 1. Day cards fill their grid track (cap 640px, not 440, which left a gutter beside every card). A control that names a comparison (*Matches the plan*, *Tuned · 3 changes*) is drawn only when there is a template to compare with. On a phone the subtitle keeps *for {first name}*, the one place the screen says whose plan it is (25 Nov 2026).
+
+**A row that lights on hover opens on a click anywhere.** Where a list row's one link is its name (Workouts' sessions), the link is stretched over the row and the action cell passes clicks through to it except on its own button, so the hover never promises a target that isn't there. The date band (`c-dayrule`) is sentence case (*Sat · 21 Nov*) and its relative day (*Today*, *4 days ago*) is ink, never lime (25 Nov 2026).
+
+**A category opens onto its exercises.** On `/programs/exercises` a body part lists at once, with its muscles as pills over the list (*All muscles* first); it no longer opens onto a page of muscle tiles that listed nothing, whose own *All muscles* pill jumped back to the tiles. A selected table row paints its row-header cell (`th`) as well as its `td`s (25 Nov 2026).
+
+**A picked answer is a state, never lime — in the design system itself.** `.chip[aria-pressed="true"]` (webapp.css) is a raised fill with an ink edge and ink text, and `.card--pick-accent` an ink-edged raised card; a ranked chip's badge is an ink plate. Before this, every picker (profile certifications, specialities, languages, *Work & hours*, the setup flow, the builder's strip) lit its answers lime, up to eight lime marks on one screen against its one lime action. Lime stays for `.btn--primary` and the page's one highlight (25 Nov 2026).
+
+**A status tag is not a control.** In a `c-fold` head, `control` is for a real control (a switch) and sits after the chevron; a status (*Yours*, *Unsaved*) rides beside the title, so every chevron in a list stays on one edge (Settings → Nudge messages, 25 Nov 2026).
+
+**Text sent as WhatsApp is written in WhatsApp's syntax.** The nudge editor is `c-markupfield` with `dialect="whatsapp"`: **B · I · S · H · emoji**, stored as `*bold*` / `_italic_` / `~strike~`, with a heading written as a whole bold line (WhatsApp has no underline and no heading, so S takes U's place and H is the line in bold), so the message arrives formatted; the app's own `**bold**` would arrive as asterisks. Markers only count at a word boundary, as in WhatsApp, so `{pay_by_upi}` and `meera_k@okaxis` stay plain (`lib/text/whatsapp.ts`). The preview renders through `Markup dialect="whatsapp"`; token chips insert at the caret through the field's `apiRef` (25 Nov 2026).
+
+**A fold opens and closes, it never blinks.** `c-fold` keeps its body mounted for a ~220ms closing phase and grows it in on opening: a `grid-template-rows` transition between `minmax(0,0fr)` and `minmax(0,1fr)` with a fade (`@starting-style` for the entrance), clipped only while moving so popups inside are never cut, `inert` while closing, and still unmounted when shut. Reduced motion skips it (25 Nov 2026).
+
+**One word, one meaning: *next*.** On the client's Home, *Next* is the next BOOKED session (the hero card). The week list therefore never says *Up next* for an unbooked plan day; it says *Next in your plan · not booked*, and other unbooked days *Not booked yet*, so the page cannot name two different workouts as next. Plan (`/me/plan`) uses the same wording, and its block meter is the data tone, not lime. A workout's preview (`/me/workout/:id`) is a day of the plan: it lights *Plan* and opens with a *Plan / {workout}* crumb. A standalone text link (alone in its line, or the card's only way onward) gets a hit area of ~25px through an `::after` on the link itself, without adding line height (25 Nov 2026).
+
+**Weekly bars fill their plot, and count axes count.** `c-vbars` spaces its capped (96px) bars around the plot width, with the label row on the same spacing, so a short series fills the chart instead of crowding its left half; bar figures are upright. A whole-number series with a small odd peak gets a box one taller (3 → 4) so its half-way tick is a whole number, never *1.5 sessions*. On the client's Assessments, a check-in already waiting under *To do* is not offered again under *Start a new one* — one door per check-in (25 Nov 2026).
+
+**A row menu is measured, never estimated, and stays attached to its trigger.** A fixed-position menu is placed from the trigger's edges and the panel's real height, taken before paint: below if it fits, directly above if not, pinned to the gutter otherwise. Placing it from a height constant flipped a short menu above and left it hanging ~170px off its row on a phone (`PaymentRowMenu`, 25 Nov 2026). On a phone a table row drawn as a grid card is hovered or open as one row: the fill goes on the `tr` and the cells stay clear, or the hover shows as scattered blocks.
+
+**Adding and removing a movement mid-session.** The Add panel asks *Where does it go?* before the pick, as Swap asks how far a swap reaches: **Today only** (default) or **Today and the plan** (disabled, with the reason, when the session is not from the client's program); each added row says *Added* or *Added · on the plan*. Every exercise card's menu ends with **Remove from today** (danger), which hides the movement from today's log only — its sets stay and leave the totals — and offers **Undo** for ten seconds.
+
+**The finish page leads with its one decision.** Figures, then a neutral *Close out {name}'s session* card (the pack fact, *Mark the session done* in lime and *They didn't train*, one line of help), then *Not logged* as a list. Closing out is the ordinary end of every session, so it is never an amber warning. The WhatsApp message is shown with its *Open WhatsApp* button; no switch stands in front of it. Same grid as the session page; figures 2 × 2 on a phone.
+
+**A session page has one shape in every state** (upcoming, done, no-show, unmarked): the main column takes the width and the rail is capped at 400px. Lime goes on the header's *Log this session* only while the session is still to come; an unmarked session's lime is *They came · Done* in its alarm, beside *No-show · −1*; a done or no-show session has no lime verb. A session with nothing logged shows its plan once as the plan table, never as a stack of "Not logged" cards.
+
+**A form sheet has one lime mark: its submit.** Choices inside it (delivery, length, billing chips) take the neutral pick; a chosen day or time in `SlotPicker` is an **ink plate** (ink fill, canvas text), the same answer `SubTabs` gives to "strongly selected, not an action"; a day with nothing open dims its date. Panel headers are `min-height`, so a wrapped subtitle grows the header rather than pushing the title out of it. A panel or dialog focused on open (`tabindex=-1`) draws no ring round itself.
+
+**A setting that blocks something is a `NoticeBar`** with its one verb as a button, not amber text: amber means a problem.
+
+**An applied filter is a removable token,** a neutral chip with an × and an accessible name that says it removes the filter, never a pressed or lime chip. **Never restyle a shared chip inline** (`style={{ background: … }}`): seven Clients chips did, which is how a lime wash outlived the rule against it.
+
+**Legends name every colour on screen.** A calendar key lists only what the grid is currently drawing (*Free gap* with the gaps toggle, *Not marked* while a past unmarked session is visible), and no colour is drawn that the key cannot name.
+
+### Lists of repeated answers
+When every row of a list carries the same verb (the close-out list's *Done*), the verb is a secondary button, with an icon if it is the expected answer. Lime on every row would make the list louder than the one primary action on the screen.
 
 ### Tags
 A 20px read-only label with a 4px radius and a 700 11px caption. Neutral by default; tone variants (ok, warn, danger, info, accent, floor, remote, record) are a soft tint with the tone as text. Never clickable, with one named exception: `tag--link` (Has a note), which holds its tone on hover.
@@ -337,13 +409,14 @@ A 20px read-only label with a 4px radius and a 700 11px caption. Neutral by defa
 - **Border:** 1px hairline.
 - **Internal Padding:** 16px (13px on phones), a header band of 14px with a bottom hairline.
 - **Variants:** `card--lead` for the one hero, `card--acc` (lime wash), `card--danger`.
-- **Stat tile:** 12px radius, a mono uppercase key, a tabular 27px Archivo figure and a meta line. A linked tile resets its figure to ink so a lime figure is never mistaken for a status.
+- **Stat tile:** 12px radius, a sentence-case Inter key (12.5px, ink-3), a tabular 27px Archivo figure in ink and a meta line. Only `warn` and `danger` colour the figure; `acc` leaves it ink, because a lime figure reads as a status. A value that is words, not a number (*Nothing due*), is detected by `Stat` and set as a 17px Inter answer in ink-2, not a 27px figure: on a phone the figure size wrapped it to two huge lines.
 
 ### Inputs / Fields
 - **Style:** 34px, 8px radius, a hairline border on a field fill with a faint inset shadow; the label sits above, always visible (12.5px 600 in ink-2), hint and error beneath (12px).
 - **Focus:** the border goes to the focus colour and a 3px halo rings the field; the fill lifts one step so it visibly opens. State rules touch `background-color`, never the shorthand, or a select loses its chevron.
 - **Affix:** units such as ₹ live outside the input in a shared chrome with a flat inner control.
-- **Error:** text under the field in danger, in words that say how to fix it; never in a toast.
+- **Error:** text under the field in danger, in words that say how to fix it; never in a toast. A bare field with `aria-invalid="true"` draws the same danger border and halo as one inside `.fld--err`.
+- **Disabled:** 55% opacity on a surface-2 fill, no inset, a not-allowed cursor, and no hover change.
 - **Boundary:** a second token carries the 3:1 boundary WCAG 1.4.11 asks of a field with no other edge; its first call-site is the workout console's entry grid.
 
 ### Navigation
@@ -353,14 +426,22 @@ A 20px read-only label with a 4px radius and a 700 11px caption. Neutral by defa
 - **Menus:** 5px padding, 32px items, an 8px radius and the floating shadow; destructive items are danger.
 - **Tabs above a page** are views of that page, links in a strip.
 
+### Meters, charts and timelines
+- **Meter:** 6px (9px `lg`) pill on a surface-3 track. Tones: `acc` (lime, a single progress bar or the one highlighted row), `data` (neutral, the rest of a ranked list), and `ok`, `warn`, `danger`, `dim`. On paper a lime fill carries a 1px dark-lime inner ring, since lime has no edge against the track.
+- **Rank list** (`ui/RankList.tsx`, `.rank`): a ranking on one 44px line a row (name ≤220px · bar · figure), the bar scaled to the largest row; the first is the lime bar, the rest `--tx-ink-off`. Under 620px the bar drops beneath the name and figure. Use it instead of a key-value row with a meter under it.
+- **Chart geometry** (`.chart`): no frame of its own (it always sits in a card). Each bar is centred in its month slot inside the gridlines' 12px inset and capped (56px on a six-month chart, 40px on the reports' charts), and its label shares that centre; anything printed per month under a chart (the reports' gained/archived row) uses the same columns. Figures over the bars are 10.5px mono, upright.
+- **Chart bars** (`.chart__b`): neutral by default (`--tx-ink-off` on slate, `--tx-line-strong` on paper, where taupe columns were the heaviest blocks on the page; the printed figure carries the value); `.chart__b--now` is the lime month in progress, ringed on paper like the meter.
+- **Timeline** (`.tl`): a `--tx-line-strong` spine and 9px `--tx-ink-off` dots ringed in the ground they sit on (canvas, or surface inside a card); the date mark is 12px Inter, tabular.
+- **Section count** (`.slab__n`): a 20px neutral chip (surface-3, ink-2), the same shape as a tab count. Never lime.
+
 ### Callouts (`.why`)
-A 2px accent left border on a soft ground with a mono eyebrow. It appears at the point of doubt, never on a help page; warn and danger variants use the same shape. This is the system's one deliberate side-border, and it is a callout, not a card or a row.
+A 2px accent left border on a soft ground with a short bold head in accent text. It appears at the point of doubt, never on a help page; warn and danger variants use the same shape. This is the system's one deliberate side-border, and it is a callout, not a card or a row.
 
 ### Overlays
-Panels slide from the right at 420px; modals pop from 96%; the command palette (⌘K) drops from the top. All are glass over a scrim. A panel is deliberately paired with the table it acts on staying visible behind it, because a payment is decided while looking at the payments.
+Panels slide from the right at 420px; modals pop from 96%; the command palette (⌘K) drops from the top. **Under 900px a form modal is a bottom sheet** (`<Modal sheet>`, `.modal--sheet`): full width, 18px top corners, the sheet shadow, the body scrolls and the foot clears the home indicator, rising on a 320ms transition from `@starting-style`. A dialog whose scrim covers the frame sits on the screen's floor over the tab bar; one that covers `main` sits on `main`'s. A short confirm stays a centred question. Used by every form and document dialog: Schedule an assessment, Invite, Take a payment / Settle, Refund, Correct a payment, Confirm a payment, the portal's *I paid*, the template editor and the invoice. **Every dialog animates out** (`ModalHost` plays a copy of itself out on unmount, so Escape, the scrim, Cancel and a parent's own close all get it): a sheet slides back down over 240ms on the exit curve, a centred dialog fades and settles to 97% over 180ms, and the scrim fades. Nothing plays under reduced motion. All are glass over a scrim. A panel is deliberately paired with the table it acts on staying visible behind it, because a payment is decided while looking at the payments.
 
 ### Motion
-Seven `tx-*` keyframes and nothing else; anything further is a transition. 120/180/240/320ms with one entrance curve (`cubic-bezier(.2,.8,.2,1)`), one exit curve and an overshoot curve reserved for knob-sized state changes (switch, check, radio). The toast deck alone uses a sampled real spring over 520ms. Entrances use a transition plus `@starting-style`. Everything collapses under `prefers-reduced-motion`.
+Seven `tx-*` keyframes and nothing else; anything further is a transition. 120/180/240/320ms with one entrance curve (`cubic-bezier(.2,.8,.2,1)`), one exit curve and an overshoot curve reserved for knob-sized state changes (switch, check, radio). The toast deck alone uses a sampled real spring over 520ms. Entrances use a transition plus `@starting-style`. **Rows that open and close in a table** (Today's *+N more*, *Show N more clients*) use `useFlipRows` (`lib/ui/flip-rows.ts`): a row cannot animate its height, so the rows that stay slide from their old position to their new one (240ms, entrance curve), arriving rows fade and drop 6px in with a 35ms stagger, and leaving rows fade out over 140ms on the exit curve before the change applies (never later than 260ms, so a paused clock cannot stop a disclosure closing). Mark each row `data-flip="<stable key>"`. Transform and opacity only; nothing moves under reduced motion. Everything collapses under `prefers-reduced-motion`.
 
 ## Do's and Don'ts
 

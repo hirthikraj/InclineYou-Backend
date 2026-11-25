@@ -188,10 +188,16 @@ export async function removeSet(sessionId: string, setId: string): Promise<SetDe
 /** Add an exercise mid-session. `sets` lays down that many empty rows (default 0). */
 export async function addExerciseRow(
   sessionId: string,
-  input: { id: string; exerciseId: string; position?: number; sets?: number },
+  input: { id: string; exerciseId: string; position?: number; sets?: number; scope?: SwapScopeV1 },
 ): Promise<ExerciseWritten> {
-  return write('Adding the exercise', () =>
+  /* `scope: program` also appends it to the client's plan day (24 Nov 2026), as a swap can. */
+  const out = await write('Adding the exercise', () =>
     send<ExerciseWire>(`${base(sessionId)}/exercises`, { method: 'POST', body: input }));
+  if (out.ok && input.scope === 'program') {
+    revalidatePath('/clients');
+    revalidatePath('/programs');
+  }
+  return out;
 }
 
 /** Remove · undo · note · rest. `onPlan: true` writes the client's plan too (R44). */

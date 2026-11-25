@@ -380,7 +380,7 @@ export function PackPanel({
     return (
       <ScreenSheet
         className="pkx-sheet"
-        title={editing ? 'Edit pack' : 'New pack'}
+        title={editing ? 'Edit pack' : theirs ? `New ${whose} pack` : 'New pack'}
         backLabel="Cancel"
         onBack={dismiss}
         action={saveButton('sm')}
@@ -409,7 +409,7 @@ export function PackPanel({
         aria-label={editing ? 'Edit this pack' : 'New pack'}
       >
         <div className="panel__hd">
-          <span className="panel__t">{editing ? 'Edit pack' : 'New pack'}</span>
+          <span className="panel__t">{editing ? 'Edit pack' : theirs ? `New ${whose} pack` : 'New pack'}</span>
           <Button
             variant="ghost"
             iconOnly

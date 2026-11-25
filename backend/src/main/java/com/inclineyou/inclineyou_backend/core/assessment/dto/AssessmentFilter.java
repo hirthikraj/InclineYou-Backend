@@ -11,5 +11,7 @@ import java.util.UUID;
  * @param states some of booked · missed · done; empty filters nothing
  * @param q      the assessment's or the client's name, case-insensitive
  * @param dueBy  due on or before this date
+ * @param reviewed true: only reviewed ones; false: only done ones not yet reviewed; null: either
  */
-public record AssessmentFilter(UUID trainerId, LocalDate today, List<String> states, UUID clientId, String q, LocalDate dueBy) {}
+public record AssessmentFilter(UUID trainerId, LocalDate today, List<String> states, UUID clientId, String q, LocalDate dueBy,
+                               Boolean reviewed) {}

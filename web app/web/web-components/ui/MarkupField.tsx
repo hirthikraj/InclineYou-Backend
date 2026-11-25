@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 
-import { parseMarkup, type Mark } from '@/lib/text/markup';
+import { parseMarkup, type Block, type Mark } from '@/lib/text/markup';
+import { parseWhatsApp, WHATSAPP_MARKER } from '@/lib/text/whatsapp';
 import { useEscapeGuard } from './Modal';
 
 /**
@@ -71,6 +72,8 @@ export function MarkupField({
   /** Ctrl/⌘+Enter — the caller's commit, since Enter is a new line in here. */
   onCommit,
   className,
+  dialect = 'markup',
+  apiRef,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -96,6 +99,15 @@ export function MarkupField({
   placeholder?: string;
   onCommit?: () => void;
   className?: string;
+  /**
+   * WHICH MARKERS ARE STORED (25 Nov 2026). `markup` is the app's own (`**bold**`, `*italic*`, `__underline__`,
+   * `# heading`), read by `Markup`. `whatsapp` is WhatsApp's (`*bold*`, `_italic_`) for text that is SENT as a
+   * WhatsApp message — a nudge — so it arrives formatted rather than with stray asterisks. WhatsApp has no
+   * underline and no heading, so the toolbar is B, I and emoji in that dialect.
+   */
+  dialect?: 'markup' | 'whatsapp';
+  /** For a caller that inserts at the caret from outside the box — a nudge's {token} chips. */
+  apiRef?: Ref<{ insert: (text: string) => void }>;
 }) {
   const box = useRef<HTMLDivElement>(null);
   /** What this component last handed to `onChange`. See the header: the guard
@@ -110,10 +122,10 @@ export function MarkupField({
     const el = box.current;
     if (!el) return;
     if (value === mine.current) return;
-    el.innerHTML = htmlFor(value);
+    el.innerHTML = htmlFor(value, dialect);
     mine.current = value;
     setEmpty(!value);
-  }, [value]);
+  }, [value, dialect]);
 
   /* ── THE TOOLBAR REPORTS THE CARET, IT DOES NOT JUST FIRE AT IT ───────────
      A button that only acts is a button you have to press to find out what it
@@ -139,6 +151,7 @@ export function MarkupField({
         bold: state('bold'),
         italic: state('italic'),
         underline: state('underline'),
+        strike: state('strikeThrough'),
         heading: line instanceof HTMLElement && line.classList.contains('mkpf__h'),
       });
     }
@@ -160,7 +173,7 @@ export function MarkupField({
   function sync() {
     const el = box.current;
     if (!el) return;
-    const next = serialize(el);
+    const next = serialize(el, dialect);
     /* EMPTIED MEANS EMPTIED, block class and all. Deleting every character
        leaves the editable holding the last block it had, so a note cleared out
        of a heading line kept writing headings — and the placeholder, which is
@@ -178,8 +191,27 @@ export function MarkupField({
     /* A mark applied to a selection that did not MOVE fires no
        `selectionchange`, so the lamp would stay on the previous answer until
        the caret was nudged — which is the one moment it is being watched. */
-    setOn(o => ({ ...o, bold: state('bold'), italic: state('italic'), underline: state('underline') }));
+    setOn(o => ({ ...o, bold: state('bold'), italic: state('italic'), underline: state('underline'), strike: state('strikeThrough') }));
   }
+
+  /* INSERT AT THE CARET, FROM OUTSIDE (25 Nov 2026) — a nudge's {token} chips. A chip press moves focus, so
+     a caret that has left the box is put back at the end of the text before inserting. */
+  useImperativeHandle(apiRef, () => ({
+    insert(text: string) {
+      const el = box.current;
+      if (!el) return;
+      const sel = window.getSelection();
+      if (!sel || !sel.anchorNode || !el.contains(sel.anchorNode)) {
+        el.focus();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        sel?.removeAllRanges();
+        sel?.addRange(range);
+      }
+      run('insertText', text);
+    },
+  }));
 
   /** The caret's line, as a block element of the editable. */
   function lineOf(): HTMLElement | null {
@@ -253,7 +285,7 @@ export function MarkupField({
             }
 
             const command = SHORTCUT[e.key.toLowerCase()];
-            if (!command) return;
+            if (!command || (dialect === 'whatsapp' && command === 'underline')) return;
             /* Taken from the browser rather than left to it, so the three marks
                behave identically whatever the engine's own bindings are — and
                so ⌘B cannot reach the bookmark bar through an editable. */
@@ -266,7 +298,9 @@ export function MarkupField({
             above it. `onMouseDown` is prevented on every control: a button that
             took focus would collapse the selection it is about to format. */}
         <div className="mkpf__tb" role="toolbar" aria-label={`Formatting for ${label}`}>
-          {MARKS.map(([key, command, mark, hint]) => (
+          {/* The app's format: B · I · U · H. WhatsApp's: B · I · S · H — it has no underline, and strike sits
+              in that place so the toolbar keeps its shape. */}
+          {MARKS.filter(([, , mark]) => (dialect === 'markup' ? mark !== 'strike' : mark !== 'underline')).map(([key, command, mark, hint]) => (
             <button
               key={mark}
               type="button"
@@ -283,6 +317,7 @@ export function MarkupField({
               {key}
             </button>
           ))}
+          {(
           <button
             type="button"
             className={`mkpf__b mkpf__b--h${on.heading ? ' mkpf__b--on' : ''}`}
@@ -305,6 +340,7 @@ export function MarkupField({
           >
             H
           </button>
+          )}
 
           <Emoji
             open={emoji}
@@ -333,6 +369,7 @@ const MARKS: [string, string, Mark, string][] = [
   ['B', 'bold', 'bold', 'Bold'],
   ['I', 'italic', 'italic', 'Italic'],
   ['U', 'underline', 'underline', 'Underline'],
+  ['S', 'strikeThrough', 'strike', 'Strikethrough'],
 ];
 
 const SHORTCUT: Record<string, string | undefined> = {
@@ -353,8 +390,9 @@ const ESCAPE: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;' 
  * keystroke. An empty line carries a `<br>` for the same reason: without it the
  * div has no height and the trainer's blank line is invisible until they type.
  */
-function htmlFor(value: string): string {
-  return parseMarkup(value)
+function htmlFor(value: string, dialect: 'markup' | 'whatsapp'): string {
+  const blocks: Block[] = dialect === 'whatsapp' ? parseWhatsApp(value) : parseMarkup(value);
+  return blocks
     .map(block => {
       const inner =
         block.spans
@@ -368,7 +406,7 @@ function htmlFor(value: string): string {
     .join('');
 }
 
-const TAG: Record<Mark, string> = { bold: 'b', italic: 'i', underline: 'u' };
+const TAG: Record<Mark, string> = { bold: 'b', italic: 'i', underline: 'u', strike: 's' };
 
 /**
  * And back: editable DOM in, markdown out.
@@ -381,7 +419,8 @@ const TAG: Record<Mark, string> = { bold: 'b', italic: 'i', underline: 'u' };
  * ignored `styleWithCSS`. All of them are read, because the alternative is a
  * mark that renders in the box and vanishes on save.
  */
-function serialize(root: HTMLElement): string {
+function serialize(root: HTMLElement, dialect: 'markup' | 'whatsapp' = 'markup'): string {
+  const markers = dialect === 'whatsapp' ? WHATSAPP_MARKERS : MARKER;
   const lines: string[] = [];
   /* Inline content sitting at the root with no block around it — which is what
      some engines leave behind for the first line ever typed into an empty
@@ -390,7 +429,7 @@ function serialize(root: HTMLElement): string {
 
   for (const node of [...root.childNodes]) {
     if (!isBlock(node)) {
-      loose += inline(node, []);
+      loose += inline(node, [], markers);
       continue;
     }
     if (loose) {
@@ -403,7 +442,7 @@ function serialize(root: HTMLElement): string {
        asking it about the block we are already in put that newline in front of
        every line in the note. One Enter saved as two. */
     const parts = [...node.childNodes]
-      .map(child => inline(child, []))
+      .map(child => inline(child, [], markers))
       .join('')
       .split('\n');
     /* THE BROWSER'S PADDING `<br>` IS NOT A LINE. Every empty block carries one
@@ -411,7 +450,13 @@ function serialize(root: HTMLElement): string {
        of Enter produce two newlines in the saved note. A trailing empty part is
        that padding; a MIDDLE empty part is a blank line somebody typed. */
     if (parts.length > 1 && parts[parts.length - 1] === '') parts.pop();
-    for (const part of parts) lines.push(heading && part ? `# ${part}` : part);
+    /* A heading line: `# text` in the app's format; in WhatsApp's, the whole line bold — its inner marks dropped,
+       since `*` cannot nest inside `*`. */
+    const plainLine = (node.textContent ?? '').replace(/\n+$/, '');
+    for (const part of parts) {
+      if (!heading || !part) lines.push(part);
+      else lines.push(dialect === 'markup' ? `# ${part}` : `*${plainLine}*`);
+    }
   }
   if (loose) lines.push(loose);
 
@@ -425,39 +470,43 @@ function serialize(root: HTMLElement): string {
  * which some engines produce on Enter inside a styled line — is one too, so a
  * caller splitting on `\n` gets the lines whichever shape the engine chose.
  */
-function inline(node: Node, marks: Mark[]): string {
+function inline(node: Node, marks: Mark[], markers: Record<Mark, string> = MARKER): string {
   if (node.nodeType === Node.TEXT_NODE) return node.nodeValue ?? '';
   if (!(node instanceof HTMLElement)) return '';
   if (node.tagName === 'BR') return '\n';
 
   const mark = markOf(node);
   const deeper = mark && !marks.includes(mark) ? [...marks, mark] : marks;
-  const inner = [...node.childNodes].map(child => inline(child, deeper)).join('');
+  const inner = [...node.childNodes].map(child => inline(child, deeper, markers)).join('');
   if (isBlock(node)) return `\n${inner}`;
   /* WRAPPED ONLY IF THERE IS SOMETHING INSIDE. An empty `<b>` — what a browser
      leaves behind when a bolded word is deleted — would otherwise serialise as
      `****` and read back as four literal asterisks. And never twice: a `<b>`
      inside a `<b>` is one bold run, which is what `marks` is carrying. */
   if (!mark || !inner.trim() || marks.includes(mark)) return inner;
-  return `${MARKER[mark]}${inner}${MARKER[mark]}`;
+  return `${markers[mark]}${inner}${markers[mark]}`;
 }
 
 function isBlock(node: Node): boolean {
   return node instanceof HTMLElement && (node.tagName === 'DIV' || node.tagName === 'P');
 }
 
-const MARKER: Record<Mark, string> = { bold: '**', italic: '*', underline: '__' };
+const MARKER: Record<Mark, string> = { bold: '**', italic: '*', underline: '__', strike: '' };
+/* WhatsApp has no underline: a pasted underline is kept as plain text rather than invented a marker. */
+const WHATSAPP_MARKERS: Record<Mark, string> = { ...WHATSAPP_MARKER, underline: '' };
 
 function markOf(el: HTMLElement): Mark | null {
   const tag = el.tagName;
   if (tag === 'B' || tag === 'STRONG') return 'bold';
   if (tag === 'I' || tag === 'EM') return 'italic';
   if (tag === 'U' || tag === 'INS') return 'underline';
+  if (tag === 'S' || tag === 'STRIKE' || tag === 'DEL') return 'strike';
   /* The engines that ignore `styleWithCSS=false` write these instead. */
   const style = el.style;
   if (style.fontWeight === 'bold' || Number(style.fontWeight) >= 600) return 'bold';
   if (style.fontStyle === 'italic') return 'italic';
   if (style.textDecoration.includes('underline')) return 'underline';
+  if (style.textDecoration.includes('line-through')) return 'strike';
   return null;
 }
 

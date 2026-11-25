@@ -33,6 +33,7 @@ import {
 import { relativePast, rupees } from '@/lib/today/time';
 import { formatPhone } from '@/lib/auth/policy';
 import { exportRoster } from '@/lib/clients/export';
+import { ClientsTabs } from '@/components/clients/join/JoinTabs';
 import { TopBar } from '@/components/shell/TopBar';
 import {
   Bars,
@@ -68,6 +69,7 @@ import { packReceipt } from '@/lib/clients/pack-receipt';
 import { useToast } from '@/lib/toast/store';
 import { Tag } from '@/web-components/ui/Tag';
 import { Chip } from '@/web-components/ui/Chip';
+import { Segment as SegmentGroup, SegmentButton } from '@/web-components/ui/Segment';
 import { Avatar } from '@/web-components/ui/Avatar';
 import { PackGauge } from '@/web-components/ui/PackGauge';
 import { Table, Row, type Column } from '@/web-components/ui/Table';
@@ -293,14 +295,16 @@ const FILTER_BATCH: { value: 'morning' | 'evening' | 'night' | 'none'; label: st
 function FilterPanel({
   filters,
   sort,
-  visibleCount,
+  countFor,
   totalCount,
   onApply,
   onClose,
 }: {
   filters: Filters;
   sort: SortKey;
-  visibleCount: number;
+  /** How many clients a set of filters would show — run on the DRAFT, so the
+   *  button's number follows every tick rather than the filters already applied. */
+  countFor: (f: Filters) => number;
   totalCount: number;
   onApply: (f: Filters, sort: SortKey) => void;
   onClose: () => void;
@@ -355,10 +359,9 @@ function FilterPanel({
     return () => document.removeEventListener('keydown', onKey);
   }, [dismiss]);
 
-  // Count how many clients the draft would show.
-  // (We receive visibleCount from the parent pre-computed for the current draft
-  //  — but since draft is local here, pass the total and compute in parent via prop update.)
-  // For the label we reuse totalCount for simplicity — the parent applies and then re-renders.
+  /* What the draft would show. It printed the APPLIED filters' count before
+     (24 Nov 2026), so "Show 13 clients" stayed 13 whatever was ticked. */
+  const visibleCount = countFor(draft);
 
   return (
     <>
@@ -411,25 +414,21 @@ function FilterPanel({
               fourth is a Reset a trainer has to check. */}
           <div className="crd-fsort">
             <p className="micro" style={{ margin: '16px 0 8px' }}>Sort by</p>
-            <div className="wk">
+            <SegmentGroup label="Sort by" mode="single">
               {SORTS.map(s => {
                 const on = sortDraft === s.key;
                 return (
-                  <Chip
+                  <SegmentButton
                     pressed={on}
                     key={s.key}
                     onClick={() => setSortDraft(s.key)}
-                    style={on ? {
-                      background: 'var(--tx-accent-soft)',
-                      borderColor: 'var(--tx-accent-line)',
-                      color: 'var(--tx-accent-text)',
-                    } : undefined}
+                    mode="single"
                   >
                     {s.label}
-                  </Chip>
+                  </SegmentButton>
                 );
               })}
-            </div>
+            </SegmentGroup>
           </div>
 
           <p className="micro" style={{ margin: '16px 0 8px' }}>Where</p>
@@ -437,18 +436,13 @@ function FilterPanel({
             {FILTER_MODES.map(m => {
               const on = draft.mode.includes(m.value);
               return (
-                <Chip
+                <SegmentButton
                   pressed={on}
                   key={m.value}
                   onClick={() => toggleMode(m.value)}
-                  style={on ? {
-                    background: 'var(--tx-accent-soft)',
-                    borderColor: 'var(--tx-accent-line)',
-                    color: 'var(--tx-accent-text)',
-                  } : undefined}
                 >
                   {m.label}
-                </Chip>
+                </SegmentButton>
               );
             })}
           </div>
@@ -458,18 +452,13 @@ function FilterPanel({
             {FILTER_MONEY.map(m => {
               const on = draft.money.includes(m.value);
               return (
-                <Chip
+                <SegmentButton
                   pressed={on}
                   key={m.value}
                   onClick={() => toggleMoney(m.value)}
-                  style={on ? {
-                    background: 'var(--tx-accent-soft)',
-                    borderColor: 'var(--tx-accent-line)',
-                    color: 'var(--tx-accent-text)',
-                  } : undefined}
                 >
                   {m.label}
-                </Chip>
+                </SegmentButton>
               );
             })}
           </div>
@@ -479,18 +468,13 @@ function FilterPanel({
             {FILTER_BATCH.map(b => {
               const on = draft.batch.includes(b.value as never);
               return (
-                <Chip
+                <SegmentButton
                   pressed={on}
                   key={b.value}
                   onClick={() => toggleBatch(b.value)}
-                  style={on ? {
-                    background: 'var(--tx-accent-soft)',
-                    borderColor: 'var(--tx-accent-line)',
-                    color: 'var(--tx-accent-text)',
-                  } : undefined}
                 >
                   {b.label}
-                </Chip>
+                </SegmentButton>
               );
             })}
           </div>
@@ -500,18 +484,13 @@ function FilterPanel({
             {FILTER_GENDER.map(g => {
               const on = draft.gender.includes(g.value);
               return (
-                <Chip
+                <SegmentButton
                   pressed={on}
                   key={g.value}
                   onClick={() => toggleGender(g.value)}
-                  style={on ? {
-                    background: 'var(--tx-accent-soft)',
-                    borderColor: 'var(--tx-accent-line)',
-                    color: 'var(--tx-accent-text)',
-                  } : undefined}
                 >
                   {g.label}
-                </Chip>
+                </SegmentButton>
               );
             })}
           </div>
@@ -739,6 +718,9 @@ export const ARCHIVE_REASONS: [ArchiveReason, string][] = [
   ['no_time', 'No time'],
   ['switched_trainer', 'Switched trainer'],
   ['other', 'Other'],
+  /* V48: the two a prospect ends on. Offered for everyone — a lapsed client who never answers is the same fact. */
+  ['not_interested', 'Not interested'],
+  ['no_response', 'Never replied'],
 ];
 
 function RowMenu({
@@ -1023,6 +1005,8 @@ function RowVerb({ row }: { row: RosterRow }) {
   const a = row.attention;
   if (!a) return null;
   if (a.kind === 'pack' && a.packageId) return <RenewButton clientId={row.id} name={row.name} packageId={a.packageId} label={a.action} />;
+  /* V48: the follow-up is done on the file — Call, WhatsApp and Log a response are on its Lead card. */
+  if (a.kind === 'follow-up') return <Button href={`/clients/${row.id}`} size="sm">{a.action}</Button>;
   const template = templateForKind(a.kind);
   if (template) {
     return (
@@ -1032,6 +1016,7 @@ function RowVerb({ row }: { row: RosterRow }) {
         template={template}
         label={a.action}
         className="btn btn--secondary btn--sm"
+        quietWhenContacted
       />
     );
   }
@@ -1193,7 +1178,7 @@ function ClientRow({
           numeric: true,
           className: 'rst__c-left',
           content: row.pack ? (
-            <PackGauge remaining={row.pack.remaining} total={row.pack.total} />
+            <PackGauge remaining={row.pack.remaining} total={row.pack.total} ended={row.pack.ended} daysLeft={row.pack.daysLeft} />
           ) : (
             <span className="ink3">—</span>
           ),
@@ -1307,6 +1292,8 @@ const SORT_COLUMN: Record<SortKey, string> = {
   recent: 'last',
   left: 'left',
   owed: 'up',
+  /* V48: a prospect's follow-up is said in the line (*Follow up Fri 28 Nov*), so it points where `owed` does. */
+  'follow-up': 'up',
 };
 
 /* ───────────────────────────────────────── phone card row (≤900 px) ── */
@@ -1337,7 +1324,7 @@ function PhoneRow({ row }: { row: RosterRow; now: number }) {
      ("Pack expires Wedne…" was the whole explanation of why the row exists), and
      the gauge moves under the verb so the tag no longer jumps with whether a pack
      exists (it sat at x=237, 247 or 301). */
-  const hasSide = Boolean(row.attention) || pack != null;
+  const hasSide = Boolean(row.attention);
 
   return (
     <div className={rowClass}>
@@ -1354,12 +1341,16 @@ function PhoneRow({ row }: { row: RosterRow; now: number }) {
             <StatusTag tag={row.tag} />
           </span>
           {row.line && <span className="crd-row__line">{row.line}</span>}
+          {/* The pack figure in the text column (22 Nov 2026), labelled — it was an unlabelled "6/12" stacked under the
+              verb, which made the cards uneven heights. Not repeated when the line already says the pack ended. */}
+          {pack != null && !(pack.ended && row.line?.startsWith('Pack ended')) && (
+            <PackGauge inline remaining={pack.remaining} total={pack.total} ended={pack.ended} daysLeft={pack.daysLeft} />
+          )}
         </span>
       </button>
       {hasSide && (
         <span className="crd-row__side">
-          {row.attention && <RowVerb row={row} />}
-          {pack != null && <PackGauge remaining={pack.remaining} total={pack.total} />}
+          <RowVerb row={row} />
         </span>
       )}
     </div>
@@ -1521,9 +1512,12 @@ export function Clients({
   now,
   newClientData,
   lastContact,
+  joiningCount = null,
 }: {
   data: RosterData;
   now: number;
+  /** Join requests waiting on the trainer's answer, for the Joining tab's badge. Null when it could not be read. */
+  joiningCount?: number | null;
   newClientData: NewClientData | null;
   /**
    * clientId → when they were last messaged, inside the cooldown window.
@@ -1573,12 +1567,6 @@ export function Clients({
   const fc = filterCount(filters);
 
   // Compute how many clients the current filter draft would show (used by the panel's button label).
-  // The panel has its own draft state so we can't know it here; we pass the current visible count
-  // as a starting point and the panel updates its own preview as the user toggles chips.
-  // For the "Show N clients" button we pass the current visible count — once the panel applies,
-  // the count on screen updates automatically.
-  const filterPanelCount = visible.length;
-
   const paletteClients: PaletteClient[] = useMemo(
     () => data.clients.filter(c => c.status !== 'archived').map(c => ({ id: c.id, name: c.name ?? 'Client' })),
     [data.clients],
@@ -1709,9 +1697,6 @@ export function Clients({
               <>
                 {/* Desktop: Export + Add client text buttons */}
                 <div className="ph__acts ph__acts--pair crd-deskacts">
-                  <Button variant="ghost" href="/clients/invitations">
-                    Invitations
-                  </Button>
                   <Button variant="secondary" onClick={() => exportRoster(visible, now)}>
                     <ExportIcon size={15} />
                     Export
@@ -1724,6 +1709,10 @@ export function Clients({
               </>
             )}
           </div>
+
+          {/* Clients' three pages (22 Nov 2026): the roster, everybody on their way in (invitations and join requests in one
+              list), and the join link. It replaced two ghost buttons, *Invitations* and *Join requests*, beside Export. */}
+          <ClientsTabs current="clients" joining={joiningCount} />
 
           {/* ── ROW 1 ON A PHONE: FIND, THEN NARROW ─────────────────────────
               The header's three ghost glyphs are gone and this replaces them.
@@ -1778,30 +1767,25 @@ export function Clients({
             </div>
           )}
 
-          <div className="ph__tabs" style={{ gap: 7 }} role="group" aria-label="Show clients">
-            {SEGMENTS.map(s => {
-              const count = roster.counts[s.key];
-              const active = segment === s.key;
-              return (
-                <Chip
-                  pressed={active}
-                  key={s.key}
-                  onClick={() => setSegment(s.key)}
-                  style={
-                    active
-                      ? {
-                          background: 'var(--tx-accent-soft)',
-                          borderColor: 'var(--tx-accent-line)',
-                          color: 'var(--tx-accent-text)',
-                        }
-                      : undefined
-                  }
-                >
-                  {s.label}
-                  {count > 0 && <span className="rail__n">{count}</span>}
-                </Chip>
-              );
-            })}
+          {/* One of a set, so the shared pick-one pills: a neutral fill on the
+              chosen one. It was a hand-styled lime-wash Chip (24 Nov 2026). */}
+          <div className="ph__tabs">
+            <SegmentGroup label="Show clients" mode="single">
+              {SEGMENTS.map(s => {
+                const count = roster.counts[s.key];
+                return (
+                  <SegmentButton
+                    mode="single"
+                    pressed={segment === s.key}
+                    key={s.key}
+                    onClick={() => setSegment(s.key)}
+                    count={count > 0 ? count : undefined}
+                  >
+                    {s.label}
+                  </SegmentButton>
+                );
+              })}
+            </SegmentGroup>
           </div>
         </div>
 
@@ -1902,14 +1886,9 @@ export function Clients({
                   {/* Active filter chips — removable */}
                   {activeFilterChips.map(chip => (
                     <Chip
-                      pressed
                       key={chip.label}
                       onClick={chip.remove}
-                      style={{
-                        background: 'var(--tx-accent-soft)',
-                        borderColor: 'var(--tx-accent-line)',
-                        color: 'var(--tx-accent-text)',
-                      }}
+                      aria-label={`Remove the filter: ${chip.label}`}
                     >
                       {chip.label}
                       <svg
@@ -2100,7 +2079,7 @@ export function Clients({
           <FilterPanel
             filters={filters}
             sort={sort}
-            visibleCount={filterPanelCount}
+            countFor={(f) => filterRows(searchRows(sorted, query), f, segment).length}
             totalCount={roster.rows.length}
             onApply={(f, s) => { setFilters(f); setSort(s); }}
             onClose={() => setFilterPanelOpen(false)}

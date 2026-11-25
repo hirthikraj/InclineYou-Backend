@@ -85,7 +85,7 @@ public class NudgeLogJdbcRepository {
         return jdbc.query("""
                 SELECT c.name, c.phone, t.name AS trainer_name, b.upi_vpa
                 FROM client c JOIN trainer t ON t.id = :tid::uuid
-                LEFT JOIN trainer_business b ON b.trainer_id = t.id
+                LEFT JOIN tenant_business b ON b.tenant_id = c.tenant_id   -- V46: the client pays their workspace's business
                 WHERE c.id = :cid::uuid AND c.trainer_id = :tid::uuid AND c.deleted_at IS NULL
                 """, Map.of("tid", trainerId.toString(), "cid", clientId.toString()),
                 (rs, i) -> new DraftClient(rs.getString("name"), rs.getString("phone"), rs.getString("trainer_name"),

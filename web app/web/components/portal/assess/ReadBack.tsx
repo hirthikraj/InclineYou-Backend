@@ -1,8 +1,8 @@
-import Link from 'next/link';
-
 import type { AssessDetailWire } from '@/lib/portal/assess-api';
 import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
+import { Crumbs } from '@/web-components/ui/Crumbs';
+import { ListRow, ListRows } from '@/web-components/ui/ListRow';
 import { Tag } from '@/web-components/ui/Tag';
 import { TrendChart } from '@/web-components/ui/TrendChart';
 
@@ -17,6 +17,15 @@ export function ReadBack({ a }: { a: AssessDetailWire }) {
   const series = (a.history ?? []).filter((h) => h.points.length > 1);
   return (
     <div className="pl">
+      {/* THE WAY BACK, AT THE TOP (25 Nov 2026) — the trail the exercise page draws. The only exit was *All
+          assessments* at the very foot of the page. */}
+      <Crumbs
+        items={[
+          { label: 'Progress', href: '/me/progress' },
+          { label: 'Assessments', href: '/me/progress/assessments' },
+          { label: a.name },
+        ]}
+      />
       <Card className="ppg__hero">
         <Card.Body>
           <p className="pl__k">Handed in {when}</p>
@@ -72,24 +81,31 @@ export function ReadBack({ a }: { a: AssessDetailWire }) {
             <Card.Head title={`${m?.label ?? h.key} over time`} level={3} />
             <Card.Body>
               <TrendChart values={h.points.map((p) => p.value)} label={`${m?.label ?? h.key} across your assessments`} from={day(new Date(h.points[0].at).toISOString().slice(0, 10))}
-                to={day(new Date(h.points[h.points.length - 1].at).toISOString().slice(0, 10))} markIndex="last" unit={m?.unit || undefined} />
+                to={day(new Date(h.points[h.points.length - 1].at).toISOString().slice(0, 10))} markIndex="last" unit={m?.unit || undefined}
+                /* Figures on the side (25 Nov 2026): a line between two dates said the weight moved and not by how much. */
+                yAxis />
             </Card.Body>
           </Card>
         );
       })}
 
+      {/* YOUR OTHER CHECK-INS (25 Nov 2026). Headed *Compare with another*, it compared nothing — each row opens that
+          one — and it was seven lime links all reading *Weekly check-in*, told apart by a grey date. The DATE is what
+          tells them apart, so it leads each row; the name is said only where it differs from this one's. */}
       {(a.returned?.length ?? 0) > 0 && (
         <Card>
-          <Card.Head title="Compare with another" level={3} />
-          <Card.Body>
-            <ul className="pl__list">
+          <Card.Head title="Your other check-ins" level={3} />
+          <Card.Body flush>
+            <ListRows label="Your other check-ins">
               {a.returned!.map((r) => (
-                <li key={r.id} className="pl__row">
-                  <Link href={`/me/assessments/${r.id}`}>{r.name}</Link>
-                  <span className="pl__s">{new Date(r.at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}</span>
-                </li>
+                <ListRow
+                  key={r.id}
+                  href={`/me/assessments/${r.id}`}
+                  title={new Date(r.at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' })}
+                  sub={r.name !== a.name ? r.name : undefined}
+                />
               ))}
-            </ul>
+            </ListRows>
           </Card.Body>
         </Card>
       )}

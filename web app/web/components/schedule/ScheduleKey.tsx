@@ -90,10 +90,12 @@ import type { ScheduleView } from '@/lib/schedule/view';
  * have taken theirs, which is the number the two rows exist to fit inside.
  */
 export function ScheduleKey({
-  view, gaps, pivoting,
+  view, gaps, pivoting, late = false,
 }: {
   view: ScheduleView;
   gaps: boolean;
+  /** An unmarked past session is drawn. Shown only then, like `Free gap`. */
+  late?: boolean;
   /** The week by client. See `Toolbar`'s own note, and the block below. */
   pivoting: boolean;
 }) {
@@ -147,6 +149,10 @@ export function ScheduleKey({
           <Check size={9} />
         </Key>
       )}
+
+      {/* The amber frame on a past block nobody marked. It was the one colour on
+          the grid the key did not name; shown only while such a block is drawn. */}
+      {!month && late && <Key swatch="late" label="Not marked" />}
 
       {/* Follows the `Show gaps` chip rather than the view, which is the same
           rule the month branch is applying and not a second one: the key

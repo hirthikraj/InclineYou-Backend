@@ -44,7 +44,7 @@
  * one level down.
  */
 
-export type SettingsTab = 'account' | 'nudges' | 'portal';
+export type SettingsTab = 'account' | 'business' | 'nudges' | 'portal';
 
 export const SETTINGS_TABS: { key: SettingsTab; label: string }[] = [
   // First because it is the only section that is about the trainer rather than
@@ -52,6 +52,9 @@ export const SETTINGS_TABS: { key: SettingsTab; label: string }[] = [
   // they sign in with, and the way out) are the ones somebody arrives at
   // Settings specifically looking for.
   { key: 'account', label: 'Account' },
+  // The workspace's business (V46): its name, contact, address and the UPI ID clients pay. Beside Account because it is
+  // the other half of "who you are": the trainer, then the practice.
+  { key: 'business', label: 'Business' },
   { key: 'nudges', label: 'Nudge messages' },
   // What clients are sent and what they see in the portal: the trainer's two decisions about it, made once.
   { key: 'portal', label: 'Client portal' },

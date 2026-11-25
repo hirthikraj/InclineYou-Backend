@@ -4,6 +4,7 @@ import { cache } from 'react';
 
 import { api, ApiError, listAll, type ListEnvelope } from '@/lib/http/client';
 import type { NudgeLogEntry } from '@/lib/nudges/types';
+import type { LeadContactWire, LeadWire } from './lead';
 
 /**
  * THE CLIENT FILE'S WIRE — api-contract 1.1 *Client file*.
@@ -135,6 +136,8 @@ export interface ClientDetailWire {
   /** V43: female · male · other · prefer_not_to_say. Absent (not null) when not given — the server omits nulls. */
   gender?: string | null;
   pinnedNotes: { id: string; body: string; updatedAt: number }[];
+  /** V48: where they came from, what they asked about, the next follow-up and the last contact. Absent on an older server. */
+  lead?: LeadWire;
 }
 
 /** L4 — one diary row. The log sits on the row itself (R28). */
@@ -309,6 +312,8 @@ export interface ClientFilePayload extends ClientFileHeader {
   /** The newest lines to this client; empty unless they are on the portal. */
   messages: ClientMessageWire[];
   nudges: NudgeLogEntry[];
+  /** V48 · Overview, for a prospect: what they said each time, newest first. */
+  leadContacts: LeadContactWire[];
 }
 
 export type ClientTab =
@@ -376,6 +381,11 @@ export function clientNotes(clientId: string): Promise<ClientNoteWire[]> {
   return items<ClientNoteWire>(`/v1/clients/${encodeURIComponent(clientId)}/notes`);
 }
 
+/** V48 — a lead's contact log, newest first. A secondary read: an empty list rather than a tab that will not open. */
+export function clientLeadContacts(clientId: string): Promise<LeadContactWire[]> {
+  return itemsOr<LeadContactWire>(`/v1/clients/${encodeURIComponent(clientId)}/lead-contacts`);
+}
+
 export function packageAdjustments(packageId: string): Promise<PackageAdjustmentWire[]> {
   return itemsOr<PackageAdjustmentWire>(`/v1/packages/${encodeURIComponent(packageId)}/adjustments`);
 }
@@ -428,7 +438,7 @@ export interface TabOptions {
 
 const EMPTY: Omit<ClientFilePayload, keyof ClientFileHeader> = {
   sessions: [], history: [], payments: [], priceList: [], adjustments: [],
-  programs: [], notes: [], messages: [], nudges: [],
+  programs: [], notes: [], messages: [], nudges: [], leadContacts: [],
 };
 
 /** What one tab reads, per the contract's *Per-tab reads* table. */
@@ -445,11 +455,18 @@ export async function getClientFilePayload(
   switch (tab) {
     case 'overview': {
       // The contract lists L7 here too; nothing on the tab draws a payment, so it isn't read.
-      const [sessions, nudges] = await Promise.all([
+      // A prospect's overview also draws the Lead card (V48): the contact log, and the price list its "interested in"
+      // picks from.
+      const prospect = header.client.status === 'prospect';
+      const [sessions, nudges, leadContacts, list] = await Promise.all([
         clientSessions(clientId, at(-28), at(15)),
         clientNudges(clientId),
+        prospect ? clientLeadContacts(clientId) : Promise.resolve([] as LeadContactWire[]),
+        prospect
+          ? priceList(header.client.clientType === 'gym' ? 'gym' : 'trainer')
+          : Promise.resolve([] as PriceListPackWire[]),
       ]);
-      return { ...out, sessions, nudges };
+      return { ...out, sessions, nudges, leadContacts, priceList: list.filter((p) => p.status === 'active') };
     }
     case 'calendar': {
       const month = /^\d{4}-\d{2}$/.test(options.month ?? '') ? options.month! : at(0).slice(0, 7);
@@ -542,6 +559,21 @@ export const removeNote = (clientId: string, noteId: string) =>
 export const restoreNote = (clientId: string, noteId: string) =>
   call<ClientNoteWire>(`/v1/clients/${cid(clientId)}/notes/${cid(noteId)}/restore`, { method: 'POST', body: {} });
 
+/* the lead (V48) */
+
+export const postLeadContact = (
+  clientId: string,
+  input: { id: string; channel: string; outcome: string; note?: string | null; nextFollowUpOn?: string | null },
+) =>
+  call<{ contact: LeadContactWire; nextFollowUpOn?: string | null }>(`/v1/clients/${cid(clientId)}/lead-contacts`, {
+    method: 'POST',
+    body: input,
+  });
+
+/** The toast's Undo: puts the follow-up back to what the contact replaced, while it is still the newest. */
+export const deleteLeadContact = (clientId: string, contactId: string) =>
+  call<void>(`/v1/clients/${cid(clientId)}/lead-contacts/${cid(contactId)}`, { method: 'DELETE' });
+
 /* the client's own fields — Clients A6 */
 
 export const patchClient = (
@@ -551,6 +583,11 @@ export const patchClient = (
     remindersExcluded?: boolean;
     /** v1.2: `true` / `false` is the trainer's answer for this client, `null` follows their own setting. */
     portalShowMoney?: boolean | null;
+    /** V48: the lead's fields. `null` clears each; not consent-gated. */
+    leadSource?: string | null;
+    leadSourceDetail?: string | null;
+    interestedPackId?: string | null;
+    nextFollowUpOn?: string | null;
   },
   version?: string,
 ) =>

@@ -144,10 +144,10 @@ class ClientCreateRaceTest {
     }
 
     private static UpdateClientRequest edit(Patch<String> phone, Patch<String> type, Patch<String> name) {
-        return new UpdateClientRequest(name, phone, null, type, null, null, null, null, null, null, null);
+        return new UpdateClientRequest(name, phone, null, type, null, null, null, null, null, null, null, null, null, null, null);
     }
 
     private static CreateClientRequest request(UUID id, String name, String phone) {
-        return new CreateClientRequest(id, name, phone, null, "independent", null, null, null);
+        return new CreateClientRequest(id, name, phone, null, "independent", null, null, null, null, null, null, null);
     }
 }

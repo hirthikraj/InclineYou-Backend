@@ -166,16 +166,16 @@ export async function saveList(
  * is replaced wholesale by the server, and a day the picker unticked goes in
  * with `windows: []`, which is how a rest day is spelled.
  */
-export async function saveHours(days: number[], windows: HourWindow[]): Promise<StepResult> {
-  const merged = mergeWindows(windows);
-  // No days or no windows is a skip spelled out. Writing an empty week here
+export async function saveHours(perDay: HourWindow[][]): Promise<StepResult> {
+  const merged = Array.from({ length: 7 }, (_, d) => mergeWindows(perDay[d] ?? []));
+  // No hours on any day is a skip spelled out. Writing an empty week here
   // would close all seven days, which is a different and much louder answer
   // than "I did not answer this" — and `seedDefaultWorkingHours` would then
   // refuse to seed, because it stands down the moment any row exists.
-  if (days.length === 0 || merged.length === 0) {
+  if (merged.every((w) => w.length === 0)) {
     return {
       ok: false,
-      error: { status: 400, detail: 'Pick at least one day and one window, or skip the step.' },
+      error: { status: 400, detail: 'Give at least one day some hours, or skip the step.' },
     };
   }
 
@@ -184,11 +184,10 @@ export async function saveHours(days: number[], windows: HourWindow[]): Promise<
     const changes: { weekday: number; windows: HourWindow[] }[] = [];
     for (let weekday = 0; weekday < 7; weekday += 1) {
       const before = mergeWindows(stored.filter((h) => h.weekday === weekday));
-      const after = days.includes(weekday) ? merged : [];
-      if (sameWindows(before, after)) continue;
-      changes.push({ weekday, windows: after });
+      if (sameWindows(before, merged[weekday])) continue;
+      changes.push({ weekday, windows: merged[weekday] });
     }
-    await patchWorkingHours(changes);
+    if (changes.length > 0) await patchWorkingHours(changes);
     await answered('hours');
     return await onward('hours');
   } catch (error) {

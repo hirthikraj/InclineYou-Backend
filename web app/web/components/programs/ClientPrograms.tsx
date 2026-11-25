@@ -444,6 +444,7 @@ function CopyRow({ row, now, className }: { row: Copy; now: number; className?: 
       href={planHref(program.clientId, program.id, 'programs')}
       sub={weekdays ?? dayNamesOf(program, days)}
       days={days}
+      weekdays={weekdays ? week.map((w) => w.weekday) : undefined}
       /* Unused on this row: `client` takes the column. Passed as 1 because a
          copy is one use of the blueprint it came from. */
       used={1}
@@ -473,31 +474,20 @@ function CopyRow({ row, now, className }: { row: Copy; now: number; className?: 
           <Tag tone="warn">{progress.tag}</Tag>
         ) : undefined
       }
+      /* ONE CONTROL, THE SAME ON EVERY ROW (25 Nov 2026). It was a ⋯ menu where a template is still
+         there and a bare › where it is not, so the column changed shape row to row and the › read as
+         *open this row* while it opened the client's file. The row itself opens the plan; the ⋯ holds
+         the two other places a trainer goes from it. */
       actions={
-        program.templateId ? (
         <RowMenu
-          label={program.name}
+          label={`More for ${program.name}`}
           items={[
-            { label: 'Open the client file', href: `/clients/${program.clientId}` },
-            /* THE BLUEPRINT, WHERE ONE IS STILL THERE. Null once it has been
-               deleted, which is survivable and not an error — the copy is
-               whole on its own, `ProgramWire.templateId`'s own note — so the
-               row is dropped rather than drawn dead. */
-            { label: 'Open the template it came from', href: `/programs/${program.templateId}` },
+            { label: `Open ${client?.name ?? 'the client'}'s file`, href: `/clients/${program.clientId}` },
+            /* THE BLUEPRINT, WHERE ONE IS STILL THERE. Null once it has been deleted, which is
+               survivable — the copy is whole on its own — so the item is left out, not drawn dead. */
+            ...(program.templateId ? [{ label: 'Open the template it came from', href: `/programs/${program.templateId}` }] : []),
           ]}
         />
-        ) : (
-          /* A menu of one item is an extra press and a focus trap; with nothing else to offer the verb is
-             the control. */
-          <Button
-            href={`/clients/${program.clientId}`}
-            variant="ghost"
-            size="sm"
-            iconOnly
-            label={`Open ${client?.name ?? 'the client'}'s file`}
-            icon={<ChevronRight />}
-          />
-        )
       }
     />
   );
@@ -669,14 +659,6 @@ function headerLine(rows: Copy[], clients: ClientWire[]): string {
  * the shape of that block is not on the wire.
  */
 const WEEKDAY = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
-function ChevronRight() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <path d="m9 6 6 6-6 6" />
-    </svg>
-  );
-}
 
 /** Where a copy is in its block, against the SERVER's instant. `tag` is set only when the block is about to
  *  run out or already has — the same rule family as a pack that is ending. */
