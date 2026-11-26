@@ -88,6 +88,7 @@ export async function send<T>(
  * -------------------------------------------------------------------------- */
 
 interface MeWire {
+  name?: string | null;
   setupCompletedAt: number | null;
   gymName: string | null;
   workspace: { currency: string; timezone: string };
@@ -511,10 +512,12 @@ export async function getGymStart(): Promise<{
   now: number;
   setupComplete: boolean;
   gym: GymMoney;
+  /** Who the statement PDF says it is from. */
+  trainerName: string | null;
 }> {
   const now = Date.now();
   const [me, gym] = await Promise.all([get<MeWire>('/v1/me'), getGymMoney(currentMonth(now), now)]);
-  return { now, setupComplete: me.setupCompletedAt !== null, gym };
+  return { now, setupComplete: me.setupCompletedAt !== null, gym, trainerName: me.name?.trim() || null };
 }
 
 /* ----------------------------------------------------------- practice report ── */

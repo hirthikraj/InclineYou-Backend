@@ -56,27 +56,30 @@ import {
 } from './card-image';
 import { A4_PX, canvasToJpeg, imagePagesToPdf, type PdfImagePage } from './pdf';
 
-const W = A4_PX.w;
-const H = A4_PX.h;
-const PAD = 88;
+export const W = A4_PX.w;
+export const H = A4_PX.h;
+export const PAD = 88;
 /** The measure — 1,064px at 150 dpi, which is 180mm. */
-const CW = W - PAD * 2;
+export const CW = W - PAD * 2;
 /** Where a sheet's content starts and stops. The bands above and below are the
  *  running head and foot, and no item may enter them. */
-const TOP = 196;
-const BOTTOM = 1636;
+export const TOP = 196;
+export const BOTTOM = 1636;
 const ROOM = BOTTOM - TOP;
 
-/* ------------------------------------------------------------------- items */
+/* ------------------------------------------------------------------- items
+ * The sheet, its measures and the pieces below are exported for the gym
+ * statement (`lib/business/gym-statement-pdf.ts`, 26 Nov 2026), so the two
+ * documents InclineYou sends out are painted by one set of hands. */
 
-interface Item {
+export interface Item {
   h: number;
   draw: (ctx: Ctx, y: number) => void;
   /** A heading. Never the last thing on a sheet. */
   keepWithNext?: boolean;
 }
 
-function newSheet(): { canvas: HTMLCanvasElement; ctx: Ctx } | null {
+export function newSheet(): { canvas: HTMLCanvasElement; ctx: Ctx } | null {
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
@@ -125,7 +128,7 @@ function chrome(ctx: Ctx, r: ClientReport, page: number, of: number): void {
 /* ------------------------------------------------------------- the pieces */
 
 /** A section rule and its title. `keepWithNext`, always. */
-function heading(text: string, note?: string): Item {
+export function heading(text: string, note?: string): Item {
   return {
     h: note ? 96 : 74,
     keepWithNext: true,
@@ -151,7 +154,7 @@ function heading(text: string, note?: string): Item {
 }
 
 /** Wrapped prose, at the report's smallest reading size. */
-function prose(text: string): Item {
+export function prose(text: string): Item {
   const LH = 30;
   /* The lines are measured at draw time and counted at build time, which means
      measuring twice — the height has to be known before the sheet exists. A
@@ -169,7 +172,7 @@ function prose(text: string): Item {
 }
 
 let MEASURER: Ctx | null = null;
-function measurer(): Ctx {
+export function measurer(): Ctx {
   if (MEASURER) return MEASURER;
   const c = document.createElement('canvas');
   c.width = 8;
@@ -178,7 +181,7 @@ function measurer(): Ctx {
   return MEASURER;
 }
 
-function wrap(ctx: Ctx, text: string, max: number, withFont: string): string[] {
+export function wrap(ctx: Ctx, text: string, max: number, withFont: string): string[] {
   ctx.font = withFont;
   const out: string[] = [];
   for (const paragraph of text.split('\n')) {
@@ -209,7 +212,7 @@ function wrap(ctx: Ctx, text: string, max: number, withFont: string): string[] {
  * setting it at — the same arithmetic that put `.strip--wrap` in the design
  * system for the screen's own version of this row.
  */
-function figureGrid(cells: Array<{ v: string; k: string }>): Item {
+export function figureGrid(cells: Array<{ v: string; k: string }>): Item {
   const COLS = 3;
   const TH = 128;
   const GAP = 16;
@@ -327,7 +330,7 @@ function weekChart(r: ClientReport): Item {
  * of building it this way round: a trainer who reads the report on screen and
  * then sends the PDF has sent what they read.
  */
-function detailRow(row: {
+export function detailRow(row: {
   name: string;
   meta: string;
   series: Array<{ at: number; value: number }>;
@@ -568,7 +571,7 @@ function buildItems(r: ClientReport): Item[] {
   }
 
   /* ── the body ───────────────────────────────────────────────────────────── */
-  const metrics = [r.weight, ...r.measurements].filter((m): m is MetricChange => m !== null);
+  const metrics = [r.weight, ...r.measurements, ...r.fitnessTests].filter((m): m is MetricChange => m !== null);
   if (metrics.length > 0) {
     items.push(
       heading(
@@ -652,7 +655,7 @@ function paintCoverSheet(r: ClientReport, page: number, of: number): HTMLCanvasE
  * until the flow has been laid out. The first pass only measures — it calls no
  * `draw` — so it costs nothing but arithmetic.
  */
-function planPages(items: Item[]): Item[][] {
+export function planPages(items: Item[]): Item[][] {
   const pages: Item[][] = [];
   let page: Item[] = [];
   let y = 0;

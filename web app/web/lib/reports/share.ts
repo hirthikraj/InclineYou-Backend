@@ -158,7 +158,7 @@ export async function copyCard(r: ClientReport): Promise<ShareOutcome> {
 /** A blob into the trainer's Downloads. The same object-URL dance
  *  `downloadCsv` does, and the two routes on this screen with no browser
  *  capability behind them to fail. */
-function saveBlob(blob: Blob, filename: string): void {
+export function saveBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

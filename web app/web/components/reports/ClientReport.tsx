@@ -27,6 +27,7 @@ import { Button } from '@/web-components/ui/Button';
 import { Card } from '@/web-components/ui/Card';
 import { Crumbs } from '@/web-components/ui/Crumbs';
 import { EmptyState } from '@/web-components/ui/EmptyState';
+import { FactList } from '@/web-components/ui/FactList';
 import { Fold } from '@/web-components/ui/Fold';
 import { Message } from '@/web-components/ui/Message';
 import { PageHeader } from '@/web-components/ui/PageHeader';
@@ -182,6 +183,7 @@ export function ClientReport({ report }: { report: Report }) {
   const metrics = [report.weight, ...report.measurements].filter(
     (m): m is MetricChange => m !== null,
   );
+  const bestOf = new Map(report.bests.map((b) => [b.exerciseId, b]));
   /* `0` where they never trained, which matches no week's index and leaves the
      chart entirely grey — correct, since there is no latest week to accent. */
   const latestTrainedWeek = report.weekSeries.reduce(
@@ -316,6 +318,14 @@ export function ClientReport({ report }: { report: Report }) {
                 />
               </Strip>
 
+              {/* ── every aspect, one line each ─────────────────────────────
+                  The strip is six figures; this is the same window read as
+                  the trainer would say it out loud — one line per aspect of
+                  the client that moved, each the lead row of the card below
+                  it. An aspect with nothing to show is left out rather than
+                  drawn as a dash: this card is the argument, not a form. */}
+              <AtAGlance report={report} />
+
               {/* ── turning up ───────────────────────────────────────────── */}
               {report.bestWeek > 0 && (
                 <Card>
@@ -402,7 +412,7 @@ export function ClientReport({ report }: { report: Report }) {
               {/* ── the body ─────────────────────────────────────────────── */}
               {metrics.length > 0 && (
                 <Card style={{ marginTop: 14 }}>
-                  <Card.Head title="Measurements">
+                  <Card.Head title="Body">
                     <Tag>{metrics.length} measured</Tag>
                     <span className="small mono" style={{ marginLeft: 'auto' }}>
                       start → latest
@@ -416,9 +426,9 @@ export function ClientReport({ report }: { report: Report }) {
                           name={m.label}
                           meta={
                             m.baselineIsOlder
-                              ? `one reading in the window · measured from ${shortDate(
+                              ? `${m.readings} readings · from ${shortDate(
                                   m.firstAt,
-                                )}, before it opened`
+                                )}, before the window opened`
                               : `${m.readings} readings · ${shortDate(m.firstAt)} to ${shortDate(
                                   m.lastAt,
                                 )}`
@@ -434,11 +444,35 @@ export function ClientReport({ report }: { report: Report }) {
                   </Card.Body>
                   <Card.Body style={{ borderTop: '1px solid var(--tx-line)' }}>
                     <p className="small" style={{ lineHeight: 1.6 }}>
-                      No colour on the change, on the card or here: the app has
-                      <b> no opinion</b> about which way a client&rsquo;s numbers should go,
-                      and a green arrow would be one. The line is accent because a shape is
-                      not a verdict.
+                      From their returned assessments. No colour on the change, on the card
+                      or here: the app has <b>no opinion</b> about which way a client&rsquo;s
+                      numbers should go, and a green arrow would be one.
                     </p>
+                  </Card.Body>
+                </Card>
+              )}
+
+              {/* ── fitness tests taken in an assessment ─────────────────── */}
+              {report.fitnessTests.length > 0 && (
+                <Card style={{ marginTop: 14 }}>
+                  <Card.Head title="Fitness tests">
+                    <Tag>{report.fitnessTests.length} retested</Tag>
+                  </Card.Head>
+                  <Card.Body>
+                    <ProgressRows>
+                      {report.fitnessTests.map((m) => (
+                        <ProgressRow
+                          key={m.type}
+                          name={m.label}
+                          meta={`${m.readings} tests · ${shortDate(m.firstAt)} to ${shortDate(m.lastAt)}`}
+                          series={m.series.map((p) => p.value)}
+                          from={m.from}
+                          to={m.to}
+                          unit={m.unit}
+                          label={`${m.label} over ${report.weeks} weeks`}
+                        />
+                      ))}
+                    </ProgressRows>
                   </Card.Body>
                 </Card>
               )}
@@ -455,7 +489,11 @@ export function ClientReport({ report }: { report: Report }) {
                         <ProgressRow
                           key={l.exerciseId}
                           name={l.name}
-                          meta={`${l.days} days · ${l.sets} sets`}
+                          meta={
+                            bestOf.has(l.exerciseId)
+                              ? `${l.days} days · personal best ${shortDate(bestOf.get(l.exerciseId)!.at)}`
+                              : `${l.days} days · ${l.sets} sets`
+                          }
                           series={l.series.map((p) => p.value)}
                           from={l.from}
                           to={l.to}
@@ -473,6 +511,37 @@ export function ClientReport({ report }: { report: Report }) {
                       often closes on a deload and a real gain would read as a loss. The line
                       beside it is every session&rsquo;s top set, deloads included, which is
                       what the pair deliberately looks past. Only the top four go on the card.
+                    </p>
+                  </Card.Body>
+                </Card>
+              )}
+
+              {/* ── how they say they feel ───────────────────────────────── */}
+              {report.ratings.length > 0 && (
+                <Card style={{ marginTop: 14 }}>
+                  <Card.Head title="How they say they feel">
+                    <Tag>Only you see this</Tag>
+                  </Card.Head>
+                  <Card.Body>
+                    <ProgressRows>
+                      {report.ratings.map((q) => (
+                        <ProgressRow
+                          key={q.questionId}
+                          name={q.text}
+                          meta={`out of ${q.scale} · ${q.series.length} answers, ${shortDate(q.firstAt)} to ${shortDate(q.lastAt)}`}
+                          series={q.series.map((p) => p.value)}
+                          from={q.from}
+                          to={q.to}
+                          unit=""
+                          label={q.text}
+                        />
+                      ))}
+                    </ProgressRows>
+                  </Card.Body>
+                  <Card.Body style={{ borderTop: '1px solid var(--tx-line)' }}>
+                    <p className="small" style={{ lineHeight: 1.6 }}>
+                      Their own ratings on returned assessments. For your conversation with
+                      them — never on the card, the PDF or the message.
                     </p>
                   </Card.Body>
                 </Card>
@@ -504,6 +573,7 @@ export function ClientReport({ report }: { report: Report }) {
                       31-row table open by default is 1,300px of scroll between
                       the lifts and the method note. */}
                   <Table
+                    className="rptcensus"
                     caption="Every movement trained in the window, most-trained first"
                     columns={[
                       { key: 'what', label: 'Movement' },
@@ -521,6 +591,7 @@ export function ClientReport({ report }: { report: Report }) {
                         cells={[
                           {
                             key: 'what',
+                            label: '',
                             className: 'strong wrap',
                             content: (
                               <>
@@ -534,27 +605,32 @@ export function ClientReport({ report }: { report: Report }) {
                               </>
                             ),
                           },
-                          { key: 'days', content: e.days, numeric: true },
-                          { key: 'sets', content: e.sets, numeric: true },
-                          { key: 'reps', content: e.reps > 0 ? e.reps : '—', numeric: true },
+                          { key: 'days', label: 'Days', content: e.days, numeric: true },
+                          { key: 'sets', label: 'Sets', content: e.sets, numeric: true },
+                          { key: 'reps', label: 'Reps', content: e.reps > 0 ? e.reps : '—', numeric: true },
                           {
                             key: 'load',
+                            label: 'Load',
                             numeric: true,
                             content:
                               e.volumeKg > 0 ? `${e.volumeKg.toLocaleString('en-IN')} kg` : '—',
                           },
                           {
                             key: 'top',
+                            label: 'Top set',
                             numeric: true,
                             content:
                               e.topLoad !== null
                                 ? `${trim(e.topLoad)} kg`
                                 : e.topReps !== null
                                   ? `${e.topReps} reps`
-                                  : '—',
+                                  : e.topSeconds !== null
+                                    ? `${trim(e.topSeconds)} sec`
+                                    : '—',
                           },
                           {
                             key: 'gain',
+                            label: 'Change',
                             numeric: true,
                             style:
                               e.gainPercent !== null
@@ -621,18 +697,24 @@ export function ClientReport({ report }: { report: Report }) {
                   </Method>
                   <Method k="Personal bests">
                     Against every set this client has ever logged, not against this window, so
-                    a record is a record. Counted once per movement per day — working up 40,
-                    45, 50 in one session is one best, not three.
+                    a record is a record — and a first-ever set is not one, because there was
+                    nothing to beat. Load for a loaded movement, reps for a bodyweight one,
+                    seconds for a hold. Counted once per movement per day.
                   </Method>
                   <Method k="Getting stronger">
                     The best set on the first day of the window against the best set anywhere
                     in it. Ranked by the <b>proportion</b> gained rather than the kilos: +5 kg
                     on a 20 kg curl is a bigger achievement than +5 kg on a 140 kg deadlift.
                   </Method>
-                  <Method k="Measurements">
-                    From the last reading taken <b>before</b> the window opened where there is
-                    one, so a client weighed in January and again last week has a change
-                    rather than a blank. The row says so when that is what happened.
+                  <Method k="Body and fitness tests">
+                    The readings on their returned assessments, from the last one taken{' '}
+                    <b>before</b> the window opened where there is one — so a client measured
+                    in January and again last week has a change rather than a blank. Vitals
+                    and visceral fat are left out.
+                  </Method>
+                  <Method k="How they feel">
+                    The 1–10 ratings they gave on those assessments. Yours to read; it never
+                    leaves this screen.
                   </Method>
                   <Method k="What is not on it">
                     No injury, no condition, no PAR-Q answer, and there is no field for any of
@@ -647,6 +729,67 @@ export function ClientReport({ report }: { report: Report }) {
         </div>
       </main>
     </>
+  );
+}
+
+/**
+ * ONE LINE PER ASPECT THAT MOVED — consistency, strength, body, fitness, how they feel.
+ *
+ * Each line is the lead row of its own card below, so the card is a summary and never a
+ * second claim. The strength line leads with the biggest proportional gain, the body line
+ * with weight when it was measured, and the feel line with the rating that moved most —
+ * in either direction, because a trainer would rather hear about the one that fell.
+ */
+function AtAGlance({ report }: { report: Report }) {
+  const lift = report.lifts[0];
+  const body = report.weight ?? report.measurements[0];
+  const test = report.fitnessTests[0];
+  const feel = report.ratings.filter((q) => q.delta !== 0).sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0];
+  const bodyCount = (report.weight ? 1 : 0) + report.measurements.length;
+
+  return (
+    <Card title="At a glance" style={{ marginBottom: 14 }}>
+      <FactList className="rptglance">
+        {report.bestWeek > 0 && (
+          <FactList.Row
+            k="Turning up"
+            note={`best run ${report.bestStreak} week${report.bestStreak === 1 ? '' : 's'} in a row`}
+          >
+            {report.trainedWeeks} of {report.weeks} weeks
+          </FactList.Row>
+        )}
+        {lift && (
+          <FactList.Row
+            k={<>Strength · {lift.name}</>}
+            note={`${report.lifts.length} movement${report.lifts.length === 1 ? '' : 's'} up${
+              report.prCount > 0
+                ? ` · ${report.prCount} personal best${report.prCount === 1 ? '' : 's'}`
+                : ''
+            }`}
+          >
+            {trim(lift.from)} → {trim(lift.to)} {lift.unit}
+          </FactList.Row>
+        )}
+        {body && (
+          <FactList.Row
+            k={<>Body · {body.label}</>}
+            note={bodyCount > 1 ? `${bodyCount} measurements tracked` : undefined}
+          >
+            {trim(body.from)} → {trim(body.to)} {body.unit}
+          </FactList.Row>
+        )}
+        {test && (
+          <FactList.Row k={<>Fitness test · {test.label}</>}>
+            {trim(test.from)} → {trim(test.to)} {test.unit}
+          </FactList.Row>
+        )}
+        {feel && (
+          <FactList.Row k={<>They feel · {feel.text}</>}>
+            {feel.from} → {feel.to} of {feel.scale}
+          </FactList.Row>
+        )}
+      </FactList>
+    </Card>
   );
 }
 

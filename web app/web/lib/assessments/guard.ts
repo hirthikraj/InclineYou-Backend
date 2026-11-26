@@ -3,6 +3,7 @@ import 'server-only';
 import { redirect } from 'next/navigation';
 
 import { getToken } from '@/lib/auth/session';
+import { getMe } from '@/lib/clients/api';
 import type { Query } from './address';
 import type { AssessmentDetailWire } from './detail';
 import type { AssessmentWire, ScheduleWire, TemplateWire } from './vocab';
@@ -61,7 +62,7 @@ export async function requireAssessmentTemplates(): Promise<TemplatesResult> {
 }
 
 export type AssessmentResult =
-  | { ok: true; data: AssessmentDetailWire; now: number }
+  | { ok: true; data: AssessmentDetailWire; now: number; trainerName: string | null }
   | { ok: false; kind: 'unreachable' }
   | { ok: false; kind: 'refused'; status: number };
 
@@ -78,7 +79,10 @@ export async function requireAssessment(id: string): Promise<AssessmentResult> {
   if (!(await getToken())) redirect('/sign-in');
 
   try {
-    return { ok: true, data: await getAssessment(id), now: Date.now() };
+    /* The trainer's name is only for the client PDF's "Coached by" line, so a
+       failed read leaves it out rather than taking the screen down. */
+    const [data, me] = await Promise.all([getAssessment(id), getMe().catch(() => null)]);
+    return { ok: true, data, now: Date.now(), trainerName: me?.name?.trim() || null };
   } catch (error) {
     if (error instanceof AssessmentsApiError) {
       if (error.status === 401 || error.status === 403) redirect('/sign-in');

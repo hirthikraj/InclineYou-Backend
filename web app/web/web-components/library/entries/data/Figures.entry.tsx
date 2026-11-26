@@ -26,7 +26,7 @@ export function FiguresEntry() {
             <Figures>
               <Figure label="Sessions today" value={7} of={9} href="/schedule" />
               <Figure label="Collected this month" value="₹1.5L" href="/business" />
-              <Figure label="Clients at risk" value={9} href="/clients" />
+              <Figure label="Need a nudge" value={9} href="/clients" />
             </Figures>
           </Cell>
         </Bench>
@@ -45,7 +45,7 @@ export function FiguresEntry() {
         <Bench>
           <Cell label="none at risk">
             <Figures>
-              <Figure label="Clients at risk" value={0} />
+              <Figure label="Need a nudge" value={0} />
             </Figures>
           </Cell>
         </Bench>

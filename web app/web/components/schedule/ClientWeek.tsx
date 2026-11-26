@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import Link from 'next/link';
 import { formatMinute, formatMinuteRange } from '@/lib/today/time';
 import { EMPTY_CAP, type PivotDay, type PivotRow, type WeekPivot } from '@/lib/schedule/pivot';
@@ -133,15 +133,30 @@ export function ClientWeek({
 
         {pivot.empty.length > 0 && (
           <tbody className="cwk__tail">
-            <tr className="cwk__grp">
-              <th scope="colgroup" colSpan={8}>
-                {emptyHeading}
-                <em>{pivot.empty.length}</em>
-              </th>
-            </tr>
-            {empty.map((row) => (
-              <Row key={row.client.id} row={row} {...rowProps} />
-            ))}
+            {/* ONE HEADING PER KIND OF EMPTY (review, 26 Nov 2026). The band said
+                *Nothing booked this week · 2* over every empty row while the header
+                said *1 with nothing booked*: Ritu, not started, was in one count and
+                not the other. The header counts the drift only, and is right to —
+                so the band's first heading counts exactly that, and paused clients
+                and prospects get a heading of their own beneath it. Every row is
+                still drawn; the counts are of the whole group, folded or not. */}
+            {empty.map((row, i) => {
+              const kind = row.absence ?? 'none';
+              const startsGroup = i === 0 || (empty[i - 1].absence ?? 'none') !== kind;
+              return (
+                <Fragment key={row.client.id}>
+                  {startsGroup && (
+                    <tr className="cwk__grp">
+                      <th scope="colgroup" colSpan={8}>
+                        {kind === 'none' ? emptyHeading : kind === 'paused' ? 'Paused' : 'Not started'}
+                        <em>{pivot.empty.filter((r) => (r.absence ?? 'none') === kind).length}</em>
+                      </th>
+                    </tr>
+                  )}
+                  <Row row={row} {...rowProps} />
+                </Fragment>
+              );
+            })}
             {folded && (
               <tr>
                 <td colSpan={8} className="cwk__more">

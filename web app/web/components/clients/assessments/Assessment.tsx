@@ -34,6 +34,8 @@ import { CompareSelect } from './CompareSelect';
 import { ReadingBar, type Track } from './ReadingBar';
 import { DateField } from '@/web-components/ui/DateField';
 import { MeasurePanel } from './MeasurePanel';
+import { assessmentPdfBlob, assessmentPdfFilename, hasAssessmentPdf } from '@/lib/assessments/assessment-pdf';
+import { saveBlob } from '@/lib/reports/share';
 
 /**
  * ONE CHECK-IN, READ — at `/clients/assessments/:id` from the book-wide list,
@@ -89,8 +91,11 @@ export function Assessment({
   tab,
   compareId,
   within = null,
+  trainerName = null,
 }: {
   data: AssessmentDetailWire;
+  /** For the client PDF's "Coached by" line; null leaves it out. */
+  trainerName?: string | null;
   tab: AssessmentTab;
   compareId: string | null;
   /**
@@ -154,6 +159,18 @@ export function Assessment({
   const [date, setDate] = useState(data.dueOn);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /* THE PIECE TO HAND THE CLIENT (26 Nov 2026) — one page, painted like the
+     progress card (`lib/assessments/assessment-pdf.ts`). Saved as a file the
+     trainer sends or prints; nothing is sent from here. */
+  const [pdf, setPdf] = useState<'idle' | 'working'>('idle');
+  const downloadPdf = async () => {
+    setPdf('working');
+    setError(null);
+    const blob = await assessmentPdfBlob({ data, trainerName });
+    setPdf('idle');
+    if (!blob) { setError('This browser could not make the PDF. Try again.'); return; }
+    saveBlob(blob, assessmentPdfFilename(data));
+  };
 
   /** The list this came from — the file's own tab inside a file, the book-wide list otherwise. */
   const back = within ? `/clients/${within}/assessments` : '/clients/assessments';
@@ -338,6 +355,11 @@ export function Assessment({
                   href={`/clients/assessments/${data.id}/take`}
                 >
                   Correct readings
+                </Button>
+              )}
+              {hasAssessmentPdf(data) && (
+                <Button variant="secondary" disabled={busy || pdf === 'working'} onClick={() => void downloadPdf()}>
+                  {pdf === 'working' ? 'Making the PDF…' : `Download for ${client ? client.name.split(' ')[0] : 'the client'}`}
                 </Button>
               )}
               {done && reviewed && (

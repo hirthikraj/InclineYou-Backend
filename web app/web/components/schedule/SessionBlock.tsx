@@ -143,6 +143,11 @@ export function SessionBlock({
      dashed line alone is a code the trainer would have to learn. */
   const tag = freeTag(s.billing);
   if (tag) classes.push('ev--free');
+  /* NO PACK (25 Nov 2026, review §5 P0). A booked pack session no live pack
+     covers on its day — a lapsed client still on the grid. Said in words, in
+     warn, where the free tag goes; a session cannot be both. */
+  const noPack = !tag && s.noPack === true;
+  if (noPack) classes.push('ev--nopack');
   // Three rings, three meanings, and they are ranked rather than mixed: danger is
   // a clash, warn is a session that has run without being marked. `live` never
   // fires on this screen — it is a fact about `workout_session`, which the
@@ -297,7 +302,8 @@ export function SessionBlock({
     s.clientName,
     s.detail,
     s.mode === 'remote' ? 'remote' : 'floor',
-    tag ? (s.billing === 'trial' ? 'trial, free' : 'complimentary, free') : null,
+    tag ? (s.billing === 'trial' ? 'trial, free' : 'free') : null,
+    noPack ? 'no pack covers it' : null,
     state,
     clash ? `clashes with ${clashesWith.join(', ')}` : null,
     just ? 'just moved, undo available' : null,
@@ -337,7 +343,7 @@ export function SessionBlock({
        * narrow ones, because a tooltip that appears on some blocks and not
        * others is a tooltip a trainer has to discover twice.
        */
-      title={`${when} · ${s.clientName}${tag ? ` · ${tag}` : ''}${s.detail ? ` · ${s.detail}` : ''}`}
+      title={`${when} · ${s.clientName}${tag ? ` · ${tag}` : ''}${noPack ? ' · No pack' : ''}${s.detail ? ` · ${s.detail}` : ''}`}
       style={{
         top: (top - segFrom) * scale,
         height: Math.max(1, (bottom - top) * scale),
@@ -354,6 +360,7 @@ export function SessionBlock({
       <span className="ev__t ev__t--s">{whenShort}</span>
       <span className="ev__n">
         {tag && <em className="ev__tag">{tag}</em>}
+        {noPack && <em className="ev__tag ev__tag--warn">No pack</em>}
         {s.clientName}
       </span>
       <span className="ev__p">{s.detail}</span>

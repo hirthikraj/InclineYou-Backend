@@ -10,7 +10,7 @@ colors:
   lime-wash: "#EDF6D6"
   lime-wash-line: "#CFE39A"
   paper-white: "#FFFFFF"
-  paper: "#F7F6F2"
+  paper: "#F6F5F1"
   paper-deep: "#F1EFE9"
   paper-deepest: "#E9E5DD"
   paper-rule: "#E2DDD5"
@@ -233,9 +233,9 @@ Warm paper and cool slate for the ground, one lime for the mark, and four earned
 - **Today Wash** (`--w-today`: #F7FAEE on paper, lime at 4.5% on slate): today's column on the calendars, half the strength of a selected row, because a selection is one row and today is a whole column.
 
 ### Neutral
-- **Paper White** (#FFFFFF): the content plane on light; the only white thing on screen.
-- **Paper** (#F7F6F2): cards, the section pane and the top bar on light.
-- **Paper Deep** (#F1EFE9): the rail, a card's own header, quiet fills.
+- **Paper White** (#FFFFFF): cards, the rail, the section pane and the top bar on light — everything you read and act on (26 Nov 2026: grey page, white cards).
+- **Paper** (#F6F5F1): the page (`--tx-canvas`) on light — barely off-white, so a 1px Paper Rule border, not the tone step alone, separates a card from it. Also the inset search field in the white top bar.
+- **Paper Deep** (#F1EFE9): a card's own header, quiet fills.
 - **Paper Deepest** (#E9E5DD): tags, meter tracks and the deepest surface step.
 - **Paper Rule** (#E2DDD5) and **Paper Rule Strong** (#CDC7BC): hairlines and control borders.
 - **Paper Ink** (#171512), **Paper Ink 2** (#59544A), **Paper Ink 3** (#676156): body, secondary and quiet text, all warmed onto the ground's hue (7.5:1 and 6.1:1 on the surface for the last two).
@@ -379,6 +379,14 @@ Compact, tactile, confident.
 **One word, one meaning: *next*.** On the client's Home, *Next* is the next BOOKED session (the hero card). The week list therefore never says *Up next* for an unbooked plan day; it says *Next in your plan · not booked*, and other unbooked days *Not booked yet*, so the page cannot name two different workouts as next. Plan (`/me/plan`) uses the same wording, and its block meter is the data tone, not lime. A workout's preview (`/me/workout/:id`) is a day of the plan: it lights *Plan* and opens with a *Plan / {workout}* crumb. A standalone text link (alone in its line, or the card's only way onward) gets a hit area of ~25px through an `::after` on the link itself, without adding line height (25 Nov 2026).
 
 **Weekly bars fill their plot, and count axes count.** `c-vbars` spaces its capped (96px) bars around the plot width, with the label row on the same spacing, so a short series fills the chart instead of crowding its left half; bar figures are upright. A whole-number series with a small odd peak gets a box one taller (3 → 4) so its half-way tick is a whole number, never *1.5 sessions*. On the client's Assessments, a check-in already waiting under *To do* is not offered again under *Start a new one* — one door per check-in (25 Nov 2026).
+
+**A disabled primary is neutral.** `.btn--primary[disabled]` is a raised neutral fill with ink-3 text at full opacity — never the lime at 50%, which reads as a broken olive. The sign-in screen's kicker and foot line are sentence case in ink (no mono capitals, no lime text), the fixed *+91* affix has no chevron (it is not a picker), and the subtitle says the page is for new and returning numbers alike. On a phone the card stays a card — border, all four corners, a 16px gutter each side — rather than a full-bleed sheet, by the owner's call (25 Nov 2026).
+
+**Trainer routes check who is asking, once.** `app/(main)/layout.tsx` reads the session before any trainer data: no session → sign-in, an unfinished signup → `/sign-in/new`, a client → `TrainerOnly` (*This page is for trainers*, with *Go to your home* and *Sign out*), anything else → sign-in. A page must never depend on the backend's refusal to keep a client out — that refusal became a 500 on `/settings/nudges` (25 Nov 2026).
+
+**A progress report shows every part of the client that changed, each with its proof (26 Nov 2026).** `/clients/:id/report` opens with *At a glance*: one line per part that moved (turning up, strength, body, fitness test, how they feel), each the top row of its own card below. A part with nothing to show is left out, never drawn as a dash. The body and fitness tests come from the client's returned assessments, with vitals and visceral fat left out. The client's own 1–10 ratings are on the trainer's screen only, tagged *Only you see this*. A personal best is named on its lift's row (*personal best 15 Nov*); it is not a second list. Changes stay uncoloured.
+
+**On a phone, a table with many number columns becomes one block per row (26 Nov 2026).** The report's *Every movement trained* has seven columns and scrolled sideways at 390, cutting off *Top set* and *Change*. Under 620px each row is the name on its own line, then the figures in a 3-column grid, each under its column name (`label` → `data-l`), left-aligned (`.rptcensus`). Use a grid rather than one label/value line per figure, which would make each row six lines tall.
 
 **A row menu is measured, never estimated, and stays attached to its trigger.** A fixed-position menu is placed from the trigger's edges and the panel's real height, taken before paint: below if it fits, directly above if not, pinned to the gutter otherwise. Placing it from a height constant flipped a short menu above and left it hanging ~170px off its row on a phone (`PaymentRowMenu`, 25 Nov 2026). On a phone a table row drawn as a grid card is hovered or open as one row: the fill goes on the `tr` and the cells stay clear, or the hover shows as scattered blocks.
 

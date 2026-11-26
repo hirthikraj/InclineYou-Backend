@@ -1,4 +1,9 @@
+import { redirect } from 'next/navigation';
+
 import { AppShell } from '@/components/shell/AppShell';
+import { TrainerOnly } from '@/components/auth/TrainerOnly';
+import { readClaims } from '@/lib/auth/claims';
+import { getToken, getTokenRole } from '@/lib/auth/session';
 import { getRoster, getTrainerIdentity, getTrainerName } from '@/lib/shell/api';
 import { listWorkspaces, resolveWorkspaces } from '@/lib/workspace/api';
 
@@ -23,6 +28,16 @@ export default async function MainLayout({
      and `listWorkspaces` both read `/v1/trainers/me` through `getTrainerIdentity`,
      which is `cache()`d per request, so the two of them are ONE round trip plus
      `/v1/team`. */
+  /* WHO IS ASKING, BEFORE ANYTHING IS READ (25 Nov 2026). These are trainer routes; a client's session reaching them
+     used to fall through to each page's own fetches, and what the backend's refusal became depended on the page —
+     a redirect on `/today`, a 500 on `/settings/nudges`. The root page's own reading of the session decides: no
+     session signs in, an unfinished signup goes to setup, a client is told this page is a trainer's. */
+  const claims = readClaims(await getToken(), await getTokenRole());
+  if (!claims) redirect('/sign-in');
+  if (claims.role === 'pending') redirect('/sign-in/new');
+  if (claims.role === 'client') return <TrainerOnly />;
+  if (claims.role !== 'trainer') redirect('/sign-in');
+
   const [trainerName, roster, workspaces, identity] = await Promise.all([
     getTrainerName(),
     getRoster(),

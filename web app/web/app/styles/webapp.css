@@ -236,8 +236,13 @@
      The two values are swapped, not renamed. Nothing else on the ramp moves,
      so every contrast pair below is the same pair it was, measured against
      the same hex — see the block comment above. */
-  --tx-canvas:#FFFFFF;
-  --tx-surface:#F7F6F2;
+  /* 26 Nov 2026: BACK TO GREY PAGE, WHITE CARD (owner's call). The page is
+     the desk and white marks what you read and act on — the Stripe / Shopify
+     Admin pattern. The grey stays barely off-white, and each card's 1px
+     --tx-line border does the separating, not the tone difference alone.
+     Inside a card, rows separate with hairlines, not more grey boxes. */
+  --tx-canvas:#F6F5F1;
+  --tx-surface:#FFFFFF;
   --tx-surface-2:#F1EFE9;
   --tx-surface-3:#E9E5DD;
   --tx-line:#E2DDD5;
@@ -328,14 +333,16 @@
      is the whole of the reason it is a different value and not a border.
      Dark does this already and always did — see --w-rail-bg above, one step
      BELOW its canvas. This is the same idea arriving on the other theme. */
-  --w-rail-bg:#F1EFE9;
-  --w-pane-bg:#F7F6F2;
+  /* 26 Nov 2026: the chrome is white like the cards, ruled off by its
+     hairlines; the grey page is what sits behind the content. */
+  --w-rail-bg:#FFFFFF;
+  --w-pane-bg:#FFFFFF;
   /* Same target as --g-fill above, at this rule's own alpha: .90 over white
      composites to #F7F6F2. The two have to agree — `.top__n` punches its 2px
      ring out of THIS token while §24 may be painting the bar from the glass
      one, so a bar that is warm under glass and white without it would show as
      a white halo round the bell count on exactly one of the two paths. */
-  --w-top-bg:rgba(246,245,241,.90);
+  --w-top-bg:rgba(255,255,255,.92);
   --w-hover:rgba(23,21,18,.04);
   --w-selected:#EDF6D6;
   --w-today:#F7FAEE;   /* see the dark block */
@@ -1042,6 +1049,9 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
   border-radius:var(--tx-r2);color:var(--tx-ink-3);font-size:13px;cursor:text;
 }
 .omni:hover{border-color:var(--tx-field-line-hover)}
+/* Light: the one grey box inside white chrome — the inset-input convention,
+   so the search reads as a place to type in the white top bar. */
+[data-theme="light"] .omni{background:var(--tx-canvas);border-color:var(--tx-line)}
 .omni kbd{
   margin-left:auto;font-family:var(--tx-mono);font-size:10.5px;
   padding:2px 5px;border-radius:var(--tx-r1);
@@ -1647,6 +1657,11 @@ button.menu__i{width:100%;border:0;background:none;text-align:left;font-family:i
    `width:100%` the button's own family should have carried from the start. */
 .btn--wide{width:100%}
 .btn[disabled],.btn[aria-disabled="true"]{opacity:.5;pointer-events:none}
+/* A DISABLED PRIMARY IS NEUTRAL, NOT HALF-LIME (25 Nov 2026). At 50% opacity the lime fill turned a muddy olive on the
+   dark card — the colour of something broken rather than something not ready. A primary that cannot be pressed yet
+   loses the lime altogether: a raised neutral fill and ink-3 text, full opacity, so the label stays readable. */
+.btn--primary[disabled],.btn--primary[aria-disabled="true"]{opacity:1;background:var(--tx-surface-3);
+  border-color:var(--tx-line);color:var(--tx-ink-3);box-shadow:none}
 .btn kbd{font-family:var(--tx-mono);font-size:10px;opacity:.7}
 /* 2026 pass — the working state. A submit that answers over the network needs
    the button itself to say so (NN/g heuristic 1: visibility of system status).
@@ -3888,9 +3903,10 @@ button.ev--late{border-left-color:var(--tx-warn)}
 
 /* ── above the card ──────────────────────────────────────────────────────── */
 .authwrap__say{margin-top:20px}
+/* Sentence case in the running face (25 Nov 2026), like every label since the mono-caps eyebrows went; the lime is
+   for the one action on this screen, so the kicker is ink. */
 .authwrap__k{
-  display:block;font-family:var(--tx-mono);font-size:10.5px;font-weight:500;
-  letter-spacing:.2em;text-transform:uppercase;color:var(--tx-accent-text);
+  display:block;font-size:13px;font-weight:500;color:var(--tx-ink-2);
 }
 /* A PAGE TITLE, NOT A POSTER. The split plate set this at up to 82px because it
    was the only thing on its half; here it sits 26px above a card whose own
@@ -3926,9 +3942,8 @@ button.ev--late{border-left-color:var(--tx-warn)}
 .authwrap__foot{margin-top:20px;display:flex;flex-direction:column;gap:10px}
 .authwrap__quote{font-size:13.5px;line-height:1.5;color:var(--tx-ink-2);
   max-width:42ch;margin-inline:auto;text-wrap:pretty}
-.authwrap__by{font-family:var(--tx-mono);font-size:10.5px;letter-spacing:.11em;
-  text-transform:uppercase;color:var(--tx-ink-3);line-height:1.6}
-.authwrap__by b{color:var(--tx-accent-text);font-weight:500}
+.authwrap__by{font-size:12.5px;color:var(--tx-ink-3);line-height:1.6}
+.authwrap__by b{color:var(--tx-ink-2);font-weight:500}
 
 /* ── the second way in ────────────────────────────────────────────────────
    A labelled rule, not a bare one. Two buttons stacked with nothing between
@@ -4086,6 +4101,19 @@ button.ev--late{border-left-color:var(--tx-warn)}
      under the form is three lines the field paid for. */
   .authwrap__foot{display:none}
   .authwrap__or{margin:18px 0}
+}
+/* A CARD WITH A GUTTER ON A PHONE TOO (25 Nov 2026), by the owner's call: the full-bleed sheet touched both screen
+   edges, so the form read as stuck to the glass. The card keeps its border and all four corners, sits 16px in from
+   each side — the app's phone gutter — and stops 16px above the bottom, sized to its content rather than running to
+   the edge. The fill stays (the comment above says why the ink needs it). */
+@media (max-width:560px){
+  .authwrap{padding:0 16px calc(16px + env(safe-area-inset-bottom))}
+  .authwrap__say{padding-inline:4px}
+  .authwrap__card{
+    flex:0 0 auto;
+    border:1px solid var(--tx-line-strong);border-radius:var(--tx-r4);
+    padding:24px 18px;
+  }
 }
 
 /* the wizard rail — six setup steps, all visible. A phone shows step 3 of 6;
@@ -5328,7 +5356,7 @@ button.ev--late{border-left-color:var(--tx-warn)}
      page is not a material, it is nothing. The fill is chosen so that what you
      SEE composites to the chrome's own #F7F6F2: at .68 over a white ground,
      rgba(243,242,236) lands on #F7F6F1. Solve it again if the alpha moves. */
-  --g-fill:rgba(243,242,236,.68);
+  --g-fill:rgba(255,255,255,.80);
   --g-fill-strong:rgba(255,255,255,.88);
   --g-line:rgba(23,21,18,.10);
   --g-edge:rgba(255,255,255,.92);
@@ -5471,7 +5499,7 @@ button.ev--late{border-left-color:var(--tx-warn)}
     -webkit-backdrop-filter:none !important;backdrop-filter:none !important;
   }
   [data-glass="on"] .menu,[data-glass="on"] .toast{background:var(--tx-surface)}
-  [data-glass="on"] .top{background:var(--tx-canvas)}
+  [data-glass="on"] .top{background:var(--w-top-bg)}
   [data-glass="on"] .panel,[data-glass="on"] .modal,[data-glass="on"] .pal,
   [data-glass="on"] .glassy{background:var(--tx-surface)}
 }
@@ -8349,6 +8377,18 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
   border-top:1px solid var(--tx-line);
 }
 .slab--first{margin-top:0;padding-top:0;border-top:0}
+/* 26 Nov 2026 — TRIAL: on Today (light), each section is a white card on the
+   grey page instead of a rule across it. Same card as `.card`: white, 1px
+   hairline, r3 radius; rows inside keep their hairline dividers. Scoped to
+   Today so the other slab screens (Business overview) are unchanged. */
+[data-theme="light"] .ph--today ~ .body .slab{
+  margin-top:16px;padding:14px 16px 16px;
+  background:var(--tx-surface);border:1px solid var(--tx-line);
+  border-radius:var(--tx-r3);box-shadow:var(--tx-e1);
+}
+[data-theme="light"] .ph--today ~ .body .slab--first{margin-top:0}
+/* the card's own edge closes the list; a rule under the last row doubles it */
+[data-theme="light"] .ph--today ~ .body .slab .agn > .agn__r:last-child{border-bottom:0}
 .slab__hd{
   display:flex;align-items:baseline;gap:10px;
   margin-bottom:10px;min-height:24px;
@@ -8429,6 +8469,9 @@ button.stat:focus-visible{outline:2px solid var(--tx-focus);outline-offset:2px}
   background:transparent;
   border-color:var(--tx-line-strong);
 }
+/* Light: on the grey page an outline-only card reads as a hole — it is a
+   white card with the ordinary hairline, like every other card. */
+[data-theme="light"] .hro--quiet{background:var(--tx-surface);border-color:var(--tx-line)}
 
 .hro__k{
   display:flex;align-items:center;gap:7px;

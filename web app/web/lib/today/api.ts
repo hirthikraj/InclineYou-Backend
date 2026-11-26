@@ -443,6 +443,7 @@ export const getToday = cache(async (): Promise<TodayData> => {
       notes: s.notes,
       week: s.workout?.week ?? undefined,
       billing: s.billing,
+      charged: s.charge !== null,
     })),
     workouts,
     // The live set counts ride on the session rows now (`DeckWorkout.setsDone`).
@@ -494,6 +495,10 @@ export const getToday = cache(async (): Promise<TodayData> => {
       subjectAt: d.subjectAt ?? null,
     })),
     nudges: (nudges ?? []).map((n) => ({ clientId: n.clientId, sentAt: n.sentAt })),
+    // The Schedule's own coverage map, so Today's *Training with no pack* and the grid's *No pack* agree.
+    billing: billingByClient(packageRows, clientRows.map((c) => ({
+      id: c.id, clientType: c.clientType, deliveryMode: c.schedule?.deliveryMode ?? null,
+    }))),
     claimed: claims.reduce<Record<string, number>>((m, c) => ({ ...m, [c.clientId]: (m[c.clientId] ?? 0) + Number(c.amount) }), {}),
     // The deck reads newest month first; 1.1 sends oldest first. Pending and
     // clients owing are "right now" figures (`now`), the same on every month.

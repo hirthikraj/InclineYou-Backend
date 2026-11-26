@@ -26,5 +26,5 @@ export default async function Page() {
     );
   }
 
-  return <GymPage start={{ now: result.now, gym: result.gym }} />;
+  return <GymPage start={{ now: result.now, gym: result.gym, trainerName: result.trainerName }} />;
 }

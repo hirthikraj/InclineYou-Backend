@@ -23,7 +23,7 @@ import { Chip } from '@/web-components/ui/Chip';
 import { KeyValueRow } from '@/web-components/ui/KeyValue';
 import { TextField } from '@/web-components/ui/Field';
 import {
-  BILLING_CHOICES, coverage, coverageLine, defaultBilling, isProspect, readPrice, serviceOf, type Billing,
+  BILLING_CHOICES, coverage, coverageLine, defaultBilling, isProspect, noPackLine, readPrice, serviceOf, type Billing,
 } from '@/lib/schedule/billing';
 import { Avatar } from '@/web-components/ui/Avatar';
 
@@ -310,7 +310,7 @@ export function BookPanel({
   const billingWanted: Billing = billingPicked ?? defaultBilling(client);
   const billing: Billing = gymClient && billingWanted === 'single' ? 'pack' : billingWanted;
   const service = serviceOf(mode, client?.billing ?? null);
-  const covered = client ? coverage(client.billing, service) : null;
+  const covered = client ? coverage(client.billing, service, at) : null;
   const moneyLine = client && covered && billing === 'pack' ? coverageLine(covered, client.name, service) : null;
   // A single session is priced at the client's per-session rate until the trainer types another.
   const priceShown = priceText ?? (rate ? String(rate) : '');
@@ -634,7 +634,7 @@ export function BookPanel({
                   {billing === 'trial' && (isProspect(client) && billingPicked === null
                     ? `${client.name.split(' ')[0]} hasn’t bought anything yet, so this is booked as a trial — delivered free, never charged.`
                     : 'A trial before they buy — delivered free, never charged.')}
-                  {billing === 'complimentary' && 'On the house — delivered free, never charged.'}
+                  {billing === 'complimentary' && 'Free — delivered, never charged.'}
                   {billing === 'single' && 'Sold on its own when you book it: owed from the session’s day until it’s paid. Their pack is not touched.'}
                 </p>
               </div>
@@ -664,7 +664,29 @@ export function BookPanel({
                     </span>
                   </p>
                 )}
-                {moneyLine && (
+                {/* NO PACK (25 Nov 2026, review §5 P0). A client who has bought
+                    before and has no pack for this day is the leak: say it, and
+                    put the two ways to make it paid beside the sentence. A
+                    prospect is already defaulted to Trial, so keeps the plain line. */}
+                {moneyLine && covered?.kind === 'none' && client && !isProspect(client) ? (
+                  <div className="sch__note sch__note--warn">
+                    <WarnTriangle size={14} />
+                    <span>
+                      <Tag tone="warn">No pack</Tag>{' '}
+                      {noPackLine({ at }, client.billing, client.name.split(' ')[0] || client.name)}
+                      <span className="row gap2 sch__wrap" style={{ marginTop: 8 }}>
+                        <Button href={`/clients/${client.id}/payments?renew=1`} variant="secondary" size="sm">
+                          Renew
+                        </Button>
+                        {!gymClient && (
+                          <Button variant="secondary" size="sm" onClick={() => setBilling('single')}>
+                            Make it single{rate ? <> &middot; {rupees(rate)}</> : null}
+                          </Button>
+                        )}
+                      </span>
+                    </span>
+                  </div>
+                ) : moneyLine && (
                   <p className={moneyLine.warn ? 'sch__note sch__note--warn' : 'sch__note'}>
                     {moneyLine.warn ? <WarnTriangle size={14} /> : <Check size={14} />}
                     <span>{moneyLine.text}</span>

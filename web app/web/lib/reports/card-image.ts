@@ -279,7 +279,7 @@ function rowGeometry(ctx: Ctx, figure: string, deltaWidth: number): RowGeometry 
 
 /** Weight, and any measurement that moved: `Weight ▁▂▃ 73.6 → 73.4 kg −0.2`. */
 function measurementBlock(r: ClientReport, cap: number): Block | null {
-  const rows = [r.weight, ...r.measurements].filter((m) => m !== null).slice(0, cap);
+  const rows = [r.weight, ...r.measurements, ...r.fitnessTests].filter((m) => m !== null).slice(0, cap);
   if (rows.length === 0) return null;
 
   const ROW = 70;

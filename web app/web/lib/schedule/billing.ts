@@ -68,8 +68,10 @@ export interface ClientBilling {
   gymClient: boolean;
   /** The service a booking with no delivery mode of its own is charged as. */
   defaultService: Service;
-  /** Live session packs (status active), one entry each. */
-  packs: { service: string; left: number; paused: boolean }[];
+  /** Live session packs (status active), one entry each. `start` / `end` are the pack's term, `YYYY-MM-DD` or null. */
+  packs: { service: string; left: number; paused: boolean; start: string | null; end: string | null }[];
+  /** The latest end date of any session pack on the wire, live or closed — "Pack ended 19 Nov". Null when none. */
+  lastEnd: string | null;
   /** Pack-billed sessions still to be marked, per service. */
   bookedAhead: Partial<Record<string, number>>;
 }
@@ -85,6 +87,9 @@ export interface BillingPackWire {
   sessionsBookedAhead?: number | null;
   /** 10 Nov 2026 — a single session's own sale: it pays for that session only, so it covers nothing else. */
   sessionId?: string | null;
+  /** The pack's term, `YYYY-MM-DD`; Mark done charges only a pack whose term holds the session's day. */
+  startDate?: string | null;
+  endDate?: string | null;
 }
 
 export function billingByClient(
@@ -97,6 +102,7 @@ export function billingByClient(
       gymClient: c.clientType === 'gym',
       defaultService: asService(c.deliveryMode),
       packs: [],
+      lastEnd: null,
       bookedAhead: {},
     });
   }
@@ -107,8 +113,16 @@ export function billingByClient(
     // Every pack of a client and service carries the same count (Mark done picks
     // the pack, not the booking), so any one of them is the answer.
     if (p.sessionsBookedAhead != null) b.bookedAhead[p.service] = p.sessionsBookedAhead;
+    const end = p.endDate ?? null;
+    if (end && (!b.lastEnd || end > b.lastEnd)) b.lastEnd = end;
     if (p.status === 'active') {
-      b.packs.push({ service: p.service, left: p.sessionsRemaining ?? 0, paused: p.pausedAt !== null });
+      b.packs.push({
+        service: p.service,
+        left: p.sessionsRemaining ?? 0,
+        paused: p.pausedAt !== null,
+        start: p.startDate ?? null,
+        end,
+      });
     }
   }
   return out;
@@ -131,8 +145,12 @@ export type Coverage =
   | { kind: 'none' };
 
 /** Will one more pack-billed booking be paid for when it is delivered? */
-export function coverage(b: ClientBilling | null, service: Service): Coverage {
-  const live = (b?.packs ?? []).filter((p) => p.service === service);
+export function coverage(b: ClientBilling | null, service: Service, at?: number): Coverage {
+  /* With the booking's instant, only a pack whose term holds that day can pay
+     for it — Mark done's own rule — so a slot after the pack ends reads `none`. */
+  const day = at === undefined ? null : dayOf(at);
+  const live = (b?.packs ?? []).filter((p) => p.service === service
+    && (day === null || ((p.start === null || p.start <= day) && (p.end === null || p.end >= day))));
   if (live.length === 0) return { kind: 'none' };
   const running = live.filter((p) => !p.paused);
   if (running.length === 0) return { kind: 'paused' };
@@ -142,6 +160,53 @@ export function coverage(b: ClientBilling | null, service: Service): Coverage {
   if (free <= 0) return { kind: 'uncovered', left, ahead };
   if (free === 1) return { kind: 'last' };
   return { kind: 'covered', after: free - 1 };
+}
+
+/** `2026-11-19` for an instant, in this device's zone — the trainer's, as everywhere on the grid. */
+function dayOf(at: number): string {
+  const d = new Date(at);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/**
+ * NO PACK COVERS THIS BOOKED SESSION (25 Nov 2026, review §5 P0).
+ *
+ * A client whose pack lapsed kept three sessions a week on the grid, every one of
+ * them headed for "Delivered · not charged", and nothing said so before the
+ * session happened. This asks the server's own question of a session already in
+ * the diary — `SessionStateJdbcRepository.payingPack`: a live session pack for the
+ * same service whose term (start_date … end_date) holds the session's day — and
+ * answers true when there is none. A PAUSED pack still counts as a pack (its own
+ * line says paused); a pack with sessions left but booked over is the booking
+ * panel's count, not this. Only a booked, pack-billed, uncharged session can be
+ * uncovered; trial, free and single sessions say what pays for them already.
+ *
+ * Null `b` (packs not loaded) is never "no pack": a guess would be a false alarm
+ * on every block.
+ */
+export function noPackCovers(
+  s: { at: number; mode: 'floor' | 'remote'; billing: Billing; charged: boolean; done: boolean; dead: boolean; noShow: boolean },
+  b: ClientBilling | null,
+): boolean {
+  if (!b || s.billing !== 'pack' || s.charged || s.done || s.dead || s.noShow) return false;
+  // The session's own mode, else the client's — `home_visit` is drawn as floor on the grid.
+  const service: Service = s.mode === 'remote' ? 'remote' : b.defaultService === 'home_visit' ? 'home_visit' : 'floor';
+  const day = dayOf(s.at);
+  return !b.packs.some((p) => p.service === service
+    && (p.start === null || p.start <= day)
+    && (p.end === null || p.end >= day));
+}
+
+/** The words for an uncovered session: why, when the wire says. */
+export function noPackLine(s: { at: number }, b: ClientBilling | null, first: string): string {
+  const day = dayOf(s.at);
+  if (b?.lastEnd && b.lastEnd < day) {
+    const [y, m, d] = b.lastEnd.split('-').map(Number);
+    const ended = new Date(y, m - 1, d).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+    return `${first}’s pack ended ${ended}. No pack covers this session, so it won’t be charged when you mark it done.`;
+  }
+  return `No pack covers this session, so it won’t be charged when you mark it done.`;
 }
 
 const SERVICE_WORD: Record<Service, string> = { floor: 'in-person', home_visit: 'home-visit', remote: 'online' };
@@ -169,7 +234,8 @@ export function coverageLine(c: Coverage, name: string, service: Service): { war
 export function notChargedLine(reason: string | null | undefined): string | null {
   switch (reason) {
     case 'TRIAL': return 'A trial — delivered free.';
-    case 'COMPLIMENTARY': return 'Complimentary — delivered free.';
+    // The chip says *Free*, so this does too (review, 26 Nov 2026) — never *Complimentary*.
+    case 'COMPLIMENTARY': return 'Free — delivered, never charged.';
     case 'PACKAGE_PAUSED': return 'Not charged — their pack is paused.';
     case 'PACKAGE_EMPTY': return 'Not charged — their pack has none left.';
     case 'NO_PACKAGE': return 'Not charged — there is no running pack for it.';

@@ -573,6 +573,12 @@ subtree out, and five of those are live shell screens.
   reason: a reminder to measure is addressed to the wrong person, because on this
   product the trainer holds the tape. The band is **not on the phone**: V5 is
   backend + web only and the app has no cadence column to read.
+- **Training with no pack (25 Nov 2026).** The pack row becomes *Training with no pack · N
+  sessions so far* (delivered on Pack, `charge` null) or *· next session …* (booked, `noPackCovers`),
+  at `pack-empty`, past `PACK_CLOSED_SHOWN_DAYS`, renewing the newest session pack. The deck reads
+  `billingByClient` — the Schedule's map — so the row and the grid's *No pack* tag are one rule.
+  *Make it single* (`item.single`, the next uncovered session, never for a gym client) is a button
+  in the text cell, because `.q__act` holds one verb. Skipped: no session pack ever, or a live period pack.
 - **`unmarked` fires `POST /v1/sessions/{id}/done` one at a time** — in parallel
   against a pack with one left, two requests both read `sessions_remaining = 1`.
 - **`QUEUE_CAP` is 6 and the rest are folded behind a disclosure that states the
@@ -1945,6 +1951,15 @@ being a route is what keeps that cost off the other five.
   unwindowed, counted once per exercise per day.
 - **No colour on any change**, on the card or beside it: a green arrow on a card
   the client keeps is the product taking a side in a conversation it was not in.
+- **The client report reads the body from ASSESSMENTS (26 Nov 2026).** `getClientReport` reads the returned
+  assessments in the window plus the last one before it (the baseline), capped at 12 detail reads, and joins their
+  `history`. Health keys (`HEALTH_MEASUREMENT_KEYS`) never reach the builder. `Movement` readings become
+  `fitnessTests` (on the card, the PDF and the message); rating answers become `ratings` (trainer column ONLY). This half
+  is optional: if the read fails, the body is left blank and the report still loads.
+- **Timed holds count, and a first-ever set is not a record.** Sets map through `KG_KINDS` / `REP_KINDS` /
+  `TIME_KINDS` (`lib/log/set-history.ts`), so a plank is a `time` gain in seconds. A movement is judged on load if it
+  ever carried any, then reps, then time. `personalBests` now needs a prior best to beat, so `prCount` no longer gives
+  out one "best" per new movement, and `bests` names each one.
 - **A thin report is refused rather than generated** — a card with a name and no
   figures reads as *you have done nothing*.
 

@@ -137,8 +137,9 @@ function SectionHead({
  *     that is ₹0 every morning and says nothing about whether the month is going
  *     well — which is the question a trainer asks once a day. `deck.money.collected`
  *     is the month's, and the money book is one tap behind it for the breakdown.
- *   · **Pending became *Clients at risk*.** ₹ outstanding is a money-book figure
- *     and it was the second money figure of three here. `clientsAtRisk` counts
+ *   · **Pending became *Clients at risk*, now *Need a nudge*** (25 Nov 2026 —
+ *     *At risk* is the roster's chip and counts fewer). ₹ outstanding is a money-book figure
+ *     and it was the second money figure of three here. `clientsToNudge` counts
  *     PEOPLE — how many are on their way out — which is the one number on this
  *     screen that is not about today at all, and the one a trainer can still act
  *     on. `RISK_BANDS` in `deck.ts` says which conditions count and why the
@@ -165,7 +166,7 @@ export function Glance({ deck }: { deck: Deck }) {
         more" — so they are three numbers on one ruled line now, and the position
         at the FOOT of the page, which is the load-bearing part, is unchanged.
 
-        The at-risk figure was an em dash when it was zero. Zero is the good news
+        The need-a-nudge figure was an em dash when it was zero. Zero is the good news
         on that row and a dash reads as a figure that failed to load, so it is a
         number like the other two.
       */}
@@ -181,9 +182,19 @@ export function Glance({ deck }: { deck: Deck }) {
           value={rupeesShort(deck.money.collected)}
           href="/business"
         />
+        {/*
+          NOT "AT RISK" (review, 25 Nov 2026). *At risk* is the roster's chip —
+          one tag, missed sessions or quiet past their own gap — and this counts
+          a wider set: owing, a pack ending or gone, quiet. Two screens giving two
+          numbers for one word is how a trainer stops trusting every number,
+          the money included. So the word stays the roster's; the tile still
+          opens `/clients`, whose default order (at risk, then expiring, then
+          pending) puts these people first. Not "Need you" either: the queue's
+          own heading is *Needs you today* and its count includes housekeeping.
+        */}
         <Figure
-          label="Clients at risk"
-          value={deck.clientsAtRisk}
+          label="Need a nudge"
+          value={deck.clientsToNudge}
           hint="Owing, pack ending or gone quiet"
           href="/clients"
         />

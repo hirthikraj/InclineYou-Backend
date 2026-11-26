@@ -1,5 +1,6 @@
 import type { Placed, ScheduleGrid } from './grid';
 import type { ScheduleClient } from './session';
+import { isProspect } from './billing';
 
 /**
  * THE WEEK, PIVOTED ONTO THE ROSTER — rows are people, columns are days.
@@ -176,9 +177,11 @@ function absenceOf(client: ScheduleClient): Absence {
      lifecycle and cannot say either of these words. See the note on the field. */
   const membership = client.membership.toLowerCase();
   if (membership === 'paused') return 'paused';
-  // The roster's word for somebody who has not started. There is no rhythm to
-  // have broken, so this is not a silence worth reporting.
-  if (membership === 'invited' || membership === 'pending') return 'prospect';
+  // Somebody who has not started: no rhythm to have broken, so not a silence
+  // worth reporting. `isProspect` is the booking panel's rule (status prospect, or
+  // an invited / pending membership) — a prospect never sent an invite was read as
+  // drift here and counted in the header's *with nothing booked* (26 Nov 2026).
+  if (isProspect({ status: client.status, membership })) return 'prospect';
   return 'none';
 }
 

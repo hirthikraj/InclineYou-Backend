@@ -1,5 +1,6 @@
 package com.inclineyou.inclineyou_backend.core.client;
 
+import com.inclineyou.inclineyou_backend.core.payment.PackageExpirySweeper;
 import com.inclineyou.inclineyou_backend.core.tenant.TenantContext;
 import com.inclineyou.inclineyou_backend.core.tenant.WorkspaceClock;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +29,10 @@ import java.util.UUID;
  * <p>The list is read as SYSTEM; every booking runs as STAFF in the client's own workspace, one transaction per client,
  * so the ordinary tenant policies check every write and one client's failure does not stop the rest. Twice a day is
  * plenty for a window that only has to stay three weeks deep.
+ *
+ * <p>V51: a client whose pack has LAPSED — they bought before, nothing is live now, and the last pack closed more than
+ * {@link PackageExpirySweeper#GRACE_DAYS} ago — is no longer topped up, because every session it booked would be
+ * delivered for free. Renewing makes a live pack and the next run books them again.
  */
 @Component
 @Slf4j
@@ -78,8 +83,9 @@ public class SlotTopUpSweeper {
         var before = TenantContext.current();
         TenantContext.set(TenantContext.SYSTEM);
         try {
-            return jdbc.query("SELECT client_id, trainer_id, tenant_id, timezone FROM slot_topup_targets(:refill)",
-                    Map.of("refill", REFILL_DAYS),
+            return jdbc.query(
+                    "SELECT client_id, trainer_id, tenant_id, timezone FROM slot_topup_targets(:refill, :grace)",
+                    Map.of("refill", REFILL_DAYS, "grace", PackageExpirySweeper.GRACE_DAYS),
                     (rs, i) -> new Target(UUID.fromString(rs.getString("client_id")),
                             UUID.fromString(rs.getString("trainer_id")),
                             UUID.fromString(rs.getString("tenant_id")),

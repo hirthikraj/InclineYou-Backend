@@ -47,6 +47,8 @@ export interface ScheduleSession extends DeckSession {
   billing: Billing;
   /** A single session's price, a decimal string, else null. */
   price: string | null;
+  /** 25 Nov 2026 — booked on Pack and no live pack's term holds its day (`noPackCovers`). Set by the screen, not the wire. */
+  noPack?: boolean;
   /** 10 Nov 2026 — a single session's own sale (made at booking); null otherwise. */
   sale: import('./rows').SessionSaleWire | null;
   /** When the log was opened, or null. A started session can't be moved, cancelled or no-showed. */

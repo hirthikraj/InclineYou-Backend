@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import type { ScheduleData } from '@/lib/schedule/api';
 import { toSession } from '@/lib/schedule/rows';
+import { noPackCovers } from '@/lib/schedule/billing';
 import { buildGrid, MAX_WEEK_LANES } from '@/lib/schedule/grid';
 import { buildMonth } from '@/lib/schedule/month';
 import { buildWeekPivot } from '@/lib/schedule/pivot';
@@ -136,7 +137,16 @@ export function Schedule({ data }: { data: ScheduleData }) {
     setSeenData(data);
     setWin({ view: data.view, anchor: data.anchor, sessions: data.sessions });
   }
-  const { view, anchor, sessions } = win;
+  const { view, anchor } = win;
+  /* Which booked sessions no pack covers (25 Nov 2026, review §5 P0) — worked out
+     here so every view (grid, month, agenda, by client) and the panel read one answer. */
+  const sessions = useMemo(() => {
+    const byId = new Map(clients.map((c) => [c.id, c.billing]));
+    return win.sessions.map((s) => {
+      const noPack = noPackCovers(s, byId.get(s.clientId) ?? null);
+      return noPack === (s.noPack === true) ? s : { ...s, noPack };
+    });
+  }, [win.sessions, clients]);
 
   /* Both memoised, because `usePaletteRows` depends on them by IDENTITY: a fresh
      array every render would re-register the rows every render, and the effect

@@ -79,6 +79,7 @@ export default async function Page(props: {
   return (
     <Assessment
       data={result.data}
+      trainerName={result.trainerName}
       tab={parseAssessmentTab(params.tab)}
       compareId={parseCompare(params.cmp)}
       within={clientId}

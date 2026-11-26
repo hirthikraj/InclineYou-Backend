@@ -28,7 +28,8 @@ import java.util.Map;
 public class PackageExpirySweeper {
 
     /** Today's own unmarked-session window (web `deck.ts`); V29 explains why the two are the same number. */
-    static final int GRACE_DAYS = 7;
+    /* Public since V51: SlotTopUpSweeper stops topping up a client whose last pack closed longer ago than this. */
+    public static final int GRACE_DAYS = 7;
 
     private final NamedParameterJdbcTemplate jdbc;
 

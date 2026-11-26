@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { useFlipRows } from '@/lib/ui/flip-rows';
-import { clientsNeedYou } from '@/lib/today/copy';
+import { clientsOweYou } from '@/lib/today/copy';
 
 import { loadSummary } from '@/lib/business/actions';
 import {
@@ -147,7 +147,16 @@ export function Overview({ data, claims = null, gymOwes = null }: { data: Overvi
   const nothingAtAll = data.year.total.packagesSold === 0 && data.year.total.paymentsCount === 0
     && data.packages.length === 0;
 
-  const needCount = new Set(actions.items.map((i) => i.clientId)).size;
+  /* NOT "N clients need you" (review, 25 Nov 2026). Today's header says that over a queue that
+     also holds sessions, plans and quiet clients, so the same words gave two numbers on two
+     screens. This page's list is money: somebody owing, or a pack used up or past its end. It
+     says which, in two counts of distinct clients — a client in both is in both. */
+  const owingCount = new Set(actions.items.filter((i) => i.kind === 'overdue').map((i) => i.clientId)).size;
+  const renewCount = new Set(actions.items.filter((i) => i.kind !== 'overdue').map((i) => i.clientId)).size;
+  const headline = [
+    owingCount > 0 ? clientsOweYou(owingCount) : null,
+    renewCount > 0 ? `${renewCount} to renew` : null,
+  ].filter(Boolean).join(' · ');
 
   return (
     <>
@@ -157,9 +166,9 @@ export function Overview({ data, claims = null, gymOwes = null }: { data: Overvi
           title="Business overview"
           subtitle={
             <>
-              {/* Clients, not things: *Needs you* is one row per client now, and the line above it
-                  should count what the list shows — Today's header does the same (24 Nov 2026). */}
-              {needCount > 0 ? <>{clientsNeedYou(needCount)}</> : <>Nothing outstanding</>}
+              {/* Clients, not things: the list is one row per client, and this line counts the
+                  clients it shows, split by what they owe you — money, or a renewal. */}
+              {headline || <>Nothing outstanding</>}
               {' · '}{rupees(summary.total.takeHome)} {data.hasGym ? 'to you' : 'collected'} in {periodProse(period)}
             </>
           }
@@ -266,7 +275,8 @@ function NeedsYou({
     <Slab
       /* Not `first`: the money-at-a-glance tiles sit above it now, so it takes the rule and the
          air every other section gets — it was 10px under the tiles with neither (24 Nov 2026). */
-      title="Needs you"
+      /* Not "Needs you": that is Today's queue, with a different count (25 Nov 2026). */
+      title="Collect and renew"
       count={groups.length > 0 ? groups.length : undefined}
       /* The chase total is NOT printed here. It is on the page this link goes
          to, whose *Pending* chip states it over the rows it totals. */
@@ -282,7 +292,7 @@ function NeedsYou({
       ) : (
         <>
           <div className="biz-needs" ref={listRef}>
-          <ListRows label="Clients who need you">
+          <ListRows label="Clients to collect from or renew">
             {shown.flatMap((group) => {
               const [lead, ...rest] = group;
               const isOpen = open[lead.clientId] === true;

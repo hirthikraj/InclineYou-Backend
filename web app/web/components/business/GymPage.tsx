@@ -5,6 +5,10 @@ import { useEffect, useState } from 'react';
 
 import { loadGym } from '@/lib/business/actions';
 import { gymQuery, type GymMoney } from '@/lib/business/types';
+import { gymStatementWhatsApp } from '@/lib/business/gym-statement';
+import { gymStatementFilename, gymStatementPdfBlob } from '@/lib/business/gym-statement-pdf';
+import { saveBlob } from '@/lib/reports/share';
+import { WhatsApp } from '@/components/shell/Icons';
 import { currentMonth, periodProse } from '@/lib/money/period';
 import { rupees } from '@/lib/today/time';
 import { TopBar } from '@/components/shell/TopBar';
@@ -41,7 +45,7 @@ import { usePeriodScope } from './PeriodScope';
  * closed months of the arrangement, which is the answer to *what is owed*, and an
  * answer that moved with a picker would stop being one.
  */
-export function GymPage({ start }: { start: { now: number; gym: GymMoney } }) {
+export function GymPage({ start }: { start: { now: number; gym: GymMoney; trainerName: string | null } }) {
   const { period, now } = usePeriodScope();
 
   /* The server rendered the CURRENT month; any other period is fetched here, and
@@ -51,6 +55,8 @@ export function GymPage({ start }: { start: { now: number; gym: GymMoney } }) {
     () => ({ key: gymQuery(currentMonth(start.now), start.now), gym: start.gym }),
   );
   const [failed, setFailed] = useState(false);
+  /** The PDF is painted in the browser; this is its button's state. */
+  const [pdf, setPdf] = useState<'idle' | 'working' | 'failed'>('idle');
 
   useEffect(() => {
     if (wanted === loaded.key) return;
@@ -74,6 +80,19 @@ export function GymPage({ start }: { start: { now: number; gym: GymMoney } }) {
      book), which is the Overview's figure and not this page's: on a page about a
      gym, *yours* beside *to the gym* has to be the other half of the same sales. */
   const share = Math.max(0, stats.floorBilled - stats.gymCut);
+
+  /* THE PDF IS PAINTED, NOT PRINTED (26 Nov 2026). It was the card through the
+     browser's print dialog — grey on white with the browser's own date in the
+     margin. Now it is the progress report's look, logo and *Tracked on
+     InclineYou* foot (`lib/business/gym-statement-pdf.ts`), saved as a file. */
+  const downloadPdf = async () => {
+    setPdf('working');
+    const input = { gym, gymName: name, periodLabel: periodProse(period), trainerName: start.trainerName, now: Date.now() };
+    const blob = await gymStatementPdfBlob(input);
+    if (!blob) { setPdf('failed'); return; }
+    saveBlob(blob, gymStatementFilename(input));
+    setPdf('idle');
+  };
 
   /** Re-read the current period after a write — the settlement is what moved. */
   const reload = async () => {
@@ -233,9 +252,38 @@ export function GymPage({ start }: { start: { now: number; gym: GymMoney } }) {
                 {gym.statement && (
                   <Card className="mt4 gstm">
                     <Card.Head title={`Statement for ${name} · ${periodProse(period)}`}>
-                      <Button variant="secondary" size="sm" className="gstm__print" onClick={() => window.print()}>Print or save as PDF</Button>
+                      {/* Two ways to send the same month: the printed card as a PDF, and the
+                          same figures as a WhatsApp message from the trainer's own number
+                          (`lib/business/gym-statement.ts`). Both hidden when printing. */}
+                      <span className="row gstm__print" style={{ gap: 8 }}>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          icon={<WhatsApp size={15} />}
+                          href={gymStatementWhatsApp({
+                            gymName: name,
+                            periodLabel: periodProse(period),
+                            statement: gym.statement,
+                            gymShare: stats.gymCut,
+                            yourShare: share,
+                            stillOwed: gym.settlement ? gym.settlement.balanceDue : null,
+                          })}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          Send on WhatsApp
+                        </Button>
+                        <Button variant="secondary" size="sm" disabled={pdf === 'working' || stale} onClick={() => void downloadPdf()}>
+                          {pdf === 'working' ? 'Making the PDF…' : 'Download PDF'}
+                        </Button>
+                      </span>
                     </Card.Head>
                     <Card.Body>
+                      {pdf === 'failed' && (
+                        <p className="msg msg--err" role="alert" style={{ marginBottom: 12 }}>
+                          <span>This browser could not make the PDF. Try again, or send the statement on WhatsApp.</span>
+                        </p>
+                      )}
                       <FactList>
                         <FactList.Row k="Clients coached">{gym.statement.clientsCoached}</FactList.Row>
                         <FactList.Row k="Sessions delivered">{gym.statement.sessionsDelivered}</FactList.Row>

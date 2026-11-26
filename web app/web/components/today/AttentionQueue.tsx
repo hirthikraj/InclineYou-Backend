@@ -15,6 +15,8 @@ import { KIND_LEAD, clientsNeedYou, foldedSummary, sessionsToday } from '@/lib/t
 import { DAY_MS } from '@/lib/today/time';
 import { useToast } from '@/lib/toast/store';
 import { packReceipt } from '@/lib/clients/pack-receipt';
+import { setBilling } from '@/lib/schedule/actions';
+import { rupees } from '@/lib/today/time';
 
 /** "Mon 3 Nov" — the days a renew offer names. */
 function shortDay(at: number): string {
@@ -125,6 +127,7 @@ export function AttentionQueue({
   openLogs,
   todayCount,
   now,
+  singleRates,
 }: {
   items: AttentionItem[];
   /** Rows a live dismissal is hiding, each with the `dismissalId` to delete. */
@@ -136,6 +139,8 @@ export function AttentionQueue({
   todayCount: number;
   /** The ticking instant, so a snooze is dated from the trainer's clock. */
   now: number;
+  /** clientId → the per-session price *Make it single* sells at — the Schedule's `rates.perSession`. */
+  singleRates?: Map<string, number>;
 }) {
   const [states, setStates] = useState<Record<string, RowState>>({});
   const { show } = useToast();
@@ -235,6 +240,32 @@ export function AttentionQueue({
       setState(item.key, { kind: 'sent', whatsappUrl: result.whatsappUrl, note: result.ok ? result.message : undefined });
     },
     [openLogs, renewTerms, setState, show],
+  );
+
+  /*
+   * MAKE IT SINGLE (25 Nov 2026) — the Schedule's verb on a *No pack* session,
+   * offered here on a *Training with no pack* row for the next booked one. Sells
+   * that session on its own at the client's rate (`POST /v1/sessions/{id}/billing`);
+   * the row stays while delivered sessions are still uncharged.
+   */
+  const sellSingle = useCallback(
+    async (item: AttentionItem, price: number) => {
+      if (!item.single) return;
+      setState(item.key, { kind: 'working' });
+      const res = await setBilling({ id: item.single.sessionId, billing: 'single', price: String(price) });
+      if (!res.ok) {
+        setState(item.key, { kind: 'failed', message: res.message ?? 'That did not go through.' });
+        return;
+      }
+      setState(item.key, { kind: 'rest' });
+      show({
+        tone: 'ok',
+        variant: 'receipt',
+        title: <>Sold as a single session</>,
+        body: <>{item.clientName}’s next session is sold on its own at {rupees(price)}.</>,
+      });
+    },
+    [setState, show],
   );
 
   const act = useCallback(
@@ -387,6 +418,8 @@ export function AttentionQueue({
       onSilence={(permanent) => void silence(item, permanent)}
       onUnsilence={(id) => void unsilence(item, id)}
       renewable={item.action !== 'Renew' || (renewTerms[item.clientId]?.amount ?? 0) > 0}
+      singlePrice={item.single ? singleRates?.get(item.clientId) ?? null : null}
+      onSingle={(price) => void sellSingle(item, price)}
       now={now}
       {...extra}
     />
@@ -647,6 +680,8 @@ function Row({
   onSilence,
   onUnsilence,
   renewable,
+  singlePrice = null,
+  onSingle,
   now,
   continuation = false,
   also,
@@ -662,6 +697,9 @@ function Row({
   onSilence: (permanent: boolean) => void;
   onUnsilence: (dismissalId: string) => void;
   renewable: boolean;
+  /** Set on a *Training with no pack* row whose next session can be sold on its own. */
+  singlePrice?: number | null;
+  onSingle?: (price: number) => void;
   /** The ticking clock, so *messaged yesterday* re-reads itself at midnight. */
   now: number;
 }) {
@@ -921,6 +959,21 @@ function Row({
             can see progress, and a pack running out is when that is decided —
             so the card is offered on the row that asks for the renewal. In the
             text and not beside the verb: `.q__act` is sized for one button. */}
+        {/* The second answer to *Training with no pack*, beside Renew's: in the
+            text cell because `.q__act` holds one verb. A real button — it writes. */}
+        {item.single && singlePrice && onSingle && (
+          <>
+            <span className="q__dot" aria-hidden="true">{' · '}</span>
+            <button
+              type="button"
+              className="q__also-b"
+              disabled={state.kind === 'working'}
+              onClick={() => onSingle(singlePrice)}
+            >
+              Make it single · {rupees(singlePrice)}
+            </button>
+          </>
+        )}
         {item.action === 'Renew' && (
           <>
             <span className="q__dot" aria-hidden="true">{' · '}</span>

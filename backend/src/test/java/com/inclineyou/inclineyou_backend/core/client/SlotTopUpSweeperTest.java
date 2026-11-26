@@ -101,4 +101,38 @@ class SlotTopUpSweeperTest {
                 Map.of("id", client.toString()), Integer.class);
         assertEquals(1, cancelled, "the cancelled one stays cancelled and is not booked again beside it");
     }
+
+    /** A finished 12-session floor pack, closed {@code closedDaysAgo} days ago, or a live one when null. */
+    private void pack(UUID client, Integer closedDaysAgo) {
+        var p = new java.util.HashMap<String, Object>();
+        p.put("id", UUID.randomUUID().toString()); p.put("t", trainer.toString()); p.put("c", client.toString());
+        p.put("ago", closedDaysAgo);
+        jdbc.update("""
+                INSERT INTO package (id, trainer_id, client_id, name, service, basis, sessions_total, sessions_remaining,
+                                     amount, currency, start_date, end_date, due_date, status, closed_at)
+                VALUES (:id::uuid, :t::uuid, :c::uuid, 'Pack', 'floor', 'sessions', 12, 9, 6000, 'INR',
+                        current_date - 60, current_date - coalesce(CAST(:ago AS int), -30), current_date - 60,
+                        CASE WHEN CAST(:ago AS int) IS NULL THEN 'active' ELSE 'expired' END,
+                        CASE WHEN CAST(:ago AS int) IS NOT NULL THEN now() - make_interval(days => CAST(:ago AS int)) END)""", p);
+    }
+
+    @Test
+    @DisplayName("V51 · stops booking a client whose pack lapsed beyond the grace, keeps the rest")
+    void stopsAtLapsedPack() {
+        UUID lapsed = clientWithSlot("active");
+        pack(lapsed, 10);
+        UUID inGrace = clientWithSlot("active");
+        pack(inGrace, 3);
+        UUID renewed = clientWithSlot("active");
+        pack(renewed, 40);
+        pack(renewed, null);
+        UUID neverBought = clientWithSlot("active");
+
+        sweeper.topUp();
+
+        assertEquals(0, booked(lapsed), "pack closed ten days ago, nothing live: every booking would be free");
+        assertEquals(4, booked(inGrace), "closed three days ago: still inside the week to renew");
+        assertEquals(4, booked(renewed), "an old pack closed, a new one is live");
+        assertEquals(4, booked(neverBought), "never bought a pack — trials and singles keep their slots");
+    }
 }

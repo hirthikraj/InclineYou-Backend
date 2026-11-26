@@ -306,6 +306,7 @@ export function Today({ data }: { data: TodayData }) {
                   silenced={deck.silenced}
                   renewTerms={renewTerms}
                   openLogs={openLogs}
+                  singleRates={rates.perSession}
                   todayCount={deck.today.length}
                   now={now}
                 />

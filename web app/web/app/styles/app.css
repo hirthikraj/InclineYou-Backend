@@ -6144,7 +6144,7 @@ button.ev--1l{flex-wrap:nowrap}
     background-color:var(--tx-surface-3);color:var(--tx-ink);font-weight:700;
     box-shadow:var(--tx-e1);
   }
-  [data-theme="light"] .sch__views .btn[aria-pressed="true"]{background-color:var(--tx-canvas)}
+  [data-theme="light"] .sch__views .btn[aria-pressed="true"]{background-color:var(--tx-surface)}
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -14364,7 +14364,7 @@ a.setrow:hover{background:var(--tx-surface-2)}
    two levels up. DARK IS UNTOUCHED — there the ramp runs the correct way
    (surface-2 is LIGHTER than surface) and the container already reads as the
    nearer surface. */
-[data-theme="light"] .wsk{background:var(--tx-canvas)}
+[data-theme="light"] .wsk{background:var(--tx-surface)}
 .wsk:last-of-type{margin-bottom:0}
 .wsk:hover{border-color:var(--tx-line-strong)}
 /* IN FLIGHT. The same treatment a lifted row and a lifted superset get, for the
@@ -21470,6 +21470,9 @@ a.setrow:hover{background:var(--tx-surface-2)}
   font-size:9.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
   line-height:14px;vertical-align:1px}
 .ev.ev--done .ev__t{color:var(--tx-ink-2)}
+/* NO PACK (25 Nov 2026) — a booked pack session nothing will pay for. Same slot
+   as the free tag, in warn: a conversation to have before the session, not after. */
+.ev .ev__tag.ev__tag--warn{background:var(--tx-warn-soft);color:var(--tx-warn)}
 /* The four state tones webapp.css sets on `.ev__t` are (0,2,0) too and lost the
    same way round once the rule above existed. Restated at the same weight, in
    the order webapp.css declares them, so a live block is still accent and a
@@ -27159,6 +27162,11 @@ body:has(.npad:not(.npad--inline)) .body{padding-bottom:calc(400px + env(safe-ar
    figure instead of running past a phone's edge; the figure itself stays on one line. */
 .gstm .facts__v{flex:0 1 auto;min-width:0}
 .gstm .facts__on{white-space:normal}
+/* Two sends in the head (26 Nov 2026: WhatsApp beside Print). `.card__hd` does not wrap
+   (trap 15), and a 40-character title plus two buttons is ~520px — so at a phone's
+   width the pair drops under the title instead of being clipped by `.main`. */
+.gstm .card__hd{flex-wrap:wrap;row-gap:8px}
+.gstm .gstm__print{flex-wrap:wrap}
 /* The split repeats the tiles above it on screen; only the printed statement carries it. */
 .gstm .gstm__split{display:none}
 @media print{
@@ -27228,3 +27236,37 @@ body:has(.npad:not(.npad--inline)) .body{padding-bottom:calc(400px + env(safe-ar
 .inbm__lk a::after{content:'';position:absolute;inset:-5px -2px}
 /* *Your details*: the read-only facts sit on the fields' edge, not 16px inside it (25 Nov 2026). */
 .pdet__facts{padding:0}
+
+/* REPORT · AT A GLANCE (26 Nov 2026). One line per aspect that moved; the label names
+   the aspect and its lead row (`Strength · Plank`), the figure is the change. The note
+   under a figure is a clause (`9 movements up · 12 personal bests`), so it may wrap
+   under the figure at 320 instead of standing 15px past the card — `.gstm`'s answer. */
+.rptglance .facts__v{flex:0 1 auto;min-width:0}
+.rptglance .facts__on{white-space:normal}
+
+/* REPORT · EVERY MOVEMENT TRAINED, ON A PHONE (26 Nov 2026). Seven columns in a 350px
+   card scrolled sideways with *Top set* and *Change* cut off at the edge, and the
+   movement name wrapped to four lines in its narrow column. Under 620px each row
+   becomes a block: the name on its own line, then the six figures as a 3 × 2 grid,
+   each one under its column name (`data-l`). The `.pk__tbl` approach, but as a grid,
+   because six stacked label/value lines a row is 13 rows × 6 lines of scrolling. */
+@media (max-width:620px){
+  .rptcensus,.rptcensus tbody{display:block;width:100%}
+  .tblwrap > .rptcensus{min-width:0}
+  .rptcensus thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .rptcensus tbody tr{
+    display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px 12px;
+    padding:12px 14px;border-bottom:1px solid var(--tx-line)}
+  .rptcensus tbody tr:last-child{border-bottom:0}
+  .rptcensus tbody td{
+    display:flex;flex-direction:column;gap:2px;height:auto;padding:0;border-bottom:0;
+    white-space:normal;text-align:left;min-width:0}
+  .rptcensus tbody td::before{
+    content:attr(data-l);font-size:11.5px;font-weight:500;color:var(--tx-ink-3);
+    font-family:var(--tx-font)}
+  /* `.tbl td.num` ranges a figure right at (0,2,1); here a figure sits under its own
+     label, so both start at the left edge. */
+  .rptcensus tbody td.num{text-align:left;align-items:flex-start}
+  .rptcensus tbody td[data-l=""]{grid-column:1/-1;font-size:14px}
+  .rptcensus tbody td[data-l=""]::before{content:none}
+}

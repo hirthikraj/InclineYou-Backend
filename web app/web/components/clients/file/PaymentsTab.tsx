@@ -253,12 +253,22 @@ export function PaymentsTab({
   const router = useRouter();
   const pathname = usePathname();
   const [sellPack] = useState<string | null>(() => search.get('sell'));
+  /* `?renew=1` — the schedule's *Renew* on a session no pack covers (25 Nov 2026): opens the sale on the pack they
+     are on, else the last one they finished, else a fresh sale. Same one-shot as `?sell`. */
+  const [renewAsked] = useState<boolean>(() => search.get('renew') !== null);
   useEffect(() => {
-    if (search.get('sell')) router.replace(pathname, { scroll: false });
+    if (search.get('sell') || search.get('renew') !== null) router.replace(pathname, { scroll: false });
   }, [search, router, pathname]);
 
   /** null = shut, 'sell' = a fresh pack, or the pack being renewed with changes. */
-  const [panel, setPanel] = useState<null | 'sell' | ClientPackageWire>(() => (sellPack ? 'sell' : null));
+  const [panel, setPanel] = useState<null | 'sell' | ClientPackageWire>(() => {
+    if (sellPack) return 'sell';
+    if (!renewAsked) return null;
+    const packs = packages.filter((p) => !p.sessionId);
+    const running = packs.filter((p) => p.status === 'active').sort((a, b) => a.createdAt - b.createdAt);
+    const newest = [...packs].sort((a, b) => b.createdAt - a.createdAt)[0];
+    return running[0] ?? newest ?? 'sell';
+  });
   /** Which pack money is being recorded against, and the row it settles if any. */
   const [collecting, setCollecting] = useState<null | {
     pkg: ClientPackageWire;

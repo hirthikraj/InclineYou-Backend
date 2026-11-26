@@ -56,6 +56,8 @@ export interface ReportSetRow {
   exerciseId: string;
   loadKg: number | null;
   reps: number | null;
+  /** A timed set's seconds — a plank, a hold, a hang. Null on every other set. */
+  seconds?: number | null;
   /** The owning log's date, epoch ms at the start of the day. A set's date is
    *  the SESSION's — a Tuesday session typed up on Thursday is Tuesday. */
   at: number;
@@ -66,6 +68,24 @@ export interface ReportMetricRow {
   value: number;
   unit: string;
   recordedAt: number;
+  /** The catalogue's own name (`Waist, at the navel`). Falls back to the key. */
+  label?: string;
+  /** The catalogue's group — `Movement` readings are a fitness test, not a body. */
+  group?: string;
+}
+
+/**
+ * ONE SELF-RATING ON A RETURNED ASSESSMENT — *how would you rate your energy*, 1 to 10.
+ *
+ * The client's own account of the block, and the one aspect of progress no tape and no
+ * set log can carry. Trainer-side only: it never goes on the card, the PDF or the message.
+ */
+export interface ReportRatingRow {
+  questionId: string;
+  text: string;
+  scale: number;
+  value: number;
+  at: number;
 }
 
 export interface ReportBuildInput {
@@ -83,6 +103,8 @@ export interface ReportBuildInput {
    *  not the window: a personal record is a claim about all of it. */
   sets: ReportSetRow[];
   metrics: ReportMetricRow[];
+  /** Ratings answered on returned assessments, any order. Optional — absent means none read. */
+  ratings?: ReportRatingRow[];
   /** `exerciseId` → display name. Missing ids are dropped, never drawn blank. */
   exerciseNames: Map<string, string>;
   now: number;
@@ -132,13 +154,13 @@ export interface MetricChange {
 export interface LiftGain {
   exerciseId: string;
   name: string;
-  /** `load` for a movement with plates on it, `reps` for a bodyweight one. */
-  kind: 'load' | 'reps';
+  /** `load` for a movement with plates on it, `reps` for a bodyweight one, `time` for a hold. */
+  kind: LiftKind;
   /** The best set on the first day of the window. */
   from: number;
   /** The best set anywhere in the window. */
   to: number;
-  unit: 'kg' | 'reps';
+  unit: 'kg' | 'reps' | 'sec';
   delta: number;
   percent: number;
   /** Days trained on this movement inside the window. */
@@ -151,6 +173,40 @@ export interface LiftGain {
    * block, deloads included, which is exactly what `from`/`to` deliberately
    * looks past. The pair is the claim; this is the evidence for it.
    */
+  series: Reading[];
+}
+
+export type LiftKind = 'load' | 'reps' | 'time';
+
+/**
+ * ONE PERSONAL BEST, NAMED — which movement, what it was, what it beat and when.
+ *
+ * `prCount` was the only trace of these, and a count is the least persuasive way to
+ * say it: *35 personal bests* is a figure, *Back squat 70 kg, up from 65, on 12 Nov*
+ * is a moment the client remembers. One per movement — its highest in the window.
+ */
+export interface PersonalBest {
+  exerciseId: string;
+  name: string;
+  kind: LiftKind;
+  unit: 'kg' | 'reps' | 'sec';
+  value: number;
+  /** The best before this window's first record on the movement. */
+  previous: number;
+  at: number;
+}
+
+/** One self-rating question across the window — see `ReportRatingRow`. */
+export interface RatingChange {
+  questionId: string;
+  text: string;
+  scale: number;
+  from: number;
+  to: number;
+  delta: number;
+  firstAt: number;
+  lastAt: number;
+  baselineIsOlder: boolean;
   series: Reading[];
 }
 
@@ -179,6 +235,8 @@ export interface ExerciseWork {
   topLoad: number | null;
   /** Most reps in a single set. */
   topReps: number | null;
+  /** Longest timed set, seconds — a plank's figure. */
+  topSeconds: number | null;
   /** The matching `LiftGain.percent`, or null where it did not gain. */
   gainPercent: number | null;
   /** True when the client's FIRST EVER set on this movement is in the window. */
@@ -231,7 +289,14 @@ export interface ClientReport {
   bestStreak: number;
   /** The measurement a client asks about first, so it is not in the list. */
   weight: MetricChange | null;
+  /** Body measurements other than weight — composition and girths. */
   measurements: MetricChange[];
+  /** Fitness tests taken in an assessment (push-ups, plank, sit-and-reach…). Trainer column and PDF. */
+  fitnessTests: MetricChange[];
+  /** The client's own ratings across returned assessments. Trainer column only. */
+  ratings: RatingChange[];
+  /** Every movement that set a new best in the window, biggest jump first. */
+  bests: PersonalBest[];
   lifts: LiftGain[];
   /** The complete census — see `ExerciseWork`. Trainer-side only. */
   exercises: ExerciseWork[];
@@ -279,7 +344,10 @@ function metricChange(rows: ReportMetricRow[], from: number, to: number): Metric
 
   const last = inside[inside.length - 1];
   const before = sorted.filter((m) => m.recordedAt < from);
-  const baseline = inside.length > 1 ? inside[0] : before[before.length - 1];
+  /* The reading before the window is the baseline whenever there is one — a
+     client measured in August and twice inside a September window started the
+     window at August's number, not at the first September one. */
+  const baseline = before.length > 0 ? before[before.length - 1] : inside[0];
   if (!baseline || baseline === last) return null;
 
   /* The baseline first — which is a reading BEFORE the window when there is
@@ -294,15 +362,15 @@ function metricChange(rows: ReportMetricRow[], from: number, to: number): Metric
 
   return {
     type: last.metricType,
-    label: metricLabel(last.metricType),
+    label: last.label || metricLabel(last.metricType),
     from: baseline.value,
     to: last.value,
     unit: last.unit || '',
     delta: Math.round((last.value - baseline.value) * 10) / 10,
-    readings: inside.length + (inside.length > 1 ? 0 : 1),
+    readings: series.length,
     firstAt: baseline.recordedAt,
     lastAt: last.recordedAt,
-    baselineIsOlder: inside.length === 1,
+    baselineIsOlder: baseline !== inside[0],
     series,
   };
 }
@@ -346,9 +414,8 @@ function liftGains(
     const days = [...new Set(rows.map((r) => r.at))].sort((a, b) => a - b);
     if (days.length < 2) continue;
 
-    const loaded = rows.some((r) => (r.loadKg ?? 0) > 0);
-    const kind: 'load' | 'reps' = loaded ? 'load' : 'reps';
-    const valueOf = (r: ReportSetRow) => (kind === 'load' ? r.loadKg ?? 0 : r.reps ?? 0);
+    const kind = kindOf(rows);
+    const valueOf = valueFor(kind);
 
     const firstDay = days[0];
     const start = Math.max(...rows.filter((r) => r.at === firstDay).map(valueOf));
@@ -371,7 +438,7 @@ function liftGains(
       kind,
       from: start,
       to: best,
-      unit: kind === 'load' ? 'kg' : 'reps',
+      unit: UNIT[kind],
       delta: Math.round((best - start) * 10) / 10,
       percent: Math.round(((best - start) / start) * 100),
       days: days.length,
@@ -398,26 +465,119 @@ function liftGains(
  * one personal best, not three, and a card claiming three would be a card the
  * trainer has to explain.
  */
-function personalBests(sets: ReportSetRow[], from: number, to: number): number {
-  const best = new Map<string, number>();
-  const credited = new Set<string>();
-  let count = 0;
+function personalBests(
+  sets: ReportSetRow[],
+  names: Map<string, string>,
+  from: number,
+  to: number,
+): { count: number; bests: PersonalBest[] } {
+  /* The KIND is read over the movement's whole history, so a squat that was
+     once done unloaded is still judged on its load, never on a rep count. */
+  const byExercise = new Map<string, ReportSetRow[]>();
+  for (const s of sets) {
+    const list = byExercise.get(s.exerciseId);
+    if (list) list.push(s);
+    else byExercise.set(s.exerciseId, [s]);
+  }
 
-  /* Oldest first, so the running best is always "everything before this set". */
-  for (const s of [...sets].sort((a, b) => a.at - b.at)) {
-    const load = s.loadKg ?? 0;
-    if (load <= 0) continue;
-    const prior = best.get(s.exerciseId) ?? 0;
-    if (load > prior) {
-      best.set(s.exerciseId, load);
-      const key = `${s.exerciseId}·${s.at}`;
-      if (s.at >= from && s.at <= to && !credited.has(key)) {
-        credited.add(key);
-        count++;
+  let count = 0;
+  const bests: PersonalBest[] = [];
+  for (const [exerciseId, rows] of byExercise) {
+    const kind = kindOf(rows);
+    const valueOf = valueFor(kind);
+    let best = 0;
+    let before: number | null = null; // the best standing when the window opened
+    let top: { value: number; at: number } | null = null;
+    const credited = new Set<number>();
+
+    /* Oldest first, so the running best is always "everything before this set". */
+    for (const s of [...rows].sort((a, b) => a.at - b.at)) {
+      const v = valueOf(s);
+      if (v <= 0) continue;
+      if (s.at < from) {
+        best = Math.max(best, v);
+        continue;
       }
+      if (s.at > to) continue;
+      if (before === null) before = best;
+      /* A FIRST EVER set is not a record — there was nothing to beat. Counting it
+         handed a client one "personal best" per new movement, which is the figure
+         a trainer would have to explain away. */
+      if (best > 0 && v > best) {
+        if (!credited.has(s.at)) {
+          credited.add(s.at);
+          count++;
+        }
+        if (!top || v > top.value) top = { value: v, at: s.at };
+      }
+      best = Math.max(best, v);
+    }
+
+    const name = names.get(exerciseId);
+    if (top && name && before !== null && before > 0) {
+      bests.push({ exerciseId, name, kind, unit: UNIT[kind], value: top.value, previous: before, at: top.at });
     }
   }
-  return count;
+
+  bests.sort(
+    (a, b) => (b.value - b.previous) / b.previous - (a.value - a.previous) / a.previous || b.at - a.at,
+  );
+  return { count, bests };
+}
+
+/** What a movement is judged on: load if it has ever carried any, else reps, else time. */
+function kindOf(rows: ReportSetRow[]): LiftKind {
+  if (rows.some((r) => (r.loadKg ?? 0) > 0)) return 'load';
+  if (rows.some((r) => (r.reps ?? 0) > 0)) return 'reps';
+  return 'time';
+}
+
+function valueFor(kind: LiftKind): (r: ReportSetRow) => number {
+  if (kind === 'load') return (r) => r.loadKg ?? 0;
+  if (kind === 'reps') return (r) => r.reps ?? 0;
+  return (r) => r.seconds ?? 0;
+}
+
+const UNIT: Record<LiftKind, 'kg' | 'reps' | 'sec'> = { load: 'kg', reps: 'reps', time: 'sec' };
+
+/**
+ * ONE SELF-RATING ACROSS THE WINDOW — the same baseline rule as `metricChange`.
+ * Null with fewer than two answers: one rating is a mood, not a change.
+ */
+function ratingChanges(rows: ReportRatingRow[], from: number, to: number): RatingChange[] {
+  const byQuestion = new Map<string, ReportRatingRow[]>();
+  for (const r of rows) {
+    const list = byQuestion.get(r.questionId);
+    if (list) list.push(r);
+    else byQuestion.set(r.questionId, [r]);
+  }
+  const out: RatingChange[] = [];
+  for (const [questionId, list] of byQuestion) {
+    const sorted = [...list].sort((a, b) => a.at - b.at);
+    const inside = sorted.filter((r) => r.at >= from && r.at <= to);
+    if (inside.length === 0) continue;
+    const before = sorted.filter((r) => r.at < from);
+    const baseline = before.length > 0 ? before[before.length - 1] : inside[0];
+    const last = inside[inside.length - 1];
+    if (baseline === last) continue;
+    const series = [...(baseline === inside[0] ? [] : [baseline]), ...inside].map((r) => ({
+      at: r.at,
+      value: r.value,
+    }));
+    out.push({
+      questionId,
+      text: last.text,
+      scale: last.scale,
+      from: baseline.value,
+      to: last.value,
+      delta: last.value - baseline.value,
+      firstAt: baseline.at,
+      lastAt: last.at,
+      baselineIsOlder: baseline !== inside[0],
+      series,
+    });
+  }
+  return out.sort((a, b) => a.text.localeCompare(b.text));
 }
 
 /**
@@ -473,6 +633,9 @@ function exerciseCensus(
       volumeKg: Math.round(rows.reduce((sum, r) => sum + (r.loadKg ?? 0) * (r.reps ?? 0), 0)),
       topLoad: loads.length > 0 ? Math.max(...loads) : null,
       topReps: repsList.length > 0 ? Math.max(...repsList) : null,
+      topSeconds: rows.some((r) => (r.seconds ?? 0) > 0)
+        ? Math.max(...rows.map((r) => r.seconds ?? 0))
+        : null,
       gainPercent: gain.get(exerciseId) ?? null,
       isNew: (firstEver.get(exerciseId) ?? 0) >= from,
     });
@@ -557,8 +720,14 @@ export function buildClientReport(input: ReportBuildInput, weeks: ReportWeeks): 
     ? metricChange(byType.get('weight')!, from, to)
     : null;
 
+  const isTest = (rows: ReportMetricRow[]) => rows[0]?.group === 'Movement';
+  const fitnessTests = [...byType.entries()]
+    .filter(([, rows]) => isTest(rows))
+    .map(([, rows]) => metricChange(rows, from, to))
+    .filter((m): m is MetricChange => m !== null);
+
   const measurements = [...byType.entries()]
-    .filter(([type]) => type !== 'weight')
+    .filter(([type, rows]) => type !== 'weight' && !isTest(rows))
     .map(([, rows]) => metricChange(rows, from, to))
     .filter((m): m is MetricChange => m !== null)
     /* Biggest movement first, by proportion — a 4 cm waist is a bigger story
@@ -566,6 +735,8 @@ export function buildClientReport(input: ReportBuildInput, weeks: ReportWeeks): 
     .sort((a, b) => Math.abs(b.delta / (b.from || 1)) - Math.abs(a.delta / (a.from || 1)));
 
   const lifts = liftGains(input.sets, input.exerciseNames, from, to);
+  const records = personalBests(input.sets, input.exerciseNames, from, to);
+  const ratings = ratingChanges(input.ratings ?? [], from, to);
   const exercises = exerciseCensus(input.sets, input.exerciseNames, lifts, from, to);
 
   const windowSets = input.sets.filter((s) => s.at >= from && s.at <= to);
@@ -611,15 +782,23 @@ export function buildClientReport(input: ReportBuildInput, weeks: ReportWeeks): 
     bestStreak: bestStreakOf(weekBars),
     weight,
     measurements,
+    fitnessTests,
+    ratings,
+    bests: records.bests,
     lifts,
     exercises,
     volumeKg,
     setCount: windowSets.length,
     repCount: windowSets.reduce((sum, s) => sum + (s.reps ?? 0), 0),
     newExerciseCount: exercises.filter((e) => e.isNew).length,
-    prCount: personalBests(input.sets, from, to),
+    prCount: records.count,
     exerciseCount: new Set(windowSets.map((s) => s.exerciseId)).size,
-    isThin: days.size === 0 && weight === null && measurements.length === 0 && lifts.length === 0,
+    isThin:
+      days.size === 0 &&
+      weight === null &&
+      measurements.length === 0 &&
+      fitnessTests.length === 0 &&
+      lifts.length === 0,
   };
 }
 
@@ -692,7 +871,7 @@ export function reportMessage(r: ClientReport): string {
   if (r.weight) {
     lines.push(`• Weight ${trim(r.weight.from)} → ${trim(r.weight.to)} ${r.weight.unit} (${signed(r.weight.delta)})`);
   }
-  for (const m of r.measurements.slice(0, 3)) {
+  for (const m of [...r.measurements.slice(0, 3), ...r.fitnessTests.slice(0, 2)]) {
     lines.push(`• ${m.label} ${trim(m.from)} → ${trim(m.to)} ${m.unit} (${signed(m.delta)})`);
   }
   for (const l of r.lifts.slice(0, 3)) {

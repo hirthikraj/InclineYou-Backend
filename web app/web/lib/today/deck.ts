@@ -43,7 +43,7 @@
    the ranking would be the one that silently disagrees. */
 import { packCountsForSetup, setupFor, setupLine, SETUP_COPY } from '@/lib/clients/setup';
 import { followUpDue, followUpLine, followUpState, type LeadWire } from '@/lib/clients/lead';
-import { asBilling, type Billing } from '@/lib/schedule/billing';
+import { asBilling, noPackCovers, type Billing, type ClientBilling } from '@/lib/schedule/billing';
 import { COOLDOWN_DAYS } from '@/lib/nudges/cooldown';
 
 import { readMode, type DeliveryMode } from './mode';
@@ -381,12 +381,15 @@ export const DECK_BANDS: AttentionBand[] = [
 ];
 
 /**
- * The bands that mean a CLIENT is at risk — the third of Today's three figures.
+ * The bands that mean a CLIENT is at risk — the third of Today's three figures,
+ * labelled *Need a nudge* and NOT *At risk*: that word is the roster's chip
+ * (`lib/clients/roster.ts`), which counts one tag, and the same word with two
+ * counts on two screens is a figure nobody trusts.
  *
  * Deliberately not "every band in the queue". Four of the ten are the trainer's
  * own housekeeping or good news (`unmarked`, `no-program`, `milestone`,
  * `log-open`), and counting those would make the figure a restatement of the
- * queue's badge, which is drawn six inches away. *Clients at risk* has to mean
+ * queue's badge, which is drawn six inches away. *Need a nudge* has to mean
  * something the badge does not: how many people on this roster are on their way
  * out.
  *
@@ -480,6 +483,21 @@ export function packEndedLine(endedAt: number, remaining: number): string {
     ? `Pack ended ${day} · ${remaining} session${remaining === 1 ? '' : 's'} unused`
     : `Pack ended ${day}`;
 }
+
+/**
+ * "Training with no pack · 2 sessions so far" — the delivered count when there is
+ * one, else the next booked session nothing will pay for.
+ */
+export function trainingNoPackLine(soFar: number, nextAt: number | null, now: number): string {
+  if (soFar > 0) return `Training with no pack · ${soFar} session${soFar === 1 ? '' : 's'} so far`;
+  if (nextAt === null) return 'Training with no pack';
+  const d = new Date(nextAt);
+  const when = startOfDay(nextAt) === startOfDay(now) ? 'today'
+    : `${WEEKDAYS_SHORT[d.getDay()]} ${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`;
+  return `Training with no pack · next session ${when}`;
+}
+
+const WEEKDAYS_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -705,6 +723,8 @@ export interface DeckScheduled {
   week?: number;
   /** V32 — `pack` · `trial` · `complimentary` · `single`; absent reads as `pack`. */
   billing?: string | null;
+  /** True when a pack paid for this session (`charge` on the wire). Absent reads as unknown, never as free. */
+  charged?: boolean;
 }
 export interface DeckWorkout {
   id: string;
@@ -860,6 +880,12 @@ export interface DeckInput {
    */
   claimed?: Record<string, number>;
   /**
+   * 25 Nov 2026 · what each client's packs can pay for — `billingByClient`, the
+   * map the Schedule's *No pack* tag reads, so Today and the grid ask one
+   * question (`noPackCovers`). Optional: without it no row says "no pack".
+   */
+  billing?: Map<string, ClientBilling>;
+  /**
    * v1 · `GET /v1/money/summary?months=2`, newest month first. When present the
    * money card reads it rather than summing payment rows (api-contract R4).
    */
@@ -1004,6 +1030,13 @@ export interface AttentionItem {
    * after a renewal, renew the new pack a second time.
    */
   packageId?: string;
+  /**
+   * 25 Nov 2026 · on a *Training with no pack* row: the next booked session no
+   * pack covers, which *Make it single* sells on its own (the Schedule's verb).
+   * Absent for a gym client — the gym sells its own packs — and when nothing
+   * uncovered is booked.
+   */
+  single?: { sessionId: string; at: number };
   /**
    * Set only on the rows in `Deck.silenced`: the `attention_dismissal` row that
    * is hiding this one, which is what *Restore* deletes.
@@ -1255,7 +1288,7 @@ export interface Deck {
    * figure, and a dismissal is the trainer saying they have dealt with it, which
    * must.
    */
-  clientsAtRisk: number;
+  clientsToNudge: number;
   collectedToday: number;
   pendingTotal: number;
   money: DeckMoney;
@@ -1570,9 +1603,87 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
       });
     }
   }
+  /*
+   * TRAINING WITH NO PACK (25 Nov 2026, review P1). Rohan's pack ended on 19 Nov
+   * and he kept three sessions a week; his row said "Pack ended 19 Nov · 9 unused"
+   * and nothing said he was being trained for free — and 30 days after the end
+   * (`PACK_CLOSED_SHOWN_DAYS`) the row went away while the sessions did not.
+   *
+   * Two counts, both by the Schedule's rule so the grid's *No pack* tag and this
+   * row cannot disagree: sessions DELIVERED on Pack that no pack took (`charge`
+   * null — what Renew's offer counts), and sessions still BOOKED on Pack that
+   * `noPackCovers`. Either makes the row this one, at the top of the pack band,
+   * whatever the old pack's own standing — and raises it even when that pack is
+   * past the 30-day window. Only for a client who has had a session pack (Renew
+   * needs one to repeat); never for one holding a live period pack, whose
+   * sessions are not charged one by one and would all read as free.
+   */
+  const billing = input.billing;
+  const noPack = new Map<string, { soFar: number; next: DeckScheduled | null; packageId: string }>();
+  if (billing) {
+    const sessionPack = new Map<string, DeckPackage>();
+    const periodLive = new Set<string>();
+    for (const p of input.packages) {
+      if (p.single) continue;
+      if (p.basis === 'period') {
+        if (packStanding(p, now)?.kind === 'live') periodLive.add(p.clientId);
+        continue;
+      }
+      const seen = sessionPack.get(p.clientId);
+      if (!seen || p.updatedAt > seen.updatedAt) sessionPack.set(p.clientId, p);
+    }
+    const sorted = [...input.sessions].sort((a, b) => a.scheduledAt - b.scheduledAt);
+    for (const s of sorted) {
+      const pack = sessionPack.get(s.clientId);
+      const b = billing.get(s.clientId);
+      if (!pack || !b || periodLive.has(s.clientId) || asBilling(s.billing) !== 'pack') continue;
+      const status = lower(s.status);
+      const entry = () => {
+        let e = noPack.get(s.clientId);
+        if (!e) { e = { soFar: 0, next: null, packageId: pack.id }; noPack.set(s.clientId, e); }
+        return e;
+      };
+      if (DONE_SESSION.has(status)) {
+        if (s.charged === false) entry().soFar += 1;
+        continue;
+      }
+      if (DEAD_SESSION.has(status) || status === 'no_show' || s.scheduledAt < startOfDay(now)) continue;
+      const uncovered = noPackCovers({
+        at: s.scheduledAt,
+        // The session's own mode, else the client's — as the grid reads it.
+        mode: (s.deliveryMode ?? (b.defaultService === 'remote' ? 'remote' : 'floor')) === 'remote' ? 'remote' : 'floor',
+        billing: 'pack', charged: false, done: false, dead: false, noShow: false,
+      }, b);
+      if (uncovered) {
+        const e = entry();
+        if (!e.next) e.next = s;
+      }
+    }
+    // `YYYY-MM-DD` in this zone — the comparison `noPackCovers` makes against a pack's term.
+    const t = new Date(now);
+    const todayIso = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    for (const [clientId, e] of noPack) {
+      /* Only booked ones, and a pack still running today: that is the grid's
+         *No pack* on a session past the pack's end, not a client training free
+         now — the pack's own row (ending, expiring) says the rest. */
+      const runningToday = (billing.get(clientId)?.packs ?? []).some((p) =>
+        (p.start === null || p.start <= todayIso) && (p.end === null || p.end >= todayIso));
+      if (e.soFar === 0 && runningToday) { noPack.delete(clientId); continue; }
+      const seen = worst.get(clientId);
+      worst.set(clientId, {
+        band: 'pack-empty',
+        remaining: seen?.remaining ?? 0,
+        daysLeft: null,
+        at: seen?.at ?? now,
+        // The newest session pack, not the worst one: Renew repeats the latest arrangement.
+        packageId: e.packageId,
+      });
+    }
+  }
   for (const [clientId, { band, remaining, daysLeft, endedAt, at, packageId }] of worst) {
     const client = byId.get(clientId);
     if (!client) continue;
+    const free = noPack.get(clientId);
     /*
      * The sentence follows the BAND, not the data. A pack in `pack-expiring`
      * landed there because of its date, so it says the date; one in
@@ -1581,7 +1692,9 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
      * the trainer to work out which one put it in front of them.
      */
     const line =
-      endedAt !== undefined
+      free
+        ? trainingNoPackLine(free.soFar, free.next?.scheduledAt ?? null, now)
+        : endedAt !== undefined
         ? packEndedLine(endedAt, remaining)
         : band === 'pack-expiring' && daysLeft !== null
           ? packExpiryLine(daysLeft, WEEKDAYS_LONG[isoWeekday(now + daysLeft * DAY_MS)])
@@ -1596,6 +1709,9 @@ function buildAttention(input: DeckInput, now: number): AttentionItem[] {
       severity: attentionSeverity(band),
       action: 'Renew',
       packageId,
+      single: free?.next && !billing?.get(clientId)?.gymClient
+        ? { sessionId: free.next.id, at: free.next.scheduledAt }
+        : undefined,
       /*
        * Fewer left is more urgent inside the two session bands; fewer DAYS left
        * is more urgent inside the date band. Same axis, different unit, and the
@@ -2612,7 +2728,7 @@ export function buildDeck(input: DeckInput, now: number): Deck {
     roster: input.clients.map((c) => ({ id: c.id, name: c.name?.trim() || 'Client' })),
     attention,
     silenced,
-    clientsAtRisk: atRisk.size,
+    clientsToNudge: atRisk.size,
     collectedToday: paidToday,
     pendingTotal,
     money: buildMoney(input, now),

@@ -19,6 +19,7 @@ import { Card } from '@/web-components/ui/Card';
 import { Tag } from '@/web-components/ui/Tag';
 import { RowMenu } from '@/web-components/ui/RowMenu';
 import { PayoutPanel, TermsPanel } from './GymPanels';
+import { signedRupees } from '@/lib/business/gym-statement';
 
 /**
  * WHAT THE GYM OWES YOU — the page's reason to exist, so it leads.
@@ -235,7 +236,7 @@ export function GymSettlement({
                       <td className="num" data-l="Your share">{rupees(m.yourShare)}</td>
                       <td className="num" data-l="Owed">{m.soFar ? '—' : rupees(m.owed)}</td>
                       <td className="num" data-l="Received">{rupees(m.received)}</td>
-                      <td className="num" data-l="Balance">{m.balance === null ? '—' : rupees(m.balance)}</td>
+                      <td className="num" data-l="Balance">{m.balance === null ? '—' : signedRupees(m.balance)}</td>
                     </tr>
                   ))}
                 </tbody>

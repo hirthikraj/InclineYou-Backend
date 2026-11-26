@@ -8,7 +8,7 @@ import { lengthChoices } from '@/lib/schedule/result';
 import {
   cancelSession, markDone, markNoShow, reopenSession, setBilling, updateSession,
 } from '@/lib/schedule/actions';
-import { BILLING_CHOICES, freeTag, isProspect, type Billing } from '@/lib/schedule/billing';
+import { BILLING_CHOICES, freeTag, isProspect, noPackCovers, noPackLine, type Billing } from '@/lib/schedule/billing';
 import { refundPack } from '@/lib/clients/package-actions';
 import type { WriteResult } from '@/lib/schedule/result';
 import { Calendar, Check, Chevron } from '@/components/shell/Icons';
@@ -226,6 +226,9 @@ export function SessionPanel({
      would read as unpaid; offer the one tap that says what it really was. */
   const prospectOnPack = !settled && !session.charged && session.billing === 'pack'
     && isProspect(client) && (client?.billing?.packs.length ?? 0) === 0;
+  /* No pack covers it (25 Nov 2026, review §5 P0): a client whose pack lapsed,
+     still on the grid. The prospect case above says it its own way. */
+  const noPack = !prospectOnPack && !started && noPackCovers(session, client?.billing ?? null);
   const salePaid = sale ? Number(sale.paid) : 0;
   const saleAmount = sale ? rupees(Number(sale.amount)) : '';
 
@@ -487,6 +490,30 @@ export function SessionPanel({
                     >
                       Make it a trial
                     </Button>
+                  </span>
+                </div>
+              )}
+              {noPack && (
+                <div className="sch__note sch__note--warn" style={{ marginBottom: 8 }}>
+                  <WarnTriangle size={14} />
+                  <span>
+                    <Tag tone="warn">No pack</Tag>{' '}
+                    {noPackLine(session, client?.billing ?? null, first)}
+                    <span className="row gap2 sch__wrap" style={{ marginTop: 8 }}>
+                      <Button href={`/clients/${session.clientId}/payments?renew=1`} variant="secondary" size="sm">
+                        Renew
+                      </Button>
+                      {rate && !client?.billing?.gymClient ? (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          disabled={pending}
+                          onClick={() => run(() => setBilling({ id: session.id, billing: 'single', price: String(rate) }))}
+                        >
+                          Make it single &middot; {rupees(rate)}
+                        </Button>
+                      ) : null}
+                    </span>
                   </span>
                 </div>
               )}

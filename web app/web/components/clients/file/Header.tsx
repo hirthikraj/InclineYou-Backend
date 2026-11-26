@@ -307,7 +307,15 @@ export function Header({
                 the session count is checked; *joined 4 Feb* is read once, on a tab
                 that is one tap away. So the desk keeps it and the phone drops it,
                 and the row loses the 12px the second line cost. */}
-            <span className="cfjoin">joined {dateStr(client.createdAt)} · </span>
+            {/* *Joined* is the trainer's word for a client who said yes (review, 26 Nov 2026):
+                a prospect or anyone yet to accept their invite was only *added*. Joined is
+                dated by the acceptance, added by the row. Paused had accepted, so it joined. */}
+            <span className="cfjoin">
+              {hasConsent(client.membershipStatus)
+                ? `joined ${dateStr(client.portal?.acceptedAt ?? client.createdAt)}`
+                : `added ${dateStr(client.createdAt)}`}
+              {' · '}
+            </span>
             {sessionCount} session{sessionCount === 1 ? '' : 's'} logged
           </p>
         </div>

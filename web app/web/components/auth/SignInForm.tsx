@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, useTransition } from 'react';
 import { sendCode } from '@/lib/auth/actions';
 import { type Message, sendMessage } from '@/lib/auth/copy';
 import { GOOGLE_SIGN_IN_ENABLED, PHONE_PATTERN } from '@/lib/auth/policy';
-import { IconChevronDown, IconGoogle } from './Icons';
+import { IconGoogle } from './Icons';
 import { MessageSlot } from './MessageSlot';
 import { TrustLine } from './TrustLine';
 import { Button } from '@/web-components/ui/Button';
@@ -106,7 +106,9 @@ export function SignInForm({ notice = null }: { notice?: Message | null }) {
           Sign in
         </h2>
         <p className="stp__sub" style={{ marginTop: 8 }}>
-          Your mobile number is your account. There is no password to forget.
+          {/* ONE PAGE FOR EVERYONE (10 Oct 2026 entry rule), and it said only *Sign in* — a trainer here for the first
+              time had no sign this was also where their account starts (25 Nov 2026). */}
+          Your mobile number is your account, new or returning. There is no password to forget.
         </p>
       </header>
 
@@ -135,10 +137,8 @@ export function SignInForm({ notice = null }: { notice?: Message | null }) {
             >
               {/* One child so the design's grid affix still centers as a unit;
                   the inner flex keeps the chevron and +91 on a single line. */}
-              <span className="affix__in">
-                <IconChevronDown size={13} />
-                +91
-              </span>
+              {/* No chevron (25 Nov 2026): +91 is fixed, and a chevron promised a menu that does not exist. */}
+              <span className="affix__in">+91</span>
             </span>
             <input
               className="ctl"

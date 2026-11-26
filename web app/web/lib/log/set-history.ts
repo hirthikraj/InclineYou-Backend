@@ -60,9 +60,11 @@ export async function fetchSetHistory(
 }
 
 /** A weight in kilograms, when the set carried one. `percent_1rm`, `level` and the RPE kinds are not kilograms. */
-const KG_KINDS = new Set(['weight', 'weight_range', 'rpe_weight']);
+export const KG_KINDS = new Set(['weight', 'weight_range', 'rpe_weight']);
 /** A count of reps. Time and distance are not reps, so those sets carry no reps here. */
-const REP_KINDS = new Set(['reps', 'rep_interval', 'max_reps']);
+export const REP_KINDS = new Set(['reps', 'rep_interval', 'max_reps']);
+/** Seconds on a stopwatch — a plank, a hold. */
+export const TIME_KINDS = new Set(['time', 'max_time']);
 
 /**
  * The same history in `LogInput`'s shape, so `buildProgress` and `buildHistory`
